@@ -2386,5 +2386,24 @@ typedef struct GetDiagStmt {
     bool hasCondNum;
     List *condNum;
 } GetDiagStmt;
+
+extern inline NodeTag transform_node_tag(Node* raw_parse_tree)
+{
+    if (!raw_parse_tree) {
+        return T_Invalid;
+    }
+    if (nodeTag(raw_parse_tree) == T_SelectStmt) {
+        SelectStmt *stmt = (SelectStmt *)raw_parse_tree;
+        /* treat select into @var and select into file as common select */
+        if (stmt->intoClause == NULL || stmt->intoClause->userVarList != NIL || stmt->intoClause->filename != NULL) {
+            return T_SelectStmt;
+        }
+        return T_CreateStmt;
+    } else if (nodeTag(raw_parse_tree) == T_ExplainStmt) {
+        return transform_node_tag(((ExplainStmt*)raw_parse_tree)->query);
+    }
+    return nodeTag(raw_parse_tree);
+}
+
 #endif /* PARSENODES_H */
 

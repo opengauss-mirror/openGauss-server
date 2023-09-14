@@ -141,6 +141,7 @@ int StreamMain()
         WLMReleaseIoInfoFromHash();
         /* Reset here so that we can get debug_query_string when Stream thread is in Sync point */
         t_thrd.postgres_cxt.debug_query_string = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
 
         /* 
          * Note that parent thread will do commit or abort transaction.
@@ -440,6 +441,7 @@ static void execute_stream_plan(StreamProducer* producer)
     // For now plan shipping is used only for SELECTs, in future
     // we should remove this hard coding and get the tag automatically
     commandTag = "SELECT";
+    t_thrd.postgres_cxt.cur_command_tag = T_SelectStmt;
 
     set_ps_display(commandTag, false);
 

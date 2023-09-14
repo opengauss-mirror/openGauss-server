@@ -4934,6 +4934,7 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
     expr->func->datums = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums;
     expr->func->ndatums = u_sess->plsql_cxt.curr_compile_context->plpgsql_nDatums;
     TupleDesc tupleDesc = NULL;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     PG_TRY();
     {
         List* parsetreeList = pg_parse_query(expr->query);
@@ -4945,6 +4946,7 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
         List* queryList = NIL;
         foreach(cell, parsetreeList) {
             Node *parsetree = (Node *)lfirst(cell);
+            t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
             if (nodeTag(parsetree) == T_SelectStmt) {
                 if (checkSelectIntoParse((SelectStmt*)parsetree)) {
                     list_free_deep(parsetreeList);
@@ -4991,6 +4993,7 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
     }
     PG_CATCH();
     {
+        t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
         /* Save error info */
         MemoryContext ecxt = MemoryContextSwitchTo(current_context);
         ErrorData* edata = CopyErrorData();
@@ -5011,6 +5014,7 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
     }
     PG_END_TRY();
 
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
     return tupleDesc;
 }
 static int get_inner_type_ind(Oid typeoid)
