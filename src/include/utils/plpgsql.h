@@ -972,7 +972,7 @@ typedef struct {    /* condition information item name for signal/resignal */
     char *table_name;
     char *column_name;
     char *cursor_name;
-    int sqlerrcode;     /* mysql_errno */
+    char *sqlerrcode;     /* mysql_errno */
 } PLpgSQL_condition_info_item;
 
 typedef struct {    /* siganl_information_item */

@@ -973,9 +973,10 @@ call prc();
 (1 row)
 
 show warnings;
- level | code | message 
--------+------+---------
-(0 rows)
+ level | code  |                        message                         
+-------+-------+--------------------------------------------------------
+ Error | 23502 | null value in column "c1" violates not-null constraint
+(1 row)
 
 select @retSqlstate, @msg;
  @retsqlstate |                          @msg                          
@@ -1234,13 +1235,13 @@ select @num1,@num2,@num3,@num4;
 select @msg1,@errno1;
                   @msg1                   | @errno1 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 select @msg2,@errno2;
                   @msg2                   | @errno2 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 select @msg3,@errno3;
@@ -1302,13 +1303,13 @@ select @num1,@num2,@num3,@num4;
 select @msg1,@errno1;
                   @msg1                   | @errno1 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 select @msg2,@errno2;
                   @msg2                   | @errno2 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 select @msg3,@errno3;
@@ -1320,7 +1321,7 @@ select @msg3,@errno3;
 select @msg4,@errno4;
                   @msg4                   | @errno4 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 CREATE or replace PROCEDURE p1() IS
@@ -1370,13 +1371,13 @@ select @num1,@num2,@num3,@num4;
 select @msg1,@errno1;
                   @msg1                   | @errno1 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 select @msg2,@errno2;
                   @msg2                   | @errno2 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 select @msg3,@errno3;
@@ -1388,7 +1389,7 @@ select @msg3,@errno3;
 select @msg4,@errno4;
                   @msg4                   | @errno4 
 ------------------------------------------+---------
- Unhandled user-defined warning condition | 64
+ Unhandled user-defined warning condition | 01000
 (1 row)
 
 drop procedure p1;
@@ -1473,7 +1474,7 @@ SELECT
   @returned_sqlstate;
  @class_origin | @subclass_origin | @constraint_catalog | @constraint_schema | @constraint_name | @catalog_name | @schema_name | @table_name | @column_name | @cursor_name |  @message_text  | @mysql_errno | @returned_sqlstate 
 ---------------+------------------+---------------------+--------------------+------------------+---------------+--------------+-------------+--------------+--------------+-----------------+--------------+--------------------
- (null)        | (null)           | (null)              | (null)             | (null)           | (null)        | (null)       | (null)      | (null)       | (null)       | inout parameter | 64           | 01234
+ (null)        | (null)           | (null)              | (null)             | (null)           | (null)        | (null)       | (null)      | (null)       | (null)       | inout parameter | 01000        | 01234
 (1 row)
 
 set @class_origin='',@subclass_origin='',@returned_sqlstate='',@message_text= '',@mysql_errno='',@constraint_catalog='',@constraint_schema='',@constraint_name='',@catalog_name='',@schema_name='',@table_name='',@column_name='',@cursor_name='';
@@ -1667,6 +1668,29 @@ CONTEXT:  referenced column: stacked_diagnostics_test
  stacked_diagnostics_test 
 --------------------------
  
+(1 row)
+
+CREATE OR REPLACE PROCEDURE p_resig1() IS
+begin
+DECLARE EXIT HANDLER FOR SQLSTATE '42P01'
+BEGIN
+RESIGNAL;
+END;
+DROP TABLE t1;
+end;
+/
+call p_resig1();
+ p_resig1 
+----------
+ 
+(1 row)
+
+get diagnostics condition 1 @p1 = CLASS_ORIGIN,@p2 = SUBCLASS_ORIGIN,@p3 = MESSAGE_TEXT,@p4 = MYSQL_ERRNO,@p5 = CONSTRAINT_CATALOG,@p6 = CONSTRAINT_SCHEMA,
+@p7 = CONSTRAINT_NAME,@p8 = CATALOG_NAME,@p9 = SCHEMA_NAME,@p10 = TABLE_NAME,@p11 = COLUMN_NAME,@p12 = CURSOR_NAME;
+select @p1,@p2,@p3,@p4;
+ @p1 | @p2 | @p3 | @p4 
+-----+-----+-----+-----
+     |     |     | 
 (1 row)
 
 \c regression
