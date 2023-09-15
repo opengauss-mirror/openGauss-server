@@ -78,6 +78,7 @@
 #include "storage/lock/lock.h"
 #include "nodes/makefuncs.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "storage/file/fio_device.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -87,6 +88,8 @@
 #define UPPERCASE_LETTERS_ID 55
 #define LOWERCASE_LETTERS_ID 87
 #define DISPLACEMENTS_VALUE 32
+#define MAX_DURATION_TIME 60
+#define DSS_IO_STAT_COLUMN_NUM 3
 
 const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
@@ -14723,6 +14726,48 @@ Datum track_memory_context_detail(PG_FUNCTION_ARGS)
     }
 }
 
+
+/*
+ * @Description : Get the statistical information for DSS IO, including read bytes, write bytes and io times.
+ * @in         	: Duration of statistics.
+ * @out         : None.
+ * @return      : Node.
+ */
+Datum dss_io_stat(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("This function only supports shared storage.")));
+    }
+    Datum result;
+    TupleDesc tupdesc;
+    int32 duration = PG_GETARG_INT32(0);
+    if (duration > MAX_DURATION_TIME) {
+        ereport(ERROR, (errmsg("The duration is too long, and it must be less than 60s.")));
+    }
+    init_dss_io_stat();
+    unsigned long long read_bytes = 0;
+    unsigned long long write_bytes = 0;
+    int io_count = 0;
+    get_dss_io_stat(duration, &read_bytes, &write_bytes, &io_count);
+    // tuple header
+    int i = 1;
+    tupdesc = CreateTemplateTupleDesc(DSS_IO_STAT_COLUMN_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "read_kilobyte_per_sec", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "write_kilobyte_per_sec", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i, "io_times", INT4OID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+    // tuple body
+    Datum values[DSS_IO_STAT_COLUMN_NUM];
+    bool nulls[DSS_IO_STAT_COLUMN_NUM]={false};
+    i = 0;
+    values[i++] = UInt64GetDatum(read_bytes);
+    values[i++] = UInt64GetDatum(write_bytes);
+    values[i] = Int32GetDatum(io_count);
+    
+    HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(heap_tuple);
+    PG_RETURN_DATUM(result); 
+}
 #ifdef ENABLE_MULTIPLE_NODES
 /* Get the head row of the view of index status */
 TupleDesc get_index_status_view_frist_row()
