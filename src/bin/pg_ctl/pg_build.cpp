@@ -609,7 +609,7 @@ void get_conninfo(const char* filename)
     }
 
     if (build_mode == CROSS_CLUSTER_FULL_BUILD || build_mode == CROSS_CLUSTER_INC_BUILD ||
-        build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD || build_mode == BUILD_CHECK) {
+        build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD || ss_instance_config.dss.enable_dss) {
         /* For shared storage cluster */
         conninfo_para = config_para_cross_cluster_build;
     } else {

@@ -221,8 +221,6 @@ static char remove_member_file[MAXPGPATH];
 static char change_role_file[MAXPGPATH];
 static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
-static int get_instance_id(void);
-static int ss_get_primary_id(void);
 static int ss_get_inter_node_nums(const char* interconn_url);
 bool ss_read_config(void);
 static unsigned int vote_num = 0;
@@ -7336,111 +7334,6 @@ static void free_ctl()
     FREE_AND_RESET(pgha_opt);
     FREE_AND_RESET(ss_instance_config.dss.vgname);
     FREE_AND_RESET(ss_instance_config.dss.vgdata);
-}
-
-static int get_instance_id(void)
-{
-    PGconn* conn = NULL;
-    PGresult* res = NULL;
-    const char* sql_string = "show ss_instance_id;";
-    char* instid = NULL;
-
-    conn = get_connectionex();
-    if (PQstatus(conn) != CONNECTION_OK) {
-        pg_log(PG_WARNING, _("could not connect to server: %s"), PQerrorMessage(conn));
-        return -1;
-    }
-
-    /* Get local role from the local server. */
-    res = PQexec(conn, sql_string);
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        PQclear(res);
-        pg_log(PG_WARNING, _("could not get local role from the local server: %s"), PQerrorMessage(conn));
-        close_connection();
-        conn = NULL;
-        return -1;
-    }
-
-    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
-        int ntuples = PQntuples(res);
-        int nfields = PQnfields(res);
-
-        PQclear(res);
-        pg_log(PG_WARNING,
-            _("invalid response from primary server: "
-              "Expected 1 tuple with 1 fields, got %d tuples with %d fields."),
-            ntuples,
-            nfields);
-        close_connection();
-        conn = NULL;
-        return -1;
-    }
-
-    instid = PQgetvalue(res, 0, 0);
-
-    PQclear(res);
-    close_connection();
-    conn = NULL;
-
-    return atoi(instid);
-}
-
-static int ss_get_primary_id(void)
-{
-    if (ss_instance_config.dss.socketpath == NULL) {
-        return -1;
-    }
-
-    if (ss_instance_config.dss.vgname == NULL) {
-        return -1;
-    }
-
-    int fd = -1;
-    int len = 0;
-    int err = 0;
-    struct stat statbuf;
-    char control_file_path[MAXPGPATH];
-
-    err = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
-    securec_check_c(err, "\0", "\0");
-    err = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", ss_instance_config.dss.vgname);
-    securec_check_ss_c(err, "\0", "\0");
-
-    if (dss_device_init(ss_instance_config.dss.socketpath, true) != DSS_SUCCESS) {
-        pg_log(PG_WARNING, _("failed to init dss device\n"));
-        exit(1);
-    }
-
-    fd = open(control_file_path, O_RDONLY | PG_BINARY, 0);
-    if(fd < 0) {
-        pg_log(PG_WARNING, _("failed to open pg_contol\n"));
-        close(fd);
-        fd = -1;
-        exit(1);
-    }
-
-    if (stat(control_file_path, &statbuf) < 0) {
-        pg_log(PG_WARNING, _("failed to stat pg_contol\n"));
-        close(fd);
-        fd = -1;
-        exit(1);
-    }
-
-    len = statbuf.st_size;
-    char* tmpBuffer = (char*)malloc(len + 1);
-
-    if ((read(fd, tmpBuffer, len)) != len) {
-        close(fd);
-        fd = -1;
-        pg_log(PG_WARNING, _("failed to read pg_contol\n"));
-        exit(1);
-    }
-
-    ss_reformer_ctrl_t* reformerCtrl;
-
-    /* Calculate the offset to obtain the primary_id of the last page */
-    reformerCtrl = (ss_reformer_ctrl_t*)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
-    return reformerCtrl->primaryInstId;
 }
 
 static int ss_get_inter_node_nums(const char* interconn_url)

@@ -1326,60 +1326,40 @@ tryAgain:
     return XLOG_BLCKSZ;
 }
 
-XLogRecord* XLogReadRecordFromAllDir(char* dirPath, XLogReaderState *xlogReader, XLogRecPtr curLsn, char** errorMsg)
+XLogRecord* XLogReadRecordFromAllDir(char** xlogDirs, int xlogDirNum, XLogReaderState *xlogReader, XLogRecPtr curLsn, char** errorMsg)
 {
-    DIR* dir = opendir(dirPath);
-    struct dirent* entry = NULL;
-    char xlogDirStr[MAXPGPATH];
-    errno_t rc = EOK;
     XLogRecord* record = NULL;
-
-    while (dir != NULL && (entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
-            rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dirPath, entry->d_name);
-            securec_check_ss_c(rc, "", "");
-            record = XLogReadRecord(xlogReader, curLsn, errorMsg, true, xlogDirStr);
-            if (record != NULL) {
-                break;
-            } else {
-                CLOSE_FD(xlogreadfd);
-            }
+    for (int i = 0; i < xlogDirNum; i++) {
+        record = XLogReadRecord(xlogReader, curLsn, errorMsg, true, xlogDirs[i]);
+        if (record != NULL) {
+            break;
+        } else {
+            CLOSE_FD(xlogreadfd);
         }
     }
-    (void)closedir(dir);
     return record;
 }
 
-void FindMaxXlogFileName(char* dirPath, char* maxXLogFileName)
+void SSFindMaxXlogFileName(char* maxXLogFileName, char** xlogDirs, int xlogDirNum)
 {
-    DIR* dir = opendir(dirPath);
-    struct dirent* entry = NULL;
-    char xlogDirStr[MAXPGPATH];
     errno_t rc = EOK;
-
-    while (dir != NULL && (entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
-            rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dirPath, entry->d_name);
-            securec_check_ss_c(rc, "", "");
-            DIR* subDir = opendir(xlogDirStr);
-            struct dirent* subDirEntry = NULL;
-            while (subDir != NULL && (subDirEntry = readdir(subDir)) != NULL) {
-                if (strlen(subDirEntry->d_name) == 24 && strspn(subDirEntry->d_name, "0123456789ABCDEF") == 24 && 
-                    (strlen(maxXLogFileName) == 0 || strcmp(maxXLogFileName, subDirEntry->d_name) < 0)) {
-                    rc = strncpy_s(maxXLogFileName, MAXPGPATH, subDirEntry->d_name, strlen(subDirEntry->d_name) + 1);
-                    securec_check(rc, "", "");
-                    maxXLogFileName[strlen(subDirEntry->d_name)] = '\0';
-                }
+    for (int i = 0; i < xlogDirNum; i++) {
+        DIR* subDir = opendir(xlogDirs[i]);
+        struct dirent* subDirEntry = NULL;
+        while (subDir != NULL && (subDirEntry = readdir(subDir)) != NULL) {
+            if (strlen(subDirEntry->d_name) == 24 && strspn(subDirEntry->d_name, "0123456789ABCDEF") == 24 && 
+                (strlen(maxXLogFileName) == 0 || strcmp(maxXLogFileName, subDirEntry->d_name) < 0)) {
+                rc = strncpy_s(maxXLogFileName, MAXPGPATH, subDirEntry->d_name, strlen(subDirEntry->d_name) + 1);
+                securec_check(rc, "", "");
+                maxXLogFileName[strlen(subDirEntry->d_name)] = '\0';
             }
-            (void)closedir(subDir);
         }
+        (void)closedir(subDir);
     }
-    (void)closedir(dir);
 }
 
-XLogRecPtr SSFindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc, char* dssDirStr)
+XLogRecPtr SSFindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc, char** xlogDirs, int xlogDirNum)
 {
-    struct dirent *entry = NULL;
     XLogReaderState *xlogReader = NULL;
     XLogPageReadPrivate readPrivate = {
         .datadir = NULL,
@@ -1395,13 +1375,10 @@ XLogRecPtr SSFindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32
     bool findValidXLogFile = false;
     uint32 xlogReadLogid = -1;
     uint32 xlogReadLogSeg = -1;
-    char dssXlogDirStr[MAXPGPATH];
     errno_t rc = EOK;
-    DIR* dssDir = NULL;
-    bool breakLoops = false;
 
     /* Ranking xlog from large to small */
-    FindMaxXlogFileName(dssDirStr, maxXLogFileName);
+    SSFindMaxXlogFileName(maxXLogFileName, xlogDirs, xlogDirNum);
 
     if (sscanf_s(maxXLogFileName, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
         rc = snprintf_s(returnMsg, XLOG_READER_MAX_MSGLENTH, XLOG_READER_MAX_MSGLENTH - 1,
@@ -1432,29 +1409,18 @@ XLogRecPtr SSFindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32
 
     /* Start to find the max lsn from a valid xlogfile */
     startLsn = (xlogReadLogSeg * XLogSegSize) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
-    while (!XLogRecPtrIsInvalid(startLsn) && !breakLoops) {
-        dssDir = opendir(dssDirStr);
+    while (!XLogRecPtrIsInvalid(startLsn) && !findValidXLogFile) {
         /* find the first valid record from the bigger xlogrecord. then break */
-        while (dssDir != NULL && (entry = readdir(dssDir)) != NULL) {
-            if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
-                rc = snprintf_s(dssXlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dssDirStr, entry->d_name);
-#ifndef FRONTEND
-                securec_check_ss(rc, "", "");
-#else
-                securec_check_ss_c(rc, "", "");
-#endif
-                curLsn = XLogFindNextRecord(xlogReader, startLsn, NULL, dssXlogDirStr);
-                if (XLogRecPtrIsInvalid(curLsn)) {
-                    CLOSE_FD(xlogreadfd);
-                } else {
-                    findValidXLogFile = true;
-                    breakLoops = true;
-                    break;
-                }
+        for (int i = 0; i < xlogDirNum; i++) {
+            curLsn = XLogFindNextRecord(xlogReader, startLsn, NULL, xlogDirs[i]);
+            if (XLogRecPtrIsInvalid(curLsn)) {
+                CLOSE_FD(xlogreadfd);
+            } else {
+                findValidXLogFile = true;
+                break;
             }
         }
         startLsn = startLsn - XLogSegSize;
-        (void)closedir(dssDir);
     }
 
     CLOSE_FD(xlogreadfd);
@@ -1476,7 +1442,7 @@ XLogRecPtr SSFindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32
 
     /* find the max lsn. */
     while(true) {
-        record = XLogReadRecordFromAllDir(dssDirStr, xlogReader, curLsn, &errorMsg);
+        record = XLogReadRecordFromAllDir(xlogDirs, xlogDirNum, xlogReader, curLsn, &errorMsg);
         if (record == NULL) {
             break;
         }
