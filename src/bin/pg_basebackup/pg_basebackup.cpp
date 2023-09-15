@@ -1960,13 +1960,11 @@ static int GsBaseBackup(int argc, char** argv)
     int i;
     for (i = 0; i < argc; i++) {
         char *optstr = argv[i];
-        int is_only_shortbar;
-        if (strlen(optstr) == 1) {
-            is_only_shortbar = optstr[0] == '-' ? 1 : 0;
-        } else {
-            is_only_shortbar = 0;
-        }
-        if (is_only_shortbar) {
+        if (strlen(optstr) == 1 && optstr[0] == '-') {
+            /* ignore the case of redirecting output like "gs_probackup ... -D -> xxx.tar.gz" */
+            if (i > 0 && strcmp(argv[i - 1], "-D") == 0) {
+                continue;
+            }
             fprintf(stderr, _("%s: The option '-' is not a valid option.\n"), progname);
             exit(1);
         }
@@ -1986,9 +1984,11 @@ static int GsBaseBackup(int argc, char** argv)
             }
 
             char *next_optstr = argv[i + 1];
+            if (strcmp(optstr, "-D") == 0 && strcmp(next_optstr, "-") == 0) {
+                continue;
+            }
             char *next_oli = strchr(optstring, next_optstr[1]);
-            int is_arg_optionform = next_optstr[0] == '-' && next_oli != NULL;
-            if (is_arg_optionform) {
+            if (next_optstr[0] == '-' && next_oli != NULL) {
                 fprintf(stderr, _("%s: The option '-%c' need a parameter.\n"), progname, optstr[1]);
                 exit(1);
             }
