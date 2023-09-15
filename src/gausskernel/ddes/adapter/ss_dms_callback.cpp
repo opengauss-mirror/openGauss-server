@@ -1771,6 +1771,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     unsigned long long bitmap_nodes)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    reform_info->is_hashmap_constructed = false;
     reform_info->reform_type = (SSReformType)reform_type;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
@@ -1797,6 +1798,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
         }
     }
+    INSTR_TIME_SET_CURRENT(reform_info->reform_start_time);
 
     reform_info->bitmap_nodes = bitmap_nodes;
     reform_info->dms_role = role;
@@ -1820,6 +1822,8 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
 
     int old_primary = SSGetPrimaryInstId();
     SSReadControlFile(old_primary, true);
+    g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
+    ereport(LOG, (errmsg("[SS reform] old cluster node bitmap: %lld", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 
     if (SS_STANDBY_FAILOVER) {
         AliveFailoverCleanBackends();
@@ -1855,6 +1859,10 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
     SSReadControlFile(REFORM_CTRL_PAGE);
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
+    g_instance.dms_cxt.SSReformInfo.new_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
+    ereport(LOG, (errmsg("[SS reform] new cluster node bitmap: %lld", g_instance.dms_cxt.SSReformInfo.new_bitmap)));
+    INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.reform_end_time);
+    g_instance.dms_cxt.SSReformInfo.reform_success = true;
     ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",
