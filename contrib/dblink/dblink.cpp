@@ -974,10 +974,10 @@ Datum dblink_open(PG_FUNCTION_ARGS)
         rconn = getConnectionByName(conname);
     }
 
-    linker = rconn->linker;
-    if (linker == NULL) {
+    if (rconn == NULL || rconn->linker == NULL) {
         DBLINK_CONN_NOT_AVAIL;
     }
+    linker = rconn->linker;
 
     /* Assemble sql */
     appendStringInfo(&buf, "DECLARE %s CURSOR FOR %s", curname, sql);
@@ -1028,10 +1028,10 @@ Datum dblink_close(PG_FUNCTION_ARGS)
         rconn = getConnectionByName(conname);
     }
 
-    linker = rconn->linker;
-    if (linker == NULL) {
+    if (rconn == NULL || rconn->linker == NULL) {
         DBLINK_CONN_NOT_AVAIL;
     }
+    linker = rconn->linker;
 
     appendStringInfo(&buf, "CLOSE %s", curname);
 
