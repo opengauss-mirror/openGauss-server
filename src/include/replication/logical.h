@@ -306,7 +306,7 @@ typedef struct DecodeOptionsDefault {
 
 extern LogicalDispatcher g_Logicaldispatcher[];
 extern bool firstCreateDispatcher;
-
+extern bool QuoteCheckOut(char* newval);
 extern void CheckLogicalDecodingRequirements(Oid databaseId);
 extern void ParallelReorderBufferQueueChange(ParallelReorderBuffer *rb, logicalLog *change, int slotId);
 extern void ParallelReorderBufferForget(ParallelReorderBuffer *rb, int slotId, ParallelReorderBufferTXN *txn);
