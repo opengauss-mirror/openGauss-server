@@ -1593,6 +1593,10 @@ static void setup_config(void)
         securec_check_c(nRet, "\0", "\0");
         conflines = replace_token(conflines, "#ss_enable_dss = off", repltok);
 
+        nRet = strcpy_s(repltok, sizeof(repltok), "enable_segment = on");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#enable_segment = off", repltok);
+
         conflines = ss_addnodeparmater(conflines);
     }
 
