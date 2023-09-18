@@ -1240,6 +1240,11 @@ static void doDeletion(const ObjectAddress* object, int flags)
             bool isTmpSequence = false;
             bool isTmpTable = false;
 
+            Oid mlogid = find_matview_mlog_table(object->objectId);
+            if (mlogid != 0 && !u_sess->attr.attr_sql.enable_cluster_resize) {
+                delete_matdep_table(mlogid);
+            }
+            
             if (relKind == RELKIND_INDEX || relKind == RELKIND_GLOBAL_INDEX) {
                 bool concurrent = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY) == PERFORM_DELETION_CONCURRENTLY);
                 bool concurrent_lock_mode = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY_LOCK) == PERFORM_DELETION_CONCURRENTLY_LOCK);
@@ -1279,11 +1284,6 @@ static void doDeletion(const ObjectAddress* object, int flags)
                  * is executed to drop this relation.If you reload relation after drop, it may
                  * cause other exceptions during the drop process
                  */
-            }
-
-            Oid mlogid = find_matview_mlog_table(object->objectId);
-            if (mlogid != 0 && !u_sess->attr.attr_sql.enable_cluster_resize) {
-                delete_matdep_table(mlogid);
             }
 
 #ifdef PGXC
