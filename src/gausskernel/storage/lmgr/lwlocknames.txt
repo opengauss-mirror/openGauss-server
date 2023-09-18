@@ -141,3 +141,6 @@ AboCacheLock 131
 OndemandXLogMemAllocLock 132
 OndemandXLogFileHandleLock 133
 ExrtoSnapshotLock 134
+RedoTruncateLock 135
+
+ExrtoRecycleResidualUndoLock 137

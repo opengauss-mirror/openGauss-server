@@ -627,14 +627,18 @@ void XactLockTableWait(TransactionId xid, bool allow_con_update, int waitSec)
  * As above, but only lock if we can get the lock without blocking.
  * Returns TRUE if the lock was acquired.
  */
-bool ConditionalXactLockTableWait(TransactionId xid, bool waitparent, bool bcareNextXid)
+bool ConditionalXactLockTableWait(TransactionId xid, const Snapshot snapshot, bool waitparent, bool bcareNextXid)
 {
     LOCKTAG tag;
     CLogXidStatus status = CLOG_XID_STATUS_IN_PROGRESS;
+    bool takenDuringRecovery = false;
+    if (snapshot != NULL) {
+        takenDuringRecovery = snapshot->takenDuringRecovery;
+    }
 
     for (;;) {
         Assert(!TransactionIdEquals(xid, GetTopTransactionIdIfAny()) || status == CLOG_XID_STATUS_COMMITTED ||
-               status == CLOG_XID_STATUS_ABORTED);
+               status == CLOG_XID_STATUS_ABORTED || takenDuringRecovery);
 
         if (!TransactionIdIsValid(xid))
             break;

@@ -113,8 +113,6 @@ enum knl_parallel_redo_state {
     REDO_DONE,
 };
 
-typedef struct ExrtoSnapshotData* ExrtoSnapshot;
-
 /* all process level attribute which expose to user */
 typedef struct knl_instance_attr {
 
@@ -728,6 +726,15 @@ typedef struct knl_g_parallel_decode_context {
     ErrorData *edata;
 } knl_g_parallel_decode_context;
 
+typedef struct _ExrtoSnapshotData* ExrtoSnapshot;
+
+typedef struct _StandbyReadDelayDdlState {
+    uint64 next_index_need_unlink;
+    uint64 next_index_can_insert;
+    uint32 delete_stat;
+    uint32 insert_stat;
+} StandbyReadDelayDdlState;
+
 typedef struct knl_g_parallel_redo_context {
     RedoType redoType;
     volatile knl_parallel_redo_state state;
@@ -751,6 +758,9 @@ typedef struct knl_g_parallel_redo_context {
     RedoCpuBindControl redoCpuBindcontrl;
     XLogRecPtr global_recycle_lsn; /* extreme-rto standby read */
     HTAB **redoItemHash; /* used in ondemand extreme RTO */
+    ExrtoSnapshot exrto_snapshot;
+    StandbyReadDelayDdlState standby_read_delay_ddl_stat;
+    uint64 max_clog_pageno;
 } knl_g_parallel_redo_context;
 
 typedef struct knl_g_heartbeat_context {
@@ -1404,4 +1414,3 @@ extern void add_numa_alloc_info(void* numaAddr, size_t length);
 #define DEFAULT_CREATE_GLOBAL_INDEX (u_sess->attr.attr_storage.default_index_kind == DEFAULT_INDEX_KIND_GLOBAL)
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_H_ */
-

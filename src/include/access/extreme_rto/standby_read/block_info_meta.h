@@ -77,8 +77,8 @@ typedef enum {
     STANDBY_READ_RECLYE_ALL,
 } StandbyReadRecyleState;
 
-BlockMetaInfo* get_block_meta_info_by_relfilenode(
-    const BufferTag& buf_tag, BufferAccessStrategy strategy, ReadBufferMode mode, Buffer* buffer);
+BlockMetaInfo *get_block_meta_info_by_relfilenode(const BufferTag &buf_tag, BufferAccessStrategy strategy,
+                                                  ReadBufferMode mode, Buffer *buffer, bool need_share_lock = false);
 void insert_lsn_to_block_info(
     StandbyReadMetaInfo* mete_info, const BufferTag& buf_tag, const Page base_page, XLogRecPtr next_lsn);
 StandbyReadRecyleState recyle_block_info(
@@ -98,7 +98,7 @@ static inline bool is_block_meta_info_valid(BlockMetaInfo* meta_info)
 
 void remove_one_block_info_file(const RelFileNode rnode);
 
-void remove_block_meta_info_files_of_db(Oid db_oid, Oid rel_oid = InvalidOid);
+void remove_block_meta_info_files_of_db(Oid db_oid);
 
 }  // namespace extreme_rto_standby_read
 

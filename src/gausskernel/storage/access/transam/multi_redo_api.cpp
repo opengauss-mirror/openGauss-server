@@ -338,9 +338,8 @@ void CountXLogNumbers(XLogReaderState *record)
             record->readblocks);
     } else if (rm_id == RM_XACT_ID) {
         ColFileNode *xnodes = NULL;
-        bool compress = false;
         int nrels = 0;
-        XactGetRelFiles(record, &xnodes, &nrels, &compress);
+        XactGetRelFiles(record, &xnodes, &nrels);
         if (nrels > 0) {
             (void)pg_atomic_add_fetch_u64(&g_instance.comm_cxt.predo_cxt.xlogStatics[rm_id][info].extra_num, nrels);
         }

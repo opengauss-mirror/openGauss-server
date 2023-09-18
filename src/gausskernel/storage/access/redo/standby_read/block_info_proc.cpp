@@ -16,7 +16,7 @@
  * block_info_proc.cpp
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/recovery/parallel/blocklevel/standby_read/block_info_proc.cpp
+ *    src/gausskernel/storage/access/redo/standby_read/block_info_proc.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -24,6 +24,7 @@
 #include <cassert>
 #include "access/extreme_rto/standby_read/block_info_meta.h"
 #include "access/extreme_rto/standby_read/lsn_info_meta.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "storage/smgr/relfilenode.h"
 
 namespace extreme_rto_standby_read {
@@ -33,7 +34,7 @@ void block_info_page_init(Page page)
     static_assert(sizeof(BlockInfoPageHeader) == BLOCK_INFO_HEAD_SIZE, "BlockInfoPageHeader size is not 64 bytes");
     static_assert(sizeof(BlockMetaInfo) == BLOCK_INFO_SIZE, "BlockMetaInfo size is not 64 bytes");
 
-    BlockInfoPageHeader* page_header = (BlockInfoPageHeader*)page;
+    BlockInfoPageHeader *page_header = (BlockInfoPageHeader *)page;
     errno_t ret = memset_s(page_header, BLCKSZ, 0, BLCKSZ);
     securec_check(ret, "", "");
     page_header->flags |= BLOCK_INFO_PAGE_VALID_FLAG;
@@ -44,15 +45,21 @@ inline BlockNumber data_block_number_to_meta_page_number(BlockNumber block_num)
 {
     return block_num / BLOCK_INFO_NUM_PER_PAGE;
 }
-
+#ifdef ENABLE_UT
+uint32 block_info_meta_page_offset(BlockNumber block_num)
+{
+    return (block_num % BLOCK_INFO_NUM_PER_PAGE) * BLOCK_INFO_SIZE + BLOCK_INFO_HEAD_SIZE;
+}
+#else
 inline uint32 block_info_meta_page_offset(BlockNumber block_num)
 {
     return (block_num % BLOCK_INFO_NUM_PER_PAGE) * BLOCK_INFO_SIZE + BLOCK_INFO_HEAD_SIZE;
 }
+#endif
 
 // get page, just have pin, no lock
 BlockMetaInfo* get_block_meta_info_by_relfilenode(
-    const BufferTag& buf_tag, BufferAccessStrategy strategy, ReadBufferMode mode, Buffer* buffer)
+    const BufferTag& buf_tag, BufferAccessStrategy strategy, ReadBufferMode mode, Buffer* buffer, bool need_share_lock)
 {
     RelFileNode standby_read_rnode = buf_tag.rnode;
     standby_read_rnode.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
@@ -63,25 +70,47 @@ BlockMetaInfo* get_block_meta_info_by_relfilenode(
     *buffer = ReadBuffer_common(smgr, 0, buf_tag.forkNum, meta_block_num, mode, strategy, &hit, NULL);
 
     if (*buffer == InvalidBuffer) {
+        ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
+                         errmsg("get block meta info failed, buffer invalid %u/%u/%u %d %u, meta_block_num %u",
+                                buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                                buf_tag.blockNum, meta_block_num)));
         return NULL;
     }
 
+    if (need_share_lock) {
+        LockBuffer(*buffer, BUFFER_LOCK_SHARE);
+    } else {
+        LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+    }
+    
+#ifdef ENABLE_UT
+    Page page = get_page_from_buffer(*buffer);
+#else
     Page page = BufferGetPage(*buffer);
-    if (!is_block_info_page_valid((BlockInfoPageHeader*)page)) {
+#endif
+    if (!is_block_info_page_valid((BlockInfoPageHeader *)page)) {
         if (mode == RBM_NORMAL) {
-            ReleaseBuffer(*buffer);
+            UnlockReleaseBuffer(*buffer);
+            ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
+                             errmsg("get block meta info failed, page invalid %u/%u/%u %d %u, meta_block_num %u",
+                                    buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                                    buf_tag.blockNum, meta_block_num)));
             return NULL;
         }
     }
 
     uint32 offset = block_info_meta_page_offset(buf_tag.blockNum);
-    BlockMetaInfo *block_info = ((BlockMetaInfo*)(page + offset));
+    BlockMetaInfo *block_info = ((BlockMetaInfo *)(page + offset));
     if (!is_block_meta_info_valid(block_info) && mode == RBM_NORMAL) {
-        ReleaseBuffer(*buffer);
-
+        ereport(DEBUG1,
+                (errmsg("block_info is invalid %u/%u/%u %d %u min lsn %08X/%08X max lsn %08X/%08X flags:%u",
+                        buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                        buf_tag.blockNum, (uint32)(block_info->min_lsn >> UINT64_HALF), (uint32)block_info->min_lsn,
+                        (uint32)(block_info->max_lsn >> UINT64_HALF), (uint32)block_info->max_lsn, block_info->flags)));
+        UnlockReleaseBuffer(*buffer);
         return NULL;
     }
-
+    Assert(block_info != NULL);
     return block_info;
 }
 
@@ -106,11 +135,14 @@ void insert_lsn_to_block_info(
         ereport(PANIC, (errmsg("insert lsn failed,block invalid %u/%u/%u %d %u", buf_tag.rnode.spcNode,
                                buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum, buf_tag.blockNum)));
     }
-    LockBuffer(block_info_buf, BUFFER_LOCK_EXCLUSIVE);
+#ifdef ENABLE_UT
+    Page page = get_page_from_buffer(block_info_buf);
+#else
     Page page = BufferGetPage(block_info_buf);
+#endif
     XLogRecPtr current_page_lsn = PageGetLSN(base_page);
     if (!is_block_meta_info_valid(block_info)) {
-        if (!is_block_info_page_valid((BlockInfoPageHeader*)page)) {
+        if (!is_block_info_page_valid((BlockInfoPageHeader *)page)) {
             block_info_page_init(page);
         }
 
@@ -142,14 +174,19 @@ StandbyReadRecyleState recyle_block_info(
     BlockMetaInfo* block_meta_info = get_block_meta_info_by_relfilenode(buf_tag, NULL, RBM_NORMAL, &buffer);
     if ((block_meta_info == NULL) || (buffer == InvalidBuffer)) {
         // no block info, should not at this branch
-        ereport(WARNING, (errmsg("block meta is invalid %u/%u/%u %d %u", buf_tag.rnode.spcNode, buf_tag.rnode.dbNode,
-                                  buf_tag.rnode.relNode, buf_tag.forkNum, buf_tag.blockNum)));
+        ereport(WARNING, (errmodule(MOD_STANDBY_READ), errmsg("block meta is invalid %u/%u/%u %d %u",
+                          buf_tag.rnode.spcNode, buf_tag.rnode.dbNode,
+                          buf_tag.rnode.relNode, buf_tag.forkNum, buf_tag.blockNum)));
         return STANDBY_READ_RECLYE_ALL;
     }
     StandbyReadRecyleState stat = STANDBY_READ_RECLYE_NONE;
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     Assert(((block_meta_info->flags & BLOCK_INFO_NODE_VALID_FLAG) == BLOCK_INFO_NODE_VALID_FLAG));
     if (XLByteLT(block_meta_info->max_lsn, recyle_lsn)) {
+        ereport(DEBUG1,
+                (errmsg(EXRTOFORMAT("block meta recycle all %u/%u/%u %d %u, max lsn %08X/%08X, recycle lsn %08X/%08X"),
+                        buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                        buf_tag.blockNum, (uint32)(block_meta_info->max_lsn >> UINT64_HALF),
+                        (uint32)block_meta_info->max_lsn, (uint32)(recyle_lsn >> UINT64_HALF), (uint32)recyle_lsn)));
         block_meta_info->flags &= ~BLOCK_INFO_NODE_VALID_FLAG;
         stat = STANDBY_READ_RECLYE_ALL;
         MarkBufferDirty(buffer);
@@ -186,12 +223,10 @@ bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, 
     StandbyReadLsnInfoArray* lsn_info)
 {
     Buffer buf;
-    BlockMetaInfo* block_meta_info = get_block_meta_info_by_relfilenode(buf_tag, strategy, RBM_NORMAL, &buf);
+    BlockMetaInfo* block_meta_info = get_block_meta_info_by_relfilenode(buf_tag, strategy, RBM_NORMAL, &buf, true);
     if (block_meta_info == NULL) {
         return false;
     }
-
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
 
     if (XLByteLT(read_lsn, block_meta_info->min_lsn)) {
         UnlockReleaseBuffer(buf);
@@ -203,9 +238,22 @@ bool get_page_lsn_info(const BufferTag& buf_tag, BufferAccessStrategy strategy, 
     }
 
     Assert(block_meta_info->base_page_info_list.prev != LSN_INFO_LIST_HEAD);
+    if (block_meta_info->base_page_info_list.prev == LSN_INFO_LIST_HEAD) {
+        ereport(ERROR,
+                ((errmsg("block_meta_info->base_page_info_list.prev is invaild. timeline %u, recordnum %u , min lsn "
+                         "%lu, max lsn %lu, read lsn %lu",
+                         block_meta_info->timeline, block_meta_info->record_num, block_meta_info->min_lsn,
+                         block_meta_info->max_lsn, read_lsn))));
+    }
     reset_tmp_lsn_info_array(lsn_info);
     get_lsn_info_for_read(buf_tag, block_meta_info->base_page_info_list.prev, lsn_info, read_lsn);
     UnlockReleaseBuffer(buf);
+
+    if (lsn_info->lsn_num == 0 && XLogRecPtrIsInvalid(lsn_info->base_page_lsn)) {
+        ereport(ERROR, ((errmsg("cannot find valid lsn info %u/%u/%u %d %u read lsn %lu, min lsn %lu",
+                                buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                                buf_tag.blockNum, read_lsn, block_meta_info->min_lsn))));
+    }
     return true;
 }
 
@@ -227,73 +275,12 @@ void remove_one_block_info_file(const RelFileNode rnode)
  * recycle all relation files when drop db occurs.
  * db_id: database oid.
  */
-void remove_block_meta_info_files_of_db(Oid db_oid, Oid rel_oid)
+void remove_block_meta_info_files_of_db(Oid db_oid)
 {
-    char pathbuf[EXRTO_FILE_PATH_LEN];
-    char **filenames;
-    char **filename;
-    struct stat statbuf;
-    /* get block info file directory */
-    char exrto_block_info_dir[EXRTO_FILE_PATH_LEN] = {0};
-    int rc = snprintf_s(exrto_block_info_dir, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%s/%s", EXRTO_FILE_DIR,
-                        EXRTO_FILE_SUB_DIR[BLOCK_INFO_META]);
-    securec_check_ss(rc, "", "");
-    /* get all files' name from block meta file directory */
-    filenames = pgfnames(exrto_block_info_dir);
-    if (filenames == NULL) {
-        return;
-    }
     char target_prefix[EXRTO_FILE_PATH_LEN] = {0};
-    if (rel_oid != InvalidOid) {
-        rc = sprintf_s(target_prefix, EXRTO_FILE_PATH_LEN, "%u_%u_", db_oid, rel_oid);
-    } else {
-        rc = sprintf_s(target_prefix, EXRTO_FILE_PATH_LEN, "%u_", db_oid);
-    }
+    errno_t rc = sprintf_s(target_prefix, EXRTO_FILE_PATH_LEN, "%u_", db_oid);
     securec_check_ss(rc, "", "");
-    /* use the prefix name to match up files we want to delete */
-    size_t prefix_len = strlen(target_prefix);
-    for (filename = filenames; *filename != NULL; filename++) {
-        char *fname = *filename;
-        size_t fname_len = strlen(fname);
-        /*
-         * the length of prefix is less than the length of file name and must be the same under the same prefix_len
-         */
-        if (prefix_len >= fname_len || strncmp(target_prefix, fname, prefix_len) != 0) {
-            continue;
-        }
-        rc =
-            snprintf_s(pathbuf, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%s/%s", exrto_block_info_dir, *filename);
-        securec_check_ss(rc, "", "");
-        /* may be can be some error */
-        if (lstat(pathbuf, &statbuf) != 0) {
-            if (errno != ENOENT) {
-#ifndef FRONTEND
-                ereport(WARNING, (errmsg("could not stat file or directory \"%s\" \n", pathbuf)));
-#else
-                fprintf(stderr, _("could not stat file or directory \"%s\": %s\n"), pathbuf, gs_strerror(errno));
-#endif
-            }
-            continue;
-        }
-        /* if the file is a directory, don't touch it */
-        if (S_ISDIR(statbuf.st_mode)) {
-            /* skip dir */
-            continue;
-        }
-        /* delete this file we found */
-        if (unlink(pathbuf) != 0) {
-            if (errno != ENOENT) {
-#ifndef FRONTEND
-                ereport(WARNING, (errmsg("could not remove file or directory \"%s\" ", pathbuf)));
-#else
-                fprintf(stderr, _("could not remove file or directory \"%s\": %s\n"), pathbuf, gs_strerror(errno));
-#endif
-            }
-        }
-    }
-    pgfnames_cleanup(filenames);
-    return;
+    exrto_unlink_file_with_prefix(target_prefix, BLOCK_INFO_META);
 }
 
 }  // namespace extreme_rto_standby_read
-

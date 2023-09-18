@@ -118,6 +118,7 @@ static void SSDestroyRecoveryWorkers();
 static void DispatchRecordWithPages(XLogReaderState *, List *);
 static void DispatchRecordWithoutPage(XLogReaderState *, List *);
 static void DispatchTxnRecord(XLogReaderState *, List *);
+void dispatch_record_to_all_thread(XLogReaderState *record, List *expected_tlis);
 static void StartPageRedoWorkers(uint32);
 static void StopRecoveryWorkers(int, Datum);
 static bool StandbyWillChangeStandbyState(const XLogReaderState *);
@@ -639,6 +640,8 @@ void SendSingalToPageWorker(int signal)
     for (uint32 i = 0; i < g_instance.comm_cxt.predo_cxt.totalNum; ++i) {
         uint32 state = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState));
         if (state == PAGE_REDO_WORKER_READY) {
+            ereport(LOG, (errmsg("Dispatch start to kill(pid %lu, signal %d)",
+                                 g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal)));
             int err = gs_signal_send(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal);
             if (0 != err) {
                 ereport(WARNING, (errmsg("Dispatch kill(pid %lu, signal %d) failed: \"%s\",",
@@ -675,7 +678,7 @@ static void StopRecoveryWorkers(int code, Datum arg)
         if ((count & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
             ereport(WARNING,
                     (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("StopRecoveryWorkers wait page work exit")));
-            if ((count & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
+            if ((count & STOP_WORKERS_WAIT_COUNT) == STOP_WORKERS_WAIT_COUNT) {
                 DumpDispatcher();
                 ereport(PANIC,
                         (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("StopRecoveryWorkers wait too long!!!")));
@@ -700,8 +703,8 @@ static void StopRecoveryWorkers(int code, Datum arg)
 /* Run from the dispatcher thread. */
 static void DestroyRecoveryWorkers()
 {
+    SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     if (g_dispatcher != NULL) {
-        SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
         for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
             DestroyPageRedoWorker(g_dispatcher->pageLines[i].batchThd);
             DestroyPageRedoWorker(g_dispatcher->pageLines[i].managerThd);
@@ -734,8 +737,8 @@ static void DestroyRecoveryWorkers()
             g_instance.comm_cxt.predo_cxt.parallelRedoCtx = NULL;
         }
         g_dispatcher = NULL;
-        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     }
+    SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
 }
 
 static void SSDestroyRecoveryWorkers()
@@ -895,7 +898,8 @@ static void DispatchSyncTxnRecord(XLogReaderState *record, List *expectedTLIs)
     RedoItem *item = GetRedoItemPtr(record);
     ReferenceRedoItem(item);
 
-    if ((g_dispatcher->chosedPLCnt != 1) && (XLogRecGetRmid(&item->record) != RM_XACT_ID)) {
+    if ((g_dispatcher->chosedPLCnt != 1) && (XLogRecGetRmid(&item->record) != RM_XACT_ID) &&
+        !(IsSmgrTruncate(&item->record))) {
         ereport(WARNING,
                 (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                  errmsg("[REDO_LOG_TRACE]DispatchSyncTxnRecord maybe some error:rmgrID:%u, info:%u, workerCount:%u",
@@ -1025,12 +1029,25 @@ static bool DispatchXLogRecord(XLogReaderState *record, List *expectedTLIs, Time
 
     } else if ((info == XLOG_FPI) || (info == XLOG_FPI_FOR_HINT)) {
         DispatchRecordWithPages(record, expectedTLIs);
+    } else if (info == XLOG_BACKUP_END) {
+        dispatch_record_to_all_thread(record, expectedTLIs);
     } else {
         /* process in trxn thread and need to sync to other pagerredo thread */
         DispatchTxnRecord(record, expectedTLIs);
     }
 
     return isNeedFullSync;
+}
+
+void dispatch_record_to_all_thread(XLogReaderState *record, List *expected_tlis)
+{
+    RedoItem *item = GetRedoItemPtr(record);
+    ReferenceRedoItem(item);
+    for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
+        ReferenceRedoItem(item);
+        AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
+    }
+    AddTxnRedoItem(g_dispatcher->trxnLine.managerThd, item);
 }
 
 /* Run  from the dispatcher thread. */
@@ -1044,7 +1061,7 @@ static bool DispatchRelMapRecord(XLogReaderState *record, List *expectedTLIs, Ti
 /* Run  from the dispatcher thread. */
 static bool DispatchXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
-    if (XactWillRemoveRelFiles(record)) {
+    if (xact_has_invalid_msg_or_delete_file(record)) {
         bool hasSegpageRelFile = XactHasSegpageRelFiles(record);
         uint32 doneFlag = 0;
         
@@ -1207,15 +1224,9 @@ static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, Time
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
         rnode.opt = GetCreateXlogFileNodeOpt(record);
         DispatchToOnePageWorker(record, rnode, expectedTLIs);
-    } else if (IsSmgrTruncate(record)) {
-        xl_smgr_truncate *xlrec = (xl_smgr_truncate *)XLogRecGetData(record);
-        RelFileNode rnode;
-        RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-        rnode.opt = GetTruncateXlogFileNodeOpt(record);
-        uint32 id = GetSlotId(rnode, 0, 0, GetBatchCount());
-        AddSlotToPLSet(id);
-
-        DispatchToSpecPageWorker(record, expectedTLIs);
+    } else if (info == XLOG_SMGR_TRUNCATE) {
+        record->isFullSync = true;
+        dispatch_record_to_all_thread(record, expectedTLIs);
     }
 
     return isNeedFullSync;

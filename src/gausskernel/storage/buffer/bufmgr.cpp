@@ -1628,6 +1628,47 @@ Buffer ReadBuffer(Relation reln, BlockNumber block_num)
     return ReadBufferExtended(reln, MAIN_FORKNUM, block_num, RBM_NORMAL, NULL);
 }
 
+Buffer buffer_read_extended_internal(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                                     BufferAccessStrategy strategy)
+{
+    bool hit = false;
+    Buffer buf;
+
+    if (block_num == P_NEW) {
+        STORAGE_SPACE_OPERATION(reln, BLCKSZ);
+    }
+
+    /* Open it at the smgr level */
+    RelationOpenSmgr(reln);
+
+    /*
+     * * Test for a temporary relation that belongs to some other session.
+     */
+    if (RELATION_IS_OTHER_TEMP(reln) && fork_num <= INIT_FORKNUM)
+        /*
+         * We would be likely to get wrong data since we have no visibility into the owning session's local buffers.
+         */
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot access temporary tables of other sessions")));
+
+    /*
+     * Read the buffer.
+     */
+    pgstat_count_buffer_read(reln);
+    pgstatCountBlocksFetched4SessionLevel();
+
+    if (RelationisEncryptEnable(reln)) {
+        reln->rd_smgr->encrypt = true;
+    }
+    buf =
+        ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num, block_num, mode, strategy, &hit, NULL);
+    if (hit) {
+        /* Update pgstat counters to reflect a cache hit */
+        pgstat_count_buffer_hit(reln);
+    }
+    return buf;
+}
+
 /*
  * ReadBufferExtended -- returns a buffer containing the requested
  *		block of the requested relation.  If the blknum
@@ -1673,45 +1714,12 @@ Buffer ReadBuffer(Relation reln, BlockNumber block_num)
 Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                           BufferAccessStrategy strategy)
 {
-    if (IsDefaultExtremeRtoMode() && IsExtremeRtoRunning() && !AmPageRedoWorker()) {
+    if (IsDefaultExtremeRtoMode() &&
+        (!RecoveryInProgress() || !IsExtremeRtoRunning() || !is_exrto_standby_read_worker())) {
+        return buffer_read_extended_internal(reln, fork_num, block_num, mode, strategy);
+    } else {
         return standby_read_buf(reln, fork_num, block_num, mode, strategy);
     }
-
-    bool hit = false;
-    Buffer buf;
-
-    if (block_num == P_NEW) {
-        STORAGE_SPACE_OPERATION(reln, BLCKSZ);
-    }
-
-    /* Open it at the smgr level if not already done */
-    RelationOpenSmgr(reln);
-
-    /*
-     * Reject attempts to read non-local temporary relations; we would be
-     * likely to get wrong data since we have no visibility into the owning
-     * session's local buffers.
-     */
-    if (RELATION_IS_OTHER_TEMP(reln) && fork_num <= INIT_FORKNUM)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot access temporary tables of other sessions")));
-
-    /*
-     * Read the buffer, and update pgstat counters to reflect a cache hit or
-     * miss.
-     */
-    pgstat_count_buffer_read(reln);
-    pgstatCountBlocksFetched4SessionLevel();
-
-    if (RelationisEncryptEnable(reln)) {
-        reln->rd_smgr->encrypt = true;
-    }
-    buf = ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num,
-                            block_num, mode, strategy, &hit, NULL);
-    if (hit) {
-        pgstat_count_buffer_hit(reln);
-    }
-    return buf;
 }
 
 /*
@@ -5424,31 +5432,6 @@ void DropDatabaseBuffers(Oid dbid)
     gstrace_exit(GS_TRC_ID_DropDatabaseBuffers);
 }
 
-void buffer_drop_exrto_standby_read_buffers()
-{
-    int i = 0;
-    ereport(LOG, (errmsg("buffer_drop_exrto_standby_read_buffers: start to drop buffers.")));
-    while (i < TOTAL_BUFFER_NUM) {
-        BufferDesc *buf_desc = GetBufferDescriptor(i);
-        uint32 buf_state;
-        /*
-         * Some safe unlocked checks can be done to reduce the number of cycle.
-         */
-        if (!IS_EXRTO_RELFILENODE(buf_desc->tag.rnode)) {
-            i++;
-            continue;
-        }
-
-        buf_state = LockBufHdr(buf_desc);
-        if (IS_EXRTO_RELFILENODE(buf_desc->tag.rnode)) {
-            InvalidateBuffer(buf_desc); /* with buffer head lock released */
-        } else {
-            UnlockBufHdr(buf_desc, buf_state);
-        }
-        i++;
-    }
-}
-
 /* -----------------------------------------------------------------
  *		PrintBufferDescs
  *
@@ -5718,11 +5701,6 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 
     Assert(GetPrivateRefCount(buffer) > 0);
 
-    //  temp buf just for old page version, could not write to disk
-    if (pg_atomic_read_u32(&buf_desc->state) & BM_IS_TMP_BUF) {
-        return;
-    }
-
     /* here, either share or exclusive lock is OK */
     if (!LWLockHeldByMe(buf_desc->content_lock))
         ereport(PANIC, (errcode(ERRCODE_INVALID_BUFFER),
@@ -5744,6 +5722,11 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
         bool delayChkpt = false;
         uint32 buf_state;
         uint32 old_buf_state;
+        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        //  temp buf just for old page version, could not write to disk
+        if (IS_EXRTO_READ && (buf_state & BM_IS_TMP_BUF)) {
+            return;
+        }
 
         /*
          * If we need to protect hint bit updates from torn writes, WAL-log a
@@ -5756,9 +5739,8 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
          * The incremental checkpoint is protected by the doublewriter, the
          * half-write problem does not occur.
          */
-        bool need_write_wal =
-            (!ENABLE_INCRE_CKPT && XLogHintBitIsNeeded() && (pg_atomic_read_u32(&buf_desc->state) & BM_PERMANENT));
-        if (need_write_wal) {
+        if (unlikely(!ENABLE_INCRE_CKPT && XLogHintBitIsNeeded() &&
+                     (pg_atomic_read_u32(&buf_desc->state) & BM_PERMANENT))) {
             /*
              * If we're in recovery we cannot dirty a page because of a hint.
              * We can set the hint, just not dirty the page as a result so the
@@ -6213,10 +6195,16 @@ void LockBufferForCleanup(Buffer buffer)
  */
 bool HoldingBufferPinThatDelaysRecovery(void)
 {
-    uint32 bufLen = parallel_recovery::GetStartupBufferPinWaitBufLen();
+    if (IS_EXRTO_READ) {
+        return false;
+    }
+    SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     int bufids[MAX_RECOVERY_THREAD_NUM + 1];
+    errno_t rc = memset_s(bufids, sizeof(bufids), -1, sizeof(bufids));
+    securec_check(rc, "\0", "\0");
+    uint32 bufLen = parallel_recovery::GetStartupBufferPinWaitBufLen();
     parallel_recovery::GetStartupBufferPinWaitBufId(bufids, bufLen);
-
+    SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     for (uint32 i = 0; i < bufLen; i++) {
 
         /*

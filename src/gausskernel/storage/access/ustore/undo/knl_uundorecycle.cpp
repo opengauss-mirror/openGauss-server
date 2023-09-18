@@ -370,7 +370,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
         if (undoRecycled) {
             Assert(TransactionIdIsValid(recycleXid) && (zone->GetRecycleXid() < recycleXid));
             zone->LockUndoZone();
-            if (!zone->CheckRecycle(startUndoPtr, endUndoPtr)) {
+            if (!zone->CheckRecycle(startUndoPtr, endUndoPtr, false)) {
                 ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d recycle start %lu >= recycle end %lu."),
                         zone->GetZoneId(), startUndoPtr, endUndoPtr)));
             }
@@ -536,7 +536,7 @@ void exrto_standby_release_space(UndoZone *zone, TransactionId recycle_xid, Undo
     UndoRecPtr oldest_end_undo_ptr = end_undo_ptr;
     Assert(TransactionIdIsValid(recycle_xid) && (zone->get_recycle_xid_exrto() < recycle_xid));
     zone->LockUndoZone();
-    if (!zone->CheckRecycle(start_undo_ptr, end_undo_ptr)) {
+    if (!zone->CheckRecycle(start_undo_ptr, end_undo_ptr, true)) {
         ereport(PANIC, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT("zone %d recycle start %lu >= recycle end %lu."),
             zone->GetZoneId(), start_undo_ptr, end_undo_ptr)));
@@ -549,7 +549,11 @@ void exrto_standby_release_space(UndoZone *zone, TransactionId recycle_xid, Undo
         }
         zone->set_discard_urec_ptr_exrto(oldest_end_undo_ptr);
     }
- 
+
+    ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
+                     errmsg("exrto_standby_release_space: zone %d recycle_xid %lu recycle start "
+                            "%lu recycle end %lu recycle_tslot %lu.",
+                            zone->GetZoneId(), recycle_xid, start_undo_ptr, end_undo_ptr, recycle_exrto)));
     zone->set_recycle_xid_exrto(recycle_xid);
     zone->set_force_discard_urec_ptr_exrto(end_undo_ptr);
     zone->set_recycle_tslot_ptr_exrto(recycle_exrto);
@@ -644,17 +648,23 @@ bool exrto_standby_recycle_undo_zone()
 }
  
 /* recycle residual_undo_file which may be leftover by exrto read in standby */
-void exrto_recycle_residual_undo_file()
+void exrto_recycle_residual_undo_file(char *FuncName)
 {
     uint32 idx = 0;
     uint64 record_file_cnt = 0;
     uint64 slot_file_cnt = 0;
+    (void)LWLockAcquire(ExrtoRecycleResidualUndoLock, LW_EXCLUSIVE);
     if (g_instance.undo_cxt.is_exrto_residual_undo_file_recycled) {
+        LWLockRelease(ExrtoRecycleResidualUndoLock);
+        ereport(LOG, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file skip, FuncName:%s."), FuncName)));
         return;
     }
+    g_instance.undo_cxt.is_exrto_residual_undo_file_recycled = true;
+    LWLockRelease(ExrtoRecycleResidualUndoLock);
     ereport(LOG, (errmodule(MOD_UNDO),
-        errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file begin uZoneCount is %u."),
-            g_instance.undo_cxt.uZoneCount)));
+        errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file begin uZoneCount is %u, FuncName:%s."),
+            g_instance.undo_cxt.uZoneCount, FuncName)));
     if (g_instance.undo_cxt.uZoneCount == 0 || g_instance.undo_cxt.uZones == NULL) {
         g_instance.undo_cxt.is_exrto_residual_undo_file_recycled = true;
         ereport(LOG, (errmodule(MOD_UNDO),
@@ -673,7 +683,6 @@ void exrto_recycle_residual_undo_file()
     ereport(LOG, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file release record_file_cnt:%lu, "
             "slot_file_cnt:%lu."), record_file_cnt, slot_file_cnt)));
-    g_instance.undo_cxt.is_exrto_residual_undo_file_recycled = true;
 }
  
 void recycle_wait(bool recycled, uint64 *non_recycled)
@@ -799,6 +808,7 @@ void UndoRecycleMain()
     pg_usleep(10000000L);
     ereport(LOG, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("sleep 10s, ensure  the snapcapturer can give the undorecyclemain a valid recycleXmin."))));
+    exrto_recycle_residual_undo_file("recycle_main");
     while (true) {
         if (t_thrd.undorecycler_cxt.got_SIGHUP) {
             t_thrd.undorecycler_cxt.got_SIGHUP = false;
@@ -807,7 +817,6 @@ void UndoRecycleMain()
         if (t_thrd.undorecycler_cxt.shutdown_requested) {
             ShutDownRecycle(recycleMaxXIDs);
         }
-        exrto_recycle_residual_undo_file();
         if (!RecoveryInProgress()) {
             TransactionId recycleXmin = InvalidTransactionId;
             TransactionId oldestXmin = GetOldestXminForUndo(&recycleXmin);

@@ -543,6 +543,7 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
         proc->snapXmax = InvalidTransactionId;
         proc->snapCSN = InvalidCommitSeqNo;
         proc->exrto_read_lsn = 0;
+        proc->exrto_min = 0;
         proc->exrto_gen_snap_time = 0;
         pgxact->csn_min = InvalidCommitSeqNo;
         pgxact->csn_dr = InvalidCommitSeqNo;
@@ -589,6 +590,7 @@ static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact,
     proc->snapXmax = InvalidTransactionId;
     proc->snapCSN = InvalidCommitSeqNo;
     proc->exrto_read_lsn = 0;
+    proc->exrto_min = 0;
     proc->exrto_gen_snap_time = 0;
     pgxact->csn_min = InvalidCommitSeqNo;
     pgxact->csn_dr = InvalidCommitSeqNo;
@@ -819,6 +821,8 @@ void ProcArrayClearTransaction(PGPROC* proc)
     pgxact->xmin = InvalidTransactionId;
     proc->snapXmax = InvalidTransactionId;
     proc->snapCSN = InvalidCommitSeqNo;
+    proc->exrto_read_lsn = 0;
+    proc->exrto_gen_snap_time = 0;
     pgxact->csn_min = InvalidCommitSeqNo;
     pgxact->csn_dr = InvalidCommitSeqNo;
     proc->recoveryConflictPending = false;
@@ -832,8 +836,7 @@ void ProcArrayClearTransaction(PGPROC* proc)
     /* Clear the subtransaction-XID cache too */
     pgxact->nxids = 0;
 
-    proc->exrto_read_lsn = 0;
-    proc->exrto_gen_snap_time = 0;
+    proc->exrto_min = 0;
     /* Free xid cache memory if needed */
     ResetProcXidCache(proc, true);
 }
@@ -2111,8 +2114,6 @@ RETRY:
     bool retry_get = false;
     uint64 retry_count = 0;
     const static uint64 WAIT_COUNT = 0x7FFFF;
-    /* reset xmin before acquiring lwlock, in case blocking redo */
-    t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
     if (snapshot->takenDuringRecovery && !StreamThreadAmI() && !IS_EXRTO_READ &&
         !u_sess->proc_cxt.clientIsCMAgent) {
@@ -2433,13 +2434,38 @@ GROUP_GET_SNAPSHOT:
 
     if (snapshot->takenDuringRecovery) {
         (void)pgstat_report_waitstatus(oldStatus);
-    }
-
-    if (IsDefaultExtremeRtoMode() && IsExtremeRtoRunning() && pmState == PM_HOT_STANDBY) {
-        extreme_rto::exrto_read_snapshot(snapshot);
+        if (IsDefaultExtremeRtoMode() && IS_EXRTO_STANDBY_READ) {
+            extreme_rto::exrto_read_snapshot(snapshot);
+            if (t_thrd.proc->exrto_reload_cache) {
+                t_thrd.proc->exrto_reload_cache = false;
+                reset_invalidation_cache();
+            }
+            AcceptInvalidationMessages();
+        }
     }
 
     return snapshot;
+}
+
+void exrto_get_snapshot_data(TransactionId &xmin, TransactionId &xmax, CommitSeqNo &snapshot_csn)
+{
+    LWLockAcquire(ProcArrayLock, LW_SHARED);
+ 
+    /* xmax is always latest_completed_xid + 1 */
+    xmax = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
+ 
+    Assert(TransactionIdIsNormal(xmax));
+    TransactionIdAdvance(xmax);
+    /* initialize xmin calculation with xmax */
+    xmin = xmax;
+    if (TransactionIdIsValid(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin)) {
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin, xmin)) {
+            xmin = t_thrd.xact_cxt.ShmemVariableCache->standbyXmin;
+        }
+    }
+ 
+    LWLockRelease(ProcArrayLock);
+    snapshot_csn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
 }
 
 /*
@@ -3220,10 +3246,10 @@ bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid, bool r
         int pg_proc_no = proc_array->pgprocnos[index];
         PGPROC* pg_proc = g_instance.proc_base_all_procs[pg_proc_no];
         PGXACT* pg_xact = &g_instance.proc_base_all_xacts[pg_proc_no];
-        XLogRecPtr read_lsn = pg_proc->exrto_read_lsn;
+        XLogRecPtr read_lsn = pg_proc->exrto_min;
         TransactionId pxmin = pg_xact->xmin;
 
-        if (pg_proc->pid == 0 || !TransactionIdIsValid(pxmin) || XLogRecPtrIsInvalid(read_lsn)) {
+        if (pg_proc->pid == 0 || XLogRecPtrIsInvalid(read_lsn)) {
             continue;
         }
 
@@ -3250,6 +3276,10 @@ bool proc_array_cancel_conflicting_proc(TransactionId latest_removed_xid, bool r
                  * Wait a little bit for it to die so that we avoid flooding
                  * an unresponsive backend when system is heavily loaded.
                  */
+                ereport(LOG,
+                        (errmsg(EXRTOFORMAT("exrto_gen_snap_time: %ld, current_timestamp: %ld, cancel thread while "
+                                            "redo truncate, thread id = %lu\n"),
+                                pg_proc->exrto_gen_snap_time, GetCurrentTimestamp(), pg_proc->pid)));
                 pg_usleep(5000L);
             }
         }
@@ -4457,11 +4487,11 @@ TransactionId GetGlobal2pcXmin()
  * Wait for the transaction which modify the tuple to finish.
  * First release the buffer lock. After waiting, re-acquire the buffer lock.
  */
-void SyncWaitXidEnd(TransactionId xid, Buffer buffer)
+void SyncWaitXidEnd(TransactionId xid, Buffer buffer, const Snapshot snapshot)
 {
     if (!BufferIsValid(buffer)) {
         /* Wait local transaction finish */
-        SyncLocalXidWait(xid);
+        SyncLocalXidWait(xid, snapshot);
         return;
     }
 
@@ -4473,7 +4503,7 @@ void SyncWaitXidEnd(TransactionId xid, Buffer buffer)
     /* Release buffer lock */
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     /* Wait local transaction finish */
-    SyncLocalXidWait(xid);
+    SyncLocalXidWait(xid, snapshot);
     /* Re-acqure buffer lock, need transform lwlock mode to buffer lock mode */
     LockBuffer(buffer, mode == LW_EXCLUSIVE ? BUFFER_LOCK_EXCLUSIVE : BUFFER_LOCK_SHARE);
 }
@@ -4482,7 +4512,7 @@ void SyncWaitXidEnd(TransactionId xid, Buffer buffer)
 /*
  * Wait local transaction finish, if transaction wait time exceed transaction_sync_naptime, call gs_clean.
  */
-void SyncLocalXidWait(TransactionId xid)
+void SyncLocalXidWait(TransactionId xid, const Snapshot snapshot)
 {
     ReleaseAllGSCRdConcurrentLock();
     
@@ -4492,7 +4522,7 @@ void SyncLocalXidWait(TransactionId xid)
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_UNDEFINED, true);
 
     gstrace_entry(GS_TRC_ID_SyncLocalXidWait);
-    while (!ConditionalXactLockTableWait(xid)) {
+    while (!ConditionalXactLockTableWait(xid, snapshot)) {
         /* type of transaction id is same as node id, reuse the second param for waited transaction id */
         pgstat_report_waitstatus_xid(STATE_WAIT_XACTSYNC, xid);
 

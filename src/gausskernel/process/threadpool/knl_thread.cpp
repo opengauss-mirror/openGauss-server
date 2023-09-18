@@ -962,6 +962,7 @@ static void knl_t_page_redo_init(knl_t_page_redo_context* page_redo_cxt)
     page_redo_cxt->sleep_long = false;
     page_redo_cxt->check_repair = false;
     page_redo_cxt->redo_worker_ptr = NULL;
+    page_redo_cxt->invalid_msg.valid = false;
 }
 
 static void knl_t_exrto_recycle_init(knl_t_exrto_recycle_context* exrto_recycle_cxt)

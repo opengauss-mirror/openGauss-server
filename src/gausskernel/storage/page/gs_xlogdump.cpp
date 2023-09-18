@@ -107,7 +107,7 @@ static XLogRecPtr GetMaxLSN()
     return current_recptr;
 }
 
-static void XLogDumpDisplayRecord(XLogReaderState *record, char *strOutput)
+void XLogDumpDisplayRecord(XLogReaderState *record, char *strOutput)
 {
     errno_t rc = snprintf_s(strOutput + (int)strlen(strOutput), MAXOUTPUTLEN, MAXOUTPUTLEN - 1,
         "start_lsn: %X/%X \nend_lsn: %X/%X \nxid: " XID_FMT " \nterm: %u \ntotal length: %u \ndesc: %s - ",
@@ -209,7 +209,7 @@ static bool CheckValidRecord(XLogReaderState *xlogreader_state, XLogFilter *filt
     return found;
 }
 
-static XLogRecPtr UpdateNextLSN(XLogRecPtr cur_lsn, XLogRecPtr end_lsn, XLogReaderState *xlogreader_state, bool *found)
+XLogRecPtr UpdateNextLSN(XLogRecPtr cur_lsn, XLogRecPtr end_lsn, XLogReaderState *xlogreader_state, bool *found)
 {
     XLogRecPtr next_record = InvalidXLogRecPtr;
     for (int tryTimes = 0; tryTimes < FIVE; tryTimes++) {

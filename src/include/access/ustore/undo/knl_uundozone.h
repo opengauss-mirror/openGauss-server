@@ -309,7 +309,7 @@ public:
     }
     bool CheckNeedSwitch(UndoRecordSize size);
     UndoRecordState CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle, TransactionId *lastXid);
-    bool CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp);
+    bool CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto = false);
 
     UndoRecPtr AllocateSpace(uint64 size);
     void ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRecycleSize);
@@ -378,5 +378,7 @@ void AllocateZonesBeforXid();
 void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence);
 void InitUndoSpace(UndoZone *uzone, UndoSpaceType type);
 bool VerifyUndoZone(UndoZone *uzone);
+void exrto_recycle_residual_undo_file(char *FuncName);
+
 } // namespace undo
 #endif // __KNL_UUNDOZONE_H__

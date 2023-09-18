@@ -3262,6 +3262,7 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_LITE_MODE        
         {{"standby_recycle_interval",
             PGC_SIGHUP,
             NODE_ALL,
@@ -3304,6 +3305,7 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#endif
         {{"force_promote",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -3932,19 +3934,21 @@ static void InitStorageConfigureNamesReal()
             NULL,
             NULL,
             NULL},
-        {{"standby_force_recyle_ratio",
+#ifndef ENABLE_LITE_MODE
+        {{"standby_force_recycle_ratio",
             PGC_SIGHUP,
             NODE_ALL,
             RESOURCES_RECOVERY,
             gettext_noop("Sets the ratio that triggers forced recycling in extreme-rto standby read."),
             NULL},
-            &g_instance.attr.attr_storage.standby_force_recyle_ratio,
+            &g_instance.attr.attr_storage.standby_force_recycle_ratio,
             0.8,
             0.0,
             1.0,
             NULL,
             NULL,
             NULL},
+#endif            
         {{"bypass_dram",
             PGC_SIGHUP,
             NODE_ALL,
@@ -4095,6 +4099,7 @@ static void InitStorageConfigureNamesInt64()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_LITE_MODE            
         {{"max_standby_base_page_size",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -4103,7 +4108,7 @@ static void InitStorageConfigureNamesInt64()
             NULL},
             &g_instance.attr.attr_storage.max_standby_base_page_size,
             INT64CONST(0x4000000000),  /* 256GB */
-            INT64CONST(0),
+            INT64CONST(0x40000000),  /* 1GB */
             INT64CONST(0x7FFFFFFFFFFFFFF),
             NULL,
             NULL,
@@ -4116,11 +4121,12 @@ static void InitStorageConfigureNamesInt64()
             NULL},
             &g_instance.attr.attr_storage.max_standby_lsn_info_size,
             INT64CONST(0x4000000000),  /* 256GB */
-            INT64CONST(0),
+            INT64CONST(0x40000000),  /* 1GB */
             INT64CONST(0x7FFFFFFFFFFFFFF),
             NULL,
             NULL,
             NULL},
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

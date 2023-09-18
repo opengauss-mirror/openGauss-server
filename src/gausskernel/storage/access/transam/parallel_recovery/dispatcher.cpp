@@ -503,8 +503,8 @@ static void StopRecoveryWorkers(int code, Datum arg)
 /* Run from the dispatcher thread. */
 static void DestroyRecoveryWorkers()
 {
+    SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     if (g_dispatcher != NULL) {
-        SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
         for (uint32 i = 0; i < g_dispatcher->totalWorkerCount; i++)
             DestroyPageRedoWorker(g_dispatcher->pageWorkers[i]);
         if (g_dispatcher->txnWorker != NULL)
@@ -519,8 +519,8 @@ static void DestroyRecoveryWorkers()
             g_instance.comm_cxt.predo_cxt.parallelRedoCtx = NULL;
         }
         g_dispatcher = NULL;
-        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     }
+    SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
 }
 
 static bool RmgrRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo)
@@ -1894,10 +1894,12 @@ uint32 GetStartupBufferPinWaitBufLen()
  */
 void GetStartupBufferPinWaitBufId(int *bufids, uint32 len)
 {
-    for (uint32 i = 0; i < len - 1; i++) {
-        bufids[i] = g_dispatcher->pageWorkers[i]->bufferPinWaitBufId;
+    if (g_dispatcher != NULL) {
+        for (uint32 i = 0; i < len - 1; i++) {
+            bufids[i] = g_dispatcher->pageWorkers[i]->bufferPinWaitBufId;
+        }
+        bufids[len - 1] = g_instance.proc_base->startupBufferPinWaitBufId;
     }
-    bufids[len - 1] = g_instance.proc_base->startupBufferPinWaitBufId;
 }
 
 void GetReplayedRecPtrFromUndoWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr)

@@ -8583,7 +8583,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         lc_replan_nodegroup = InvalidOid;
         /* reset xmin before ReadCommand, in case blocking redo */
         if (RecoveryInProgress()) {
-            t_thrd.pgxact->xmin = InvalidTransactionId;
+            
         }
 
         /*

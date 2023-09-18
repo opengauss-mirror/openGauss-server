@@ -25,6 +25,7 @@
 #include "miscadmin.h"
 #include "access/transam.h"
 #include "access/xlog.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "catalog/catalog.h"
 #include "portability/instr_time.h"
 #include "postmaster/bgwriter.h"
@@ -1307,7 +1308,7 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
         } else {
             check_file_stat(FilePathName(v->mdfd_vfd));
             force_backtrace_messages = true;
-
+            extreme_rto_standby_read::dump_error_all_info(reln->smgr_rnode.node, forknum, blocknum);
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                             errmsg("could not read block %u in file \"%s\": read only %d of %d bytes", blocknum,
                                    FilePathName(v->mdfd_vfd), nbytes, BLCKSZ)));

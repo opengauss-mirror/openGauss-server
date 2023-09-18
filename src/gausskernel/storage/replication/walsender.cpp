@@ -2946,6 +2946,7 @@ static void PhysicalReplicationSlotNewXmin(TransactionId feedbackXmin)
     SpinLockAcquire(&slot->mutex);
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
     t_thrd.proc->exrto_gen_snap_time = 0;
     /*
      * For physical replication we don't need the the interlock provided

@@ -47,30 +47,10 @@ typedef struct _ExRTOFileState {
     File file[EXRTO_FORK_NUM];
 } ExRTOFileState;
 
-static inline ExRTOFileType exrto_file_type(uint32 space_oid)
-{
-    if (space_oid == EXRTO_BASE_PAGE_SPACE_OID) {
-        return BASE_PAGE;
-    } else if (space_oid == EXRTO_LSN_INFO_SPACE_OID) {
-        return LSN_INFO_META;
-    } else {
-        return BLOCK_INFO_META;
-    }
-}
-
 static inline void set_file_state(ExRTOFileState *state, ForkNumber forknum, uint64 segno, File file)
 {
     state->segno[forknum] = segno;
     state->file[forknum] = file;
-}
-
-static inline uint64 get_total_block_num(ExRTOFileType type, uint32 high, uint32 low)
-{
-    if (type == BASE_PAGE || type == LSN_INFO_META) {
-        return ((uint64)high << UINT64_HALF) | low;
-    } else {
-        return (uint64)low;
-    }
 }
 
 static ExRTOFileState *alloc_file_state(void)
@@ -100,7 +80,7 @@ static void exrto_get_file_path(const RelFileNode node, ForkNumber forknum, uint
     if (type == BASE_PAGE || type == LSN_INFO_META) {
         uint32 batch_id = node.dbNode >> LOW_WORKERID_BITS;
         uint32 worker_id = node.dbNode & LOW_WORKERID_MASK;
-        rc = snprintf_s(filename, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%02X%02X%016X",
+        rc = snprintf_s(filename, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%02x%02x%016lX",
             batch_id, worker_id, segno);
     } else {
         rc = snprintf_s(filename, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%u_%u_%s.%u",
@@ -201,16 +181,18 @@ static ExRTOFileState *exrto_open_file(SMgrRelation reln, ForkNumber forknum, Bl
     return state;
 }
 
-BlockNumber get_single_file_nblocks(SMgrRelation reln, ForkNumber forknum, const ExRTOFileState*state)
+BlockNumber get_single_file_nblocks(SMgrRelation reln, ForkNumber forknum, const ExRTOFileState *state)
 {
     Assert(state != NULL);
 
     char *filename = FilePathName(state->file[forknum]);
     off_t len = FileSeek(state->file[forknum], 0L, SEEK_END);
     if (len < 0) {
+        char filepath[EXRTO_FILE_PATH_LEN];
+        errno_t rc = strcpy_s(filepath, EXRTO_FILE_PATH_LEN, filename);
+        securec_check(rc, "\0", "\0");
         exrto_close(reln, forknum, InvalidBlockNumber);
-        ereport(ERROR, (errcode_for_file_access(),
-            errmsg("could not seek to end of file \"%s\": %m", filename)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek to end of file \"%s\": %m", filepath)));
     }
 
     /* note that this calculation will ignore any partial block at EOF */
@@ -235,13 +217,20 @@ void exrto_close(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
     if (state == NULL) {
         return;
     }
-    reln->fileState = NULL;    /* prevent dangling pointer after error */
- 
+
     /* if not closed already */
     if (state->file[forknum] >= 0) {
         FileClose(state->file[forknum]);
+        state->file[forknum] = -1;
     }
+    for (int forkno = 0; forkno < EXRTO_FORK_NUM; forkno++) {
+        if (state->file[forkno] != -1) {
+            return;
+        }
+    }
+
     pfree(state);
+    reln->fileState = NULL;
 }
 
 bool exrto_exists(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
@@ -260,57 +249,94 @@ bool exrto_exists(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
     return isExist;
 }
 
-bool exrto_unlink_single_file(const RelFileNodeBackend &rnode, ForkNumber forknum, uint64 segno)
+void exrto_unlink_file_with_prefix(char* target_prefix, ExRTOFileType type, uint64 segno)
 {
-    struct stat stat_buf;
-    char segpath[EXRTO_FILE_PATH_LEN];
+    char pathbuf[EXRTO_FILE_PATH_LEN];
+    char **filenames;
+    char **filename;
+    struct stat statbuf;
+    /* get file directory */
+    char exrto_block_info_dir[EXRTO_FILE_PATH_LEN] = {0};
+    int rc = snprintf_s(exrto_block_info_dir, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%s/%s", EXRTO_FILE_DIR,
+                        EXRTO_FILE_SUB_DIR[type]);
+    securec_check_ss(rc, "", "");
+    /* get all files' name from block meta file directory */
+    filenames = pgfnames(exrto_block_info_dir);
+    if (filenames == NULL) {
+        return;
+    }
 
-    exrto_get_file_path(rnode.node, forknum, segno, segpath);
-    if (stat(segpath, &stat_buf) < 0) {
-        if (errno != ENOENT) {
-            ereport(WARNING, (errcode_for_file_access(),
-                     errmsg("could not stat file \"%s\" before removing: %m", segpath)));
+    /* use the prefix name to match up files we want to delete */
+    size_t prefix_len = strlen(target_prefix);
+    for (filename = filenames; *filename != NULL; filename++) {
+        char *fname = *filename;
+        size_t fname_len = strlen(fname);
+        /*
+         * the length of prefix is less than the length of file name and must be the same under the same prefix_len
+         */
+        if (prefix_len >= fname_len || strncmp(target_prefix, fname, prefix_len) != 0) {
+            continue;
         }
-        return false;
-    }
-    if (unlink(segpath) < 0) {
-        ereport(WARNING, (errcode_for_file_access(),
-                 errmsg("could not remove file \"%s\": %m", segpath)));
-    }
-    return true;
-}
+        if (segno > 0) {
+            uint32 batch_id, worker_id;
+            uint64 f_segno;
+            const int para_num = 3;
+            if (sscanf_s(fname, "%02X%02X%016lX", &batch_id, &worker_id, &f_segno) != para_num) {
+                continue;
+            }
+            if (f_segno >= segno) {
+                continue;
+            }
+        }
 
-void exrto_unlink_file(const RelFileNodeBackend &rnode, ForkNumber forknum, BlockNumber blocknum)
-{
-    uint64 segno;
-    ExRTOFileType type = exrto_file_type(rnode.node.spcNode);
-    if (type == BLOCK_INFO_META) {
-        /* unlink all files */
-        extreme_rto_standby_read::remove_block_meta_info_files_of_db(rnode.node.dbNode, rnode.node.relNode);
-    } else if (type == BASE_PAGE || type == LSN_INFO_META) {
-        /* just unlink the files before the file where blocknum is */
-        segno = get_seg_num(rnode, blocknum);
-        while (segno != 0) {
-            segno -= 1;
-            if (!exrto_unlink_single_file(rnode, forknum, segno)) {
-                return;
+        rc =
+            snprintf_s(pathbuf, EXRTO_FILE_PATH_LEN, EXRTO_FILE_PATH_LEN - 1, "%s/%s", exrto_block_info_dir, *filename);
+        securec_check_ss(rc, "", "");
+        /* may be can be some error */
+        if (lstat(pathbuf, &statbuf) != 0) {
+            if (errno != ENOENT) {
+                ereport(WARNING, (errmsg("could not stat file or directory \"%s\" \n", pathbuf)));
+            }
+            continue;
+        }
+        /* if the file is a directory, don't touch it */
+        if (S_ISDIR(statbuf.st_mode)) {
+            /* skip dir */
+            continue;
+        }
+        /* delete this file we found */
+        if (unlink(pathbuf) != 0) {
+            if (errno != ENOENT) {
+                ereport(WARNING, (errmsg("could not remove file or directory \"%s\" ", pathbuf)));
             }
         }
     }
+    pgfnames_cleanup(filenames);
+    return;
 }
 
 void exrto_unlink(const RelFileNodeBackend &rnode, ForkNumber forknum, bool is_redo, BlockNumber blocknum)
 {
+    char target_prefix[EXRTO_FILE_PATH_LEN] = {0};
     ExRTOFileType type = exrto_file_type(rnode.node.spcNode);
-    if (type == BASE_PAGE || type == LSN_INFO_META) {
-        forknum = MAIN_FORKNUM;
-    }
-    if (forknum == InvalidForkNumber) {
-        for (int fork_num = 0; fork_num < EXRTO_FORK_NUM; fork_num++) {
-            exrto_unlink_file(rnode, (ForkNumber)fork_num, blocknum);
+    uint64 segno;
+    errno_t rc;
+
+    if (type == BLOCK_INFO_META) {
+        /* unlink all files */
+        rc = sprintf_s(target_prefix, EXRTO_FILE_PATH_LEN, "%u_%u_", rnode.node.dbNode, rnode.node.relNode);
+        securec_check_ss(rc, "", "");
+        exrto_unlink_file_with_prefix(target_prefix, type);
+    } else if (type == BASE_PAGE || type == LSN_INFO_META) {
+        /* just unlink the files before the file where blocknum is */
+        segno = get_seg_num(rnode, blocknum);
+        if (segno > 0) {
+            uint32 batch_id = rnode.node.dbNode >> LOW_WORKERID_BITS;
+            uint32 worker_id = rnode.node.dbNode & LOW_WORKERID_MASK;
+            rc = sprintf_s(target_prefix, EXRTO_FILE_PATH_LEN, "%02X%02X", batch_id, worker_id);
+            securec_check_ss(rc, "", "");
+            exrto_unlink_file_with_prefix(target_prefix, type, segno);
         }
-    } else {
-        exrto_unlink_file(rnode, forknum, blocknum);
     }
 }
 
@@ -336,8 +362,11 @@ void exrto_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, c
     state = exrto_open_file(reln, forknum, blocknum, EXTENSION_CREATE);
     filename = FilePathName(state->file[forknum]);
     if (stat(filename, &file_stat) < 0) {
+        char filepath[EXRTO_FILE_PATH_LEN];
+        errno_t rc = strcpy_s(filepath, EXRTO_FILE_PATH_LEN, filename);
+        securec_check(rc, "\0", "\0");
         exrto_close(reln, forknum, InvalidBlockNumber);
-        ereport(ERROR, (errmsg("could not stat file \"%s\": %m.", filename)));
+        ereport(ERROR, (errmsg("could not stat file \"%s\": %m.", filepath)));
     }
     Assert(file_stat.st_size % BLCKSZ == 0);
     Assert(file_stat.st_size <= EXRTO_FILE_SIZE[type]);
@@ -402,14 +431,15 @@ SMGR_READ_STATUS exrto_read(SMgrRelation reln, ForkNumber forknum, BlockNumber b
     }
     if (nbytes != BLCKSZ) {
         char *filename = FilePathName(state->file[forknum]);
+        char filepath[EXRTO_FILE_PATH_LEN];
+        rc = strcpy_s(filepath, EXRTO_FILE_PATH_LEN, filename);
+        securec_check(rc, "\0", "\0");
         exrto_close(reln, forknum, InvalidBlockNumber);
         if (nbytes < 0) {
-            ereport(ERROR,
-                     (errmsg("could not read block %u in file \"%s\": %m.", blocknum, filename)));
+            ereport(ERROR, (errmsg("could not read block %u in file \"%s\": %m.", blocknum, filepath)));
         }
-        ereport(ERROR,
-                 (errmsg("could not read block %u in file \"%s\": read only %d of %d bytes.", blocknum, filename,
-                          nbytes, BLCKSZ)));
+        ereport(ERROR, (errmsg("could not read block %u in file \"%s\": read only %d of %d bytes.", blocknum, filepath,
+                               nbytes, BLCKSZ)));
     }
 
     if (PageIsVerified((Page)buffer, blocknum)) {
@@ -441,14 +471,15 @@ void exrto_write(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, co
     nbytes = FilePWrite(state->file[forknum], buffer, BLCKSZ, seekpos);
     if (nbytes != BLCKSZ) {
         char *filename = FilePathName(state->file[forknum]);
+        char filepath[EXRTO_FILE_PATH_LEN];
+        errno_t rc = strcpy_s(filepath, EXRTO_FILE_PATH_LEN, filename);
+        securec_check(rc, "\0", "\0");
         exrto_close(reln, forknum, InvalidBlockNumber);
         if (nbytes < 0) {
-            ereport(ERROR,
-                (errmsg("could not write block %u in file \"%s\": %m.", blocknum, filename)));
+            ereport(ERROR, (errmsg("could not write block %u in file \"%s\": %m.", blocknum, filepath)));
         }
-        ereport(ERROR,
-            (errmsg("could not write block %u in file \"%s\": wrote only %d of %d bytes.",
-                     blocknum, filename, nbytes, BLCKSZ)));
+        ereport(ERROR, (errmsg("could not write block %u in file \"%s\": wrote only %d of %d bytes.", blocknum,
+                               filepath, nbytes, BLCKSZ)));
     }
 }
 

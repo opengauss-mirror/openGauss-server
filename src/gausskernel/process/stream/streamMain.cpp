@@ -24,7 +24,9 @@
 #include "postgres.h"
 
 #include "access/gtm.h"
+#include "access/multi_redo_api.h"
 #include "access/printtup.h"
+#include "access/multi_redo_api.h"
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
 #include "executor/exec/execStream.h"
@@ -488,6 +490,19 @@ static void execute_stream_plan(StreamProducer* producer)
      * Start the portal.  No parameters here.
      */
     PortalStart(portal, producer->getParams(), 0, producer->getSnapShot());
+    
+    /* The value of snapshot.read_lsn may be assigned to thread A and used on thread B.
+        So we should reassigned read_lsn to t_thrd of thread B */
+    if (unlikely(IS_EXRTO_STANDBY_READ && producer->getSnapShot() != NULL)) {
+        t_thrd.proc->exrto_read_lsn = producer->getSnapShot()->read_lsn;
+        t_thrd.proc->exrto_min = t_thrd.proc->exrto_read_lsn;
+    }
+
+    /* The value of snapshot.read_lsn may be assigned to thread A and used on thread B.
+        So we should reassigned read_lsn to t_thrd of thread B */
+    if (unlikely(IS_EXRTO_STANDBY_READ && producer->getSnapShot() != NULL)) {
+        t_thrd.proc->exrto_read_lsn = producer->getSnapShot()->read_lsn;
+    }
     format = 0;
     PortalSetResultFormat(portal, 1, &format);
 

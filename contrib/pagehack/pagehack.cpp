@@ -5172,7 +5172,7 @@ static bool parse_lsn_info_meta(const char *filename)
     }
 
     long pagenum = size / BLCKSZ;
-    fprintf(stdout, "file length is %ld, blknum is %ld\n", size, pagenum);
+    fprintf(stdout, "file length is %ld, pagenum is %ld\n", size, pagenum);
 
     for (loop = 1; loop <= pagenum; loop++) {
         fprintf(stdout, "Page %u information:\n", loop);
@@ -5231,8 +5231,9 @@ static void parse_block_info_content(BlockMetaInfo *blockInfo)
             indents[indentLevel], blockInfo->timeline, blockInfo->record_num);
     fprintf(stdout, "%smin_lsn: %lu, max_lsn: %lu, flags: %u\n",
             indents[indentLevel], blockInfo->min_lsn, blockInfo->max_lsn, blockInfo->flags);
-    fprintf(stdout, "%slsn_info_list: prev %lu, next: %lu\n",
-            indents[indentLevel], blockInfo->lsn_info_list.prev, blockInfo->lsn_info_list.next);
+    fprintf(stdout, "%slsn_info_list: prev %lu, next: %lu. base_page_info_list: prev %lu, next: %lu\n",
+            indents[indentLevel], blockInfo->lsn_info_list.prev, blockInfo->lsn_info_list.next,
+            blockInfo->base_page_info_list.prev, blockInfo->base_page_info_list.next);
 }
 
 static bool parse_block_info_meta(const char *filename)
@@ -5257,7 +5258,7 @@ static bool parse_block_info_meta(const char *filename)
         return false;
     }
     long pagenum = size / BLCKSZ;
-    fprintf(stdout, "file length is %ld, blknum is %ld\n", size, pagenum);
+    fprintf(stdout, "file length is %ld, pagenum is %ld\n", size, pagenum);
 
     for (loop = 0; loop < pagenum; loop++) {
         fprintf(stdout, "Page %u information:\n", loop);

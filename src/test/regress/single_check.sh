@@ -265,6 +265,8 @@ function real_hacheck()
             sh ./run_paxos_single.sh ;;
         hacheck_ss_all)
             sh ./run_ha_single_ss.sh ;;
+        hacheck_single_standby_read)
+            sh ./run_ha_single_standby_read.sh ;;
         *)
             echo "module $module is not valid" ;;
     esac
@@ -520,7 +522,7 @@ case $DO_CMD in
     --wlmcheck_single|wlmcheck_single)
         args_val="-d 6 -c 3 -p $p -r ${runtest}"
         real_wmlcheck parallel_schedule${part}.wlm make_wlmcheck_postgresql.conf "${args_val}" ;;
-    --hacheck_single_all|hacheck_single_all|--hacheck_single|hacheck_single|--hacheck_multi_single|hacheck_multi_single|--hacheck_multi_single_mot|hacheck_multi_single_mot|--hacheck_decode|hacheck_decode|--hacheck_single_paxos|hacheck_single_paxos|--hacheck_ss_all|hacheck_ss_all)
+    --hacheck_single_all|hacheck_single_all|--hacheck_single|hacheck_single|--hacheck_multi_single|hacheck_multi_single|--hacheck_multi_single_mot|hacheck_multi_single_mot|--hacheck_decode|hacheck_decode|--hacheck_single_paxos|hacheck_single_paxos|--hacheck_ss_all|hacheck_ss_all|--hacheck_single_standby_read|hacheck_single_standby_read)
         args_val=$(echo $DO_CMD | sed 's\--\\g')
         real_hacheck "${args_val}";;
     --fastcheck_ledger_single|fastcheck_ledger_single)

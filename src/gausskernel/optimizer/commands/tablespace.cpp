@@ -55,6 +55,8 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
+#include "access/multi_redo_api.h"
+#include "access/extreme_rto/standby_read/standby_read_delay_ddl.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -2618,9 +2620,12 @@ void xlog_drop_tblspc(Oid tsId)
      * etc etc. There's not much we can do about that, so just remove what
      * we can and press on.
      */
+
     if (!destroy_tablespace_directories(tsId, true)) {
         ResolveRecoveryConflictWithTablespace(tsId);
-
+        if (IS_EXRTO_READ) {
+            delete_by_table_space(tsId);
+        }
         /*
          * If we did recovery processing then hopefully the backends who
          * wrote temp files should have cleaned up and exited by now.  So

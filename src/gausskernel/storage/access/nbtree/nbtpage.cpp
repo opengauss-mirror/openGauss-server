@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/hio.h"
+#include "access/multi_redo_api.h"
 #include "access/nbtree.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"

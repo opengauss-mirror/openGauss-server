@@ -141,13 +141,13 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
                 *needRepair = true;
                 XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
             }
-            ereport(elevel,
-                (errmsg("lsn check error, record last lsn (%X/%X) ,lsn in current page %X/%X, "
-                        "page info:%u/%u/%u forknum %d blknum:%u lsn %X/%X",
-                        (uint32)(lastLsn >> XLOG_LSN_SWAP), (uint32)(lastLsn), (uint32)(pageCurLsn >> XLOG_LSN_SWAP),
-                        (uint32)(pageCurLsn), blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
-                        blockinfo->rnode.relNode, blockinfo->forknum, blockinfo->blkno, (uint32)(lsn >> XLOG_LSN_SWAP),
-                        (uint32)(lsn))));
+            ereport(elevel, (errmsg("lsn check error, record last lsn (%X/%X) ,lsn in current page %X/%X, "
+                                    "page info:%u/%u/%u/%d/%d forknum %d blknum:%u lsn %X/%X",
+                                    (uint32)(lastLsn >> XLOG_LSN_SWAP), (uint32)(lastLsn),
+                                    (uint32)(pageCurLsn >> XLOG_LSN_SWAP), (uint32)(pageCurLsn),
+                                    blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
+                                    blockinfo->rnode.bucketNode, blockinfo->rnode.opt, blockinfo->forknum,
+                                    blockinfo->blkno, (uint32)(lsn >> XLOG_LSN_SWAP), (uint32)(lsn))));
             return false;
         }
     }
@@ -1769,6 +1769,9 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
 
     if ((block_valid != BLOCK_DATA_UNDO_TYPE) && g_instance.attr.attr_storage.EnableHotStandby &&
         IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
+        if (bufferinfo->blockinfo.forknum >= EXRTO_FORK_NUM) {
+            ereport(PANIC, (errmsg("forknum is illegal: %d", bufferinfo->blockinfo.forknum)));
+        }
         BufferTag buf_tag;
         INIT_BUFFERTAG(buf_tag, bufferinfo->blockinfo.rnode,
             bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno);
@@ -1951,7 +1954,7 @@ void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_inf
     /* do we need register interrupt func here? like ProcessConfigFile */
     XLogParseBufferInitFunc(&redo_pm, MAX_BUFFER_NUM_PER_WAL_RECORD, NULL, NULL);
     if (xlog_reader == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("redo_target_page: out of memory"),
                         errdetail("Failed while allocating an XLog reading processor.")));
     }
 
@@ -1961,7 +1964,7 @@ void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_inf
         XLogRecord *record = XLogReadRecord(xlog_reader, lsn_info->lsn_array[i], &error_msg);
         if (record == NULL) {
             ereport(ERROR, (errcode_for_file_access(),
-                            errmsg("could not read two-phase state from xlog at %X/%X, errormsg: %s",
+                            errmsg("redo_target_page: could not read wal record from xlog at %X/%X, errormsg: %s",
                                    (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]),
                                    error_msg ? error_msg : " ")));
         }
@@ -1970,12 +1973,12 @@ void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_inf
         XLogRecParseState *state = XLogParseToBlockCommonFunc(xlog_reader, &num);
 
         if (num == 0) {
-            ereport(ERROR, (errmsg("internal error, xlog in lsn %X/%X doesn't contain any block.",
+            ereport(ERROR, (errmsg("redo_target_page: internal error, xlog in lsn %X/%X doesn't contain any block.",
                                    (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]))));
         }
 
         if (state == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
+            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("redo_target_page: out of memory"),
                             errdetail("Failed while wal parse to block.")));
         }
         XLogRecParseState *state_iter = state;
@@ -1986,7 +1989,7 @@ void redo_target_page(const BufferTag &buf_tag, StandbyReadLsnInfoArray *lsn_inf
             state_iter = (XLogRecParseState *)(state_iter->nextrecord);
         }
         if (state_iter == NULL) {
-            ereport(ERROR, (errmsg("internal error, xlog in lsn %X/%X doesn't contain target block.",
+            ereport(ERROR, (errmsg("redo_target_page: internal error, xlog in lsn %X/%X doesn't contain target block.",
                                    (uint32)(lsn_info->lsn_array[i] >> LSN_MOVE32), (uint32)(lsn_info->lsn_array[i]))));
         }
         buf_info.lsn = state_iter->blockparse.blockhead.end_ptr;

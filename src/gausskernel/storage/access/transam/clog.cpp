@@ -1130,6 +1130,7 @@ void clog_redo(XLogReaderState *record)
         Assert(!ClogCtl(pageno)->shared->page_dirty[slotno]);
 
         LWLockRelease(ClogCtl(pageno)->shared->control_lock);
+        g_instance.comm_cxt.predo_cxt.max_clog_pageno = pageno;
     } else if (info == CLOG_TRUNCATE) {
         int64 pageno;
 
