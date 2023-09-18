@@ -147,6 +147,10 @@ void ResetDeepthInAcceptInvalidationMessage(int value)
 
 static bool SwitchToSessionSysCache()
 {
+    /* fenced mode not use gsc */
+    if (FencedUDFMasterMode) {
+        return true;
+    }
     if (
 #ifdef ENABLE_MULTIPLE_NODES
         /* ts code dont use gsc */
