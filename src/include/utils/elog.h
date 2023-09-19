@@ -596,7 +596,6 @@ extern ErrorDataArea *initErrorDataArea();
 extern void resetErrorDataArea(bool, bool);
 extern void pushErrorData(ErrorData *);
 extern void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to);
-extern void copyDiffErrorDataArea(ErrorDataArea *from, ErrorDataArea *to, ErrorData *edata);
 extern uint64 SqlErrorDataErrorCount();
 extern uint64 SqlErrorDataWarnCount();
 extern int SqlErrorDataCount();

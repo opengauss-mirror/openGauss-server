@@ -4126,9 +4126,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             } else {
                 if ((enum PLpgSQL_stmt_types)stmt->cmd_type == PLPGSQL_STMT_BLOCK) {
                     if (estate->handler_level == estate->block_level) {
-                        copyDiffErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea, estate->cur_error);
-                        if (u_sess->dolphin_errdata_ctx.lastErrorDataArea->current_edata_count != 0)
-                            copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
+                        copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
                         u_sess->dolphin_errdata_ctx.handler_active = false;
                     } else if (!u_sess->dolphin_errdata_ctx.handler_active) {
                         copyErrorDataArea(u_sess->dolphin_errdata_ctx.errorDataArea, u_sess->dolphin_errdata_ctx.lastErrorDataArea);
