@@ -19,8 +19,8 @@ subdir = contrib/pagehack
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 override CPPFLAGS += -I${top_builddir}/src/lib/page_compression
-override LDFLAGS += -L${top_builddir}/src/lib/page_compression
-override CFLAGS += -lpagecompression -lzstd -llz4
+override LDFLAGS += -L${top_builddir}/src/lib/page_compression -Wl,-z,relro,-z,now
+override CFLAGS += -lpagecompression -lzstd -llz4 -fstack-protector-all
 ifeq ($(enable_debug), yes)
 	PG_CPPFLAGS += -DDEBUG
 endif
