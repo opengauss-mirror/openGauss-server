@@ -205,6 +205,12 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 
         if (t_thrd.tpcleaner_cxt.shutdown_requested) {
             /* Normal exit from the twophasecleaner is here */
+            ereport(LOG, (errmsg("TwoPhaseCleaner exits via SIGTERM")));
+            proc_exit(0);
+        }
+
+        if (SS_PRIMARY_DEMOTING) {
+            ereport(LOG, (errmsg("TwoPhaseCleaner exits via SS global var")));
             proc_exit(0);
         }
 
@@ -326,6 +332,7 @@ static void TwoPCShutdownHandler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
+    ereport(LOG, (errmsg("TwoPhaseCleaner received SIGTERM")));
     t_thrd.tpcleaner_cxt.shutdown_requested = true;
 
     if (t_thrd.proc)
