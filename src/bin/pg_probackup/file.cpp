@@ -633,7 +633,7 @@ int fio_truncate(int fd, off_t size)
 /*
  * Read file from specified location.
  */
-int fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression)
+int fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression, int size)
 {
     if (fio_is_remote_file(f))
     {
@@ -660,13 +660,13 @@ int fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression)
     {
         /* For local file, opened by fopen, we should use stdio functions */
         if (pageCompression) {
-            return (int)pageCompression->ReadCompressedBuffer((BlockNumber)(offs / BLCKSZ), (char*)buf, BLCKSZ, true);
+            return (int)pageCompression->ReadCompressedBuffer((BlockNumber)(offs / BLCKSZ), (char*)buf, size, true);
         } else {
             int rc = fseek(f, offs, SEEK_SET);
             if (rc < 0) {
                 return rc;
             }
-            return fread(buf, 1, BLCKSZ, f);
+            return fread(buf, 1, size, f);
         }
     }
 }
@@ -765,7 +765,7 @@ fio_decompress(void* dst, void const* src, size_t size, int compress_alg)
 }
 
 /* Write data to the file */
-ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compress_alg)
+ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compress_alg, const char *to_fullpath, char *preWriteBuf, int *preWriteOff, int *targetSize)
 {
     if (fio_is_remote_file(f))
     {
@@ -783,13 +783,37 @@ ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compres
     }
     else
     {
-        /* operate is same in local mode and dss mode */
-        char uncompressed_buf[BLCKSZ];
-        int32 uncompressed_size = fio_decompress(uncompressed_buf, buf, size, compress_alg);
-
-        return (uncompressed_size < 0)
-                    ? uncompressed_size
-                    : fio_fwrite(f, uncompressed_buf, uncompressed_size);
+        if (preWriteBuf != NULL)
+        {
+            int32 uncompressed_size = fio_decompress(preWriteBuf + (*preWriteOff), buf, size, compress_alg);
+            *preWriteOff += uncompressed_size;
+            if (*preWriteOff > DSS_BLCKSZ)
+            {
+                pg_free(preWriteBuf);
+                elog(ERROR, "Offset %d is bigger than preWriteBuf size %d", *preWriteOff, DSS_BLCKSZ);
+            }
+            if (*preWriteOff == DSS_BLCKSZ)
+            {
+                int write_len = fio_fwrite(f, preWriteBuf, DSS_BLCKSZ);
+                if (write_len != DSS_BLCKSZ)
+                {
+                    pg_free(preWriteBuf);
+                    elog(ERROR, "Cannot write block of \"%s\": %s, size: %u",
+                        to_fullpath, strerror(errno), DSS_BLCKSZ);
+                }
+                *preWriteOff = 0;
+                *targetSize -= DSS_BLCKSZ;
+            }
+            return uncompressed_size;
+        }
+        else
+        {
+            char uncompressed_buf[BLCKSZ];
+            int32 uncompressed_size = fio_decompress(uncompressed_buf, buf, size, compress_alg);
+            return (uncompressed_size < 0)
+                ? uncompressed_size
+                : fio_fwrite(f, uncompressed_buf, uncompressed_size);
+        }
     }
 }
 
