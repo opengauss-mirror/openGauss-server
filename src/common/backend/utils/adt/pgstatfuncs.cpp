@@ -14983,7 +14983,7 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
     reform_iterate_t *iterate = (reform_iterate_t *)funcctx->user_fctx;
     ss_reform_info_t reform_info = iterate->reform_info;
     for (uint64 i = iterate->iterate_idx; i < DMS_MAX_INSTANCE; i++) {
-        if (!((reform_info.old_bitmap | reform_info.new_bitmap) & (1 << i))) {
+        if (!((reform_info.old_bitmap | reform_info.new_bitmap) & (((uint64)1) << i))) {
             continue;
         }
 
