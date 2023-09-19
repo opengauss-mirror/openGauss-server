@@ -3393,6 +3393,7 @@ typedef struct knl_t_dms_context {
     bool flush_copy_get_page_failed; //used in flush copy
     HTAB* SSTxnStatusHash;
     LRUQueue* SSTxnStatusLRU;
+    uint32 srsn; /* session rsn used for DMS page request ordering */
 } knl_t_dms_context;
 
 typedef struct knl_t_ondemand_xlog_copy_context {

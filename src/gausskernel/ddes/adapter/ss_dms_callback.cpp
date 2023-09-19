@@ -497,6 +497,11 @@ static void ReleaseResource()
     FlushErrorState();
 }
 
+static unsigned int CBIncAndGetSrsn(uint32 sessid)
+{
+    return ++t_thrd.dms_cxt.srsn;
+}
+
 static unsigned int CBPageHashCode(const char pageid[DMS_PAGEID_SIZE])
 {
     BufferTag *tag = (BufferTag *)pageid;
@@ -2066,6 +2071,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->reform_set_dms_role = CBReformSetDmsRole;
     callback->opengauss_ondemand_redo_buffer = CBOndemandRedoPageForStandby;
 
+    callback->inc_and_get_srsn = CBIncAndGetSrsn;
     callback->get_page_hash_val = CBPageHashCode;
     callback->read_local_page4transfer = CBEnterLocalPage;
     callback->leave_local_page = CBLeaveLocalPage;
