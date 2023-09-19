@@ -481,6 +481,7 @@ static bool CheckSignalByFile(const char *filename, void *infoPtr, size_t infoSi
 
 int GaussDbThreadMain(knl_thread_arg* arg);
 const char* GetThreadName(knl_thread_role role);
+void SSOndemandProcExitIfStayWaitBackends();
 
 #ifdef EXEC_BACKEND
 
@@ -3842,6 +3843,10 @@ static int ServerLoop(void)
                             result = BackendStartup(port, isConnectHaPort);
                         }
 
+                        if (SS_CLUSTER_ONDEMAND_RECOVERY && SS_IN_REFORM &&
+                            result != STATUS_OK && pmState == PM_WAIT_BACKENDS) {
+                                SSOndemandProcExitIfStayWaitBackends();
+                        }
                         if (result != STATUS_OK) {
                             if (port->is_logic_conn) {
                                 gs_close_gsocket(&port->gs_sock);
@@ -14863,4 +14868,21 @@ void SSRestartFailoverPromote()
 
     pmState = PM_WAIT_BACKENDS;
     SShandle_promote_signal();
+}
+
+void SSOndemandProcExitIfStayWaitBackends() 
+{
+    int failTimes = 0;
+    while (failTimes < WAIT_PMSTATE_UPDATE_TRIES && pmState == PM_WAIT_BACKENDS) {
+        PostmasterStateMachine();
+        pg_usleep(REFORM_WAIT_LONG);
+        failTimes++;
+    }
+    if (pmState == PM_WAIT_BACKENDS) {
+        ereport(PANIC, (errmsg("Proc exit because pmState stay %s for %d times, "
+            "when reform failed and in ondemand recovery, "
+            "to avoid pmState being stuck in PM_WAIT_BACKENDS.", 
+            GetPMState(pmState), WAIT_PMSTATE_UPDATE_TRIES)));
+        proc_exit(1);
+    }
 }

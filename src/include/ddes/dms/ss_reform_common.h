@@ -31,6 +31,8 @@
 #define REFORM_WAIT_LONG 100000 /* 0.1 sec */
 #define WAIT_REFORM_CTRL_REFRESH_TRIES 1000
 
+#define WAIT_PMSTATE_UPDATE_TRIES 100
+
 #define REFORM_CTRL_VERSION 1
 
 typedef struct SSBroadcastCancelTrx {
