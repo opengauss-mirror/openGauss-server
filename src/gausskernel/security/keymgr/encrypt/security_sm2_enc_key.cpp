@@ -161,6 +161,13 @@ CmkemErrCode encrypt_with_sm2_pubkey(CmkemUStr *plain, CmkemUStr *pub_key, Cmkem
         return CMKEM_EVP_ERR;
     }
 
+    ret = EVP_PKEY_set_alias_type(public_evp_key, EVP_PKEY_SM2);
+    if (ret != 1) {
+        cmkem_errmsg("EVP_PKEY_set_alias_type to EVP_PKEY_SM2 failed!");
+        EVP_PKEY_free(public_evp_key);
+        return CMKEM_EVP_ERR;
+    }
+
     /* do cipher. */
     ctx = EVP_PKEY_CTX_new(public_evp_key, NULL);
     EVP_PKEY_free(public_evp_key);
@@ -240,6 +247,13 @@ CmkemErrCode decrypt_with_sm2_privkey(CmkemUStr *cipher, CmkemUStr *priv_key, Cm
     EC_KEY_free(ec_key);
     if (ret != 1) {
         cmkem_errmsg("EVP_PKEY_set1_EC_KEY failed\n");
+        EVP_PKEY_free(private_evp_key);
+        return CMKEM_EVP_ERR;
+    }
+
+    ret = EVP_PKEY_set_alias_type(private_evp_key, EVP_PKEY_SM2);
+    if (ret != 1) {
+        cmkem_errmsg("EVP_PKEY_set_alias_type to EVP_PKEY_SM2 failed!");
         EVP_PKEY_free(private_evp_key);
         return CMKEM_EVP_ERR;
     }

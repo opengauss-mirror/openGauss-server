@@ -45,7 +45,7 @@
 const int MAX_KEY_PATH_LEN = 64;
 const int MIN_KEY_PATH_LEN = 1;
 
-static const char *g_support_algo[] = {"RSA_3072", "SM2", NULL};
+static const char *g_support_algo[] = {"RSA_2048", "RSA_3072", "SM2", NULL};
 
 LocalKmsMgr *localkms_new(KmErr *err)
 {
@@ -427,7 +427,7 @@ void kms_mk_create(KeyMgr *kmgr, KeyInfo info)
 
     switch (get_algo_by_str(info.algo)) {
         case AT_RSA_2048:
-            km_err_msg(kms->kmgr.err, "rsa_2048 is not safe now, please use rsa_3072 instead.");
+            ret = create_and_write_rsa_key_pair(info.id, RSA2048_KEN_LEN);
             return;
         case AT_RSA_3072:
             ret = create_and_write_rsa_key_pair(info.id, RSA3072_KEN_LEN);
@@ -493,11 +493,6 @@ char *kms_mk_select(KeyMgr *kmgr, KeyInfo info)
         return NULL;
     }
 
-    if (strcasecmp(info.algo, "RSA_2048") == 0) {
-        km_err_msg(kms->kmgr.err, "rsa_2048 is not safe now, please use rsa_3072 instead.");
-        return NULL;
-    }
-
     ret = check_cmk_algo_validity(info.algo);
     if (ret != CMKEM_SUCCEED) {
         km_err_msg(kms->kmgr.err, "%s", get_cmkem_errmsg(ret));
@@ -518,9 +513,8 @@ KmUnStr kms_mk_encrypt(KeyMgr *kmgr, KeyInfo info, KmUnStr plain)
 
     switch (get_algo_by_str(info.algo)) {
         case AT_RSA_2048:
-            km_err_msg(kms->kmgr.err, "the algorithm of master key is rsa_2048, but rsa_2048 is not safe now, "
-                "please create new master key with rsa_3072.");
-            return cipher;
+            ret = encrypt_cek_with_rsa(&_plain, info.id, &_cipher);
+            break;
         case AT_RSA_3072:
             ret = encrypt_cek_with_rsa(&_plain, info.id, &_cipher);
             break;
@@ -551,7 +545,7 @@ KmUnStr kms_mk_decrypt(KeyMgr *kmgr, KeyInfo info, KmUnStr cipher)
     CmkemUStr *_plain = NULL;
 
     switch (get_algo_by_str(info.algo)) {
-        case AT_RSA_2048: /* only decrypt the existing data encrypted by old version of opengauss */
+        case AT_RSA_2048:
         case AT_RSA_3072:
             ret = decrypt_cek_with_rsa(&_cipher, info.id, &_plain);
             break;
