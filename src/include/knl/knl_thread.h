@@ -782,6 +782,7 @@ typedef struct knl_t_xlog_context {
     /* for switchover failed when load xlog record invalid retry count */
     int currentRetryTimes;
     RedoTimeCost timeCost[TIME_COST_NUM];
+    int ssXlogReadFailedTimes;
 } knl_t_xlog_context;
 
 typedef struct knl_t_dfs_context {
