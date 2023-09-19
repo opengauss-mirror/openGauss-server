@@ -237,7 +237,7 @@ SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber 
     }
 
     SegmentCheck(sliceno < sf->file_num);
-    if (SS_STANDBY_MODE && sf->segfiles[sliceno].fd <= 0) {
+    if (ENABLE_DMS && sf->segfiles[sliceno].fd <= 0) {
         char *filename = slice_filename(sf->filename, sliceno);
         sf->segfiles[sliceno].fd = dv_open_file(filename, O_RDONLY | PG_BINARY, SEGMENT_FILE_MODE);
         pfree(filename);
