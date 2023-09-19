@@ -18,6 +18,8 @@ comment on function PG_CATALOG.sha1(text) is 'use the sha1 algorithm to hash';
  
 -- sha2
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 560;
+DROP FUNCTION IF EXISTS pg_catalog.sha2(text, bigint) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.sha2(text, int) CASCADE;
 CREATE OR REPLACE FUNCTION pg_catalog.sha2(text, bigint)
  RETURNS text
  LANGUAGE internal
