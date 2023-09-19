@@ -1242,6 +1242,8 @@ void PostgresInitializer::InitJobScheduler()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 }
 
