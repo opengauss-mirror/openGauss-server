@@ -622,6 +622,8 @@ extern void getPublications(Archive *fout);
 extern void getPublicationTables(Archive *fout, TableInfo tblinfo[], int numTables);
 extern void getSubscriptions(Archive *fout);
 extern EventTriggerInfo *getEventTriggers(Archive *fout, int *numEventTriggers);
+bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName);
+bool TabExists(Archive* fout, const char* schemaName, const char* tabName);
 
 #ifdef GSDUMP_LLT
 void stopLLT();

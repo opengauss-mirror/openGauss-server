@@ -64,6 +64,7 @@
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_attrdef.h"
+#include "catalog/pg_partition.h"
 #include "libpq/libpq-fs.h"
 #include "libpq/libpq-int.h"
 #include "catalog/pgxc_node.h"
@@ -5737,23 +5738,29 @@ bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname)
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, "pg_catalog");
 
-    appendPQExpBuffer(query,
-        "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
-        classid,
-        objid);
-    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    if (FuncExists(fout, "pg_catalog", "gs_is_recycle_obj")) {
+            appendPQExpBuffer(query,
+                "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
+                classid,
+                objid);
+            res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
-    colNum = PQfnumber(res, "gs_is_recycle_obj");
-    recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
-    if (strcmp(recycleObject, f) == 0) {
-        isRecycleObj = false;
+            colNum = PQfnumber(res, "gs_is_recycle_obj");
+            recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
+            if (strcmp(recycleObject, f) == 0) {
+                isRecycleObj = false;
+            } else {
+                isRecycleObj = true;
+            }
+            GS_FREE(recycleObject);
+            PQclear(res);
+            destroyPQExpBuffer(query);
+            return isRecycleObj;
     } else {
-        isRecycleObj = true;
+        destroyPQExpBuffer(query);
+        return false;
     }
-    GS_FREE(recycleObject);
-    PQclear(res);
-    destroyPQExpBuffer(query);
-    return isRecycleObj;
+    
 }
 
 uint32 GetVersionNum(Archive *fout)
@@ -9299,7 +9306,6 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
         selectSourceSchema(fout, tbinfo->dobj.nmspace->dobj.name);
 
         /* find all the user attributes and their types */
-
         /*
          * we must read the attribute names in attribute number order! because
          * we will use the attnum to index into the attnames array later.  We
@@ -9323,7 +9329,13 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "a.attstattarget, a.attstorage, t.typstorage, "
                 "a.attnotnull, a.atthasdef, a.attisdropped, "
                 "a.attlen, a.attalign, a.attislocal, a.attkvtype, t.oid AS typid, "
-                "CASE WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' "
+                "CASE ");
+            if (TabExists(fout, "pg_catalog", "pg_set")) {
+                appendPQExpBuffer(q,
+                    "WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' ");
+
+            }
+            appendPQExpBuffer(q,
                 "WHEN t.typtype = 'e' THEN 'enum(' || (select pg_catalog.string_agg(''''||enumlabel||'''', ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid) || ')' ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
                 "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
@@ -9341,6 +9353,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "AND a.attnum > 0::pg_catalog.int2 "
                 "ORDER BY a.attrelid, a.attnum",
                 tbinfo->dobj.catId.oid);
+            
             appendPQExpBuffer(ce_sql,
                 "SELECT b.column_name, a.column_key_name, b.encryption_type, "
                 "pg_catalog.format_type(c.atttypmod, b.data_type_original_mod) AS client_encryption_original_type from "
@@ -17911,6 +17924,11 @@ static bool PartkeyexprIsNull(Archive* fout, TableInfo* tbinfo, bool isSubPart)
     PGresult* partkeyexpr_res = NULL;
     int i_partkeyexpr;
     bool partkeyexprIsNull = true;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+    if (!is_column_exists(AH->connection, PartitionRelationId, "partkeyexpr")) {
+        return true;
+    }
+
     if (!isSubPart)
         appendPQExpBuffer(partkeyexpr,
             "select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = \'%s\' and "
@@ -23540,4 +23558,28 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
+}
+
+bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName)
+{
+    char query[300];
+
+    bool exist = false;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+    sprintf(query, "SELECT * FROM pg_proc a LEFT JOIN pg_namespace b on a.pronamespace=b.oid WHERE a.proname='%s' and b.nspname='%s'", funcName, funcNamespace);
+    
+    exist = isExistsSQLResult(AH->connection, query);
+    return exist;
+}
+
+bool TabExists(Archive* fout, const char* schemaName, const char* tabName)
+{
+    char query[300];
+    bool exist = false;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+
+    sprintf(query, "SELECT * FROM pg_tables  WHERE schemaname='%s' and tablename='%s'", schemaName, tabName);
+    
+    exist = isExistsSQLResult(AH->connection, query);
+    return exist;
 }
