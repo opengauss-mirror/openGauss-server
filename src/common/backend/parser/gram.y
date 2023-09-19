@@ -25594,6 +25594,7 @@ opt_evtime_unit:
 				$$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR) |
 												 INTERVAL_MASK(MONTH), @1));
 			}
+			;
 
 opt_interval:
 			YEAR_P
