@@ -201,6 +201,9 @@ NON_EXEC_STATIC void JobScheduleMain()
     /* Initialize openGauss with DEFAULT_DATABASE, since it cannot be dropped */
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitJobScheduler();
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
 
 #ifdef PGXC /* PGXC_COORD */
     /*
