@@ -3845,7 +3845,7 @@ static int ServerLoop(void)
 
                         if (SS_CLUSTER_ONDEMAND_RECOVERY && SS_IN_REFORM &&
                             result != STATUS_OK && pmState == PM_WAIT_BACKENDS) {
-                                SSOndemandProcExitIfStayWaitBackends();
+                            SSOndemandProcExitIfStayWaitBackends();
                         }
                         if (result != STATUS_OK) {
                             if (port->is_logic_conn) {
@@ -14879,7 +14879,7 @@ void SSOndemandProcExitIfStayWaitBackends()
         failTimes++;
     }
     if (pmState == PM_WAIT_BACKENDS) {
-        ereport(PANIC, (errmsg("Proc exit because pmState stay %s for %d times, "
+        ereport(WARNING, (errmsg("Proc exit because pmState stay %s for %d times, "
             "when reform failed and in ondemand recovery, "
             "to avoid pmState being stuck in PM_WAIT_BACKENDS.", 
             GetPMState(pmState), WAIT_PMSTATE_UPDATE_TRIES)));
