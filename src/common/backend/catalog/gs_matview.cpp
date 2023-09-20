@@ -340,6 +340,42 @@ void delete_matdep_table(Oid mlogid)
     return;
 }
 
+Oid get_matview_mlog_baserelid(Oid mlogOid)
+{
+    Relation relation = NULL;
+    TableScanDesc scan;
+    ScanKeyData scanKey;
+    HeapTuple tup = NULL;
+    Datum relid = 0;
+    Oid baserelid = InvalidOid;
+    bool isnull;
+
+    ScanKeyInit(&scanKey,
+            Anum_gs_matview_dep_mlogid,
+            BTEqualStrategyNumber,
+            F_OIDEQ,
+            ObjectIdGetDatum(mlogOid));
+    relation = heap_open(MatviewDependencyId, AccessShareLock);
+    scan = tableam_scan_begin(relation, SnapshotNow, 1, &scanKey);
+
+    while((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+        relid = heap_getattr(tup,
+                            Anum_gs_matview_dep_relid,
+                            RelationGetDescr(relation),
+                            &isnull);
+        if (!isnull) {
+            baserelid = DatumGetObjectId(relid);
+            /* find out baserelid*/
+            break;
+        }
+    }    
+
+    tableam_scan_end(scan);
+    heap_close(relation, NoLock);
+
+    return baserelid;
+}
+
 Datum get_matview_refreshtime(Oid matviewOid, bool *isNULL)
 {
     Relation relation = NULL;
