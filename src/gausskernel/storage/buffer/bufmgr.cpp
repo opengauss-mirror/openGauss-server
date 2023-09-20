@@ -1714,11 +1714,10 @@ Buffer buffer_read_extended_internal(Relation reln, ForkNumber fork_num, BlockNu
 Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                           BufferAccessStrategy strategy)
 {
-    if (IsDefaultExtremeRtoMode() &&
-        (!RecoveryInProgress() || !IsExtremeRtoRunning() || !is_exrto_standby_read_worker())) {
-        return buffer_read_extended_internal(reln, fork_num, block_num, mode, strategy);
-    } else {
+    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker()) {
         return standby_read_buf(reln, fork_num, block_num, mode, strategy);
+    } else {
+        return buffer_read_extended_internal(reln, fork_num, block_num, mode, strategy);
     }
 }
 
