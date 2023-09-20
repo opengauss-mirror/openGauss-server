@@ -5019,7 +5019,7 @@ void InitializeNumLwLockPartitions(void)
     /* set default values */
     SetLWLockPartDefaultNum();
     /* Do str copy and remove space. */
-    char* attr = TrimStr(g_instance.attr.attr_storage.num_internal_lock_partitions_str);
+    char* attr = TrimStrQuote(g_instance.attr.attr_storage.num_internal_lock_partitions_str, true);
     if (attr == NULL || attr[0] == '\0') { /* use default values */
         return;
     }
@@ -6504,11 +6504,24 @@ static void assign_ss_log_backup_file_count(int newval, void *extra)
 
 static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source)
 {
-    if (!LogicalDecodeParseOptionsDefault(*newval, extra)) {
-        GUC_check_errdetail("invalid parameter setting for loglical_decode_options_default");
-        return false;
+    /*Check argument whether coming frmo SYATEM ALTER SET*/
+    char* temp = *newval;
+    int len = strlen(temp);
+    char ch = (len > 0) ? temp[len-1] : '\0';
+    if(QuoteCheckOut(temp)) {
+        temp[len - 1] = '\0';
+        temp++;
     }
-
+    if (!LogicalDecodeParseOptionsDefault(temp, extra)) {
+        GUC_check_errdetail("invalid parameter setting for loglical_decode_options_default");         
+	if(len != 0) {
+            (*newval)[len - 1] = ch;
+        }
+	return false;
+    }
+    if(len != 0) {
+        (*newval)[len - 1] = ch;
+    }
     return true;
 }
 
