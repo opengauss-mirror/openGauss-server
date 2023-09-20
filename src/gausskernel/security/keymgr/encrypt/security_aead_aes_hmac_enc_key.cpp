@@ -47,14 +47,6 @@ const unsigned char *AeadAesHamcEncKey::g_iv_key_salt_format =
 
 const int RAND_COUNT = 100;
 
-void HmacCtxGroup::free_hmac_ctx(HMAC_CTX** ctx_tmp) const
-{
-    if (*ctx_tmp != NULL) {
-        HMAC_CTX_free(*ctx_tmp);
-        *ctx_tmp = NULL;
-    }
-}
-
 /* Derives all the required keys from the given root key */
 AeadAesHamcEncKey::AeadAesHamcEncKey(unsigned char *root_key, size_t root_key_size)
 {

@@ -49,7 +49,13 @@ public:
     HMAC_CTX* ctx_worker;
     HMAC_CTX* ctx_template;
 private:
-    void free_hmac_ctx(HMAC_CTX** ctx_tmp) const;
+    void free_hmac_ctx(HMAC_CTX** ctx_tmp)
+    {
+        if (*ctx_tmp != NULL) {
+            HMAC_CTX_free(*ctx_tmp);
+            *ctx_tmp = NULL;
+        }
+    }
 };
 
 /*
