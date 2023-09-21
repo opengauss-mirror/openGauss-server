@@ -1643,3 +1643,50 @@ drop database b_cmpt_db;
 drop database db_a1144425;
 DROP USER test_c;
 DROP USER test_d;
+
+-- view sql security bugfix
+create database db_a1144877 dbcompatibility 'B';
+\c db_a1144877;
+
+create user use_a_1144877 identified by 'A@123456';
+create user use_b_1144877 identified by 'A@123456';
+--create
+create table sql_security_1144877(id int,cal int);
+insert into sql_security_1144877 values(1,1);
+insert into sql_security_1144877 values(2,2);
+insert into sql_security_1144877 values(3,3);
+
+create schema s_1144877;
+create table s_1144877.sql_security_1144877(id int,cal int);
+insert into s_1144877.sql_security_1144877 values(2,1);
+insert into s_1144877.sql_security_1144877 values(3,2);
+insert into s_1144877.sql_security_1144877 values(4,3);
+
+create or replace procedure p_1144877 as
+begin
+create sql security invoker view v_1144877 as select * from s_1144877.sql_security_1144877;
+
+create sql security definer view v_1144877_1 as select * from sql_security_1144877;
+end;
+/
+
+call p_1144877();
+--root pass 
+select * from v_1144877 order by 1,2;
+select * from v_1144877_1 order by 1,2;
+
+--a call 
+grant select on v_1144877 to use_a_1144877;
+grant select on v_1144877_1 to use_a_1144877;
+grant all on table s_1144877.sql_security_1144877 to use_a_1144877;
+set role use_a_1144877 password 'A@123456';
+select * from v_1144877 order by 1,2;
+select * from v_1144877_1 order by 1,2;
+
+reset role;
+
+drop user use_a_1144877 cascade;
+drop user use_b_1144877 cascade;
+
+\c regression
+drop database db_a1144877;
