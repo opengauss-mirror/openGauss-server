@@ -85,6 +85,7 @@ typedef enum
 #define IO_CHECK(cmd, size) do { int _rc = (cmd); if (_rc != (int)(size)) fio_error(_rc, size, __FILE__, __LINE__); } while (0)
 
 #define FILE_PERMISSIONS 0600
+#define DSS_BLCKSZ  2097152    //2M , In dss mode, the size of operation(read and write) from a DSS file is 2M
 
 typedef struct
 {
@@ -112,9 +113,9 @@ extern int     fio_get_agent_version(void);
 extern FILE*   fio_fopen(char const* name, char const* mode, fio_location location);
 extern size_t  fio_fwrite(FILE* f, void const* buf, size_t size);
 extern void fio_construct_compressed(void const* buf, size_t size);
-extern ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compress_alg);
+extern ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compress_alg, const char *to_fullpath, char *preWriteBuf, int *preWriteOff, int *targetSize);
 extern ssize_t fio_fread(FILE* f, void* buf, size_t size);
-extern int     fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression);
+extern int     fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression, int size);
 extern int     fio_fprintf(FILE* f, char const* arg, ...);// pg_attribute_printf(2, 3);
 extern int     fio_fflush(FILE* f);
 extern int     fio_fseek(FILE* f, off_t offs);
