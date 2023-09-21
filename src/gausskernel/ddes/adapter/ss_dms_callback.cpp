@@ -413,6 +413,7 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
                             unsigned long long list_in, unsigned int save_ctrl)
 {
     int primary_id = (int)reformer_id;
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.primaryInstId = primary_id;
     g_instance.dms_cxt.SSReformerControl.list_stable = list_stable;
     int ret = DMS_ERROR;
@@ -422,7 +423,8 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
             Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED ||
                 g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING);
         }
-        SSSaveReformerCtrl();
+        SSUpdateReformerCtrl();
+        LWLockRelease(ControlFileLock);
         Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == (int)primary_id);
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS %s] set current instance:%d as primary.",
             SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", primary_id)));
@@ -432,6 +434,7 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
         }
         ret = DMS_SUCCESS;
     } else { /* we are on standby */
+        LWLockRelease(ControlFileLock);
         ret = SetPrimaryIdOnStandby(primary_id);
     }
     return ret;
@@ -1064,6 +1067,9 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
                 break;
             case BCAST_CHECK_DB_BACKENDS:
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
+                break;
+            case BCAST_RELOAD_REFORM_CTRL_PAGE:
+                ret = SSReloadReformCtrlPage(len);
                 break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("invalid broadcast operate type")));
@@ -1790,7 +1796,6 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
     g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
-    SSReadControlFile(REFORM_CTRL_PAGE);
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     ereport(LOG,
             (errmodule(MOD_DMS),

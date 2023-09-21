@@ -213,7 +213,6 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
-static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSource source);
 static void assign_ss_enable_aio(bool newval, void *extra);
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
@@ -1043,7 +1042,7 @@ static void InitStorageConfigureNamesBool()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery,
             false,
-            check_ss_enable_ondemand_recovery,
+            NULL,
             NULL,
             NULL},
 
@@ -5957,17 +5956,6 @@ static bool check_ss_enable_ssl(bool *newval, void **extra, GucSource source)
 {
     if (!*newval) {
         ereport(WARNING, (errmsg("The SSL connection will be disabled during build, which brings security risks.")));
-    }
-    return true;
-}
-
-static bool check_ss_enable_ondemand_recovery(bool* newval, void** extra, GucSource source)
-{
-    if (*newval) {
-        if (pg_atomic_read_u32(&WorkingGrandVersionNum) < ONDEMAND_REDO_VERSION_NUM) {
-            ereport(ERROR, (errmsg("Do not allow enable ondemand_recovery if openGauss run in old version.")));
-            return false;
-        }
     }
     return true;
 }

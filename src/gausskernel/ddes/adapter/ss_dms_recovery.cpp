@@ -50,8 +50,10 @@ int SSGetPrimaryInstId()
 
 void SSSavePrimaryInstId(int id)
 {
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.primaryInstId = id;
-    SSSaveReformerCtrl();
+    SSUpdateReformerCtrl();
+    LWLockRelease(ControlFileLock);
 }
 
 void SSWaitStartupExit()

@@ -43,7 +43,7 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
     int readLen);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSGetRecoveryXlogPath();
-void SSSaveReformerCtrl(bool force = false);
+void SSUpdateReformerCtrl();
 void SSReadControlFile(int id, bool updateDmsCtx = false);
 void SSClearSegCache();
 int SSCancelTransactionOfAllStandby(SSBroadcastOp type);

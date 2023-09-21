@@ -2040,17 +2040,6 @@ void register_backend_version(uint32 backend_version){
     }
 }
 
-void SSUpgradeFileBeforeCommit()
-{
-    // upgrade reform control file
-    if (pg_atomic_read_u32(&WorkingGrandVersionNum) < ONDEMAND_REDO_VERSION_NUM) {
-        if (SS_PRIMARY_MODE) {
-            SSReadControlFile(REFORM_CTRL_PAGE);
-            SSSaveReformerCtrl(true);
-        }
-    }
-}
-
 /*
  * Check whether the version contains the backend_version parameter.
  */

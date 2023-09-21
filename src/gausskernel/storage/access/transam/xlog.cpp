@@ -152,6 +152,7 @@
 #include "vectorsonic/vsonichash.h"
 
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
@@ -9494,10 +9495,14 @@ void StartupXLOG(void)
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
             g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
+            g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_IN_ONDEMAND_BUILD;
             /* for other nodes in cluster and ondeamnd recovery failed */
+            LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
             g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
-            SSSaveReformerCtrl();
+            SSUpdateReformerCtrl();
+            LWLockRelease(ControlFileLock);
+            SSRequestAllStandbyReloadReformCtrlPage();
             SetOndemandExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
@@ -10060,8 +10065,12 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("redo is not required")));
             if (SS_IN_ONDEMAND_RECOVERY) {
                 g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+                g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_NORMAL;
+                LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
                 g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
-                SSSaveReformerCtrl();
+                SSUpdateReformerCtrl();
+                LWLockRelease(ControlFileLock);
+                SSRequestAllStandbyReloadReformCtrlPage();
             }
         }
     }
@@ -10559,9 +10568,13 @@ void StartupXLOG(void)
     }
 
     if (SS_PRIMARY_MODE) {
+        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_NORMAL;
         /* for other nodes in cluster */
+        LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
-        SSSaveReformerCtrl();
+        SSUpdateReformerCtrl();
+        LWLockRelease(ControlFileLock);
+        SSRequestAllStandbyReloadReformCtrlPage();
     }
 
     ereport(LOG, (errmsg("redo done, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT ", recentLocalXmin: " XID_FMT
