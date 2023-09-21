@@ -1218,7 +1218,7 @@ static void InitStorageConfigureNamesBool()
             gettext_noop("Enable batch dispatch for parallel reovery"),
             NULL},
             &g_instance.attr.attr_storage.enable_batch_dispatch,
-            true,
+            false,
             NULL,
             NULL,
             NULL},
