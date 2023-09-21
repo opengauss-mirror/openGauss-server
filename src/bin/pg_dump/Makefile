@@ -74,6 +74,9 @@ all: submake-aes gs_dump gs_restore gs_dumpall
 ifeq ($(enable_lite_mode), no)
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
 endif
+ifeq ($(with_tassl), yes)
+libpq_pgport += -lTassSDF4GHVSM
+endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)
     libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -l$(SECURE_C_CHECK) -L$(LIBKMC_LIB_PATH) -lkmc

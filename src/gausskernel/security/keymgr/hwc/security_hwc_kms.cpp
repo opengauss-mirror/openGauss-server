@@ -170,9 +170,11 @@ static char *hwc_kms_get_url(HwcKmsMgr *kms, const char *kmsurl, UrlType type)
     }
     km_securec_check_ss(rc, "", "");
 
+#ifndef USE_TASSL
     if (kms->aksk && strlen(kms->projid) == 0) {
         km_err_msg(kms->err, "can't access '%s', please set arg 'kmsProjectId'.", url);
     }
+#endif
     return url;
 }
 
@@ -249,7 +251,11 @@ static char *hwc_kms_mk_dec_reqbody(HwcKmsMgr *kms, const char *keyid, KmUnStr c
         }
     ));
 
+#ifdef USE_TASSL
+    KmStr sha = km_hex_encode(cipher);
+#else
     KmStr sha = km_sha_encode(cipher);
+#endif
     if (sha.val == NULL) {
         km_err_msg(kms->err, "when access '%s', failed to encode cipher", kms->url);
         return NULL;
@@ -260,7 +266,12 @@ static char *hwc_kms_mk_dec_reqbody(HwcKmsMgr *kms, const char *keyid, KmUnStr c
         return NULL;
     }
 
+#ifdef USE_TASSL
+#define TA_SM4_KEY_SZ 32
+    rc = sprintf_s(plainlen, LEN_BUF_SZ, "%d", TA_SM4_KEY_SZ);
+#else
     rc = sprintf_s(plainlen, LEN_BUF_SZ, "%lu", cipher.len - PLAIN_LEN);
+#endif
     km_securec_check_ss(rc, "", "");
 
     ReplaceRule rules[] = {
@@ -343,7 +354,11 @@ static char *hwc_kms_key_state(char *keystate)
      * do not use atoi() here, we get the 'keystate' from http message, the 'keystate' could be anything
      */
     if (strcmp(keystate, "1") == 0) {
+#ifdef USE_TASSL
+        return km_strdup("active");
+#else
         return km_strdup("to be active");
+#endif
     } else if (strcmp(keystate, "2") == 0) {
         return km_strdup("active");
     } else if (strcmp(keystate, "3") == 0) {
@@ -377,9 +392,13 @@ char *hwc_kms_mk_select(HwcKmsMgr *kms, const char *keypath)
 #endif
     httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath.kmsurl, SEL_MK), CURLOPT_HTTPPOST, kms->cacert);
     httpmgr_set_req_header(http, "Content-Type:application/json");
+#ifndef USE_TASSL
     kms->aksk ? httpmgr_set_req_header(http, kms->projid) : httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
+#endif
     reqbody = hwc_kms_mk_sel_reqbody(kms, kpath.keyid);
+#ifndef USE_TASSL
     httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
+#endif
     httpmgr_set_req_body(http, reqbody);
     char remain[3] = {0, 0, 1};
     httpmgr_set_response(http, remain, NULL);
@@ -441,9 +460,13 @@ KmUnStr hwc_kms_mk_encrypt(HwcKmsMgr *kms, const char *keypath, KmUnStr plain)
 #endif
     httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath.kmsurl, ENC_KEY), CURLOPT_HTTPPOST, kms->cacert);
     reqbody = hwc_kms_mk_enc_reqbody(kms, kpath.keyid, plain);
+#ifndef USE_TASSL
     httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
+#endif
     httpmgr_set_req_header(http, "Content-Type:application/json");
+#ifndef USE_TASSL
     kms->aksk ? httpmgr_set_req_header(http, kms->projid) : httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
+#endif
     httpmgr_set_req_body(http, reqbody);
 
     char remain[3] = {0, 0, 1};
@@ -472,7 +495,11 @@ KmUnStr hwc_kms_mk_encrypt(HwcKmsMgr *kms, const char *keypath, KmUnStr plain)
         return cipher;
     }
     sha.len = strlen(sha.val);
+#ifdef USE_TASSL
+    cipher = km_hex_decode(sha);
+#else
     cipher = km_sha_decode(sha);
+#endif
     km_free(sha.val);
     if (cipher.val == NULL) {
         km_err_msg(kms->err, "failed to decode hex cipher in http response body of '%s'.", kms->url);
@@ -505,9 +532,13 @@ KmUnStr hwc_kms_mk_decrypt(HwcKmsMgr *kms, const char *keypath, KmUnStr cipher)
 #endif
     httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath.kmsurl, DEC_KEY), CURLOPT_HTTPPOST, kms->cacert);
     reqbody = hwc_kms_mk_dec_reqbody(kms, kpath.keyid, cipher);
+#ifndef USE_TASSL
     httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
+#endif
     httpmgr_set_req_header(http, "Content-Type:application/json");
+#ifndef USE_TASSL
     kms->aksk ? httpmgr_set_req_header(http, kms->projid) : httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
+#endif
     httpmgr_set_req_body(http, reqbody);
 
     char remain[3] = {0, 0, 1};
@@ -568,11 +599,15 @@ KmUnStr hwc_kms_dk_create(HwcKmsMgr *kms, const char *keypath, KmUnStr *cipher)
 #endif
     httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath.kmsurl, CRT_KEY), CURLOPT_HTTPPOST, kms->cacert);
     reqbody = hwc_kms_dk_crt_reqbody(kms, kpath.keyid);
+#ifndef USE_TASSL
     httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
+#endif
     httpmgr_set_req_header(http, "Content-Type:application/json");
+#ifndef USE_TASSL
     if (!kms->aksk) {
         httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
     }
+#endif
     httpmgr_set_req_body(http, reqbody);
 
     char remain[3] = {0, 0, 1};

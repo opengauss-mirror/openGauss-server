@@ -123,6 +123,7 @@ int kv_scan_exec(KvScan *scan)
     int start;
     int curpos;
     char curchr;
+    bool issk;
     errno_t rc;
 
     if (scan == NULL) {
@@ -142,9 +143,12 @@ int kv_scan_exec(KvScan *scan)
 
     for (curpos = scan->curpos; curpos < scan->inlen; curpos++) {
         curchr = scan->input[curpos];
-        if (curchr == '=') {
+        if (curchr == '=' && !issk) {
             rc = strncpy_s(scan->key, KV_BUF_SZ, scan->input + start, curpos - start);
             start = curpos + 1;
+            if (strlen(km_str_strip(scan->key)) > 0 && strcasecmp(km_str_strip(scan->key), "sk") == 0) {
+                issk = true;
+            }
         } else if (curchr == ',') {
             rc = strncpy_s(scan->value, KV_BUF_SZ, scan->input + start, curpos - start);
             start = curpos + 1;

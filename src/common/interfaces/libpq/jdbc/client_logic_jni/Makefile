@@ -14,7 +14,9 @@ include $(top_builddir)/src/Makefile.global
 NAME= libgauss_cl_jni
 
 INCLUDES = -I$(top_builddir)/src/include -I"$(JAVA_HOME)/include" -I"$(JAVA_HOME)/include/linux" -I$(top_builddir)/src/include/libpq -I../../ -I$(LIBOPENSSL_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH)
-SHLIB_LINK :=  -L"../../" -lpq_ce -lrt -lz -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -lcjson -lcurl
+SHLIB_LINK :=  -L"../../" -lpq_ce -lrt -lz -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -lcjson -lcurl 
+ifeq ($(with_tassl), yes)
+endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)
     SHLIB_LINK += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -l$(SECURE_C_CHECK) -L$(LIBKMC_LIB_PATH) -lkmc

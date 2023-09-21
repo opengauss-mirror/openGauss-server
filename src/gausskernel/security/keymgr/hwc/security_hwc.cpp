@@ -146,8 +146,8 @@ static char *hwc_mk_select(KeyMgr *kmgr, KeyInfo key)
         km_err_msg(hwc->kmgr.err, "failed to access huawei_kms, please set key id.");
     }
 
-    if (strcasecmp(key.algo, "aes_256") != 0) {
-        km_err_msg(hwc->kmgr.err, "invalid algorithm '%s', huawei_kms only support 'aes_256'.", key.algo);
+    if (strcasecmp(key.algo, "aes_256") != 0 && strcasecmp(key.algo, "sm4") != 0) {
+        km_err_msg(hwc->kmgr.err, "invalid algorithm '%s', huawei_kms only support 'aes_256', 'sm4'.", key.algo);
         return NULL;
     }
 
@@ -226,6 +226,22 @@ KeyMethod huawei_kms = {
  */
 KeyMethod hcs_kms = {
     "hcs_kms",
+
+    hwc_new, /* kmgr_new */
+    hwc_free, /* kmgr_free */
+    hwc_set_arg, /* kmgr_set_arg */
+
+    NULL, /* mk_create */
+    NULL, /* mk_delete */
+    hwc_mk_select, /* mk_select */
+    hwc_mk_encrypt, /* mk_encrypt */
+    hwc_mk_decrypt, /* mk_decrypt */
+
+    hwc_dk_create, /* dk_create */
+};
+
+KeyMethod ta_kms = {
+    "ta_kms",
 
     hwc_new, /* kmgr_new */
     hwc_free, /* kmgr_free */

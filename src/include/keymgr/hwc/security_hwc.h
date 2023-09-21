@@ -43,5 +43,6 @@ void hwc_mgr_set_arg(HwcMgr *hwc, const char *key, const char *value);
 
 extern KeyMethod huawei_kms;
 extern KeyMethod hcs_kms;
+extern KeyMethod ta_kms;
 
 #endif

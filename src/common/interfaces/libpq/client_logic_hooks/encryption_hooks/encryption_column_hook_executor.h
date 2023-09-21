@@ -36,6 +36,7 @@
 #include "keymgr/encrypt/security_aead_aes_hamc_enc_key.h"
 #include "postgres_ext.h"
 #include "client_logic_processor/values_processor.h"
+#include "keymgr/enc_adpt/enc_adpt.h"
 
 #define MAX_DATATYPE_LEN 30
 
@@ -66,10 +67,16 @@ public:
     const char *get_data_type(const ColumnDef * const column) override;
     void set_data_type(const ColumnDef * const column, ICachedColumn *ce) override;
 
+
+
 private:
     void init()
     {
         is_cek_set = false;
+        m_cek = (EmKeyData *)malloc(sizeof(EmKeyData));
+        if (m_cek != NULL) {
+            keydata_init(m_cek);
+        }
     }
     bool deprocess_column_encryption_key(EncryptionGlobalHookExecutor *encryption_global_hook_executor,
         unsigned char *decryptedKey, size_t *decryptedKeySize, const char *encrypted_key_value, 
@@ -99,6 +106,8 @@ private:
     bool is_cek_set;
     ColumnEncryptionAlgorithm m_column_encryption_algorithm = ColumnEncryptionAlgorithm::INVALID_ALGORITHM;
     AeadAesHamcEncKey aesCbcEncryptionKey;         /* contains iv, encryption and mac keys */
+
+    EmKeyData *m_cek;
 };
 
 #endif
