@@ -308,6 +308,15 @@ static bool viewSecurityPassDown(Node* node, void* context)
         /* Do what we came for */
         if (rte->rtekind == RTE_RELATION) {
             rte->checkAsUser = *asUser;
+            /* Check namespace permissions. */
+            AclResult aclresult;
+            /* No lock here ,cause relation already opend */
+            Relation rel = heap_open(rte->relid, NoLock);
+            Oid namespaceId = RelationGetNamespace(rel);
+            aclresult = pg_namespace_aclcheck(namespaceId, *asUser, ACL_USAGE);
+            if (aclresult != ACLCHECK_OK)
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            heap_close(rel, NoLock);
         }
         /* allow rangetable entry continue */
         return false;
