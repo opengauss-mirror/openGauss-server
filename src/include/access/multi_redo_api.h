@@ -68,7 +68,7 @@ static const uint32 BIG_RECORD_LENGTH = XLOG_BLCKSZ * 16;
 
 #define IS_EXRTO_READ (IsExtremeRedo() && g_instance.attr.attr_storage.EnableHotStandby && IsDefaultExtremeRtoMode())
 #define IS_EXRTO_STANDBY_READ (IS_EXRTO_READ && pm_state_is_hot_standby())
-#define IS_EXRTO_RECOVERY_IN_PROGRESS (RecoveryInProgress() && IsExtremeRedo())
+#define IS_EXRTO_RECOVERY_IN_PROGRESS (RecoveryInProgress() && IsExtremeRedo() && IsDefaultExtremeRtoMode())
 
 inline bool is_exrto_standby_read_worker()
 {
