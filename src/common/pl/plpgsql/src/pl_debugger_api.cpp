@@ -331,8 +331,14 @@ static Datum get_info_local_data(const char* var_name, const int frameno, Functi
  */
 Datum debug_client_info_code(PG_FUNCTION_ARGS)
 {
-    InterfaceCheck("info_code", false);
     Oid funcid = PG_GETARG_OID(0);
+    /*
+     * Anonymous block debugging call info_code() needs to get
+     * information from the server, so set needAttach to TRUE
+     * Procedure and function get information from system table, 
+     * info_code() can be called at any time, so set needAttach to FALSE.
+     */
+    InterfaceCheck("info_code", !OidIsValid(funcid));
 
     const int DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM = 3;
 
@@ -493,7 +499,7 @@ Datum debug_client_add_breakpoint(PG_FUNCTION_ARGS)
         lines = debug_show_code_worker(funcOid, &nLine, &headerlines);
         if (lineno < 1 || (uint32)lineno > nLine - headerlines) {
             ereport(WARNING, (errcode(ERRCODE_WARNING),
-                errmsg("lineno must be within the range of [1, MaxLineNumber]"
+                errmsg("lineno must be within the range of [1, MaxLineNumber]."
                 " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
             PG_RETURN_INT32(-1);
         }
@@ -523,7 +529,7 @@ Datum debug_client_add_breakpoint(PG_FUNCTION_ARGS)
         PG_RETURN_INT32(-1);
     } else if (ans == ADD_BP_ERR_OUT_OF_RANGE) {
         ereport(WARNING, (errcode(ERRCODE_WARNING),
-                errmsg("lineno must be within the range of [1, MaxLineNumber]"
+                errmsg("lineno must be within the range of [1, MaxLineNumber]."
                 " Please use dbe_pldebugger.info_code for valid breakpoint candidates")));
         PG_RETURN_INT32(-1);
     } else if (ans == ADD_BP_ERR_INVALID_BP_POS) {
@@ -564,7 +570,7 @@ Datum debug_client_delete_breakpoint(PG_FUNCTION_ARGS)
 error:
     ereport(ERROR,
         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_AMBIGUOUS_PARAMETER),
-            errmsg("invalid break point index"),
+            errmsg("invalid breakpoint index"),
             errdetail("the given index is either outside the range or already deleted"),
             errcause("try to delete a breakpoint that's never added"),
             erraction("use dbe_pldebugger.info_breakpoints() to show all valid breakpoints")));
@@ -600,7 +606,7 @@ Datum debug_client_enable_breakpoint(PG_FUNCTION_ARGS)
 error:
     ereport(ERROR,
         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_AMBIGUOUS_PARAMETER),
-            errmsg("invalid break point index"),
+            errmsg("invalid breakpoint index"),
             errdetail("the given index is either outside the range or already enabled"),
             errcause("try to enable a breakpoint that's already enabled"),
             erraction("use dbe_pldebugger.info_breakpoints() to show all breakpoints")));
@@ -636,7 +642,7 @@ Datum debug_client_disable_breakpoint(PG_FUNCTION_ARGS)
 error:
     ereport(ERROR,
         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_AMBIGUOUS_PARAMETER),
-            errmsg("invalid break point index"),
+            errmsg("invalid breakpoint index"),
             errdetail("the given index is either outside the range or already disabled"),
             errcause("try to disabled a breakpoint that's already disabled"),
             erraction("use dbe_pldebugger.info_breakpoints() to show all breakpoints")));
@@ -951,7 +957,7 @@ Datum debug_server_turn_off(PG_FUNCTION_ARGS)
     PlDebugEntry* entry = has_debug_func(funcOid, &found);
     if (!found) {
         ereport(WARNING, (errmodule(MOD_PLDEBUGGER),
-                errmsg("function %d has not be turned on", funcOid)));
+                errmsg("function %d has not been turned on", funcOid)));
     } else {
         if (entry->func && entry->func->debug) {
             clean_up_debug_server(entry->func->debug, false, false);
@@ -1018,12 +1024,12 @@ static void InterfaceCheck(const char* funcname, bool needAttach)
         int commIdx = u_sess->plsql_cxt.debug_client->comm_idx;
         CHECK_DEBUG_COMM_VALID(commIdx);
         /* if current debug index is not myself during debug, clean up my self */
+        uint64 clientSessionId = ENABLE_THREAD_POOL ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
         PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commIdx];
         DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
         AutoMutexLock debuglock(&debug_comm->mutex);
         debuglock.lock();
-        if ((debug_comm->clientId != u_sess->session_id && debug_comm->clientId != t_thrd.proc_cxt.MyProcPid) ||
-            !debug_comm->isRunning()) {
+        if (debug_comm->clientId != clientSessionId || !debug_comm->isRunning()) {
             client->comm_idx = -1;
             MemoryContextDelete(client->context);
             u_sess->plsql_cxt.debug_client = NULL;
@@ -1088,7 +1094,7 @@ static PlDebugEntry* add_debug_func(Oid key)
     } else {
         ReleaseDebugCommIdx(commIdx);
         ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
-                errmsg("function %d has already be turned on", key)));
+                errmsg("function %d has already been turned on", key)));
     }
     return entry;
 }

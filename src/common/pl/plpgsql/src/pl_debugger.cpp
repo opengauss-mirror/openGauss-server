@@ -743,11 +743,11 @@ void clean_up_debug_client(bool hasError)
         DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
         /* clean comm idx*/
         if (client->comm_idx < PG_MAX_DEBUG_CONN && client->comm_idx >= 0) {
+            uint64 clientSessionId = ENABLE_THREAD_POOL ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
             PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[client->comm_idx];
             AutoMutexLock debuglock(&debug_comm->mutex);
             debuglock.lock();
-            if (debug_comm->hasClient() &&
-                (debug_comm->clientId == u_sess->session_id || debug_comm->clientId == t_thrd.proc_cxt.MyProcPid)) {
+            if (debug_comm->hasClient() && debug_comm->clientId == clientSessionId) {
                 /* only wake up server for error when it's not recevied server error */
                 if (hasError && debug_comm->IsServerWaited && !debug_comm->hasServerErrorOccured) {
                     debug_comm->hasClientErrorOccured = true;
