@@ -1760,9 +1760,12 @@ void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
     }
 #endif
 
-    int attno = GetAttrNumber(slot, attnum);
+    int attno = attnum;
+    if (slot->tts_tuple) {
+        attno = GetAttrNumber(slot, attnum);
 
-    slot_deform_tuple(slot, attno);
+        slot_deform_tuple(slot, attno);
+    }
 
     /* If tuple doesn't have all the atts indicated by tupleDesc, read the rest as null */
     if (unlikely(attno < attnum)) {
