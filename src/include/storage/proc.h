@@ -566,17 +566,6 @@ void CancelBlockedRedistWorker(LOCK* lock, LOCKMODE lockmode);
 extern void BecomeLockGroupLeader(void);
 extern void BecomeLockGroupMember(PGPROC *leader);
 
-static inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
-{
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-    return xid < cutoff;
-}
-static inline bool TransactionIdOlderThanFrozenXid(TransactionId xid)
-{
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
-    return xid < cutoff;
-}
-
 extern int GetThreadPoolStreamProcNum(void);
 
 #endif /* PROC_H */

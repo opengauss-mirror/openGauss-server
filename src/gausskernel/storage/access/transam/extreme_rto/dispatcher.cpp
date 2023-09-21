@@ -221,7 +221,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
 };
 
 const int REDO_WAIT_SLEEP_TIME = 5000; /* 5ms */
-const int MAX_REDO_WAIT_LOOP = 24000;  /* 5ms*24000 = 2min */
+const int MAX_REDO_WAIT_LOOP = 48000;  /* 5ms*24000 = 2min */
 
 uint32 GetReadyWorker()
 {
@@ -1320,7 +1320,8 @@ static bool DispatchCompresseShrinkRecord(XLogReaderState *record, List *expecte
 static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
-    if (info == XLOG_BTREE_REUSE_PAGE) {
+    if (info == XLOG_BTREE_REUSE_PAGE &&
+        !(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
         DispatchTxnRecord(record, expectedTLIs);
     } else {
         DispatchRecordWithPages(record, expectedTLIs);
@@ -1332,7 +1333,8 @@ static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, Tim
 static bool DispatchUBTreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
-    if (info == XLOG_UBTREE_REUSE_PAGE) {
+    if (info == XLOG_UBTREE_REUSE_PAGE &&
+        !(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
         DispatchTxnRecord(record, expectedTLIs);
     } else {
         DispatchRecordWithPages(record, expectedTLIs);
@@ -1435,7 +1437,11 @@ static bool DispatchHeap2VacuumRecord(XLogReaderState *record, List *expectedTLI
     uint8 info = ((XLogRecGetInfo(record) & (~XLR_INFO_MASK)) & XLOG_HEAP_OPMASK);
 
     if (info == XLOG_HEAP2_CLEANUP_INFO) {
-        DispatchTxnRecord(record, expectedTLIs);
+        xl_heap_cleanup_info *xlrec = (xl_heap_cleanup_info *)XLogRecGetData(record);
+        RelFileNode tmp_node;
+        RelFileNodeCopy(tmp_node, xlrec->node, (int2)XLogRecGetBucketId(record));
+ 
+        DispatchToOnePageWorker(record, tmp_node, expectedTLIs);
     } else {
         DispatchRecordWithPages(record, expectedTLIs);
     }

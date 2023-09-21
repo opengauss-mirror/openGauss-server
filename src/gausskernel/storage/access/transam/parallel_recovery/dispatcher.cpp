@@ -75,6 +75,7 @@
 #include "gssignal/gs_signal.h"
 #include "utils/atomic.h"
 #include "pgstat.h"
+#include "access/xlogreader.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -327,9 +328,16 @@ void StartRecoveryWorkers(XLogRecPtr startLsn)
         g_dispatcher = CreateDispatcher();
         g_dispatcher->oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
         g_dispatcher->txnWorker = StartTxnRedoWorker();
-        if (g_dispatcher->txnWorker != NULL)
+        if (g_dispatcher->txnWorker != NULL) {
+            Assert(g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_len == 0 ||
+                   g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_len == get_real_recovery_parallelism());
+            if (g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_ids == NULL) {
+                g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_ids = (int *)MemoryContextAllocZero(
+                    INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), get_real_recovery_parallelism() * sizeof(int));
+                g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_len = get_real_recovery_parallelism();
+            }
             StartPageRedoWorkers(get_real_recovery_parallelism());
-
+        }
         ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
             errmsg("[PR]: max=%d, thrd=%d, workers=%u", g_instance.attr.attr_storage.max_recovery_parallelism,
                 get_real_recovery_parallelism(), g_dispatcher->pageWorkerCount)));
@@ -922,10 +930,13 @@ static void DispatchRecordWithPages(XLogReaderState *record, List *expectedTLIs,
 
 static bool DispatchHeapRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
-    if (record->max_block_id >= 0)
-        DispatchRecordWithPages(record, expectedTLIs, SUPPORT_FPAGE_DISPATCH);
-    else
+    if (unlikely((XLogRecGetInfo(record) & XLOG_HEAP_OPMASK) == XLOG_HEAP_INPLACE)) {
         DispatchRecordWithoutPage(record, expectedTLIs);
+    } else if (record->max_block_id >= 0) {
+        DispatchRecordWithPages(record, expectedTLIs, SUPPORT_FPAGE_DISPATCH);
+    } else {
+        DispatchRecordWithoutPage(record, expectedTLIs);
+    }
 
     return false;
 }
@@ -1872,7 +1883,7 @@ void SetStartupBufferPinWaitBufId(int bufid)
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
             PGPROC *proc = GetPageRedoWorkerProc(g_dispatcher->pageWorkers[i]);
             if (t_thrd.proc->pid == proc->pid) {
-                g_dispatcher->pageWorkers[i]->bufferPinWaitBufId = bufid;
+                g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_ids[i] = bufid;
                 break;
             }
         }
@@ -1883,7 +1894,7 @@ uint32 GetStartupBufferPinWaitBufLen()
 {
     uint32 buf_len = 1;
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
-        buf_len += g_dispatcher->pageWorkerCount;
+        buf_len += g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_len;
     }
     return buf_len;
 }
@@ -1896,7 +1907,7 @@ void GetStartupBufferPinWaitBufId(int *bufids, uint32 len)
 {
     if (g_dispatcher != NULL) {
         for (uint32 i = 0; i < len - 1; i++) {
-            bufids[i] = g_dispatcher->pageWorkers[i]->bufferPinWaitBufId;
+            bufids[i] = g_instance.comm_cxt.predo_cxt.buffer_pin_wait_buf_ids[i];
         }
         bufids[len - 1] = g_instance.proc_base->startupBufferPinWaitBufId;
     }

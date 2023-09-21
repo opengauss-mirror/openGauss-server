@@ -6717,7 +6717,7 @@ void ProcessInterrupts(void)
                                 " database and repeat your command.")));
             else
                 ereport(ERROR,
-                    (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                    (errcode(ERRCODE_SR_RECOVERY_CONFLICT),
                         errmsg("canceling statement due to conflict with recovery"),
                         errdetail_recovery_conflict()));
         }

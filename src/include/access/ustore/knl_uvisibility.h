@@ -16,6 +16,8 @@
 #ifndef KNL_UVISIBILITY_H
 #define KNL_UVISIBILITY_H
 
+#include "postmaster/postmaster.h"
+
 typedef struct UHeapTupleTransInfo {
     int td_slot;
     TransactionId xid;
@@ -87,4 +89,28 @@ bool UHeapTupleHasSerializableConflictOut(bool visible, Relation relation, ItemP
 void UHeapTupleCheckVisible(Snapshot snapshot, UHeapTuple tuple, Buffer buffer);
 
 void UHeapUpdateTDInfo(int tdSlot, Buffer buffer, OffsetNumber offnum, UHeapTupleTransInfo* uinfo);
+
+inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
+{
+    /* to slove standby read consistency problem */
+    if (RecoveryInProgress()) {
+        uint64 standby_recycle_xid = pg_atomic_read_u64(&g_instance.undo_cxt.hotStandbyRecycleXid);
+        return xid < standby_recycle_xid;
+    }
+
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+    return xid < cutoff;
+}
+
+inline bool TransactionIdOlderThanFrozenXid(TransactionId xid)
+{
+    /* to slove standby read consistency problem */
+    if (RecoveryInProgress()) {
+        uint64 standby_recycle_xid = pg_atomic_read_u64(&g_instance.undo_cxt.hotStandbyRecycleXid);
+        return xid < standby_recycle_xid;
+    }
+
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
+    return xid < cutoff;
+}
 #endif

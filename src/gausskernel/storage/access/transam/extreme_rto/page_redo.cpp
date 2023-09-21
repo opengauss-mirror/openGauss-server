@@ -100,7 +100,7 @@
 namespace extreme_rto {
 static const int MAX_PARSE_BUFF_NUM = PAGE_WORK_QUEUE_SIZE * 10 * 3;
 static const int MAX_LOCAL_BUFF_NUM = PAGE_WORK_QUEUE_SIZE * 10 * 3;
-static const int MAX_CLEAR_SMGR_NUM = 100000;
+static const int MAX_CLEAR_SMGR_NUM = 50000;
 
 static const char *const PROCESS_TYPE_CMD_ARG = "--forkpageredo";
 static char g_AUXILIARY_TYPE_CMD_ARG[16] = {0};
@@ -117,6 +117,7 @@ RedoItem g_cleanInvalidPageMark;
 static const int PAGE_REDO_WORKER_ARG = 3;
 static const int REDO_SLEEP_50US = 50;
 static const int REDO_SLEEP_100US = 100;
+static const int EXRTO_STANDBY_READ_TIME_INTERVAL = 1 * 1000;
 
 static void ApplySinglePageRecord(RedoItem *);
 static void InitGlobals();
@@ -342,6 +343,23 @@ uint32 GetMyPageRedoWorkerIdWithLock()
     return g_redoWorker->id;
 }
 
+void redo_worker_release_all_locks()
+{
+    Assert(t_thrd.proc != NULL);
+ 
+    /* If waiting, get off wait queue (should only be needed after error) */
+    LockErrorCleanup();
+ 
+    /* Release standard locks, including session-level if aborting */
+    LockReleaseAll(DEFAULT_LOCKMETHOD, true);
+ 
+    /*
+     * User locks are not released by transaction end, so be sure to release
+     * them explicitly.
+     */
+    LockReleaseAll(USER_LOCKMETHOD, true);
+}
+
 /* Run from any worker thread. */
 PGPROC *GetPageRedoWorkerProc(PageRedoWorker *worker)
 {
@@ -391,6 +409,24 @@ void HandlePageRedoInterruptsImpl(uint64 clearRedoFdCountInc = 1)
 void HandlePageRedoInterrupts()
 {
     HandlePageRedoInterruptsImpl();
+}
+
+void clean_smgr(uint64 &clear_redo_fd_count)
+{
+    const uint64 clear_redo_fd_count_mask = 0x3FFFFF;
+    clear_redo_fd_count += 1;
+    if (clear_redo_fd_count > clear_redo_fd_count_mask && GetSMgrRelationHash() != NULL) {
+        clear_redo_fd_count = 0;
+        long hash_num = hash_get_num_entries(GetSMgrRelationHash());
+        if (hash_num >= MAX_CLEAR_SMGR_NUM) {
+            ereport(LOG,
+                (errmsg("smgr close all: clear_redo_fd_count:%lu, hash_num:%ld,clear_redo_fd_count_mask :%lu",
+                    clear_redo_fd_count,
+                    hash_num,
+                    clear_redo_fd_count_mask)));
+            smgrcloseall();
+        }
+    }
 }
 
 void ReferenceRedoItem(void *item)
@@ -444,7 +480,6 @@ void AddRecordReadBlocks(void *rec, uint32 readblocks)
 
 void AddRefRecord(void *rec)
 {
-    pg_memory_barrier();
 #ifndef EXTREME_RTO_DEBUG
     (void)pg_atomic_fetch_add_u32(&((XLogReaderState *)rec)->refcount, 1);
 #else
@@ -478,7 +513,6 @@ void AddRefRecord(void *rec)
 
 void SubRefRecord(void *rec)
 {
-    pg_memory_barrier();
     Assert(((XLogReaderState *)rec)->refcount != 0);
     uint32 relCount = pg_atomic_sub_fetch_u32(&((XLogReaderState *)rec)->refcount, 1);
 #ifdef EXTREME_RTO_DEBUG
@@ -961,6 +995,27 @@ static void WaitNextBarrier(XLogRecParseState *parseState)
     }
 }
 
+void redo_page_manager_do_cleanup_action(XLogRecParseState *parse_state)
+{
+    if (!IS_EXRTO_READ_OPT || !pm_state_is_hot_standby()) {
+        return;
+    }
+ 
+    RelFileNode tmp_node;
+    tmp_node.spcNode = parse_state->blockparse.blockhead.spcNode;
+    tmp_node.dbNode = parse_state->blockparse.blockhead.dbNode;
+    tmp_node.relNode = parse_state->blockparse.blockhead.relNode;
+    tmp_node.bucketNode = parse_state->blockparse.blockhead.bucketNode;
+    tmp_node.opt = parse_state->blockparse.blockhead.opt;
+    XLogRecPtr lsn = parse_state->blockparse.blockhead.end_ptr;
+    TransactionId removed_xid = parse_state->blockparse.extra_rec.clean_up_info.removed_xid;
+ 
+    LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+    UpdateCleanUpInfo(removed_xid, lsn);
+    LWLockRelease(ProcArrayLock);
+    ResolveRecoveryConflictWithSnapshot(removed_xid, tmp_node, lsn);
+}
+
 void PageManagerRedoParseState(XLogRecParseState *preState)
 {
     switch (preState->blockparse.blockhead.block_valid) {
@@ -1033,6 +1088,10 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             RedoPageManagerDistributeToAllOneBlock(preState);
             XLogBlockParseStateRelease(preState);
             break;
+        case BLOCK_DATA_CLEANUP_TYPE:
+            redo_page_manager_do_cleanup_action(preState);
+            XLogBlockParseStateRelease(preState);
+            break;
         default:
             XLogBlockParseStateRelease(preState);
             break;
@@ -1077,6 +1136,7 @@ bool PageManagerRedoDistributeItems(XLogRecParseState *record_block_state)
 void RedoPageManagerMain()
 {
     XLogRecParseState *record_block_state = NULL;
+    uint64 clear_redo_fd_count = 0;
 
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
     XLogParseBufferInitFunc(&(g_redoWorker->parseManager), MAX_PARSE_BUFF_NUM, &recordRefOperate,
@@ -1097,6 +1157,7 @@ void RedoPageManagerMain()
         SPSCBlockingQueuePop(g_redoWorker->queue);
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2]);
         RedoInterruptCallBack();
+        clean_smgr(clear_redo_fd_count);
         ADD_ABNORMAL_POSITION(5);
         GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
 
@@ -1467,6 +1528,7 @@ void RedoPageWorkerMain()
                                RedoInterruptCallBack);
     }
 
+    uint64 clear_redo_fd_count = 0;
     XLogRecParseState *redoblockstateHead = NULL;
     GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
     while ((redoblockstateHead = (XLogRecParseState *)SPSCBlockingQueueTop(g_redoWorker->queue)) !=
@@ -1594,6 +1656,7 @@ void RedoPageWorkerMain()
         }
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
         RedoInterruptCallBack();
+        clean_smgr(clear_redo_fd_count);
         CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2], g_redoWorker->timeCostList[TIME_COST_STEP_1]);
         ADD_ABNORMAL_POSITION(4);
     }
@@ -1660,8 +1723,14 @@ void PushToWorkerLsn(bool force)
         cur_recor_count = 0;
         SendLsnFowarder();
     } else {
-        if (cur_recor_count < max_record_count) {
-            return;
+        if (g_instance.attr.attr_storage.EnableHotStandby && pm_state_is_hot_standby()) {
+            if (!exceed_send_lsn_forworder_interval()) {
+                return;
+            }
+        } else {
+            if (cur_recor_count < max_record_count) {
+                return;
+            }
         }
 
         if (pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount) != 0) {
@@ -2592,6 +2661,9 @@ void ParallelRedoThreadMain()
 
     int retCode = RedoMainLoop();
     StandbyReleaseAllLocks();
+    if (g_redoWorker->role == REDO_TRXN_WORKER) {
+        redo_worker_release_all_locks();
+    }
     ResourceManagerStop();
     ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, role:%u, slotId:%u, retcode %u.", g_redoWorker->id,
                          g_redoWorker->role, g_redoWorker->slotId, retCode)));
@@ -3100,349 +3172,18 @@ void SeqCheckRemoteReadAndRepairPage()
     }
 }
 
-inline void invalid_msg_leak_warning(XLogRecPtr trxn_lsn)
+bool exceed_send_lsn_forworder_interval()
 {
-    if (t_thrd.page_redo_cxt.invalid_msg.valid) {
-        ereport(WARNING, (errmsg(EXRTOFORMAT("[exrto_generate_snapshot] not send invalid msg: %08X/%08X"),
-                                 (uint32)(trxn_lsn >> UINT64_HALF), (uint32)trxn_lsn)));
-    }
-}
+    TimestampTz last_time;
+    TimestampTz now_time;
 
-void exrto_generate_snapshot(XLogRecPtr trxn_lsn)
-{
-    if (!g_instance.attr.attr_storage.EnableHotStandby) {
-        return;
-    }
- 
-    ExrtoSnapshot exrto_snapshot = g_instance.comm_cxt.predo_cxt.exrto_snapshot;
-    /*
-     * do not generate the same snapshot repeatedly.
-     */
-    if (XLByteLE(trxn_lsn, exrto_snapshot->read_lsn)) {
-        invalid_msg_leak_warning(trxn_lsn);
-        return;
-    }
-
-    TransactionId xmin;
-    TransactionId xmax;
-    CommitSeqNo snapshot_csn;
- 
-    exrto_get_snapshot_data(xmin, xmax, snapshot_csn);
-    (void)LWLockAcquire(ExrtoSnapshotLock, LW_EXCLUSIVE);
-    exrto_snapshot->snapshot_csn = snapshot_csn;
-    exrto_snapshot->xmin = xmin;
-    exrto_snapshot->xmax = xmax;
-    exrto_snapshot->read_lsn = trxn_lsn;
-    send_delay_invalid_message();
-    LWLockRelease(ExrtoSnapshotLock);
-}
- 
-void exrto_read_snapshot(Snapshot snapshot)
-{
-    if ((!is_exrto_standby_read_worker()) || u_sess->proc_cxt.clientIsCMAgent || dummyStandbyMode) {
-        return;
-    }
-
-    ExrtoSnapshot exrto_snapshot = g_instance.comm_cxt.predo_cxt.exrto_snapshot;
-    (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
-    if (XLByteEQ(exrto_snapshot->read_lsn, 0)) {
-        LWLockRelease(ExrtoSnapshotLock);
-        ereport(ERROR, (errmsg("could not get a valid snapshot with extreme rto")));
-    }
-    snapshot->snapshotcsn = exrto_snapshot->snapshot_csn;
-    snapshot->xmin = exrto_snapshot->xmin;
-    snapshot->xmax = exrto_snapshot->xmax;
-    snapshot->read_lsn = exrto_snapshot->read_lsn;
-    LWLockRelease(ExrtoSnapshotLock);
-    if (!TransactionIdIsValid(t_thrd.pgxact->xmin) || TransactionIdPrecedes(snapshot->xmin, t_thrd.pgxact->xmin)) {
-        t_thrd.pgxact->xmin = snapshot->xmin;
-        u_sess->utils_cxt.TransactionXmin = snapshot->xmin;
-    }
-    t_thrd.proc->exrto_read_lsn = exrto_snapshot->read_lsn;
-    if (t_thrd.proc->exrto_min == 0 ||
-        XLByteLT(t_thrd.proc->exrto_min, t_thrd.proc->exrto_read_lsn)) {
-        t_thrd.proc->exrto_min = t_thrd.proc->exrto_read_lsn;
-    }
-
-    if (t_thrd.proc->exrto_gen_snap_time == 0) {
-        t_thrd.proc->exrto_gen_snap_time = GetCurrentTimestamp();
-    }
-    Assert(XLogRecPtrIsValid(t_thrd.proc->exrto_read_lsn));
-}
- 
-static inline uint64 get_force_recycle_pos(uint64 recycle_pos, uint64 insert_pos)
-{
-    const double force_recyle_ratio = 0.3; /* to be adjusted */
-    Assert(recycle_pos <= insert_pos);
-    return recycle_pos + (uint64)((insert_pos - recycle_pos) * force_recyle_ratio);
-}
- 
-XLogRecPtr calculate_force_recycle_lsn_per_worker(StandbyReadMetaInfo* meta_info)
-{
-    uint64 base_page_recycle_pos;
-    uint64 lsn_info_recycle_pos;
-    XLogRecPtr base_page_recycle_lsn = InvalidXLogRecPtr;
-    XLogRecPtr lsn_info_recycle_lsn = InvalidXLogRecPtr;
-    Buffer buffer;
-    Page page;
- 
-    /* for base page */
-    if (meta_info->base_page_recyle_position < meta_info->base_page_next_position) {
-        base_page_recycle_pos = get_force_recycle_pos(meta_info->base_page_recyle_position,
-            meta_info->base_page_next_position);
-        buffer = extreme_rto_standby_read::buffer_read_base_page(meta_info->batch_id, meta_info->redo_id,
-        base_page_recycle_pos, RBM_NORMAL);
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
-        base_page_recycle_lsn = PageGetLSN(BufferGetPage(buffer));
-        UnlockReleaseBuffer(buffer);
-    }
- 
-    /* for lsn info */
-    if (meta_info->lsn_table_recyle_position < meta_info->lsn_table_next_position) {
-        lsn_info_recycle_pos = get_force_recycle_pos(meta_info->lsn_table_recyle_position,
-            meta_info->lsn_table_next_position);
-        page = extreme_rto_standby_read::get_lsn_info_page(meta_info->batch_id, meta_info->redo_id,
-            lsn_info_recycle_pos, RBM_NORMAL, &buffer);
-        if (unlikely(page == NULL || buffer == InvalidBuffer)) {
-            ereport(PANIC,
-                     (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"),
-                              meta_info->batch_id, meta_info->redo_id, lsn_info_recycle_pos)));
-        }
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
-        extreme_rto_standby_read::LsnInfo lsn_info =
-            (extreme_rto_standby_read::LsnInfo)(page + extreme_rto_standby_read::LSN_INFO_HEAD_SIZE);
-        lsn_info_recycle_lsn = lsn_info->lsn[0];
-        UnlockReleaseBuffer(buffer);
-    }
- 
-    return rtl::max(base_page_recycle_lsn, lsn_info_recycle_lsn);
-}
- 
-void calculate_force_recycle_lsn(XLogRecPtr &recycle_lsn)
-{
-    XLogRecPtr recycle_lsn_per_worker;
-    uint32 worker_nums = g_dispatcher->allWorkersCnt;
-    PageRedoWorker** workers = g_dispatcher->allWorkers;
- 
-    for (uint32 i = 0; i < worker_nums; ++i) {
-        PageRedoWorker* page_redo_worker = workers[i];
-        if (page_redo_worker->role != REDO_PAGE_WORKER || (page_redo_worker->isUndoSpaceWorker)) {
-            continue;
-        }
-        recycle_lsn_per_worker = calculate_force_recycle_lsn_per_worker(&page_redo_worker->standby_read_meta_info);
-        if (XLByteLT(recycle_lsn, recycle_lsn_per_worker)) {
-            recycle_lsn = recycle_lsn_per_worker;
-        }
-    }
-    ereport(LOG,
-             (errmsg(EXRTOFORMAT("[exrto_recycle] try force recycle, recycle lsn: %08X/%08X"),
-                      (uint32)(recycle_lsn >> UINT64_HALF), (uint32)recycle_lsn)));
-}
- 
-static inline bool exceed_standby_max_query_time(TimestampTz start_time)
-{
-    if (start_time == 0) {
+    last_time = g_instance.comm_cxt.predo_cxt.exrto_send_lsn_forworder_time;
+    now_time = GetCurrentTimestamp();
+    if (!TimestampDifferenceExceeds(last_time, now_time, EXRTO_STANDBY_READ_TIME_INTERVAL)) {
         return false;
     }
-    return TimestampDifferenceExceeds(start_time, GetCurrentTimestamp(),
-        g_instance.attr.attr_storage.standby_max_query_time * MSECS_PER_SEC);
-}
- 
-/* 1. resolve recycle conflict with backends
- * 2. get oldest xmin and oldest readlsn of backends. */
-void proc_array_get_oldeset_readlsn(XLogRecPtr recycle_lsn, XLogRecPtr &oldest_lsn, TransactionId &oldest_xmin,
-                                    bool &conflict)
-{
-    ProcArrayStruct* proc_array = g_instance.proc_array_idx;
-    conflict = false;
- 
-    LWLockAcquire(ProcArrayLock, LW_SHARED);
-    for (int index = 0; index < proc_array->numProcs; index++) {
-        int pg_proc_no = proc_array->pgprocnos[index];
-        PGPROC* pg_proc = g_instance.proc_base_all_procs[pg_proc_no];
-        PGXACT* pg_xact = &g_instance.proc_base_all_xacts[pg_proc_no];
-        TransactionId pxmin = pg_xact->xmin;
-        XLogRecPtr read_lsn = pg_proc->exrto_min;
-        ereport(
-            DEBUG1,
-            (errmsg(EXRTOFORMAT("proc_array_get_oldeset_readlsn info, read_lsn: %08X/%08X ,xmin: %lu ,vacuum_flags: "
-                                "%hhu ,pid: %lu"),
-                    (uint32)(read_lsn >> UINT64_HALF), (uint32)read_lsn, pxmin, pg_xact->vacuumFlags, pg_proc->pid)));
-
-        if (pg_proc->pid == 0 || XLogRecPtrIsInvalid(read_lsn)) {
-            continue;
-        }
-
-        Assert(!(pg_xact->vacuumFlags & PROC_IN_VACUUM));
-        /*
-         * Backend is doing logical decoding which manages xmin
-         * separately, check below.
-         */
-        if (pg_xact->vacuumFlags & PROC_IN_LOGICAL_DECODING) {
-            continue;
-        }
- 
-         /* cancel query when its read_lsn < recycle_lsn or its runtime > standby_max_query_time */
-        if (XLByteLT(read_lsn, recycle_lsn) || exceed_standby_max_query_time(pg_proc->exrto_gen_snap_time)) {
-            pg_proc->recoveryConflictPending = true;
-            conflict = true;
-            if (pg_proc->pid != 0) {
-                /*
-                 * Kill the pid if it's still here. If not, that's what we
-                 * wanted so ignore any errors.
-                 */
-                (void)SendProcSignal(pg_proc->pid, PROCSIG_RECOVERY_CONFLICT_SNAPSHOT, pg_proc->backendId);
-                ereport(
-                    LOG,
-                    (errmsg(
-                        EXRTOFORMAT("read_lsn is less than recycle_lsn or query time exceed max_query_time while "
-                                    "get_oldeset_readlsn, read_lsn %lu, "
-                                    "recycle_lsn: %lu, exrto_gen_snap_time: %ld, current_time: %ld, thread id = %lu\n"),
-                        read_lsn, recycle_lsn, pg_proc->exrto_gen_snap_time, GetCurrentTimestamp(), pg_proc->pid)));
-                /*
-                 * Wait a little bit for it to die so that we avoid flooding
-                 * an unresponsive backend when system is heavily loaded.
-                 */
-                pg_usleep(5000L);
-            }
-            continue;
-        }
- 
-        if (XLogRecPtrIsInvalid(oldest_lsn) ||
-            (XLogRecPtrIsValid(read_lsn) && XLByteLT(read_lsn, oldest_lsn))) {
-            oldest_lsn = read_lsn;
-        }
- 
-        if (!TransactionIdIsValid(oldest_xmin) ||
-            (TransactionIdIsValid(pxmin) && TransactionIdFollows(oldest_xmin, pxmin))) {
-            oldest_xmin = pxmin;
-        }
-    }
-    LWLockRelease(ProcArrayLock);
-}
- 
-void proc_array_get_oldeset_xmin_for_undo(TransactionId &oldest_xmin)
-{
-    ProcArrayStruct* proc_array = g_instance.proc_array_idx;
- 
-    LWLockAcquire(ProcArrayLock, LW_SHARED);
-    for (int index = 0; index < proc_array->numProcs; index++) {
-        int pg_proc_no = proc_array->pgprocnos[index];
-        PGPROC* pg_proc = g_instance.proc_base_all_procs[pg_proc_no];
-        PGXACT* pg_xact = &g_instance.proc_base_all_xacts[pg_proc_no];
-        TransactionId pxmin = pg_xact->xmin;
- 
-        if (pg_proc->pid == 0 || !TransactionIdIsValid(pxmin)) {
-            continue;
-        }
- 
-        Assert(!(pg_xact->vacuumFlags & PROC_IN_VACUUM));
-        /*
-         * Backend is doing logical decoding which manages xmin
-         * separately, check below.
-         */
-        if (pg_xact->vacuumFlags & PROC_IN_LOGICAL_DECODING) {
-            continue;
-        }
-        if (!TransactionIdIsValid(oldest_xmin) ||
-            (TransactionIdIsValid(pxmin) && TransactionIdFollows(oldest_xmin, pxmin))) {
-            oldest_xmin = pxmin;
-        }
-    }
-    LWLockRelease(ProcArrayLock);
-}
- 
-XLogRecPtr exrto_calculate_recycle_position(bool force_recyle)
-{
-    Assert(t_thrd.role != PAGEREDO);
-    Assert(IS_EXRTO_READ);
- 
-    XLogRecPtr recycle_lsn = g_instance.comm_cxt.predo_cxt.global_recycle_lsn;
-    XLogRecPtr oldest_lsn = InvalidXLogRecPtr;
-    TransactionId oldest_xmin = InvalidTransactionId;
-    bool conflict = false;
-    const int max_check_times = 1000;
-    int check_times = 0;
- 
-    if (force_recyle) {
-        calculate_force_recycle_lsn(recycle_lsn);
-    }
-    ereport(DEBUG1, (errmsg(EXRTOFORMAT("time information of calculate recycle position, current_time: %ld, snapshot "
-                                        "read_lsn: %08X/%08X, gen_snaptime:%ld"),
-                            GetCurrentTimestamp(),
-                            (uint32)(g_instance.comm_cxt.predo_cxt.exrto_snapshot->read_lsn >> UINT64_HALF),
-                            (uint32)g_instance.comm_cxt.predo_cxt.exrto_snapshot->read_lsn,
-                            g_instance.comm_cxt.predo_cxt.exrto_snapshot->gen_snap_time)));
-
-    /*
-     * If there is no backend read threads, set read oldest lsn to snapshot lsn.
-     */
-    ExrtoSnapshot exrto_snapshot = NULL;
-    exrto_snapshot = g_instance.comm_cxt.predo_cxt.exrto_snapshot;
-    (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
-    if (XLByteEQ(exrto_snapshot->read_lsn, 0)) {
-        ereport(WARNING, (errmsg("could not get a valid snapshot with extreme rto")));
-    } else {
-        oldest_lsn = exrto_snapshot->read_lsn;
-        oldest_xmin = exrto_snapshot->xmin;
-    }
-    LWLockRelease(ExrtoSnapshotLock);
-    /* Loop checks to avoid conflicting queries that were not successfully canceled. */
-    do {
-        RedoInterruptCallBack();
-        proc_array_get_oldeset_readlsn(recycle_lsn, oldest_lsn, oldest_xmin, conflict);
-        check_times++;
-    } while (conflict && check_times < max_check_times);
- 
-    recycle_lsn = rtl::max(recycle_lsn, oldest_lsn);
-
-    ereport(
-        LOG,
-        (errmsg(
-            EXRTOFORMAT(
-                "[exrto_recycle] calculate recycle position, oldestlsn: %08X/%08X, snapshot read_lsn: %08X/%08X, try "
-                "recycle lsn: %08X/%08X"),
-            (uint32)(oldest_lsn >> UINT64_HALF), (uint32)oldest_lsn,
-            (uint32)(g_instance.comm_cxt.predo_cxt.exrto_snapshot->read_lsn >> UINT64_HALF),
-            (uint32)g_instance.comm_cxt.predo_cxt.exrto_snapshot->read_lsn,
-            (uint32)(recycle_lsn >> UINT64_HALF), (uint32)recycle_lsn)));
-
-    return recycle_lsn;
-}
-
-TransactionId exrto_calculate_recycle_xmin_for_undo()
-{
-    Assert(t_thrd.role != PAGEREDO);
-    Assert(IS_EXRTO_READ);
-    TransactionId oldest_xmin = InvalidTransactionId;
-    TransactionId snapshot_xmin = InvalidTransactionId;
-    proc_array_get_oldeset_xmin_for_undo(oldest_xmin);
-
-    /*
-     * If there is no backend read threads, set read oldest lsn to snapshot lsn.
-     */
-    if ((oldest_xmin == InvalidTransactionId) && (g_dispatcher != NULL)) {
-        ExrtoSnapshot exrto_snapshot = NULL;
-        exrto_snapshot = g_instance.comm_cxt.predo_cxt.exrto_snapshot;
-        (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
-        if (XLByteEQ(exrto_snapshot->xmin, InvalidTransactionId)) {
-            ereport(
-                WARNING,
-                (errmsg("exrto_calculate_recycle_xmin_for_undo: could not get a valid snapshot in exrto_snapshot")));
-        } else {
-            snapshot_xmin = exrto_snapshot->xmin;
-        }
-
-        LWLockRelease(ExrtoSnapshotLock);
-    }
-    ereport(DEBUG1, (errmodule(MOD_UNDO),
-                     errmsg(UNDOFORMAT("exrto_calculate_recycle_xmin_for_undo: oldest_xmin: %lu, snapshot_xmin: %lu."),
-                            oldest_xmin, snapshot_xmin)));
-
-    if (oldest_xmin == InvalidTransactionId) {
-        return snapshot_xmin;
-    }
-    return oldest_xmin;
+    g_instance.comm_cxt.predo_cxt.exrto_send_lsn_forworder_time = now_time;
+    return true;
 }
 
 }  // namespace extreme_rto

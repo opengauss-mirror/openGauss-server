@@ -183,7 +183,6 @@ struct PageRedoWorker {
     uint64 statWaitReplay;
     pg_atomic_uint32 readyStatus;
     MemoryContext oldCtx;
-    int bufferPinWaitBufId;
     RedoTimeCost timeCostList[TIME_COST_NUM];
     uint32 remoteReadPageNum;
     HTAB *badPageHashTbl;

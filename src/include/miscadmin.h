@@ -136,6 +136,7 @@ extern const uint32 SLOW_SQL_VERSION_NUM;
 extern const uint32 INDEX_HINT_VERSION_NUM;
 extern const uint32 CREATE_TABLE_AS_VERSION_NUM;
 extern const uint32 GB18030_2022_VERSION_NUM;
+extern const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

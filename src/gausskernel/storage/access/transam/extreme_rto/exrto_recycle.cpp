@@ -122,8 +122,11 @@ bool check_if_need_force_recycle()
         total_lsn_info_size += (meta_info.lsn_table_next_position - meta_info.lsn_table_recyle_position);
     }
 
-    if (total_base_page_size > g_instance.attr.attr_storage.max_standby_base_page_size * ratio ||
-        total_lsn_info_size > g_instance.attr.attr_storage.max_standby_lsn_info_size * ratio) {
+    /* the unit of max_standby_base_page_size and max_standby_lsn_info_size is KB */
+    uint64 max_standby_base_page_size = ((uint64)u_sess->attr.attr_storage.max_standby_base_page_size << 10);
+    uint64 max_standby_lsn_info_size = ((uint64)u_sess->attr.attr_storage.max_standby_lsn_info_size << 10);
+    if (total_base_page_size > max_standby_base_page_size * ratio ||
+        total_lsn_info_size > max_standby_lsn_info_size * ratio) {
         return true;
     }
 
@@ -145,6 +148,7 @@ void do_standby_read_recyle(XLogRecPtr recycle_lsn)
             XLByteLT(page_redo_worker->standby_read_meta_info.recycle_lsn_per_worker, min_recycle_lsn)) {
             min_recycle_lsn = page_redo_worker->standby_read_meta_info.recycle_lsn_per_worker;
         }
+        pg_usleep(1000); // sleep 1ms
     }
     if (XLByteLT(g_instance.comm_cxt.predo_cxt.global_recycle_lsn, min_recycle_lsn)) {
         pg_atomic_write_u64(&g_instance.comm_cxt.predo_cxt.global_recycle_lsn, min_recycle_lsn);

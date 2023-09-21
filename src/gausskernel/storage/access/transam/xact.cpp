@@ -7175,7 +7175,7 @@ void push_unlink_rel_to_hashtbl(ColFileNode *xnodes, int nrels)
 /*
  *	XLOG support routines
  */
-void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
+void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay_ddl)
 {
     ColMainFileNodesCreate();
 
@@ -7212,7 +7212,7 @@ void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels)
             /*
              * recycle exrto files when dropping table occurs.
              */
-            if (RecoveryInProgress() && IS_EXRTO_READ) {
+            if (!is_old_delay_ddl && RecoveryInProgress() && IS_EXRTO_READ) {
                 RelFileNode block_meta_file = relFileNode;
                 block_meta_file.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
                 extreme_rto_standby_read::remove_one_block_info_file(block_meta_file);

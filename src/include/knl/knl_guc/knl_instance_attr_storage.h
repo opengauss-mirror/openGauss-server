@@ -210,12 +210,11 @@ typedef struct knl_instance_attr_storage {
     int max_active_gtt;
 
     /* extreme-rto standby read */
-    int64 max_standby_base_page_size;
-    int64 max_standby_lsn_info_size;
     int base_page_saved_interval;
     double standby_force_recycle_ratio;
     int standby_recycle_interval;
     int standby_max_query_time;
+    bool enable_exrto_standby_read_opt;
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_save_confirmed_lsn;
 #endif

@@ -255,7 +255,21 @@ LsnInfoPosition create_base_page_info_node(StandbyReadMetaInfo *meta_info,
     base_page_info->base_page_position = base_page_pos;
  
     set_base_page_map_bit(page, offset);
- 
+    ereport(DEBUG1,
+        (errmsg("create_base_page_info_node, block is %u/%u/%u %d %u, batch_id: %u, redo_worker_id: %u"
+                "page lsn %lu, next lsn %lu, base page pos %lu, insert pos %lu",
+            buf_tag->rnode.spcNode,
+            buf_tag->rnode.dbNode,
+            buf_tag->rnode.relNode,
+            buf_tag->forkNum,
+            buf_tag->blockNum,
+            batch_id,
+            worker_id,
+            current_page_lsn,
+            next_lsn,
+            base_page_pos,
+            insert_pos)));
+
     standby_read_meta_page_set_lsn(page, next_lsn);
     MarkBufferDirty(buffer);
     UnlockReleaseBuffer(buffer);
@@ -497,11 +511,19 @@ void recycle_one_lsn_info_list(const BufferTag& buf_tag, LsnInfoPosition page_in
  
         /* retain a page version with page lsn less than recycle lsn */
         XLogRecPtr next_base_page_lsn = base_page_info->next_base_page_lsn;
-        if (XLogRecPtrIsInvalid(next_base_page_lsn) || XLByteLT(recycle_lsn, next_base_page_lsn)) {
-            UnlockReleaseBuffer(buffer);
-            break;
+        if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+            XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
+            if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
+                UnlockReleaseBuffer(buffer);
+                break;
+            }
+        } else {
+            if (XLogRecPtrIsInvalid(next_base_page_lsn) || XLByteLT(recycle_lsn, next_base_page_lsn)) {
+                UnlockReleaseBuffer(buffer);
+                break;
+            }
         }
- 
+
         base_page_info->lsn_info_node.flags &= ~LSN_INFO_NODE_VALID_FLAG;
         page_info_pos = base_page_info->base_page_list.next;
         MarkBufferDirty(buffer);
@@ -545,16 +567,26 @@ void invalid_base_page_list(StandbyReadMetaInfo *meta_info, Buffer buffer, uint3
     }
 }
 
-inline void update_recycle_lsn_per_worker(StandbyReadMetaInfo *meta_info, XLogRecPtr lsn)
+inline void update_recycle_lsn_per_worker(StandbyReadMetaInfo *meta_info, XLogRecPtr base_page_lsn,
+                                          XLogRecPtr next_base_page_lsn,
+                                          XLogRecPtr block_info_max_lsn = InvalidXLogRecPtr)
 {
-    Assert(XLogRecPtrIsValid(lsn));
+    Assert(XLogRecPtrIsValid(base_page_lsn));
     if (XLogRecPtrIsInvalid(meta_info->recycle_lsn_per_worker) ||
-        XLByteLT(meta_info->recycle_lsn_per_worker, lsn)) {
-        meta_info->recycle_lsn_per_worker = lsn;
+        XLByteLT(meta_info->recycle_lsn_per_worker, base_page_lsn)) {
+        meta_info->recycle_lsn_per_worker = base_page_lsn;
     }
-    ereport(LOG, (errmsg(EXRTOFORMAT(
-                  "[exrto_recycle] update recycle lsn per worker , batch_id: %u, redo_id: %u, recycle lsn: %08X/%08X"),
-                  meta_info->batch_id, meta_info->redo_id, (uint32)(lsn >> UINT64_HALF), (uint32)lsn)));
+    uint64 cur_base_page_recyle_segno = meta_info->base_page_recyle_position / EXRTO_BASE_PAGE_FILE_MAXSIZE;
+    uint64 cur_lsn_table_recyle_segno = meta_info->lsn_table_recyle_position / EXRTO_LSN_INFO_FILE_MAXSIZE;
+    ereport(LOG,
+            (errmsg(EXRTOFORMAT("[exrto_recycle] update recycle lsn per worker , batch_id: %u, redo_id: %u, recycle "
+                                "base_page_lsn: %08X/%08X, next_base_page_lsn: %08X/%08X, block_info_max_lsn: "
+                                "%08X/%08X, base page recycle segno: "
+                                "%lu, lsn info recycle segno: %lu"),
+                    meta_info->batch_id, meta_info->redo_id, (uint32)(base_page_lsn >> UINT64_HALF),
+                    (uint32)base_page_lsn, (uint32)(next_base_page_lsn >> UINT64_HALF), (uint32)next_base_page_lsn,
+                    (uint32)(block_info_max_lsn >> UINT64_HALF), (uint32)block_info_max_lsn, cur_base_page_recyle_segno,
+                    cur_lsn_table_recyle_segno)));
 }
 
 bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycle_lsn,
@@ -598,25 +630,35 @@ bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycl
         }
         XLogRecPtr next_base_page_lsn = base_page_info->next_base_page_lsn;
         *base_page_position = base_page_info->base_page_position;
-        if (XLogRecPtrIsValid(next_base_page_lsn) && XLByteLT(recycle_lsn, next_base_page_lsn)) {
-            update_recycle_lsn_per_worker(meta_info, base_page_lsn);
-            UnlockReleaseBuffer(buffer);
-            return false;
+
+        if (g_instance.attr.attr_storage.enable_exrto_standby_read_opt) {
+            XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
+            if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
+                update_recycle_lsn_per_worker(meta_info, base_page_lsn, next_base_page_lsn);
+                UnlockReleaseBuffer(buffer);
+                return false;
+            }
+        } else {
+            if (XLogRecPtrIsValid(next_base_page_lsn) && XLByteLT(recycle_lsn, next_base_page_lsn)) {
+                update_recycle_lsn_per_worker(meta_info, base_page_lsn, next_base_page_lsn);
+                UnlockReleaseBuffer(buffer);
+                return false;
+            }
         }
- 
+
         BufferTag buf_tag;
         INIT_BUFFERTAG(buf_tag, base_page_info->relfilenode, base_page_info->fork_num, base_page_info->block_num);
  
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         buffer_is_locked = false;
- 
+
+        XLogRecPtr block_info_max_lsn = InvalidXLogRecPtr;
         StandbyReadRecyleState stat =
-            recyle_block_info(buf_tag, cur_base_page_info_pos, next_base_page_lsn, recycle_lsn);
+            recyle_block_info(buf_tag, cur_base_page_info_pos, next_base_page_lsn, recycle_lsn, &block_info_max_lsn);
         if (stat == STANDBY_READ_RECLYE_ALL) {
             invalid_base_page_list(meta_info, buffer, offset);
         } else if (stat == STANDBY_READ_RECLYE_NONE) {
-            Assert(XLogRecPtrIsInvalid(next_base_page_lsn));
-            update_recycle_lsn_per_worker(meta_info, base_page_lsn);
+            update_recycle_lsn_per_worker(meta_info, base_page_lsn, next_base_page_lsn, block_info_max_lsn);
             ReleaseBuffer(buffer);
             return false;
         }
@@ -639,15 +681,22 @@ void standby_read_recyle_per_workers(StandbyReadMetaInfo *meta_info, XLogRecPtr 
     uint64 last_lsn_table_recyle_segno = meta_info->lsn_table_recyle_position / EXRTO_LSN_INFO_FILE_MAXSIZE;
     uint64 cur_base_page_recyle_segno, cur_lsn_table_recyle_segno;
 
-    while (meta_info->lsn_table_recyle_position + BLCKSZ < meta_info->lsn_table_next_position) {
+    uint64 recyled_page_len = 0;
+    const uint32 recyle_ratio = 32; // no need recyle so fast
+    while (meta_info->lsn_table_recyle_position + BLCKSZ * recyle_ratio < meta_info->lsn_table_next_position) {
         recycle_next_page = recycle_one_lsn_info_page(meta_info, recycle_lsn, &base_page_position);
         if (!recycle_next_page) {
             break;
         }
         /* update recycle position */
         meta_info->lsn_table_recyle_position += BLCKSZ;
+        recyled_page_len += BLCKSZ;
         Assert(meta_info->lsn_table_recyle_position % BLCKSZ == 0);
-        RedoInterruptCallBack();
+        if (recyled_page_len >= EXRTO_LSN_INFO_FILE_MAXSIZE) {
+            RedoInterruptCallBack();
+            pg_usleep(100); // sleep 0.1ms
+            recyled_page_len = 0;
+        }
     }
  
     meta_info->base_page_recyle_position = base_page_position;
@@ -668,4 +717,83 @@ void standby_read_recyle_per_workers(StandbyReadMetaInfo *meta_info, XLogRecPtr 
     }
 }
 
+LsnInfoPosition get_nearest_base_page_pos(
+    const BufferTag &buf_tag, const LsnInfoDoubleList &lsn_info_list, XLogRecPtr read_lsn)
+{
+    Buffer buffer;
+
+    XLogRecPtr page_lsn = InvalidXLogRecPtr;
+    LsnInfoPosition base_page_pos = LSN_INFO_LIST_HEAD;
+    uint32 batch_id;
+    uint32 worker_id;
+
+    /* get batch id and page redo worker id */
+    extreme_rto::RedoItemTag redo_item_tag;
+    INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
+    /* batch id and worker id start from 1 when reading a page */
+    batch_id = extreme_rto::GetSlotId(buf_tag.rnode, 0, 0, (uint32)extreme_rto::get_batch_redo_num()) + 1;
+    worker_id =
+        extreme_rto::GetWorkerId(&redo_item_tag, (uint32)extreme_rto::get_page_redo_worker_num_per_manager()) + 1;
+    LsnInfoPosition latest_lsn_base_page_pos = lsn_info_list.prev;
+
+    /* Find the base page with the smallest lsn and greater than read lsn from tail to head */
+    do {
+        /* reach the end of the list */
+        if (INFO_POSITION_IS_INVALID(latest_lsn_base_page_pos)) {
+            ereport(DEBUG1, (errmsg("can not find base page, block is %u/%u/%u %d %u, batch_id: %u, redo_worker_id: %u",
+                                    buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                                    buf_tag.blockNum, batch_id, worker_id)));
+            break;
+        }
+        buffer = InvalidBuffer;
+        Page page = get_lsn_info_page(batch_id, worker_id, latest_lsn_base_page_pos, RBM_NORMAL, &buffer);
+        if (page == NULL || buffer == InvalidBuffer) {
+            ereport(ERROR, (errmsg(EXRTOFORMAT("get_nearest_base_page_pos failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                                   batch_id, worker_id, latest_lsn_base_page_pos)));
+        }
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+
+        uint32 offset = lsn_info_postion_to_offset(latest_lsn_base_page_pos);
+        BasePageInfo base_page_info = (BasePageInfo)(page + offset);
+
+        Assert(is_base_page_type(base_page_info->lsn_info_node.type));
+        if (!is_base_page_type(base_page_info->lsn_info_node.type)) {
+            UnlockReleaseBuffer(buffer);
+            ereport(
+                ERROR,
+                (errmsg(EXRTOFORMAT("get_nearest_base_page_pos failed, not base page type, block is %u/%u/%u %d %u, "
+                                    "batch_id: %u, redo_id: %u, pos: %lu"),
+                        buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.forkNum,
+                        buf_tag.blockNum, batch_id, worker_id, latest_lsn_base_page_pos)));
+        }
+
+        UnlockReleaseBuffer(buffer);
+        page_lsn = base_page_info->lsn_info_node.lsn[0];
+        LsnInfoPosition prev_lsn_base_page_pos = base_page_info->base_page_list.prev;
+
+        if (XLByteLT(page_lsn, read_lsn)) {
+            break;
+        }
+
+        /* the base page's lsn >= read_lsn */
+        base_page_pos = base_page_info->base_page_position;
+
+        // the last base page info
+        if (XLByteEQ(lsn_info_list.next, latest_lsn_base_page_pos)) {
+            break;
+        }
+ 
+        latest_lsn_base_page_pos = prev_lsn_base_page_pos;
+    } while (true);
+
+    if (page_lsn == InvalidXLogRecPtr || base_page_pos == LSN_INFO_LIST_HEAD) {
+        ereport(DEBUG1, (errmsg(EXRTOFORMAT("get_nearest_base_page_pos failed, block is %u/%u/%u/%hd/%hu %d %u, "
+                                            "batch_id: %u, redo_id: %u, pos: %lu, page_lsn: %lu"),
+                                buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode,
+                                buf_tag.rnode.bucketNode, buf_tag.rnode.opt, buf_tag.forkNum, buf_tag.blockNum,
+                                batch_id, worker_id, latest_lsn_base_page_pos, page_lsn)));
+    }
+
+    return base_page_pos;
+}
 }  // namespace extreme_rto_standby_read

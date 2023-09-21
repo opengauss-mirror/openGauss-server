@@ -565,6 +565,6 @@ extern void BeginTxnForAutoCommitOff();
 extern void SetTxnInfoForSSLibpqsw(TransactionId xid, CommandId cid);
 extern void ClearTxnInfoForSSLibpqsw();
 extern bool IsTransactionInProgressState();
-extern void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels);
+extern void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay_ddl = false);
 void xact_redo_log_drop_segs(_in_ ColFileNode *xnodes, _in_ int nrels, XLogRecPtr lsn);
 #endif /* XACT_H */

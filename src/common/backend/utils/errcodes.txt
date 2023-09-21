@@ -630,3 +630,6 @@ Section: Class SE - Security Error
 42714    E    ERRCODE_DUPLICATE_POLICY                                        duplicate_policy
 42715    E    ERRCODE_DUPLICATE_LABEL                                         duplicate_label
 SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       invalid_audit_log
+
+Section: Class SR - Uncorrected Error & warning
+SR001    E    ERRCODE_SR_RECOVERY_CONFLICT                                    recovery_conflict

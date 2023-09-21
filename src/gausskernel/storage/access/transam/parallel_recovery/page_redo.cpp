@@ -190,7 +190,6 @@ static PageRedoWorker *CreateWorker(uint32 id)
     worker->statWaitReach = 0;
     worker->statWaitReplay = 0;
     worker->oldCtx = NULL;
-    worker->bufferPinWaitBufId = -1;
     worker->remoteReadPageNum = 0;
     
     worker->badPageHashTbl = BadBlockHashTblCreate();

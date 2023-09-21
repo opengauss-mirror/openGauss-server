@@ -75,12 +75,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92912;
+const uint32 GRAND_VERSION_NUM = 92913;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION = 92913;
 const uint32 PAGE_DIST_VERSION_NUM = 92912;
 const uint32 NODE_REFORM_INFO_VERSION_NUM = 92911;
 const uint32 GB18030_2022_VERSION_NUM = 92908;

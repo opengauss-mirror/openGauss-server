@@ -1227,7 +1227,6 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-
         {{"enable_time_report",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -1247,6 +1246,17 @@ static void InitStorageConfigureNamesBool()
             gettext_noop("Enable batch dispatch for parallel reovery"),
             NULL},
             &g_instance.attr.attr_storage.enable_batch_dispatch,
+            true,
+            NULL,
+            NULL,
+            NULL},
+        {{"exrto_standby_read_opt",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            REPLICATION_STANDBY,
+            gettext_noop("Enable performance optimization of extreme-rto standby read."),
+            NULL},
+            &g_instance.attr.attr_storage.enable_exrto_standby_read_opt,
             true,
             NULL,
             NULL,
@@ -4101,28 +4111,30 @@ static void InitStorageConfigureNamesInt64()
             NULL},
 #ifndef ENABLE_LITE_MODE            
         {{"max_standby_base_page_size",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             NODE_ALL,
             RESOURCES_RECOVERY,
             gettext_noop("Sets the max size of base page files on standby"),
-            NULL},
-            &g_instance.attr.attr_storage.max_standby_base_page_size,
-            INT64CONST(0x4000000000),  /* 256GB */
-            INT64CONST(0x40000000),  /* 1GB */
-            INT64CONST(0x7FFFFFFFFFFFFFF),
+            NULL,
+            GUC_UNIT_KB},
+            &u_sess->attr.attr_storage.max_standby_base_page_size,
+            268435456,  /* 256GB */
+            1048576,  /* 1GB */
+            562949953421311,
             NULL,
             NULL,
             NULL},
         {{"max_standby_lsn_info_size",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             NODE_ALL,
             RESOURCES_RECOVERY,
             gettext_noop("Sets the max size of lsn info files on standby"),
-            NULL},
-            &g_instance.attr.attr_storage.max_standby_lsn_info_size,
-            INT64CONST(0x4000000000),  /* 256GB */
-            INT64CONST(0x40000000),  /* 1GB */
-            INT64CONST(0x7FFFFFFFFFFFFFF),
+            NULL,
+            GUC_UNIT_KB},
+            &u_sess->attr.attr_storage.max_standby_lsn_info_size,
+            268435456,  /* 256GB */
+            1048576,  /* 1GB */
+            562949953421311,
             NULL,
             NULL,
             NULL},

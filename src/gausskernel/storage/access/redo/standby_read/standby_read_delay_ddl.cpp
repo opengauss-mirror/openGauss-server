@@ -29,6 +29,9 @@
 #include "access/extreme_rto/standby_read/block_info_meta.h"
 #include "access/multi_redo_api.h"
 #include "commands/dbcommands.h"
+#include "access/slru.h"
+#include "access/twophase.h"
+#include "storage/procarray.h"
 
 #define DELAY_DDL_FILE_DIR "delay_ddl"
 #define DELAY_DDL_FILE_NAME "delay_ddl/delay_delete_info_file"
@@ -36,8 +39,11 @@
 typedef enum {
     DROP_DB_TYPE = 1,
     DROP_TABLE_TYPE,
+    TRUNCATE_CLOG,
 } DropDdlType;
 
+#define ClogCtl(n) (&t_thrd.shemem_ptr_cxt.ClogCtl[CBufHashPartition(n)])
+ 
 const static uint32 MAX_NUM_PER_FILE = 0x10000;
 
 typedef struct {
@@ -45,7 +51,10 @@ typedef struct {
     uint8 len;
     uint16 resvd1;
     uint32 resvd2;
-    ColFileNode node_info;
+    union {
+        ColFileNode file_info;
+        int64 pageno;
+    } node_info;
     XLogRecPtr lsn;
     pg_crc32 crc;
 } DelayDdlInfo;
@@ -174,8 +183,8 @@ void update_delay_ddl_db(Oid db_id, Oid tablespace_id, XLogRecPtr lsn)
         .resvd2 = 0,
     };
 
-    tmp_info.node_info.filenode.dbNode = db_id;
-    tmp_info.node_info.filenode.spcNode = tablespace_id;
+    tmp_info.node_info.file_info.filenode.dbNode  = db_id;
+    tmp_info.node_info.file_info.filenode.spcNode  = tablespace_id;
     tmp_info.lsn = lsn;
     INIT_CRC32C(tmp_info.crc);
     COMP_CRC32C(tmp_info.crc, (char*)&tmp_info, offsetof(DelayDdlInfo, crc));
@@ -195,7 +204,7 @@ void update_delay_ddl_files(ColFileNode* xnodes, int nrels, XLogRecPtr lsn)
         info_list[i].len = sizeof(DelayDdlInfo);
         info_list[i].resvd1 = 0;
         info_list[i].resvd2 = 0;
-        info_list[i].node_info = xnodes[i];
+        info_list[i].node_info.file_info = xnodes[i];
         info_list[i].lsn = lsn;
         INIT_CRC32C(info_list[i].crc);
         COMP_CRC32C(info_list[i].crc, (char*)&info_list[i], offsetof(DelayDdlInfo, crc));
@@ -236,7 +245,63 @@ void update_delay_ddl_files(ColFileNode* xnodes, int nrels, XLogRecPtr lsn)
     exit_state(&stat->insert_stat);
 }
 
-void do_delay_ddl(DelayDdlInfo* info)
+void update_delay_ddl_file_truncate_clog(XLogRecPtr lsn, int64 pageno)
+{
+    StandbyReadDelayDdlState *stat = &g_instance.comm_cxt.predo_cxt.standby_read_delay_ddl_stat;
+    enter_state(&stat->insert_stat);
+    uint64 insert_start = pg_atomic_read_u64(&stat->next_index_can_insert);
+ 
+    char path[MAXPGPATH];
+    errno_t errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, DELAY_DDL_FILE_NAME "_%08X_%lX",
+        t_thrd.shemem_ptr_cxt.ControlFile->timeline, insert_start / MAX_NUM_PER_FILE);
+    securec_check_ss(errorno, "", "");
+ 
+    off_t off_set = (off_t)(insert_start % MAX_NUM_PER_FILE * sizeof(DelayDdlInfo));
+ 
+    DelayDdlInfo truncate_clog_info = {0};
+    truncate_clog_info.type = TRUNCATE_CLOG;
+    truncate_clog_info.len = sizeof(DelayDdlInfo);
+    truncate_clog_info.node_info.pageno = pageno;
+    truncate_clog_info.lsn = lsn;
+    INIT_CRC32C(truncate_clog_info.crc);
+    COMP_CRC32C(truncate_clog_info.crc, (char*)&truncate_clog_info, offsetof(DelayDdlInfo, crc));
+    FIN_CRC32C(truncate_clog_info.crc);
+ 
+    if (write_delay_ddl_info(path, &truncate_clog_info, sizeof(DelayDdlInfo), off_set)) {
+        pg_atomic_write_u64(&stat->next_index_can_insert, insert_start + 1);
+    }
+    exit_state(&stat->insert_stat);
+}
+
+void clog_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid, XLogRecPtr lsn)
+{
+    const int max_check_times = 1000;
+    int check_times = 0;
+    bool conflict = true;
+    bool reach_max_check_times = false;
+    while (conflict && check_times < max_check_times) {
+        RedoInterruptCallBack();
+        check_times++;
+        reach_max_check_times = (check_times == max_check_times);
+        conflict = proc_array_cancel_conflicting_proc(latest_removed_xid, lsn, reach_max_check_times);
+    }
+}
+
+void do_truncate_clog(int64 pageno)
+{
+    ClogCtl(pageno)->shared->latest_page_number = pageno;
+
+    TransactionId truncate_xid = (TransactionId)PAGE_TO_TRANSACTION_ID(pageno);
+    clog_truncate_cancel_conflicting_proc(truncate_xid, InvalidXLogRecPtr);
+    if (TransactionIdPrecedes(g_instance.undo_cxt.hotStandbyRecycleXid, truncate_xid)) {
+        pg_atomic_write_u64(&g_instance.undo_cxt.hotStandbyRecycleXid, truncate_xid);
+    }
+
+    SimpleLruTruncate(ClogCtl(0), pageno, NUM_CLOG_PARTITIONS);
+    DeleteObsoleteTwoPhaseFile(pageno);
+}
+
+void do_delay_ddl(DelayDdlInfo *info, bool is_old_delay_ddl = false)
 {
     pg_crc32c crc_check;
     INIT_CRC32C(crc_check);
@@ -246,21 +311,45 @@ void do_delay_ddl(DelayDdlInfo* info)
     if (!EQ_CRC32C(crc_check, info->crc)) {
         ereport(WARNING, (errcode_for_file_access(),
             errmsg("delay ddl ,crc(%u:%u) check error, maybe is type:%u, info %u/%u/%u lsn:%lu", crc_check, info->crc,
-            (uint32)info->type, info->node_info.filenode.spcNode, info->node_info.filenode.dbNode,
-            info->node_info.filenode.relNode, info->lsn)));
+            (uint32)info->type, info->node_info.file_info.filenode.spcNode, info->node_info.file_info.filenode.dbNode,
+            info->node_info.file_info.filenode.relNode, info->lsn)));
         return;
     }
 
     if (info->type == DROP_TABLE_TYPE) {
-        unlink_relfiles(&info->node_info, 1);
-        xact_redo_log_drop_segs(&info->node_info, 1, info->lsn);
+        ereport(DEBUG2,
+            (errmodule(MOD_STANDBY_READ),
+                errmsg("delay ddl for table, type:%u, info %u/%u/%u lsn:%lu",
+                    (uint32)info->type,
+                    info->node_info.file_info.filenode.spcNode,
+                    info->node_info.file_info.filenode.dbNode,
+                    info->node_info.file_info.filenode.relNode,
+                    info->lsn)));
+        unlink_relfiles(&info->node_info.file_info, 1, is_old_delay_ddl);
+        xact_redo_log_drop_segs(&info->node_info.file_info, 1, info->lsn);
     } else if (info->type == DROP_DB_TYPE) {
-        do_db_drop(info->node_info.filenode.dbNode, info->node_info.filenode.spcNode);
+        ereport(DEBUG2,
+            (errmodule(MOD_STANDBY_READ),
+                errmsg("delay ddl for database, type:%u, info %u/%u lsn:%lu",
+                    (uint32)info->type,
+                    info->node_info.file_info.filenode.spcNode,
+                    info->node_info.file_info.filenode.dbNode,
+                    info->lsn)));
+        do_db_drop(info->node_info.file_info.filenode.dbNode, info->node_info.file_info.filenode.spcNode);
+    } else if (info->type == TRUNCATE_CLOG) {
+        ereport(LOG,
+            (errmodule(MOD_STANDBY_READ), errmsg("delay ddl for truncate clog, pageno: %ld", info->node_info.pageno)));
+        UpdateMinRecoveryPoint(info->lsn, false);
+        do_truncate_clog(info->node_info.pageno);
     } else {
-        ereport(WARNING, (errcode_for_file_access(),
-            errmsg("delay ddl ,type error, maybe is type:%u, info %u/%u/%u lsn:%lu", (uint32)info->type,
-            info->node_info.filenode.spcNode, info->node_info.filenode.dbNode, info->node_info.filenode.relNode,
-            info->lsn)));
+        ereport(WARNING,
+            (errcode_for_file_access(),
+                errmsg("delay ddl ,type error, maybe is type:%u, info %u/%u/%u lsn:%lu",
+                    (uint32)info->type,
+                    info->node_info.file_info.filenode.spcNode,
+                    info->node_info.file_info.filenode.dbNode,
+                    info->node_info.file_info.filenode.relNode,
+                    info->lsn)));
     }
 }
 
@@ -293,6 +382,7 @@ void delete_by_lsn(XLogRecPtr lsn)
 
         int fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
         if (fd < 0) {
+            exit_state(&stat->delete_stat);
             return;
         }
         int count = read_delay_ddl_info(fd, info_list, cur_deleted * sizeof(DelayDdlInfo), (off_t)offset);
@@ -326,6 +416,7 @@ void delete_by_lsn(XLogRecPtr lsn)
         deleted_total += cur_deleted;
         if (next_delete % MAX_NUM_PER_FILE == 0) {
             (void)unlink(path);
+            ereport(LOG, (errmsg("delete delay ddl file end [%s:%d:%s]", __FUNCTION__, __LINE__, path)));
         }
         RedoInterruptCallBack();
     }
@@ -341,6 +432,8 @@ void delete_by_table_space(Oid tablespace_id)
     enter_state(&stat->delete_stat);
     uint64 next_delete = pg_atomic_read_u64(&stat->next_index_need_unlink);
     uint64 next_insert = pg_atomic_read_u64(&stat->next_index_can_insert);
+
+    ereport(LOG, (errmsg("delete_by_table_space start")));
 
     DelayDdlInfo* info_list = (DelayDdlInfo*)palloc0(sizeof(DelayDdlInfo) * MAX_NUM_PER_FILE);
     while (next_delete < next_insert) {
@@ -363,6 +456,7 @@ void delete_by_table_space(Oid tablespace_id)
         if (fd < 0) {
             ereport(WARNING,
                 (errmsg("delete_by_table_space: file %s could not open:%m", path)));
+            exit_state(&stat->delete_stat);
             return;
         }
 
@@ -370,6 +464,7 @@ void delete_by_table_space(Oid tablespace_id)
         if (count <= 0) {
             ereport(WARNING,
                 (errmsg("delete_by_table_space: file %s nothing  deleted", path)));
+            exit_state(&stat->delete_stat);
             return;
         }
         close(fd);
@@ -384,7 +479,7 @@ void delete_by_table_space(Oid tablespace_id)
         }
 
         for (uint32 i = 0; i < copys; ++i) {
-            if (info_list[i].node_info.filenode.spcNode == tablespace_id) {
+            if (info_list[i].node_info.file_info.filenode.spcNode == tablespace_id) {
                 do_delay_ddl(&info_list[i]);
             }
             RedoInterruptCallBack();
@@ -394,6 +489,7 @@ void delete_by_table_space(Oid tablespace_id)
     }
     pfree(info_list);
     exit_state(&stat->delete_stat);
+    ereport(LOG, (errmsg("delete_by_table_space end")));
 }
 
 void do_all_old_delay_ddl()
@@ -435,6 +531,7 @@ void do_all_old_delay_ddl()
         }
 
         (void)unlink(path);
+        ereport(LOG, (errmsg("delete delay ddl file end [%s:%d:%s]", __FUNCTION__, __LINE__, path)));
         pfree(info_list);
         RedoInterruptCallBack();
     }

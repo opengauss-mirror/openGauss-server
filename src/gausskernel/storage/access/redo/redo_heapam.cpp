@@ -991,7 +991,7 @@ static XLogRecParseState *HeapXlogBaseShiftParseBlock(XLogReaderState *record, u
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HEAP_BASESHIFT_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, HEAP_BASESHIFT_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -1018,7 +1018,7 @@ static XLogRecParseState *HeapXlogLockParseBlock(XLogReaderState *record, uint32
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HEAP_LOCK_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, HEAP_LOCK_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     return recordstatehead;
 }
@@ -1080,37 +1080,13 @@ XLogRecParseState *HeapRedoParseToBlock(XLogReaderState *record, uint32 *blocknu
 static XLogRecParseState *HeapXlogFreezeParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState *recordstatehead = NULL;
-    XLogRecParseState *blockstate = NULL;
 
     *blocknum = 1;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HEAP_FREEZE_ORIG_BLOCK_NUM, recordstatehead);
-
-    /*
-     * In Hot Standby mode, ensure that there's no queries running which still
-     * consider the frozen xids as running.
-     */
-    if (g_supportHotStandby) {
-        (*blocknum)++;
-        /* need notify hot standby */
-        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-        if (blockstate == NULL) {
-            return NULL;
-        }
-        RelFileNode rnode;
-        xl_heap_freeze *xlrec = (xl_heap_freeze *)XLogRecGetData(record);
-        TransactionId cutoff_xid = xlrec->cutoff_xid;
-
-        XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
-
-        RelFileNodeForkNum filenode =
-            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, blockstate);
-        XLogRecSetInvalidMsgState(&blockstate->blockparse.extra_rec.blockinvalidmsg, cutoff_xid);
-    }
+    XLogRecSetBlockDataState(record, HEAP_FREEZE_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     return recordstatehead;
 }
@@ -1118,105 +1094,52 @@ static XLogRecParseState *HeapXlogFreezeParseBlock(XLogReaderState *record, uint
 static XLogRecParseState *HeapXlogInvalidParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     *blocknum = 1;
-    XLogRecParseState *blockstate = NULL;
     XLogRecParseState *recordstatehead = NULL;
 
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HEAP_FREEZE_ORIG_BLOCK_NUM, recordstatehead);
-
-    /*
-     * In Hot Standby mode, ensure that there's no queries running which still consider the
-     * invalid xids as running.
-     */
-    if (g_supportHotStandby) {
-        (*blocknum)++;
-        /* need notify hot standby */
-        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-        if (blockstate == NULL) {
-            return NULL;
-        }
-        /* get cutoff xid */
-        xl_heap_invalid *xlrecInvalid = (xl_heap_invalid *)XLogRecGetData(record);
-        TransactionId cutoff_xid = xlrecInvalid->cutoff_xid;
-        RelFileNode rnode;
-
-        XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
-
-        RelFileNodeForkNum filenode =
-            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, blockstate);
-        XLogRecSetInvalidMsgState(&blockstate->blockparse.extra_rec.blockinvalidmsg, cutoff_xid);
-    }
+    XLogRecSetBlockDataState(record, HEAP_FREEZE_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     return recordstatehead;
 }
 
 static XLogRecParseState *HeapXlogCleanParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
-    xl_heap_clean *xlrec = (xl_heap_clean *)XLogRecGetData(record);
     XLogRecParseState *recordstatehead = NULL;
-    XLogRecParseState *blockstate = NULL;
 
     *blocknum = 1;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HEAP_CLEAN_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, HEAP_CLEAN_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
-    /*
-     * We're about to remove tuples. In Hot Standby mode, ensure that there's
-     * no queries running for which the removed tuples are still visible.
-     *
-     * Not all HEAP2_CLEAN records remove tuples with xids, so we only want to
-     * conflict on the records that cause MVCC failures for user queries. If
-     * latestRemovedXid is invalid, skip conflict processing.
-     */
-    if (g_supportHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid)) {
-        (*blocknum)++;
-        /* need notify hot standby */
-        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-        if (blockstate == NULL) {
-            return NULL;
-        }
-        RelFileNode rnode;
-        XLogRecGetBlockTag(record, HEAP_CLEAN_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
-
-        RelFileNodeForkNum filenode =
-            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, blockstate);
-        XLogRecSetInvalidMsgState(&blockstate->blockparse.extra_rec.blockinvalidmsg, xlrec->latestRemovedXid);
-    }
     return recordstatehead;
 }
 
 static XLogRecParseState *HeapXlogCleanupInfoParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState *recordstatehead = NULL;
+    RelFileNodeOld *rnode = NULL;
+    ForkNumber forknum = MAIN_FORKNUM;
+    BlockNumber blkno = InvalidBlockNumber;
 
-    /* Backup blocks are not used in cleanup_info records */
-    Assert(!XLogRecHasAnyBlockRefs(record));
+    (*blocknum)++;
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
 
-    *blocknum = 0;
-    if (g_supportHotStandby) {
-        (*blocknum)++;
-        XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-        if (recordstatehead == NULL) {
-            return NULL;
-        }
+    xl_heap_cleanup_info *xlrec = (xl_heap_cleanup_info *)XLogRecGetData(record);
+    rnode = &(xlrec->node);
+    forknum = MAIN_FORKNUM;
+    RelFileNode tmp_node;
+    RelFileNodeCopy(tmp_node, *rnode, (int2)XLogRecGetBucketId(record));
+    tmp_node.opt = 0;
+    RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&tmp_node, InvalidBackendId, forknum, blkno);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_CLEANUP_TYPE, filenode, recordstatehead);
 
-        xl_heap_cleanup_info *xlrec = (xl_heap_cleanup_info *)XLogRecGetData(record);
-        RelFileNode rnode;
-        RelFileNodeCopy(rnode, xlrec->node, XLogRecGetBucketId(record));
+    wal_rec_set_clean_up_info_state(&(recordstatehead->blockparse.extra_rec.clean_up_info), xlrec->latestRemovedXid);
 
-        RelFileNodeForkNum filenode =
-            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, recordstatehead);
-        XLogRecSetInvalidMsgState(&recordstatehead->blockparse.extra_rec.blockinvalidmsg, xlrec->latestRemovedXid);
-    }
     return recordstatehead;
 }
 
@@ -1230,7 +1153,7 @@ static XLogRecParseState *HeapXlogVisibleParseBlock(XLogReaderState *record, uin
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HEAP_VISIBLE_VM_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, HEAP_VISIBLE_VM_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     if (XLogRecHasBlockRef(record, HEAP_VISIBLE_DATA_BLOCK_NUM)) {
         (*blocknum)++;
@@ -1238,26 +1161,9 @@ static XLogRecParseState *HeapXlogVisibleParseBlock(XLogReaderState *record, uin
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, HEAP_VISIBLE_DATA_BLOCK_NUM, blockstate);
+        XLogRecSetBlockDataState(record, HEAP_VISIBLE_DATA_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
     }
-
-    if (g_supportHotStandby) {
-        (*blocknum)++;
-        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-        if (blockstate == NULL) {
-            return NULL;
-        }
-        RelFileNode rnode;
-        xl_heap_visible *xlrec = (xl_heap_visible *)XLogRecGetData(record);
-
-        XLogRecGetBlockTag(record, HEAP_VISIBLE_VM_BLOCK_NUM, &rnode, NULL, NULL);
-
-        RelFileNodeForkNum filenode =
-            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, blockstate);
-        XLogRecSetInvalidMsgState(&blockstate->blockparse.extra_rec.blockinvalidmsg, xlrec->cutoff_xid);
-    }
-
+    
     return recordstatehead;
 }
 

@@ -1131,6 +1131,7 @@ static void KnlTUndorecyclerInit(knl_t_undorecycler_context* undorecyclerCxt)
 {
     undorecyclerCxt->got_SIGHUP = false;
     undorecyclerCxt->shutdown_requested = false;
+    undorecyclerCxt->is_recovery_in_progress = false;
 }
 
 static void KnlTUstoreInit(knl_u_ustore_context *ustoreCxt)

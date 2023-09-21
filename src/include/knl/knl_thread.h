@@ -1556,6 +1556,7 @@ typedef struct knl_t_undorecycler_context {
     /* Flags set by signal handlers */
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
+    bool is_recovery_in_progress;
 } knl_t_undorecycler_context;
 
 typedef struct knl_t_rollback_requests_context {
