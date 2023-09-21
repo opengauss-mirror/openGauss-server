@@ -557,7 +557,7 @@ function decompress()
         kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
         if [ "${kernel}" = "Euleros" ]
         then
-            kernel="Euler"
+            kernel="openEuler"
         fi
     elif [ -f "/etc/openEuler-release" ]
     then
