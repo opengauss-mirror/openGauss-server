@@ -687,7 +687,6 @@ extern bool RecoveryInProgress(void);
 extern bool HotStandbyActive(void);
 extern bool HotStandbyActiveInReplay(void);
 extern bool XLogInsertAllowed(void);
-extern bool SSXLogInsertAllowed(void);
 extern bool SSModifySharedLunAllowed(void);
 extern void GetXLogReceiptTime(TimestampTz* rtime, bool* fromStream);
 extern XLogRecPtr GetXLogReplayRecPtr(TimeLineID* targetTLI, XLogRecPtr* ReplayReadPtr = NULL);
