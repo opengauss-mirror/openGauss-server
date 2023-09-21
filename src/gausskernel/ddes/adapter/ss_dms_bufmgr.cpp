@@ -484,16 +484,15 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     }
 
     // standby node must notify primary node for prepare lastest page in ondemand recovery
-    if (SS_STANDBY_ONDEMAND_RECOVERY) {
-        while (!SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
-            SSReadControlFile(REFORM_CTRL_PAGE);
-            if (SS_STANDBY_ONDEMAND_NORMAL) {
-                break; // ondemand recovery finish, skip
-            } else if (SS_STANDBY_ONDEMAND_BUILD) {
-                return 0; // in new reform
-            }
-            // still need requset page
+    while (SS_STANDBY_ONDEMAND_NOT_NORMAL) {
+        /* in new reform */
+        if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
+            return 0;
         }
+        if (SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
+            break;
+        }
+        SSReadControlFile(REFORM_CTRL_PAGE);
     }
 
     if (!StartReadPage(buf_desc, mode)) {
@@ -507,7 +506,9 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
     dms_context_t dms_ctx;
     int32 redo_status = ONDEMAND_REDO_TIMEOUT;
 
-    if (!SS_STANDBY_ONDEMAND_RECOVERY) {
+    if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
+        return false;
+    } else if (SS_STANDBY_ONDEMAND_NORMAL) {
         return true;
     }
 

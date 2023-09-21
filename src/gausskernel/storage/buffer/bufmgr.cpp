@@ -2423,16 +2423,15 @@ found_branch:
     /* DMS: Try get page remote */
     if (ENABLE_DMS) {
         // standby node must notify primary node for prepare lastest page in ondemand recovery
-        if (SS_STANDBY_ONDEMAND_RECOVERY) {
-            while (!SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
-                SSReadControlFile(REFORM_CTRL_PAGE);
-                if (SS_STANDBY_ONDEMAND_NORMAL) {
-                    break; // ondemand recovery finish, skip
-                } else if (SS_STANDBY_ONDEMAND_BUILD) {
-                    return 0; // in new reform
-                }
-                // still need requset page
+        while (SS_STANDBY_ONDEMAND_NOT_NORMAL) {
+            /* in new reform */
+            if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
+                return 0;
             }
+            if (SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
+                break;
+            }
+            SSReadControlFile(REFORM_CTRL_PAGE);
         }
         MarkReadHint(bufHdr->buf_id, relpersistence, isExtend, pblk);
         if (mode != RBM_FOR_REMOTE && relpersistence != RELPERSISTENCE_TEMP && !isLocalBuf) {
