@@ -62,6 +62,8 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/buf/buf_internals.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/buf/bufpage.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 #include "pgxc/pgxcnode.h"
@@ -14899,7 +14901,6 @@ Datum gs_get_index_status(PG_FUNCTION_ARGS)
     }
     SRF_RETURN_DONE(funcctx);
 }
-
 #endif
 
 TupleDesc create_query_node_reform_info_tupdesc()
@@ -15062,4 +15063,200 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
         }
     }
     SRF_RETURN_DONE(funcctx);
+}
+
+void buftag_get_buf_info(BufferTag tag, stat_buf_info_t *buf_info)
+{
+    errno_t err = memset_s(buf_info, sizeof(stat_buf_info_t), 0, sizeof(stat_buf_info_t));
+    securec_check(err, "\0", "\0");
+    securec_check(err, "", "");
+    uint32 hash_code = BufTableHashCode(&tag);
+
+    LWLock *lock = BufMappingPartitionLock(hash_code);
+    (void)LWLockAcquire(lock, LW_SHARED);
+    int buf_id = BufTableLookup(&tag, hash_code);
+    if (buf_id >= 0) {
+        BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
+
+        buf_info->rec_lsn = buf_desc->extra->rec_lsn;
+        buf_info->lsn_on_disk = buf_desc->extra->lsn_on_disk;
+        buf_info->aio_in_progress = buf_desc->extra->aio_in_progress;
+        buf_info->dirty_queue_loc = buf_desc->extra->dirty_queue_loc;
+        buf_info->mem_lsn = BufferGetLSN(buf_desc);
+
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+        buf_info->lock_mode = buf_ctrl->lock_mode;
+        err = memcpy_s(buf_info->data, DMS_RESID_SIZE, &tag, sizeof(BufferTag));
+        securec_check(err, "", "");
+        LWLockRelease(lock);
+    } else {
+        LWLockRelease(lock);
+        ereport(INFO, (errmsg("buffer does not exist in local buffer pool ")));
+    }
+}
+
+RelFileNode relname_get_relfilenode(text* relname)
+{
+    RelFileNode rnode;
+    RangeVar* relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
+    Relation rel = relation_openrv(relrv, AccessShareLock);
+    if (rel == NULL) {
+        ereport(ERROR, (errmsg("Open relation failed!")));
+        return rnode;
+    }
+    RelationOpenSmgr(rel);
+    rnode = rel->rd_smgr->smgr_rnode.node;
+    relation_close(rel, AccessShareLock);
+    return rnode;
+}
+
+TupleDesc create_query_page_distribution_info_tupdesc()
+{
+    int column = 8;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "instance_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "is_master", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "is_owner", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "is_copy", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "lock_mode", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "mem_lsn", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "disk_lsn", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "is_dirty", BOOLOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+int compute_copy_insts_count(uint64 bitmap)
+{
+    int count = 0;
+    for (uint8 i = 0; i < DMS_MAX_INSTANCES; i++) {
+        uint64 tmp = (uint64)1 << i;
+        if (bitmap & tmp) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* this struct is used to control the iteration during query_page_distribution_info */
+typedef struct st_dms_iterate {
+    stat_drc_info_t *drc_info;
+    uint8 iterate_idx;
+} dms_iterate_t;
+
+Datum query_page_distribution_info_internal(text* relname, ForkNumber fork, BlockNumber blockno, PG_FUNCTION_ARGS)
+{
+    if (fork >= MAX_FORKNUM) {
+        ereport(ERROR, (errmsg("[SS] forknumber must be less than MAX_FORKNUM(4)!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    unsigned char masterId = CM_INVALID_ID8;
+    if (SRF_IS_FIRSTCALL()) {
+        RelFileNode rnode = relname_get_relfilenode(relname);
+        
+        BufferTag tag;
+        INIT_BUFFERTAG(tag, rnode, fork, blockno);
+        
+        stat_buf_info_t buf_info;
+        buftag_get_buf_info(tag, &buf_info);
+        char resid[DMS_PAGEID_SIZE];
+        errno_t rc = memcpy_s(resid, DMS_PAGEID_SIZE, &tag, sizeof(BufferTag));
+        securec_check(rc, "\0", "\0");
+
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        stat_drc_info_t *drc_info = (stat_drc_info_t*)palloc0(sizeof(stat_drc_info_t));
+        InitDmsBufContext(&drc_info->dms_ctx, tag);
+        drc_info->claimed_owner = CM_INVALID_ID8;
+        drc_info->buf_info[0] = buf_info;
+        rc = memcpy_s(drc_info->data, DMS_PAGEID_SIZE, &tag, sizeof(BufferTag));
+        securec_check(rc, "\0", "\0");
+        int is_found = 0;
+
+        int ret = get_drc_info(&is_found, drc_info);
+        if (ret != DMS_SUCCESS) {
+            ereport(ERROR, (errmsg("[SS] some errors occurred while querying DRC!")));
+        }
+        if (!is_found) {
+            ereport(INFO, (errmsg("[SS] could not find a DRC entry in DRC for page (%u/%u/%u/%d/%d %d-%u)!",
+                    rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt, fork, blockno)));
+        }
+        int count = compute_copy_insts_count(drc_info->copy_insts);
+                
+        dms_iterate_t *iterate = (dms_iterate_t*)palloc0(sizeof(dms_iterate_t));
+        iterate->drc_info = drc_info;
+        iterate->iterate_idx = 0;
+        count = (drc_info->claimed_owner == masterId) ? count : count + 1;
+
+        funcctx->user_fctx = (void*)iterate;
+        funcctx->tuple_desc = create_query_page_distribution_info_tupdesc();
+        funcctx->max_calls = (!is_found) ? 0 : (count + 1);
+        MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        Datum values[8];
+        bool nulls[8] = {false};
+        bool ret_tup = false;
+
+        dms_iterate_t *iterate = (dms_iterate_t*)funcctx->user_fctx;
+        for (uint8 i = iterate->iterate_idx; i < DMS_MAX_INSTANCES; i++) {
+            uint64 tmp = (uint64)1 << i;
+            if ((iterate->drc_info->copy_insts & tmp) || (iterate->drc_info->claimed_owner == i) || (iterate->drc_info->master_id == i)) {
+                ret_tup = true;
+                values[0] = UInt8GetDatum(i);                                       // instance id
+                values[1] = BoolGetDatum(iterate->drc_info->master_id == i);        // is master?
+                values[2] = BoolGetDatum(iterate->drc_info->claimed_owner == i);    // is owner?
+                if (iterate->drc_info->copy_insts & tmp) {                          // is copy?
+                    values[3] = BoolGetDatum(true);
+                    iterate->drc_info->copy_insts = iterate->drc_info->copy_insts & ~tmp;
+                } else {
+                    values[3] = BoolGetDatum(false);
+                }
+                if (iterate->drc_info->buf_info[i].lock_mode == 1) {                // lock mode
+                    values[4] = CStringGetTextDatum("Share lock");
+                } else if (iterate->drc_info->buf_info[i].lock_mode == 2) {
+                    values[4] = CStringGetTextDatum("Exclusive lock");
+                } else {
+                    values[4] = CStringGetTextDatum("No lock"); 
+                }
+                values[5] = UInt64GetDatum((uint64)iterate->drc_info->buf_info[i].mem_lsn);          // mem lsn
+                values[6] = UInt64GetDatum((uint64)iterate->drc_info->buf_info[i].lsn_on_disk);      // disk lsn
+                if (iterate->drc_info->buf_info[i].dirty_queue_loc != PG_UINT64_MAX &&               // is dirty?
+                    iterate->drc_info->buf_info[i].dirty_queue_loc != 0) {
+                    values[7] = BoolGetDatum(true); 
+                } else {
+                    values[7] = BoolGetDatum(false);
+                }
+                iterate->iterate_idx = i + 1;
+                break;
+            }
+        }
+        if (ret_tup) {
+            HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+            if (tuple != NULL) {
+                SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+            }
+        } else {
+            SRF_RETURN_DONE(funcctx);
+        }
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+
+Datum query_page_distribution_info(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_page_distribution_info without shared storage deployment!")));
+    }
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_page_distribution_info at Standby node while DMS enabled!")));
+    }
+    text* relname = PG_GETARG_TEXT_PP(0);
+    ForkNumber fork = PG_GETARG_INT64(1);
+    BlockNumber blockno = PG_GETARG_INT64(2);
+    return query_page_distribution_info_internal(relname, fork, blockno, fcinfo);
 }
