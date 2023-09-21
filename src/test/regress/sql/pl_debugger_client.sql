@@ -478,6 +478,11 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 select * from dbe_pldebugger.info_locals();
 select funcname, lineno, query from dbe_pldebugger.finish();
 select * from dbe_pldebugger.print_var('k');
-select * from dbe_pldebugger.abort();
+select * from dbe_pldebugger.continue();
+
+select pg_sleep(1);
+select * from dbe_pldebugger.continue();
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+select * from dbe_pldebugger.continue();
 
 select * from tmp_holder;

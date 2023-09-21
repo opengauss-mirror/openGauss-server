@@ -161,7 +161,7 @@ ERROR:  must attach a execute func before execute dbe_pldebugger.abort
 DETAIL:  execute func not attached before execute dbe_pldebugger.abort
 -- turn off without turn on
 select * from dbe_pldebugger.turn_off(1);
-WARNING:  function 1 has not be turned on
+WARNING:  function 1 has not been turned on
  turn_off 
 ----------
  f
@@ -683,8 +683,21 @@ begin
     insert into test_anonymous values(k, 'test2');
 end;
 $$;
-ERROR:  receive abort message
-CONTEXT:  PL/pgSQL function inline_code_block line 9 at SQL statement
+delete from debug_info;
+insert into debug_info select * from dbe_pldebugger.turn_on(0);
+do $$
+declare
+	funcoid oid;
+    k int;
+begin
+	select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';
+	perform * from pg_proc where oid = funcoid;
+    k = test_increment(3);
+    insert into test_anonymous values(k, 'test');
+    k = abs(-k);
+    insert into test_anonymous values(k, 'test2');
+end;
+$$;
 drop schema pl_debugger cascade;
 NOTICE:  drop cascades to 20 other objects
 DETAIL:  drop cascades to table test

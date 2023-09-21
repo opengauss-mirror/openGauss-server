@@ -444,4 +444,21 @@ begin
 end;
 $$;
 
+delete from debug_info;
+insert into debug_info select * from dbe_pldebugger.turn_on(0);
+
+do $$
+declare
+	funcoid oid;
+    k int;
+begin
+	select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';
+	perform * from pg_proc where oid = funcoid;
+    k = test_increment(3);
+    insert into test_anonymous values(k, 'test');
+    k = abs(-k);
+    insert into test_anonymous values(k, 'test2');
+end;
+$$;
+
 drop schema pl_debugger cascade;

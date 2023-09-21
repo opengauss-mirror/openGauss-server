@@ -1576,7 +1576,7 @@ const int DEBUG_SERVER_PRINT_VAR_FRAMENO_EXCEED = 1;
         if (!g_instance.pldebug_cxt.debug_comm[idx].Used())                                   \
             ereport(ERROR,                                                                    \
                     (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_PLDEBUGGER_ERROR),            \
-                     errmsg("Debug Comm %d has been released or not turn on yet.", idx)));                        \
+                     errmsg("Debug Comm %d has been released or not turned on yet.", idx)));                        \
     } while (0)
 
 static const char *stringFromCompileStatus(int strindex)

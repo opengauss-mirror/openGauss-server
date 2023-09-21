@@ -75,7 +75,7 @@ begin
     insert into tmp_holder select breakpointno || ':' || lineno || ':' || query || ':' || enable from dbe_pldebugger.info_breakpoints();
 end;
 $$;
-WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 0)"
 PL/pgSQL function inline_code_block line 6 at SQL statement
 WARNING:  the given line number does not name a valid breakpoint. Please use dbe_pldebugger.info_code for valid breakpoint candidates
@@ -87,7 +87,7 @@ PL/pgSQL function inline_code_block line 9 at SQL statement
 WARNING:  the given line number already contains a valid breakpoint. Please se dbe_pldebugger.info_breakpoints for detail.
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 15)"
 PL/pgSQL function inline_code_block line 11 at SQL statement
-WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 50)"
 PL/pgSQL function inline_code_block line 19 at SQL statement
 select * from tmp_holder;
@@ -1475,13 +1475,13 @@ select dbe_pldebugger.info_code(0);
 (7 rows)
 
 insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 0); -- negative
-WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 6); -- headerline
 insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 6); -- already
 WARNING:  the given line number already contains a valid breakpoint. Please se dbe_pldebugger.info_breakpoints for detail.
 insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 8); -- ok
 insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 13); -- negative
-WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 insert into tmp_holder select * from dbe_pldebugger.disable_breakpoint(1); -- ok
 insert into tmp_holder select * from dbe_pldebugger.enable_breakpoint(1); -- ok
 insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(0);  -- ok
@@ -1536,10 +1536,31 @@ select * from dbe_pldebugger.print_var('k');
  k       | int4    | 0     |              | f
 (1 row)
 
-select * from dbe_pldebugger.abort();
- abort 
--------
- t
+select * from dbe_pldebugger.continue();
+ funcoid |     funcname      | lineno |        query         
+---------+-------------------+--------+----------------------
+       0 | "anonymous block" |      0 | [EXECUTION FINISHED]
+(1 row)
+
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from dbe_pldebugger.continue();
+ERROR:  must attach a execute func before execute dbe_pldebugger.continue
+DETAIL:  execute func not attached before execute dbe_pldebugger.continue
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+                                                      attach                                                      
+------------------------------------------------------------------------------------------------------------------
+ (0,"""anonymous block""",6,"    select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';")
+(1 row)
+
+select * from dbe_pldebugger.continue();
+ funcoid |     funcname      | lineno |        query         
+---------+-------------------+--------+----------------------
+       0 | "anonymous block" |      0 | [EXECUTION FINISHED]
 (1 row)
 
 select * from tmp_holder;
