@@ -1141,6 +1141,46 @@ call bug6900_9074(0);
 call bug6900_9074(1);
 call bug6900_9074(2);
 drop procedure bug6900_9074;
+CREATE TABLE t1(c1 TEXT NOT NULL); 
+CREATE OR REPLACE PROCEDURE p_1145188()
+AS
+BEGIN
+DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+BEGIN
+-- Here the current DA is nonempty because no prior statements
+-- executing within the handler have cleared it
+GET CURRENT DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET CURRENT DIAGNOSTICS CONDITION 1 @luser = MYSQL_ERRNO, @msg = MESSAGE_TEXT;
+RAISE NOTICE 'current DA before mapped insert , error = % , msg = %', @errno, @msg;
+GET STACKED DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET STACKED DIAGNOSTICS CONDITION 1 @errno1 = MYSQL_ERRNO, @mingshigang2 = MESSAGE_TEXT;
+RAISE NOTICE 'stacked DA before mapped insert , error = % , msg = %', @errno1, @msg1;
+
+INSERT INTO t1 (c1) VALUES(0),(1),(2);
+GET CURRENT DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET CURRENT DIAGNOSTICS CONDITION 1 @luser = MYSQL_ERRNO, @msg = MESSAGE_TEXT;
+RAISE NOTICE 'current DA before mapped insert , error = % , msg = %', @errno, @msg;
+GET STACKED DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET STACKED DIAGNOSTICS CONDITION 1 @errno1 = MYSQL_ERRNO, @mingshigang2 = MESSAGE_TEXT;
+RAISE NOTICE 'stacked DA before mapped insert , error = % , msg = %', @errno1, @msg1;
+END;
+
+GET CURRENT DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+RAISE NOTICE 'current DA before mapped insert , num = % , errcount = %', @num, @errcount;
+
+INSERT INTO t1 (c1) VALUES(NULL);
+
+GET CURRENT DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+RAISE NOTICE 'current DA before mapped insert , num = % , errcount = %', @num, @errcount;
+GET STACKED DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+
+END;
+/
+call p_1145188();
 \c regression
 -- test access to exception data
 create function zero_divide() returns int as $$
