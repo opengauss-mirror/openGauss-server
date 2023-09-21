@@ -28,6 +28,7 @@
 #include <string.h>
 #include "securec.h"
 #include "securec_check.h"
+#include "postgres_fe.h"
 
 #ifdef FRONTEND /* used by libpq */
 #define km_securec_check_ss securec_check_ss_c

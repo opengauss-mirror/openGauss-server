@@ -86,6 +86,9 @@ FLEXFLAGS = -Cfe -b -p -p
 all: submake-aes gsql
 ifeq ($(enable_lite_mode), no)
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
+ifeq ($(with_tassl), yes)
+	libpq_pgport += -lTassSDF4GHVSM
+endif
 endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)

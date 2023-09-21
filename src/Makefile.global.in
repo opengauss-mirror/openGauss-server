@@ -1076,6 +1076,9 @@ ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   endif
 else
 libpq_ce = -L$(libpq_builddir) -lpq_ce
+ifeq ($(with_tassl), yes)
+  libpq_ce += -lTassSDF4GHVSM
+endif
 endif
 
 # If doing static linking, shared library dependency info isn't available,

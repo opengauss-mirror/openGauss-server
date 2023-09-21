@@ -25,6 +25,7 @@
 #define _KM_KEY_ADPT_H_
 
 #include "keymgr/security_key_mgr.h"
+#include "keymgr/enc_adpt/enc_adpt.h"
 
 #define MAX_KEY_MGR_NUM 20
 
@@ -33,6 +34,9 @@ typedef struct {
 
     KeyMethod *methods[MAX_KEY_MGR_NUM];
     KeyMgr *mgrs[MAX_KEY_MGR_NUM];
+
+    EmType emtype;
+    EncAdpt *ea;
 } KeyAdpt;
 
 KeyAdpt *key_adpt_new();

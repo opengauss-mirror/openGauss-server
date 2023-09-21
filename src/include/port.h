@@ -379,8 +379,9 @@ extern int pqGethostbyname(
 
 extern void pg_qsort(void* base, size_t nel, size_t elsize, int (*cmp)(const void*, const void*));
 extern int pg_qsort_strcmp(const void *a, const void *b);
+#ifndef FRONTEND
 #define qsort(a, b, c, d) pg_qsort(a, b, c, d)
-
+#endif
 typedef int (*qsort_arg_comparator)(const void* a, const void* b, void* arg);
 
 extern void qsort_arg(void* base, size_t nel, size_t elsize, qsort_arg_comparator cmp, void* arg);

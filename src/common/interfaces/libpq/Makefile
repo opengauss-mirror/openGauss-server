@@ -98,12 +98,17 @@ OBJS += pthread-win32.o
 endif
 endif
 
+CE_HSM :=
+ifeq ($(with_tassl), yes)
+CE_HSM += -lTassSDF4GHVSM
+endif
 
 # Add libraries that libpq depends (or might depend) on into the
 # shared library link.  (The order in which you list them here doesn't
 # matter.)
 ifneq ($(PORTNAME), win32)
-SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl -lk5crypto -lkrb5 -lgssapi_krb5 -lgss -lgssapi -lsocket -lnsl -lresolv -lintl -l$(SECURE_C_CHECK), $(LIBS)) $(LDAP_LIBS_FE) $(PTHREAD_LIBS)
+
+SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl  -lk5crypto -lkrb5 -lgssapi_krb5 -lgss -lgssapi -lsocket -lnsl -lresolv -lintl $(CE_HSM) -l$(SECURE_C_CHECK), $(LIBS)) $(LDAP_LIBS_FE) $(PTHREAD_LIBS)
 else
 SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl -lk5crypto -lkrb5 -lgssapi32 -lsocket -lnsl -lresolv -lintl -l$(SECURE_C_CHECK) $(PTHREAD_LIBS), $(LIBS)) $(LDAP_LIBS_FE)
 endif
@@ -236,6 +241,9 @@ install: all installdirs install-lib
 	$(INSTALL_DATA) $(top_builddir)/src/include/libpq/pqexpbuffer.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(srcdir)/pg_service.conf.sample '$(DESTDIR)$(datadir)/pg_service.conf.sample'
 	$(MKDIR_P) '$(DESTDIR)$(includedir)/../etc/localkms'
+ifeq ($(with_tassl), yes)
+	cp $(LIBOPENSSL_LIB_PATH)/libTassSDF4GHVSM.so '$(DESTDIR)$(libdir)/'
+endif
 
 installcheck:
 	$(MAKE) -C test $@

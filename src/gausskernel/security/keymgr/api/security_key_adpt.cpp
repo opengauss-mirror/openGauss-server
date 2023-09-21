@@ -31,6 +31,7 @@
 #include "keymgr/his/security_his.h"
 #include "keymgr/localkms/security_localkms.h"
 #include "keymgr/ktool/security_gs_ktool.h"
+#include "keymgr/enc_adpt/enc_adpt.h"
 
 KeyMethod *g_key_method[MAX_KEY_MGR_NUM] = {
     &his_kms, /* HisAccount, HisSecret, HisAppId, HisEnterprise, HisIamUrl, HisKmsUrl, */
@@ -42,6 +43,8 @@ KeyMethod *g_key_method[MAX_KEY_MGR_NUM] = {
 #ifdef ENABLE_HUAWEI_KMS
     &huawei_kms,
 #endif
+
+    &ta_kms,
 
 #ifdef ENABLE_LOCALKMS
 #ifdef FRONTEND
@@ -80,6 +83,8 @@ KeyAdpt *key_adpt_new()
         adpt->methods[i] = g_key_method[i];
     }
 
+    adpt->emtype = enc_adpt_init_with_env();
+    adpt->ea = enc_adpt_new(err, adpt->emtype);
     return adpt;
 }
 
@@ -95,6 +100,8 @@ void key_adpt_free(KeyAdpt *kadpt)
             kadpt->mgrs[i] = NULL;
         }
     }
+    enc_adpt_free(kadpt->ea);
+
     km_err_free(kadpt->err);
     km_free(kadpt);
 }

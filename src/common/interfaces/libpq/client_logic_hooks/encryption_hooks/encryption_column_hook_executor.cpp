@@ -39,6 +39,10 @@
 #include "catalog/pg_type.h"
 #include "keymgr/security_key_adpt.h"
 
+#define CK_FMT_BUF_SZ 1024
+#define CK_SM4_LEN 16
+#define CK_IV_LEN 16
+
 bool is_cmk_algo_sm(CmkAlgorithm cmk_algo)
 {
     if (cmk_algo == CmkAlgorithm::SM2 || cmk_algo == CmkAlgorithm::SM4) {
@@ -108,6 +112,67 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
 
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(PgClientLogic);
+    if (adpt->emtype != EMT_INVALID && m_cek != NULL) {
+        EncAdpt *ea = adpt->ea;
+        
+        /* decrypt dk */
+        if (m_cek->plain.len == 0) {
+            EncryptionGlobalHookExecutor *mkexec = encryption_global_hook_executor;
+            size_t unused = 0;
+            KmUnStr plain;
+            
+            const char *kstore = NULL;
+            const char *kpath = NULL;
+            const char *kalgo = NULL;
+
+            mkexec->get_argument("key_store", &kstore, unused);
+            mkexec->get_argument("key_path", &kpath, unused);
+            mkexec->get_argument("algorithm", &kalgo, unused);
+
+            do {
+                /* the encrypted_value is raw key cipher */
+                unsigned char *fmtcek = (unsigned char *)encrypted_key_value;
+                size_t fmtceklen = encrypted_key_value_size;
+
+                /* decrypt dk */
+                plain = key_adpt_mk_decrypt(adpt, {kstore, kpath, kalgo}, {fmtcek + CK_IV_LEN, fmtceklen - CK_IV_LEN});
+                if (key_adpt_catch_err(adpt)) {
+                    break;
+                }
+
+                void *keyhdr = enc_adpt_import_key(ea, plain);
+                if (km_err_catch(ea->err)) {
+                    break;
+                }
+
+                /* cache cek */
+                m_cek->plain.val = plain.val;
+                m_cek->plain.len = plain.len;
+                m_cek->cipher.val = fmtcek + CK_IV_LEN;
+                m_cek->cipher.len = fmtceklen - CK_IV_LEN;
+                m_cek->iv.val = fmtcek;
+                m_cek->iv.len = CK_IV_LEN;
+                m_cek->keyhdr = keyhdr;
+            } while (0);
+
+            if (key_adpt_catch_err(adpt)) {
+                printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
+                return -1;
+            }
+        }
+
+        KmUnStr datacipher  = {processed_data, 0};
+
+        enc_adpt_encrypt(ea, HEA_SM4_MAC, {(unsigned char *)data, (size_t)data_size}, {0}, m_cek, &datacipher);
+        if (key_adpt_catch_err(adpt)) {
+            printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
+            return -1;
+        }
+
+        return (int)datacipher.len;
+    }
+
     if (!is_cek_set) {
         size_t decrypted_key_size = 0;
         unsigned char encrypted_key[MAX_CEK_LENGTH];
@@ -123,6 +188,7 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
         errno_t res = memset_s(encrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(res, "\0", "\0");
     }
+
     Oid data_type = cached_column->get_data_type();
     EncryptionType encryption_type = EncryptionType::INVALID_TYPE;
     if (data_type == BYTEAWITHOUTORDERWITHEQUALCOLOID) {
@@ -173,6 +239,75 @@ DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned 
         }
         
         set_column_encryption_algorithm(column_encryption_algorithm);
+    }
+
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(PgClientLogic);
+    if (adpt->emtype != EMT_INVALID && m_cek != NULL) {
+        EncAdpt *ea = adpt->ea;
+
+        /* decrypt dk */
+        if (m_cek->plain.len == 0) {
+            EncryptionGlobalHookExecutor *mkexec = encryption_global_hook_executor;
+            size_t unused = 0;
+            KmUnStr plain;
+            
+            const char *kstore = NULL;
+            const char *kpath = NULL;
+            const char *kalgo = NULL;
+
+            mkexec->get_argument("key_store", &kstore, unused);
+            mkexec->get_argument("key_path", &kpath, unused);
+            mkexec->get_argument("algorithm", &kalgo, unused);
+
+            do {
+                /* the encrypted_value is raw key cipher */
+                unsigned char *fmtcek = (unsigned char *)encrypted_key_value;
+                size_t fmtceklen = encrypted_key_value_size;
+
+                /* decrypt dk */
+                plain = key_adpt_mk_decrypt(adpt, {kstore, kpath, kalgo}, {fmtcek + CK_IV_LEN, fmtceklen - CK_IV_LEN});
+                if (key_adpt_catch_err(adpt)) {
+                    break;
+                }
+
+                void *keyhdr = enc_adpt_import_key(ea, plain);
+                if (key_adpt_catch_err(adpt)) {
+                    break;
+                }
+
+                /* cache cek */
+                m_cek->plain.val = plain.val;
+                m_cek->plain.len = plain.len;
+                m_cek->cipher.val = fmtcek + CK_IV_LEN;
+                m_cek->cipher.len = fmtceklen - CK_IV_LEN;
+                m_cek->iv.val = fmtcek;
+                m_cek->iv.len = CK_IV_LEN;
+                m_cek->keyhdr = keyhdr;
+            } while (0);
+
+            if (key_adpt_catch_err(adpt)) {
+                printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
+                return DECRYPT_CEK_ERR;
+            }
+        }
+
+        *data = (unsigned char *)malloc(data_proceeed_size);
+        if (*data == NULL) {
+            return DECRYPT_CEK_ERR;
+        }
+
+        KmUnStr plain = {*data, 0};
+        enc_adpt_decrypt(ea, HEA_SM4_MAC, {(unsigned char *)data_processed, (size_t)data_proceeed_size}, {0}, m_cek,
+            &plain);
+        if (key_adpt_catch_err(adpt)) {
+            printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
+            return DECRYPT_CEK_ERR;
+        }
+
+        *data_plain_size = plain.len;
+        *data[plain.len] = '\0';
+
+        return DEC_DATA_SUCCEED;
     }
 
     if (!is_cek_set) {
@@ -318,6 +453,7 @@ void free_after_check(bool condition, unsigned char *ptr, size_t ptr_size)
 bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, const StringArgs &args,
     StringArgs &new_args)
 {
+
     bool has_user_set_cek = false;
     
     EncryptionGlobalHookExecutor *encryption_global_hook_executor =
@@ -365,6 +501,83 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
             libpq_gettext("ERROR(CLIENT): National secret algorithm must be used together.\n"));
         return false;
     }
+    set_column_encryption_algorithm(column_encryption_algorithm);
+
+    KeyAdpt *adpt = CL_GET_KEY_ADPT(column_encryption);
+    if (adpt->emtype != EMT_INVALID && m_cek != NULL) {
+        EncAdpt *ea = adpt->ea;
+        bool succeed = false;
+
+        do {
+            unsigned char *keybuf = (unsigned char *)malloc(CK_SM4_LEN);
+            if (keybuf == NULL) {
+                km_err_msg(adpt->err, "failed to malloc memory.");
+                break;
+            }
+
+            /* generate cek */
+            enc_adpt_random(ea, CK_SM4_LEN, keybuf);
+            if (km_err_catch(ea->err)) {
+                break;
+            }
+
+            void *keyhdr = enc_adpt_import_key(ea, {keybuf, CK_SM4_LEN});
+            if (km_err_catch(ea->err)) {
+                break;
+            }
+
+            /* generate iv, iv and cek cipher share the same buffer */
+            unsigned char *ivcipher = (unsigned char *)malloc(CK_FMT_BUF_SZ);
+            if (ivcipher == NULL) {
+                km_err_msg(adpt->err, "failed to malloc memory.");
+                break;
+            }
+
+            /* generate iv */
+            enc_adpt_random(ea, CK_IV_LEN, ivcipher);
+            if (km_err_catch(ea->err)) {
+                break;
+            }
+
+            /* encrypt cek */
+            KmUnStr keycipher = {0};
+            keycipher = key_adpt_mk_encrypt(adpt, {cmk_store_str, cmk_path_str, cmk_algo_str}, {keybuf, CK_SM4_LEN});
+            if (key_adpt_catch_err(adpt)) {
+                break;
+            }
+
+            /* merger iv and cek cipher */
+            check_memcpy_s(memcpy_s(ivcipher + CK_IV_LEN, CK_FMT_BUF_SZ - CK_IV_LEN, keycipher.val, keycipher.len));
+            size_t ivcipherlen = CK_IV_LEN + keycipher.len;
+
+            /* encode iv and cek cipher */
+            size_t hexlen;
+
+            char *hexcipher = (char *)PQescapeByteaConn(conn, ivcipher, ivcipherlen, &hexlen);
+            if (hexcipher == NULL) {
+                km_err_msg(adpt->err, "failed encode the column key cipher");
+                break;
+            }
+
+            /* cache cek and iv */
+            m_cek->plain.val = keybuf;
+            m_cek->plain.len = CK_SM4_LEN;
+            m_cek->cipher.val = ivcipher;
+            m_cek->cipher.len = ivcipherlen;
+            m_cek->keyhdr = keyhdr;
+
+            new_args.set("encrypted_value", hexcipher, hexlen - 1);
+            free(hexcipher);
+            hexcipher = NULL;
+            succeed = true;
+        } while (0);
+
+        if (!succeed) {
+            printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", key_adpt_get_err(adpt));
+        }
+
+        return succeed;
+    }
 
     /* genereate CEK if not provided (common case) */
     expected_value = (char *)create_or_check_cek(conn, (unsigned char *)expected_value_find, expected_value_size);
@@ -372,7 +585,6 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
         return false;
     }
 
-    set_column_encryption_algorithm(column_encryption_algorithm);
     if (!set_cek_keys((unsigned char *)expected_value, expected_value_size)) {
         free_after_check(!has_user_set_cek, (unsigned char *)expected_value, expected_value_size);
         return false;
@@ -380,7 +592,6 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     /* encrypt CEK */
 
     /* encrypt CEK */
-    KeyAdpt *adpt = CL_GET_KEY_ADPT(column_encryption);
     KeyInfo info = {cmk_store_str, cmk_path_str, cmk_algo_str};
     KmUnStr plain = {(unsigned char *)expected_value, expected_value_size};
     KmUnStr cipher = {0};
