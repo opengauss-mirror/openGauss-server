@@ -277,7 +277,7 @@ test: single_node_forbidden
 
 test: single_node_mergeinto merge_subquery merge_subquery3 merge_1
 test: merge_where_col
-test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3
+test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3 merge_into_deleted merge_into_partition_row_movement merge_into_selfmodified merge_into_updated
 
 # Trigger tests
 test: single_node_triggers

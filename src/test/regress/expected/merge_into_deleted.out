@@ -1,0 +1,53 @@
+create schema merge_into_deleted;
+set search_path = 'merge_into_deleted';
+create table t1 (c1 int, c2 text, c3 timestamp);
+insert into t1 values (1, 'a', '2023-09-15');
+-- concurrently deleted and insert, do update and insert
+\parallel on 2
+begin
+    delete from t1 where c1 = 1;
+    perform pg_sleep(3);
+end;
+/
+begin
+    perform pg_sleep(1);
+    insert into t1 values (1, 'b', '2023-09-16');
+    merge into t1 using (select 1 c1) t2
+    on (t1.c1 = t2.c1)
+    when matched then update set c2 = 'c'
+    when not matched then insert values (2, 'c', '2023-09-17');
+end;
+/
+\parallel off
+select c1, c2, to_char(c3, 'yyyy-mm-dd') from t1 order by c1;
+ c1 | c2 |  to_char   
+----+----+------------
+  1 | c  | 2023-09-16
+  2 | c  | 2023-09-17
+(2 rows)
+
+-- concurrently deleted, not matched, do insert
+\parallel on 2
+begin
+    delete from t1 where c1 = 1;
+    perform pg_sleep(3);
+end;
+/
+begin
+    perform pg_sleep(1);
+    merge into t1 using (select 1 c1) t2
+    on (t1.c1 = t2.c1)
+    when matched then update set c2 = 'd'
+    when not matched then insert values (3, 'd', '2023-09-18');
+end;
+/
+\parallel off
+select c1, c2, to_char(c3, 'yyyy-mm-dd') from t1 order by c1;
+ c1 | c2 |  to_char   
+----+----+------------
+  2 | c  | 2023-09-17
+  3 | d  | 2023-09-18
+(2 rows)
+
+drop schema merge_into_deleted cascade;
+NOTICE:  drop cascades to table t1
