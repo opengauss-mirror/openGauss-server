@@ -98,6 +98,8 @@ Sm2KeyPair* generate_encrypt_pair_key()
     BIO_read(bio_pub_key, pub_key->ustr_val, (int)pub_key_len);
     priv_key->ustr_len = pri_key_len;
     pub_key->ustr_len = pub_key_len;
+    BIO_free(bio_priv_key);
+    BIO_free(bio_pub_key);
  
     sm2_key_pair = (Sm2KeyPair *)km_alloc(sizeof(Sm2KeyPair));
     if (sm2_key_pair == NULL) {
