@@ -650,8 +650,8 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
         ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("cannot make new WAL entries during recovery")));
     }
 
-    if (!SSXLogInsertAllowed()) {
-        ereport(FATAL, (errmsg("SS standby cannot insert XLOG entries")));
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
+        ereport(FATAL, (errmsg("SS dorado standby cluster cannot insert XLOG entries")));
     }
 
     START_CRIT_SECTION();
@@ -1089,8 +1089,8 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn)
         ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("cannot make new WAL entries during recovery")));
     }
 
-    if (!SSXLogInsertAllowed()) {
-        ereport(FATAL, (errmsg("SS standby cannot insert XLOG entries")));
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
+        ereport(FATAL, (errmsg("SS dorado standby cluster cannot insert XLOG entries")));
     }
 
     /* ----------
@@ -3195,7 +3195,7 @@ void XLogWaitFlush(XLogRecPtr recptr)
         return;
     }
 
-    if (!SSXLogInsertAllowed()) {
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         return;
     }
 
@@ -3405,7 +3405,7 @@ bool XLogBackgroundFlush(void)
         return false;
     }
 
-    if (!SSXLogInsertAllowed()) {
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         return false;
     }
 
@@ -3725,8 +3725,8 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
         }
     }
 
-    if (!SSXLogInsertAllowed()) {
-        ereport(FATAL, (errmsg("SS standby cannot init xlog files due to DSS")));
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
+        ereport(FATAL, (errmsg("SS dorado standby cluster cannot init xlog files due to DSS")));
     }
 
     /*
@@ -4989,8 +4989,9 @@ static void UpdateLastRemovedPtr(const char *filename)
  */
 static void RemoveOldXlogFiles(XLogSegNo segno, XLogRecPtr endptr)
 {
-    if (!SSXLogInsertAllowed())
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         return;
+    }
 
     DIR *xldir = NULL;
     struct dirent *xlde = NULL;
@@ -5407,6 +5408,13 @@ static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, in
             if (t_thrd.xlog_cxt.StandbyMode && !dummyStandbyMode && !t_thrd.xlog_cxt.recoveryTriggered) {
                 continue;
             } else {
+                if (u_sess->attr.attr_storage.HaModuleDebug) {
+                    ereport(LOG,
+                        (errmsg("startup replay xlog ready to exit, standbymode is %s, dummyStandbyMode is %s, recoveryTriggered is %s",
+                                t_thrd.xlog_cxt.StandbyMode ? "true" : "false",
+                                dummyStandbyMode ? "true" : "false",
+                                t_thrd.xlog_cxt.recoveryTriggered ? "true" : "false")));
+                }
                 return NULL;
             }
         }
@@ -10790,6 +10798,10 @@ void StartupXLOG(void)
     if (ENABLE_DMS && ENABLE_REFORM && !SS_PRIMARY_DEMOTED && !SS_REPLICATION_STANDBY_CLUSTER) {
         StartupWaitReform();
     }
+
+    if (SS_REPLICATION_MAIN_STANBY_NODE) {
+        SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
+    }
 }
 
 void CopyXlogForForceFinishRedo(XLogSegNo logSegNo, uint32 termId, XLogReaderState *xlogreader,
@@ -11761,9 +11773,9 @@ void CreateCheckPoint(int flags)
                 (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("can't create a checkpoint during recovery")));
     }
 
-    if (!SSXLogInsertAllowed()) {
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("can't create a checkpoint on SS standby node")));
+                (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("can't create a checkpoint on SS dorado standby cluster")));
     }
 
     /* allow standby do checkpoint only after it has promoted AND has finished recovery. */
@@ -17478,7 +17490,9 @@ bool CheckForFailoverTrigger(void)
          */
         ResetSlotLSNEndRecovery(slotname);
 
-        SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
+        if (!SS_REPLICATION_MAIN_STANBY_NODE) {
+            SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
+        }  
         ret = true;
         goto exit;
     }
@@ -19233,20 +19247,6 @@ XLogRecPtr GetFlushMainStandby()
     flushptr = XLByteLT(recptr, replayptr)? replayptr : recptr;
 
     return flushptr;
-}
-
-/* SS bans data write unless current node is:
- * 1. normal: running as primary;
- * 2. switchover: primary demoting, doing shutdown checkpoint;
- * 3. switchover: standby promoting, doing StartupXLOG;
- * 4. switchover: standby promoted, running as primary de facto,
- *    waiting for DMS reformer thread to update its role.
- * 5. failover: doing StartupXLOG
- */
-bool SSXLogInsertAllowed()
-{
-    /* allow xlog write as long as to different VGs */
-    return true;
 }
 
 bool SSModifySharedLunAllowed()
