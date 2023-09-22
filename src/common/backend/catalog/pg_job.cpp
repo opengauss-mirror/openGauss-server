@@ -1066,6 +1066,7 @@ void execute_job(int4 job_id)
         FlushErrorState();
 
         t_thrd.utils_cxt.CurrentResourceOwner = save;
+        ResourceOwnerRelease(save, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
         /* Update last_end_date and  job_status='f' and failure_count++ */
         update_pg_job_info(job_id, Pgjob_Fail, start_date, new_next_date, edata->message, is_scheduler_job);
         elog_job_detail(job_id, what, Pgjob_Fail, edata->message);
