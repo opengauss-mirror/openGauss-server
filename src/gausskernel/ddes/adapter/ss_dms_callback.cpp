@@ -390,9 +390,6 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
         if (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED) {
             /* flush control file primary id in advance to save new standby's waiting time */
             SSSavePrimaryInstId(SS_MY_INST_ID);
-
-            SSReadControlFile(REFORM_CTRL_PAGE);
-            Assert(SSGetPrimaryInstId() == SS_MY_INST_ID);
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS switchover] Standby promote: success, set new primary:%d.", SS_MY_INST_ID)));
             return DMS_SUCCESS;
@@ -430,16 +427,15 @@ static void CBSwitchoverResult(void *db_handle, int result)
 
 static int SetPrimaryIdOnStandby(int primary_id)
 {
-    g_instance.dms_cxt.SSReformerControl.primaryInstId = primary_id;
-
     for (int ntries = 0;; ntries++) {
         SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
         if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d.",
-                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id)));
+                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d, confirm ntries=%d.",
+                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id, ntries)));
             return DMS_SUCCESS;
         } else {
+            SSSavePrimaryInstId(primary_id);
             if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
                 ereport(ERROR,
                     (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d,"
