@@ -1,6 +1,6 @@
 -- B db compatibility case
 drop database if exists B_db;
-NOTICE:  database "B_db" does not exist, skipping
+NOTICE:  database "b_db" does not exist, skipping
 create database B_db dbcompatibility 'B';
 --------------------concat--------------------
 -- concat case in A db compatibility
@@ -634,7 +634,7 @@ select timestampdiff(second, '2018-01-01', now());
 (1 row)
 
 select timestampdiff(microsecond, '2018-01-01', now());
- timestamp_diff 
+--?.*
 --?.*
 --?.*
 (1 row)
@@ -797,6 +797,12 @@ select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3;
 drop table if exists test1;
 NOTICE:  table "test1" does not exist, skipping
 create table test1 (f1 int,f2 int,f3 text);
+-- prepare with empty var or not exist var
+set @v_empty := '';
+prepare stmt_empty as @v_empty;
+ERROR:  Query was empty
+prepare stmt_empty as @does_not_exist;
+ERROR:  Query was empty
 -- insertStmt
 set @v2 := 'insert into test1 values(1, 2, 123)';
 prepare stmt2 as @v2;

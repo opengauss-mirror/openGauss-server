@@ -119,7 +119,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 # mysql_function_prepare must precede mysql_function/mysql_function_2, and mysql_function_clearup must follow mysql_function/mysql_function_2
-test: gs_dump_encrypt substr mysql_function_prepare
+test: gs_dump_encrypt substr mysql_function_prepare mysql_compatibility
 test: composite_datum_record mysql_function mysql_function_2 b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger
 
 test: join_test_alias alter_ctable_compress
