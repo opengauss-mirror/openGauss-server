@@ -560,9 +560,6 @@ is_ss_xlog(const char *ss_dir)
     rc = sprintf_s(ss_xlog, sizeof(ss_xlog), "%s%d", "pg_xlog", instance_id);
     securec_check_ss_c(rc, "\0", "\0");
 
-    rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s%d", "pg_doublewrite", instance_id);
-    securec_check_ss_c(rc, "\0", "\0");
-
     rc = sprintf_s(ss_notify, sizeof(ss_notify), "%s%d", "pg_notify", instance_id);
     securec_check_ss_c(rc, "\0", "\0");
 
@@ -571,7 +568,6 @@ is_ss_xlog(const char *ss_dir)
 
     if (IsDssMode() && strlen(instance_config.dss.vglog) &&
         (pg_strcasecmp(ss_dir, ss_xlog) == 0 ||
-        pg_strcasecmp(ss_dir, ss_doublewrite) == 0 ||
         pg_strcasecmp(ss_dir, ss_notify) == 0 ||
         pg_strcasecmp(ss_dir, ss_notify) == 0)) {
         return true;
@@ -595,6 +591,22 @@ ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog)
     if (symlink(path, link_path) < 0) {
         elog(ERROR, "can not link dss xlog dir \"%s\" to dss xlog dir \"%s\": %s", link_path, path,
             strerror(errno));
+    }
+}
+
+bool
+ss_create_if_doublewrite(pgFile* dir, const char* vgdata, int instance_id)
+{
+    char ss_doublewrite[MAXPGPATH];;  
+    errno_t rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s%d", "pg_doublewrite", instance_id);
+    securec_check_ss_c(rc, "\0", "\0");
+    if (pg_strcasecmp(dir->rel_path, ss_doublewrite) == 0) {
+        rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s/%s", vgdata, dir->rel_path);
+        securec_check_ss_c(rc, "\0", "\0");
+        dir_create_dir(ss_doublewrite, DIR_PERMISSION);
+        return true;
+    } else {
+        return false;
     }
 }
 
