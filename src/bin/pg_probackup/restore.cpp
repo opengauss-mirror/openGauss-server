@@ -1430,10 +1430,17 @@ create_recovery_conf(time_t backup_id,
      * in "the past" relatively to latest state in the archive?
      * We will get a replica that is "in the future" to the master.
      * We accept this risk because its probability is low.
+     * 
+     * if rt recovery is not bigger than backup, we dont need to 
+     * generate recovery.conf file
+     * 
+     * rt is malloc 0 before
      */
-    pitr_requested = !backup->stream || rt->time_string ||
-        rt->xid_string || rt->lsn_string || rt->target_name ||
-        target_immediate || target_latest || restore_command_provided;
+    pitr_requested =
+            !backup->stream || backup->recovery_time < rt->target_time || backup->recovery_xid < rt->target_xid ||
+            backup->stop_lsn < rt->target_lsn || rt->target_name || target_immediate || target_latest ||
+            restore_command_provided;
+
 
     /* No need to generate recovery.conf at all. */
     if (!pitr_requested)
