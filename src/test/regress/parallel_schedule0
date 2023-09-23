@@ -1026,7 +1026,7 @@ test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
-test: gs_dump_encrypt substr
+test: gs_dump_encrypt substr mysql_compatibility
 test: composite_datum_record mysql_function b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger
 
 test: join_test_alias alter_ctable_compress

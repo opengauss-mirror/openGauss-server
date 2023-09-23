@@ -5164,10 +5164,16 @@ List* QueryRewritePrepareStmt(Query* parsetree)
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("userdefined variable in prepare statement must be text type.")));
     }
+    if (value->constvalue == (Datum)0) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
+    }
 
     sqlstr = TextDatumGetCString(value->constvalue);
 
     raw_parsetree_list = pg_parse_query(sqlstr);
+    if (raw_parsetree_list == NIL) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
+    }
 
     if (raw_parsetree_list->length != 1) {
         ereport(ERROR,
