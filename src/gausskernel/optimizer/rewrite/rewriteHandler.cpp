@@ -3817,7 +3817,7 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
         bool rewriteView = false;
         List* rewriteRelations = NIL;
 
-        result_relation = linitial_int(parsetree->resultRelations);
+        result_relation = linitial2_int(parsetree->resultRelations);
 
         if (result_relation == 0)
             return rewritten;

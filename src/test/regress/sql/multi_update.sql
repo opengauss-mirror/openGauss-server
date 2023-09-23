@@ -634,5 +634,16 @@ drop function trigger_func_update_multiview1();
 drop view multiview1;
 drop view multiview2;
 drop view multiview3;
+-- multi update with join
+CREATE TABLE t1 (f1 int);
+CREATE TABLE t2 (f1 int);
+INSERT INTO t2  VALUES (1);
+CREATE VIEW v1 AS SELECT * FROM t2;
+
+UPDATE t2 AS A NATURAL JOIN v1 B SET B.f1 = 1;
+drop table t1;
+drop view v1;
+drop table t2;
+
 \c regression
 drop database multiupdate;
