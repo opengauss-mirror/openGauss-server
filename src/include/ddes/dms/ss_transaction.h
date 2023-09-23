@@ -122,5 +122,7 @@ bool SSCheckDbBackendsFromAllStandby(Oid dbid);
 void SSStandbyUpdateRedirectInfo();
 void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
 int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len);
+int SSReloadReformCtrlPage(uint32 len);
+void SSRequestAllStandbyReloadReformCtrlPage();
 
 #endif

@@ -88,6 +88,7 @@ typedef struct ss_recovery_info {
     volatile failover_ckpt_status_t failover_ckpt_status;
     char recovery_xlog_dir[MAXPGPATH];
     int recovery_inst_id;
+    volatile SSGlobalClusterState cluster_ondemand_status;
     int instid_list[DMS_MAX_INSTANCE];
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;

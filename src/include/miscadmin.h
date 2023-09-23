@@ -42,7 +42,6 @@ extern const uint32 PARAM_MARK_VERSION_NUM;
 extern const uint32 TIMESCALE_DB_VERSION_NUM;
 extern const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM;
 extern const uint32 NBTREE_DEDUPLICATION_VERSION_NUM;
-extern const uint32 ONDEMAND_REDO_VERSION_NUM;
 extern const uint32 MULTI_CHARSET_VERSION_NUM;
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
@@ -140,7 +139,6 @@ extern const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
-extern void SSUpgradeFileBeforeCommit();
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
 

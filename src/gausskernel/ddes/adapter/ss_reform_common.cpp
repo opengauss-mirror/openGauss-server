@@ -249,119 +249,12 @@ void SSDoradoGetInstidList()
     closedir(dssdir);
 }
 
-static void SSSaveOldReformerCtrl()
-{
-    ss_reformer_ctrl_t new_ctrl = g_instance.dms_cxt.SSReformerControl;
-    ss_old_reformer_ctrl_t old_ctrl = {new_ctrl.list_stable, new_ctrl.primaryInstId, new_ctrl.crc};
-
-    int len = sizeof(ss_old_reformer_ctrl_t);
-    int write_size = (int)BUFFERALIGN(len);
-    char buffer[write_size] __attribute__((__aligned__(ALIGNOF_BUFFER))) = { 0 };
-    char *fname[2];
-    int fd = -1;
-
-    errno_t err = memcpy_s(&buffer, write_size, &old_ctrl, len);
-    securec_check(err, "\0", "\0");
-
-    INIT_CRC32C(((ss_old_reformer_ctrl_t *)buffer)->crc);
-    COMP_CRC32C(((ss_old_reformer_ctrl_t *)buffer)->crc, (char *)buffer, offsetof(ss_old_reformer_ctrl_t, crc));
-    FIN_CRC32C(((ss_old_reformer_ctrl_t *)buffer)->crc);
-
-    fname[0] = XLOG_CONTROL_FILE_BAK;
-    fname[1] = XLOG_CONTROL_FILE;
-
-    for (int i = 0; i < BAK_CTRL_FILE_NUM; i++) {
-        if (i == 0) {
-            fd = BasicOpenFile(fname[i], O_CREAT | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-        } else {
-            fd = BasicOpenFile(fname[i], O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-        }
-
-        if (fd < 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname[i])));
-        }
-
-        SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, write_size);
-        if (close(fd)) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-        }
-    }
-}
-
-static bool SSReadOldReformerCtrl()
-{
-    ss_reformer_ctrl_t *new_ctrl = &g_instance.dms_cxt.SSReformerControl;
-    ss_old_reformer_ctrl_t old_ctrl;
-    pg_crc32c crc;
-    int fd = -1;
-    bool retry = false;
-    char *fname = XLOG_CONTROL_FILE;
-
-loop:
-    fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
-    }
-
-    off_t seekpos = (off_t)BLCKSZ * REFORM_CTRL_PAGE;
-    int len = sizeof(ss_old_reformer_ctrl_t);
-
-    int read_size = (int)BUFFERALIGN(len);
-    char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
-    if (pread(fd, buffer, read_size, seekpos) != read_size) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
-    }
-
-    errno_t rc = memcpy_s(&old_ctrl, len, buffer, len);
-    securec_check(rc, "", "");
-    if (close(fd) < 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
-    }
-
-    /* Now check the CRC. */
-    INIT_CRC32C(crc);
-    COMP_CRC32C(crc, (char *)&old_ctrl, offsetof(ss_old_reformer_ctrl_t, crc));
-    FIN_CRC32C(crc);
-
-    if (!EQ_CRC32C(crc, old_ctrl.crc)) {
-        if (retry == false) {
-            ereport(WARNING,
-                (errmsg("control file \"%s\" contains incorrect checksum in upgrade mode, try backup file", fname)));
-            fname = XLOG_CONTROL_FILE_BAK;
-            retry = true;
-            goto loop;
-        } else {
-            ereport(WARNING,
-                (errmsg("backup control file \"%s\" contains incorrect checksum in upgrade mode, "
-                "try again in post-upgrade mode", fname)));
-            return false;
-        }
-    }
-
-    // new params set to initial value
-    new_ctrl->version = REFORM_CTRL_VERSION;
-    new_ctrl->recoveryInstId = INVALID_INSTANCEID;
-    new_ctrl->clusterStatus = CLUSTER_NORMAL;
-
-    // exist param inherit
-    new_ctrl->primaryInstId = old_ctrl.primaryInstId;
-    new_ctrl->list_stable = old_ctrl.list_stable;
-    new_ctrl->crc = old_ctrl.crc;
-
-    return true;
-}
-
-void SSSaveReformerCtrl(bool force)
+void SSUpdateReformerCtrl()
 {
     int fd = -1;
     int len;
     errno_t err = EOK;
     char *fname[2];
-
-    if ((pg_atomic_read_u32(&WorkingGrandVersionNum) < ONDEMAND_REDO_VERSION_NUM) && !force) {
-        SSSaveOldReformerCtrl();
-        return;
-    }
 
     len = sizeof(ss_reformer_ctrl_t);
     int write_size = (int)BUFFERALIGN(len);
@@ -405,24 +298,12 @@ void SSReadControlFile(int id, bool updateDmsCtx)
     int read_size = 0;
     int len = 0;
     fname = XLOG_CONTROL_FILE;
-
-    if ((pg_atomic_read_u32(&WorkingGrandVersionNum) < ONDEMAND_REDO_VERSION_NUM) && (id == REFORM_CTRL_PAGE)) {
-        if (SSReadOldReformerCtrl()) {
-            return;
-        }
-
-        // maybe primary node already upgrade pg_control file, sleep and try read in lastest mode again
-        if (SS_STANDBY_MODE) {
-            pg_usleep(5000000);  /* 5 sec */
-            goto loop;
-        } else {
-            ereport(PANIC, (errmsg("incorrect checksum in control file")));
-        }
-    }
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
 
 loop:
     fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
+        LWLockRelease(ControlFileLock);
         ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
     }
 
@@ -437,6 +318,7 @@ loop:
     read_size = (int)BUFFERALIGN(len);
     char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
     if (pread(fd, buffer, read_size, seekpos) != read_size) {
+        LWLockRelease(ControlFileLock);
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
     }
 
@@ -444,6 +326,7 @@ loop:
         rc = memcpy_s(&g_instance.dms_cxt.SSReformerControl, len, buffer, len);
         securec_check(rc, "", "");
         if (close(fd) < 0) {
+            LWLockRelease(ControlFileLock);
             ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
         }
 
@@ -459,9 +342,11 @@ loop:
                 retry = true;
                 goto loop;
             } else {
+                LWLockRelease(ControlFileLock);
                 ereport(FATAL, (errmsg("incorrect checksum in control file")));
             }
         }
+        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= g_instance.dms_cxt.SSReformerControl.clusterStatus;
     } else {
         ControlFileData* controlFile = NULL;
         ControlFileData tempControlFile;
@@ -474,6 +359,7 @@ loop:
         rc = memcpy_s(controlFile, (size_t)len, buffer, (size_t)len);
         securec_check(rc, "", "");
         if (close(fd) < 0) {
+            LWLockRelease(ControlFileLock);
             ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
         }
 
@@ -489,6 +375,7 @@ loop:
                 retry = true;
                 goto loop;
             } else {
+                LWLockRelease(ControlFileLock);
                 ereport(FATAL, (errmsg("incorrect checksum in control file")));
             }
         }
@@ -497,6 +384,7 @@ loop:
             g_instance.dms_cxt.ckptRedo = controlFile->checkPointCopy.redo;
         }
     }
+    LWLockRelease(ControlFileLock);
 }
 
 void SSClearSegCache()

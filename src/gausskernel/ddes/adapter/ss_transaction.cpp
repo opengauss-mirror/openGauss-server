@@ -28,6 +28,7 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment_internal.h"
 #include "ddes/dms/ss_transaction.h"
+#include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/sinvaladt.h"
 #include "replication/libpqsw.h"
@@ -502,6 +503,16 @@ void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *p
     ereport(DEBUG1, (errmsg("SS get page map success, buffer_id = %u.", page)));
 }
 
+int SSReloadReformCtrlPage(uint32 len)
+{
+    if (unlikely(len != sizeof(SSBroadcastCmdOnly))) {
+        return DMS_ERROR;
+    }
+
+    SSReadControlFile(REFORM_CTRL_PAGE);
+    return DMS_SUCCESS;
+}
+
 int SSCheckDbBackends(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
 {
     if (unlikely(len != sizeof(SSBroadcastDbBackends))) {
@@ -551,6 +562,24 @@ bool SSCheckDbBackendsFromAllStandby(Oid dbid)
         return true;
     }
     return false;
+}
+
+void SSRequestAllStandbyReloadReformCtrlPage()
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    int ret;
+    SSBroadcastCmdOnly ssmsg;
+    ssmsg.type = BCAST_RELOAD_REFORM_CTRL_PAGE;
+    do {
+        ret = dms_broadcast_msg(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastCmdOnly),
+            (unsigned char)false, SS_BROADCAST_WAIT_ONE_SECOND);
+
+        if (ret == DMS_SUCCESS) {
+            return;
+        }
+        pg_usleep(5000L);
+    } while (ret != DMS_SUCCESS);
 }
 
 void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)

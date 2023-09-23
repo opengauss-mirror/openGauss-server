@@ -10032,8 +10032,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
             ereport(LOG,
                 (errmsg("Failover between two dorado cluster start, change current run mode to primary_cluster")));
             g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_PRIMARY;
+            LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
-            SSSaveReformerCtrl();
+            SSUpdateReformerCtrl();
+            LWLockRelease(ControlFileLock);
             t_thrd.xlog_cxt.server_mode = PRIMARY_MODE;
             SetHaShmemData();
         }
