@@ -581,7 +581,7 @@ static void InitSqlConfigureNamesBool()
             gettext_noop("Enable llvm for executor."),
             NULL},
             &u_sess->attr.attr_sql.enable_codegen,
-            true,
+            false,
             NULL,
             NULL,
             NULL},
