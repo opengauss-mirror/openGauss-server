@@ -78,6 +78,7 @@ void nvm_init(void)
         }
 
         if (LockNvmFile(nvmBufFd)) {
+            close(nvmBufFd);
             LWLockRelease(ShmemIndexLock);
             ereport(FATAL, (errmsg("can not lock nvm file.")));
         }
@@ -86,6 +87,7 @@ void nvm_init(void)
 
         g_instance.attr.attr_storage.nvm_attr.nvmBlocks = (char *)mmap(NULL, nvmBufferSize,
             PROT_READ | PROT_WRITE, MAP_SHARED, nvmBufFd, 0);
+        close(nvmBufFd);
         if (g_instance.attr.attr_storage.nvm_attr.nvmBlocks == NULL) {
             LWLockRelease(ShmemIndexLock);
             ereport(FATAL,
