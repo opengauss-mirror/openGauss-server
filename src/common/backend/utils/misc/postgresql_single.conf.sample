@@ -800,7 +800,7 @@ audit_enabled = on
 #------------------------------------------------------------------------------
 # LLVM
 #------------------------------------------------------------------------------
-#enable_codegen = on			# consider use LLVM optimization
+#enable_codegen = off			# consider use LLVM optimization
 #enable_codegen_print = off		# dump the IR function
 #codegen_cost_threshold = 10000		# the threshold to allow use LLVM Optimization
 
