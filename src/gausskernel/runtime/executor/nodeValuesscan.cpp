@@ -125,30 +125,31 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
 
         RightRefState* refState = econtext->rightRefState;
         int targetCount = list_length(expr_state_list);
-        GenericExprState* targetArr[targetCount];
 
         int colCnt = (IS_ENABLE_RIGHT_REF(refState) && refState->colCnt > 0) ? refState->colCnt : 1;
         bool hasExecs[colCnt];
-
-        SortTargetListAsArray(refState, expr_state_list, targetArr);
-
-        InitOutputValues(refState, targetArr, values, is_null, targetCount, hasExecs);
+        Datum rightRefValues[colCnt];
+        bool rightRefIsNulls[colCnt];
+        InitOutputValues(refState, rightRefValues, rightRefIsNulls, hasExecs);
 
         resind = 0;
         foreach (lc, expr_state_list) {
             ExprState* exprState = (ExprState*)lfirst(lc);
 
             values[resind] = ExecEvalExpr(exprState, econtext, &is_null[resind]);
-            if (IS_ENABLE_RIGHT_REF(refState) && resind < refState->colCnt) {
-                hasExecs[resind] = true;
+            if (unlikely(IS_ENABLE_INSERT_RIGHT_REF(refState) && resind < refState->explicitAttrLen)) {
+                int idx = refState->explicitAttrNos[resind] - 1;
+                hasExecs[idx] = true;
+                rightRefValues[idx] = values[resind];
+                rightRefIsNulls[idx] = is_null[resind];
             }
             resind++;
         }
 
-        if (IS_ENABLE_RIGHT_REF(econtext->rightRefState)) {
-            econtext->rightRefState->values = nullptr;
-            econtext->rightRefState->isNulls = nullptr;
-            econtext->rightRefState->hasExecs = nullptr;
+        if (unlikely(IS_ENABLE_RIGHT_REF(refState))) {
+            refState->values = nullptr;
+            refState->isNulls = nullptr;
+            refState->hasExecs = nullptr;
         }
 
         MemoryContextSwitchTo(old_context);

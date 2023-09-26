@@ -632,7 +632,7 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
     RightRefState* refState = econtext->rightRefState;
     int index = attnum - 1;
     if (refState && refState->values &&
-        (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
+        ((slot == nullptr && IS_ENABLE_INSERT_RIGHT_REF(refState)) ||
          (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
         *isNull = refState->isNulls[index];
         return refState->values[index];
@@ -6872,7 +6872,7 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
 
     SortTargetListAsArray(refState, targetlist, targetArr);
 
-    InitOutputValues(refState, targetArr, values, isnull, targetCount, hasExecs);
+    InitOutputValues(refState, values, isnull, hasExecs);
 
     /*
      * evaluate all the expressions in the target list
