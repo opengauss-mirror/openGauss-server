@@ -989,6 +989,8 @@ bool SSWaitIOTimeout(BufferDesc *buf)
         ret = SSLWLockAcquireTimeout(buf->io_in_progress_lock, LW_SHARED);
         if (ret) {
             LWLockRelease(buf->io_in_progress_lock);
+        } else {
+            break;
         }
     }
 
