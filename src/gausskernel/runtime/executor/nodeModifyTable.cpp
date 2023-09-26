@@ -720,10 +720,9 @@ checktest:
     ExecProject(resultRelInfo->ri_updateProj, NULL);
     /* Evaluate where qual if exists, add to count if filtered */
     if (ExecQual(upsertState->us_updateWhere, econtext, false)) {
-        TM_Result out_result;
         *returning = ExecUpdate(conflictTid, oldPartitionOid, bucketid, NULL,
             upsertState->us_updateproj, planSlot, &mtstate->mt_epqstate,
-            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpdated, &out_result, partExprKeyStr);
+            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpdated, NULL, partExprKeyStr);
     } else {
         InstrCountFiltered1(&mtstate->ps, 1);
     }
@@ -2010,33 +2009,6 @@ end:;
     return NULL;
 }
 
-/*
- * check whether the tuple still match the merge condition after the tuple has been updated by other transaction.
- * [in] node, executor node
- * [in] epq_slot, the tuple slot after recheck on the updated tuple
- * [in] mergeMatchedActionStates, update action state
- * [in] fake_relation, heap table relation
- * [in/out] slot, in: origin tuple slot, out: slot after merge projection
- * [out] tuple, if the updated tuple still match the merge condition, return the new projected tuple
- * [return value] true for match, false for not match.
- */
-static bool MatchMergeCondition(ModifyTableState* node, TupleTableSlot* epq_slot, List* mergeMatchedActionStates,
-    Relation fake_relation, AttrNumber junkAttno, TupleTableSlot** slot, Tuple *tuple)
-{
-    /* resultRelInfo->ri_mergeState is always not null */
-    *slot = ExecMergeProjQual(node, mergeMatchedActionStates, node->ps.ps_ExprContext, epq_slot, *slot, node->ps.state);
-    if (*slot != NULL) {
-        bool is_null = false;
-        /* Check after epq, whether the ctid is null. null means the updated row does not match */
-        (void)ExecGetJunkAttribute(epq_slot, junkAttno, &is_null);
-        if (!is_null) {
-            *tuple = tableam_tslot_get_tuple_from_slot(fake_relation, *slot);
-            return true;
-        }
-    }
-    return false;
-}
-
 /* ----------------------------------------------------------------
  *		ExecUpdate
  *
@@ -2060,7 +2032,7 @@ static bool MatchMergeCondition(ModifyTableState* node, TupleTableSlot* epq_slot
 TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     Oid oldPartitionOid, /* when update a partitioned table , give a partitionOid to find the tuple */
     int2 bucketid, HeapTupleHeader oldtuple, TupleTableSlot* slot, TupleTableSlot* planSlot, EPQState* epqstate,
-    ModifyTableState* node, bool canSetTag, bool partKeyUpdate, TM_Result* out_result, char* partExprKeyStr)
+    ModifyTableState* node, bool canSetTag, bool partKeyUpdate, TM_Result* uresultp, char* partExprKeyStr, TM_FailureData* tmfdp)
 {
     EState* estate = node->ps.state;
     Tuple tuple = NULL;
@@ -2085,13 +2057,13 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     ConflictInfoData conflictInfo;
     Oid conflictPartOid = InvalidOid;
     int2 conflictBucketid = InvalidBktId;
+    bool cross_partition = (partKeyUpdate || partExprKeyStr != NULL);
 #ifdef PGXC
     RemoteQueryState* result_remote_rel = NULL;
 #endif
     bool allow_update_self = (node->mt_upsert != NULL &&
         node->mt_upsert->us_action != UPSERT_NONE) ? true : false;
 
-    *out_result = TM_Ok;
     /*
      * get information on the (current) result relation
      */
@@ -2146,9 +2118,9 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_update_before_row) {
 #ifdef PGXC
         slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, oldPartitionOid,
-            bucketid, oldtuple, tupleid, slot);
+            bucketid, oldtuple, tupleid, slot, uresultp, tmfdp);
 #else
-        slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, tupleid, slot);
+        slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, tupleid, slot, uresultp, tmfdp);
 #endif
 
         if (slot == NULL) {
@@ -2159,6 +2131,9 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         // tableam
         /* trigger might have changed tuple */
         tuple = tableam_tslot_get_tuple_from_slot(result_relation_desc, slot);
+
+        /* The partition key might have been updated by the trigger. */
+        cross_partition = true;
     }
 
     /* INSTEAD OF ROW UPDATE Triggers */
@@ -2246,6 +2221,8 @@ lreplace:
             bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, tupleid, oldPartitionOid, bucketid);
             if (!update_fix_result) {
                 tuple = slot->tts_tuple;
+                /* The partition key might have been updated by on update rule. */
+                cross_partition = true;
             }
         }
 
@@ -2255,6 +2232,8 @@ lreplace:
         if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
             ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_UPDATE);
             tuple = slot->tts_tuple;
+            /* The partition key might have been updated by generated expr. */
+            cross_partition = true;
         }
 
         if (result_relation_desc->rd_att->constr) {
@@ -2333,12 +2312,18 @@ lreplace:
                         estate->es_crosscheck_snapshot, estate->es_snapshot, true, // wait for commit
                         &oldslot, &tmfd, &update_indexes, &modifiedIdxAttrs, allow_update_self,
                         allowInplaceUpdate, &lockmode);
-                    *out_result = result;
+
+                    /* Let the caller know about the status of this operation */
+                    if (uresultp)
+                        *uresultp = result;
+                    if (tmfdp)
+                        *tmfdp = tmfd;
+
                     switch (result) {
                         case TM_SelfUpdated:
                         case TM_SelfModified:
                             /* can not update one row more than once for merge into */
-                            if (node->operation == CMD_MERGE && !MEGRE_UPDATE_MULTI) {
+                            if (node->operation == CMD_MERGE && !MERGE_UPDATE_MULTI) {
                                 ereport(ERROR,
                                     (errmodule(MOD_EXECUTOR),
                                         (errcode(ERRCODE_TOO_MANY_ROWS),
@@ -2404,27 +2389,23 @@ lreplace:
                                         errmsg("concurrent update under Stream mode is not yet supported")));
                             }
 
+                            /*
+                             * Recheck the tuple using EPQ. For MERGE, we leave this
+                             * to the caller (it must do additional rechecking, and
+                             * might end up executing a different action entirely).
+                             */
+                            if (uresultp && estate->es_plannedstmt->commandType == CMD_MERGE)
+                                return NULL;
+
                             TupleTableSlot *epq_slot = EvalPlanQual(estate, epqstate, fake_relation,
                                 result_rel_info->ri_RangeTableIndex, lockmode, &tmfd.ctid, tmfd.xmax, false);
                             if (!TupIsNull(epq_slot)) {
                                 *tupleid = tmfd.ctid;
 
-                                /*
-                                 * For merge into query, mergeMatchedAction's targetlist is not same as junk filter's
-                                 * targetlist. Here, epqslot is a plan slot, target table needs slot to be projected
-                                 * from plan slot.
-                                 */
-                                if (node->operation == CMD_MERGE) {
-                                    if (MatchMergeCondition(node, epq_slot, result_rel_info->ri_mergeState->matchedActionStates,
-                                        fake_relation, result_rel_info->ri_junkFilter->jf_junkAttNo, &slot, &tuple)) {
-                                        goto lreplace;
-                                    }
-                                } else {
-                                    slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
+                                slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
 
-                                    tuple = tableam_tslot_get_tuple_from_slot(fake_relation, slot);
-                                    goto lreplace;
-                                }
+                                tuple = tableam_tslot_get_tuple_from_slot(fake_relation, slot);
+                                goto lreplace;
                             }
 
                             /* Updated tuple not matched; nothing to do */
@@ -2486,7 +2467,7 @@ lreplace:
                 if (partExprKeyStr) {
                     newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
                 }
-                if (!partExprKeyStr && !partKeyUpdate) {
+                if (!cross_partition) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
@@ -2649,12 +2630,18 @@ lreplace:
                             allow_update_self,
                             allowInplaceUpdate,
                             &lockmode);
-                        *out_result = result;
+
+                        /* Let the caller know about the status of this operation */
+                        if (uresultp)
+                            *uresultp = result;
+                        if (tmfdp)
+                            *tmfdp = tmfd;
+
                         switch (result) {
                             case TM_SelfUpdated:
                             case TM_SelfModified:
                                 /* can not update one row more than once for merge into */
-                                if (node->operation == CMD_MERGE && !MEGRE_UPDATE_MULTI) {
+                                if (node->operation == CMD_MERGE && !MERGE_UPDATE_MULTI) {
                                     ereport(ERROR, (errmodule(MOD_EXECUTOR), (errcode(ERRCODE_TOO_MANY_ROWS),
                                         errmsg("unable to get a stable set of rows in the source tables"))));
                                 }
@@ -2707,6 +2694,15 @@ lreplace:
                                         errmsg("concurrent update under Stream mode is not yet supported")));
                                 }
 
+
+                                /*
+                                 * Recheck the tuple using EPQ. For MERGE, we leave this
+                                 * to the caller (it must do additional rechecking, and
+                                 * might end up executing a different action entirely).
+                                 */
+                                if (uresultp && estate->es_plannedstmt->commandType == CMD_MERGE)
+                                    return NULL;
+
                                 TupleTableSlot *epq_slot = EvalPlanQual(estate, epqstate, fake_relation,
                                     result_rel_info->ri_RangeTableIndex, lockmode, &tmfd.ctid, tmfd.xmax,
                                     result_relation_desc->rd_rel->relrowmovement);
@@ -2714,22 +2710,10 @@ lreplace:
                                 if (!TupIsNull(epq_slot)) {
                                     *tupleid = tmfd.ctid;
 
-                                    /*
-                                     * For merge into query, mergeMatchedAction's targetlist is not same as junk
-                                     * filter's targetlist. Here, epq_slot is a plan slot, target table needs slot to be
-                                     * projected from plan slot.
-                                     */
-                                    if (node->operation == CMD_MERGE) {
-                                        if (MatchMergeCondition(node, epq_slot, result_rel_info->ri_mergeState->matchedActionStates,
-                                            fake_relation, result_rel_info->ri_junkFilter->jf_junkAttNo, &slot, &tuple)) {
-                                            goto lreplace;
-                                        }
-                                    } else {
-                                        slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
+                                    slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
 
-                                        tuple = tableam_tslot_get_tuple_from_slot(fake_relation, slot);
-                                        goto lreplace;
-                                    }
+                                    tuple = tableam_tslot_get_tuple_from_slot(fake_relation, slot);
+                                    goto lreplace;
                                 }
 
                                 /* Updated tuple not matched; nothing to do */
@@ -2857,12 +2841,18 @@ ldelete:
                                 &oldslot,
                                 &tmfd,
                                 allow_update_self);
-                            *out_result = result;
+
+                            /* Let the caller know about the status of this operation */
+                            if (uresultp)
+                                *uresultp = result;
+                            if (tmfdp)
+                                *tmfdp = tmfd;
+
                             switch (result) {
                                 case TM_SelfUpdated:
                                 case TM_SelfModified:
                                     /* can not update one row more than once for merge into */
-                                    if (node->operation == CMD_MERGE && !MEGRE_UPDATE_MULTI) {
+                                    if (node->operation == CMD_MERGE && !MERGE_UPDATE_MULTI) {
                                         ereport(ERROR, (errmodule(MOD_EXECUTOR), (errcode(ERRCODE_TOO_MANY_ROWS),
                                             errmsg("unable to get a stable set of rows in the source tables"))));
                                     }
@@ -2939,6 +2929,14 @@ ldelete:
                                                 errmsg("concurrent update under Stream mode is not yet supported")));
                                     }
 
+                                    /*
+                                     * Recheck the tuple using EPQ. For MERGE, we leave this
+                                     * to the caller (it must do additional rechecking, and
+                                     * might end up executing a different action entirely).
+                                     */
+                                    if (uresultp && estate->es_plannedstmt->commandType == CMD_MERGE)
+                                        return NULL;
+
                                     TupleTableSlot* epq_slot = EvalPlanQual(estate,
                                         epqstate,
                                         old_fake_relation,
@@ -2950,22 +2948,10 @@ ldelete:
                                     /* Try to fetch latest tuple values in row movement case */
                                     if (!TupIsNull(epq_slot)) {
                                         *tupleid = tmfd.ctid;
-                                        /*
-                                         * For merge into query, mergeMatchedAction's targetlist is not same as
-                                         * junk filter's targetlist. Here, epqslot is a plan slot, target table
-                                         * needs slot to be projected from plan slot.
-                                         */
-                                        if (node->operation == CMD_MERGE) {
-                                            if (MatchMergeCondition(node, epq_slot, result_rel_info->ri_mergeState->matchedActionStates,
-                                                old_fake_relation, result_rel_info->ri_junkFilter->jf_junkAttNo, &slot, &tuple)) {
-                                                goto ldelete;
-                                            }
-                                        } else {
-                                            slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
+                                        slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
 
-                                            tuple = tableam_tslot_get_tuple_from_slot(old_fake_relation, slot);
-                                            goto ldelete;
-                                        }
+                                        tuple = tableam_tslot_get_tuple_from_slot(old_fake_relation, slot);
+                                        goto ldelete;
                                     }
 
                                     /* Updated tuple not matched; nothing to do */
@@ -3721,7 +3707,6 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                 }
                 break;
             case CMD_UPDATE: {
-                TM_Result out_result;
                 slot = ExecUpdate(tuple_id,
                     old_partition_oid,
                     bucketid,
@@ -3732,7 +3717,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                     node,
                     node->canSetTag,
                     part_key_updated,
-                    &out_result,
+                    NULL,
                     partExprKeyStr);
                 } break;
             case CMD_DELETE:

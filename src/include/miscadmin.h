@@ -179,7 +179,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_UNBIND_DIVIDE_BOUND 64
 #define OPT_CORRECT_TO_NUMBER 128
 #define OPT_CONCAT_VARIADIC 256
-#define OPT_MEGRE_UPDATE_MULTI 512
+#define OPT_MERGE_UPDATE_MULTI 512
 #define OPT_CONVERT_TO_NUMERIC 1024
 #define OPT_PLSTMT_IMPLICIT_SAVEPOINT 2048
 #define OPT_HIDE_TAILING_ZERO 4096
@@ -217,7 +217,7 @@ extern bool contain_backend_version(uint32 version_number);
  * option is blank and the behavior is new and compatible with current A and C mode, if the option is set, the
  * behavior is old and the same as previous GAUSSDB kernel. */
 #define CONCAT_VARIADIC (!(u_sess->utils_cxt.behavior_compat_flags & OPT_CONCAT_VARIADIC))
-#define MEGRE_UPDATE_MULTI (u_sess->utils_cxt.behavior_compat_flags & OPT_MEGRE_UPDATE_MULTI)
+#define MERGE_UPDATE_MULTI (u_sess->utils_cxt.behavior_compat_flags & OPT_MERGE_UPDATE_MULTI)
 #define CONVERT_STRING_DIGIT_TO_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_CONVERT_TO_NUMERIC)
 #define PLSTMT_IMPLICIT_SAVEPOINT (u_sess->utils_cxt.behavior_compat_flags & OPT_PLSTMT_IMPLICIT_SAVEPOINT)
 #define HIDE_TAILING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_HIDE_TAILING_ZERO)

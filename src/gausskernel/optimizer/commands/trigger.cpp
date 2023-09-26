@@ -88,8 +88,6 @@
 /* Local function prototypes */
 static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
 static void SetTriggerFlags(TriggerDesc* trigdesc, const Trigger* trigger);
-HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot);
 static void ReleaseFakeRelation(Relation relation, Partition part, Relation* fakeRelation);
 static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trigger, TriggerEvent event,
     const Bitmapset* modifiedCols, HeapTuple oldtup, HeapTuple newtup);
@@ -2718,7 +2716,7 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
 #ifdef PGXC
     HeapTupleHeader datanode_tuphead,
 #endif
-    ItemPointer tupleid, TupleTableSlot* slot)
+    ItemPointer tupleid, TupleTableSlot* slot, TM_Result* result, TM_FailureData* tmfd)
 {
     TriggerDesc* trigdesc = get_and_check_trigdesc_value(relinfo->ri_TrigDesc);
     HeapTuple slottuple = ExecMaterializeSlot(slot);
@@ -2780,7 +2778,7 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
 #endif
         /* get a copy of the on-disk tuple we are planning to update */
         trigtuple = GetTupleForTrigger(estate, epqstate, relinfo, oldPartitionOid,
-            bucketid, tupleid, lockmode, &newSlot);
+            bucketid, tupleid, lockmode, &newSlot, result, tmfd);
         if (trigtuple == NULL)
             return NULL; /* cancel the update action */
 
@@ -3031,7 +3029,7 @@ void ExecASTruncateTriggers(EState* estate, ResultRelInfo* relinfo)
 }
 
 HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot)
+    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot, TM_Result* tmresultp, TM_FailureData* tmfdp)
 {
     Relation relation = relinfo->ri_RelationDesc;
     HeapTupleData tuple;
@@ -3203,6 +3201,13 @@ ltrmark:
                 &tmfd,
                 true,       // fake params below are for uheap implementation
                 false, false, NULL, NULL, false);
+
+            /* Let the caller know about the status of this operation */
+            if (tmresultp)
+                *tmresultp = test;
+            if (tmfdp)
+                *tmfdp = tmfd;
+
             switch (test) {
                 case TM_SelfUpdated:
                 case TM_SelfModified:
@@ -3236,6 +3241,15 @@ ltrmark:
                             (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                 errmsg("could not serialize access due to concurrent update")));
                     Assert(!ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+
+                    /*
+                     * Recheck the tuple using EPQ. For MERGE, we leave this
+                     * to the caller (it must do additional rechecking, and
+                     * might end up executing a different action entirely).
+                     */
+                    if (tmresultp && estate->es_plannedstmt->commandType == CMD_MERGE)
+                        return NULL;
+
                     /* it was updated, so look at the updated version */
                     TupleTableSlot* epqslot = NULL;
 

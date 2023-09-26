@@ -366,7 +366,7 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"unbind_divide_bound", OPT_UNBIND_DIVIDE_BOUND},
     {"correct_to_number", OPT_CORRECT_TO_NUMBER},
     {"compat_concat_variadic", OPT_CONCAT_VARIADIC},
-    {"merge_update_multi", OPT_MEGRE_UPDATE_MULTI},
+    {"merge_update_multi", OPT_MERGE_UPDATE_MULTI},
     {"convert_string_digit_to_numeric", OPT_CONVERT_TO_NUMERIC},
     {"plstmt_implicit_savepoint", OPT_PLSTMT_IMPLICIT_SAVEPOINT},
     {"hide_tailing_zero", OPT_HIDE_TAILING_ZERO},
