@@ -1023,7 +1023,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
                      List* (*parser_hook)(const char*, List**))
 {
     List* raw_parsetree_list = NULL;
-    OgRecordOperator _local_opt(PARSE_TIME);
+    OgRecordAutoController _local_opt(PARSE_TIME);
 
     TRACE_POSTGRESQL_QUERY_PARSE_START(query_string);
 
@@ -1079,7 +1079,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
  */
 List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams)
 {
-    OgRecordOperator _local_opt(SRT3_ANALYZE_REWRITE);
+    OgRecordAutoController _local_opt(SRT3_ANALYZE_REWRITE);
     Query* query = NULL;
     List* querytree_list = NULL;
 
@@ -1360,7 +1360,7 @@ static void check_query_acl(Query* query)
 PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo boundParams, bool underExplain)
 {
     PlannedStmt* plan = NULL;
-    OgRecordOperator _local_opt(PLAN_TIME);
+    OgRecordAutoController _local_opt(PLAN_TIME);
     bool multi_node_hint = false;
 
     /* Utility commands have no plans. */
@@ -1486,7 +1486,7 @@ __attribute__((unused)) static bool is_insert_multiple_values_query_in_gtmfree(Q
  */
 List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundParams)
 {
-    OgRecordOperator _local_opt(SRT4_PLAN_QUERY);
+    OgRecordAutoController _local_opt(SRT4_PLAN_QUERY);
     List* stmt_list = NIL;
     ListCell* query_list = NULL;
 
@@ -2372,7 +2372,7 @@ bool IsRightRefState(List* plantreeList)
  */
 static void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg = NULL)
 {
-    OgRecordOperator _local_opt(SRT2_SIMPLE_QUERY);
+    OgRecordAutoController _local_opt(SRT2_SIMPLE_QUERY);
     CommandDest dest = (CommandDest)t_thrd.postgres_cxt.whereToSendOutput;
     MemoryContext oldcontext;
     MemoryContext OptimizerContext;
@@ -9068,7 +9068,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             case 'Q': /* simple query */
             {
                 const char* query_string = NULL;
-                OgRecordOperator _local_opt(SRT1_Q);
+                OgRecordAutoController _local_opt(SRT1_Q);
 
                 pgstat_report_trace_id(&u_sess->trace_cxt, true);
                 query_string = pq_getmsgstring(&input_message);
@@ -9438,7 +9438,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #endif
             case 'P': /* parse */
             {
-                OgRecordOperator _local_opt(SRT6_P);
+                OgRecordAutoController _local_opt(SRT6_P);
                 const char* stmt_name = NULL;
                 const char* query_string = NULL;
                 int numParams;
@@ -9546,7 +9546,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'B': /* bind */
             {
-                OgRecordOperator _local_opt(SRT7_B);
+                OgRecordAutoController _local_opt(SRT7_B);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
                     u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
@@ -9563,7 +9563,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'E': /* execute */
             {
-                OgRecordOperator _local_opt(SRT8_E);
+                OgRecordAutoController _local_opt(SRT8_E);
                 const char* portal_name = NULL;
                 int max_rows;
 
@@ -9709,7 +9709,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'C': /* close */
             {
-                OgRecordOperator _local_opt(SRT11_C);
+                OgRecordAutoController _local_opt(SRT11_C);
                 int close_type;
                 const char* closeTarget = NULL;
 
@@ -9772,7 +9772,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'D': /* describe */
             {
-                OgRecordOperator _local_opt(SRT9_D);
+                OgRecordAutoController _local_opt(SRT9_D);
                 int describe_type;
                 const char* describe_target = NULL;
                 if ((unsigned int)input_message.len > SECUREC_MEM_MAX_LEN) {
@@ -9826,7 +9826,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'S': /* sync */
             {
-                OgRecordOperator _local_opt(SRT10_S);
+                OgRecordAutoController _local_opt(SRT10_S);
                 pq_getmsgend(&input_message);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
@@ -10310,7 +10310,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'U': /* msg type for batch Bind-Execute for PBE */
             {
-                OgRecordOperator _local_opt(SRT12_U);
+                OgRecordAutoController _local_opt(SRT12_U);
                 if (!u_sess->attr.attr_common.support_batch_bind)
                     ereport(ERROR,
                         (errcode(ERRCODE_SYSTEM_ERROR),
