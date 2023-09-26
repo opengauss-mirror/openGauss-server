@@ -7418,6 +7418,8 @@ static int CopyReadAttributesTextT(CopyState cstate)
         int input_len;
         bool saw_non_ascii = false;
         proc_col_num++;
+        int byte_count = 0;
+        int pos = 0;
 
         /* Make sure there is enough space for the next value */
         if (fieldno >= cstate->max_fields) {
@@ -7471,8 +7473,29 @@ static int CopyReadAttributesTextT(CopyState cstate)
                 found_delim = true;
                 break;
             }
+            if (PG_GB18030 == GetDatabaseEncoding() || PG_GB18030_2022 == GetDatabaseEncoding()) {
+                if (pos == byte_count) {
+                    unsigned char c1 = (unsigned char)(c);
+                    if (c1 < (unsigned char)0x80) {
+                        byte_count = 1;
+                    } else if (c1 >= (unsigned char)0x81 && c1 <= (unsigned char)0xFE) {
+                        char nextc = *cur_ptr;
+                        unsigned char nextc1 = (unsigned char)(nextc);
+                        if (nextc1 >= (unsigned char)0x30 && nextc1 <= (unsigned char)0x39) {
+                            byte_count = 4;
+                        } else {
+                            byte_count = 2;
+                        }
+                    } else {
+                        ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
+                            errmsg("invalid character encoding in gb18030 or gb18030_2022")));
+                    }
+                    pos = 0;
+                }
+                pos++;
+            }
 
-            if (c == '\\' && !cstate->without_escaping) {
+            if (c == '\\' && !cstate->without_escaping && byte_count != 2) {
                 if (cur_ptr >= line_end_ptr) {
                     break;
                 }
