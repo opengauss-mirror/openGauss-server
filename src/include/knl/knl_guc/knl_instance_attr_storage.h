@@ -224,7 +224,7 @@ typedef struct knl_instance_attr_storage {
     bool enable_batch_dispatch;
     int parallel_recovery_timeout;
     int parallel_recovery_batch;
-    bool enable_ss_dorado;
+    bool ss_enable_dorado;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

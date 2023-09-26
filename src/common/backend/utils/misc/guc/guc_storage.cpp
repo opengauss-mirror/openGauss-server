@@ -1136,14 +1136,14 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-        {{"enable_ss_dorado",
+        {{"ss_enable_dorado",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
             WAL,
             gettext_noop("Use to enabel dorado replication in share storage mode."),
             NULL,
             GUC_SUPERUSER_ONLY},
-            &g_instance.attr.attr_storage.enable_ss_dorado,
+            &g_instance.attr.attr_storage.ss_enable_dorado,
             false,
             check_ss_cluster_replication_control_para,
             NULL,
@@ -6117,10 +6117,10 @@ static bool check_normal_cluster_replication_config_para(char** newval, void** e
         return true;
     }
 
-    if (g_instance.attr.attr_storage.enable_ss_dorado) {
+    if (g_instance.attr.attr_storage.ss_enable_dorado) {
         ereport(ERROR, (errmsg("Do not allow both enable normal cluster replication "
-            "and ss cluster repliction with \"enable_ss_dorado\" = %d", \
-            g_instance.attr.attr_storage.enable_ss_dorado)));
+            "and ss cluster repliction with \"ss_enable_dorado\" = %d", \
+            g_instance.attr.attr_storage.ss_enable_dorado)));
         return false; 
     }
 
