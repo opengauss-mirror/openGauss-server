@@ -685,6 +685,7 @@ typedef void (*dms_clean_ctrl_edp)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
 typedef char *(*dms_display_pageid)(char *display_buf, unsigned int count, char *pageid);
 typedef char *(*dms_display_xid)(char *display_buf, unsigned int count, char *xid);
 typedef char *(*dms_display_rowid)(char *display_buf, unsigned int count, char *rowid);
+typedef int (*dms_check_session_invalid)(unsigned int sid);
 typedef int (*dms_drc_buf_res_rebuild)(void *db_handle);
 typedef int (*dms_drc_buf_res_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
 typedef int(*dms_ctl_rcy_clean_parallel_t)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
@@ -847,6 +848,7 @@ typedef struct st_dms_callback {
     dms_display_pageid display_pageid;
     dms_display_xid display_xid;
     dms_display_rowid display_rowid;
+    dms_check_session_invalid check_session_invalid;
 
     // for smon deadlock check
     dms_get_sid_by_rmid get_sid_by_rmid;
@@ -883,6 +885,7 @@ typedef struct st_dms_callback {
     //for shared storage backup
     dms_set_inst_behavior set_inst_behavior;
     dms_db_prepare db_prepare;
+
     dms_get_buf_info get_buf_info;
 } dms_callback_t;
 
@@ -967,7 +970,7 @@ typedef enum st_dms_protocol_version {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           94
+#define DMS_LOCAL_VERSION           95
 
 #ifdef __cplusplus
 }
