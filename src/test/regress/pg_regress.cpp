@@ -4712,6 +4712,24 @@ static int regrReloadAndParseLineBuffer(bool* pbBuffReloadReq, bool* pbHalfReadT
     return iRet;
 }
 
+static int countTestLines(const char* filename){
+    char command[1024];
+    snprintf(command, sizeof(command), "grep -c '^test:' %s", filename);
+
+    FILE *f = popen(command, "r");
+    if(f == NULL){
+       fprintf(stderr, "Failed to execute command.\n");
+       return -1;
+    }
+
+    char result[10];
+    fgets(result, sizeof(result), f);
+    pclose(f);
+
+    int count = atoi((result));
+    return count;
+}
+
 /*
  * Run all the tests specified in one schedule file
  */
@@ -4734,6 +4752,8 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
     bool bIgnoreLineOnReload = false;
     bool isSystemTableDDL = false;
     bool isPlanAndProto = false;
+    int all_test_lines = 0;
+    int done_test_lines = 0;
     if (grayscale_upgrade != -1) {
         g_uiTotalBuf = 0;
     }
@@ -4776,6 +4796,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
     /* Initializing the "total time taken by the test suite execution" */
     g_dGroupTotalTime = 0;
 
+    all_test_lines = countTestLines(schedule);
     scf = fopen(schedule, "r");
     if (!scf) {
         fprintf(stderr, _("%s: could not open file \"%s\" for reading: %s\n"), progname, schedule, gs_strerror(errno));
@@ -4950,7 +4971,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 } else if (use_jdbc_client) {
                     status(_("jdbc test %-24s .... "), tests[0]);
                 } else {
-                    status(_("test %-24s .... "), tests[0]);
+                    status(_("test(%d/%d) %-24s .... "), ++done_test_lines, all_test_lines, tests[0]);
                 }
                 makeNestedDirectory(tests[0]);
 
@@ -5079,7 +5100,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
             } else if (isPlanAndProto) {
                 status(_("parallel group (%d plan_proto_tests): "), num_tests);
             } else {
-                status(_("parallel group (%d tests): "), num_tests);
+                status(_("parallel group (%d tests)(%d/%d): "), num_tests, ++done_test_lines, all_test_lines);
             }
 
             wait_for_tests(pids, statuses, tests, num_tests);
