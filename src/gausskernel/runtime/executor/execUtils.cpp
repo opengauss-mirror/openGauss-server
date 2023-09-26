@@ -2809,8 +2809,7 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
 }
 
 
-void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
-                      Datum* values, bool* isnull, int targetCount, bool* hasExecs)
+void InitOutputValues(RightRefState* refState, Datum* values, bool* isnull, bool* hasExecs)
 {
     if (!IS_ENABLE_RIGHT_REF(refState)) {
         return;
@@ -2819,13 +2818,13 @@ void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
     refState->values = values;
     refState->isNulls = isnull;
     refState->hasExecs = hasExecs;
-    int colCnt = refState->colCnt;
+    const int colCnt = refState->colCnt;
     for (int i = 0; i < colCnt; ++i) {
         hasExecs[i] = false;
     }
 
     if (IS_ENABLE_INSERT_RIGHT_REF(refState)) {
-        for (int i = 0; i < targetCount; ++i) {
+        for (int i = 0; i < colCnt; ++i) {
             Const* con = refState->constValues[i];
             if (con) {
                 values[i] = con->constvalue;

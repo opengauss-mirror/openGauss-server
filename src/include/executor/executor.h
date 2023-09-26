@@ -342,8 +342,7 @@ extern TupleDesc ExecTypeFromTL(List *targetList, bool hasoid, bool markdropped 
 extern TupleDesc ExecCleanTypeFromTL(List *targetList, bool hasoid, const TableAmRoutine *tam_ops = TableAmHeap);
 extern TupleDesc ExecTypeFromExprList(List *exprList, List *namesList, const TableAmRoutine *tam_ops = TableAmHeap);
 extern void UpdateChangedParamSet(PlanState *node, Bitmapset *newchg);
-extern void InitOutputValues(RightRefState *refState, GenericExprState *targetArr[], Datum *values, bool *isnull,
-                             int targetCount, bool *hasExecs);
+extern void InitOutputValues(RightRefState* refState, Datum* values, bool* isnull, bool* hasExecs);
 extern void SortTargetListAsArray(RightRefState *refState, List *targetList, GenericExprState *targetArr[]);
 
 typedef struct TupOutputState {

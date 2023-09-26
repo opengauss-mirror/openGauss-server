@@ -1595,17 +1595,16 @@ static void CheckUnsupportInsertSelectClause(Query* query)
 }
 
 
-static void SetInsertAttrnoState(ParseState* pstate, List* attrnos) 
+static void SetInsertAttrnoState(ParseState* pstate, List* attrnos, int exprLen) 
 {
     RightRefState* rstate = pstate->rightRefState;
     Relation relation = (Relation)linitial(pstate->p_target_relation);
     rstate->colCnt = RelationGetNumberOfAttributes(relation);
-    int len = list_length(attrnos);
-    rstate->explicitAttrLen = len;
-    rstate->explicitAttrNos = (int*)palloc0(sizeof(int) * len);
+    rstate->explicitAttrLen = exprLen;
+    rstate->explicitAttrNos = (int*)palloc0(sizeof(int) * exprLen);
     
     ListCell* attr = list_head(attrnos);
-    for (int i = 0; i < len; ++i) {
+    for (int i = 0; i < exprLen; ++i) {
         rstate->explicitAttrNos[i] = lfirst_int(attr);
         attr = lnext(attr);
     }
@@ -1891,8 +1890,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Validate stmt->cols list, or build default list if no list given */
     icolumns = checkInsertTargets(pstate, stmt->cols, &attrnos);
-
-    SetInsertAttrnoState(pstate, attrnos);
     
     AssertEreport(list_length(icolumns) == list_length(attrnos), MOD_OPT, "list length inconsistent");
 
