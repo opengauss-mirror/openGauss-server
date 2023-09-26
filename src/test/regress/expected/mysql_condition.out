@@ -1693,6 +1693,55 @@ select @p1,@p2,@p3,@p4;
      |     |     | 
 (1 row)
 
+-- core 
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t3 (w char unique, x char);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t3_w_key" for table "t3"
+insert into t3 values ('a', 'b');
+create or replace procedure bug6900_9074(a int)
+AS
+begin
+  declare exit handler for sqlstate '23000' 
+  begin
+      RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+  end;
+  begin
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+
+    if a = 1 then
+      insert into t3 values ('a', 'b');
+    elseif a = 2 then
+      insert into t3 values ('c', 'd');
+    else
+      insert into t3 values ('x', 'y', 'z');
+    end if;
+  end;
+  drop table t1;
+end;
+/
+call bug6900_9074(0);
+NOTICE:  SQLSTATE = 42601, SQLCODE = 16801924, SQLERRM = INSERT has more expressions than target columns
+ bug6900_9074 
+--------------
+ 
+(1 row)
+
+call bug6900_9074(1);
+NOTICE:  SQLSTATE = 23505, SQLCODE = 83906754, SQLERRM = duplicate key value violates unique constraint "t3_w_key"
+ bug6900_9074 
+--------------
+ 
+(1 row)
+
+call bug6900_9074(2);
+ERROR:  table "t1" does not exist
+CONTEXT:  SQL statement "drop table t1"
+PL/pgSQL function bug6900_9074(integer) line 20 at SQL statement
+drop procedure bug6900_9074;
 \c regression
 -- test access to exception data
 create function zero_divide() returns int as $$
