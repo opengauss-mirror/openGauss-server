@@ -6984,6 +6984,24 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
         if (raw_buf_ptr < copy_buf_len) {
             sec = copy_raw_buf[raw_buf_ptr];
         }
+        if (IS_TEXT(cstate) && (cstate->copy_dest == COPY_NEW_FE) && !cstate->is_load_copy) {
+            if (c == '\\') {
+                char c2;
+                IF_NEED_REFILL_AND_NOT_EOF_CONTINUE(0);
+
+                /* get next character */
+                c2 = copy_raw_buf[raw_buf_ptr];
+
+                /*
+                 * If the following character is a newline or CRLF,
+                 * skip the '\\'.
+                 */
+                if (c2 == '\n' || c2 == '\r' ||
+                    (c2 == '\r' && (raw_buf_ptr + 1) < copy_buf_len && copy_raw_buf[raw_buf_ptr + 1] == '\n')) {
+                    continue;
+                }
+            }
+        }
 
         if (csv_mode) {
             /*
