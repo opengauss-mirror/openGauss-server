@@ -1888,13 +1888,13 @@ void GetReplayedRecPtrFromUndoWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr)
     *endPtr = minEnd;
 }
 
-void GetReplayedRecPtrFromWorkers(XLogRecPtr *endPtr)
+void GetReplayingRecPtrFromWorkers(XLogRecPtr *endPtr)
 {
     XLogRecPtr minEnd = MAX_XLOG_REC_PTR;
 
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
         if (!RedoWorkerIsIdle(g_dispatcher->pageWorkers[i])) {
-            XLogRecPtr end = GetCompletedRecPtr(g_dispatcher->pageWorkers[i]);
+            XLogRecPtr end = GetReplyingRecPtr(g_dispatcher->pageWorkers[i]);
             if (XLByteLT(end, minEnd)) {
                 minEnd = end;
             }
