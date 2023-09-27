@@ -1221,7 +1221,7 @@ insert into tb_1092829 values(n);
 END loop;
 END;
 /
-ERROR:  The lable name is invalid
+ERROR:  The label name can only contain letters, digits and underscores
 LINE 2: “abel1*”:
         ^
 QUERY:   DECLARE BEGIN
@@ -1248,7 +1248,7 @@ insert into tb_1092829 values(n);
 END loop;
 END;
 /
-ERROR:  The lable name is invalid
+ERROR:  The label name can only contain letters, digits and underscores
 LINE 2: label#:
              ^
 QUERY:   DECLARE BEGIN
@@ -1275,7 +1275,7 @@ insert into tb_1092829 values(n);
 END loop;
 END;
 /
-ERROR:  The lable name is invalid
+ERROR:  The label name can only contain letters, digits and underscores
 LINE 2: 测试中文:
         ^
 QUERY:   DECLARE BEGIN

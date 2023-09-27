@@ -9775,7 +9775,7 @@ make_execsql_stmt(int firsttoken, int location)
     bool insert_array_record = false; 
     int values_end_loc = -1;
     int before_semi_loc = -1;
-    const char* err_msg = "The lable name is invalid";
+    const char* err_msg = "The label name can only contain letters, digits and underscores";
     PLpgSQL_row* row_data = NULL;
     PLpgSQL_rec* rec_data = NULL;
     PLpgSQL_var* array_data = NULL;
