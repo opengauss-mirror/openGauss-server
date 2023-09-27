@@ -935,7 +935,7 @@ Buffer standby_read_buf_new(
         UnlockReleaseBuffer(block_info_buf);
         return read_buf;
     }
-    UnlockReleaseBuffer(read_buf);
+    ReleaseBuffer(read_buf);
 
     extreme_rto::RedoItemTag redo_item_tag;
     INIT_REDO_ITEM_TAG(redo_item_tag, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum);
