@@ -1023,8 +1023,15 @@ XLogRecPtr GetCompletedRecPtr(PageRedoWorker *worker)
 
 XLogRecPtr GetReplyingRecPtr(PageRedoWorker *worker)
 {
+    XLogRecPtr curReplayingReadRecPtr;
+    XLogRecPtr lastReplayedEndRecPtr;
+    XLogRecPtr result;
     pg_read_barrier();
-    return pg_atomic_read_u64(&worker->curReplayingReadRecPtr);
+
+    curReplayingReadRecPtr = pg_atomic_read_u64(&worker->curReplayingReadRecPtr);
+    lastReplayedEndRecPtr = pg_atomic_read_u64(&worker->lastReplayedEndRecPtr);
+
+    return lastReplayedEndRecPtr > curReplayingReadRecPtr ? lastReplayedEndRecPtr : curReplayingReadRecPtr;
 }
 
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */
