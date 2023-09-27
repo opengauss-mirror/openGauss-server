@@ -233,8 +233,8 @@ void SSDoradoGetInstidList()
                         g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name)));                                                  
     }
 
-    int len = strlen("pg_xlog");
-    int index = 0;
+    uint8_t len = strlen("pg_xlog");
+    uint8_t index = 0;
     while ((entry = readdir(dssdir)) != NULL) {
         if (strncmp(entry->d_name, "pg_xlog", len) == 0) {
             if (strlen(entry->d_name) > len) {
