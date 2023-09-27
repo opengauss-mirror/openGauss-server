@@ -411,6 +411,7 @@ void ApplyProcHead(RedoItem *head)
     while (head != NULL) {
         RedoItem *cur = head;
         g_redoWorker->current_item = &cur->record;
+        pg_atomic_write_u64((volatile uint64*)&g_redoWorker->curReplayingReadRecPtr, cur->record.ReadRecPtr);
         head = head->nextByWorker[g_redoWorker->id + 1];
         ApplyAndFreeRedoItem(cur);
     }
@@ -1020,6 +1021,12 @@ XLogRecPtr GetCompletedRecPtr(PageRedoWorker *worker)
 {
     pg_read_barrier();
     return pg_atomic_read_u64(&worker->lastReplayedEndRecPtr);
+}
+
+XLogRecPtr GetReplyingRecPtr(PageRedoWorker *worker)
+{
+    pg_read_barrier();
+    return pg_atomic_read_u64(&worker->curReplayingReadRecPtr);
 }
 
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */
