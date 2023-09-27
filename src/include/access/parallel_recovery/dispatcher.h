@@ -123,7 +123,7 @@ uint32 GetWorkerId(const RelFileNode& node, BlockNumber block, ForkNumber forkNu
 XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState = false);
 void FreeAllocatedRedoItem();
 void GetReplayedRecPtrFromWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
-void GetReplayedRecPtrFromWorkers(XLogRecPtr *endPtr);
+void GetReplayingRecPtrFromWorkers(XLogRecPtr *endPtr);
 void GetReplayedRecPtrFromUndoWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 List* CheckImcompleteAction(List* imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
