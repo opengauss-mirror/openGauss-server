@@ -149,7 +149,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_gtt_attached_pids WITH (security_barrier) A
 GRANT SELECT ON pg_catalog.pg_gtt_attached_pids TO PUBLIC;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-DROP FUNCTION IF EXISTS pg_catalog.gs_is_recycle_obj(Oid, Oid, name);DROP FUNCTION IF EXISTS pg_catalog.gs_catalog_attribute_records(oid);DROP FUNCTION IF EXISTS pg_catalog.gs_verify_urq(oid, text, int8, text) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.gs_catalog_attribute_records(oid);DROP FUNCTION IF EXISTS pg_catalog.gs_verify_urq(oid, text, int8, text) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_repair_urq(oid) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_verify_undo_record(text, int8, int8, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_verify_undo_translot(text, int8, int8, boolean) CASCADE;
