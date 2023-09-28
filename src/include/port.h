@@ -429,6 +429,7 @@ extern struct dirent* gs_readdir(DIR* dir);
 
 /*env thread safe version*/
 extern int gs_putenv_r(char* envvar);
+extern int gs_setenv_r(const char* name, const char* envvar, int overwrite);
 extern char* gs_getenv_r(const char* name);
 
 #endif /* PG_PORT_H */
