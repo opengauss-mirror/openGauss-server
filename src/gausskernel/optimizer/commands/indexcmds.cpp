@@ -814,6 +814,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
             (errcode(ERRCODE_DUPLICATE_TABLE),
                 errmsg("relation \"%s\" already exists, skipping", stmt->idxname)));
         heap_close(rel, NoLock);
+        SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
         return address;
     }
 
