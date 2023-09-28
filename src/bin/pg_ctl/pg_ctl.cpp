@@ -7309,6 +7309,10 @@ static void free_ctl()
     FREE_AND_RESET(register_password);
     FREE_AND_RESET(pgha_str);
     FREE_AND_RESET(pgha_opt);
+    FREE_AND_RESET(exec_path);
+    FREE_AND_RESET(pg_data);
+    FREE_AND_RESET(pg_config);
+    FREE_AND_RESET(pgxcCommand);
     FREE_AND_RESET(ss_instance_config.dss.vgname);
     FREE_AND_RESET(ss_instance_config.dss.vgdata);
 }
