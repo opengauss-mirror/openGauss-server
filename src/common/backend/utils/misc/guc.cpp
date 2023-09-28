@@ -4412,7 +4412,7 @@ static void InitConfigureNamesEnum()
             NULL,
             NULL},
         {{"instr_unique_sql_track_type",
-            PGC_INTERNAL,
+            PGC_USERSET,
             NODE_ALL,
             INSTRUMENTS_OPTIONS,
             gettext_noop("unique sql track type"),

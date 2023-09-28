@@ -1040,6 +1040,7 @@ static void knl_u_unique_sql_init(knl_u_unique_sql_context* unique_sql_cxt)
     Assert(unique_sql_cxt != NULL);
 
     unique_sql_cxt->unique_sql_id = 0;
+    unique_sql_cxt->parent_unique_sql_id = 0;
     unique_sql_cxt->unique_sql_user_id = InvalidOid;
     unique_sql_cxt->unique_sql_cn_id = InvalidOid;
     unique_sql_cxt->unique_sql_start_time = 0;

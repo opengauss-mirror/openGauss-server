@@ -2110,7 +2110,7 @@ typedef struct knl_u_unique_sql_context {
     uint64 unique_sql_id;
     Oid unique_sql_user_id;
     uint32 unique_sql_cn_id;
-
+    uint64 parent_unique_sql_id;
     /*
      * storing unique sql start time,
      * in PortalRun method, we will update unique sql elapse time,
@@ -2210,6 +2210,10 @@ typedef struct knl_u_unique_sql_context {
  
     /* child statements in open cursor case, need always generate unique sql id */
     bool force_generate_unique_sql;
+    /* when record all plsql to statement_history, we need to cache the value for opening a cursor */
+    bool skip_sql_in_open = false;
+    bool is_open_cursor = false;
+    bool need_record_in_dynexecplsql = false;
 #ifndef ENABLE_MULTIPLE_NODES
     char* unique_sql_text;
 #endif

@@ -3518,7 +3518,8 @@ CREATE unlogged table statement_history(
     srt12_u bigint,
     srt13_before_query bigint,
     srt14_after_query bigint,
-    rtt_unknown bigint
+    rtt_unknown bigint,
+    parent_query_id bigint
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
