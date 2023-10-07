@@ -46,9 +46,10 @@ public:
     bool TryFeedWorker(ThreadPoolWorker* worker);
     void AddNewSession(knl_session_context* session);
     void WaitTask();
-    void DelSessionFromEpoll(knl_session_context* session);
+    void DelSessionFromEpoll(knl_session_context* session, bool sub_count);
     void RemoveWorkerFromList(ThreadPoolWorker* worker);
     void AddEpoll(knl_session_context* session);
+    void dispatch_socked_closed_session(knl_session_context* session);
     void SendShutDown();
     void ReaperAllSession();
     void ShutDown() const;

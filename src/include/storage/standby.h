@@ -30,8 +30,8 @@ void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid 
 extern void ResolveRecoveryConflictWithTablespace(Oid tsid);
 extern void ResolveRecoveryConflictWithDatabase(Oid dbid);
 
-extern void ResolveRecoveryConflictWithBufferPin(void);
-extern void SendRecoveryConflictWithBufferPin(ProcSignalReason reason);
+extern void ResolveRecoveryConflictWithBufferPin(int retry_count);
+extern void SendRecoveryConflictWithBufferPin(ProcSignalReason reason, int retry_count = 0);
 extern void CheckRecoveryConflictDeadlock(void);
 
 /*
