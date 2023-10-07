@@ -4282,7 +4282,7 @@ uint64 CopyFrom(CopyState cstate)
      */
     if ((resultRelInfo->ri_TrigDesc != NULL &&
         (resultRelInfo->ri_TrigDesc->trig_insert_before_row || resultRelInfo->ri_TrigDesc->trig_insert_instead_row)) ||
-        cstate->volatile_defexprs) {
+        cstate->volatile_defexprs || isForeignTbl) {
         useHeapMultiInsert = false;
     } else {
         useHeapMultiInsert = true;
@@ -4819,6 +4819,8 @@ uint64 CopyFrom(CopyState cstate)
 
             if (!skip_tuple && isForeignTbl) {
                 resultRelInfo->ri_FdwRoutine->ExecForeignInsert(estate, resultRelInfo, slot, NULL);
+                Assert(!useHeapMultiInsert);
+                resetPerTupCxt = true;
                 processed++;
             } else if (!skip_tuple) {
                 /*
@@ -5004,6 +5006,14 @@ uint64 CopyFrom(CopyState cstate)
                  * tuples inserted by an INSERT command.
                  */
                 processed++;
+            } else {/*skip_tupe == true*/
+                /*
+                 * only the before row insert trigget would make skip_tupe==true
+                 * which useHeapMultiInsert must be false
+                 * so we can safely reset the per-tuple memory context in next iteration
+                 */
+                Assert(useHeapMultiInsert == false);
+                resetPerTupCxt = true;
             }
 #ifdef PGXC
         }

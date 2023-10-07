@@ -321,3 +321,45 @@ DROP TABLE x;
 DROP TABLE y;
 DROP FUNCTION fn_x_before();
 DROP FUNCTION fn_x_after();
+CREATE TABLE measurement (
+city_id int not null,
+logdate int not null,
+peaktemp int,
+unitsales int
+);
+CREATE TABLE measurement_movement (
+city_id int not null,
+logdate int not null,
+peaktemp int,
+unitsales int
+);
+CREATE OR REPLACE FUNCTION measurement_insert_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+INSERT INTO measurement_movement VALUES (NEW.*);
+RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER insert_measurement_trigger
+BEFORE INSERT ON measurement
+FOR EACH ROW EXECUTE PROCEDURE measurement_insert_trigger();
+COPY measurement from stdin;
+select * from measurement_movement order by city_id;
+ city_id | logdate | peaktemp | unitsales 
+---------+---------+----------+-----------
+   10001 |      22 |       32 |        42
+   10002 |      23 |       33 |        43
+   10003 |      24 |       34 |        44
+   10004 |      25 |       35 |        45
+   10005 |      26 |       36 |        46
+(5 rows)
+
+select * from measurement order by city_id;
+ city_id | logdate | peaktemp | unitsales 
+---------+---------+----------+-----------
+(0 rows)
+
+drop trigger insert_measurement_trigger on measurement;
+drop function measurement_insert_trigger;
+drop table measurement;
+drop table measurement_movement;
