@@ -183,6 +183,9 @@ docker_process_sql() {
         if [ -n "$GS_DB" ]; then
                 query_runner+=( --dbname "$GS_DB" )
         fi
+        if [ -n "$GS_PORT" ]; then
+                query_runner+=( --port "$GS_PORT" )
+        fi
 
         echo "Execute SQL: ${query_runner[@]} $@"
         "${query_runner[@]}" "$@"
