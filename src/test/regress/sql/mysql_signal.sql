@@ -965,5 +965,35 @@ call p2(0);
 call p2(0);
 show warnings;
 
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate 01001;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate value 01001;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate values 01001;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate value;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate values;
+END;
+/
+
 \c regression
 drop database mysql_test_signal;

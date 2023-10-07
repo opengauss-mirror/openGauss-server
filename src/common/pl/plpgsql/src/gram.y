@@ -13094,11 +13094,20 @@ static void read_signal_sqlstate(PLpgSQL_stmt_signal *newp, int tok)
         yyerror("unexpected end of function definition");
     }
 
-    if (strcmp(yylval.str, "value") == 0) {
-        if (yylex() != SCONST) {
-            yyerror("syntax error, the expected value is a string.");
+    if (tok != SCONST && tok != T_WORD) {
+        yyerror("syntax error, the expected value is a string.");
+    }
+
+    if (tok == T_WORD) {
+        if (strcmp(yylval.str, "value") == 0) {
+            if (yylex() != SCONST) {
+                yyerror("syntax error, the expected value is a string.");
+            }
+        } else {
+            yyerror("syntax error, the expected word is value.");
         }
     }
+
     sqlstate_value = yylval.str;
 
     if (strlen(sqlstate_value) != 5 ||
