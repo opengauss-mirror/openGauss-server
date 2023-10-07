@@ -74,6 +74,8 @@ static bool* generateTranslateColumns(int n, int truesz, int* trues);
 const char* ORIENTATION_TIMESERIES = "timeseries";
 const char* TS_PSEUDO_DIST_COLUMN = "ts_pseudo_distcol";
 
+extern int dolphin_lower_case_table_names;
+
 /* ----------------
  * Handlers for various slash commands displaying some sort of list
  * of things in the database.
@@ -1133,6 +1135,15 @@ bool describeTableDetails(const char* pattern, bool verbose, bool showSystem)
     PQExpBufferData buf;
     PGresult* res = NULL;
     int i;
+
+    PGresult* res_lower_case_table_names = NULL;
+    res_lower_case_table_names = PSQLexec("select setting from pg_settings where name = 'dolphin.lower_case_table_names';", false);
+    if (PQntuples(res_lower_case_table_names) == 1){
+        dolphin_lower_case_table_names = atoi(PQgetvalue(res_lower_case_table_names, 0, 0));
+    } else {
+        dolphin_lower_case_table_names = -1;
+    }
+    PQclear(res_lower_case_table_names);
 
     initPQExpBuffer(&buf);
 
