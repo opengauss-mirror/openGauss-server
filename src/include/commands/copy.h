@@ -448,8 +448,8 @@ extern int GetDecimalFromHex(char hex);
 extern char* limit_printout_length(const char* str);
 
 extern bool StrToInt32(const char* s, int *val);
+extern char* TrimStrQuote(const char* str, bool isQuote);
 extern char* TrimStr(const char* str);
-
 extern void UHeapAddToBulkInsertSelect(CopyFromBulk bulk, Tuple tup, bool needCopy);
 
 extern void HeapAddToBulkInsertSelect(CopyFromBulk bulk, Tuple tup, bool needCopy);

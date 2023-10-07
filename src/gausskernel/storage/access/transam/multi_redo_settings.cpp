@@ -29,7 +29,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "utils/guc.h"
-
+#include "commands/copy.h"
 #include "access/multi_redo_settings.h"
 #include "access/multi_redo_api.h"
 #include "threadpool/threadpool_controler.h"
@@ -133,7 +133,7 @@ static uint32 GetCPUCount()
 
 void ParseBindCpuInfo(RedoCpuBindControl *control)
 {
-    char* attr = TrimStr(g_instance.attr.attr_storage.redo_bind_cpu_attr);
+    char* attr = TrimStrQuote(g_instance.attr.attr_storage.redo_bind_cpu_attr, true);
     if (attr == NULL) {
         return;
     }

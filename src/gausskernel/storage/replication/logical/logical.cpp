@@ -85,6 +85,15 @@ static void parallel_change_cb_wrapper(ParallelReorderBuffer *cache, ReorderBuff
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
 static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin);
 
+/* Checkout aurgments whether coming from ALTER SYSTEM SET*/
+bool QuoteCheckOut(char* newval)
+{
+    int len = strlen(newval);
+    if(len >= 2 && newval[0] == '"' && newval[0] == newval[len - 1])
+        return true;
+    return false;
+}
+
 /*
  * Make sure the current settings & environment are capable of doing logical
  * decoding.
