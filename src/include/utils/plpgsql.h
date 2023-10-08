@@ -377,6 +377,7 @@ typedef struct PLpgSQL_expr { /* SQpL Query to plan and execute	*/
     bool is_have_tableof_index_func;
     /* dno maybe is 0, so need an extra variable */
     int tableof_func_dno;
+    uint64 unique_sql_id;
 } PLpgSQL_expr;
 
 typedef struct { /* openGauss data type */

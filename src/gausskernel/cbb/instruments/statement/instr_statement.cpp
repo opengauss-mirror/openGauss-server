@@ -75,7 +75,7 @@
 
 #define STATEMENT_DETAILS_HEAD_SIZE (1)     /* [VERSION] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
-#define INSTR_STATEMENT_ATTRNUM (44 + TOTAL_TIME_INFO_TYPES)
+#define INSTR_STATEMENT_ATTRNUM (45 + TOTAL_TIME_INFO_TYPES)
 
 /* support different areas in stmt detail column */
 #define STATEMENT_DETAIL_TYPE_LEN (1)
@@ -556,6 +556,7 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     for (int num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
         values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
     }
+    values[i++] = Int64GetDatum(statementInfo->parent_query_id);
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
@@ -2071,10 +2072,12 @@ void instr_stmt_report_query(uint64 unique_query_id)
     CHECK_STMT_HANDLE();
     CURRENT_STMT_METRIC_HANDLE->unique_query_id = unique_query_id;
     CURRENT_STMT_METRIC_HANDLE->unique_sql_cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
+    CURRENT_STMT_METRIC_HANDLE->parent_query_id = u_sess->unique_sql_cxt.parent_unique_sql_id;
 
-    if (likely(!is_local_unique_sql() || 
-        (!u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->query) ||
-        (u_sess->attr.attr_common.track_stmt_parameter && 
+    if (likely(!is_local_unique_sql() ||
+        (!u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->query
+                && !u_sess->unique_sql_cxt.need_record_in_dynexecplsql) ||
+        (u_sess->attr.attr_common.track_stmt_parameter &&
          (u_sess->pbe_message == PARSE_MESSAGE_QUERY || u_sess->pbe_message == BIND_MESSAGE_QUERY)))) {
         return;
     }
@@ -2247,7 +2250,8 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 {
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
     if (queryDesc == NULL || ssctx == NULL || ssctx->level <= STMT_TRACK_L0
-        || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0 || u_sess->statement_cxt.executer_run_level > 1) {
+        || ssctx->level > STMT_TRACK_L2 || (ssctx->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor)
+        || (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL)) {
         return;
     }
     /* when getting plan directly from CN, the plan is partial, deparse plan will be failed,

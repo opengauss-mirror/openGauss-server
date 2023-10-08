@@ -78,7 +78,7 @@ typedef struct {
 typedef enum {
     UNIQUE_SQL_NONE = 0,
     UNIQUE_SQL_TRACK_TOP, /* only top SQL will be tracked */
-    UNIQUE_SQL_TRACK_ALL  /* later maybe support parent and child SQLs */
+    UNIQUE_SQL_TRACK_ALL  /* all the sql(including plsql) will be tracked */
 } UniqueSQLTrackType;
 
 typedef struct {
@@ -154,42 +154,42 @@ extern int GetUniqueSQLTrackType();
     }
 
 #define IS_UNIQUE_SQL_TRACK_TOP ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && GetUniqueSQLTrackType() == UNIQUE_SQL_TRACK_TOP)
+#define IS_UNIQUE_SQL_TRACK_ALL ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && GetUniqueSQLTrackType() == UNIQUE_SQL_TRACK_ALL)
 
-#define INIT_UNIQUE_SQL_CXT()                                                           \
-        bool old_is_top_unique_sql = false;                                             \
-        uint64 old_unique_sql_id = 0;                                                   \
-        bool old_is_multi_unique_sql = false;                                           \
-        char *old_curr_single_unique_sql = NULL;                                        \
-        int32 old_multi_sql_offset = 0;                                                 \
-        bool old_force_gen_unique_sql = false;
 
-#define BACKUP_UNIQUE_SQL_CXT()                                                         \
-        old_is_top_unique_sql = IsTopUniqueSQL();                                       \
-        if (old_is_top_unique_sql) {                                                    \
-            SetIsTopUniqueSQL(false);                                                   \
-            old_unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;                   \
-        }                                                                               \
-        if (u_sess->unique_sql_cxt.is_multi_unique_sql) {                               \
-            u_sess->unique_sql_cxt.is_multi_unique_sql = false;                         \
-            old_is_multi_unique_sql = true;                                             \
-            old_curr_single_unique_sql = u_sess->unique_sql_cxt.curr_single_unique_sql; \
-            old_multi_sql_offset = u_sess->unique_sql_cxt.multi_sql_offset;             \
-            u_sess->unique_sql_cxt.multi_sql_offset = 0;                                \
-        }                                                                               \
-        old_force_gen_unique_sql = u_sess->unique_sql_cxt.force_generate_unique_sql;    \
-        u_sess->unique_sql_cxt.force_generate_unique_sql = true;
+#define INIT_UNIQUE_SQL_CXT()                                                                               \
+int64 timeInfo[TOTAL_TIME_INFO_TYPES] = {0};                                                                \
+PLSQLStmtTrackStack stack;                                                                                 \
+errno_t err_no;                                                                                             \
+if (IS_UNIQUE_SQL_TRACK_ALL) {                                                                              \
+    for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {                                                       \
+    timeInfo[i] = u_sess->stat_cxt.localTimeInfoArray[i];                                                   \
+    u_sess->stat_cxt.localTimeInfoArray[i] = 0;                                                             \
+    }                                                                                                       \
+}                                                                                                           \
+u_sess->stat_cxt.localTimeInfoArray[DB_TIME] = GetCurrentTimestamp();                                       \
+u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();                                               \
 
-#define RESTORE_UNIQUE_SQL_CXT()                                                        \
-        if (old_is_top_unique_sql) {                                                    \
-            SetIsTopUniqueSQL(true);                                                    \
-            u_sess->unique_sql_cxt.unique_sql_id = old_unique_sql_id;                   \
-        }                                                                               \
-        if (old_is_multi_unique_sql) {                                                  \
-            u_sess->unique_sql_cxt.is_multi_unique_sql = true;                          \
-            u_sess->unique_sql_cxt.curr_single_unique_sql = old_curr_single_unique_sql; \
-            u_sess->unique_sql_cxt.multi_sql_offset = old_multi_sql_offset;             \
-        }                                                                               \
-        u_sess->unique_sql_cxt.force_generate_unique_sql = old_force_gen_unique_sql;
+#define BACKUP_UNIQUE_SQL_CXT()                                                             \
+        stack.push();
+
+#define RESTORE_UNIQUE_SQL_CXT()                                                                                 \
+if (IS_UNIQUE_SQL_TRACK_ALL) {                                                                                   \
+        int64 cur = getCpuTime();                                                                                \
+        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];     \
+        u_sess->stat_cxt.localTimeInfoArray[DB_TIME] =                                                           \
+        GetCurrentTimestamp() - u_sess->stat_cxt.localTimeInfoArray[DB_TIME];                                    \
+        UniqueSQLStat sql_stat;                                                                                  \
+        sql_stat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;                                                 \
+        instr_stmt_report_unique_sql_info(NULL, sql_stat.timeInfo, NULL);                                        \
+    }                                                                                                            \
+stack.pop();                                                                                                     \
+if (IS_UNIQUE_SQL_TRACK_ALL) {                                                                                   \
+        for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {                                                        \
+    u_sess->stat_cxt.localTimeInfoArray[i] = timeInfo[i];                                                        \
+    }                                                                                                            \
+}                                                                                                                \
+
 
 #define START_TRX_UNIQUE_SQL_ID 2718638560
 

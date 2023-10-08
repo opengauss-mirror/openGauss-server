@@ -1706,7 +1706,7 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
      */
     if (sql == NULL || query == NULL || g_instance.stat_cxt.UniqueSQLHashtbl == NULL || !is_local_unique_sql() ||
         IsAbortedTransactionBlockState() || CheckSkipSQL(query) ||
-        u_sess->unique_sql_cxt.skipUniqueSQLCount != 0) {
+        u_sess->unique_sql_cxt.skipUniqueSQLCount != 0 || u_sess->unique_sql_cxt.skip_sql_in_open) {
         return;
     }
 

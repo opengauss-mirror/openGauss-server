@@ -1,0 +1,430 @@
+\c postgres
+alter system set instr_unique_sql_count to 1000;
+delete from statement_history;
+--generate slow sql
+CREATE TABLE big_table (
+                           id SERIAL PRIMARY KEY,
+                           column1 INT,
+                           column2 VARCHAR(100)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "big_table_id_seq" for serial column "big_table.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "big_table_pkey" for table "big_table"
+--generate normal sql for comparison
+create table temp (
+    a int
+);
+--set the slow sql threshold
+set log_min_duration_statement = 30; --30ms
+--test exec_plsql(possibly with an insert query)
+create or replace procedure test_exec_plsql()
+is
+begin
+INSERT INTO temp values (1);
+INSERT INTO big_table (column1, column2) SELECT generate_series(1, 10000), 'data' || generate_series(1, 10000);
+end;
+/
+-- record all sql
+set track_stmt_stat_level = 'L1,L1';
+set instr_unique_sql_track_type = 'all';
+call test_exec_plsql();
+ test_exec_plsql 
+-----------------
+ 
+(1 row)
+
+-- record slow sql
+set track_stmt_stat_level = 'OFF,L1';
+call test_exec_plsql();
+ test_exec_plsql 
+-----------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where query_plan is not null order by start_time;
+                                               query                                               |                                query_plan                                | is_slow_sql 
+---------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------+-------------
+ call test_exec_plsql();                                                                           | Datanode Name: datanode1                                                +| t
+                                                                                                   | Function Scan on test_exec_plsql  (cost=0.25..0.26 rows=1 width=4)      +| 
+                                                                                                   |                                                                         +| 
+                                                                                                   |                                                                          | 
+ INSERT INTO temp values (?)                                                                       | Datanode Name: datanode1                                                +| f
+                                                                                                   | Insert on temp  (cost=0.00..0.01 rows=1 width=0)                        +| 
+                                                                                                   |   ->  Result  (cost=0.00..0.01 rows=1 width=0)                          +| 
+                                                                                                   |                                                                         +| 
+                                                                                                   |                                                                          | 
+ INSERT INTO big_table (column1, column2) SELECT generate_series(?, ?), ? || generate_series(?, ?) | Datanode Name: datanode1                                                +| t
+                                                                                                   | Insert on big_table  (cost=0.00..22.52 rows=1000 width=36)              +| 
+                                                                                                   |   ->  Subquery Scan on "*SELECT*"  (cost=0.00..22.52 rows=1000 width=36)+| 
+                                                                                                   |         ->  Result  (cost=0.00..5.01 rows=1000 width=0)                 +| 
+                                                                                                   |                                                                         +| 
+                                                                                                   |                                                                          | 
+ call test_exec_plsql();                                                                           | Datanode Name: datanode1                                                +| t
+                                                                                                   | Function Scan on test_exec_plsql  (cost=0.25..0.26 rows=1 width=4)      +| 
+                                                                                                   |                                                                         +| 
+                                                                                                   |                                                                          | 
+ INSERT INTO big_table (column1, column2) SELECT generate_series(?, ?), ? || generate_series(?, ?) | Datanode Name: datanode1                                                +| t
+                                                                                                   | Insert on big_table  (cost=0.00..22.52 rows=1000 width=36)              +| 
+                                                                                                   |   ->  Subquery Scan on "*SELECT*"  (cost=0.00..22.52 rows=1000 width=36)+| 
+                                                                                                   |         ->  Result  (cost=0.00..5.01 rows=1000 width=0)                 +| 
+                                                                                                   |                                                                         +| 
+                                                                                                   |                                                                          | 
+(5 rows)
+
+delete from statement_history;
+--test perform
+CREATE OR REPLACE PROCEDURE test_exec_perform()
+AS
+BEGIN
+INSERT INTO temp values (2);
+PERFORM pg_sleep(0.1);
+END;
+/
+set track_stmt_stat_level = 'L1,L1';
+set instr_unique_sql_track_type = 'all';
+call test_exec_perform();
+ test_exec_perform 
+-------------------
+ 
+(1 row)
+
+set track_stmt_stat_level = 'OFF,L1';
+call test_exec_perform();
+ test_exec_perform 
+-------------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where query_plan is not null order by start_time;
+            query            |                              query_plan                              | is_slow_sql 
+-----------------------------+----------------------------------------------------------------------+-------------
+ call pg_sleep(?);           | Datanode Name: datanode1                                            +| t
+                             | Function Scan on pg_sleep  (cost=0.00..0.01 rows=1 width=4)         +| 
+                             |                                                                     +| 
+                             |                                                                      | 
+ call test_exec_perform();   | Datanode Name: datanode1                                            +| t
+                             | Function Scan on test_exec_perform  (cost=0.25..0.26 rows=1 width=4)+| 
+                             |                                                                     +| 
+                             |                                                                      | 
+ INSERT INTO temp values (?) | Datanode Name: datanode1                                            +| f
+                             | Insert on temp  (cost=0.00..0.01 rows=1 width=0)                    +| 
+                             |   ->  Result  (cost=0.00..0.01 rows=1 width=0)                      +| 
+                             |                                                                     +| 
+                             |                                                                      | 
+ SELECT pg_sleep(?)          | Datanode Name: datanode1                                            +| t
+                             | Result  (cost=0.00..0.01 rows=1 width=0)                            +| 
+                             |                                                                     +| 
+                             |                                                                      | 
+ call test_exec_perform();   | Datanode Name: datanode1                                            +| t
+                             | Function Scan on test_exec_perform  (cost=0.25..0.26 rows=1 width=4)+| 
+                             |                                                                     +| 
+                             |                                                                      | 
+ SELECT pg_sleep(?)          | Datanode Name: datanode1                                            +| t
+                             | Result  (cost=0.00..0.01 rows=1 width=0)                            +| 
+                             |                                                                     +| 
+                             |                                                                      | 
+(6 rows)
+
+delete from statement_history;
+--test return query
+CREATE OR REPLACE FUNCTION test_return_query()
+RETURNS TABLE (column1 int, column2 VARCHAR(100))
+LANGUAGE plpgsql
+AS $$
+BEGIN
+INSERT INTO temp values (3);
+RETURN QUERY SELECT column1, column2 FROM big_table WHERE column1 = 9909 ORDER BY column1 DESC;
+END;
+$$;
+set track_stmt_stat_level = 'L1,L0';
+set instr_unique_sql_track_type = 'all';
+call test_return_query();
+ column1 | column2  
+---------+----------
+    9909 | data9909
+    9909 | data9909
+(2 rows)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+                                     query                                      |                          query_plan                          | is_slow_sql 
+--------------------------------------------------------------------------------+--------------------------------------------------------------+-------------
+ INSERT INTO temp values (?)                                                    | Datanode Name: datanode1                                    +| f
+                                                                                | Insert on temp  (cost=0.00..0.01 rows=1 width=0)            +| 
+                                                                                |   ->  Result  (cost=0.00..0.01 rows=1 width=0)              +| 
+                                                                                |                                                             +| 
+                                                                                |                                                              | 
+ SELECT column1, column2 FROM big_table WHERE column1 = ? ORDER BY column1 DESC | Datanode Name: datanode1                                    +| f
+                                                                                | Seq Scan on big_table  (cost=0.00..177.65 rows=20 width=222)+| 
+                                                                                |   Filter: (column1 = '***')                                 +| 
+                                                                                |                                                             +| 
+                                                                                |                                                              | 
+(2 rows)
+
+delete from statement_history;
+--test open cursor
+CREATE OR REPLACE PROCEDURE test_exec_open()
+AS
+DECLARE
+cur refcursor;
+    row record;
+BEGIN
+OPEN cur FOR SELECT column1, column2 FROM big_table where column1 = 9909;
+LOOP
+FETCH NEXT FROM cur INTO row;
+        EXIT WHEN NOT FOUND;
+        insert into temp values(row.column1);
+        RAISE NOTICE 'id: %, name: %', row.column1, row.column2;
+END LOOP;
+CLOSE cur;
+END;
+/
+set track_stmt_stat_level = 'L1,L0';
+set instr_unique_sql_track_type = 'all';
+call test_exec_open();
+NOTICE:  id: 9909, name: data9909
+NOTICE:  id: 9909, name: data9909
+ test_exec_open 
+----------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+                          query                           |                          query_plan                          | is_slow_sql 
+----------------------------------------------------------+--------------------------------------------------------------+-------------
+ SELECT column1, column2 FROM big_table where column1 = ? | Datanode Name: datanode1                                    +| f
+                                                          | Seq Scan on big_table  (cost=0.00..177.65 rows=20 width=222)+| 
+                                                          |   Filter: (column1 = '***')                                 +| 
+                                                          |                                                             +| 
+                                                          |                                                              | 
+ insert into temp values(row.column1)                     | Datanode Name: datanode1                                    +| f
+                                                          | Insert on temp  (cost=0.00..0.01 rows=1 width=0)            +| 
+                                                          |   ->  Result  (cost=0.00..0.01 rows=1 width=0)              +| 
+                                                          |                                                             +| 
+                                                          |                                                              | 
+ insert into temp values(row.column1)                     | Datanode Name: datanode1                                    +| f
+                                                          | Insert on temp  (cost=0.00..0.01 rows=1 width=0)            +| 
+                                                          |   ->  Result  (cost=0.00..0.01 rows=1 width=0)              +| 
+                                                          |                                                             +| 
+                                                          |                                                              | 
+(3 rows)
+
+delete from statement_history;
+--test for with select
+CREATE OR REPLACE PROCEDURE test_exec_fors()
+AS
+DECLARE
+data varchar(100);
+BEGIN
+FOR data IN SELECT column2 FROM big_table where column1 = 9909 LOOP
+    RAISE NOTICE 'column_value: %', data;
+END LOOP;
+END;
+/
+call test_exec_fors();
+NOTICE:  column_value: data9909
+NOTICE:  column_value: data9909
+ test_exec_fors 
+----------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+                      query                      |                          query_plan                          | is_slow_sql 
+-------------------------------------------------+--------------------------------------------------------------+-------------
+ SELECT column2 FROM big_table where column1 = ? | Datanode Name: datanode1                                    +| f
+                                                 | Seq Scan on big_table  (cost=0.00..177.65 rows=20 width=218)+| 
+                                                 |   Filter: (column1 = '***')                                 +| 
+                                                 |                                                             +| 
+                                                 |                                                              | 
+(1 row)
+
+delete from statement_history;
+--test for with a cursor
+CREATE OR REPLACE PROCEDURE test_exec_forc()
+AS
+DECLARE
+CURSOR cur_cursor is SELECT column1 FROM big_table where column1 = 9909;
+num int;
+BEGIN
+for num in cur_cursor
+    LOOP
+        RAISE NOTICE '%',num;
+END LOOP;
+END;
+/
+call test_exec_forc();
+NOTICE:  (9909)
+NOTICE:  (9909)
+ test_exec_forc 
+----------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+                      query                      |                         query_plan                         | is_slow_sql 
+-------------------------------------------------+------------------------------------------------------------+-------------
+ SELECT column1 FROM big_table where column1 = ? | Datanode Name: datanode1                                  +| f
+                                                 | Seq Scan on big_table  (cost=0.00..177.65 rows=20 width=4)+| 
+                                                 |   Filter: (column1 = '***')                               +| 
+                                                 |                                                           +| 
+                                                 |                                                            | 
+(1 row)
+
+delete from statement_history;
+--test dynamic plsql
+CREATE OR REPLACE PROCEDURE test_exec_dynexecsql(second int)
+AS
+DECLARE
+sql_stmt VARCHAR;
+BEGIN
+    sql_stmt := 'call pg_sleep('|| second ||')';
+EXECUTE sql_stmt;
+END;
+/
+call test_exec_dynexecsql(1);
+ test_exec_dynexecsql 
+----------------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+      query       |                         query_plan                          | is_slow_sql 
+------------------+-------------------------------------------------------------+-------------
+ call pg_sleep(?) | Datanode Name: datanode1                                   +| t
+                  | Function Scan on pg_sleep  (cost=0.00..0.01 rows=1 width=4)+| 
+                  |                                                            +| 
+                  |                                                             | 
+(1 row)
+
+delete from statement_history;
+--test dynamic fors
+CREATE OR REPLACE PROCEDURE test_exec_dynfors()
+AS
+DECLARE
+data varchar(100);
+    sql_stmt VARCHAR;
+BEGIN
+    sql_stmt := 'SELECT column2 FROM big_table where column1 = 9909';
+FOR data IN EXECUTE sql_stmt LOOP
+    RAISE NOTICE 'column_value: %', data;
+END LOOP;
+END;
+/
+call test_exec_dynfors();
+NOTICE:  column_value: data9909
+NOTICE:  column_value: data9909
+ test_exec_dynfors 
+-------------------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+                      query                      |                          query_plan                          | is_slow_sql 
+-------------------------------------------------+--------------------------------------------------------------+-------------
+ SELECT column2 FROM big_table where column1 = ? | Datanode Name: datanode1                                    +| f
+                                                 | Seq Scan on big_table  (cost=0.00..177.65 rows=20 width=218)+| 
+                                                 |   Filter: (column1 = '***')                                 +| 
+                                                 |                                                             +| 
+                                                 |                                                              | 
+(1 row)
+
+delete from statement_history;
+CREATE OR REPLACE PACKAGE test_proc_in_pkg IS
+PROCEDURE proc_pkg();
+END test_proc_in_pkg;
+/
+create or replace package body test_proc_in_pkg is
+procedure proc_pkg()
+is
+begin
+create table if not exists test1(col1 int);
+insert into test1 values(1);
+end;
+begin
+proc_pkg();
+end test_proc_in_pkg;
+/
+select test_proc_in_pkg.proc_pkg();
+NOTICE:  relation "test1" already exists, skipping
+CONTEXT:  SQL statement "create table if not exists test1(col1 int)"
+PL/pgSQL function proc_pkg() line 2 at SQL statement
+referenced column: proc_pkg
+ proc_pkg 
+----------
+ 
+(1 row)
+
+call pg_sleep(0.1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+                   query                    |                         query_plan                          | is_slow_sql 
+--------------------------------------------+-------------------------------------------------------------+-------------
+ CALL proc_pkg()                            | Datanode Name: datanode1                                   +| f
+                                            | Function Scan on proc_pkg  (cost=0.25..0.26 rows=1 width=4)+| 
+                                            |                                                            +| 
+                                            |                                                             | 
+ create table if not exists test1(col1 int) |                                                             | f
+ insert into test1 values(?)                | Datanode Name: datanode1                                   +| f
+                                            | Insert on test1  (cost=0.00..0.01 rows=1 width=0)          +| 
+                                            |   ->  Result  (cost=0.00..0.01 rows=1 width=0)             +| 
+                                            |                                                            +| 
+                                            |                                                             | 
+ create table if not exists test1(col1 int) |                                                             | f
+ insert into test1 values(?)                | Datanode Name: datanode1                                   +| f
+                                            | Insert on test1  (cost=0.00..0.01 rows=1 width=0)          +| 
+                                            |   ->  Result  (cost=0.00..0.01 rows=1 width=0)             +| 
+                                            |                                                            +| 
+                                            |                                                             | 
+(5 rows)
+
