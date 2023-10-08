@@ -112,7 +112,7 @@ void DoradoReadCtlInfo(ShareStorageXLogCtl *ctlInfo)
     }
 
     if (ctlInfo->magic != SHARE_STORAGE_CTL_MAGIC || ctlInfo->checkNumber != SHARE_STORAGE_CTL_CHCK_NUMBER) {
-        ereport(FATAL, (errmsg("dorado ctl info maybe damaged, cltInfo->magic = %u, ctlInfo->checkNumber = %llu",
+        ereport(FATAL, (errmsg("dorado ctl info maybe damaged, cltInfo->magic = %u, ctlInfo->checkNumber = %lu",
                             ctlInfo->magic, ctlInfo->checkNumber)));
     }
 
