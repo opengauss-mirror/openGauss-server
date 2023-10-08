@@ -121,7 +121,7 @@ void UpdateFusion::InitBaseParam(List* targetList)
             break;
         }
 
-        TargetEntry* res = (TargetEntry*)lfirst(lc);
+        res = (TargetEntry*)lfirst(lc);
         expr = res->expr;
 
         while (IsA(expr, RelabelType)) {
