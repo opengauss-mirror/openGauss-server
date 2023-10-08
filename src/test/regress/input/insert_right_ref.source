@@ -450,6 +450,39 @@ CREATE TABLE t2 (
 INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = t2.col2 + 1;
 INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = extract(century from col4) * 100 + extract(isodow from col4);
 
+-- multi values case1
+create table t_multi_values(a int not null primary key, b char(10));
+insert into t_multi_values values (1);
+insert into t_multi_values values (a+2);
+insert into t_multi_values values (a+5),(a+6);
+insert into t_multi_values values (a+7, b),(a+8, concat(b, ' not display')), (a+9 + a * 3, b),(a + 10 + a * 3, 'display');
+select * from t_multi_values order by a;
+
+-- multi values case2
+create table t_multi_values2(f1 int primary key, f2 int, f3 int);
+insert into t_multi_values2(f1, f3, f2) VALUES(1, f1 + 2, f3 + 3),(2, f1 + 2, f3 + 3),(3, f1 + 2, f3 + 3),(4, f1 + 2, f3 + 3);
+select * from t_multi_values2 order by f1;
+
+-- multi values case3
+create table t_multi_values3(f1 int primary key, f2 int, f3 int);
+insert into t_multi_values3(f1, f3) VALUES(1, f1 + 2),(2, f1 + 2),(3, f1 + 2),(4, f1 + 2);
+select * from t_multi_values3 order by f1;
+
+-- test insert select
+create table ins_sel_t2 (a1 int);
+create table ins_sel_t3 (a int);
+create table ins_sel_t4 (a1 int);
+insert into ins_sel_t3 select * from ins_sel_t2 where a < 800; -- should error
+
+insert into ins_sel_t2 values(generate_series(20, 30));
+insert into ins_sel_t3 select * from ins_sel_t2 where a1 < 25;
+select * from ins_sel_t3 order by a;
+
+delete from ins_sel_t2;
+insert into ins_sel_t4 values(generate_series(1, 10));
+insert into ins_sel_t2 select * from ins_sel_t4 where a1 < 3;
+select * from ins_sel_t2 order by a1;
+
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 CREATE USER rightref WITH PASSWORD 'rightref@123';
