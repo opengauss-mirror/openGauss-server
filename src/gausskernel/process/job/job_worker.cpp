@@ -314,6 +314,10 @@ void JobExecuteWorkerMain()
     t_thrd.proc_cxt.PostInit->InitJobExecuteWorker();
     t_thrd.proc_cxt.PostInit->GetDatabaseName(u_sess->proc_cxt.MyProcPort->database_name);
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
+
 #ifdef PGXC /* PGXC_COORD */
     /*
      * Initialize key pair to be used as object id while using advisory lock
