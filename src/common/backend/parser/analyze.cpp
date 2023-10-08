@@ -1651,11 +1651,15 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
     }
 }
 
-static RightRefState* MakeRightRefState() 
+static RightRefState* MakeRightRefStateIfSupported(SelectStmt* selectStmt)
 {
-    RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
-    refState->isSupported = !IsInitdb && DB_IS_CMPT(B_FORMAT);
-    return refState;
+    bool isSupported = DB_IS_CMPT(B_FORMAT) && selectStmt && selectStmt->valuesLists && !IsInitdb;
+    if (isSupported) {
+        RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
+        refState->isSupported = true;
+        return refState;
+    }
+    return nullptr;
 }
 
 /*
@@ -1684,7 +1688,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     /* There can't be any outer WITH to worry about */
     AssertEreport(pstate->p_ctenamespace == NIL, MOD_OPT, "para should be NIL");
 
-    RightRefState* rightRefState = MakeRightRefState();
+    RightRefState* rightRefState = MakeRightRefStateIfSupported((SelectStmt*)stmt->selectStmt);
     
     qry->commandType = CMD_INSERT;
     pstate->p_is_insert = true;
@@ -2176,7 +2180,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         exprList = transformInsertRow(pstate, exprList, stmt->cols, icolumns, attrnos);
     }
 
-    if (rightRefState->isSupported) {
+    if (IS_SUPPORT_RIGHT_REF(rightRefState)) {
         SetInsertAttrnoState(pstate, attrnos, list_length(exprList));
     }
 
@@ -2273,7 +2277,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     } else {
         qry->rightRefState = nullptr;
         pstate->rightRefState = nullptr;
-        pfree(rightRefState);
+        pfree_ext(rightRefState);
     }
 
     return qry;
