@@ -5736,7 +5736,7 @@ static void eraseSingleQuotes(char* query_string)
  * Report error according to the return value.
  * At the same time, we should free the space alloced by developers.
  */
-void freeSecurityFuncSpace(char* charList, ...)
+void freeSecurityFuncSpace(const char* charList, ...)
 {
     va_list argptr;
 

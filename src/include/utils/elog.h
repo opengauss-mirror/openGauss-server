@@ -316,7 +316,7 @@ typedef struct FormatCallStack {
 #define securec_check(errno, charList, ...)                                                                            \
     {                                                                                                                  \
         if (EOK != errno) {                                                                                            \
-            freeSecurityFuncSpace(static_cast<char*>(charList), ##__VA_ARGS__);                                        \
+            freeSecurityFuncSpace(charList, ##__VA_ARGS__);                                        \
             switch (errno) {                                                                                           \
                 case EINVAL:                                                                                           \
                     elog(ERROR,                                                                                        \
@@ -669,7 +669,7 @@ extern void write_stderr_with_prefix(const char* fmt, ...)
 
 extern void getElevelAndSqlstate(int* eLevel, int* sqlState);
 extern void get_time_now(char* nowTime, int timeLen);
-void freeSecurityFuncSpace(char* charList, ...);
+void freeSecurityFuncSpace(const char* charList, ...);
 
 extern void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
