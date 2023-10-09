@@ -110,6 +110,14 @@ typedef struct WalRcvCtlBlock {
     char walReceiverBuffer[FLEXIBLE_ARRAY_MEMBER];
 } WalRcvCtlBlock;
 
+typedef struct UwalrcvWriterState {
+    XLogRecPtr startPtr;
+    XLogRecPtr flushPtr;
+    XLogRecPtr truncatePtr;	
+    uint64_t startTimeLine;
+    slock_t mutex;
+} UwalrcvWriterState;
+
 typedef enum { 
     REPCONNTARGET_DEFAULT, 
     REPCONNTARGET_PRIMARY, 
@@ -219,6 +227,7 @@ typedef struct WalRcvData {
 
     Latch* walrcvWriterLatch;
     WalRcvCtlBlock* walRcvCtlBlock;
+    UwalrcvWriterState* uwalRcvState;
     slock_t mutex; /* locks shared variables shown above */
     slock_t exitLock;
     char recoveryTargetBarrierId[MAX_BARRIER_ID_LENGTH];
@@ -237,6 +246,8 @@ typedef struct WalRcvData {
     struct ArchiveSlotConfig *archive_slot;
     uint32 rcvDoneFromShareStorage;
     uint32 shareStorageTerm;
+    bool needCatchup;
+    bool flagAlreadyNotifyCatchup;
 } WalRcvData;
 
 typedef struct WalReceiverFunc {

@@ -97,6 +97,7 @@
 #include "storage/lmgr.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "storage/file/fio_device.h"
+#include "storage/gs_uwal/gs_uwal.h"
 #include "tcop/tcopprot.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -175,7 +176,9 @@ static void InitWalSnd(void);
 static void WalSndHandshake(void);
 static void WalSndKill(int code, Datum arg);
 static void XLogSendPhysical(void);
+static void XLogSendUwalLSN(void);
 static void XLogSendLogical(void);
+static void XLogSendUwalStatus(void);
 static void IdentifySystem(void);
 static void IdentifyVersion(void);
 static void IdentifyConsistence(IdentifyConsistenceCmd *cmd);
@@ -187,6 +190,7 @@ static void StartLogicalReplication(StartReplicationCmd *cmd);
 static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd);
 static void ProcessStandbyMessage(void);
 static void ProcessStandbyReplyMessage(void);
+static void ProcessUwalCatchupEndMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessStandbySwitchRequestMessage(void);
 static void ProcessRepliesIfAny(void);
@@ -243,7 +247,6 @@ static void WalSndHadrSwitchoverRequest();
 static void ProcessHadrSwitchoverMessage();
 static void ProcessHadrReplyMessage();
 static int WalSndTimeout();
-
 
 char *DataDir = ".";
 
@@ -477,7 +480,11 @@ int WalSenderMain(void)
         return WalSndLoop(XLogSendLogical);
     else {
         if (USE_PHYSICAL_XLOG_SEND) {
-            return WalSndLoop(XLogSendPhysical);
+            if (!g_instance.attr.attr_storage.enable_uwal) {
+                return WalSndLoop(XLogSendPhysical);
+            } else {
+                return WalSndLoop(XLogSendUwalStatus);
+            }
         } else {
             return WalSndLoop(XLogSendLSN);
         }
@@ -2508,6 +2515,11 @@ static void ProcessStandbyMessage(void)
             SendPostmasterSignal(PMSIGNAL_SWITCHOVER_TIMEOUT);
             break;
 
+        case 'w':
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                ProcessUwalCatchupEndMessage();
+            }
+            break;
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
@@ -2915,7 +2927,7 @@ static void ProcessStandbyReplyMessage(void)
         ProcessTargetRtoRpoChanged();
     }
 
-    if (!AM_WAL_STANDBY_SENDER) {
+    if (!AM_WAL_STANDBY_SENDER && !g_instance.attr.attr_storage.enable_uwal) {
         SyncRepReleaseWaiters();
     }
 
@@ -2935,6 +2947,11 @@ static void ProcessStandbyReplyMessage(void)
         sndFlush = GetFlushRecPtr();
         WalSndRefreshPercentCountStartLsn(sndFlush, reply.flush);
     }
+}
+
+static void ProcessUwalCatchupEndMessage(void) {
+    WalSndSetState(WALSNDSTATE_UWALCATCHUP_END);
+    ereport(LOG, (errmsg("master is state [WALSNDSTATE_UWALCATCHUP_END]")));
 }
 
 /* compute new replication slot xmin horizon if needed */
@@ -4170,7 +4187,41 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP) {
                 ereport(DEBUG1, (errmsg("standby \"%s\" has now caught up with primary",
                                         u_sess->attr.attr_common.application_name)));
+                if (g_instance.attr.attr_storage.enable_uwal) {
+                    if (t_thrd.walsender_cxt.MyWalSnd->replSender) {
+                        ereport(LOG, (errmsg("the walsender is for a normal replication")));
+
+                        WalSndSetState(WALSNDSTATE_UWALCATCHUP);
+                        ereport(LOG, (errmsg("primary is state [WALSNDSTATE_UWALCATCHUP]")));
+
+                        WalSndKeepalive(false);
+                        WalSndSetState(WALSNDSTATE_UWALCATCHUP_MSGSENT);
+
+                        ereport(LOG, (errmsg("primary send keepalive to tell standby uwal catchup start, and start "
+                                             "walsender notify")));
+                        if (GsUwalWalSenderNotify() != 0) {
+                            ereport(FATAL, (errmsg("uwal primary notify failed.")));
+                            proc_exit(1);
+                        }
+                        ereport(LOG, (errmsg("walsender notify success")));
+                        ereport(LOG, (errmsg("the walsender for a new standby %s comming notify sucessed",
+                                             u_sess->attr.attr_common.application_name)));
+                    } else {
+                        ereport(LOG, (errmsg("the walsender is for a building")));
+                        WalSndSetState(WALSNDSTATE_UWALCATCHUP_END);
+                    }
+                } else {
+                    WalSndSetState(WALSNDSTATE_STREAMING);
+                    ereport(LOG, (errmsg("master is state [WALSNDSTATE_STREAMING]")));
+                    /* Refresh new state tp peer */
+                    WalSndKeepalive(true);
+                }
+            }
+
+            if (g_instance.attr.attr_storage.enable_uwal &&
+                t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP_END) {
                 WalSndSetState(WALSNDSTATE_STREAMING);
+                ereport(LOG, (errmsg("master is state [WALSNDSTATE_STREAMING]")));
                 /* Refresh new state to peer */
                 WalSndKeepalive(true);
             }
@@ -4259,7 +4310,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
             WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
                               sleeptime);
-            if (!AM_WAL_STANDBY_SENDER) {
+            if (!AM_WAL_STANDBY_SENDER && !g_instance.attr.attr_storage.enable_uwal) {
                 SyncRepReleaseWaiters();
             }
             t_thrd.int_cxt.ImmediateInterruptOK = false;
@@ -4551,6 +4602,8 @@ static void InitWalSnd(void)
             walsnd->lastWriteChangeTime = 0;
             walsnd->lastFlushChangeTime = 0;
             walsnd->lastApplyChangeTime = 0;
+            rc = strncpy_s((char *)&walsnd->remote_application_name, NAMEDATALEN, u_sess->proc_cxt.applicationName, NAMEDATALEN - 1);
+            securec_check_c(rc, "\0", "\0");
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);
@@ -4625,6 +4678,13 @@ static void WalSndKill(int code, Datum arg)
 
     /* Mark WalSnd struct no longer in use. */
     WalSndReset(walsnd);
+
+    if (g_instance.attr.attr_storage.enable_uwal && walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
+        ereport(LOG, (errmsg("wal sender has been killed , start walsender notify")));
+        if (GsUwalWalSenderNotify(true) != 0) {
+            ereport(FATAL, (errmsg("uwal primary notify for WalSndKill() failed.")));
+        }
+    }
 
     /*
      * Here one standby is going down, then check if it was synchronous
@@ -5329,6 +5389,68 @@ static void XLogSendPhysical(void)
     return;
 }
 
+static void XLogSendUwalLSN(void)
+{
+    PrimaryKeepaliveMessage keepalive_message;
+    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    errno_t errorno = EOK;
+
+    /* Update sentPtr */
+    {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        walsnd->log_ctrl.prev_send_time = GetCurrentTimestamp();
+
+        SpinLockAcquire(&walsnd->mutex);
+        XLogRecPtr sentPtr_new = walsnd->sentPtr;
+        SpinLockRelease(&walsnd->mutex);
+
+        if (t_thrd.walsender_cxt.sentPtr == sentPtr_new) {
+            return;
+        }
+        t_thrd.walsender_cxt.sentPtr = sentPtr_new;
+    }
+
+    /* Construct a new message */
+    SpinLockAcquire(&hashmdata->mutex);
+    keepalive_message.peer_role = hashmdata->current_mode;
+    SpinLockRelease(&hashmdata->mutex);
+    keepalive_message.peer_state = get_local_dbstate();
+    keepalive_message.walEnd = t_thrd.walsender_cxt.sentPtr;
+    WalSndSetState(WALSNDSTATE_STREAMING);
+    
+    keepalive_message.sendTime = GetCurrentTimestamp();
+    keepalive_message.replyRequested = false;
+    keepalive_message.catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP);
+    ereport(DEBUG2, (errmsg("sending wal replication keepalive")));
+    t_thrd.walsender_cxt.walSndCaughtUp = true;
+    t_thrd.walsender_cxt.catchup_threshold = 0;
+    /* Prepend with the message type and send it. */
+    t_thrd.walsender_cxt.output_xlog_message[0] = 'k';
+    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
+                       sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &keepalive_message,
+                       sizeof(PrimaryKeepaliveMessage));
+    securec_check(errorno, "\0", "\0");
+    (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(PrimaryKeepaliveMessage) + 1);
+    
+    /* Flush the keepalive message to standby immediately. */
+    if (pq_flush_if_writable() != 0)
+        WalSndShutdown();
+}
+
+static void XLogSendUwalStatus(void)
+{
+    if (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
+        return XLogSendPhysical();
+    } else if (t_thrd.walsender_cxt.MyWalSnd->state < WALSNDSTATE_UWALCATCHUP) {
+        return XLogSendPhysical();
+    } else if (t_thrd.walsender_cxt.MyWalSnd->state < WALSNDSTATE_STREAMING) {
+        return;
+    } else {
+        return XLogSendUwalLSN();
+    }
+}
+
 void XLogCompression(int* compressedSize, XLogRecPtr startPtr, Size nbytes)
 {
     /* for xlog shipping performances */
@@ -5842,6 +5964,9 @@ static const char *WalSndGetStateString(WalSndState state)
         case WALSNDSTATE_BACKUP:
             return "Backup";
         case WALSNDSTATE_CATCHUP:
+        case WALSNDSTATE_UWALCATCHUP:
+        case WALSNDSTATE_UWALCATCHUP_MSGSENT:
+        case WALSNDSTATE_UWALCATCHUP_END:
             return "Catchup";
         case WALSNDSTATE_STREAMING:
             return "Streaming";
@@ -6514,6 +6639,15 @@ static void WalSndKeepalive(bool requestReply)
     keepalive_message.sendTime = GetCurrentTimestamp();
     keepalive_message.replyRequested = requestReply;
     keepalive_message.catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP);
+
+    /* if the standby is belong 'ANY 0' / not belong any domain, tell it exec catchup */ 
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        keepalive_message.uwal_catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP);
+        uint8 syncrep_method;
+        unsigned num_sync;
+        bool find = FindSyncRepConfig(t_thrd.walsender_cxt.MyWalSnd->remote_application_name, NULL, &syncrep_method, &num_sync);
+        keepalive_message.need_catchup = ((find && syncrep_method == SYNC_REP_QUORUM && num_sync == 0) || !find);
+    }
 
     ereport(((requestReply && AM_WAL_DB_SENDER) ? LOG : DEBUG2), (errmsg("sending wal replication keepalive")));
 

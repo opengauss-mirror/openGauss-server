@@ -338,6 +338,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_upgrade_merge_lock_mode                   | bool    |      |           | 
  enable_user_metric_persistent                    | bool    |      |           | 
  enable_ustore                                    | bool    |      |           | 
+ enable_uwal                                      | bool    |      |           | 
  enable_valuepartition_pruning                    | bool    |      |           | 
  enable_vector_engine                             | bool    |      |           | 
  enable_vector_targetlist                         | bool    |      |           | 
@@ -744,6 +745,21 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  user_metric_retention_time                       | integer |      | 0         | 3650
  use_workload_manager                             | bool    |      |           | 
  ustore_attr                                      | string  |      |           | 
+ uwal_batch_io_size                               | integer |      | 8192      | 2097152
+ uwal_devices_path                                | string  |      |           | 
+ uwal_disk_block_size                             | int64   |      | 0         | 9223372036854775807
+ uwal_disk_size                                   | int64   |      | 0         | 9223372036854775807
+ uwal_ip                                          | string  |      |           | 
+ uwal_log_path                                    | string  |      |           | 
+ uwal_nodeid                                      | integer |      | 0         | 7
+ uwal_port                                        | integer |      | 9000      | 65535
+ uwal_protocol                                    | string  |      |           | 
+ uwal_rpc_compression_switch                      | bool    |      |           | 
+ uwal_rpc_flowcontrol_switch                      | bool    |      |           | 
+ uwal_rpc_flowcontrol_value                       | integer |      | 0         | 65535
+ uwal_rpc_rndv_switch                             | bool    |      |           | 
+ uwal_rpc_timeout                                 | integer |      | 0         | 65535
+ uwal_rpc_worker_thread_num                       | integer |      | 0         | 65535
  vacuum_cost_delay                                | integer | ms   | 0         | 100
  vacuum_cost_limit                                | integer |      | 1         | 10000
  vacuum_cost_page_dirty                           | integer |      | 0         | 10000

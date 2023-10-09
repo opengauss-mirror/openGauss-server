@@ -3,6 +3,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/transam/xlogreader.cpp ${CMAKE_CURRENT_SOURCE_DIR}/xlogreader.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/redo/xlogreader_common.cpp ${CMAKE_CURRENT_SOURCE_DIR}/xlogreader_common.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/gs_uwal/gs_uwal_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/gs_uwal_adaptor.cpp
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_gsctl_SRC)
@@ -23,6 +24,7 @@ set(TGT_gsctl_INC
     ${ZLIB_INCLUDE_PATH}
     ${ZSTD_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/lib/page_compression
+    ${PROJECT_SRC_DIR}/include/storage/gs_uwal
 )
 
 set(gsctl_DEF_OPTIONS ${MACRO_OPTIONS} -DHAVE_LIBZ -DFRONTEND)
@@ -32,11 +34,15 @@ set(gsctl_LINK_LIBS libelog.a libbuildquery.a pg_rewind.a libpgcommon.a libhotpa
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     list(APPEND gsctl_LINK_LIBS -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
 endif()
+
+list(APPEND gsctl_LINK_DIRS ${LIBUWAL_LINK_DIRS})
+list(APPEND gsctl_LINK_OPTIONS ${LIBUWAL_LINK_OPTIONS})
+
 add_bintarget(gs_ctl TGT_gsctl_SRC TGT_gsctl_INC "${gsctl_DEF_OPTIONS}" "${gsctl_COMPILE_OPTIONS}" "${gsctl_LINK_OPTIONS}" "${gsctl_LINK_LIBS}")
 add_dependencies(gs_ctl elog_static buildquery_static pg_rewind_static pgcommon_static hotpatchclient_static pgport_static pq pagecompression)
 target_link_directories(gs_ctl PUBLIC
     ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH}
     ${ZLIB_LIB_PATH} ${ZSTD_LIB_PATH} ${LZ4_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH}
-    ${LIBHOTPATCH_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
+    ${LIBHOTPATCH_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib ${gsctl_LINK_DIRS}
 )
 install(TARGETS gs_ctl RUNTIME DESTINATION bin)

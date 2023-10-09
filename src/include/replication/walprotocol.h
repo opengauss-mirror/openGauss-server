@@ -46,6 +46,8 @@ typedef struct {
      */
     bool replyRequested;
     bool catchup;
+    bool uwal_catchup;
+    bool need_catchup;
 } WalSndrMessage;
 
 /*
@@ -231,6 +233,12 @@ typedef struct StandbyReplyMessage {
      */
     uint32 replyFlags;
 } StandbyReplyMessage;
+
+typedef struct UwalCatchEndMessage {
+    /* Sender's system clock at the time of transmission */
+    TimestampTz sendTime;
+    bool replyRequested;
+} UwalCatchEndMessage;
 
 /*
  * Hot Standby feedback from standby (message type 'h').  This is wrapped within

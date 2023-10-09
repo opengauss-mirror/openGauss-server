@@ -41,6 +41,8 @@ OBJS=	pg_ctl.o  pg_build.o backup.o receivelog.o streamutil.o xlogreader.o xlogr
 endif
 
 OBJS += $(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
+OBJS += $(top_builddir)/src/gausskernel/storage/gs_uwal/gs_uwal_adaptor.o
+override CXXFLAGS += -I${top_builddir}/src/include
 
 all: submake-pagecompression gs_ctl
 

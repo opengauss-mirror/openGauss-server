@@ -56,6 +56,7 @@
 #include "utils/knl_localsysdbcache.h"
 #include "utils/palloc.h"
 #include "storage/latch.h"
+#include "storage/gs_uwal/uwal.h"
 #include "portability/instr_time.h"
 #include "cipher.h"
 #include "openssl/ossl_typ.h"
@@ -421,6 +422,11 @@ typedef struct RepairBlockKey RepairBlockKey;
 typedef void (*RedoInterruptCallBackFunc)(void);
 typedef void (*RedoPageRepairCallBackFunc)(RepairBlockKey key, XLogPhyBlock pblk);
 
+typedef struct UwalInfoHis {
+    UwalInfo info;
+    bool recycle;
+} UwalInfoHis;
+
 typedef struct knl_t_xlog_context {
 #define MAXFNAMELEN 64
     typedef uint32 TimeLineID;
@@ -782,6 +788,8 @@ typedef struct knl_t_xlog_context {
     int currentRetryTimes;
     RedoTimeCost timeCost[TIME_COST_NUM];
     int ssXlogReadFailedTimes;
+    UwalInfo uwalInfo;
+    List* uwalInfoHis;
 } knl_t_xlog_context;
 
 typedef struct knl_t_dfs_context {

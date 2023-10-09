@@ -14,21 +14,24 @@
 # ---------------------------------------------------------------------------------------
 # 
 # Makefile
-#     Makefile for the storage subsystem
+#     Makefile for storage/gs_uwal
 # 
 # IDENTIFICATION
-#        src/gausskernel/storage/Makefile
+#        src/gausskernel/storage/gs_uwal/Makefile
 # 
 # ---------------------------------------------------------------------------------------
 
-subdir = src/gausskernel/storage
-top_builddir = ../../..
+subdir = src/gausskernel/storage/gs_uwal
+top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = access  bulkload  replication  buffer  cmgr  cstore  file  freespace  ipc  large_object  lmgr page  remote  smgr nvm gs_uwal tcap sync dorado_operation  xlog_share_storage dss
-
-ifeq ($(enable_mot), yes)
-SUBDIRS     += mot
+ifneq "$(MAKECMDGOALS)" "clean"
+  ifneq "$(MAKECMDGOALS)" "distclean"
+    ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
+      -include $(DEPEND)
+    endif
+  endif
 endif
+OBJS = gs_uwal.o gs_uwal_adaptor.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

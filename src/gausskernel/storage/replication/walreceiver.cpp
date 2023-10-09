@@ -67,6 +67,7 @@
 #include "storage/copydir.h"
 #include "storage/procarray.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
+#include "storage/gs_uwal/gs_uwal.h"
 #include "utils/guc.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -162,8 +163,24 @@ const char *g_reserve_param[] = {
     NULL,
 #endif
     "enable_huge_pages",
-    "huge_page_size"
-    "exrto_standby_read_opt"
+    "huge_page_size",
+    "exrto_standby_read_opt",
+    "huge_page_size",
+    "uwal_ip",
+    "enable_uwal",
+    "uwal_batch_io_size",
+    "uwal_nodeid",
+    "uwal_port",
+    "uwal_protocol",
+    "uwal_disk_size",
+    "uwal_devices_path",
+    "uwal_log_path",
+    "uwal_rpc_worker_thread_num",
+    "uwal_rpc_timeout",
+    "uwal_rpc_rndv_switch",
+    "uwal_rpc_compression_switch",
+    "uwal_rpc_flowcontrol_switch",
+    "uwal_rpc_flowcontrol_value"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);
@@ -954,6 +971,10 @@ static void WalRcvDie(int code, Datum arg)
                          0, sizeof(walrcv->conn_channel));
     securec_check_c(rc, "\0", "\0");
 
+    ereport(LOG, (errmsg("walreceiver has been shut down, start notify changed")));
+    if (g_instance.attr.attr_storage.enable_uwal && GsUwalWalReceiverNotify(false) != 0) {
+        ereport(FATAL, (errmsg("uwal standby notify for WalRcvDie() failed.")));
+    }
     ereport(LOG, (errmsg("walreceiver thread shut down")));
 }
 
@@ -1553,11 +1574,13 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     if (!force && u_sess->attr.attr_storage.wal_receiver_status_interval <= 0)
         return;
 
-    SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-    receivePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr;
-    writePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->writePtr;
-    flushPtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr;
-    SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+    if (!g_instance.attr.attr_storage.enable_uwal) {
+        SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+        receivePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr;
+        writePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->writePtr;
+        flushPtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr;
+        SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+    }
 
     /* In shared storage, standby receivePtr equal dorado insertHead */
     if (IS_SHARED_STORAGE_STANBY_MODE) {
@@ -1648,6 +1671,19 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     securec_check(rc, "\0", "\0");
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(StandbyReplyMessage) + 1);
     WalRcvRefreshPercentCountStartLsn(sndFlushPtr, flushPtr);
+}
+
+void UWalCatchupEndRcvSendReply() {
+    char buf[sizeof(UwalCatchEndMessage) + 1] = {0};
+    UwalCatchEndMessage uwalCatchEndMessage;
+
+    /* Prepend with the message type and send it. */
+    buf[0] = 'w';
+    int rc = memcpy_s(&buf[1], sizeof(UwalCatchEndMessage), &uwalCatchEndMessage,
+                  sizeof(uwalCatchEndMessage));
+    securec_check(rc, "\0", "\0");
+    (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(UwalCatchEndMessage) + 1);
+    ereport(LOG, (errmsg("send uwal catchup end message.")));
 }
 
 /*
@@ -1801,11 +1837,43 @@ static void ProcessKeepaliveMessage(PrimaryKeepaliveMessage *keepalive)
     SpinLockAcquire(&walrcv->mutex);
     walrcv->peer_role = keepalive->peer_role;
     walrcv->peer_state = keepalive->peer_state;
+    
+    bool uwal_update_lsn = (g_instance.attr.attr_storage.enable_uwal &&
+                            walrcv->sender_sent_location < keepalive->walEnd && walrcv->flagAlreadyNotifyCatchup);
+    if (uwal_update_lsn) {
+        walrcv->sender_write_location = keepalive->walEnd;
+        walrcv->sender_flush_location = keepalive->walEnd;
+        walrcv->sender_replay_location = keepalive->walEnd;
+        walrcv->receiver_received_location = keepalive->walEnd;
+        walrcv->receiver_write_location = keepalive->walEnd;
+        walrcv->receiver_flush_location = keepalive->walEnd;
+        walrcv->receivedUpto = keepalive->walEnd;
+        walrcv->needCatchup = keepalive->need_catchup;
+    }
     walrcv->sender_sent_location = keepalive->walEnd;
     walrcv->lastMsgSendTime = keepalive->sendTime;
     walrcv->lastMsgReceiptTime = lastMsgReceiptTime;
     SpinLockRelease(&walrcv->mutex);
-    wal_catchup = keepalive->catchup;
+
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        wal_catchup = keepalive->catchup || keepalive->uwal_catchup;
+    } else {
+        wal_catchup = keepalive->catchup;
+    }
+
+    if (g_instance.attr.attr_storage.enable_uwal && keepalive->uwal_catchup && !walrcv->flagAlreadyNotifyCatchup) {
+        walrcv->flagAlreadyNotifyCatchup = true;
+        if (GsUwalWalReceiverNotify() != 0) {
+            ereport(FATAL, (errmsg("uwal standby notify failed.")));
+            proc_exit(1);
+        }
+        UWalCatchupEndRcvSendReply();
+    }
+
+    // wake up the startup thread to redo
+    if (uwal_update_lsn) {
+        WakeupRecovery();
+    }
 
     if (log_min_messages <= DEBUG2) {
         MakeDebugLog(keepalive->sendTime, lastMsgReceiptTime, "wal receive keep alive data sendtime %s receipttime %s");

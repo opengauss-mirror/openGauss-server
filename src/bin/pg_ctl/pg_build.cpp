@@ -408,6 +408,9 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
     int tmp_localport = 0;
     char tmp_remotehost[IP_LEN] = {0};
     int tmp_remoteport = 0;
+    int tmp_remotenodeid = 0;
+    char tmp_remoteuwalhost[IP_LEN] = {0};
+    int tmp_remoteuwalport = 0;
     int cascadeLen = strlen("iscascade");
     int corssRegionLen = strlen("isCrossRegion");
     errno_t rc = EOK;
@@ -450,6 +453,9 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
             securec_check_c(rc, "\0", "\0");
 
             rc = memset_s(tmp_remotehost, IP_LEN, 0, sizeof(tmp_remotehost));
+            securec_check_c(rc, "\0", "\0");
+
+            rc = memset_s(tmp_remoteuwalhost, IP_LEN, 0, sizeof(tmp_remoteuwalhost));
             securec_check_c(rc, "\0", "\0");
 
             /* localhost */
@@ -535,6 +541,53 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
             }
             tmp_remoteport = atoi(iter);
 
+            /* remotenodeid */
+            iter = strstr(token, "remotenodeid");
+            if (iter != NULL) {
+                iter += strlen("remotenodeid");
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+
+                if (isdigit(*iter)) {
+                    tmp_remotenodeid = atoi(iter);
+                }
+            }
+
+            /* remoteuwalhost */
+            iter = strstr(token, "remoteuwalhost");
+            if (iter != NULL) {
+                iter += strlen("remoteuwalhost");
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+                if (isdigit(*iter) || *iter == ':' || isalpha(*iter)) {
+                    pNext = iter;
+                    iplen = 0;
+                    while (*pNext != ' ' && 0 != strncmp(pNext, "remoteuwalhost", strlen("remoteuwalhost"))) {
+                        iplen++;
+                        pNext++;
+                    }
+                    rc = strncpy_s(tmp_remoteuwalhost, IP_LEN, iter, iplen);
+                    securec_check(rc, "", "");
+
+                    tmp_remoteuwalhost[IP_LEN - 1] = '\0';
+                }
+            }
+
+            /* remoteuwalport */
+            iter = strstr(token, "remoteuwalport");
+            if (iter != NULL) {
+                iter += strlen("remoteuwalport");
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+
+                if (isdigit(*iter)) {
+                    tmp_remoteuwalport = atoi(iter);
+                }
+            }
+
             /* is cascade? */
             iter = strstr(token, "iscascade");
             if (iter != NULL) {
@@ -575,6 +628,13 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
 
             repl->remotehost[IP_LEN - 1] = '\0';
             repl->remoteport = tmp_remoteport;
+
+            rc = strncpy_s(repl->remoteuwalhost, IP_LEN, tmp_remoteuwalhost, IP_LEN - 1);
+            securec_check_c(rc, "", "");
+
+            repl->remoteuwalhost[IP_LEN - 1] = '\0';
+            repl->remoteuwalport = tmp_remoteuwalport;
+            repl->remotenodeid = tmp_remotenodeid;
 
             token = strtok_r(NULL, ",", &p);
             parsed++;

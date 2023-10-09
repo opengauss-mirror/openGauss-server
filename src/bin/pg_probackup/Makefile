@@ -22,7 +22,8 @@ OBJS += backup.o catalog.o configure.o data.o \
 OBJS += datapagemap.o receivelog.o streamutil.o \
 	xlogreader.o pg_lzcompress.o
 OBJS += $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
-	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
+	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o \
+	$(top_builddir)/src/gausskernel/storage/gs_uwal/gs_uwal_adaptor.o
 
 EXTRA_CLEAN = datapagemap.cpp datapagemap.h \
 	receivelog.cpp receivelog.h streamutil.cpp streamutil.h \

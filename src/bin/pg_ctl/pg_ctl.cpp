@@ -362,7 +362,7 @@ static void set_build_pid(pgpid_t pid);
 static void close_connection(void);
 static PGconn* get_connectionex(void);
 static ServerMode get_runmode(void);
-static void freefile(char** lines);
+void freefile(char** lines);
 static char* get_localrole_string(ServerMode mode);
 static bool do_actual_build(uint32 term = 0);
 static bool do_incremental_build(uint32 term = 0);
@@ -376,7 +376,7 @@ static void SigAlarmHandler(int arg);
 static bool DoBuildCheck(uint32 term);
 int ExecuteCmd(const char* command, struct timeval timeout);
 
-static int find_guc_optval(const char** optlines, const char* optname, char* optval);
+int find_guc_optval(const char** optlines, const char* optname, char* optval);
 static void read_ssl_confval(void);
 static char* get_string_by_sync_mode(bool syncmode);
 static void free_ctl();
@@ -782,7 +782,7 @@ static ServerMode get_runmode(void)
     return UNKNOWN_MODE;
 }
 
-static void freefile(char** lines)
+void freefile(char** lines)
 {
     char** line = NULL;
     if (lines == NULL)
@@ -5074,7 +5074,7 @@ static bool do_incremental_build(uint32 term)
  * Description		:
  * Notes			:
  */
-static int find_guc_optval(const char** optlines, const char* optname, char* optval)
+int find_guc_optval(const char** optlines, const char* optname, char* optval)
 {
     int offset = 0;
     int len = 0;
