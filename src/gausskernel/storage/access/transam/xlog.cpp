@@ -2115,12 +2115,12 @@ static void XLogArchiveNotify(const char *xlog)
     fd = AllocateFile(archiveStatusPath, "w");
     if (fd == NULL) {
         ereport(LOG, (errcode_for_file_access(),
-                      errmsg("could not create archive status file \"%s\": %m", archiveStatusPath)));
+                      errmsg("could not create archive status file \"%s\": %s", archiveStatusPath, TRANSLATE_ERRNO)));
         return;
     }
     if (FreeFile(fd)) {
         ereport(LOG, (errcode_for_file_access(),
-                      errmsg("could not write archive status file \"%s\": %m", archiveStatusPath)));
+                      errmsg("could not write archive status file \"%s\": %s", archiveStatusPath, TRANSLATE_ERRNO)));
         fd = NULL;
         return;
     }
@@ -2182,12 +2182,14 @@ void XLogArchiveForceDone(const char *xlog)
     fd = AllocateFile(archiveDone, "w");
     if (fd == NULL) {
         ereport(LOG,
-                (errcode_for_file_access(), errmsg("could not create archive status file \"%s\": %m", archiveDone)));
+            (errcode_for_file_access(),
+                errmsg("could not create archive status file \"%s\": %s", archiveDone, TRANSLATE_ERRNO)));
         return;
     }
     if (FreeFile(fd)) {
         ereport(LOG,
-                (errcode_for_file_access(), errmsg("could not write archive status file \"%s\": %m", archiveDone)));
+            (errcode_for_file_access(), 
+                errmsg("could not write archive status file \"%s\": %s", archiveDone, TRANSLATE_ERRNO)));
         fd = NULL;
         return;
     }
@@ -2709,9 +2711,9 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             if (t_thrd.xlog_cxt.openLogOff != startoffset) {
                 if (lseek(t_thrd.xlog_cxt.openLogFile, (off_t)startoffset, SEEK_SET) < 0) {
                     ereport(PANIC, (errcode_for_file_access(),
-                                    errmsg("could not seek in log file %s to offset %u: %m",
+                                    errmsg("could not seek in log file %s to offset %u: %s",
                                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.openLogSegNo),
-                                           startoffset)));
+                                           startoffset, TRANSLATE_ERRNO)));
                 }
                 t_thrd.xlog_cxt.openLogOff = startoffset;
             }
@@ -2745,9 +2747,9 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
                     errno = ENOSPC;
                 }
                 ereport(PANIC, (errcode_for_file_access(),
-                                errmsg("could not write to log file %s at offset %u, length %lu: %m",
+                                errmsg("could not write to log file %s at offset %u, length %lu: %s",
                                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.openLogSegNo),
-                                       t_thrd.xlog_cxt.openLogOff, (unsigned long)nbytes)));
+                                       t_thrd.xlog_cxt.openLogOff, (unsigned long)nbytes, TRANSLATE_ERRNO)));
             }
 
             if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
@@ -3717,8 +3719,9 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
         if (fd < 0) {
             if (!FILE_POSSIBLY_DELETED(errno)) {
                 ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, logsegno))));
+                        (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
+                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, logsegno), 
+                                                           TRANSLATE_ERRNO)));
             }
         } else {
             gstrace_exit(GS_TRC_ID_XLogFileInit);
@@ -3746,7 +3749,8 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
     /* do not use get_sync_bit() here --- want to fsync only at end of fill */
     fd = BasicOpenFile(tmppath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", tmppath)));
+        ereport(ERROR, (errcode_for_file_access(), 
+            errmsg("could not create file \"%s\": %s", tmppath, TRANSLATE_ERRNO)));
     }
 
     /*
@@ -3775,7 +3779,8 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
             unlink(tmppath);
             /* if write didn't set errno, assume problem is no disk space */
             errno = save_errno ? save_errno : ENOSPC;
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", tmppath)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %s", 
+                                                                tmppath, TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
     } else {
@@ -3791,7 +3796,8 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
                 /* if write didn't set errno, assume problem is no disk space */
                 errno = save_errno ? save_errno : ENOSPC;
 
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", tmppath)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %s", 
+                                                                    tmppath, TRANSLATE_ERRNO)));
             }
             pgstat_report_waitevent(WAIT_EVENT_END);
         }
@@ -3802,12 +3808,14 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
         int save_errno = errno;
         close(fd);
         errno = save_errno;
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %m", tmppath)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %s", 
+                                                            tmppath, TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     if (close(fd)) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", tmppath)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %s", 
+                                                            tmppath, TRANSLATE_ERRNO)));
     }
 
     /*
@@ -3837,8 +3845,9 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
     fd = BasicOpenFile(path, O_RDWR | PG_BINARY | (unsigned int)get_sync_bit(u_sess->attr.attr_storage.sync_method),
                        S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, logsegno))));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
+                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, logsegno), 
+                                                           TRANSLATE_ERRNO)));
     }
 
     ereport(DEBUG2, (errmsg("done creating and filling new WAL file:%s", path)));
@@ -3957,7 +3966,7 @@ static void XLogFileCopy(char *path, char *tmppath)
      */
     srcfd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
     if (srcfd < 0) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %s", path, TRANSLATE_ERRNO)));
     }
     /*
      * Copy into a temp file name.
@@ -3968,7 +3977,7 @@ static void XLogFileCopy(char *path, char *tmppath)
     fd = BasicOpenFile(tmppath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         close(srcfd);
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", tmppath)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %s", tmppath, TRANSLATE_ERRNO)));
     }
 
     /*
@@ -3981,7 +3990,7 @@ static void XLogFileCopy(char *path, char *tmppath)
             close(srcfd);
             close(fd);
             if (errno != 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", path)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %s", path, TRANSLATE_ERRNO)));
             } else {
                 ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("not enough data in file \"%s\"", path)));
             }
@@ -4000,7 +4009,7 @@ static void XLogFileCopy(char *path, char *tmppath)
             unlink(tmppath);
             /* if write didn't set errno, assume problem is no disk space */
             errno = save_errno ? save_errno : ENOSPC;
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", tmppath)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %s", tmppath, TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
     }
@@ -4013,13 +4022,13 @@ static void XLogFileCopy(char *path, char *tmppath)
         close(srcfd);
         close(fd);
         ereport(data_sync_elevel(ERROR),
-                (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %m", tmppath)));
+                (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %s", tmppath, TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     if (close(fd)) {
         close(srcfd);
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", tmppath)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %s", tmppath, TRANSLATE_ERRNO)));
     }
 
     close(srcfd);
@@ -4032,14 +4041,16 @@ static void XLogFileTruncateInner(char *path, int fd, uint32 targetPageOff, char
     uint32 startBytes = targetPageOff;
     if (lseek(fd, (off_t)targetPageOff, SEEK_SET) < 0) {
         ereport(ERROR, (errcode_for_file_access(),
-                        errmsg("lseek2:could not seek in log file %s to offset %u: %m", path, targetPageOff)));
+            errmsg("lseek2:could not seek in log file %s to offset %u: %s", path, targetPageOff, TRANSLATE_ERRNO)));
     }
     for (nbytes = startBytes; nbytes < (uint32)XLogSegSize; nbytes += bufLen) {
         errno = 0;
         pgstat_report_waitevent(WAIT_EVENT_WAL_COPY_WRITE);
         if ((int)write(fd, buffer, bufLen) != bufLen) {
             close(fd);
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", path)));
+            ereport(ERROR, (errcode_for_file_access(), 
+                errmsg("could not write to file \"%s\": %s", path, TRANSLATE_ERRNO)));
+            
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
         if (nbytes == startBytes) {
@@ -4050,7 +4061,8 @@ static void XLogFileTruncateInner(char *path, int fd, uint32 targetPageOff, char
     pgstat_report_waitevent(WAIT_EVENT_WAL_COPY_SYNC);
     if (pg_fsync(fd) != 0) {
         close(fd);
-        ereport(data_sync_elevel(ERROR), (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %m", path)));
+        ereport(data_sync_elevel(ERROR), (errcode_for_file_access(), 
+            errmsg("could not fsync file \"%s\": %s", path, TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 }
@@ -4065,15 +4077,15 @@ static void XLogFileTruncate(char *path, XLogRecPtr RecPtr)
     targetPageOff = (targetPagePtr % XLogSegSize);
     fd = BasicOpenFile(path, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0)
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %s", path, TRANSLATE_ERRNO)));
     if (lseek(fd, (off_t)targetPageOff, SEEK_SET) < 0) {
         ereport(ERROR, (errcode_for_file_access(),
-                        errmsg("could not seek in log file %s to offset %u: %m", path, targetPageOff)));
+                        errmsg("could not seek in log file %s to offset %u: %s", path, targetPageOff, TRANSLATE_ERRNO)));
     }
     if ((int)read(fd, buffer, sizeof(buffer)) != (int)sizeof(buffer)) {
         close(fd);
         if (errno != 0)
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", path)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %s", path, TRANSLATE_ERRNO)));
         else
             ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("not enough data in file \"%s\"", path)));
     }
@@ -4189,8 +4201,9 @@ static int XLogFileOpenInternal(XLogSegNo segno, const char *xlog_dir)
     }
 
     if (fd < 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open xlog file \"%s\" (log segment %s): %m", path,
-                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open xlog file \"%s\" (log segment %s): %s", path,
+                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), 
+                                                          TRANSLATE_ERRNO)));
     }
 
     return fd;
@@ -4207,9 +4220,10 @@ void SSXLOGCopyFromOldPrimary(XLogReaderState *state, XLogRecPtr pageptr)
             errno = ENOSPC;
         }
         uint32 shiftSize = 32;
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write xlog at start:%X/%X, length %d: %m",
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write xlog at start:%X/%X, length %d: %s",
                                                           static_cast<uint32>(pageptr >> shiftSize),
-                                                          static_cast<uint32>(pageptr), XLOG_BLCKSZ)));
+                                                          static_cast<uint32>(pageptr), XLOG_BLCKSZ,
+                                                          TRANSLATE_ERRNO)));
     }
 }
 
@@ -4330,8 +4344,8 @@ retry:
     }
     
     if (!FILE_POSSIBLY_DELETED(errno) || !notfoundOk) { /* unexpected failure? */
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
+                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
     }
     return -1;
 }
@@ -4386,8 +4400,8 @@ int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources)
     securec_check_ss(errorno, "", "");
 
     errno = ENOENT;
-    ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                                      XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+    ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
+                                                      XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
     return -1;
 }
 
@@ -4412,8 +4426,9 @@ static void XLogFileClose(void)
 
     if (close(t_thrd.xlog_cxt.openLogFile)) {
         ereport(PANIC, (errcode_for_file_access(),
-                        errmsg("could not close log file %s: %m",
-                               XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.openLogSegNo))));
+                        errmsg("could not close log file %s: %s",
+                               XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.openLogSegNo),
+                               TRANSLATE_ERRNO)));
     }
 
     t_thrd.xlog_cxt.openLogFile = -1;
@@ -4458,14 +4473,14 @@ static void KeepFileRestoredFromArchive(const char *path, const char *xlogfname)
 
         if (rename(xlogfpath, oldpath) != 0) {
             ereport(ERROR, (errcode_for_file_access(),
-                            errmsg("could not rename file \"%s\" to \"%s\": %m", xlogfpath, oldpath)));
+                            errmsg("could not rename file \"%s\" to \"%s\": %s", xlogfpath, oldpath, TRANSLATE_ERRNO)));
         }
 #else
         errorno = strncpy_s(oldpath, MAXPGPATH, xlogfpath, MAXPGPATH - 1);
         securec_check(errorno, "", "");
 #endif
         if (unlink(oldpath) != 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", xlogfpath)));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %s", xlogfpath, TRANSLATE_ERRNO)));
         }
         reload = true;
     }
@@ -4552,11 +4567,13 @@ static bool RestoreArchivedFile(char *path, const char *xlogfname, const char *r
      */
     if (stat(xlogpath, &stat_buf) != 0) {
         if (errno != ENOENT) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", xlogpath)));
+            ereport(FATAL, (errcode_for_file_access(), 
+                errmsg("could not stat file \"%s\": %s", xlogpath, TRANSLATE_ERRNO)));
         }
     } else {
         if (unlink(xlogpath) != 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", xlogpath)));
+            ereport(FATAL, (errcode_for_file_access(), 
+                errmsg("could not remove file \"%s\": %s", xlogpath, TRANSLATE_ERRNO)));
         }
     }
 
@@ -4685,7 +4702,7 @@ static bool RestoreArchivedFile(char *path, const char *xlogfname, const char *r
                 return true;
             }
         } else if (errno != ENOENT) { /* stat failed */
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", xlogpath)));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", xlogpath, TRANSLATE_ERRNO)));
         }
     }
 
@@ -5002,7 +5019,8 @@ static void RemoveOldXlogFiles(XLogSegNo segno, XLogRecPtr endptr)
     xldir = AllocateDir(SS_XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %m", SS_XLOGDIR)));
+                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s", 
+                                                    SS_XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     errorno = snprintf_s(lastoff, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
@@ -5106,7 +5124,8 @@ static void RemoveXlogFile(const char *segname, XLogRecPtr endptr)
 
         if (rename(path, newpath) != 0) {
             ereport(LOG,
-                    (errcode_for_file_access(), errmsg("could not rename old transaction log file \"%s\": %m", path)));
+                    (errcode_for_file_access(), errmsg("could not rename old transaction log file \"%s\": %s", 
+                                                        path, TRANSLATE_ERRNO)));
             return;
         }
         rc = unlink(newpath);
@@ -5115,7 +5134,8 @@ static void RemoveXlogFile(const char *segname, XLogRecPtr endptr)
 #endif
         if (rc != 0) {
             ereport(LOG,
-                    (errcode_for_file_access(), errmsg("could not remove old transaction log file \"%s\": %m", path)));
+                    (errcode_for_file_access(), errmsg("could not remove old transaction log file \"%s\": %s", 
+                                                        path, TRANSLATE_ERRNO)));
             return;
         }
         t_thrd.xlog_cxt.CheckpointStats->ckpt_segs_removed++;
@@ -5158,7 +5178,7 @@ static void ValidateXLOGDirectoryStructure(void)
     } else {
         ereport(LOG, (errmsg("creating missing WAL directory \"%s\"", path)));
         if (mkdir(path, S_IRWXU) < 0) {
-            ereport(FATAL, (errmsg("could not create missing directory \"%s\": %m", path)));
+            ereport(FATAL, (errmsg("could not create missing directory \"%s\": %s", path, TRANSLATE_ERRNO)));
         }
     }
 }
@@ -5178,7 +5198,7 @@ static void CleanupBackupHistory(void)
     xldir = AllocateDir(XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %m", XLOGDIR)));
+                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s", XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL) {
@@ -5485,7 +5505,7 @@ List *readTimeLineHistory(TimeLineID targetTLI)
     fd = AllocateFile(path, "r");
     if (fd == NULL) {
         if (errno != ENOENT) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open file \"%s\": %s", path, TRANSLATE_ERRNO)));
         }
         /* Not there, so assume no parents */
         return list_make1_int((int)targetTLI);
@@ -5587,7 +5607,7 @@ static bool existsTimeLineHistory(TimeLineID probeTLI)
         return true;
     } else {
         if (errno != ENOENT) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open file \"%s\": %s", path, TRANSLATE_ERRNO)));
         }
         return false;
     }
@@ -5715,13 +5735,13 @@ void SSWriteInstanceControlFile(int fd, const char* buffer, int id, off_t wsize)
         if (errno == 0) {
             errno = ENOSPC;
         }
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to control file: %s", TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
     
     pgstat_report_waitevent((uint32)WAIT_EVENT_CONTROL_FILE_SYNC);
     if (pg_fsync(fd) != 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync control file: %s", TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 }
@@ -5808,7 +5828,7 @@ STATIC void WriteControlFile(void)
     fd = BasicOpenFile(XLOG_CONTROL_FILE, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         ereport(PANIC,
-                (errcode_for_file_access(), errmsg("could not create control file \"%s\": %m", XLOG_CONTROL_FILE)));
+                (errcode_for_file_access(), errmsg("could not create control file \"%s\": %s", XLOG_CONTROL_FILE, TRANSLATE_ERRNO)));
     }
 
     /* create pg_control file */
@@ -5822,19 +5842,19 @@ STATIC void WriteControlFile(void)
             if (errno == 0) {
                 errno = ENOSPC;
             }
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to control file: %s", TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
 
         pgstat_report_waitevent(WAIT_EVENT_CONTROL_FILE_SYNC);
         if (pg_fsync(fd) != 0) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync control file: %s", TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
     }
 
     if (close(fd)) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %s", TRANSLATE_ERRNO)));
     }
 }
 
@@ -5858,7 +5878,7 @@ STATIC void ReadControlFile(void)
 loop:
     fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %s", fname, TRANSLATE_ERRNO)));
     }
 
     off_t seekpos = GetControlPageByInstanceId();
@@ -5870,7 +5890,7 @@ loop:
 
         pgstat_report_waitevent(WAIT_EVENT_CONTROL_FILE_READ);
         if (read(fd, buffer, read_size) != read_size) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %s", TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
     
@@ -5881,13 +5901,13 @@ loop:
         pgstat_report_waitevent(WAIT_EVENT_CONTROL_FILE_READ);
         if (read(fd, t_thrd.shemem_ptr_cxt.ControlFile, sizeof(ControlFileData)) !=
             sizeof(ControlFileData)) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %s", TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
     }
 
     if (close(fd)) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %s", TRANSLATE_ERRNO)));
     }
 
     /* Now check the CRC. */
@@ -6105,7 +6125,7 @@ void UpdateControlFile(void)
         }
 
         if (fd < 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname[i])));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %s", fname[i], TRANSLATE_ERRNO)));
         }
 
         off_t seekpos = GetControlPageByInstanceId();
@@ -6118,18 +6138,18 @@ void UpdateControlFile(void)
             if (errno == 0) {
                 errno = ENOSPC;
             }
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to control file: %s", TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
 
         pgstat_report_waitevent(WAIT_EVENT_CONTROL_FILE_SYNC_UPDATE);
         if (fsync(fd) != 0) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync control file: %s", TRANSLATE_ERRNO)));
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
 
         if (close(fd)) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %s", TRANSLATE_ERRNO)));
         }
     }
 #ifndef ENABLE_MULTIPLE_NODES
@@ -6165,7 +6185,7 @@ static void RecoverControlFile(void)
     fd = BasicOpenFile(XLOG_CONTROL_FILE, O_TRUNC | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         ereport(FATAL, (errcode_for_file_access(),
-                        errmsg("recover failed could not open control file \"%s\": %m", XLOG_CONTROL_FILE)));
+                        errmsg("recover failed could not open control file \"%s\": %s", XLOG_CONTROL_FILE, TRANSLATE_ERRNO)));
     }
 
     off_t seekpos = GetControlPageByInstanceId();
@@ -6178,15 +6198,15 @@ static void RecoverControlFile(void)
         if (errno == 0) {
             errno = ENOSPC;
         }
-        ereport(PANIC, (errcode_for_file_access(), errmsg("recover failed could not write to control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("recover failed could not write to control file: %s", TRANSLATE_ERRNO)));
     }
 
     if (pg_fsync(fd) != 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("recover failed could not fsync control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("recover failed could not fsync control file: %s", TRANSLATE_ERRNO)));
     }
 
     if (close(fd)) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("recover failed could not close control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("recover failed could not close control file: %s", TRANSLATE_ERRNO)));
     }
 }
 
@@ -6617,7 +6637,7 @@ void UpdateCtlInfoToFile(ShareStorageXLogCtl *ctlInfo)
 {
     int fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | PG_BINARY | O_DIRECT, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open ss ctl into file \"%s\": %m", SS_DORADO_CTRL_FILE)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open ss ctl into file \"%s\": %s", SS_DORADO_CTRL_FILE, TRANSLATE_ERRNO)));
     }
 
     Assert(fd > 0);
@@ -6627,18 +6647,18 @@ void UpdateCtlInfoToFile(ShareStorageXLogCtl *ctlInfo)
         if (errno == 0) {
             errno = ENOSPC;
         }  
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to ss ctl info file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to ss ctl info file: %s", TRANSLATE_ERRNO)));
     }
 
     if (pg_fsync(fd) != 0) {
         int save_errno = errno;
         close(fd);
         errno = save_errno;
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync ss ctl info file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync ss ctl info file: %s", TRANSLATE_ERRNO)));
     }
 
     if (close(fd)) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", SS_DORADO_CTRL_FILE)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %s", SS_DORADO_CTRL_FILE, TRANSLATE_ERRNO)));
     }
 }
 
@@ -6784,18 +6804,18 @@ void BootStrapXLOG(void)
         if (errno == 0) {
             errno = ENOSPC;
         }
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write bootstrap transaction log file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write bootstrap transaction log file: %s", TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     pgstat_report_waitevent(WAIT_EVENT_WAL_BOOTSTRAP_SYNC);
     if (pg_fsync(t_thrd.xlog_cxt.openLogFile) != 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync bootstrap transaction log file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync bootstrap transaction log file: %s", TRANSLATE_ERRNO)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     if (close(t_thrd.xlog_cxt.openLogFile)) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close bootstrap transaction log file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close bootstrap transaction log file: %s", TRANSLATE_ERRNO)));
     }
 
     t_thrd.xlog_cxt.openLogFile = -1;
@@ -6919,7 +6939,7 @@ static void readRecoveryCommandFile(void)
             return; /* not there, so no archive recovery */
         }
         ereport(FATAL, (errcode_for_file_access(),
-                        errmsg("could not open recovery command file \"%s\": %m", RECOVERY_COMMAND_FILE)));
+                        errmsg("could not open recovery command file \"%s\": %s", RECOVERY_COMMAND_FILE, TRANSLATE_ERRNO)));
     }
 
     /*
@@ -7248,7 +7268,7 @@ static void RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
     xldir = AllocateDir(XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %m", XLOGDIR)));
+                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %s", XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     // Construct a filename of the last segment to be kept.
@@ -7371,7 +7391,8 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
     xldir = AllocateDir(XLOGDIR);
     if (xldir == NULL) {
         ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not open transaction log directory \"%s\": %m", XLOGDIR)));
+            (errcode_for_file_access(), 
+                errmsg("could not open transaction log directory \"%s\": %s", XLOGDIR, TRANSLATE_ERRNO)));
     }
 
     while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL) {
@@ -7386,7 +7407,7 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
             rc = unlink(XLogFilePath);
             if (rc != 0) {
                 ereport(LOG, (errcode_for_file_access(),
-                              errmsg("could not remove old transaction log file \"%s\": %m", XLogFilePath)));
+                              errmsg("could not remove old transaction log file \"%s\": %s", XLogFilePath, TRANSLATE_ERRNO)));
             }
         }
     }
@@ -8325,11 +8346,12 @@ void WriteRemainSegsFile(int fd, const char *buffer, uint32 usedLen)
             errno = ENOSPC;
         }
         ereport(PANIC,
-                (errcode_for_file_access(), errmsg("could not write remain segs check start point to file: %m")));
+            (errcode_for_file_access(), 
+                errmsg("could not write remain segs check start point to file: %s", TRANSLATE_ERRNO)));
     }
 
     if (pg_fsync(fd) != 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync remain segs file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync remain segs file: %s", TRANSLATE_ERRNO)));
     }
 }
 
@@ -8387,7 +8409,7 @@ bool IsRemainSegsFileExist()
     if (stat(XLOG_REMAIN_SEGS_FILE_PATH, &segFileSt) < 0) {
         if (errno != ENOENT) {
             ereport(ERROR, (errcode_for_file_access(),
-                            errmsg("could not stat directory \"%s\": %m", XLOG_REMAIN_SEGS_FILE_PATH)));
+                            errmsg("could not stat directory \"%s\": %s", XLOG_REMAIN_SEGS_FILE_PATH, TRANSLATE_ERRNO)));
         }
         return false;
     }
@@ -8543,7 +8565,7 @@ static void ReadRemainSegsFile()
     int fd = BasicOpenFile(XLOG_REMAIN_SEGS_FILE_PATH, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         ereport(WARNING, (errcode_for_file_access(),
-                          errmsg("could not open remain segs file \"%s\": %m", XLOG_REMAIN_SEGS_FILE_PATH)));
+                          errmsg("could not open remain segs file \"%s\": %s", XLOG_REMAIN_SEGS_FILE_PATH, TRANSLATE_ERRNO)));
         return;
     }
 
@@ -8557,7 +8579,7 @@ static void ReadRemainSegsFile()
 
     if (close(fd)) {
         ereport(WARNING, (errcode_for_file_access(),
-                          errmsg("could not close remain segs file \"%s\": %m", XLOG_REMAIN_SEGS_FILE_PATH)));
+                          errmsg("could not close remain segs file \"%s\": %s", XLOG_REMAIN_SEGS_FILE_PATH, TRANSLATE_ERRNO)));
     }
 
     if (!readRightContent) {
@@ -8639,15 +8661,15 @@ void XLogCheckRemainSegs()
     if (fd < 0) {
         pfree_ext(contentBuffer);
         ereport(WARNING, (errcode_for_file_access(),
-                errmsg("could not create remain segs file \"%s\": %m", XLOG_REMAIN_SEGS_FILE_PATH)));
+                errmsg("could not create remain segs file \"%s\": %s", XLOG_REMAIN_SEGS_FILE_PATH, TRANSLATE_ERRNO)));
         return;
     }
 
     WriteRemainSegsFile(fd, contentBuffer, contentLen + sizeof(pg_crc32c));
 
     if (close(fd)) {
-        ereport(WARNING, (errcode_for_file_access(), errmsg("could not close remain segs file \"%s\": %m",
-                XLOG_REMAIN_SEGS_FILE_PATH)));
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not close remain segs file \"%s\": %s",
+                XLOG_REMAIN_SEGS_FILE_PATH, TRANSLATE_ERRNO)));
     }
 
     pfree_ext(contentBuffer);
@@ -9340,7 +9362,7 @@ void StartupXLOG(void)
                 if (symlink(ti->path, linkloc) < 0) {
                     pfree(linkloc);
                     ereport(ERROR,
-                            (errcode_for_file_access(), errmsg("could not create symbolic link \"%s\": %m", linkloc)));
+                            (errcode_for_file_access(), errmsg("could not create symbolic link \"%s\": %s", linkloc, TRANSLATE_ERRNO)));
                 }
 
                 pfree(linkloc);
@@ -10897,12 +10919,12 @@ void SetSwitchHistoryFile(XLogRecPtr switchLsn, XLogRecPtr catchLsn, uint32 term
     hfile = fopen(tmpPath, "w");
     if (hfile == NULL) {
         ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                          errmsg("[REDO_STATS]SetSwitchHistoryFile: fopen tmpPath:%s failed, %m", tmpPath)));
+                          errmsg("[REDO_STATS]SetSwitchHistoryFile: fopen tmpPath:%s failed, %s", tmpPath, TRANSLATE_ERRNO)));
         return;
     }
     if (0 == (fwrite(&info, 1, sizeof(XLogSwitchInfo), hfile))) {
         ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                          errmsg("[REDO_STATS]SetSwitchHistoryFile: fwrite tmpPath:%s failed, %m", tmpPath)));
+                          errmsg("[REDO_STATS]SetSwitchHistoryFile: fwrite tmpPath:%s failed, %s", tmpPath, TRANSLATE_ERRNO)));
     }
     fclose(hfile);
     if (durable_rename(tmpPath, path, WARNING) != 0) {
@@ -14029,8 +14051,9 @@ void assign_xlog_sync_method(int new_sync_method, void *extra)
             pgstat_report_waitevent(WAIT_EVENT_WAL_SYNC_METHOD_ASSIGN);
             if (pg_fsync(t_thrd.xlog_cxt.openLogFile) != 0) {
                 ereport(PANIC, (errcode_for_file_access(),
-                                errmsg("could not fsync log segment %s: %m",
-                                       XLogFileNameP(t_thrd.xlog_cxt.curFileTLI, t_thrd.xlog_cxt.readSegNo))));
+                                errmsg("could not fsync log segment %s: %s",
+                                       XLogFileNameP(t_thrd.xlog_cxt.curFileTLI, t_thrd.xlog_cxt.readSegNo),
+                                       TRANSLATE_ERRNO)));
             }
             pgstat_report_waitevent(WAIT_EVENT_END);
             if (get_sync_bit(u_sess->attr.attr_storage.sync_method) != get_sync_bit(new_sync_method)) {
@@ -14056,16 +14079,18 @@ void issue_xlog_fsync(int fd, XLogSegNo segno)
         case SYNC_METHOD_FSYNC:
             if (pg_fsync_no_writethrough(fd) != 0) {
                 ereport(PANIC,
-                        (errcode_for_file_access(), errmsg("could not fsync log file %s: %m",
-                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+                        (errcode_for_file_access(), errmsg("could not fsync log file %s: %s",
+                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno),
+                                                           TRANSLATE_ERRNO)));
             }
             break;
 #ifdef HAVE_FSYNC_WRITETHROUGH
         case SYNC_METHOD_FSYNC_WRITETHROUGH:
             if (pg_fsync_writethrough(fd) != 0) {
                 ereport(PANIC,
-                        (errcode_for_file_access(), errmsg("could not fsync write-through log file %s: %m",
-                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+                        (errcode_for_file_access(), errmsg("could not fsync write-through log file %s: %s",
+                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno),
+                                                           TRANSLATE_ERRNO)));
             }
             break;
 #endif
@@ -14073,8 +14098,9 @@ void issue_xlog_fsync(int fd, XLogSegNo segno)
         case SYNC_METHOD_FDATASYNC:
             if (pg_fdatasync(fd) != 0) {
                 ereport(PANIC,
-                        (errcode_for_file_access(), errmsg("could not fdatasync log file %s: %m",
-                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+                        (errcode_for_file_access(), errmsg("could not fdatasync log file %s: %s",
+                                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno),
+                                                           TRANSLATE_ERRNO)));
             }
             break;
 #endif
@@ -14116,7 +14142,7 @@ bool check_roach_start_backup(const char *slotName)
 
     if (stat(backup_label, &statbuf)) {
         if (errno != ENOENT) {
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", backup_label)));
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", backup_label, TRANSLATE_ERRNO)));
         }
         ereport(DEBUG1, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                          errmsg("roach backup %s is not in progress", slotName)));
@@ -14160,7 +14186,7 @@ static void CollectTableSpace(DIR *tblspcdir, List **tablespaces, StringInfo tbl
 #if defined(HAVE_READLINK) || defined(WIN32)
         rllen = readlink(fullpath, linkpath, sizeof(linkpath));
         if (rllen < 0) {
-            ereport(WARNING, (errmsg("could not read symbolic link \"%s\": %m", fullpath)));
+            ereport(WARNING, (errmsg("could not read symbolic link \"%s\": %s", fullpath, TRANSLATE_ERRNO)));
             continue;
         } else if (rllen >= (int)sizeof(linkpath)) {
             ereport(WARNING, (errmsg("symbolic link \"%s\" target is too long", fullpath)));
@@ -14481,7 +14507,7 @@ XLogRecPtr do_pg_start_backup(const char *backupidstr, bool fast, char **labelfi
             }
             if (stat(fileName, &stat_buf) != 0) {
                 if (errno != ENOENT) {
-                    ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", fileName)));
+                    ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
                 }
             } else {
                 ereport(ERROR,
@@ -14493,11 +14519,11 @@ XLogRecPtr do_pg_start_backup(const char *backupidstr, bool fast, char **labelfi
             fp = AllocateFile(fileName, "w");
 
             if (fp == NULL) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", fileName)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
             }
             if (fwrite(labelfbuf.data, labelfbuf.len, 1, fp) != 1 || fflush(fp) != 0 || pg_fsync(fileno(fp)) != 0 ||
                 ferror(fp) || FreeFile(fp)) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %m", fileName)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
             }
             pfree(labelfbuf.data);
 
@@ -14506,7 +14532,7 @@ XLogRecPtr do_pg_start_backup(const char *backupidstr, bool fast, char **labelfi
                 if (stat(TABLESPACE_MAP, &stat_buf) != 0) {
                     if (errno != ENOENT)
                         ereport(ERROR,
-                                (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", TABLESPACE_MAP)));
+                                (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", TABLESPACE_MAP, TRANSLATE_ERRNO)));
                 } else
                     ereport(ERROR,
                             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -14518,11 +14544,11 @@ XLogRecPtr do_pg_start_backup(const char *backupidstr, bool fast, char **labelfi
 
                 if (!fp)
                     ereport(ERROR,
-                            (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", TABLESPACE_MAP)));
+                            (errcode_for_file_access(), errmsg("could not create file \"%s\": %s", TABLESPACE_MAP, TRANSLATE_ERRNO)));
                 if (fwrite(tblspc_mapfbuf.data, tblspc_mapfbuf.len, 1, fp) != 1 || fflush(fp) != 0 ||
                     pg_fsync(fileno(fp)) != 0 || ferror(fp) || FreeFile(fp))
                     ereport(ERROR,
-                            (errcode_for_file_access(), errmsg("could not write file \"%s\": %m", TABLESPACE_MAP)));
+                            (errcode_for_file_access(), errmsg("could not write file \"%s\": %s", TABLESPACE_MAP, TRANSLATE_ERRNO)));
             }
             pfree(tblspc_mapfbuf.data);
         } else {
@@ -14737,17 +14763,17 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
         }
         if (stat(fileName, &statbuf)) {
             if (errno != ENOENT) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", fileName)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
             }
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("a backup is not in progress")));
         }
 
         lfp = AllocateFile(fileName, "r");
         if (lfp == NULL) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", fileName)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
         }
         if (statbuf.st_size > BLCKSZ) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("file size is wrong, \"%s\": %m", fileName)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("file size is wrong, \"%s\": %s", fileName, TRANSLATE_ERRNO)));
         }
         labelfile = (char *)palloc(statbuf.st_size + 1);
         r = fread(labelfile, statbuf.st_size, 1, lfp);
@@ -14757,15 +14783,15 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
          * Close and remove the backup label file
          */
         if (r != 1 || ferror(lfp) || FreeFile(lfp)) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", fileName)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
         }
         if (strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0) {
             if (unlink(fileName) != 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", fileName)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
             }
             if (unlink(TABLESPACE_MAP) != 0) {
                 ereport(DEBUG1,
-                        (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", TABLESPACE_MAP)));
+                        (errcode_for_file_access(), errmsg("could not remove file \"%s\": %s", TABLESPACE_MAP, TRANSLATE_ERRNO)));
             }
         }
     }
@@ -14878,14 +14904,14 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
         XLogWaitFlush(stoppoint);
         if (stat(fileName, &statbuf)) {
             if (errno != ENOENT) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", fileName)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", fileName, TRANSLATE_ERRNO)));
             }
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                            errmsg("the file is not exist \"%s\": %m", fileName)));
+                            errmsg("the file is not exist \"%s\": %s", fileName, TRANSLATE_ERRNO)));
         }
         if (durable_rename(BACKUP_LABEL_FILE_ROACH, BACKUP_LABEL_FILE_ROACH_DONE, ERROR)) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m",
-                                                              BACKUP_LABEL_FILE_ROACH, BACKUP_LABEL_FILE_ROACH_DONE)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %s",
+                                                              BACKUP_LABEL_FILE_ROACH, BACKUP_LABEL_FILE_ROACH_DONE, TRANSLATE_ERRNO)));
         }
     }
 
@@ -14918,7 +14944,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
 
     fp = AllocateFile(histfilepath, "w");
     if (fp == NULL) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", histfilepath)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %s", histfilepath, TRANSLATE_ERRNO)));
     }
     fprintf(fp, "START WAL LOCATION: %X/%X (file %s)\n", (uint32)(startpoint >> 32), (uint32)startpoint,
             startxlogfilename);
@@ -14927,7 +14953,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long
     fprintf(fp, "%s", remaining);
     fprintf(fp, "STOP TIME: %s\n", strfbuf);
     if (fflush(fp) || ferror(fp) || FreeFile(fp)) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %m", histfilepath)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %s", histfilepath, TRANSLATE_ERRNO)));
     }
 
     /*
@@ -15192,7 +15218,7 @@ XLogRecPtr do_roach_start_backup(const char *backupidstr)
 
     if (stat(strfbuf, &stat_buf) != 0) {
         if (errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", strfbuf)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", strfbuf, TRANSLATE_ERRNO)));
         }
     } else {
         ereport(ERROR,
@@ -15203,11 +15229,11 @@ XLogRecPtr do_roach_start_backup(const char *backupidstr)
     fp = AllocateFile(strfbuf, "w");
 
     if (fp == NULL) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", strfbuf)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %s", strfbuf, TRANSLATE_ERRNO)));
     }
     if (fwrite(labelfbuf.data, labelfbuf.len, 1, fp) != 1 || fflush(fp) != 0 || pg_fsync(fileno(fp)) != 0 ||
         ferror(fp) || FreeFile(fp)) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %m", strfbuf)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %s", strfbuf, TRANSLATE_ERRNO)));
     }
     pfree(labelfbuf.data);
 
@@ -15246,7 +15272,7 @@ XLogRecPtr do_roach_stop_backup(const char *backupidstr)
 
     if (stat(backup_label, &statbuf)) {
         if (errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", backup_label)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %s", backup_label, TRANSLATE_ERRNO)));
         }
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("roach backup %s is not in progress", backupidstr)));
@@ -15285,7 +15311,7 @@ XLogRecPtr do_roach_stop_backup(const char *backupidstr)
     securec_check_ss(errorno, "\0", "\0");
     if (durable_rename(backup_label, backup_label_done, ERROR)) {
         ereport(ERROR, (errcode_for_file_access(),
-                        errmsg("could not rename file \"%s\" to \"%s\": %m", backup_label, backup_label_done)));
+                        errmsg("could not rename file \"%s\" to \"%s\": %s", backup_label, backup_label_done, TRANSLATE_ERRNO)));
     }
 
     gstrace_exit(GS_TRC_ID_do_pg_stop_backup);
@@ -15380,7 +15406,8 @@ void enable_delay_xlog_recycle(bool isRedo)
     fp = AllocateFile(DELAY_XLOG_RECYCLE_FILE, PG_BINARY_W);
     if (fp == NULL || fflush(fp) != 0 || pg_fsync(fileno(fp)) != 0 || ferror(fp) || FreeFile(fp)) {
         ereport(ERROR, (errcode_for_file_access(),
-                        errmsg("failed to touch %s file during enable xlog delay: %m", DELAY_XLOG_RECYCLE_FILE)));
+                        errmsg("failed to touch %s file during enable xlog delay: %s", 
+                                DELAY_XLOG_RECYCLE_FILE, TRANSLATE_ERRNO)));
     }
 
     SetDelayXlogRecycle(true, isRedo);
@@ -15400,9 +15427,9 @@ void disable_delay_xlog_recycle(bool isRedo)
                          "will remove stale xlog segments")));
 
     if (unlink(DELAY_XLOG_RECYCLE_FILE) < 0 && errno != ENOENT) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %m. This will lead to residual of "
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %s. This will lead to residual of "
                                                           "stale xlog segments",
-                                                          DELAY_XLOG_RECYCLE_FILE)));
+                                                          DELAY_XLOG_RECYCLE_FILE, TRANSLATE_ERRNO)));
     }
 
     SetDelayXlogRecycle(false, isRedo);
@@ -15426,7 +15453,8 @@ void startupInitDelayXlog(void)
             SetDelayXlogRecycle(true, true);
         }
     } else if (errno != ENOENT) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("failed to stat %s file:%m", DELAY_XLOG_RECYCLE_FILE)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("failed to stat %s file:%s", 
+                                                        DELAY_XLOG_RECYCLE_FILE, TRANSLATE_ERRNO)));
     }
 }
 
@@ -15441,7 +15469,8 @@ char *getLastRewindTime()
     /* if the file is not there, return */
     if (stat(REWIND_LABLE_FILE, &st)) {
         if (errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", REWIND_LABLE_FILE)));
+            ereport(ERROR, (errcode_for_file_access(), 
+                errmsg("could not stat file \"%s\": %s", REWIND_LABLE_FILE, TRANSLATE_ERRNO)));
         }
         return "";
     }
@@ -15454,7 +15483,7 @@ char *getLastRewindTime()
     if (fgets(buf, lengthof(buf), fd) == NULL) {
         if (fclose(fd)) {
             ereport(LOG, (errcode_for_file_access(),
-                          errmsg("get null bits, could not close file \"%s\": %m", REWIND_LABLE_FILE)));
+                          errmsg("get null bits, could not close file \"%s\": %s", REWIND_LABLE_FILE, TRANSLATE_ERRNO)));
         }
         fd = NULL;
 
@@ -15466,7 +15495,7 @@ char *getLastRewindTime()
     securec_check_ss(ret, "\0", "\0");
 
     if (fclose(fd)) {
-        ereport(LOG, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", REWIND_LABLE_FILE)));
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not close file \"%s\": %s", REWIND_LABLE_FILE, TRANSLATE_ERRNO)));
     }
     fd = NULL;
     return retStr;
@@ -15491,7 +15520,8 @@ XLogRecPtr enable_delay_ddl_recycle(void)
     LWLockAcquire(DelayDDLLock, LW_EXCLUSIVE);
     if (!validate_parse_delay_ddl_file(&prevDelayRange)) {
         if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %s", 
+                                                                DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
 
         SetDDLDelayStartPtr(InvalidXLogRecPtr);
@@ -15502,7 +15532,8 @@ XLogRecPtr enable_delay_ddl_recycle(void)
     if (!XLogRecPtrIsInvalid(prevDelayRange.startLSN) && XLByteLT(prevDelayRange.startLSN, prevDelayRange.endLSN)) {
         Assert(XLogRecPtrIsInvalid(globalDelayStartPtr));
         if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %s", 
+                                                                DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
 
         SetDDLDelayStartPtr(InvalidXLogRecPtr);
@@ -15596,7 +15627,8 @@ void disable_delay_ddl_recycle(XLogRecPtr barrierLSN, bool isForce, XLogRecPtr *
     LWLockAcquire(DelayDDLLock, LW_EXCLUSIVE);
     if (!validate_parse_delay_ddl_file(&delayRange)) {
         if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %s", 
+                                                                DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
 
         SetDDLDelayStartPtr(InvalidXLogRecPtr);
@@ -15624,7 +15656,8 @@ void disable_delay_ddl_recycle(XLogRecPtr barrierLSN, bool isForce, XLogRecPtr *
                         (uint32)(barrierLSN))));
 
         if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %s", 
+                                                                DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
 
         SetDDLDelayStartPtr(InvalidXLogRecPtr);
@@ -15661,7 +15694,8 @@ void disable_delay_ddl_recycle(XLogRecPtr barrierLSN, bool isForce, XLogRecPtr *
     /* if there was no xlog record since enable-delay-ddl, just remove the delay file */
     if (XLByteEQ(delayRange.startLSN, delayRange.endLSN)) {
         if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not remove %s file: %s", 
+                                                                DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
 
         SetDDLDelayStartPtr(InvalidXLogRecPtr);
@@ -15862,7 +15896,8 @@ void startupInitDelayDDL(void)
 
     if (!validate_parse_delay_ddl_file(&delayRange) || !u_sess->attr.attr_storage.enable_cbm_tracking) {
         if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove %s file: %s", 
+                                                                DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
     } else {
         Assert(!XLogRecPtrIsInvalid(delayRange.startLSN));
@@ -15881,8 +15916,8 @@ void startupInitDelayDDL(void)
                                  (uint32)(delayRange.endLSN >> 32), (uint32)(delayRange.endLSN))));
 
             if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
-                ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("could not remove %s file: %m", DELAY_DDL_RECYCLE_FILE)));
+                ereport(ERROR, (errcode_for_file_access(), 
+                    errmsg("could not remove %s file: %s", DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
             }
         } else if (XLogRecPtrIsInvalid(delayRange.endLSN)) {
             ereport(LOG, (errmsg("ddl delay was enabled last time from start lsn %08X/%08X",
@@ -15911,8 +15946,8 @@ bool validate_parse_delay_ddl_file(DelayDDLRange *delayRange)
 
     fp = AllocateFile(DELAY_DDL_RECYCLE_FILE, PG_BINARY_R);
     if (SECUREC_UNLIKELY(fp == NULL)) {
-        ereport(LOG,
-                (errcode_for_file_access(), errmsg("could not open existing file \"%s\": %m", DELAY_DDL_RECYCLE_FILE)));
+        ereport(LOG, (errcode_for_file_access(), 
+            errmsg("could not open existing file \"%s\": %s", DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         return result;
     }
 
@@ -15941,7 +15976,8 @@ bool validate_parse_delay_ddl_file(DelayDDLRange *delayRange)
 
 END:
     if (FreeFile(fp)) {
-        ereport(LOG, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", DELAY_DDL_RECYCLE_FILE)));
+        ereport(LOG, (errcode_for_file_access(), 
+            errmsg("could not close file \"%s\": %s", DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
     }
     fp = NULL;
     return result;
@@ -15952,14 +15988,14 @@ bool write_delay_ddl_file(const DelayDDLRange &delayRange, bool onErrDelete)
     FILE *fp = AllocateFile(DELAY_DDL_RECYCLE_FILE, PG_BINARY_W);
     if (fp == NULL) {
         ereport(LOG, (errcode_for_file_access(),
-                      errmsg("could not open file \"%s\" for write: %m", DELAY_DDL_RECYCLE_FILE)));
+                      errmsg("could not open file \"%s\" for write: %s", DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         return false;
     }
 
     if (fwrite(&delayRange, 1, sizeof(DelayDDLRange), fp) != sizeof(DelayDDLRange) || fflush(fp) != 0 ||
         pg_fsync(fileno(fp)) != 0 || ferror(fp) || FreeFile(fp)) {
         ereport(onErrDelete ? LOG : PANIC,
-                (errcode_for_file_access(), errmsg("failed to write file \"%s\": %m", DELAY_DDL_RECYCLE_FILE)));
+                (errcode_for_file_access(), errmsg("failed to write file \"%s\": %s", DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
 
         /*
          * PANIC may be unnecessary here, because if we failed to write delay file during
@@ -15968,7 +16004,8 @@ bool write_delay_ddl_file(const DelayDDLRange &delayRange, bool onErrDelete)
          */
         if (onErrDelete && unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
             ereport(PANIC, (errcode_for_file_access(),
-                            errmsg("could not remove %s file after write failure: %m", DELAY_DDL_RECYCLE_FILE)));
+                            errmsg("could not remove %s file after write failure: %s", 
+                                    DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
         }
 
         return false;
@@ -16036,7 +16073,8 @@ void execDelayedDDL(XLogRecPtr startLSN, XLogRecPtr endLSN, bool ignoreCBMErr)
     if (unlink(DELAY_DDL_RECYCLE_FILE) < 0 && errno != ENOENT) {
         ereport(ERROR,
                 (errcode_for_file_access(),
-                 errmsg("could not remove %s file before unlink col relation files: %m", DELAY_DDL_RECYCLE_FILE)));
+                 errmsg("could not remove %s file before unlink col relation files: %s", 
+                            DELAY_DDL_RECYCLE_FILE, TRANSLATE_ERRNO)));
     }
 
     if (cbmParseFailed) {
@@ -16365,7 +16403,8 @@ static bool read_backup_label(XLogRecPtr *checkPointLoc, bool *backupEndRequired
     lfp = AllocateFile(BACKUP_LABEL_FILE, "r");
     if (lfp == NULL) {
         if (errno != ENOENT) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", BACKUP_LABEL_FILE)));
+            ereport(FATAL, (errcode_for_file_access(), 
+                errmsg("could not read file \"%s\": %s", BACKUP_LABEL_FILE, TRANSLATE_ERRNO)));
         }
         return false; /* it's not there, all is fine */
     }
@@ -16408,7 +16447,8 @@ static bool read_backup_label(XLogRecPtr *checkPointLoc, bool *backupEndRequired
     }
 
     if (ferror(lfp) || FreeFile(lfp)) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", BACKUP_LABEL_FILE)));
+        ereport(FATAL, (errcode_for_file_access(), 
+            errmsg("could not read file \"%s\": %s", BACKUP_LABEL_FILE, TRANSLATE_ERRNO)));
     }
 
     return true;
@@ -16440,7 +16480,8 @@ static bool read_tablespace_map(List **tablespaces)
     lfp = AllocateFile(TABLESPACE_MAP, "r");
     if (!lfp) {
         if (errno != ENOENT)
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", TABLESPACE_MAP)));
+            ereport(FATAL, (errcode_for_file_access(), 
+                errmsg("could not read file \"%s\": %s", TABLESPACE_MAP, TRANSLATE_ERRNO)));
         return false; /* it's not there, all is fine */
     }
 
@@ -16476,7 +16517,8 @@ static bool read_tablespace_map(List **tablespaces)
     }
 
     if (ferror(lfp) || FreeFile(lfp))
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", TABLESPACE_MAP)));
+        ereport(FATAL, (errcode_for_file_access(), 
+            errmsg("could not read file \"%s\": %s", TABLESPACE_MAP, TRANSLATE_ERRNO)));
 
     return true;
 }
@@ -16600,8 +16642,9 @@ bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr, int reqLen, char *readBu
                                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo))));
             } else {
                 ereport(ERROR, (errcode_for_file_access(),
-                                errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo))));
+                                errmsg("could not open file \"%s\" (log segment %s): %s", path,
+                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
+                                       TRANSLATE_ERRNO)));
             }
         }
         t_thrd.xlog_cxt.readOff = 0;
@@ -16611,8 +16654,8 @@ bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr, int reqLen, char *readBu
         if (lseek(t_thrd.xlog_cxt.readFile, (off_t)startoff, SEEK_SET) < 0) {
             (void)close(t_thrd.xlog_cxt.readFile);
             t_thrd.xlog_cxt.readFile = -1;
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek in log segment %s to offset %u: %m",
-                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo), startoff)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek in log segment %s to offset %u: %s",
+                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo), startoff, TRANSLATE_ERRNO)));
         }
         t_thrd.xlog_cxt.readOff = startoff;
     }
@@ -16627,9 +16670,9 @@ bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr, int reqLen, char *readBu
         t_thrd.xlog_cxt.readFile = -1;
         ereport(ERROR,
                 (errcode_for_file_access(),
-                 errmsg("could not read from log segment %s, offset %u, length %lu: %m",
+                 errmsg("could not read from log segment %s, offset %u, length %lu: %s",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff, INT2ULONG(reqLen))));
+                        t_thrd.xlog_cxt.readOff, INT2ULONG(reqLen), TRANSLATE_ERRNO)));
     }
 
     t_thrd.xlog_cxt.readOff += reqLen;
@@ -17373,9 +17416,9 @@ try_again:
     if (lseek(t_thrd.xlog_cxt.readFile, (off_t)t_thrd.xlog_cxt.readOff, SEEK_SET) < 0) {
         ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
-                    errmsg("could not seek in log file %s to offset %u: %m",
+                    errmsg("could not seek in log file %s to offset %u: %s",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff)));
+                        t_thrd.xlog_cxt.readOff, TRANSLATE_ERRNO)));
         if (errno == EINTR) {
             errno = 0;
             pg_usleep(1000);
@@ -17389,9 +17432,9 @@ try_again:
     if (ret != XLOG_BLCKSZ) {
         ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
-                    errmsg("could not read from log file %s to offset %u: %m",
+                    errmsg("could not read from log file %s to offset %u: %s",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff)));
+                        t_thrd.xlog_cxt.readOff, TRANSLATE_ERRNO)));
         if (errno == EINTR) {
             errno = 0;
             pg_usleep(1000);
@@ -18563,7 +18606,8 @@ XLogRecPtr mpfl_read_max_flush_lsn()
     fd = open(MAX_PAGE_FLUSH_LSN_FILE, MPFL_FILE_FLAG, MPFL_FILE_PERM);
     if (fd == -1) {
         ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW),
-                          errmsg("mpfl could not open file \"%s\": %m", MAX_PAGE_FLUSH_LSN_FILE)));
+                          errmsg("mpfl could not open file \"%s\": %s", 
+                                MAX_PAGE_FLUSH_LSN_FILE, TRANSLATE_ERRNO)));
         return MAX_XLOG_REC_PTR;
     }
 
@@ -18960,7 +19004,7 @@ void UpdatePostgresqlFile(const char *optName, const char *gucLine)
     struct stat statbuf;
     if (lstat(guc, &statbuf) != 0) {
         if (errno != ENOENT) {
-            ereport(FATAL, (errmsg("UpdatePostgresqlFile could not stat file \"%s\": %m", guc)));
+            ereport(FATAL, (errmsg("UpdatePostgresqlFile could not stat file \"%s\": %s", guc, TRANSLATE_ERRNO)));
         }
     }
 
@@ -18991,13 +19035,15 @@ void UpdatePostgresqlFile(const char *optName, const char *gucLine)
 
     if (rename(gucBak, guc) != 0) {
         release_file_lock(&filelock);
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not rename \"%s\" to \"%s\": %m", gucBak, guc)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not rename \"%s\" to \"%s\": %s", 
+                                                            gucBak, guc, TRANSLATE_ERRNO)));
     }
 
     if (lstat(guc, &statbuf) != 0) {
         if (errno != ENOENT) {
             release_file_lock(&filelock);
-            ereport(PANIC, (errmsg("UpdatePostgresqlFile2:could not stat file \"%s\": %m", guc)));
+            ereport(PANIC, (errmsg("UpdatePostgresqlFile2:could not stat file \"%s\": %s", 
+                                    guc, TRANSLATE_ERRNO)));
         }
     }
 
@@ -19016,11 +19062,11 @@ void SSWriteDoradoCtlInfoFile(int fd, char* buffer)
         if (errno == 0) {
             errno = ENOSPC;
         }  
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to ss ctl info file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to ss ctl info file: %s", TRANSLATE_ERRNO)));
     }
 
     if (pg_fsync(fd) != 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync ss ctl info file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync ss ctl info file: %s", TRANSLATE_ERRNO)));
     }
 }
 
@@ -19029,13 +19075,14 @@ void SSReadDoradoCtlInfoFile()
     Assert(ENABLE_DSS && SS_REPLICATION_DORADO_CLUSTER);
     int fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | PG_BINARY | O_DIRECT, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open ss ctl into file \"%s\": %m", SS_DORADO_CTRL_FILE)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open ss ctl into file \"%s\": %s",
+                                                            SS_DORADO_CTRL_FILE, TRANSLATE_ERRNO)));
     }
     int readSize = CalShareStorageCtlSize();
     char buffer[readSize] __attribute__ ((__aligned__(ALIGNOF_BUFFER)));
 
     if (pread(fd, buffer, SS_DORADO_CTL_INFO_SIZE, 0) != SS_DORADO_CTL_INFO_SIZE) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read ss ctl into file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read ss ctl into file: %s", TRANSLATE_ERRNO)));
     }
 
 }
@@ -19053,8 +19100,8 @@ void NormalClusterDoradoStorageInit()
         g_instance.xlog_cxt.shareStorageLockFd = BasicOpenFile(g_instance.attr.attr_storage.xlog_lock_file_path,
             O_CREAT | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
         if (g_instance.xlog_cxt.shareStorageLockFd < 0) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m",
-                g_instance.attr.attr_storage.xlog_lock_file_path)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %s",
+                g_instance.attr.attr_storage.xlog_lock_file_path, TRANSLATE_ERRNO)));
         }
 
         if (ENABLE_DMS) {
@@ -19294,8 +19341,9 @@ static void SSOndemandCopyXlogFileClose(void)
 
     if (close(t_thrd.ondemand_xlog_copy_cxt.openLogFile)) {
         ereport(PANIC, (errcode_for_file_access(),
-            errmsg("could not close copy log file %s: %m",
-                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.ondemand_xlog_copy_cxt.openLogSegNo))));
+            errmsg("could not close copy log file %s: %s",
+                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.ondemand_xlog_copy_cxt.openLogSegNo), 
+                TRANSLATE_ERRNO)));
     }
 
     t_thrd.ondemand_xlog_copy_cxt.openLogFile = -1;
@@ -19329,9 +19377,9 @@ static void SSOndemandXlogCopy(XLogSegNo copySegNo, uint32 startOffset, char *co
     if (t_thrd.ondemand_xlog_copy_cxt.openLogOff != startOffset) {
         if (lseek(t_thrd.ondemand_xlog_copy_cxt.openLogFile, (off_t)startOffset, SEEK_SET) < 0) {
             ereport(PANIC, (errcode_for_file_access(),
-                errmsg("could not seek in log file %s to offset %u: %m",
+                errmsg("could not seek in log file %s to offset %u: %s",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.ondemand_xlog_copy_cxt.openLogSegNo),
-                        startOffset)));
+                        startOffset, TRANSLATE_ERRNO)));
         }
         t_thrd.ondemand_xlog_copy_cxt.openLogOff = startOffset;
     }
@@ -19343,9 +19391,9 @@ static void SSOndemandXlogCopy(XLogSegNo copySegNo, uint32 startOffset, char *co
             errno = ENOSPC;
         }
         ereport(PANIC, (errcode_for_file_access(),
-            errmsg("could not write to log file %s at offset %u, length %lu: %m",
+            errmsg("could not write to log file %s at offset %u, length %lu: %s",
                 XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.ondemand_xlog_copy_cxt.openLogSegNo),
-                t_thrd.ondemand_xlog_copy_cxt.openLogOff, (unsigned long)copyBytes)));
+                t_thrd.ondemand_xlog_copy_cxt.openLogOff, (unsigned long)copyBytes, TRANSLATE_ERRNO)));
     }
     t_thrd.ondemand_xlog_copy_cxt.openLogOff += copyBytes;
 }
@@ -19422,15 +19470,15 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     }
 
     if (actualBytes != t_thrd.xlog_cxt.readLen) {
-        ereport(LOG, (errcode_for_file_access(), errmsg("read xlog(start:%X/%X, pos:%u len:%d) failed : %m",
+        ereport(LOG, (errcode_for_file_access(), errmsg("read xlog(start:%X/%X, pos:%u len:%d) failed : %s",
                                                         static_cast<uint32>(targetPagePtr >> BIT_NUM_INT32),
                                                         static_cast<uint32>(targetPagePtr), targetPageOff,
-                                                        expectReadLen)));
+                                                        expectReadLen, TRANSLATE_ERRNO)));
         ereport(emode_for_corrupt_record(emode, RecPtr),
                 (errcode_for_file_access(),
-                 errmsg("could not read from log file %s to offset %u: %m",
+                 errmsg("could not read from log file %s to offset %u: %s",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff)));
+                        t_thrd.xlog_cxt.readOff, TRANSLATE_ERRNO)));
         goto next_record_is_invalid;
     }
 

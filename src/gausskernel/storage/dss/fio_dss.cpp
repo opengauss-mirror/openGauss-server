@@ -33,8 +33,6 @@
 
 static char zero_area[FILE_EXTEND_STEP_SIZE + ALIGNOF_BUFFER] = { 0 };
 
-void dss_set_errno(int *errcode);
-
 ssize_t buffer_align(char **unalign_buff, char **buff, size_t size);
 ssize_t dss_align_read(int handle, void *buf, size_t size, off_t offset, bool use_p);
 int dss_pwrite_file_by_zero(int handle, off_t offset, off_t len);
@@ -89,7 +87,7 @@ int parse_errcode_from_errormsg(const char* errormsg) {
     return ERR_DSS_PROCESS_REMOTE;
 }
 
-void dss_set_errno(int *errcode)
+void dss_set_errno(int *errcode, const char **errmsg)
 {
     int errorcode = 0;
     const char *errormsg = NULL;
@@ -103,6 +101,10 @@ void dss_set_errno(int *errcode)
 
     if (errcode != NULL) {
         *errcode = errorcode;
+    }
+
+    if (errmsg != NULL) {
+        *errmsg = errormsg;
     }
 }
 

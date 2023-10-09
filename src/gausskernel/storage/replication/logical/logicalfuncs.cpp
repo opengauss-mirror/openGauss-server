@@ -211,8 +211,8 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count,
                 }
                 securec_check_ss(nRet, "", "");
 
-                ereport(ERROR, (errcode_for_file_access(),
-                                errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek in log segment %s to offset %u: %s", 
+                                                                    path, startoff, TRANSLATE_ERRNO)));
             }
             t_thrd.logical_cxt.sendOff = startoff;
         }

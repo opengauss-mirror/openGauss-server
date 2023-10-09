@@ -456,7 +456,8 @@ static inline void SendMsg(int socket, char* val, int len)
             if (errno == EINTR)
                 continue; /* Ok if interrupted */
             ereport(ERROR,
-                (errmodule(MOD_UDF), errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Socket send %d bytes: %m", nbytes)));
+                (errmodule(MOD_UDF), errcode(ERRCODE_CONNECTION_FAILURE), 
+                    errmsg("Socket send %d bytes: %s", nbytes, TRANSLATE_ERRNO)));
         }
         startPtr += nbytes;
     }
@@ -1732,7 +1733,7 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                     ereport(ERROR,
                         (errmodule(MOD_UDF),
                             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                            errmsg("internal_load_library %s failed: %m", flinfo->fnLibPath)));
+                            errmsg("internal_load_library %s failed: %s", flinfo->fnLibPath, TRANSLATE_ERRNO)));
 
                 /* Look up the function within the library */
                 flinfo->fn_addr = (PGFunction)pg_dlsym(libHandle, flinfo->fnName);
@@ -1748,7 +1749,7 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                     ereport(ERROR,
                         (errmodule(MOD_UDF),
                             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                            errmsg("internal_load_library %s failed: %m", libpljava_location)));
+                            errmsg("internal_load_library %s failed: %s", libpljava_location, TRANSLATE_ERRNO)));
                 free(libpljava_location);
                 /* Look up the java_call_handler function within libpljava.so */
                 Datum (*pljava_call_handler)(FunctionCallInfoData*);
@@ -1775,7 +1776,7 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                 void *libpl_handler = internal_load_library(pathbuf);
                 if (NULL == libpl_handler)
                     ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                                    errmsg("internal_load_library %s failed: %m", pathbuf)));
+                                    errmsg("internal_load_library %s failed: %s", pathbuf, TRANSLATE_ERRNO)));
                 Datum (*plpython_call_handler)(FunctionCallInfoData *);
 #ifdef ENABLE_PYTHON2
                 plpython_call_handler = (Datum(*)(FunctionCallInfoData *))pg_dlsym(libpl_handler, "plpython_call_handler");

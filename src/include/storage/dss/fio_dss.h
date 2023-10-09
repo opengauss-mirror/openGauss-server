@@ -33,7 +33,7 @@
 #include "storage/dss/dss_adaptor.h"
 
 void dss_device_register(dss_device_op_t *dss_device_op, bool enable_dss);
-void dss_set_errno(int *errcode);
+void dss_set_errno(int *errcode, const char **errmsg = NULL);
 int dss_access_file(const char *file_name, int mode);
 int dss_create_dir(const char *name, mode_t mode);
 int dss_open_dir(const char *name, DIR **dir_handle);

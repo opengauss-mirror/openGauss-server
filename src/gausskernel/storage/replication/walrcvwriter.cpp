@@ -333,8 +333,8 @@ static void WSDataWriteOnDummyStandby(const char *buf, uint32 nbytes)
         if (errno == 0) {
             errno = ENOSPC;
         }
-        ereport(PANIC, (errcode_for_file_access(),
-                        errmsg("could not write to data file %s buffer len %u, length %u: %m", path, nbytes, nbytes)));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to data file %s buffer len %u, length %u: %s", 
+                                                            path, nbytes, nbytes, TRANSLATE_ERRNO)));
     }
 
     errno = 0;

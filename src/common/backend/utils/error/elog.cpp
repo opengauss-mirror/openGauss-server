@@ -75,6 +75,7 @@
 #include "postmaster/syslogger.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
+#include "storage/dss/fio_dss.h"
 #include "tcop/tcopprot.h"
 #include "utils/be_module.h"
 #include "utils/guc.h"
@@ -1399,6 +1400,17 @@ int internalerrquery(const char* query)
     }
 
     return 0; /* return value does not matter */
+}
+
+const char* translate_errno(int errcode)
+{
+    /* If the error code belongs to DSS, we use error message from dssserver */
+    if (errcode > ERR_DSS_FLOOR && errcode < ERR_DSS_CEIL) {
+        const char *errmsg;
+        dss_set_errno(NULL, &errmsg);
+        return errmsg;
+    }
+    return strerror(errcode);
 }
 
 int signal_is_warnings_throw(bool is_warning_throw)

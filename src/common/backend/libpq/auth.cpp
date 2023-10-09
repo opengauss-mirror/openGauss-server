@@ -3036,7 +3036,7 @@ static int ident_inet(hbaPort* port)
     if (rc != 0) {
         ereport(LOG,
             (errcode_for_socket_access(),
-                errmsg("could not connect to Ident server at address \"%s\", port %s: %m", remote_addr_s, ident_port)));
+                errmsg("could not connect to Ident server at address \"%s\", port %s: %s", remote_addr_s, ident_port, TRANSLATE_ERRNO)));
         ident_return = false;
         goto ident_inet_done;
     }

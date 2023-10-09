@@ -416,7 +416,7 @@ static int get_prog_path(const char* argv0)
             /* log_dir not exist, create log_dir path */
             if (0 != mkdir(log_dir, S_IRWXU)) {
                 if (EEXIST != errno) {
-                    ereport(WARNING, (errmsg("could not create directory %s: %m", log_dir)));
+                    ereport(WARNING, (errmsg("could not create directory %s: %s", log_dir, TRANSLATE_ERRNO)));
                     return -1;
                 }
             }
