@@ -9775,6 +9775,7 @@ make_execsql_stmt(int firsttoken, int location)
     bool insert_array_record = false; 
     int values_end_loc = -1;
     int before_semi_loc = -1;
+    const char* err_msg = "The label name can only contain letters, digits and underscores";
     PLpgSQL_row* row_data = NULL;
     PLpgSQL_rec* rec_data = NULL;
     PLpgSQL_var* array_data = NULL;
@@ -9884,22 +9885,50 @@ make_execsql_stmt(int firsttoken, int location)
                     {
                         char*  name = NULL;
                         errno_t rc = 0;
+                        int num = -1;
 
                         int len = Min(NAMEDATALEN, lb.len - count + 1);
                         name = (char*)palloc(len);
                         rc = strncpy_s(name, len, lb.data, len - 1);
                         securec_check_c(rc, "\0", "\0");
+                        num = strspn(pg_strtolower(name), "abcdefghijklmnopqrstuvwxyz0123456789_");
+
+                        if(num != len - 1 || (name[0] >= '0' && name[0] <= '9')) {
+                            pfree(name);
+                            pfree_ext(lb.data);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg(err_msg),
+                                    parser_errposition(location + num)));
+                        }
 
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(name));
                         pfree(name);
                     }
-                    else
-                    {
+                    else {
+                        int valid_len = lb.len;
                         if(lb.len >= NAMEDATALEN)
                         {
                             lb.data[NAMEDATALEN - 1] = '\0';
+                            valid_len = NAMEDATALEN - 1;
                         }
+                        int len = -1;
+                        len = strspn(pg_strtolower(lb.data), "abcdefghijklmnopqrstuvwxyz0123456789_");
 
+                        if(len != valid_len) {
+                            pfree_ext(lb.data);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg(err_msg),
+                                    parser_errposition(location + len)));
+                        }
+                        if(lb.data[0] >= '0' && lb.data[0] <= '9') {
+                            pfree_ext(lb.data);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg(err_msg),
+                                    parser_errposition(location)));
+                        }
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
                     }
                     pfree_ext(lb.data);
@@ -9943,21 +9972,13 @@ make_execsql_stmt(int firsttoken, int location)
                     securec_check_c(rc, "\0", "\0");
                     len = strspn(pg_strtolower(name), "abcdefghijklmnopqrstuvwxyz0123456789_");
 
-                    if(len != lb.len - count) {
+                    if(len != lb.len - count || (name[0] >= '0' && name[0] <= '9')) {
                         pfree(name);
                         pfree_ext(lb.data);
                         ereport(errstate,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("The label name is invalid"),
+                                errmsg(err_msg),
                                 parser_errposition(location + len)));
-                    }
-                    if(name[0] >= '0' && name[0] <= '9') {
-                        pfree(name);
-                        pfree_ext(lb.data);
-                        ereport(errstate,
-                                (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("The label name is invalid"),
-                                parser_errposition(location)));
                     }
 
                     if(lb.len-count >= NAMEDATALEN)
@@ -9983,14 +10004,14 @@ make_execsql_stmt(int firsttoken, int location)
                         pfree_ext(lb.data);
                         ereport(errstate,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("The label name is invalid"),
+                                errmsg(err_msg),
                                 parser_errposition(location + len)));
                     }
                     if(lb.data[0] >= '0' && lb.data[0] <= '9') {
                         pfree_ext(lb.data);
                         ereport(errstate,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("The label name is invalid"),
+                                errmsg(err_msg),
                                 parser_errposition(location)));
                     }
                     if(lb.len >= NAMEDATALEN)

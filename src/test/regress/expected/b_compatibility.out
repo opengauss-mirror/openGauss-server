@@ -1206,6 +1206,147 @@ call labeltest(9);
          9
 (1 row)
 
+create table tb_1092829(id int);
+-- failed
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+“abel1*”:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE “label1”;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+ERROR:  The label name can only contain letters, digits and underscores
+LINE 2: “abel1*”:
+        ^
+QUERY:   DECLARE BEGIN
+“abel1*”:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE “label1”;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END
+-- failed
+create or replace procedure prc_2_1092829(n int)
+as
+BEGIN
+label#:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE label#;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+ERROR:  The label name can only contain letters, digits and underscores
+LINE 2: label#:
+             ^
+QUERY:   DECLARE BEGIN
+label#:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE label#;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END
+--failed
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+测试中文:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE 测试中文;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+ERROR:  The label name can only contain letters, digits and underscores
+LINE 2: 测试中文:
+        ^
+QUERY:   DECLARE BEGIN
+测试中文:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE 测试中文;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END
+-- failed
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+1_hello:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE 1_hello;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+ERROR:  syntax error at or near "1"
+LINE 2: 1_hello:
+        ^
+QUERY:   DECLARE BEGIN
+1_hello:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE 1_hello;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END
+-- success
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+_hello:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE _hello;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+call prc_1092829(10);
+ prc_1092829 
+-------------
+ 
+(1 row)
+
+select * from tb_1092829;
+ id 
+----
+  9
+  8
+  7
+  6
+  5
+(5 rows)
+
+drop function prc_1092829;
+drop table tb_1092829;
 --success
 create or replace procedure proc_label(n int)
 as
