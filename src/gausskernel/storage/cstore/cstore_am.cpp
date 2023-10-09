@@ -3805,7 +3805,7 @@ CUUncompressedRetCode CStore::GetCUDataFromRemote(
                     cuPtr->m_compressedBuf, cuDescPtr->cu_pointer, cuDescPtr->cu_size, false);
         }
 
-        CUCache->RealeseCompressLock(slotId);
+        CUCache->ReleaseCompressLock(slotId);
 
         CUCache->DataBlockCompleteIO(slotId);
     } else {

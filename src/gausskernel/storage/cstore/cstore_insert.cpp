@@ -812,7 +812,7 @@ void CStoreInsert::BatchInsertCommon(bulkload_rows* batchRowPtr, int options)
     for (col = 0; col < attno; ++col) {
         if (!m_relation->rd_att->attrs[col].attisdropped) {
             m_cuPPtr[col] = FormCU(col, batchRowPtr, m_cuDescPPtr[col]);
-            m_cuCmprsOptions[col].m_sampling_fihished = true;
+            m_cuCmprsOptions[col].m_sampling_finished = true;
         }
     }
     if (m_isUpdate)
@@ -1530,7 +1530,7 @@ bool CStoreInsert::TryEncodeNumeric(int col, bulkload_rows* batchRowPtr, CUDesc*
 
         ptr = NumericCopyCompressedBatchValues(cuPtr->m_srcData, &phase1_out, &phase2_out);
 
-        if (!m_cuCmprsOptions[col].m_sampling_fihished) {
+        if (!m_cuCmprsOptions[col].m_sampling_finished) {
             /* get adopted compression methods from the first CU sample */
             m_cuCmprsOptions[col].set_numeric_flags(*(uint16*)cuPtr->m_srcData);
         }
@@ -1861,7 +1861,7 @@ void CStoreInsert::FormCUTNumeric(int col, bulkload_rows* batchRowPtr, CUDesc* c
     /* change m_formCUFuncArray[col] to FormCUTCommon()
      * if the first time of encoding-numeric fails
      */
-    if (!this->m_cuCmprsOptions[col].m_sampling_fihished) {
+    if (!this->m_cuCmprsOptions[col].m_sampling_finished) {
         this->m_formCUFuncArray[col].colFormCU[FORMCU_IDX_NONE_NULL] = &CStoreInsert::FormCUT<false>;
         this->m_formCUFuncArray[col].colFormCU[FORMCU_IDX_HAVE_NULL] = &CStoreInsert::FormCUT<true>;
     }
@@ -1893,7 +1893,7 @@ void CStoreInsert::FormCUTNumString(int col, bulkload_rows* batchRowPtr, CUDesc*
 
     this->FormCUTCopyMem(cuPtr, batchRowPtr, cuDescPtr, dataSize, col, hasNull);
     /* change m_formCUFuncArray[col] to FormCUTCommon()	if the first time of encoding-number-string fails */
-    if (!this->m_cuCmprsOptions[col].m_sampling_fihished) {
+    if (!this->m_cuCmprsOptions[col].m_sampling_finished) {
         this->m_formCUFuncArray[col].colFormCU[FORMCU_IDX_NONE_NULL] = &CStoreInsert::FormCUT<false>;
         this->m_formCUFuncArray[col].colFormCU[FORMCU_IDX_HAVE_NULL] = &CStoreInsert::FormCUT<true>;
     }

@@ -718,7 +718,7 @@ bool CU::CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compress_mo
         Assert(m_cuSize <= m_compressedBufSize);
         PADDING_CU(m_compressedBuf + m_cuSizeExcludePadding, m_cuSize - m_cuSizeExcludePadding);
 
-        if (!ref_filter->m_sampling_fihished) {
+        if (!ref_filter->m_sampling_finished) {
             /* sample and set adopted compression methods */
             ref_filter->set_common_flags(output.modes);
         }

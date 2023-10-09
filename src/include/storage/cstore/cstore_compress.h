@@ -55,7 +55,7 @@ extern void Int64DataConvertTo(_in_ int64 inVal, _in_ short eachValSize, _out_ c
  */
 struct compression_options {
     /* sampling flag */
-    bool m_sampling_fihished;
+    bool m_sampling_finished;
 
     /* the followings are adopt-compression-method flags */
 

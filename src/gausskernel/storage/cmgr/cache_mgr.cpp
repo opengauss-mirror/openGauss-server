@@ -1479,7 +1479,7 @@ void CacheMgr::AcquireCstoreIOLock(CacheSlotId_t slotId)
  * @Description: release cstore IO lock
  * @Param[IN] slotId: slot id:
  */
-void CacheMgr::RealeseCstoreIOLock(CacheSlotId_t slotId)
+void CacheMgr::ReleaseCstoreIOLock(CacheSlotId_t slotId)
 {
     Assert(slotId >= 0 && slotId <= m_CaccheSlotMax && slotId < m_CacheSlotsNum);
     LWLockRelease(m_CacheDesc[slotId].m_iobusy_lock);
@@ -1512,7 +1512,7 @@ void CacheMgr::AcquireCompressLock(CacheSlotId_t slotId)
  * @Param[IN] slotId: slot id
  * @See also:
  */
-void CacheMgr::RealeseCompressLock(CacheSlotId_t slotId)
+void CacheMgr::ReleaseCompressLock(CacheSlotId_t slotId)
 {
     Assert(slotId >= 0 && slotId <= m_CaccheSlotMax && slotId < m_CacheSlotsNum);
     LWLockRelease(m_CacheDesc[slotId].m_compress_lock);

@@ -910,7 +910,7 @@ static void ApplyMultiPageSyncWithTrxnRecord(RedoItem *item)
     uint64 blockcnt = 0;
     pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
     while (XLogRecPtrIsInvalid(LatestReplayedRecPtr) || XLByteLT(LatestReplayedRecPtr, endLSN)) {
-        /* block if trxn hasn‘t update the last replayed lsn */
+        /* block if trxn hasn't update the last replayed lsn */
         LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL, NULL);
         blockcnt++;
         if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {

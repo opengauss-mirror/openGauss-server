@@ -193,7 +193,7 @@ public:
 
     /* compress lock */
     void AcquireCompressLock(CacheSlotId_t slotId);
-    void RealeseCompressLock(CacheSlotId_t slotId);
+    void ReleaseCompressLock(CacheSlotId_t slotId);
 
     /* ring strategy, not used for now */
     void IncRingCount(CacheSlotId_t slotId);
@@ -206,7 +206,7 @@ public:
 
     /* IO lock */
     void AcquireCstoreIOLock(CacheSlotId_t slotId);
-    void RealeseCstoreIOLock(CacheSlotId_t slotId);
+    void ReleaseCstoreIOLock(CacheSlotId_t slotId);
     bool CstoreIOLockHeldByMe(CacheSlotId_t slotId);
     void AdjustCacheMem(CacheSlotId_t slotId, int oldSize, int newSize);
 
