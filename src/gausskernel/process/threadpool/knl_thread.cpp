@@ -850,6 +850,7 @@ static void knl_t_postgres_init(knl_t_postgres_context* postgres_cxt)
 {
     postgres_cxt->clear_key_memory = false;
     postgres_cxt->debug_query_string = NULL;
+    postgres_cxt->cur_command_tag = T_Invalid;
     postgres_cxt->isInResetUserName = false;
     postgres_cxt->whereToSendOutput = DestDebug;
     postgres_cxt->local_foreign_respool = NULL;
