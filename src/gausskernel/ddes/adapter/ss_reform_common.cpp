@@ -183,7 +183,7 @@ void SSGetRecoveryXlogPath()
     securec_check_ss(rc, "", "");
 }
 
-void SSUpdateReformerCtrl(bool force)
+void SSUpdateReformerCtrl()
 {
     int fd = -1;
     int len;

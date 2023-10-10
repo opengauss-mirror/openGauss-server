@@ -197,7 +197,7 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
     return ret;
 }
 
-static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot)
+static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot, uint8 inst_id)
 {   
     /* SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY always is in recovery progress, but it can acquire snapshot*/
     if (RecoveryInProgress() && !SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
@@ -1165,8 +1165,7 @@ static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
     ctrl_info.ctrl = *buf_ctrl;
     ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
     ctrl_info.is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false; 
-    unsigned char release = false; // not used in openGauss, just adapt interface
-    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index, true, false, &release);
+    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
@@ -1223,8 +1222,7 @@ static int32 CBDrcBufRebuildInternal(int begin, int len, unsigned char thread_in
     */
 const int dms_invalid_thread_index = 255;
 const int dms_invalid_thread_num = 255;
-static int32 CBDrcBufRebuildParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num,
-    unsigned char for_rebuild)
+static int32 CBDrcBufRebuildParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num)
 {
     Assert((thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) ||
             (thread_index != dms_invalid_thread_index && thread_num != dms_invalid_thread_num &&
@@ -1713,7 +1711,8 @@ static void ReformTypeToString(SSReformType reform_type, char* ret_str)
     return;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
+static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type,
+    unsigned long long bitmap_nodes)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->reform_type = (SSReformType)reform_type;
