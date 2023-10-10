@@ -133,6 +133,27 @@ create table t_pubsub_0349(
     fi
 
     exec_sql $case_db $sub_node1_port "ALTER SYSTEM SET subscription_conflict_resolution = error"
+
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE t_pubsub_0349"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE t_pubsub_0349"
+
+    # BUG4: fix pg_replication_origin_status remain
+    exec_sql $case_db $pub_node1_port "create table tab_rep (a int primary key, b int); insert into tab_rep values (1,1)"
+    exec_sql $case_db $sub_node1_port "create table tab_rep (a int primary key, b int); insert into tab_rep values (1,1)"
+
+    echo "create publication and subscription."
+    publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
+    exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub FOR ALL TABLES"
+    exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub CONNECTION '$publisher_connstr' PUBLICATION tap_pub"
+
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub;"
+
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_replication_origin_status")" = "0" ]; then
+        echo "check if pg_replication_origin_status is empty success"
+    else
+        echo "$failed_keyword when check if pg_replication_origin_status is empty"
+        exit 1
+    fi
 }
 
 function tear_down() {

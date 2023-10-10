@@ -962,6 +962,28 @@ static void ReplicationOriginExitCleanup(int code, Datum arg)
         cv = &u_sess->reporigin_cxt.curRepState->orginCV;
         mutex = &u_sess->reporigin_cxt.curRepState->originMutex;
         u_sess->reporigin_cxt.curRepState->acquired_by = 0;
+
+        /*
+         * For table sync worker, clean the origin status when thread exit.
+         * Otherwise it will remain if worker exit abnormally.
+         */
+        if (t_thrd.applyworker_cxt.curWorker && AM_TABLESYNC_WORKER) {
+            /* first WAL log */
+            {
+                xl_replorigin_drop xlrec;
+
+                xlrec.node_id = u_sess->reporigin_cxt.originId;
+                XLogBeginInsert();
+                XLogRegisterData((char *)(&xlrec), sizeof(xlrec));
+                XLogInsert(RM_REPLORIGIN_ID, XLOG_REPLORIGIN_DROP);
+            }
+
+            /* then reset the in-memory entry */
+            u_sess->reporigin_cxt.curRepState->roident = InvalidRepOriginId;
+            u_sess->reporigin_cxt.curRepState->remote_lsn = InvalidXLogRecPtr;
+            u_sess->reporigin_cxt.curRepState->local_lsn = InvalidXLogRecPtr;
+        }
+        
         u_sess->reporigin_cxt.curRepState = NULL;
     }
 
