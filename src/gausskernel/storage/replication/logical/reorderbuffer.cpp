@@ -2233,7 +2233,7 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
     if ((Size)(write(fd, rb->outbuf, ondisk->size)) != ondisk->size) {
         (void)CloseTransientFile(fd);
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
-            errcode_for_file_access(), errmsg("could not write to xid %lu's data file: %m", txn->xid)));
+            errcode_for_file_access(), errmsg("could not write to xid %lu's data file: %s", txn->xid, TRANSLATE_ERRNO)));
     }
 
     if (txn->final_lsn < change->lsn) {

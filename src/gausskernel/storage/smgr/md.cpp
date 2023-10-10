@@ -212,7 +212,7 @@ int openrepairfile(char* path, RelFileNodeForkNum filenode)
     ADIO_END();
     fd = DataFileIdOpenFile(temppath, filenode, (int)repair_flags, 0600);
     if (fd < 0) {
-        ereport(WARNING, (errmsg("[file repair] could not open repair file %s: %m", temppath)));
+        ereport(WARNING, (errmsg("[file repair] could not open repair file %s: %s", temppath, TRANSLATE_ERRNO)));
     }
     pfree(temppath);
     return fd;
@@ -713,7 +713,7 @@ static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior
             CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, 0)) {
             fd = openrepairfile(path, filenode);
             if (fd < 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file %s.repair: %m", path)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file %s.repair: %s", path, TRANSLATE_ERRNO)));
             } else {
                 ereport(LOG, (errmsg("[file repair] open repair file %s.repair", path)));
             }

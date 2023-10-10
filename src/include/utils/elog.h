@@ -248,6 +248,7 @@ extern int ErrOutToClient(bool outToClient);
 extern int geterrcode(void);
 extern int geterrposition(void);
 extern int getinternalerrposition(void);
+extern const char* translate_errno(int errcode);
 extern int signal_is_warnings_throw(bool is_warning_throw);
 extern int signal_returnd_sqlstate(const char *returnd_sqlstate);
 extern int signal_class_origin(const char *class_origin);
@@ -673,6 +674,8 @@ void freeSecurityFuncSpace(const char* charList, ...);
 
 extern void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
+
+#define TRANSLATE_ERRNO (translate_errno(errno))
 
 /* helpful macro */
 #define AssertEreport(condition, module, msg)                                                   \

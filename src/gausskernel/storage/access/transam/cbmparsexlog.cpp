@@ -665,7 +665,7 @@ extern void CBMFollowXlog(void)
         struct stat statbuf;
         if (lstat(t_thrd.cbm_cxt.XlogCbmSys->out.name, &statbuf) != 0)
             ereport(ERROR, (errcode_for_file_access(),
-                            errmsg("failed to stat current cbm file %s :%m", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
+                            errmsg("failed to stat current cbm file %s :%s", t_thrd.cbm_cxt.XlogCbmSys->out.name, TRANSLATE_ERRNO)));
     }
 
     if (t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash == NULL)

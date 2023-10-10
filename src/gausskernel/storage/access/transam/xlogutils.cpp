@@ -1665,7 +1665,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
                 (void)close(t_thrd.xlog_cxt.sendFile);
                 t_thrd.xlog_cxt.sendFile = -1;
                 ereport(ERROR, (errcode_for_file_access(),
-                                errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
+                                errmsg("could not seek in log segment %s to offset %u: %s", path, startoff, TRANSLATE_ERRNO)));
             }
             t_thrd.xlog_cxt.sendOff = startoff;
         }

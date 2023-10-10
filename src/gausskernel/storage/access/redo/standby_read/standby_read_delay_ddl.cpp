@@ -105,7 +105,7 @@ bool write_delay_ddl_info(char* file_path, void* buf, size_t size, off_t off)
     int fd = BasicOpenFile(file_path, O_CREAT | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         ereport(WARNING,
-            (errcode_for_file_access(), errmsg("write_delay_ddl_info:could not open file %s : %m", file_path)));
+            (errcode_for_file_access(), errmsg("write_delay_ddl_info:could not open file %s : %s", file_path, TRANSLATE_ERRNO)));
         return false;
     }
     int count = 0;
@@ -139,7 +139,7 @@ RETRY:
 
     if (fsync(fd) != 0) {
         ereport(WARNING,
-            (errcode_for_file_access(), errmsg("write_delay_ddl_info:could not fsync file %s: %m", file_path)));
+            (errcode_for_file_access(), errmsg("write_delay_ddl_info:could not fsync file %s: %s", file_path, TRANSLATE_ERRNO)));
         close(fd);
         return false;
     }
@@ -455,7 +455,7 @@ void delete_by_table_space(Oid tablespace_id)
         int fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
         if (fd < 0) {
             ereport(WARNING,
-                (errmsg("delete_by_table_space: file %s could not open:%m", path)));
+                (errmsg("delete_by_table_space: file %s could not open:%s", path, TRANSLATE_ERRNO)));
             exit_state(&stat->delete_stat);
             return;
         }

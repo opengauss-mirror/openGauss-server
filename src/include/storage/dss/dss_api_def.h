@@ -141,6 +141,7 @@ typedef void (*dss_log_output)(dss_log_id_t log_type, dss_log_level_t log_level,
 // link error [2280, 2300)
 #define ERR_DSS_LINK_READ 2280
 #define ERR_DSS_LINK_READ_NOT_LINK 2281
+#define ERR_DSS_LINK_CREATE 2290
 
 // config error [2300, 2320)
 #define ERR_DSS_CONFIG_FILE_OVERSIZED 2300

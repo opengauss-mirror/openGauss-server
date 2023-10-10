@@ -667,7 +667,7 @@ static void count_usable_fds(int max_to_probe, int* usable_fds, int* already_ope
         if (thisfd < 0) {
             /* Expect EMFILE or ENFILE, else it's fishy */
             if (errno != EMFILE && errno != ENFILE) {
-                ereport(WARNING, (errmsg("dup(0) failed after %d successes: %m", used)));
+                ereport(WARNING, (errmsg("dup(0) failed after %d successes: %s", used, TRANSLATE_ERRNO)));
             }
             break;
         }
@@ -1286,7 +1286,7 @@ static void DataFileIdCloseFile(Vfd* vfdP)
         if (close(vfdP->fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Local] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
+                     errmsg("[Local] File(%s) fd(%d) have been closed, %s", vfdP->fileName, vfdP->fd, TRANSLATE_ERRNO)));
         }
         return;
     }
@@ -1324,12 +1324,12 @@ static void DataFileIdCloseFile(Vfd* vfdP)
         if (close(fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Global] File(%s) fd(%d) have been closed, %m", vfdP->fileName, fd)));
+                     errmsg("[Global] File(%s) fd(%d) have been closed, %s", vfdP->fileName, fd, TRANSLATE_ERRNO)));
         }
         if (repaired_fd >= 0 && close(repaired_fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Global] File(%s) reapired_fd(%d) have been closed, %m", vfdP->fileName, repaired_fd)));
+                     errmsg("[Global] File(%s) reapired_fd(%d) have been closed, %s", vfdP->fileName, repaired_fd, TRANSLATE_ERRNO)));
         }
         return;
     }

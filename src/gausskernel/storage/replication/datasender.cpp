@@ -1584,7 +1584,7 @@ retry:
         if (bytesread != sizeof(nbytes)) {
             if (ferror(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
                 ereport(PANIC, (errcode_for_file_access(),
-                                errmsg("could not read to data file %s length %u: %m", path, nbytes)));
+                                errmsg("could not read to data file %s length %u: %s", path, nbytes, TRANSLATE_ERRNO)));
             }
             if (feof(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
                 ereport(LOG, (errmsg("step1: data file num %u, read file fd %d",
@@ -1617,7 +1617,7 @@ retry:
         if (bytesread != nbytes) {
             if (ferror(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
                 ereport(PANIC, (errcode_for_file_access(),
-                                errmsg("could not read to data file %s length %u: %m", path, nbytes)));
+                                errmsg("could not read to data file %s length %u: %s", path, nbytes, TRANSLATE_ERRNO)));
             }
             if (feof(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
                 ereport(LOG, (errmsg("step2: data file num %u, read file fd %d",
