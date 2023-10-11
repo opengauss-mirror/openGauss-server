@@ -81,6 +81,7 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
         ItemId itemid;
         IndexTuple itup;
         BlockNumber blkno;
+        BlockNumber par_blkno;
         BTStack new_stack = NULL;
 
         /*
@@ -111,6 +112,7 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
         itup = (IndexTuple) PageGetItem(page, itemid);
         Assert(UBTreeTupleIsPivot(itup) || !key->heapkeyspace);
         blkno = UBTreeTupleGetDownLink(itup);
+        par_blkno = BufferGetBlockNumber(*bufP);
 
         /*
          * We need to save the location of the index entry we chose in the
@@ -128,7 +130,7 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
          */
         if (needStack) {
             new_stack = (BTStack)palloc(sizeof(BTStackData));
-            new_stack->bts_blkno = BufferGetBlockNumber(*bufP);
+            new_stack->bts_blkno = par_blkno;
             new_stack->bts_offset = offnum;
             new_stack->bts_btentry = blkno;
             new_stack->bts_parent = stack_in;
