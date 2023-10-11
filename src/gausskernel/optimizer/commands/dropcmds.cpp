@@ -101,9 +101,15 @@ static void DropExtensionInListIsSupported(List* objname)
     int len_unsupport = lengthof(unsupportList);
     for (int i = 0; i < len_unsupport; i++) {
         if (pg_strcasecmp(name, unsupportList[i]) == 0) {
+#ifdef ENABLE_LITE_MODE
+            if (u_sess->attr.attr_common.upgrade_mode != 0 && t_thrd.proc->workingVersionNum < DOLPHIN_ENABLE_DROP_NUM) {
+                return;
+            }
+#else
             if (u_sess->attr.attr_common.IsInplaceUpgrade && t_thrd.proc->workingVersionNum < DOLPHIN_ENABLE_DROP_NUM) {
                 return;
             }
+#endif
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXTENSION is not yet supported.")));
         }
     }
