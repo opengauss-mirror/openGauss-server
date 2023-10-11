@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
@@ -195,6 +196,7 @@ void SSInitReformerControlPages(void)
     g_instance.dms_cxt.SSReformerControl.recoveryInstId = INVALID_INSTANCEID;
     g_instance.dms_cxt.SSReformerControl.version = REFORM_CTRL_VERSION;
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
+    g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
     (void)printf("[SS] Current node:%d initdb first, will become PRIMARY for first-time SS cluster startup.\n",
         SS_MY_INST_ID);
 

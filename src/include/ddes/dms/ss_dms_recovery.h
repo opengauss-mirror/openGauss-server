@@ -55,6 +55,7 @@ typedef struct st_reformer_ctrl {
     int primaryInstId;
     int recoveryInstId;
     SSGlobalClusterState clusterStatus;
+    ClusterRunMode clusterRunMode;
     pg_crc32c crc;
 } ss_reformer_ctrl_t;
 
