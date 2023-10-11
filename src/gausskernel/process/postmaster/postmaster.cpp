@@ -4119,7 +4119,7 @@ static int ServerLoop(void)
          * one.  But this is needed only in normal operation (else we cannot
          * be writing any new WAL).
          */
-        if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN) {
+        if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN && !SS_REPLICATION_STANDBY_CLUSTER) {
             g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
         }
 
@@ -6981,7 +6981,7 @@ static void reaper(SIGNAL_ARGS)
                 }
             }
 
-            if (g_instance.pid_cxt.WalWriterPID == 0)
+            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_REPLICATION_STANDBY_CLUSTER)
                 g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
 
             if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0)
