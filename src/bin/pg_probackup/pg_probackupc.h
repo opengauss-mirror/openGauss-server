@@ -390,6 +390,7 @@ extern void get_redo(const char *pgdata_path, RedoParams *redo);
 extern void parse_vgname_args(const char* args);
 extern bool is_ss_xlog(const char *ss_dir);
 extern void ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog);
+extern bool ss_create_if_doublewrite(pgFile* dir, const char* vgdata, int instance_id);
 extern char* xstrdup(const char* s);
 extern void set_min_recovery_point(pgFile *file, const char *fullpath,
                                    XLogRecPtr stop_backup_lsn);

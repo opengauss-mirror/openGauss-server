@@ -1312,10 +1312,15 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
         if (dir->external_dir_num != 0)
             continue;
 
-        if (is_dss_type(dir->type) && is_ss_xlog(dir->rel_path)) {
-            ss_createdir(dir->rel_path, instance_config.dss.vgdata, 
-                         instance_config.dss.vglog);
-            continue;
+        if (is_dss_type(dir->type)) {
+            if (is_ss_xlog(dir->rel_path)) {
+                ss_createdir(dir->rel_path, instance_config.dss.vgdata, instance_config.dss.vglog);
+                continue;
+            }
+
+            if (ss_create_if_doublewrite(dir, instance_config.dss.vgdata, instance_config.dss.instance_id)) {
+                continue;
+            }
         }
 
         /* tablespace_map exists */
