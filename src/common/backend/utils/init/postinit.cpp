@@ -1276,6 +1276,8 @@ void PostgresInitializer::InitJobExecuteWorker()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 }
 
@@ -1954,6 +1956,8 @@ void PostgresInitializer::InitWAL()
     InitPGXCPort();
 
     InitSettings();
+
+    InitExtensionVariable();
 
     FinishInit();
 }
