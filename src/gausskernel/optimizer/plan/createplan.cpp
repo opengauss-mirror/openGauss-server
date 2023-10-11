@@ -49,6 +49,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/planner.h"
 #include "optimizer/predtest.h"
+#include "optimizer/prep.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
@@ -2667,6 +2668,28 @@ static Scan* create_indexscan_plan(
     return scan_plan;
 }
 
+static bool CheckBitmapScanQualExists(PlannerInfo *root, List *indexquals, Node *clause)
+{
+    foreach_cell (cell, indexquals) {
+        Node *node = lfirst_node(Node, cell);
+        if (equal((const void *)node, (const void *)clause)) {
+            return true;
+        }
+
+        if (IsA(node, BoolExpr)) {
+            BoolExpr *be = (BoolExpr *)node;
+            if (be->boolop != AND_EXPR) {
+                continue;
+            }
+            if (CheckBitmapScanQualExists(root, be->args, clause)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /*
  * create_bitmap_scan_plan
  *	  Returns a bitmap scan plan for the base relation scanned by 'best_path'
@@ -2717,6 +2740,9 @@ static BitmapHeapScan* create_bitmap_scan_plan(
      * the scan becomes lossy, so they have to be included in bitmapqualorig.
      */
     qpqual = NIL;
+    if (indexquals != NIL && IsA(best_path->bitmapqual, BitmapOrPath)) {
+        linitial(indexquals) = canonicalize_qual(linitial_node(Expr, indexquals), false);
+    }
     foreach (l, scan_clauses) {
         RestrictInfo* rinfo = (RestrictInfo*)lfirst(l);
         Node* clause = (Node*)rinfo->clause;
@@ -2724,7 +2750,7 @@ static BitmapHeapScan* create_bitmap_scan_plan(
         Assert(IsA(rinfo, RestrictInfo));
         if (rinfo->pseudoconstant)
             continue; /* we may drop pseudoconstants here */
-        if (list_member(indexquals, clause))
+        if (CheckBitmapScanQualExists(root, indexquals, clause))
             continue; /* simple duplicate */
         if (rinfo->parent_ec && list_member_ptr(indexECs, rinfo->parent_ec))
             continue; /* derived from same EquivalenceClass */
