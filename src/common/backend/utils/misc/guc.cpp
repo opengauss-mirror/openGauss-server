@@ -4480,7 +4480,7 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest);
 static char* _ShowOption(struct config_generic* record, bool use_units, bool is_show);
 static bool validate_option_array_item(const char* name, const char* value, bool skipIfNoPermissions);
 #ifndef ENABLE_MULTIPLE_NODES
-static void replace_config_value(char** optlines, char* name, char* value, config_type vartype);
+static void replace_config_value(char** optlines, char* name, char* value, config_type vartype, ConfFileLock* filelock);
 #endif
 
 /*
@@ -8599,7 +8599,7 @@ static char* flatten_set_variable_args(const char* name, List* args)
  * parameter to be updated is new then it is appended to the list of
  * parameters.
  */
-static void replace_config_value(char** optlines, char* name, char* value, config_type vartype)
+static void replace_config_value(char** optlines, char* name, char* value, config_type vartype, ConfFileLock* filelock)
 {
     Assert(optlines != NULL);
 
@@ -8620,6 +8620,7 @@ static void replace_config_value(char** optlines, char* name, char* value, confi
         case PGC_STRING:
             if (strlen(name) + strlen(value) + 6 >= MAX_PARAM_LEN) {
                 pfree(newline);
+                release_file_lock(filelock);
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("the length of GUC string type value exceed 1024.")));
             }
             rc = snprintf_s(newline, MAX_PARAM_LEN, MAX_PARAM_LEN - 1, "%s = '%s'\n", name, value);
@@ -8925,7 +8926,7 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
      * exists OR add it as a new cofiguration parameter in the file.
      * and we should leave postgresql.conf.bak like gs_guc.
      */
-    replace_config_value(opt_lines, name, value, record->vartype);
+    replace_config_value(opt_lines, name, value, record->vartype, &filelock);
     WriteAlterSystemSetGucFile(ConfTmpFileName, opt_lines, &filelock);
     opt_lines = read_guc_file(ConfTmpFileName);
     WriteAlterSystemSetGucFile(ConfTmpBakFileName, opt_lines, &filelock);
