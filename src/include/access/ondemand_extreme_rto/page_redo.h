@@ -30,6 +30,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/ondemand_extreme_rto/redo_item.h"
+#include "access/ondemand_extreme_rto/batch_redo.h"
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
 
@@ -42,7 +43,7 @@ namespace ondemand_extreme_rto {
 
 #define ONDEMAND_DISTRIBUTE_RATIO 0.9
 
-static const uint32 PAGE_WORK_QUEUE_SIZE = 2097152;
+static const uint32 PAGE_WORK_QUEUE_SIZE = 65536;
 
 static const uint32 ONDEMAND_EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
 static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
@@ -185,7 +186,6 @@ struct PageRedoWorker {
     RedoBufferManager bufferManager;
     RedoTimeCost timeCostList[TIME_COST_NUM];
     char page[BLCKSZ];
-    XLogBlockDataParse *curRedoBlockState;
 };
 
 
@@ -248,6 +248,8 @@ void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
     XLogRecPtr old_lsn, XLogPhyBlock pblk);
 const char *RedoWokerRole2Str(RedoRole role);
+bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
+    bool holdLock);
 
 }  // namespace ondemand_extreme_rto
 #endif

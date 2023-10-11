@@ -105,7 +105,6 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_owner));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_wait_reform));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_event));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_buf_res_rebuild_drc));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_buf_res_rebuild_drc_parallel));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_is_recovery_session));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(drc_get_page_master_id));
@@ -264,16 +263,9 @@ void dms_get_event(dms_wait_event_t event_type, unsigned long long *event_cnt, u
     return g_ss_dms_func.dms_get_event(event_type, event_cnt, event_time);
 }
 
-int dms_buf_res_rebuild_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
-    unsigned char is_dirty)
+int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index)
 {
-    return g_ss_dms_func.dms_buf_res_rebuild_drc(dms_ctx, ctrl, lsn, is_dirty);
-}
-
-int dms_buf_res_rebuild_drc_parallel(dms_context_t *dms_ctx, dms_ctrl_info_t *ctrl_info, unsigned char thread_index,
-    unsigned char for_rebuild, unsigned char can_release, unsigned char *release)
-{
-    return g_ss_dms_func.dms_buf_res_rebuild_drc_parallel(dms_ctx, ctrl_info, thread_index, for_rebuild, can_release, release);
+    return g_ss_dms_func.dms_buf_res_rebuild_drc_parallel(dms_ctx, ctrl_info, thread_index);
 }
 
 int dms_is_recovery_session(unsigned int sid)
@@ -301,9 +293,9 @@ int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int si
     return g_ss_dms_func.dms_get_ssl_param(param_name, param_value, size);
 }
 
-int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip)
+int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip, unsigned int alloc)
 {
-    return g_ss_dms_func.dms_recovery_page_need_skip(pageid, skip);
+    return g_ss_dms_func.dms_recovery_page_need_skip(pageid, skip, alloc);
 }
 
 int dms_reform_failed(void)

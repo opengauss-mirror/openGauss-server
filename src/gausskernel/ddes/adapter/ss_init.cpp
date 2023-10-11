@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * ss_init.cpp
  *  initialize for DMS shared storage.
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/gausskernel/ddes/adapter/ss_init.cpp
  *
@@ -298,7 +298,7 @@ static void setScrlConfig(dms_profile_t *profile)
     // server bind
     (void)setBindCoreConfig(dms_attr->scrlock_server_bind_core_config, &profile->scrlock_server_bind_core_start,
         &profile->scrlock_server_bind_core_end);
-    
+
     // worker bind
     if (setBindCoreConfig(dms_attr->scrlock_worker_bind_core_config, &profile->scrlock_worker_bind_core_start,
         &profile->scrlock_worker_bind_core_end)) {
@@ -371,8 +371,8 @@ static void setDMSProfile(dms_profile_t* profile)
     SetOckLogPath(dms_attr, profile->ock_log_path);
     profile->inst_map = 0;
     profile->enable_reform = (unsigned char)dms_attr->enable_reform;
-    profile->load_balance_mode = 1; /* primary-standby */
     profile->parallel_thread_num = dms_attr->parallel_thread_num;
+    profile->max_wait_time = DMS_MSG_MAX_WAIT_TIME;
 
     if (dms_attr->enable_ssl && g_instance.attr.attr_security.EnableSSL) {
         InitDmsSSL();

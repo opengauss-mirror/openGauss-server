@@ -7309,6 +7309,12 @@ static void free_ctl()
     FREE_AND_RESET(register_password);
     FREE_AND_RESET(pgha_str);
     FREE_AND_RESET(pgha_opt);
+    FREE_AND_RESET(exec_path);
+    FREE_AND_RESET(pg_data);
+    FREE_AND_RESET(pg_config);
+    FREE_AND_RESET(pgxcCommand);
+    FREE_AND_RESET(ss_instance_config.dss.vgname);
+    FREE_AND_RESET(ss_instance_config.dss.vgdata);
 }
 
 static int get_instance_id(void)
@@ -7435,7 +7441,9 @@ bool ss_read_config(void)
     (void)find_guc_optval((const char**)optlines, "ss_enable_dss", enable_dss);
 
     /* this is not enable_dss, wo do not need to do anythiny else */
-    if(strncmp(enable_dss, "on", sizeof("on")) != 0) {
+    if(strcmp(enable_dss, "on") != 0) {
+        freefile(optlines);
+        optlines = NULL;
         return false;
     }
 

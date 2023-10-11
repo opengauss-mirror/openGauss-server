@@ -54,6 +54,6 @@ extern uint64 XLogSegmentSize;
 
 #define GS_SUCCESS 0
 #define GS_ERROR (-1)
-#define GS_TIMEDOUT 1
+#define GS_TIMEOUT 1
 
 #endif /* FIO_DEVICE_COM_H */

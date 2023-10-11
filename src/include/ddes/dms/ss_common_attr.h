@@ -144,16 +144,17 @@
     (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != 0))
 
 #define SS_CLUSTER_ONDEMAND_NOT_NORAML \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus != CLUSTER_NORMAL))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status!= CLUSTER_NORMAL))
 #define SS_CLUSTER_ONDEMAND_BUILD \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_BUILD))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status== CLUSTER_IN_ONDEMAND_BUILD))
 #define SS_CLUSTER_ONDEMAND_RECOVERY \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_RECOVERY))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status== CLUSTER_IN_ONDEMAND_REDO))
 #define SS_CLUSTER_ONDEMAND_NORMAL \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_NORMAL))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status== CLUSTER_NORMAL))
 #define SS_STANDBY_ONDEMAND_BUILD (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_BUILD)
 #define SS_STANDBY_ONDEMAND_RECOVERY (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_RECOVERY)
 #define SS_STANDBY_ONDEMAND_NORMAL (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_NORMAL)
+#define SS_STANDBY_ONDEMAND_NOT_NORMAL (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_NOT_NORAML)
 
 /* DMS_BUF_NEED_LOAD */
 #define BUF_NEED_LOAD           0x1
@@ -209,6 +210,7 @@ typedef enum SSBroadcastOp {
     BCAST_DDLLOCKRELEASE,
     BCAST_DDLLOCKRELEASE_ALL,
     BCAST_CHECK_DB_BACKENDS,
+    BCAST_RELOAD_REFORM_CTRL_PAGE,
     BCAST_END
 } SSBroadcastOp;
 
@@ -237,7 +239,7 @@ typedef enum SSReformType {
 
 typedef enum SSGlobalClusterState {
     CLUSTER_IN_ONDEMAND_BUILD = 0,
-    CLUSTER_IN_ONDEMAND_RECOVERY,
+    CLUSTER_IN_ONDEMAND_REDO,
     CLUSTER_NORMAL
 } SSGlobalClusterState;
 
@@ -245,7 +247,7 @@ typedef enum SSOndemandRequestRedoStatus {
     ONDEMAND_REDO_DONE = 0,
     ONDEMAND_REDO_SKIP,
     ONDEMAND_REDO_FAIL,
-    ONDEMAND_REDO_INVALID
+    ONDEMAND_REDO_TIMEOUT
 } SSOndemandRequestRedoStatus;
 
 

@@ -35,11 +35,11 @@
 #define SS_IN_ONDEMAND_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery == true)
 #define SS_ONDEMAND_BUILD_DONE (ENABLE_DMS && SS_IN_ONDEMAND_RECOVERY \
                                 && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true)
-#define SS_ONDEMAND_RECOVERY_DONE (ENABLE_DMS && SS_IN_ONDEMAND_RECOVERY \
-                                   && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone == true)
+#define SS_ONDEMAND_REDO_DONE (SS_IN_ONDEMAND_RECOVERY \
+                               && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
 #define SS_REPLAYED_BY_ONDEMAND (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY && \
                                  t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true && \
-                                 t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone == true)
+                                 t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
 
 #define REFORM_CTRL_VERSION 1
 
@@ -75,6 +75,7 @@ typedef struct ss_recovery_info {
     volatile failover_ckpt_status_t failover_ckpt_status;
     char recovery_xlog_dir[MAXPGPATH];
     int recovery_inst_id;
+    volatile SSGlobalClusterState cluster_ondemand_status;
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
     bool ready_to_startup;              // when DB start (except failover), the flag will set true

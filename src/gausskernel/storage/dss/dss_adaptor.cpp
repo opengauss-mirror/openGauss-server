@@ -104,9 +104,7 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_ftruncate", (void **)&device_op.dss_truncate));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fwrite", (void **)&device_op.dss_write));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_pwrite", (void **)&device_op.dss_pwrite));
-    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fexist", (void **)&device_op.dss_exist));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dmake", (void **)&device_op.dss_create_dir));
-    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dexist", (void **)&device_op.dss_exist_dir));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dopen", (void **)&device_op.dss_open_dir));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dread", (void **)&device_op.dss_read_dir));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dclose", (void **)&device_op.dss_close_dir));
@@ -119,7 +117,6 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_get_error", (void **)&device_op.dss_get_error));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_symlink", (void **)&device_op.dss_link));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_unlink", (void **)&device_op.dss_unlink));
-    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_islink", (void **)&device_op.dss_exist_link));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_readlink", (void **)&device_op.dss_read_link));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_stat", (void **)&device_op.dss_stat));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_lstat", (void **)&device_op.dss_lstat));

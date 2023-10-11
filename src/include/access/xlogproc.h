@@ -696,6 +696,7 @@ typedef enum {
     XLOG_HEAD_DISTRIBUTE,
     XLOG_MID_DISTRIBUTE,
     XLOG_TAIL_DISTRIBUTE,
+    XLOG_SKIP_DISTRIBUTE,
 } XlogDistributePos;
 
 typedef struct {

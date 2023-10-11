@@ -483,16 +483,15 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     }
 
     // standby node must notify primary node for prepare lastest page in ondemand recovery
-    if (SS_STANDBY_ONDEMAND_RECOVERY) {
-        while (!SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
-            SSReadControlFile(REFORM_CTRL_PAGE);
-            if (SS_STANDBY_ONDEMAND_NORMAL) {
-                break; // ondemand recovery finish, skip
-            } else if (SS_STANDBY_ONDEMAND_BUILD) {
-                return 0; // in new reform
-            }
-            // still need requset page
+    while (SS_STANDBY_ONDEMAND_NOT_NORMAL) {
+        /* in new reform */
+        if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
+            return 0;
         }
+        if (SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
+            break;
+        }
+        SSReadControlFile(REFORM_CTRL_PAGE);
     }
 
     if (!StartReadPage(buf_desc, mode)) {
@@ -504,9 +503,11 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
 bool SSOndemandRequestPrimaryRedo(BufferTag tag)
 {
     dms_context_t dms_ctx;
-    int32 redo_status = ONDEMAND_REDO_INVALID;
+    int32 redo_status = ONDEMAND_REDO_TIMEOUT;
 
-    if (!SS_STANDBY_ONDEMAND_RECOVERY) {
+    if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
+        return false;
+    } else if (SS_STANDBY_ONDEMAND_NORMAL) {
         return true;
     }
 
@@ -521,8 +522,8 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
         ereport(LOG,
             (errmodule(MOD_DMS),
-                errmsg("[on-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
-                    "redo statu %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
+                errmsg("[On-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
+                    "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
                     (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
         return false;
     }
@@ -723,7 +724,7 @@ bool CheckPageNeedSkipInRecovery(Buffer buf)
     char pageid[DMS_PAGEID_SIZE];
     errno_t err = memcpy_s(pageid, DMS_PAGEID_SIZE, &(buf_desc->tag), sizeof(BufferTag));
     securec_check(err, "\0", "\0");
-    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip);
+    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip, false);
     if (ret != DMS_SUCCESS) {
         ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
     }
@@ -943,5 +944,61 @@ long SSGetBufSleepTime(int retry_times)
     if (retry_times < ss_buf_retry_threshold) {
         return 5000L * retry_times;
     }
-    return 1000L * 1000 * 20;
+    return SS_BUF_MAX_WAIT_TIME;
+}
+
+bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
+{
+    bool get_lock = false;
+    int wait_tickets = 2000;
+    int cur_tickets = 0;
+
+    do {
+        get_lock = LWLockConditionalAcquire(lock, mode);
+        if (get_lock) {
+            break;
+        }
+
+        pg_usleep(1000L);
+        cur_tickets++;
+        if (cur_tickets >= wait_tickets) {
+            break;
+        }
+    } while (true);
+
+    if (!get_lock) {
+        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:2s",
+            lock, mode))));
+    }
+    return get_lock;
+}
+
+bool SSWaitIOTimeout(BufferDesc *buf)
+{
+    bool ret = false;
+    for (;;) {
+        uint32 buf_state;
+        buf_state = LockBufHdr(buf);
+        UnlockBufHdr(buf, buf_state);
+
+        if (!(buf_state & BM_IO_IN_PROGRESS)) {
+            ret = true;
+            break;
+        }
+        ret = SSLWLockAcquireTimeout(buf->io_in_progress_lock, LW_SHARED);
+        if (ret) {
+            LWLockRelease(buf->io_in_progress_lock);
+        } else {
+            break;
+        }
+    }
+
+    if (!ret) {
+        BufferTag *tag = &buf->tag;
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] SSWaitIOTimeout, "
+            "buf_id:%d, io_in_progress_lock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, buf->buf_id, buf->io_in_progress_lock))));
+    }
+    return ret;
 }

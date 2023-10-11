@@ -166,10 +166,10 @@ static inline int fallocate_dev(int fd, int mode, off_t offset, off_t len)
 static inline int access_dev(const char *pathname, int mode)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_file(pathname) && !dss_exist_dir(pathname)) {
+        if (dss_access_file(pathname, mode) != GS_SUCCESS) {
             return -1;
         }
-        return dss_access_file(pathname, mode);
+        return 0;
     } else {
         return access(pathname, mode);
     }
@@ -215,7 +215,8 @@ static inline int symlink_dev(const char *target, const char *linkpath)
 static inline ssize_t readlink_dev(const char *pathname, char *buf, size_t bufsiz)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_link(pathname)) {
+        struct stat st;
+        if (dss_lstat_file(pathname, &st) != GS_SUCCESS || !S_ISLNK(st.st_mode)) {
             return -1;
         }
 
@@ -249,11 +250,13 @@ static inline int unlink_dev(const char *pathname)
 static inline int lstat_dev(const char * pathname, struct stat * statbuf)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_file(pathname) && !dss_exist_dir(pathname)) {
-            errno = ENOENT;
+        if (dss_lstat_file(pathname, statbuf) != GS_SUCCESS) {
+            if (errno == ERR_DSS_FILE_NOT_EXIST) {
+                errno = ENOENT;
+            }
             return -1;
         }
-        return dss_lstat_file(pathname, statbuf);
+        return GS_SUCCESS;
     } else {
         return lstat(pathname, statbuf);
     }
@@ -262,11 +265,13 @@ static inline int lstat_dev(const char * pathname, struct stat * statbuf)
 static inline int stat_dev(const char *pathname, struct stat *statbuf)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_file(pathname) && !dss_exist_dir(pathname)) {
-            errno = ENOENT;
+        if (dss_stat_file(pathname, statbuf) != GS_SUCCESS) {
+            if (errno == ERR_DSS_FILE_NOT_EXIST) {
+                errno = ENOENT;
+            }
             return -1;
         }
-        return dss_stat_file(pathname, statbuf);
+        return GS_SUCCESS;
     } else {
         return stat(pathname, statbuf);
     }

@@ -139,7 +139,7 @@ enum SMGR_READ_STATUS {
  * a pending fsync request getting canceled ... see mdsync).
  */
 #ifndef WIN32
-#define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT || (err) == ERR_DSS_DIR_NOT_EXIST || (err) == ERR_DSS_FILE_NOT_EXIST)
+#define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT || (err) == ERR_DSS_FILE_NOT_EXIST)
 #else
 #define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT || (err) == EACCES)
 #endif

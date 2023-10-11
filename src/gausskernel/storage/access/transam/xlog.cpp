@@ -152,6 +152,7 @@
 #include "vectorsonic/vsonichash.h"
 
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
@@ -6376,7 +6377,7 @@ void XLOGShmemInit(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedRecoveryInProgress = true;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone = false;
-    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone = false;
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedHotStandbyActive = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->WalWriterSleeping = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->xlogFlushPtrForPerRead = InvalidXLogRecPtr;
@@ -8500,7 +8501,7 @@ static void XLogMakeUpRemainSegsContent(char *contentBuffer)
 
 void XLogCheckRemainSegs()
 {
-    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_RECOVERY_DONE) {
+    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE) {
         return;
     }
 
@@ -8807,11 +8808,11 @@ void StartupXLOG(void)
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_CLUSTER_ONDEMAND_NOT_NORAML && SS_PRIMARY_MODE) {
             if (SS_STANDBY_PROMOTING) {
-                ereport(FATAL, (errmsg("Do not allow switchover if on-demand recovery is not finish")));
+                ereport(FATAL, (errmsg("[On-demand] Do not allow switchover if ondemand recovery is not finish")));
             }
             Assert(g_instance.dms_cxt.SSReformerControl.recoveryInstId != INVALID_INSTANCEID);
             src_id = g_instance.dms_cxt.SSReformerControl.recoveryInstId;
-            ereport(LOG, (errmsg("[on-demand]: On-demand recovery do not finish in last reform, "
+            ereport(LOG, (errmsg("[On-demand]: Ondemand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
             SSOndemandRecoveryExitNormal = false;
         } else {
@@ -9030,6 +9031,13 @@ void StartupXLOG(void)
             SSCLOGShmemClear();
             SSMultiXactShmemClear();
         }
+        ereport(LOG, (errmsg("[SS] Recovery instance %d, my instance %d, checkpoint record loc %X/%X, redo loc %X/%X",
+            g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id,
+            g_instance.attr.attr_storage.dms_attr.instance_id,
+            (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->checkPoint >> 32),
+            (uint32)t_thrd.shemem_ptr_cxt.ControlFile->checkPoint,
+            (uint32)(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo >> 32),
+            (uint32)t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo)));
     } else {
         xlogreader = XLogReaderAllocate(&XLogPageRead, &readprivate);
     }
@@ -9301,7 +9309,7 @@ void StartupXLOG(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->ckptXid = checkPoint.oldestXid;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone = false;
-    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone = false;
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone = false;
 
     latestCompletedXid = checkPoint.nextXid;
     TransactionIdRetreat(latestCompletedXid);
@@ -9481,14 +9489,20 @@ void StartupXLOG(void)
         t_thrd.xlog_cxt.InRecovery = false;
     }
 
+    g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+    SetDefaultExtremeRtoMode();
     if (SS_PRIMARY_MODE && ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
             g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
+            g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_IN_ONDEMAND_BUILD;
             /* for other nodes in cluster and ondeamnd recovery failed */
+            LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
             g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
-            SSSaveReformerCtrl();
+            SSUpdateReformerCtrl();
+            LWLockRelease(ControlFileLock);
+            SSRequestAllStandbyReloadReformCtrlPage();
             SetOndemandExtremeRtoMode();
             ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
@@ -10051,8 +10065,12 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("redo is not required")));
             if (SS_IN_ONDEMAND_RECOVERY) {
                 g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+                g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_NORMAL;
+                LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
                 g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
-                SSSaveReformerCtrl();
+                SSUpdateReformerCtrl();
+                LWLockRelease(ControlFileLock);
+                SSRequestAllStandbyReloadReformCtrlPage();
             }
         }
     }
@@ -10333,7 +10351,7 @@ void StartupXLOG(void)
     t_thrd.xlog_cxt.InRecovery = false;
     g_instance.roach_cxt.isRoachRestore = false;
 
-    if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING && !SS_IN_ONDEMAND_RECOVERY) {
+    if (!SS_STANDBY_FAILOVER && !SS_STANDBY_PROMOTING && !SS_IN_ONDEMAND_RECOVERY && SSOndemandRecoveryExitNormal) {
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
@@ -10461,14 +10479,14 @@ void StartupXLOG(void)
         }
     }
 
-    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING || !SSOndemandRecoveryExitNormal) {
         if (SS_STANDBY_FAILOVER) {
             g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = ALLOW_CKPT;
             pg_memory_barrier();
         }
         if (!SS_IN_ONDEMAND_RECOVERY) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS switchover/SS failover] standby promoting: start full checkpoint.")));
+                errmsg("[SS switchover/SS failover/SS normal reform] start full checkpoint.")));
             RequestCheckpoint(CHECKPOINT_FORCE | CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
             LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_PRODUCTION;
@@ -10477,7 +10495,7 @@ void StartupXLOG(void)
             LWLockRelease(ControlFileLock);
             SSRecheckBufferPool();
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS switchover/SS failover] standby promoting: finished full checkpoint"
+                errmsg("[SS switchover/SS failover/SS normal reform] finished full checkpoint"
                     "and update control file")));
         }
     }
@@ -10516,7 +10534,7 @@ void StartupXLOG(void)
 
     if (SS_IN_ONDEMAND_RECOVERY) {
         /* We wait at here */
-        ereport(LOG, (errmsg("[SS] On-demand redo, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT
+        ereport(LOG, (errmsg("[On-demand] ondemand redo, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT
                              ", recentLocalXmin: " XID_FMT ", recentGlobalXmin: %lu, PendingPreparedXacts: %d"
                              ", NextCommitSeqNo: %lu, cutoff_csn_min: %lu.",
                              NextXidAfterReovery, t_thrd.xact_cxt.ShmemVariableCache->startupMaxXid,
@@ -10537,7 +10555,7 @@ void StartupXLOG(void)
         LWLockRelease(ControlFileLock);
         SSRecheckBufferPool();
         ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS][on demand recovery] finished full checkpoint and update control file")));
+            errmsg("[On-demand] finished full checkpoint and update control file")));
 
         NotifyGscRecoveryFinished();
         if (ENABLE_INCRE_CKPT) {
@@ -10550,9 +10568,13 @@ void StartupXLOG(void)
     }
 
     if (SS_PRIMARY_MODE) {
+        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_NORMAL;
         /* for other nodes in cluster */
+        LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
-        SSSaveReformerCtrl();
+        SSUpdateReformerCtrl();
+        LWLockRelease(ControlFileLock);
+        SSRequestAllStandbyReloadReformCtrlPage();
     }
 
     ereport(LOG, (errmsg("redo done, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT ", recentLocalXmin: " XID_FMT
@@ -11566,6 +11588,9 @@ void CreateCheckPoint(int flags)
         return;
     } else if (g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status == NOT_ALLOW_CKPT) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] do not do CreateCheckpoint during failover")));
+        return;
+    } else if (SS_IN_ONDEMAND_RECOVERY && !SS_ONDEMAND_REDO_DONE) {
+        /* do not allow ckpt in ondemand recovery if xlog do not redo done, for valid ckpt loc in control file */
         return;
     }
 

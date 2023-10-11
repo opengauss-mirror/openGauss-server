@@ -62,6 +62,7 @@
 #include "access/ondemand_extreme_rto/spsc_blocking_queue.h"
 #include "access/ondemand_extreme_rto/redo_item.h"
 #include "access/ondemand_extreme_rto/batch_redo.h"
+#include "access/ondemand_extreme_rto/xlog_read.h"
 
 #include "catalog/storage.h"
 #include <sched.h>
@@ -77,6 +78,7 @@
 #include "utils/atomic.h"
 #include "pgstat.h"
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_transaction.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -98,7 +100,7 @@ static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
 
 static const int32 MAX_PENDING = 1;
 static const int32 MAX_PENDING_STANDBY = 1;
-static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
+static const int32 ITEM_QUQUE_SIZE_RATIO = 1;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
 uint32 g_readManagerTriggerFlag = TRIGGER_NORMAL;
@@ -439,9 +441,10 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
             ALLOCSET_DEFAULT_MAXSIZE,
             SHARED_CONTEXT);
         g_instance.comm_cxt.predo_cxt.redoItemHash = PRRedoItemHashInitialize(g_instance.comm_cxt.redoItemCtx);
+        g_dispatcher->maxItemNum = (get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE *
+                                   ITEM_QUQUE_SIZE_RATIO;  // 4: a startup, readmanager, txnmanager, txnworker
         uint32 maxParseBufNum = (uint32)((uint64)g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size *
             1024 / (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc) + sizeof(RedoMemSlot)));
-        g_dispatcher->maxItemNum = 4 * PAGE_WORK_QUEUE_SIZE * ITEM_QUQUE_SIZE_RATIO + maxParseBufNum;
         XLogParseBufferInitFunc(&(g_dispatcher->parseManager), maxParseBufNum, &recordRefOperate, RedoInterruptCallBack);
         /* alloc for record readbuf */
         SSAllocRecordReadBuffer(xlogreader, privateLen);
@@ -663,6 +666,7 @@ static void StopRecoveryWorkers(int code, Datum arg)
 
     pg_atomic_write_u32(&g_dispatcher->rtoXlogBufState.readWorkerState, WORKER_STATE_EXIT);
     ShutdownWalRcv();
+    CloseAllXlogFileInFdCache();
     FreeAllocatedRedoItem();
     SSDestroyRecoveryWorkers();
     g_startupTriggerState = TRIGGER_NORMAL;
@@ -1871,7 +1875,7 @@ void SendRecoveryEndMarkToWorkersAndWaitForReach(int code)
                     }
                 }
             }
-            ereport(LOG, (errmsg("[SS][REDO_LOG_TRACE] lastReadXact: %lu, trxnComplete: %lu, pageMgrComplele: %lu",
+            ereport(DEBUG1, (errmsg("[SS][REDO_LOG_TRACE] lastReadXact: %lu, trxnComplete: %lu, pageMgrComplele: %lu",
                         lastReadEndPtr, trxnCompletePtr, pageMngrCompletePtr)));
             if (XLByteEQ(trxnCompletePtr, lastReadEndPtr) && XLByteEQ(pageMngrCompletePtr, lastReadEndPtr)) {
                 break;
@@ -1905,13 +1909,17 @@ void WaitRedoFinish()
     pmState = PM_RUN;
     write_stderr_with_prefix("[On-demand] LOG: database system is ready to accept connections");
 
+    g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_IN_ONDEMAND_REDO;
+    /* for other nodes in cluster */
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+    g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_REDO;
+    SSUpdateReformerCtrl();
+    LWLockRelease(ControlFileLock);
+    SSRequestAllStandbyReloadReformCtrlPage();
+
     SpinLockAcquire(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
     t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone = true;
     SpinLockRelease(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
-
-    /* for other nodes in cluster */
-    g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_RECOVERY;
-    SSSaveReformerCtrl();
 
 #ifdef USE_ASSERT_CHECKING
     XLogRecPtr minStart = MAX_XLOG_REC_PTR;
@@ -1931,7 +1939,7 @@ void WaitRedoFinish()
     AllItemCheck();
 #endif
     SpinLockAcquire(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
-    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone = true;
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone = true;
     SpinLockRelease(&t_thrd.shemem_ptr_cxt.XLogCtl->info_lck);
 }
 

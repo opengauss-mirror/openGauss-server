@@ -197,7 +197,7 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
     return ret;
 }
 
-static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot)
+static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot, uint8 inst_id)
 {   
     /* SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY always is in recovery progress, but it can acquire snapshot*/
     if (RecoveryInProgress() && !SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
@@ -345,9 +345,6 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
         if (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED) {
             /* flush control file primary id in advance to save new standby's waiting time */
             SSSavePrimaryInstId(SS_MY_INST_ID);
-
-            SSReadControlFile(REFORM_CTRL_PAGE);
-            Assert(SSGetPrimaryInstId() == SS_MY_INST_ID);
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS switchover] Standby promote: success, set new primary:%d.", SS_MY_INST_ID)));
             return DMS_SUCCESS;
@@ -385,16 +382,15 @@ static void CBSwitchoverResult(void *db_handle, int result)
 
 static int SetPrimaryIdOnStandby(int primary_id)
 {
-    g_instance.dms_cxt.SSReformerControl.primaryInstId = primary_id;
-
     for (int ntries = 0;; ntries++) {
         SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
         if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d.",
-                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id)));
+                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d, confirm ntries=%d.",
+                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id, ntries)));
             return DMS_SUCCESS;
         } else {
+            SSSavePrimaryInstId(primary_id);
             if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
                 ereport(ERROR,
                     (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d,"
@@ -417,6 +413,7 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
                             unsigned long long list_in, unsigned int save_ctrl)
 {
     int primary_id = (int)reformer_id;
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.primaryInstId = primary_id;
     g_instance.dms_cxt.SSReformerControl.list_stable = list_stable;
     int ret = DMS_ERROR;
@@ -426,7 +423,8 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
             Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTED ||
                 g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING);
         }
-        SSSaveReformerCtrl();
+        SSUpdateReformerCtrl();
+        LWLockRelease(ControlFileLock);
         Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == (int)primary_id);
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS %s] set current instance:%d as primary.",
             SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", primary_id)));
@@ -436,6 +434,7 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
         }
         ret = DMS_SUCCESS;
     } else { /* we are on standby */
+        LWLockRelease(ControlFileLock);
         ret = SetPrimaryIdOnStandby(primary_id);
     }
     return ret;
@@ -449,6 +448,11 @@ static void ReleaseResource()
     /* buffer pins are released here: */
     ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
     FlushErrorState();
+}
+
+static unsigned int CBIncAndGetSrsn(uint32 sessid)
+{
+    return ++t_thrd.dms_cxt.srsn;
 }
 
 static unsigned int CBPageHashCode(const char pageid[DMS_PAGEID_SIZE])
@@ -491,6 +495,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     LWLock *partition_lock = NULL;
     BufferDesc *buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
+    bool get_lock = false;
 
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(relfilenode)) {
@@ -511,7 +516,15 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     PG_TRY();
     {
         do {
-            (void)LWLockAcquire(partition_lock, LW_SHARED);
+            get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
+            if (!get_lock) {
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "lock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, partition_lock))));
+                ret = GS_TIMEOUT;
+                break;
+            }
             buf_id = BufTableLookup(tag, hash);
             if (buf_id < 0) {
                 LWLockRelease(partition_lock);
@@ -529,7 +542,12 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             }
             LWLockRelease(partition_lock);
 
-            WaitIO(buf_desc);
+            bool wait_success = SSWaitIOTimeout(buf_desc);
+            if (!wait_success) {
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ret = GS_TIMEOUT;
+                break;
+            }
 
             if (!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) {
                 ereport(WARNING, (errmodule(MOD_DMS),
@@ -554,11 +572,21 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             }
 
             LWLockMode content_mode = (mode == DMS_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
-            (void)LWLockAcquire(buf_desc->content_lock, content_mode);
+            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, content_mode);
+            if (!get_lock) {
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                ret = GS_TIMEOUT;
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "buf_id:%d, lwlock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                break;
+            }
             *buf_ctrl = GetDmsBufCtrl(buf_id);
             Assert(buf_id >= 0);
             if ((*buf_ctrl)->been_loaded == false) {
                 *buf_ctrl = NULL;
+                LWLockRelease(buf_desc->content_lock);
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%u/%u/%u/%d %d-%u] been_loaded marked false, page swapped out and failed to load",
@@ -639,7 +667,15 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 
     hash = BufTableHashCode(tag);
     partition_lock = BufMappingPartitionLock(hash);
-    (void)LWLockAcquire(partition_lock, LW_SHARED);
+    bool get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
+    if (!get_lock) {
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+            "lwlock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, partition_lock))));
+        return GS_TIMEOUT;
+    }
+
     buf_id = BufTableLookup(tag, hash);
     if (buf_id < 0) {
         /* not found in shared buffer */
@@ -661,7 +697,12 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         }
         LWLockRelease(partition_lock);
 
-        WaitIO(buf_desc);
+        bool wait_success = SSWaitIOTimeout(buf_desc);
+        if (!wait_success) {
+            ret = GS_TIMEOUT;
+            break;
+        }
+
         if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
             (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
             ereport(LOG, (errmodule(MOD_DMS),
@@ -674,10 +715,18 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 
         bool can_invld_owner = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED | BM_PERMANENT)) > 0 ? false : true;
         if (!invld_owner || (invld_owner && can_invld_owner)) {
-            (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
-            buf_ctrl = GetDmsBufCtrl(buf_id);
-            buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
-            LWLockRelease(buf_desc->content_lock);
+            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, LW_EXCLUSIVE);
+            if (!get_lock) {
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "buf_id:%d, lwlock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                ret = GS_TIMEOUT;
+            } else {
+                buf_ctrl = GetDmsBufCtrl(buf_id);
+                buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
+                LWLockRelease(buf_desc->content_lock);
+            }
         } else { /* invalidate owner which buffer is dirty/permanent */
             ereport(DEBUG1, (errmodule(MOD_DMS),
                 errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%x",
@@ -971,9 +1020,12 @@ static int32 CBProcessReleaseAllLock(uint32 len)
     return res;
 }
 
-static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, char *output_msg,
-    uint32 *output_msg_len)
+static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_ctx)
 {
+    char *data = broad_ctx->data;
+    unsigned int len = broad_ctx->len;
+    char *output_msg = broad_ctx->output_msg;
+    unsigned int *output_msg_len = broad_ctx->output_msg_len;
     int32 ret = DMS_SUCCESS;
     SSBroadcastOp bcast_op = *(SSBroadcastOp *)data;
 
@@ -1016,6 +1068,9 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
             case BCAST_CHECK_DB_BACKENDS:
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
                 break;
+            case BCAST_RELOAD_REFORM_CTRL_PAGE:
+                ret = SSReloadReformCtrlPage(len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("invalid broadcast operate type")));
                 ret = DMS_ERROR;
@@ -1034,8 +1089,10 @@ static int32 CBProcessBroadcast(void *db_handle, char *data, unsigned int len, c
     return ret;
 }
 
-static int32 CBProcessBroadcastAck(void *db_handle, char *data, unsigned int len)
+static int32 CBProcessBroadcastAck(void *db_handle, dms_broadcast_context_t *broad_ctx)
 {
+    char *data = broad_ctx->data;
+    unsigned int len = broad_ctx->len;
     int32 ret = DMS_SUCCESS;
     SSBroadcastOpAck bcast_op = *(SSBroadcastOpAck *)data;
 
@@ -1108,8 +1165,7 @@ static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
     ctrl_info.ctrl = *buf_ctrl;
     ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
     ctrl_info.is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false; 
-    unsigned char release = false; // not used in openGauss, just adapt interface
-    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index, true, false, &release);
+    int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
@@ -1166,8 +1222,7 @@ static int32 CBDrcBufRebuildInternal(int begin, int len, unsigned char thread_in
     */
 const int dms_invalid_thread_index = 255;
 const int dms_invalid_thread_num = 255;
-static int32 CBDrcBufRebuildParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num,
-    unsigned char for_rebuild)
+static int32 CBDrcBufRebuildParallel(void* db_handle, unsigned char thread_index, unsigned char thread_num)
 {
     Assert((thread_index == dms_invalid_thread_index && thread_num == dms_invalid_thread_num) ||
             (thread_index != dms_invalid_thread_index && thread_num != dms_invalid_thread_num &&
@@ -1211,13 +1266,14 @@ static int32 CBDrcBufValidate(void *db_handle)
 }
 
 // used for find bufferdesc in dms
-static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_desc)
+static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_desc)
 {
     int buf_id;
     uint32 hash;
     LWLock *partition_lock = NULL;
     BufferTag *tag = (BufferTag *)pageid;
     BufferDesc *buf_desc;
+    bool ret = true;
 
     RelFileNode relfilenode = tag->rnode;
 
@@ -1238,7 +1294,16 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        (void)LWLockAcquire(partition_lock, LW_SHARED);
+        bool get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
+        if (!get_lock) {
+            ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "lwlock:%p",
+                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                    tag->forkNum, tag->blockNum, partition_lock))));
+            ret = false;
+            break;
+        }
+
         buf_id = BufTableLookup(tag, hash);
         if (buf_id >= 0) {
             buf_desc = GetBufferDescriptor(buf_id);
@@ -1250,7 +1315,13 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
             }
             LWLockRelease(partition_lock);
 
-            WaitIO(buf_desc);
+            bool wait_success = SSWaitIOTimeout(buf_desc);
+            if (!wait_success) {
+                SSUnPinBuffer(buf_desc);
+                ret = false;
+                break;
+            }
+
             Assert(!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR));
             *is_valid = (pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
@@ -1265,6 +1336,7 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
         ReleaseResource();
     }
     PG_END_TRY();
+    return ret;
 }
 
 void SSUnPinBuffer(BufferDesc* buf_desc)
@@ -1283,7 +1355,13 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
     bool valid;
     dms_buf_ctrl_t *buf_ctrl = NULL;
 
-    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (!ret) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBConfirmOwner, require LWLock timeout")));
+        return GS_TIMEOUT;
+    }
+
     if (buf_desc == NULL) {
         *lock_mode = (uint8)DMS_LOCK_NULL;
         return GS_SUCCESS;
@@ -1316,12 +1394,17 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
     BufferDesc *buf_desc = NULL;
     bool valid;
     dms_buf_ctrl_t *buf_ctrl = NULL;
-    bool timeout = false;
 
     *lsn = 0;
     *edp_map = 0;
     
-    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (!ret) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBConfirmConverting, require LWLock timeout")));
+        return GS_TIMEOUT;
+    }
+
     if (buf_desc == NULL) {
         *lock_mode = (uint8)DMS_LOCK_NULL;
         return GS_SUCCESS;
@@ -1333,38 +1416,23 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
         return GS_SUCCESS;
     }
 
-    struct timeval begin_tv;
-    struct timeval now_tv;
-    (void)gettimeofday(&begin_tv, NULL);
-    long begin = GET_US(begin_tv);
-    long now;
-
-    while (true) {
-        bool is_locked = LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
-        if (is_locked) {
-            buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-            *lock_mode = buf_ctrl->lock_mode;
-            LWLockRelease(buf_desc->io_in_progress_lock);
-            break;
-        }
-
-        (void)gettimeofday(&now_tv, NULL);
-        now = GET_US(now_tv);
-        if (now - begin > REFORM_CONFIRM_TIMEOUT) {
-            timeout = true;
-            break;
-        }
-        pg_usleep(REFORM_CONFIRM_INTERVAL); /* sleep 5ms */
-    }
-
-    if (!timeout) {
+    bool get_lock = SSLWLockAcquireTimeout(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
+    if (get_lock) {
+        buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+        *lock_mode = buf_ctrl->lock_mode;
+        LWLockRelease(buf_desc->io_in_progress_lock);
         SSUnPinBuffer(buf_desc);
         return GS_SUCCESS;
     }
 
     if (smon_chk) {
         SSUnPinBuffer(buf_desc);
-        return GS_TIMEDOUT;
+        BufferTag *tag = &buf_desc->tag;
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+            "buf_id:%d, lwlock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, buf_desc->buf_id, buf_desc->io_in_progress_lock))));
+        return GS_TIMEOUT;
     }
 
     // without lock
@@ -1643,7 +1711,8 @@ static void ReformTypeToString(SSReformType reform_type, char* ret_str)
     return;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
+static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type,
+    unsigned long long bitmap_nodes)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->reform_type = (SSReformType)reform_type;
@@ -1726,7 +1795,6 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
     g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
-    SSReadControlFile(REFORM_CTRL_PAGE);
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     ereport(LOG,
             (errmodule(MOD_DMS),
@@ -1771,7 +1839,13 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
     dms_buf_ctrl_t *buf_ctrl = NULL;
     BufferTag *tag = (BufferTag *)pageid;
 
-    SSGetBufferDesc(pageid, &valid, &buf_desc);
+    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
+    if (!ret) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS] CBMarkNeedFlush, require LWLock timeout")));
+        return GS_TIMEOUT;
+    }
+
     if (buf_desc == NULL) {
         ereport(WARNING, (errmodule(MOD_DMS),
             errmsg("[SS] CBMarkNeedFlush, buf_desc not found")));
@@ -1921,6 +1995,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->reform_set_dms_role = CBReformSetDmsRole;
     callback->opengauss_ondemand_redo_buffer = CBOndemandRedoPageForStandby;
 
+    callback->inc_and_get_srsn = CBIncAndGetSrsn;
     callback->get_page_hash_val = CBPageHashCode;
     callback->read_local_page4transfer = CBEnterLocalPage;
     callback->leave_local_page = CBLeaveLocalPage;

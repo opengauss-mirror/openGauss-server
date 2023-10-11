@@ -643,7 +643,7 @@ void PreventCommandDuringRecovery(const char* cmd_name)
                 errmsg("cannot execute %s during recovery", cmd_name)));
 }
 
-void PreventCommandDuringSSOndemandRecovery(Node* parseTree)
+void PreventCommandDuringSSOndemandRedo(Node* parseTree)
 {
     switch(nodeTag(parseTree)) {
         case T_InsertStmt:
