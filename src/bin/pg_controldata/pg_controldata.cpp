@@ -30,6 +30,7 @@
 #include "getopt_long.h"
 #include "storage/dss/dss_adaptor.h"
 #include "storage/file/fio_device.h"
+#include "tool_common.h"
 
 #define FirstNormalTransactionId ((TransactionId)3)
 #define TransactionIdIsNormal(xid) ((xid) >= FirstNormalTransactionId)
@@ -278,6 +279,18 @@ static void display_last_page(ss_reformer_ctrl_t reformerCtrl, int last_page_id)
     printf(_("Cluster run mode:                     %s\n"), SSClusterRunMode(reformerCtrl.clusterRunMode));
 }
 
+static void checkDssInput(const char* file, char** socketpath)
+{
+    if (file[0] == '+') {
+        enable_dss = true;
+    }
+
+    /* set socketpath if not existed when enable dss */
+    if (enable_dss && *socketpath == NULL) {
+        *socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char* argv[])
 {
     ControlFileData ControlFile;
@@ -358,6 +371,8 @@ int main(int argc, char* argv[])
         exit_safely(1);
     }
     check_env_value_c(DataDir);
+
+    checkDssInput(DataDir, &socketpath);
 
     if (enable_dss) {
         if (socketpath == NULL || strlen(socketpath) == 0 || strncmp("UDS:", socketpath, 4) != 0) {

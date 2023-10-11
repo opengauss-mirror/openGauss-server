@@ -128,4 +128,6 @@ extern datadir_t g_datadir;
 
 void initDataPathStruct(bool enable_dss);
 
+char *getSocketpathFromEnv();
+
 #endif

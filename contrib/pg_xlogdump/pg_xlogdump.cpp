@@ -35,6 +35,7 @@
 #include "storage/page_compression.h"
 #include "storage/dss/dss_adaptor.h"
 #include "storage/file/fio_device.h"
+#include "tool_common.h"
 
 static const char* progname;
 
@@ -1000,6 +1001,14 @@ int main(int argc, char** argv)
             default:
                 goto bad_argument;
         }
+    }
+
+    if (!dumpprivate.enable_dss && dumpprivate.inpath != NULL && dumpprivate.inpath[0] == '+') {
+        dumpprivate.enable_dss = true;
+    }
+
+    if (dumpprivate.enable_dss && dumpprivate.socketpath == NULL) {
+        dumpprivate.socketpath = getSocketpathFromEnv();
     }
 
     if ((optind + 2) < argc) {

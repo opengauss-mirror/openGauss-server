@@ -215,3 +215,19 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
         "%s/pg_doublewrite%d/dw_batch_upgrade_files", dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
 }
+
+char *getSocketpathFromEnv()
+{
+    char* env_value = NULL;
+    env_value = getenv("DSS_HOME");
+    if ((env_value == NULL) || (env_value[0] == '\0')) {
+        return NULL;
+    }
+
+    char *file = (char*)malloc(MAXPGPATH);
+    errno_t rc = EOK;
+    rc = snprintf_s(file, MAXPGPATH, MAXPGPATH - 1, "UDS:%s/.dss_unix_d_socket", env_value);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    return file;
+}

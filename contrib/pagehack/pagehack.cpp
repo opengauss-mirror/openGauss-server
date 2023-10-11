@@ -5843,6 +5843,18 @@ static long long int strtollSafe(const char* nptr, long long int default_value)
     return res;
 }
 
+static void checkDssInput(const char* file, const char** socketpath)
+{
+    if (!enable_dss && file != NULL && file[0] == '+') {
+        enable_dss = true;
+    }
+
+    /* set socketpath if not existed when enable dss */
+    if (enable_dss && *socketpath == NULL) {
+        *socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char** argv)
 {
     int c;
@@ -5995,6 +6007,8 @@ int main(int argc, char** argv)
                 break;
         }
     }
+
+    checkDssInput(filename, &socketpath);
 
     if (NULL == filename) {
         fprintf(stderr, "must specify a file to parse.\n");

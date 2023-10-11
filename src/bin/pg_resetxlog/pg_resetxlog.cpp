@@ -98,6 +98,17 @@ static inline bool is_negative_num(char *str)
     return *s == '-' ? true : false;
 }
 
+static void checkDssInput()
+{
+    if (!dss.enable_dss && dss.vgname != NULL) {
+        dss.enable_dss = true;
+    }
+
+    if (dss.enable_dss && dss.socketpath == NULL) {
+        dss.socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char* argv[])
 {
     int c;
@@ -267,6 +278,8 @@ int main(int argc, char* argv[])
                 exit(1);
         }
     }
+
+    checkDssInput();
 
     /* the data directory is not necessary in dss mode */
     if (optind >= argc) {

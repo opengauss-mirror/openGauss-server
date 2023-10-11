@@ -707,6 +707,17 @@ static void check_backid_option(char *command_name)
         dbuser = gs_pstrdup(instance_config.conn_opt.pguser);
 }
 
+static void check_dss_input()
+{
+    if (!instance_config.dss.enable_dss && instance_config.dss.vgname != NULL) {
+        instance_config.dss.enable_dss = true;
+    }
+
+    if (instance_config.dss.enable_dss && instance_config.dss.socketpath == NULL) {
+        instance_config.dss.socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char *argv[])
 {
     char       *command = NULL,
@@ -761,7 +772,7 @@ int main(int argc, char *argv[])
     optind += 1;
     /* Parse command line only arguments */
     parse_cmdline_args(argc, argv, command_name);
-    
+
     /* Initialize logger */
     init_logger(backup_path, &instance_config.logger);
     
@@ -829,6 +840,8 @@ int main(int argc, char *argv[])
 
     /* compress_init */
     compress_init();
+
+    check_dss_input();
 
     dss_init();
 
