@@ -28,6 +28,9 @@ function read_gaussdb_version()
 PG_REG_TEST_ROOT="${ROOT_DIR}"
 ROACH_DIR="${ROOT_DIR}/distribute/bin/roach"
 MPPDB_DECODING_DIR="${ROOT_DIR}/contrib/mppdb_decoding"
+XLOG_DUMP_DIR="${ROOT_DIR}/contrib/pg_xlogdump"
+PAGE_HACK_DIR="${ROOT_DIR}/contrib/pagehack"
+
 
 ###################################
 # get version number from globals.cpp
@@ -258,6 +261,18 @@ function install_gaussdb()
             die "cp ${MPPDB_DECODING_DIR}/mppdb_decoding ${MPPDB_DECODING_DIR}/bin/mppdb_decoding failed"
         fi
     fi
+
+    cd "$XLOG_DUMP_DIR"
+    make clean >> "$LOG_FILE" 2>&1
+    make -sj >> "$LOG_FILE" 2>&1
+    make install -sj >> "$LOG_FILE" 2>&1
+    echo "End make install xlog_dump" >> "$LOG_FILE" 2>&1
+
+    cd "$PAGE_HACK_DIR"
+    make clean >> "$LOG_FILE" 2>&1
+    make -sj >> "$LOG_FILE" 2>&1
+    make install -sj >> "$LOG_FILE" 2>&1
+    echo "End make install pagehack" >> "$LOG_FILE" 2>&1
 
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
