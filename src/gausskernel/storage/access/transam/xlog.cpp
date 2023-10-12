@@ -9495,7 +9495,7 @@ void StartupXLOG(void)
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
             g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
-            g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_IN_ONDEMAND_BUILD;
+            g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_IN_ONDEMAND_BUILD;
             /* for other nodes in cluster and ondeamnd recovery failed */
             LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
@@ -10065,7 +10065,7 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("redo is not required")));
             if (SS_IN_ONDEMAND_RECOVERY) {
                 g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
-                g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_NORMAL;
+                g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_NORMAL;
                 LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
                 g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
                 SSUpdateReformerCtrl();
@@ -10568,7 +10568,7 @@ void StartupXLOG(void)
     }
 
     if (SS_PRIMARY_MODE) {
-        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_NORMAL;
+        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_NORMAL;
         /* for other nodes in cluster */
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
