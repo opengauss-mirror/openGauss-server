@@ -2919,6 +2919,13 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
     SPI_disconnect(context->spi_connected + 1);
 
     /*
+     * SPI_disconnect may make CurrentMemoryContext point to a context
+     * that would be destory in SPI_restore_connection_on_exception
+     * switch to saved context now.
+     */
+    MemoryContextSwitchTo(context->oldMemCxt);
+
+    /*
      * Revert to outer eval_econtext.  (The inner one was
      * automatically cleaned up during subxact exit.)
      */
@@ -2935,7 +2942,7 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
     /* Get last transaction's ResourceOwner. */
     stp_check_transaction_and_set_resource_owner(context->oldResOwner, context->oldTransactionId);
 
-    MemoryContextSwitchTo(context->oldMemCxt);
+    Assert(CurrentMemoryContext == context->oldMemCxt);
 
     /* Must clean up the econtext too */
     exec_eval_cleanup(estate);
