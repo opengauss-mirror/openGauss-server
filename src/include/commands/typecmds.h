@@ -47,7 +47,8 @@ extern void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId, bool hasDependEn
 extern ObjectAddress AlterTypeNamespace(List* names, const char* newschema, ObjectType objecttype);
 extern Oid AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses* objsMoved);
 extern Oid AlterTypeNamespaceInternal(
-    Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved);
+    Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved,
+    char* newTypeName = NULL);
 extern void AlterTypeOwnerByPkg(Oid pkgOid, Oid newOwnerId);
 extern void AlterTypeOwnerByFunc(Oid funcOid, Oid newOwnerId);
 

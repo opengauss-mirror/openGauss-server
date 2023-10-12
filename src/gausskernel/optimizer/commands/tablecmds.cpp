@@ -780,6 +780,8 @@ static int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber att
 static void SetRelAutoIncrement(Relation rel, TupleDesc desc, int128 autoinc);
 static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, int targettypmod);
 static void check_unsupported_charset_for_column(Oid collation, const char* col_name);
+static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
+                                                Oid nspOid, ObjectAddresses* objsMoved, char* newrelname);
 
 inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 {
@@ -6577,7 +6579,7 @@ ObjectAddress RenameRelation(RenameStmt* stmt)
 #endif
 
         /* Do the work */
-        RenameRelationInternal(relid, stmt->newname);
+        RenameRelationInternal(relid, stmt->newname, stmt->newschema);
         /*
          * Record the changecsn of the table that defines the index
          */
@@ -6602,19 +6604,48 @@ ObjectAddress RenameRelation(RenameStmt* stmt)
  *			  the sequence name should probably be removed from the
  *			  sequence, AFAIK there's no need for it to be there.
  */
-void RenameRelationInternal(Oid myrelid, const char* newrelname)
+void RenameRelationInternal(Oid myrelid, const char* newrelname, char* newschema)
 {
     Relation targetrelation;
     Relation relrelation; /* for RELATION relation */
     HeapTuple reltup;
     Form_pg_class relform;
     Oid namespaceId;
+    Oid oldNspOid = InvalidOid;
+    bool needChangeNsp = false;
+    ObjectAddresses* objsMoved = NULL;
+    ObjectAddress thisobj;
+    bool is_present = false;
+
+    thisobj.classId = RelationRelationId;
+    thisobj.objectId = myrelid;
+    thisobj.objectSubId = 0;
 
     /*
      * Grab an exclusive lock on the target table, index, sequence or view,
      * which we will NOT release until end of transaction.
      */
     targetrelation = relation_open(myrelid, AccessExclusiveLock);
+
+    if (newschema != NULL) {
+        if (targetrelation->rd_mlogoid != InvalidOid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    (errmsg("Un-support feature"),
+                        errdetail("table owning matview doesn't support this ALTER yet."))));
+        }
+
+        if (targetrelation->rd_rel->relkind == RELKIND_MATVIEW) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("ALTER MATERIALIZED VIEW is not yet supported.")));
+        }
+
+        /* Permission check */
+        if (!pg_class_ownercheck(RelationGetRelid(targetrelation), GetUserId())) {
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, RelationGetRelationName(targetrelation));
+        }
+    }
 
     if (RelationIsSubPartitioned(targetrelation)) {
         ereport(
@@ -6647,6 +6678,24 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
 
     relform = (Form_pg_class)GETSTRUCT(reltup);
 
+
+    oldNspOid = namespaceId;
+    if (newschema != NULL) {
+        /* Get and lock schema OID and check its permissions. */
+        RangeVar* newrv = makeRangeVar(newschema, (char*)newrelname, -1);
+        Oid newNspOid = RangeVarGetAndCheckCreationNamespace(newrv, NoLock, NULL, '\0');
+
+        needChangeNsp = (newNspOid != namespaceId);
+        if (needChangeNsp) {
+            /* common checks on switching namespaces */
+            CheckSetNamespace(namespaceId, newNspOid, RelationRelationId, myrelid);
+            ledger_check_switch_schema(namespaceId, newNspOid);
+            objsMoved = new_object_addresses();
+            namespaceId = newNspOid;
+            is_present = object_address_present(&thisobj, objsMoved);
+        }
+    }
+
     /*
      * Check relation name to ensure that it doesn't conflict with existing synonym.
      */
@@ -6656,8 +6705,17 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
                     get_namespace_name(namespaceId))));
     }
 
-    if (get_relname_relid(newrelname, namespaceId) != InvalidOid)
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", newrelname)));
+    if (get_relname_relid(newrelname, namespaceId) != InvalidOid) {
+        if (newschema != NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_TABLE),
+                    errmsg("relation \"%s\" already exists in schema \"%s\"",
+                        newrelname,
+                        newschema)));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", newrelname)));
+        }
+    }
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (RelationIsTsStore(targetrelation)) {
@@ -6684,6 +6742,9 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
      */
     (void)namestrcpy(&(relform->relname), newrelname);
 
+    /* Update pg_class tuple with new nsp. */
+    relform->relnamespace = namespaceId;
+
     simple_heap_update(relrelation, &reltup->t_self, reltup);
 
     /* keep the system catalog indexes current */
@@ -6700,14 +6761,33 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
         renamePartitionedTable(myrelid, newrelname);
     }
 
+    if (needChangeNsp && !is_present) {
+        if (changeDependencyFor(RelationRelationId, myrelid, NamespaceRelationId, oldNspOid, namespaceId) != 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("failed to change schema dependency for relation \"%s\"", NameStr(relform->relname))));
+        }
+
+        add_exact_object_address(&thisobj, objsMoved);
+    }
+
     tableam_tops_free_tuple(reltup);
     heap_close(relrelation, RowExclusiveLock);
 
-    /*
-     * Also rename the associated type, if any.
-     */
-    if (OidIsValid(targetrelation->rd_rel->reltype))
-        RenameTypeInternal(targetrelation->rd_rel->reltype, newrelname, namespaceId);
+    if (needChangeNsp && !is_present) {
+        AlterTableNamespaceDependentProcess(relrelation, targetrelation, oldNspOid, namespaceId, objsMoved,
+                                            (char*)newrelname);
+        if (targetrelation->rd_isblockchain) {
+            rename_hist_by_newnsp(myrelid, newschema);
+        }
+        free_object_addresses(objsMoved);
+    } else {
+        /*
+        * Also rename the associated type, if any.
+        */
+        if (OidIsValid(targetrelation->rd_rel->reltype))
+            RenameTypeInternal(targetrelation->rd_rel->reltype, newrelname, oldNspOid);
+    }
 
     /*
      * Also rename the associated constraint, if any.
@@ -21492,8 +21572,16 @@ void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid, Oid nspOid, Object
 
     AlterRelationNamespaceInternal(classRel, RelationGetRelid(rel), oldNspOid, nspOid, true, objsMoved);
 
+    AlterTableNamespaceDependentProcess(classRel, rel, oldNspOid, nspOid, objsMoved, NULL);
+
+    heap_close(classRel, RowExclusiveLock);
+}
+
+static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
+                                                Oid nspOid, ObjectAddresses* objsMoved, char* newrelname)
+{
     /* Fix the table's row type too */
-    (void)AlterTypeNamespaceInternal(rel->rd_rel->reltype, nspOid, false, false, objsMoved);
+    (void)AlterTypeNamespaceInternal(rel->rd_rel->reltype, nspOid, false, false, objsMoved, newrelname);
 
     /* Change the table's set type too */
     TupleDesc tupDesc = rel->rd_att;
@@ -21510,8 +21598,6 @@ void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid, Oid nspOid, Object
         AlterSeqNamespaces(classRel, rel, oldNspOid, nspOid, objsMoved, AccessExclusiveLock);
         AlterConstraintNamespaces(RelationGetRelid(rel), oldNspOid, nspOid, false, objsMoved);
     }
-
-    heap_close(classRel, RowExclusiveLock);
 }
 
 /*

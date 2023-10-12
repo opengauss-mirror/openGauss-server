@@ -5536,6 +5536,7 @@ static RenameStmt* _copyRenameStmt(const RenameStmt* from)
     COPY_NODE_FIELD(objarg);
     COPY_STRING_FIELD(subname);
     COPY_STRING_FIELD(newname);
+    COPY_STRING_FIELD(newschema);
     COPY_SCALAR_FIELD(behavior);
     COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(renameTargetList);
