@@ -1358,6 +1358,12 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
                 case RTE_RESULT:
                 case RTE_REMOTE_DUMMY:
                     /* these can't contain any lateral references */
+#ifdef USE_SPQ
+                case RTE_NAMEDTUPLESTORE:
+                case RTE_TABLEFUNC: /* TableFunc(.., column list) */
+                case RTE_VOID: /* SPQ: deleted RTE */
+                case RTE_TABLEFUNCTION: /* SPQ: Functions over multiset input */
+#endif
                     break;
             }
         }

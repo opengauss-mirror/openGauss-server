@@ -144,6 +144,9 @@ typedef struct {
      * in some scenarios, e.g. assignment of relationOids in fix_expr_common.
      */
     List* relationOids; /* contain OIDs of relations the plan depends on */
+#ifdef USE_SPQ
+    int streamID; /* required by AMS  */
+#endif
 } RemoteQuery;
 
 extern Plan* create_remote_mergeinto_plan(PlannerInfo* root, Plan* topplan, CmdType cmdtyp, MergeAction* action);

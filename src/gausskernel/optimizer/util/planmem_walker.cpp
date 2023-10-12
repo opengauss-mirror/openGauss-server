@@ -37,6 +37,9 @@
 #include "nodes/plannodes.h"
 #include "optimizer/pgxcplan.h"
 #include "optimizer/planmem_walker.h"
+#ifdef USE_SPQ
+#include "catalog/pg_collation.h"
+#endif
 
 extern void check_stack_depth(void);
 static bool walk_scan_node_fields(Scan* scan, MethodWalker walker, void* context);
@@ -197,7 +200,9 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
         case T_Plan:
         case T_ProjectSet:
             return walk_plan_node_fields((Plan*)node, walker, context);
-
+#ifdef USE_SPQ
+        case T_Result:
+#endif
         case T_BaseResult:
         case T_VecResult:
             if (walk_plan_node_fields((Plan*)node, walker, context))
@@ -257,6 +262,9 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             break;
 
         case T_SeqScan:
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+#endif
         case T_FunctionScan:
         case T_ValuesScan:
         case T_CteScan:
@@ -394,6 +402,10 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
                 return true;
             if (p2walker((Node*)((HashJoin*)node)->hashclauses, context))
                 return true;
+#ifdef USE_SPQ
+            if (p2walker((Node *)((HashJoin *)node)->hashqualclauses, context))
+                return true;
+#endif
             break;
 
         case T_VecToRow:
@@ -455,6 +467,33 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
 
             break;
 
+#ifdef USE_SPQ
+        case T_Motion:
+            if (walk_plan_node_fields((Plan *) node, walker, context))
+                return true;
+ 
+            if (p2walker((Node *) ((Motion *)node)->hashExprs, context))
+                return true;
+ 
+            break;
+ 
+        case T_AssertOp:
+            if (walk_plan_node_fields((Plan *) node, walker, context))
+                return true;
+            break;
+ 
+        case T_ShareInputScan:
+            if (walk_plan_node_fields((Plan *) node, walker, context))
+                return true;
+            break;
+ 
+        case T_Sequence:
+            if (walk_plan_node_fields((Plan *) node, walker, context))
+                return true;
+            if (p2walker((Node *) ((Sequence *) node)->subplans, context))
+                return true;
+            break;
+#endif
         case T_VecModifyTable:
         case T_ModifyTable: {
             ModifyTable* modifytable = (ModifyTable*)node;
@@ -608,3 +647,315 @@ Plan* plan_tree_base_subplan_get_plan(plan_tree_base_prefix* base, SubPlan* subp
     return NULL;
 }
 
+#ifdef USE_SPQ
+/*
+ * These are helpers to retrieve nodes from plans.
+ */
+typedef struct extract_context {
+    //plan_tree_base_prefix base; /* Required prefix for plan_tree_walker/mutator */
+    MethodPlanWalkerContext ctx;
+    bool descendIntoSubqueries;
+    NodeTag nodeTag;
+    List *nodes;
+} extract_context;
+ 
+static bool extract_nodes_walker(Node *node, extract_context *context);
+static bool extract_nodes_expression_walker(Node *node, extract_context *context);
+/* Rewrite the plan associated with a SubPlan node in a mutator.  (This is used by
+ * framework, not by users of the framework.)
+ */
+void plan_tree_base_subplan_put_plan(plan_tree_base_prefix *base, SubPlan *subplan, Plan *plan)
+{
+    Assert(base);
+    if (IsA(base->node, PlannedStmt)) {
+        exec_subplan_put_plan((PlannedStmt*)base->node, subplan, plan);
+        return;
+    } else if (IsA(base->node, PlannerInfo)) {
+        planner_subplan_put_plan((PlannerInfo*)base->node, subplan, plan);
+        return;
+    }
+    Assert(false && "Must provide relevant base info.");
+}
+List *extract_nodes_plan(Plan *pl, int nodeTag, bool descendIntoSubqueries)
+{
+    extract_context context;
+    errno_t rc = 0;
+    rc = memset_s(&context, sizeof(extract_context), 0, sizeof(extract_context));
+    securec_check_c(rc, "\0", "\0");
+    Assert(pl);
+    context.nodeTag = (NodeTag)nodeTag;
+    context.descendIntoSubqueries = descendIntoSubqueries;
+    extract_nodes_walker((Node *)pl, &context);
+    return context.nodes;
+}
+static bool extract_nodes_walker(Node *node, extract_context *context)
+{
+    if (node == NULL)
+        return false;
+    if (nodeTag(node) == context->nodeTag) {
+        context->nodes = lappend(context->nodes, node);
+    }
+    if (nodeTag(node) == T_SubPlan) {
+        SubPlan *subplan = (SubPlan *)node;
+ 
+        /*
+         * SubPlan has both of expressions and subquery.  In case the caller wants
+         * non-subquery version, still we need to walk through its expressions.
+         * NB: Since we're not going to descend into SUBPLANs anyway (see below),
+         * look at the SUBPLAN node here, even if descendIntoSubqueries is false
+         * lest we miss some nodes there.
+         */
+        if (extract_nodes_walker((Node *)subplan->testexpr, context))
+            return true;
+        if (expression_tree_walker((Node *)subplan->args, (MethodWalker)extract_nodes_walker, context))
+            return true;
+ 
+        /*
+         * Do not descend into subplans.
+         * Even if descendIntoSubqueries indicates the caller wants to descend into
+         * subqueries, SubPlan seems special; Some partitioning code assumes this
+         * should return immediately without descending.  See MPP-17168.
+         */
+        return false;
+    }
+    if (nodeTag(node) == T_SubqueryScan && !context->descendIntoSubqueries) {
+        /* Do not descend into subquery scans. */
+        return false;
+    }
+ 
+    return plan_tree_walker(node, (MethodWalker)extract_nodes_walker, (void *)context);
+}
+/**
+ * Extract nodes with specific tag.
+ * Same as above, but starts off a scalar expression node rather than a PlannedStmt
+ *
+ */
+List *extract_nodes_expression(Node *node, int nodeTag, bool descendIntoSubqueries)
+{
+    extract_context context;
+    errno_t rc = 0;
+    rc = memset_s(&context, sizeof(extract_context), 0, sizeof(extract_context));
+    securec_check_c(rc, "\0", "\0");
+    Assert(node);
+    context.nodeTag = (NodeTag)nodeTag;
+    context.descendIntoSubqueries = descendIntoSubqueries;
+    extract_nodes_expression_walker(node, &context);
+ 
+    return context.nodes;
+}
+ 
+static bool extract_nodes_expression_walker(Node *node, extract_context *context)
+{
+    if (NULL == node) {
+        return false;
+    }
+ 
+    if (nodeTag(node) == context->nodeTag) {
+        context->nodes = lappend(context->nodes, node);
+    }
+ 
+    if (nodeTag(node) == T_Query && context->descendIntoSubqueries) {
+        Query *query = (Query *)node;
+        if (expression_tree_walker((Node *)query->targetList, (MethodWalker)extract_nodes_expression_walker, (void *)context)) {
+            return true;
+        }
+ 
+        if (query->jointree != NULL &&
+            expression_tree_walker(query->jointree->quals, (MethodWalker)extract_nodes_expression_walker, (void *)context)) {
+            return true;
+        }
+ 
+        return expression_tree_walker(query->havingQual, (MethodWalker)extract_nodes_expression_walker, (void *)context);
+    }
+ 
+    return expression_tree_walker(node, (MethodWalker)extract_nodes_expression_walker, (void *)context);
+}
+typedef struct find_nodes_context {
+    List *nodeTags;
+    int foundNode;
+} find_nodes_context;
+ 
+static bool find_nodes_walker(Node *node, find_nodes_context *context);
+ 
+/**
+ * Looks for nodes that belong to the given list.
+ * Returns the index of the first such node that it encounters, or -1 if none
+ */
+int find_nodes(Node *node, List *nodeTags)
+{
+    find_nodes_context context;
+    Assert(NULL != node);
+    context.nodeTags = nodeTags;
+    context.foundNode = -1;
+    find_nodes_walker(node, &context);
+ 
+    return context.foundNode;
+}
+ 
+static bool find_nodes_walker(Node *node, find_nodes_context *context)
+{
+    if (NULL == node) {
+        return false;
+    }
+ 
+    if (IsA(node, Query)) {
+        /* Recurse into subselects */
+        return query_tree_walker((Query *)node, (bool (*)())find_nodes_walker, (void *)context, 0 /* flags */);
+    }
+ 
+    ListCell *lc;
+    int i = 0;
+    foreach (lc, context->nodeTags) {
+        NodeTag nodeTag = (NodeTag)lfirst_int(lc);
+        if (nodeTag(node) == nodeTag) {
+            context->foundNode = i;
+            return true;
+        }
+ 
+        i++;
+    }
+ 
+    return expression_tree_walker(node, (MethodWalker)find_nodes_walker, (void *)context);
+}
+/**
+ * GPDB_91_MERGE_FIXME: collation
+ * Look for nodes with non-default collation; return 1 if any exist, -1
+ * otherwise.
+ */
+typedef struct check_collation_context {
+    int foundNonDefaultCollation;
+} check_collation_context;
+ 
+static bool check_collation_walker(Node *node, check_collation_context *context);
+ 
+int check_collation(Node *node)
+{
+    check_collation_context context;
+    Assert(NULL != node);
+    context.foundNonDefaultCollation = -1;
+    check_collation_walker(node, &context);
+ 
+    return context.foundNonDefaultCollation;
+}
+ 
+ 
+static void check_collation_in_list(List *colllist, check_collation_context *context)
+{
+    ListCell *lc;
+    foreach (lc, colllist) {
+        Oid coll = lfirst_oid(lc);
+        if (InvalidOid != coll && DEFAULT_COLLATION_OID != coll) {
+            context->foundNonDefaultCollation = 1;
+            break;
+        }
+    }
+}
+ 
+static bool check_collation_walker(Node *node, check_collation_context *context)
+{
+    Oid collation, inputCollation, type;
+ 
+    if (NULL == node) {
+        return false;
+    }
+ 
+    if (IsA(node, Query)) {
+        /* Recurse into subselects */
+        return query_tree_walker((Query *)node, (bool (*)())check_collation_walker, (void *)context, 0 /* flags */);
+    }
+ 
+    switch (nodeTag(node)) {
+        case T_Var:
+        case T_Const:
+        case T_OpExpr:
+            type = exprType((node));
+            collation = exprCollation(node);
+            if (type == NAMEOID || type == NAMEARRAYOID) {
+                if (collation != C_COLLATION_OID)
+                    context->foundNonDefaultCollation = 1;
+            } else if (InvalidOid != collation && DEFAULT_COLLATION_OID != collation) {
+                context->foundNonDefaultCollation = 1;
+            }
+            break;
+        case T_ScalarArrayOpExpr:
+        case T_DistinctExpr:
+        case T_BoolExpr:
+        case T_BooleanTest:
+        case T_CaseExpr:
+        case T_CaseTestExpr:
+        case T_CoalesceExpr:
+        case T_MinMaxExpr:
+        case T_FuncExpr:
+        case T_Aggref:
+        case T_WindowFunc:
+        case T_NullTest:
+        case T_NullIfExpr:
+        case T_RelabelType:
+        case T_CoerceToDomain:
+        case T_CoerceViaIO:
+        case T_ArrayCoerceExpr:
+        case T_SubLink:
+        case T_ArrayExpr:
+        //case T_SubscriptingRef:
+        case T_RowExpr:
+        case T_RowCompareExpr:
+        case T_FieldSelect:
+        case T_FieldStore:
+        case T_CoerceToDomainValue:
+        case T_CurrentOfExpr:
+        case T_NamedArgExpr:
+        case T_ConvertRowtypeExpr:
+        case T_CollateExpr:
+        //case T_TableValueExpr:
+        case T_XmlExpr:
+        case T_SetToDefault:
+        case T_PlaceHolderVar:
+        case T_Param:
+        case T_SubPlan:
+        case T_AlternativeSubPlan:
+        case T_GroupingFunc:
+        //case T_DMLActionExpr:
+            collation = exprCollation(node);
+            inputCollation = exprInputCollation(node);
+            if ((InvalidOid != collation && DEFAULT_COLLATION_OID != collation) ||
+                (InvalidOid != inputCollation && DEFAULT_COLLATION_OID != inputCollation)) {
+                context->foundNonDefaultCollation = 1;
+            }
+            break;
+        case T_CollateClause:
+            /* unsupported */
+            context->foundNonDefaultCollation = 1;
+            break;
+        case T_ColumnDef:
+            collation = ((ColumnDef *)node)->collOid;
+            if (InvalidOid != collation && DEFAULT_COLLATION_OID != collation) {
+                context->foundNonDefaultCollation = 1;
+            }
+            break;
+        case T_IndexElem:
+            if (NIL != ((IndexElem *)node)->collation) {
+                context->foundNonDefaultCollation = 1;
+            }
+            break;
+        case T_RangeTblEntry:
+            Assert(false);
+            break;
+        case T_CommonTableExpr:
+            check_collation_in_list(((CommonTableExpr *)node)->ctecolcollations, context);
+            break;
+        case T_SetOperationStmt:
+            check_collation_in_list(((SetOperationStmt *)node)->colCollations, context);
+            break;
+        default:
+            /* make compiler happy */
+            break;
+    }
+ 
+    if (context->foundNonDefaultCollation == 1) {
+        /* end recursion */
+        return true;
+    } else {
+        return expression_tree_walker(node, (bool (*)())check_collation_walker, (void *)context);
+    }
+}
+#endif

@@ -289,7 +289,7 @@ static void drop_unnamed_stmt(void);
 static void SigHupHandler(SIGNAL_ARGS);
 static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list);
 static void ForceModifyExpiredPwd(const char* queryString, const List* parsetreeList);
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
 static void InitGlobalNodeDefinition(PlannedStmt* planstmt);
 #endif
 static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params);
@@ -646,7 +646,7 @@ int SocketBackend(StringInfo inBuf)
                 ereport(
                     FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid frontend message type %d", qtype)));
             break;
-#ifdef ENABLE_MULTIPLE_NODES       /* PGXC_DATANODE */
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)         /* PGXC_DATANODE */
         case 'q': /* Query ID */
         case 'r': /* Plan ID with sync */
         case 'M': /* Command ID */
@@ -3130,7 +3130,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
 /*
  * exec_plan_with_params
  *
@@ -7305,11 +7305,13 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
                                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("-c %s requires a value", optCtxt.optarg)));
                     }
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef USE_SPQ
                     /* Only support 'internaltool' and 'application' for remotetype in single-node mode */
                     if (strcmp(name, "remotetype") == 0 && strcmp(value, "application") != 0 &&
                         strcmp(value, "internaltool") != 0) {
                         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid remote type:%s", value)));
                     }
+#endif
 #endif
                     if (CheckReplUuid(name, value, needCheckUuid)) {
                         gotUuidOpt = true;
@@ -7473,7 +7475,7 @@ void ReloadPoolerWithoutTransaction()
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
 /*
  * @Description: Initialize or refresh global node definition
  *
@@ -8799,6 +8801,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             t_thrd.postgres_cxt.whereToSendOutput = saved_whereToSendOutput;
 
         firstchar = ReadCommand(&input_message);
+#ifdef USE_SPQ
+        t_thrd.spq_ctx.spq_role = ROLE_UTILITY; 
+#endif
         /* update our elapsed time statistics. */
         timeInfoRecordStart();
         _local_tmp_opt1.enter();
@@ -8906,13 +8911,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         _local_tmp_opt1.exit();
 
         switch (firstchar) {
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 'Z':  // exeute plan directly.
             {
                 char* plan_string = NULL;
                 PlannedStmt* planstmt = NULL;
                 int oLen_msg = 0;
                 int cLen_msg = 0;
+                t_thrd.spq_ctx.spq_role = ROLE_QUERY_EXECUTOR;
 
                 /* Set top consumer at the very beginning. */
                 StreamTopConsumerIam();
@@ -8958,6 +8964,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     pfree(plan_string);
 
                 InitGlobalNodeDefinition(planstmt);
+                t_thrd.spq_ctx.spq_session_id = planstmt->spq_session_id;
+                t_thrd.spq_ctx.current_id = planstmt->current_id;
 
                 statement_init_metric_context();
                 exec_simple_plan(planstmt);
@@ -9090,7 +9098,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 u_sess->debug_query_id = 0;
                 send_ready_for_query = true;
             } break;
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 'O': /* In pooler stateless resue mode reset connection params */
             {
                 const char* query_string = NULL;
@@ -9361,7 +9369,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     } break;
 
                     case 'S': {
-                        rc = memcpy_s(&u_sess->globalSessionId.sessionId, sizeof(uint64),
+                        errno_t rc = memcpy_s(&u_sess->globalSessionId.sessionId, sizeof(uint64),
                             pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
                         securec_check(rc, "\0", "\0");
                         u_sess->globalSessionId.nodeId = (uint32)pq_getmsgint(&input_message, sizeof(uint32));
@@ -9891,7 +9899,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * is still sending data.
                  */
                 break;
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 'M': /* Command ID */
             {
                 CommandId cid = (CommandId)pq_getmsgint(&input_message, 4);
@@ -9923,17 +9931,19 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'r': /* query id with sync */
             {
+#ifndef USE_SPQ
                 /* We only process 'r' message on PGCX_DATANODE. */
                 if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)
                     ereport(ERROR,
                         (errcode(ERRCODE_PROTOCOL_VIOLATION),
                             errmsg("invalid frontend message type '%c'.", firstchar)));
+#endif
 
                 /* Set top consumer at the very beginning. */
                 StreamTopConsumerIam();
 
                 /* Set the query id we were passed down */
-                rc = memcpy_s(&u_sess->debug_query_id,
+                errno_t rc = memcpy_s(&u_sess->debug_query_id,
                     sizeof(uint64),
                     pq_getmsgbytes(&input_message, sizeof(uint64)),
                     sizeof(uint64));
@@ -9952,7 +9962,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_putemptymessage('O'); /* PlanIdComplete */
                 pq_flush();
             } break;
-
+#endif
+#ifdef ENABLE_MULTIPLE_NODES
             case 'g': /* gxid */
             {
                 errno_t rc = EOK;

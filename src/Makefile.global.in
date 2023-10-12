@@ -1238,6 +1238,10 @@ ifeq ($(enable_libnet), yes)
    override CFLAGS := $(CFLAGS) -DUSE_LIBNET
 endif
 
+override CPPFLAGS := $(CPPFLAGS) -DUSE_SPQ
+ifneq ($(wildcard $(top_builddir)/contrib/spq_plugin/.),)
+LIBS += -lxerces-c
+endif
 
 ##########################################################################
 #

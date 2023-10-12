@@ -173,4 +173,29 @@ extern bool plan_tree_walker(Node* node, MethodWalker walker, void* context);
 
 extern bool IsBlockedJoinNode(Plan* node);
 
+#ifdef USE_SPQ
+extern void plan_tree_base_subplan_put_plan(plan_tree_base_prefix *base, SubPlan *subplan, Plan *plan);
+/*
+ * Rewrite the Plan associated with a SubPlan node during planning.
+ */
+static inline void planner_subplan_put_plan(struct PlannerInfo *root, SubPlan *subplan, Plan *plan)
+{
+    ListCell *cell = list_nth_cell(root->glob->subplans, subplan->plan_id - 1);
+    cell->data.ptr_value = plan;
+}
+ 
+/*
+ * Rewrite the Plan associated with a SubPlan node in a completed PlannedStmt.
+ */
+static inline void exec_subplan_put_plan(struct PlannedStmt *plannedstmt, SubPlan *subplan, Plan *plan)
+{
+    ListCell *cell = list_nth_cell(plannedstmt->subplans, subplan->plan_id - 1);
+    cell->data.ptr_value = plan;
+}
+extern List *extract_nodes_plan(Plan *pl, int nodeTag, bool descendIntoSubqueries);
+extern List *extract_nodes_expression(Node *node, int nodeTag, bool descendIntoSubqueries);
+extern int find_nodes(Node *node, List *nodeTags);
+extern int check_collation(Node *node);
+#endif
+
 #endif /* PLANWALKER_H */

@@ -74,6 +74,12 @@ public:
     /* Get nodeIdx of producer by nodename. */
     int getNodeIdx(const char* nodename);
 
+#ifdef USE_SPQ
+    /* Get expectProducer nodeName */
+    char* getExpectProducerNodeName();
+    void setPstmt(PlannedStmt* p_stmt);
+#endif
+
     /* Get shared context for local stream. */
     inline StreamSharedContext* getSharedContext()
     {
@@ -96,6 +102,9 @@ private:
     void updateTransportInfo(StreamValue* val);
 
 private:
+#ifdef USE_SPQ
+    PlannedStmt* m_plan;
+#endif
     /* Current producer number. */
     int m_currentProducerNum;
 

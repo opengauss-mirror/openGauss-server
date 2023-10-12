@@ -210,4 +210,9 @@ extern List* find_all_internal_tableOids(Oid parentOid);
 extern bool check_agg_optimizable(Aggref* aggref, int16* strategy);
 extern void check_hashjoinable(RestrictInfo* restrictinfo);
 
+#ifdef USE_SPQ
+extern void spq_extract_plan_dependencies(PlannerInfo *root, Plan *plan);
+extern List* spq_make_null_eq_clause(List* joinqual, List** otherqual, List* nullinfo);
+#endif
+
 #endif /* PLANMAIN_H */

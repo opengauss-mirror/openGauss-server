@@ -289,12 +289,18 @@ void PortalCleanup(Portal portal)
                 t_thrd.utils_cxt.CurrentResourceOwner = portal->resowner;
                 ExecutorFinish(queryDesc);
                 ExecutorEnd(queryDesc);
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
                 /*
                  * estate is under the queryDesc, and stream threads use it.
                  * we should wait all stream threads exit to cleanup queryDesc.
                  */
                 if (!StreamThreadAmI()) {
+                    portal->streamInfo.AttachToSession();
+                    StreamNodeGroup::ReleaseStreamGroup(true);
+                    portal->streamInfo.Reset();
+                }
+#else
+                if (t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !StreamThreadAmI()) {
                     portal->streamInfo.AttachToSession();
                     StreamNodeGroup::ReleaseStreamGroup(true);
                     portal->streamInfo.Reset();

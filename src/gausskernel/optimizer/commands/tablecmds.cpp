@@ -28094,6 +28094,21 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
         ATUnusableGlobalIndex(partTableRel);
     }
 }
+#ifdef USE_SPQ
+void spq_btbuild_update_pg_class(Relation heap, Relation index)
+{
+    List *options = NIL;
+    DefElem *opt;
+    opt = makeNode(DefElem);
+    opt->type = T_DefElem;
+    opt->defnamespace = NULL;
+    opt->defname = "spq_build";
+    opt->defaction = DEFELEM_SET;
+    opt->arg = (Node *)makeString("finish");
+    options = lappend(options, opt);
+    ATExecSetRelOptions(index, options, AT_SetRelOptions, ShareUpdateExclusiveLock);
+}
+#endif
 
 void CheckSrcListSubPartitionForSplit(Relation rel, Oid partOid, Oid subPartOid)
 {

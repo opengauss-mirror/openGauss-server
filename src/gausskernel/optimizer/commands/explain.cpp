@@ -360,12 +360,12 @@ void ExplainQuery(
             es.costs = defGetBoolean(opt);
         else if (strcmp(opt->defname, "buffers") == 0)
             es.buffers = defGetBoolean(opt);
-#ifdef ENABLE_MULTIPLE_NODES
-        else if (strcmp(opt->defname, "nodes") == 0)
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+        else if (strcmp(opt->defname, "nodes") == 0 && IS_SPQ_RUNNING)
             es.nodes = defGetBoolean(opt);
-        else if (strcmp(opt->defname, "num_nodes") == 0)
+        else if (strcmp(opt->defname, "num_nodes") == 0 && IS_SPQ_RUNNING)
             es.num_nodes = defGetBoolean(opt);
-        else if (pg_strcasecmp(opt->defname, "detail") == 0)
+        else if (pg_strcasecmp(opt->defname, "detail") == 0 && IS_SPQ_RUNNING)
             es.detail = defGetBoolean(opt);
 #endif /* ENABLE_MULTIPLE_NODES */
         else if (strcmp(opt->defname, "timing") == 0) {
@@ -527,8 +527,8 @@ void ExplainQuery(
         }
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
-    if (u_sess->instr_cxt.global_instr != NULL) {
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+    if (IS_SPQ_RUNNING && u_sess->instr_cxt.global_instr != NULL) {
         delete u_sess->instr_cxt.global_instr;
         u_sess->instr_cxt.thread_instr = NULL;
         u_sess->instr_cxt.global_instr = NULL;
@@ -1011,13 +1011,15 @@ void ExplainOnePlan(
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR &&
 #else
-    if (StreamTopConsumerAmI() &&
+    if ((IS_SPQ_COORDINATOR || StreamTopConsumerAmI()) &&
 #endif
         queryDesc->plannedstmt->is_stream_plan == true &&
         check_stream_support() && instrument_option != 0 && u_sess->instr_cxt.global_instr == NULL &&
         queryDesc->plannedstmt->num_nodes != 0) {
         int dop = queryDesc->plannedstmt->query_dop;
-
+#ifdef USE_SPQ
+        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->spq_cxt.spq_worker_context);
+#endif
         u_sess->instr_cxt.global_instr = StreamInstrumentation::InitOnCn(queryDesc, dop);
 
         // u_sess->instr_cxt.thread_instr in CN
@@ -1028,6 +1030,9 @@ void ExplainOnePlan(
             AutoContextSwitch cxtGuard(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
             u_sess->instr_cxt.obs_instr = New(CurrentMemoryContext) OBSInstrumentation();
         }
+#ifdef USE_SPQ
+        MemoryContextSwitchTo(oldContext);
+#endif
     }
 
 #endif
@@ -1868,6 +1873,14 @@ static void ExplainNodePartition(const Plan* plan, ExplainState* es)
                 flag = 1;
             }
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+            if (((SpqSeqScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+#endif
         case T_IndexScan:
             if (((IndexScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
                 appendStringInfo(es->str, "Iterations: %s", "PART");
@@ -1932,6 +1945,9 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
             /* fallthrough */
         }
         case T_SeqScan:
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+#endif
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapIndexScan:
@@ -1958,20 +1974,20 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
 #ifndef ENABLE_MULTIPLE_NODES
 static void PredAppendInfo(Plan* plan, StringInfoData buf, ExplainState* es)
 {
-    if (plan->pred_total_time >= 0) {
+    if (es->planinfo->m_planInfo->m_pred_time && plan->pred_total_time >= 0) {
         initStringInfo(&buf);
         appendStringInfo(&buf, "%.0f", plan->pred_total_time);
         es->planinfo->m_planInfo->put(PREDICT_TIME, PointerGetDatum(cstring_to_text(buf.data)));
         pfree_ext(buf.data);
     }
 
-if (plan->pred_rows >= 0) {
+    if (es->planinfo->m_planInfo->m_pred_row && plan->pred_rows >= 0) {
         es->planinfo->m_planInfo->put(PREDICT_ROWS, 
                                         DirectFunctionCall1(dround,
                                                             Float8GetDatum(plan->pred_rows)));
     }
 
-if (plan->pred_max_memory >= 0) {
+    if (es->planinfo->m_planInfo->m_pred_mem && plan->pred_max_memory >= 0) {
         es->planinfo->m_planInfo->put(PREDICT_MEMORY,
                                         DirectFunctionCall1(pg_size_pretty, 
                                                             Int64GetDatum(plan->pred_max_memory)));
@@ -2032,6 +2048,9 @@ static void ExplainNode(
     StringInfo tmpName = nullptr;
     bool from_datanode = false;
     bool old_dn_flag = false;
+#ifdef USE_SPQ
+    int current_id_bak = es->current_id;
+#endif
 
     /* For plan_table column */
     char* pt_operation = NULL;
@@ -2108,6 +2127,9 @@ static void ExplainNode(
 
     switch (nodeTag(plan)) {
         case T_SeqScan:
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+#endif
         case T_CStoreScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -2134,9 +2156,35 @@ static void ExplainNode(
             if (((Scan*)plan)->scanrelid > 0)
                 ExplainScanTarget((Scan*)plan, es);
             break;
+#ifdef USE_SPQ
+        case T_Stream: {
+            es->current_id = ((Stream*)plan)->streamID;
+        }
+        break;
+ 
+        case T_ShareInputScan:  {
+            ShareInputScan *sisc = (ShareInputScan *) plan;
+            int slice_id = es->current_id;
+ 
+            if (es->format == EXPLAIN_FORMAT_TEXT) {
+                appendStringInfo(es->str, " (%s; slice%d; share%d; producer:%d)",
+                                    (sisc->is_producer ? "Producer" : "Consumer"),
+                                    slice_id, sisc->share_id, sisc->producer_slice_id);
+            } else {
+                ExplainPropertyText("Identity", (sisc->is_producer ? "Producer" : "Consumer"), es);
+                ExplainPropertyInteger("Producer ID", sisc->producer_slice_id, es);
+                ExplainPropertyInteger("Share ID", sisc->share_id, es);
+                ExplainPropertyInteger("Slice ID", slice_id, es);
+            }
+        }
+        break;
+#endif
 #ifdef PGXC
         case T_RemoteQuery:
         case T_VecRemoteQuery:
+#ifdef USE_SPQ
+            es->current_id = ((RemoteQuery*)plan)->streamID;
+#endif 
             /* Emit node execution list */
             ExplainExecNodes(((RemoteQuery*)plan)->exec_nodes, es);
 #ifdef STREAMPLAN
@@ -2244,6 +2292,11 @@ static void ExplainNode(
                 case JOIN_RIGHT_ANTI_FULL:
                     jointype = pt_options = "Right Anti Full";
                     break;
+#ifdef USE_SPQ
+                case JOIN_LASJ_NOTIN:
+                    jointype = "Left Anti Semi (Not-In)";
+                    break;
+#endif
                 default:
                     jointype = pt_options = "?\?\?";
                     break;
@@ -2693,6 +2746,9 @@ static void ExplainNode(
             show_startwith_dfx((StartWithOpState*)planstate, es);
             break;
         case T_SeqScan:
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+#endif
             show_tablesample(plan, planstate, ancestors, es);
             if (!((SeqScan*)plan)->scanBatchMode) {
                 show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
@@ -2927,7 +2983,17 @@ static void ExplainNode(
                 }
             }
             break;
-
+#ifdef USE_SPQ
+        case T_AssertOp:
+            show_upper_qual(plan->qual, "Assert Cond", planstate, ancestors, es);
+            break;
+        case T_ShareInputScan:
+            show_upper_qual(plan->qual, "Shared Scan", planstate, ancestors, es);
+            break;
+        case T_Sequence:
+            show_upper_qual(plan->qual, "Sequence", planstate, ancestors, es);
+            break;
+#endif
         default:
             break;
     }
@@ -2990,8 +3056,15 @@ static void ExplainNode(
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                    char* node_name = g_instance.exec_cxt.nodeName;
+                    char* node_name = NULL;
+                    if (!IS_SPQ_RUNNING) {
+                        node_name = g_instance.exec_cxt.nodeName;
+                    } else {
+                        node_name = (char*)palloc0(SPQNODENAMELEN);
+                        sprintf(node_name, "%d", i);
+                    }
 #endif
+
                     for (int j = 0; j < dop; j++) {
                         outerCycles = 0.0;
                         innerCycles = 0.0;
@@ -3066,6 +3139,9 @@ static void ExplainNode(
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+#endif
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:
@@ -3203,6 +3279,11 @@ runnext:
         case T_ExtensiblePlan:
             ExplainExtensibleChildren((ExtensiblePlanState*)planstate, ancestors, es);
             break;
+#ifdef USE_SPQ
+        case T_Sequence:
+            ExplainMemberNodes(((Sequence*)plan)->subplans, ((SequenceState*)planstate)->subplans, ancestors, es);
+            break;
+#endif
         default:
             break;
     }
@@ -3263,6 +3344,9 @@ runnext:
         /* 4. set cost and cardinality */
         es->planinfo->m_planTableData->set_plan_table_cost_card(plan->plan_node_id, plan->total_cost, plan->plan_rows);
     }
+#ifdef USE_SPQ
+    es->current_id = current_id_bak;
+#endif
 }
 
 /*
@@ -4062,7 +4146,13 @@ static void show_peak_memory(ExplainState* es, int plan_size)
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(j, PGXC_NODE_DATANODE);
 #else
-                    char* node_name = g_instance.exec_cxt.nodeName;
+                    char* node_name = NULL;
+                    if (!IS_SPQ_RUNNING) {
+                        node_name = g_instance.exec_cxt.nodeName;
+                    } else {
+                        node_name = (char*)palloc0(SPQNODENAMELEN);
+                        sprintf(node_name, "%d", j);
+                    }
 #endif
                     if (instr != NULL) {
                         if (!is_execute)
@@ -4155,8 +4245,17 @@ static void show_dn_executor_time(ExplainState* es, int plan_node_id, ExecutorTi
     char* min_node_name = PGXCNodeGetNodeNameFromId(min_idx, PGXC_NODE_DATANODE);
     char* max_node_name = PGXCNodeGetNodeNameFromId(max_idx, PGXC_NODE_DATANODE);
 #else
-    char* min_node_name = g_instance.exec_cxt.nodeName;
-    char* max_node_name = g_instance.exec_cxt.nodeName;
+    char* min_node_name = NULL;
+    char* max_node_name = NULL;
+    if (!IS_SPQ_RUNNING) {
+        min_node_name = g_instance.exec_cxt.nodeName;
+        max_node_name = g_instance.exec_cxt.nodeName;
+    } else {
+        min_node_name = (char*)palloc0(SPQNODENAMELEN);
+        max_node_name = (char*)palloc0(SPQNODENAMELEN);
+        sprintf(min_node_name, "%d", min_idx);
+        sprintf(max_node_name, "%d", max_idx);
+    }
 #endif
 
     appendStringInfo(es->planinfo->m_query_summary->info_str, "Datanode executor %s time [%s, %s]: [%.3f ms,%.3f ms]\n", symbol_time, min_node_name, max_node_name, min_time, max_time);
@@ -4197,8 +4296,15 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 sortMethodId = instr->sorthashinfo.sortMethodId;
                 spaceTypeId = instr->sorthashinfo.spaceTypeId;
                 sortMethod = sortmessage[sortMethodId].sortName;
@@ -4426,8 +4532,15 @@ static void show_llvm_info(const PlanState* planstate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                    char* node_name = g_instance.exec_cxt.nodeName;
+                    char* node_name = NULL;
+                    if (!IS_SPQ_RUNNING) {
+                        node_name = g_instance.exec_cxt.nodeName;
+                    } else {
+                        node_name = (char*)palloc0(SPQNODENAMELEN);
+                        sprintf(node_name, "%d", i);
+                    }
 #endif
+
                     if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
                         es->planinfo->m_runtimeinfo->put(i, 0, LLVM_OPTIMIZATION, true);
                         es->planinfo->m_datanodeInfo->set_plan_name<false, true>();
@@ -4456,8 +4569,15 @@ static void show_llvm_info(const PlanState* planstate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                    char* node_name = g_instance.exec_cxt.nodeName;
+                    char* node_name = NULL;
+                    if (!IS_SPQ_RUNNING) {
+                        node_name = g_instance.exec_cxt.nodeName;
+                    } else {
+                        node_name = (char*)palloc0(SPQNODENAMELEN);
+                        sprintf(node_name, "%d", i);
+                    }
 #endif
+
                     ExplainPropertyText("DN Name", node_name, es);
                     ExplainPropertyText("LLVM", "LLVM Optimized", es);
                     ExplainCloseGroup("Plan", NULL, true, es);
@@ -4533,8 +4653,15 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
 #ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-            char* node_name = g_instance.exec_cxt.nodeName;
+            char* node_name = NULL;
+            if (!IS_SPQ_RUNNING) {
+                node_name = g_instance.exec_cxt.nodeName;
+            } else {
+                node_name = (char*)palloc0(SPQNODENAMELEN);
+                sprintf(node_name, "%d", i);
+            }
 #endif
+
             for (j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr != NULL && instr->nloops > 0) {
@@ -4695,8 +4822,15 @@ static void show_detail_execute_info(const PlanState* planstate, ExplainState* e
 #ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-            char* node_name = g_instance.exec_cxt.nodeName;
+            char* node_name = NULL;
+            if (!IS_SPQ_RUNNING) {
+                node_name = g_instance.exec_cxt.nodeName;
+            } else {
+                node_name = (char*)palloc0(SPQNODENAMELEN);
+                sprintf(node_name, "%d", i);
+            }
 #endif
+
             for (j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr != NULL && instr->nloops > 0) {
@@ -4829,8 +4963,15 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 append_datanode_name(es, node_name, 1, 0);
 
                 spacePeakKb = (instr->sorthashinfo.spacePeak + 1023) / 1024;
@@ -5154,8 +5295,15 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 spaceUsed = (instr->sorthashinfo.spaceUsed + 1023) / 1024;
                 spillSize = (instr->sorthashinfo.spill_size + 1023) / 1024;
                 file_num = instr->sorthashinfo.hash_FileNum;
@@ -5418,8 +5566,15 @@ static void show_recursive_info(RecursiveUnionState* rustate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
                 if (instr == NULL) {
                     continue;
@@ -5449,8 +5604,15 @@ static void show_recursive_info(RecursiveUnionState* rustate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                    char* node_name = g_instance.exec_cxt.nodeName;
+                    char* node_name = NULL;
+                    if (!IS_SPQ_RUNNING) {
+                        node_name = g_instance.exec_cxt.nodeName;
+                    } else {
+                        node_name = (char*)palloc0(SPQNODENAMELEN);
+                        sprintf(node_name, "%d", i);
+                    }
 #endif
+
                     appendStringInfoSpaces(es->planinfo->m_recursiveInfo->info_str, 16);
                     appendStringInfo(es->planinfo->m_recursiveInfo->info_str,
                         "%s return tuples: %lu\n",
@@ -5483,8 +5645,15 @@ static void show_datanode_buffers(ExplainState* es, PlanState* planstate)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 append_datanode_name(es, node_name, dop, j);
 
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
@@ -6428,8 +6597,15 @@ static StreamTime* get_instrument(
 #ifdef ENABLE_MULTIPLE_NODES
     char* node_name = PGXCNodeGetNodeNameFromId(j, PGXC_NODE_DATANODE);
 #else
-    char* node_name = g_instance.exec_cxt.nodeName;
+    char* node_name = NULL;
+    if (!IS_SPQ_RUNNING) {
+        node_name = g_instance.exec_cxt.nodeName;
+    } else {
+        node_name = (char*)palloc0(SPQNODENAMELEN);
+        sprintf(node_name, "%d", j);
+    }
 #endif
+
 
     instrument = &trackpoint->track_time;
 
@@ -6511,8 +6687,15 @@ static void show_track_time_without_plannodeid(ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* nodename = PGXCNodeGetNodeNameFromId(0, PGXC_NODE_COORDINATOR);
 #else
-                char* nodename = g_instance.exec_cxt.nodeName;
+                char* nodename = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    nodename = g_instance.exec_cxt.nodeName;
+                } else {
+                    nodename = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(nodename, "%d", i);
+                }
 #endif
+
                 appendStringInfoSpaces(str, 6);
                 appendStringInfo(str, " %s:", nodename);
 
@@ -6660,8 +6843,15 @@ static void show_track_time_info(ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                         char* nodename = PGXCNodeGetNodeNameFromId(0, PGXC_NODE_COORDINATOR);
 #else
-                        char* nodename = g_instance.exec_cxt.nodeName;
+                        char* nodename = NULL;
+                        if (!IS_SPQ_RUNNING) {
+                            nodename = g_instance.exec_cxt.nodeName;
+                        } else {
+                            nodename = (char*)palloc0(SPQNODENAMELEN);
+                            sprintf(nodename, "%d", i);
+                        }
 #endif
+
                         appendStringInfoSpaces(str, 6);
                         appendStringInfo(str, " %s:", nodename);
                         if (instrument->need_timer) {
@@ -7074,8 +7264,15 @@ static void show_stream_send_time(ExplainState* es, const PlanState* planstate)
 #ifdef ENABLE_MULTIPLE_NODES
         char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-        char* node_name = g_instance.exec_cxt.nodeName;
+        char* node_name = NULL;
+        if (!IS_SPQ_RUNNING) {
+            node_name = g_instance.exec_cxt.nodeName;
+        } else {
+            node_name = (char*)palloc0(SPQNODENAMELEN);
+            sprintf(node_name, "%d", i);
+        }
 #endif
+
         for (int j = 0; j < dop; j++) {
             Instrumentation* instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
             if (instr != NULL && instr->stream_senddata.loops == true) {
@@ -7138,9 +7335,18 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
             ThreadInstrumentation* threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i);
 #else
-            char* node_name = g_instance.exec_cxt.nodeName;
-            ThreadInstrumentation* threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(1, 0);
+            char* node_name = NULL;
+            ThreadInstrumentation* threadinstr = NULL;
+            if (!IS_SPQ_RUNNING) {
+                node_name = g_instance.exec_cxt.nodeName;
+                threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(1, 0);
+            } else {
+                node_name = (char*)palloc0(SPQNODENAMELEN);
+                sprintf(node_name, "%d", i);
+                threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i);
+            }
 #endif
+
             if (threadinstr == NULL)
                 continue;
             executed = threadinstr->m_instrArray[0].instr.isExecute;
@@ -7907,8 +8113,15 @@ static void show_storage_filter_info(PlanState* planstate, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 for (j = 0; j < dop; j++) {
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                     if (instr == NULL)
@@ -7986,8 +8199,15 @@ static void show_modifytable_merge_info(const PlanState* planstate, ExplainState
 #ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-                char* node_name = g_instance.exec_cxt.nodeName;
+                char* node_name = NULL;
+                if (!IS_SPQ_RUNNING) {
+                    node_name = g_instance.exec_cxt.nodeName;
+                } else {
+                    node_name = (char*)palloc0(SPQNODENAMELEN);
+                    sprintf(node_name, "%d", i);
+                }
 #endif
+
                 append_datanode_name(es, node_name, 1, 0);
 
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
@@ -8978,8 +9198,15 @@ static void showStreamnetwork(Stream* stream, ExplainState* es)
 #ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
 #else
-            char* node_name = g_instance.exec_cxt.nodeName;
+            char* node_name = NULL;
+            if (!IS_SPQ_RUNNING) {
+                node_name = g_instance.exec_cxt.nodeName;
+            } else {
+                node_name = (char*)palloc0(SPQNODENAMELEN);
+                sprintf(node_name, "%d", i);
+            }
 #endif
+
             for (int j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, plan->plan_node_id, j);
                 if (instr == NULL)

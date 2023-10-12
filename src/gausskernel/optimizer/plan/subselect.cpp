@@ -3309,6 +3309,9 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
         case T_Stream:
         case T_PartIterator:
         case T_StartWithOp:
+#ifdef USE_SPQ
+        case T_ShareInputScan:
+#endif
             break;
 
         default:

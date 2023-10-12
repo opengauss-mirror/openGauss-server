@@ -3487,6 +3487,28 @@ int* StreamConnectNodes(List* datanodelist, int consumerDop, int distriType, Nod
  */
 int* StreamConnectNodes(libcommaddrinfo** addrArray, int connNum)
 {
+#ifdef USE_SPQ
+    libcommaddrinfo *nodeAddr = NULL;
+ 
+    Assert(connNum > 0);
+ 
+    int re = -1;
+    WaitState oldStatus = pgstat_report_waitstatus(STATE_STREAM_WAIT_CONNECT_NODES);
+    re = gs_connect(addrArray, connNum, -1);
+    pgstat_report_waitstatus(oldStatus);
+    if (re > 0) {
+        int error_index = re - 1;
+        nodeAddr = addrArray[error_index];
+        ereport(ERROR,
+                (errcode(ERRCODE_CONNECTION_FAILURE),
+                    errmsg("Failed to connect %s, detail:%s", nodeAddr->nodename, gs_comm_strerror())));
+    } else if (re < 0) {
+        ereport(ERROR,
+                (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect Nodes, detail:%s", gs_comm_strerror())));
+    }
+ 
+    return 0;
+#endif
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;

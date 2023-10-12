@@ -41,6 +41,9 @@ typedef enum {
     REMOTE_BROADCAST,        /* Broadcast data to all nodes. */
     REMOTE_SPLIT_BROADCAST,  /* Broadcast data to all parallel threads all nodes. */
     REMOTE_HYBRID,           /* Hybrid send data. */
+#ifdef USE_SPQ
+    REMOTE_ROUNDROBIN,
+#endif
     LOCAL_DISTRIBUTE,        /* Distribute data to all threads at local node. */
     LOCAL_BROADCAST,         /* Broadcast data to all threads at local node. */
     LOCAL_ROUNDROBIN         /* Roundrobin data to all threads at local node. */
@@ -82,6 +85,9 @@ typedef struct Stream {
                                 * used for recursive sql execution that under recursive-union operator. */
     ExecNodes* origin_consumer_nodes;
     bool is_recursive_local;   /* LOCAL GATHER for recursive */
+#ifdef USE_SPQ
+    int streamID;
+#endif
 } Stream;
 
 extern void compute_stream_cost(StreamType type, char locator_type, double subrows, double subgblrows,

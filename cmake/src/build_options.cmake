@@ -71,6 +71,7 @@ option(USE_TASSL "build with tassl, the old is --with-tassl" OFF)#ON
 option(ENABLE_THREAD_SAFETY "enable thread safety, the old is --enable-thread-safety" ON)
 
 #The following are basically no need to configure, because these libraries are necessary or must not be used in mppdb
+option(USE_SPQ "enable spq optimizer" OFF)
 option(USE_BONJOUR "enable bonjour, the old is --with-bonjour" OFF)
 option(USE_LDAP "build with ldap, the old is --with-ldap" OFF)#ON
 option(USE_ETCD "build with etcd libs, new option for old mppdb, after 8.1 close it" OFF)
@@ -158,7 +159,7 @@ set(PROTECT_OPTIONS -fwrapv -std=c++14 -fnon-call-exceptions ${OPTIMIZE_LEVEL})
 set(WARNING_OPTIONS -Wall -Wendif-labels -Wformat-security)
 set(OPTIMIZE_OPTIONS -pipe -pthread -fno-aggressive-loop-optimizations -fno-expensive-optimizations -fno-omit-frame-pointer -fno-strict-aliasing -freg-struct-return)
 set(CHECK_OPTIONS -Wmissing-format-attribute -Wno-attributes -Wno-unused-but-set-variable -Wno-write-strings -Wpointer-arith)
-set(MACRO_OPTIONS -D_GLIBCXX_USE_CXX11_ABI=0 -DENABLE_GSTRACE -D_GNU_SOURCE -DPGXC -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT -DSTREAMPLAN -D_THREAD_SAFE ${DB_COMMON_DEFINE})
+set(MACRO_OPTIONS -D_GLIBCXX_USE_CXX11_ABI=0 -DENABLE_GSTRACE -D_GNU_SOURCE -DPGXC -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT -DSTREAMPLAN -D_THREAD_SAFE -DUSE_SPQ ${DB_COMMON_DEFINE})
 
 # Set MAX_ALLOC_SEGNUM size in extreme_rto
 if(${WAL_SEGSIZE} LESS 256)
@@ -223,6 +224,10 @@ endif()
 if("${ENABLE_LCOV}" STREQUAL "ON")
     list(APPEND CHECK_OPTIONS -fprofile-arcs -ftest-coverage)
     set(TEST_LINK_OPTIONS -lgcov -L${LCOV_LIB_PATH})
+endif()
+
+if(${USE_SPQ})
+    set(GAUSSDB_CONFIGURE "${GAUSSDB_CONFIGURE} -DUSE_SPQ")
 endif()
 
 if(${USE_LDAP})

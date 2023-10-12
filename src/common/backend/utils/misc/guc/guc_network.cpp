@@ -237,7 +237,11 @@ static void InitNetworkConfigureNamesBool()
     struct config_bool localConfigureNamesBool[] = {
         {{"enable_stateless_pooler_reuse",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Pooler stateless reuse mode."),
             NULL,
@@ -250,7 +254,11 @@ static void InitNetworkConfigureNamesBool()
         // Stream communication
         {{"comm_tcp_mode",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CLIENT_CONN,
             gettext_noop("Whether use tcp commucation mode for stream"),
             NULL,
@@ -262,7 +270,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"comm_debug_mode",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Whether use libcomm debug mode for print debug information"),
             NULL,
@@ -278,7 +290,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"comm_stat_mode",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Whether use libcomm stat mode for print stat data"),
             NULL,
@@ -294,7 +310,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"comm_timer_mode",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Whether use libcomm timer debug mode for print timer data"),
             NULL,
@@ -310,7 +330,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"comm_no_delay",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Whether set NO_DELAY option for libcomm socket"),
             NULL,
@@ -322,7 +346,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"enable_force_reuse_connections",
             PGC_BACKEND,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Session force reuse pooler connections."),
             NULL,
@@ -334,7 +362,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"comm_client_bind",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Whether client use bind function"),
             NULL,
@@ -346,7 +378,11 @@ static void InitNetworkConfigureNamesBool()
             NULL},
         {{"comm_ssl",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SECURITY,
             gettext_noop("Enables libcomm SSL connections."),
             NULL},
@@ -464,7 +500,11 @@ static void InitNetworkConfigureNamesInt()
             show_unix_socket_permissions},
         {{"pooler_maximum_idle_time",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Maximum idle time of the pooler links."),
             NULL,
@@ -479,7 +519,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"minimum_pool_size",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Initial pool size."),
             gettext_noop("If number of active connections decreased below this value, "
@@ -494,7 +538,11 @@ static void InitNetworkConfigureNamesInt()
         // Stream communication
         {{"comm_sctp_port",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Sets the STCP port the server listens on."),
             NULL},
@@ -508,7 +556,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_control_port",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Sets the stream control port the server listens on."),
             NULL},
@@ -522,7 +574,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_quota_size",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Sets the stream quota size in kB."),
             NULL,
@@ -537,7 +593,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_usable_memory",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Sets the total usable memory for communication(in kB)."),
             NULL,
@@ -552,7 +612,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_memory_pool",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Sets the memory pool size for communication(in kB)."),
             NULL,
@@ -567,7 +631,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_memory_pool_percent",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Sets the percent of comm_memory_pool for dynamic workload."),
             NULL},
@@ -581,7 +649,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_ackchk_time",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             QUERY_TUNING,
             gettext_noop("Send ack check package to stream sender periodically."),
             NULL,
@@ -692,7 +764,11 @@ static void InitNetworkConfigureNamesInt()
 #endif
         {{"comm_max_receiver",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Maximum number of internal receiver threads."),
             NULL},
@@ -719,7 +795,11 @@ static void InitNetworkConfigureNamesInt()
             NULL},
         {{"comm_sender_buffer_size",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("The libcomm sender's buffer size in every interaction between DN and CN, "
                          "or DN and DN, unit(KB)"),
@@ -733,7 +813,11 @@ static void InitNetworkConfigureNamesInt()
             NULL},
         {{"max_pool_size",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Max pool size."),
             gettext_noop("If number of active connections reaches this value, "
@@ -747,7 +831,11 @@ static void InitNetworkConfigureNamesInt()
             NULL},
         {{"pooler_port",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             COORDINATORS,
             gettext_noop("Legacy port of the Pool Manager. Now it is used for cn HA port for build and replication "
                          "under thread pool mode."),
@@ -762,7 +850,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"pooler_timeout",
             PGC_SIGHUP,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Timeout of the Pool Communication with Other Nodes."),
             NULL,
@@ -777,7 +869,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"pooler_connect_max_loops",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Max retries of the Pooler Connecting to Other Nodes."),
             NULL},
@@ -791,7 +887,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"pooler_connect_interval_time",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Indicates the interval for each retry."),
             NULL,
@@ -806,7 +906,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"pooler_connect_timeout",
             PGC_SIGHUP,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Timeout of the Pooler Connecting to Other Nodes."),
             NULL,
@@ -821,7 +925,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"pooler_cancel_timeout",
             PGC_SIGHUP,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Timeout of the Pooler Cancel Connections to Other Nodes."),
             NULL,
@@ -835,7 +943,11 @@ static void InitNetworkConfigureNamesInt()
             NULL},
         {{"max_coordinators",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DATA_NODES,
             gettext_noop("Maximum number of Coordinators in the cluster."),
             gettext_noop("It is not possible to create more Coordinators in the cluster than "
@@ -849,7 +961,11 @@ static void InitNetworkConfigureNamesInt()
             show_max_coordnode},
         {{"comm_max_datanode",
             PGC_USERSET,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             DEVELOPER_OPTIONS,
             gettext_noop("Currently number of Datanodes."),
             NULL},
@@ -863,7 +979,11 @@ static void InitNetworkConfigureNamesInt()
 
         {{"comm_max_stream",
             PGC_POSTMASTER,
+#ifdef USE_SPQ
+            NODE_ALL,
+#else
             NODE_DISTRIBUTE,
+#endif
             CONN_AUTH_SETTINGS,
             gettext_noop("Maximum number of streams."),
             NULL},

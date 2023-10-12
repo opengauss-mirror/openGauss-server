@@ -183,7 +183,6 @@ static void convert_bytea_to_scalar(
 static double convert_one_string_to_scalar(const char* value, int rangelo, int rangehi);
 static double convert_one_bytea_to_scalar(unsigned char* value, int valuelen, int rangelo, int rangehi);
 static char* convert_string_datum(Datum value, Oid typid);
-static double convert_timevalue_to_scalar(Datum value, Oid typid);
 static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatData* vardata);
 static bool get_variable_range(PlannerInfo* root, VariableStatData* vardata, Oid sortop, Datum* min, Datum* max);
 static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* vardata, Oid sortop, Datum* min, Datum* max);
@@ -4375,7 +4374,7 @@ static double convert_one_bytea_to_scalar(unsigned char* value, int valuelen, in
 /*
  * Do convert_to_scalar()'s work for any timevalue data type.
  */
-static double convert_timevalue_to_scalar(Datum value, Oid typid)
+double convert_timevalue_to_scalar(Datum value, Oid typid)
 {
     switch (typid) {
         case TIMESTAMPOID:

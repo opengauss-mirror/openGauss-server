@@ -249,5 +249,12 @@ extern void heap_slot_getsomeattrs(TupleTableSlot* slot, int attnum);
 extern bool heap_slot_attisnull(TupleTableSlot* slot, int attnum);
 extern void heap_slot_formbatch(TupleTableSlot* slot, struct VectorBatch* batch, int cur_rows, int attnum);
 
+#ifdef USE_SPQ
+extern Datum slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull);
+extern void slot_getsomeattrs(TupleTableSlot *slot, int attnum);
+extern void slot_getallattrs(TupleTableSlot *slot);
+extern Datum heap_copy_tuple_as_datum(HeapTuple tuple, TupleDesc tupleDesc);
+#endif
+
 #endif /* !FRONTEND_PARSER */
 #endif /* TUPTABLE_H */

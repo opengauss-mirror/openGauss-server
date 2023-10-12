@@ -25,6 +25,47 @@
 
 #include "optimizer/bucketinfo.h"
 
+#ifdef USE_SPQ
+/*
+ * ApplyShareInputContext is used in different stages of ShareInputScan
+ * processing. This is mostly used as working area during the stages, but
+ * some information is also carried through multiple stages.
+ */
+typedef struct ApplyShareInputContextPerShare {
+    int producer_slice_id;
+    Bitmapset *participant_slices;
+} ApplyShareInputContextPerShare;
+ 
+struct PlanSlice;
+struct Plan;
+ 
+typedef struct ApplyShareInputContext {
+    /* curr_rtable is used by all stages when traversing into subqueries */
+    List *curr_rtable;
+ 
+    /*
+     * Populated in dag_to_tree() (or collect_shareinput_producers() for ORCA),
+     * used in replace_shareinput_targetlists()
+     */
+    Plan **shared_plans;
+    int shared_input_count;
+ 
+    /*
+     * State for replace_shareinput_targetlists()
+     */
+    int *share_refcounts;
+    int share_refcounts_sz; /* allocated sized of 'share_refcounts' */
+ 
+    /*
+     * State for apply_sharinput_xslice() walkers.
+     */
+    PlanSlice *slices;                             /* root->glob->slices */
+    List *motStack;                                /* stack of motionIds leading to current node */
+    ApplyShareInputContextPerShare *shared_inputs; /* one for each share */
+    Bitmapset *qdShares;                           /* share_ids that are referenced from QD slices */
+} ApplyShareInputContext;
+#endif
+
 /*
  * Determines if query has to be launched
  * on Coordinators only (SEQUENCE DDL),
@@ -219,6 +260,9 @@ typedef struct PlannerGlobal {
 
     /* There is a counter attempt to get name for sublinks */
     int sublink_counter;
+#ifdef USE_SPQ
+    ApplyShareInputContext share;       /* workspace for GPDB plan sharing */
+#endif
 } PlannerGlobal;
 
 /* macro for fetching the Plan associated with a SubPlan node */

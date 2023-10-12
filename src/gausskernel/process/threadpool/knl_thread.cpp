@@ -1797,6 +1797,13 @@ void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
         ResourceOwnerCreate(NULL, "InitLocalSysCache", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 }
 
+#ifdef USE_SPQ
+static void knlTSPQCxtInit(knl_t_spq_context *spqCxt)
+{
+    spqCxt->spq_role = ROLE_UTILITY;
+}
+#endif
+
 void knl_thread_init(knl_thread_role role)
 {
     t_thrd.role = role;
@@ -1936,6 +1943,9 @@ void knl_thread_init(knl_thread_role role)
     KnlDcfContextInit(&t_thrd.dcf_cxt);
     knl_t_page_compression_init(&t_thrd.page_compression_cxt);
     knl_t_rc_init(&t_thrd.rc_cxt);
+#ifdef USE_SPQ
+    knlTSPQCxtInit(&t_thrd.spq_ctx);
+#endif
 }
 
 __attribute__ ((__used__)) knl_thrd_context *GetCurrentThread()

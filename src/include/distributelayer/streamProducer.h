@@ -106,6 +106,11 @@ public:
     /* Send tuple with Roundrobin. */
     void roundRobinStream(TupleTableSlot* tuple, DestReceiver* self);
 
+#ifdef USE_SPQ
+    /* Send batch with Roundrobin. */
+    void roundRobinStream(VectorBatch* batch);
+#endif
+
     /* Local roundrobin the tuple through memory. */
     void localRoundRobinStream(TupleTableSlot* tuple);
 
@@ -271,6 +276,9 @@ public:
         m_threadInit = flag;
     }
 
+    /* save expr context to producer. */
+    void setEcontext(ExprContext* econtext);
+
     void setUniqueSQLKey(uint64 unique_sql_id, Oid unique_user_id, uint32 unique_cn_id);
     void setGlobalSessionId(GlobalSessionId* globalSessionId);
     void getGlobalSessionId(GlobalSessionId* globalSessionId);
@@ -351,6 +359,9 @@ private:
 
     template<int keyNum, int distrType>
     void redistributeTupleChannel(TupleTableSlot* tuple);
+
+    template<int distrType>
+    void redistributeTupleChannelWithExpr(TupleTableSlot* tuple);
 
     /* Choose which channel to send by hash value. */
     template<int distrType>
@@ -508,6 +519,10 @@ private:
 
     /* global session id */
     GlobalSessionId m_globalSessionId;
+
+    bool m_hasExprKey;
+    List* m_exprkeystate;
+    ExprContext* m_econtext;
 };
 
 extern THR_LOCAL StreamProducer* streamProducer;

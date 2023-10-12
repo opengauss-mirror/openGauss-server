@@ -65,6 +65,10 @@ static void printLocalBroadCastBatch(VectorBatch *batch, DestReceiver *self);
 static void printRedistributeBatch(VectorBatch *batch, DestReceiver *self);
 static void printLocalRedistributeBatch(VectorBatch *batch, DestReceiver *self);
 static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
+#ifdef USE_SPQ
+static void printRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
+#endif
 static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
 static void finalizeLocalStream(DestReceiver *self);
 
@@ -116,7 +120,14 @@ DestReceiver *createStreamDestReceiver(CommandDest dest)
         case DestTupleHybrid:
             self->pub.receiveSlot = printHybridTuple;
             break;
-
+#ifdef USE_SPQ
+        case DestTupleRoundRobin:
+            self->pub.receiveSlot = printRoundRobinTuple;
+            break;
+        case DestBatchRoundRobin:
+            self->pub.sendBatch = printRoundRobinBatch;
+            break;
+#endif
         case DestBatchBroadCast:
             self->pub.sendBatch = printBroadCastBatchCompress;
             break;
@@ -233,6 +244,20 @@ static void printLocalRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self)
     rec->arg->localRoundRobinStream(tuple);
 }
 
+#ifdef USE_SPQ
+/*
+ * @Description: Send a tuple by roundrobin
+ *
+ * @param[IN] tuple: tuple to send.
+ * @param[IN] dest: dest receiver.
+ * @return void
+ */
+static void printRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self)
+{
+    streamReceiver *rec = (streamReceiver *)self;
+    rec->arg->roundRobinStream(tuple, self);
+}
+#endif
 /*
  * @Description: Send a tuple in hybrid ways, some data with special values
  *               shoule be sent in special way.
@@ -312,6 +337,20 @@ static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self)
     rec->arg->localRoundRobinStream(batch);
 }
 
+/*
+ * @Description: Send a batch by roundrobin
+ *
+ * @param[IN] batch: batch to send.
+ * @param[IN] dest: dest receiver.
+ * @return void
+ */
+#ifdef USE_SPQ
+static void printRoundRobinBatch(VectorBatch *batch, DestReceiver *self)
+{
+    streamReceiver *rec = (streamReceiver *)self;
+    rec->arg->roundRobinStream(batch);
+}
+#endif
 /*
  * @Description: Send a batch in hybrid ways, some data with special values
  *               shoule be sent in special way.
@@ -1487,7 +1526,7 @@ inline void AddCheckInfo(StringInfo buf)
     bool is_check_added = false;
 
     /* add check info  for datanode and coordinator */
-    if (IsConnFromCoord()) {
+    if (IS_SPQ_EXECUTOR || IsConnFromCoord()) {
 #ifdef USE_ASSERT_CHECKING
         initStringInfo(&buf_check);
         AddCheckMessage(&buf_check, buf, false);

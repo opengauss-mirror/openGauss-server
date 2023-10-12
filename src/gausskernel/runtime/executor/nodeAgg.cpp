@@ -1762,6 +1762,12 @@ static TupleTableSlot* agg_retrieve_direct(AggState* aggstate)
                         /* If we are grouping, we should produce no tuples too */
                         if (node->aggstrategy != AGG_PLAIN)
                             return NULL;
+#ifdef USE_SPQ
+                        if (IS_SPQ_EXECUTOR) {
+                            if (t_thrd.spq_ctx.skip_direct_distribute_result)
+                                return NULL;
+                        }
+#endif
                     }
                 }
             }
@@ -2221,6 +2227,9 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
     aggstate->ss.ps.plan = (Plan*)node;
     aggstate->ss.ps.state = estate;
 
+#ifdef USE_SPQ
+    aggstate->aggsplittype = node->aggsplittype;
+#endif
     aggstate->aggs = NIL;
     aggstate->numaggs = 0;
     aggstate->maxsets = 0;
@@ -3881,6 +3890,15 @@ static void exec_lookups_agg(AggState *aggstate, Agg *node, EState *estate)
             }
         }
 #endif /* ENABLE_MULTIPLE_NODES */
+#ifdef USE_SPQ
+            /* Final function only required if we're finalizing the aggregates */
+        if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+            if (DO_AGGSPLIT_SKIPFINAL(aggstate->aggsplittype))
+                peraggstate->finalfn_oid = finalfn_oid = InvalidOid;
+            else
+                peraggstate->finalfn_oid = finalfn_oid = aggform->aggfinalfn;
+        }
+#endif /* SPQ */
 #endif /* PGXC */
         /* Check that aggregate owner has permission to call component fns */
         {

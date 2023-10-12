@@ -1672,11 +1672,15 @@ Plan* create_local_redistribute(PlannerInfo* root, Plan* lefttree, List* redistr
  */
 uint2* get_bucketmap_by_execnode(ExecNodes* exec_node, PlannedStmt* plannedstmt, int *bucketCnt)
 {
+#ifndef USE_SPQ
     if (exec_node == NULL) {
         return NULL;
     }
-
+#endif
     int nodeLen = list_length(exec_node->nodeList);
+#ifdef USE_SPQ
+    nodeLen = plannedstmt->num_nodes;
+#endif
     if (nodeLen == 0) {
         return NULL;
     }

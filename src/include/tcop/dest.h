@@ -102,6 +102,11 @@ typedef enum {
 
     DestTupleHybrid,
 
+#ifdef USE_SPQ
+    DestTupleRoundRobin,
+    DestBatchRoundRobin,
+#endif
+
     DestBatchBroadCast,         /* results send to consumer thread in a broadcast way */
     DestBatchLocalBroadCast,    /* results send to consumer thread in a local broadcast way */
     DestBatchRedistribute,      /* results send to consumer thread in a redistribute way */

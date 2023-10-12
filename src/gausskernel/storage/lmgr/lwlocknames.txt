@@ -144,3 +144,4 @@ ExrtoSnapshotLock 134
 RedoTruncateLock 135
 
 ExrtoRecycleResidualUndoLock 137
+ShareInputScanLock 138

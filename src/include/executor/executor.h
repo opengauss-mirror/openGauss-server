@@ -841,4 +841,7 @@ private:
     bool m_smpEnabled;
 };
 
+#ifdef USE_SPQ
+extern bool IsJoinExprNull(List *joinExpr, ExprContext *econtext);
+#endif
 #endif /* EXECUTOR_H  */

@@ -66,4 +66,11 @@ extern bool split_pathtarget_at_srfs(PlannerInfo *root, PathTarget *target, Path
 /* Convenience macro to get a PathTarget with valid cost/width fields */
 #define create_pathtarget(root, tlist) \
     set_pathtarget_cost_width(root, make_pathtarget_from_tlist(tlist))
+
+#ifdef USE_SPQ
+extern List* tlist_members(Node* node, List* targetlist);
+extern void get_sortgroupclauses_tles(List *clauses, List *targetList, List **tles, List **sortops, List **eqops);
+extern Index maxSortGroupRef(List *targetlist, bool include_orderedagg);
+#endif
+
 #endif /* TLIST_H */

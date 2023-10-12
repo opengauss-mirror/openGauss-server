@@ -1891,6 +1891,15 @@ CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
 
     /* Decide whether to use a custom plan */
     customplan = ChooseCustomPlan(plansource, boundParams);
+
+#ifdef USE_SPQ
+    ListCell* qlc = NULL;
+    foreach (qlc, plansource->query_list) {
+	Query* query = castNode(Query, lfirst(qlc));
+	query->is_support_spq = true;
+    }
+#endif
+
     if (!customplan) {
         if (ChooseAdaptivePlan(plansource, boundParams)) {
             plan = GetAdaptGenericPlan(plansource, boundParams, &qlist, &customplan);
@@ -2044,6 +2053,14 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
 
     /* Decide whether to use a custom plan */
     customplan = ChooseCustomPlan(plansource, boundParams);
+
+#ifdef USE_SPQ
+    ListCell* qlc = NULL;
+    foreach (qlc, plansource->query_list) {
+        Query* query = castNode(Query, lfirst(qlc));
+        query->is_support_spq = false;
+    }
+#endif
     
     if (!customplan) {
         if (CheckCachedPlan(plansource, plansource->gplan)) {

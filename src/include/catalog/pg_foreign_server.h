@@ -62,5 +62,9 @@ typedef FormData_pg_foreign_server *Form_pg_foreign_server;
 #define Anum_pg_foreign_server_srvacl              6
 #define Anum_pg_foreign_server_srvoptions          7
 
+#ifdef USE_SPQ
+#define GS_EXTTABLE_SERVER_NAME "gs_exttable_server"
+#endif
+
 #endif   /* PG_FOREIGN_SERVER_H */
 

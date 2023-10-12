@@ -84,6 +84,14 @@
 #include "optimizer/func_dependency.h"
 #endif
 
+#ifdef USE_SPQ
+#include "access/sysattr.h"
+#include "funcapi.h"
+#include "catalog/pg_inherits_fn.h"
+#include "catalog/pg_inherits.h"
+#include "catalog/pg_aggregate.h"
+#include "catalog/pg_trigger.h"
+#endif
 
 /*				---------- AMOP CACHES ----------						 */
 
@@ -5509,3 +5517,920 @@ char get_typecategory(Oid typid)
     ReleaseSysCache(tuple);
     return result;
 }
+
+#ifdef USE_SPQ
+/*
+ * get_check_constraint_relid
+ * 		Given check constraint id, return the check constraint's relation oid
+ */
+Oid get_check_constraint_relid(Oid oidCheckconstraint)
+{
+    HeapTuple tp;
+ 
+    tp = SearchSysCache(CONSTROID, ObjectIdGetDatum(oidCheckconstraint), 0, 0, 0);
+    if (HeapTupleIsValid(tp)) {
+        Form_pg_constraint contup = (Form_pg_constraint)GETSTRUCT(tp);
+        Oid result;
+ 
+        result = contup->conrelid;
+        ReleaseSysCache(tp);
+        return result;
+    } else
+        return InvalidOid;
+}
+/*
+ * get_check_constraint_oids
+ * 	 Extract all check constraint oid for a given relation.
+ */
+List *get_check_constraint_oids(Oid oidRel)
+{
+    List *plConstraints = NIL;
+    HeapTuple htup;
+    Relation conrel;
+    ScanKeyData scankey;
+    SysScanDesc sscan;
+ 
+    /*
+     * lookup constraints for relation from the catalog table
+     *
+     * SELECT * FROM pg_constraint WHERE conrelid = :1
+     */
+    conrel = heap_open(ConstraintRelationId, AccessShareLock);
+ 
+    ScanKeyInit(&scankey, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(oidRel));
+    sscan = systable_beginscan(conrel, InvalidOid, false, NULL, 1, &scankey);
+ 
+    while (HeapTupleIsValid(htup = systable_getnext(sscan))) {
+        Form_pg_constraint contuple = (Form_pg_constraint)GETSTRUCT(htup);
+ 
+        // only consider check constraints
+        if (CONSTRAINT_CHECK != contuple->contype || !contuple->convalidated) {
+            continue;
+        }
+ 
+        plConstraints = lappend_oid(plConstraints, HeapTupleGetOid(htup));
+    }
+ 
+    systable_endscan(sscan);
+    heap_close(conrel, AccessShareLock);
+ 
+    return plConstraints;
+}
+/*
+ * get_check_constraint_expr_tree
+ * returns the expression node tree representing the check constraint
+ * with the given oidConstraint.
+ *
+ * Note: returns a palloc'd expression node tree, or NULL if no such constraint.
+ */
+Node *get_check_constraint_expr_tree(Oid oidCheckconstraint)
+{
+    HeapTuple tp;
+    Node *result = NULL;
+ 
+    tp = SearchSysCache(CONSTROID, ObjectIdGetDatum(oidCheckconstraint), 0, 0, 0);
+    if (HeapTupleIsValid(tp)) {
+        Datum conbin;
+        bool isnull;
+ 
+        conbin = SysCacheGetAttr(CONSTROID, tp, Anum_pg_constraint_conbin, &isnull);
+        if (!isnull)
+            result = (Node *)stringToNode(TextDatumGetCString(conbin));
+ 
+        ReleaseSysCache(tp);
+    }
+    return result;
+}
+/*
+ * operator_exists
+ *	  Is there an operator with the given oid
+ */
+bool operator_exists(Oid oid)
+{
+    return SearchSysCacheExists(OPEROID, oid, 0, 0, 0);
+}
+/*
+ * relation_exists
+ *	  Is there a relation with the given oid
+ */
+bool relation_exists(Oid oid)
+{
+    return SearchSysCacheExists(RELOID, oid, 0, 0, 0);
+}
+/*
+ * get_agg_transtype
+ * 		Given aggregate id, return the aggregate transition function's result type.
+ */
+Oid get_agg_transtype(Oid aggid)
+{
+    HeapTuple tp;
+    Oid result;
+ 
+    tp = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for aggregate %u", aggid);
+ 
+    result = ((Form_pg_aggregate)GETSTRUCT(tp))->aggtranstype;
+    ReleaseSysCache(tp);
+    return result;
+}
+/*
+ * is_agg_partial_capable
+ * 		Given aggregate id, check if it can be used in 2-phase aggregation.
+ *
+ * It must have a combine function, and if the transition type is 'internal',
+ * also serial/deserial functions.
+ */
+bool is_agg_partial_capable(Oid aggid)
+{
+    HeapTuple aggTuple;
+    Form_pg_aggregate aggform;
+    bool result = true;
+ 
+    aggTuple = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggid));
+    if (!HeapTupleIsValid(aggTuple))
+        elog(ERROR, "cache lookup failed for aggregate %u", aggid);
+    aggform = (Form_pg_aggregate)GETSTRUCT(aggTuple);
+ 
+    ReleaseSysCache(aggTuple);
+ 
+    return result;
+}
+ 
+/*
+ * is_ordered_agg
+ * 		Given aggregate id, check if it is an ordered aggregate
+ */
+bool is_agg_ordered(Oid aggid)
+{
+    HeapTuple aggTuple;
+    char aggkind;
+    bool isnull = false;
+ 
+    aggTuple = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggid));
+    if (!HeapTupleIsValid(aggTuple))
+        elog(ERROR, "cache lookup failed for aggregate %u", aggid);
+ 
+    aggkind = DatumGetChar(SysCacheGetAttr(AGGFNOID, aggTuple, Anum_pg_aggregate_aggkind, &isnull));
+    Assert(!isnull);
+ 
+    ReleaseSysCache(aggTuple);
+ 
+    return AGGKIND_IS_ORDERED_SET(aggkind);
+}
+/*
+ * get_cast_func
+ *        finds the cast function between the given source and destination type,
+ *        and records its oid and properties in the output parameters.
+ *        Returns true if a cast exists, false otherwise.
+ */
+bool get_cast_func(Oid oidSrc, Oid oidDest, bool *is_binary_coercible, Oid *oidCastFunc, CoercionPathType *pathtype)
+{
+    if (IsBinaryCoercible(oidSrc, oidDest)) {
+        *is_binary_coercible = true;
+        *oidCastFunc = 0;
+        return true;
+    }
+ 
+    *is_binary_coercible = false;
+ 
+    *pathtype = find_coercion_pathway(oidDest, oidSrc, COERCION_IMPLICIT, oidCastFunc);
+    if (*pathtype == COERCION_PATH_RELABELTYPE)
+        *is_binary_coercible = true;
+    if (*pathtype != COERCION_PATH_NONE)
+        return true;
+    return false;
+}
+/*
+ * type_exists
+ *	  Is there a type with the given oid
+ */
+bool type_exists(Oid oid)
+{
+    return SearchSysCacheExists(TYPEOID, oid, 0, 0, 0);
+}
+/*
+ * get_comparison_type
+ *      Retrieve comparison type
+ */
+CmpType get_comparison_type(Oid oidOp)
+{
+    OpBtreeInterpretation *opBti;
+    List *opBtis;
+ 
+    opBtis = get_op_btree_interpretation(oidOp);
+ 
+    if (opBtis == NIL) {
+	    /* The operator does not belong to any B-tree operator family */
+	    return CmptOther;
+    }
+ 
+    /*
+     * XXX: Arbitrarily use the first found operator family. Usually
+     * there is only one, but e.g. if someone has created a reverse ordering
+     * family that sorts in descending order, it is ambiguous whether a
+     * < operator stands for the less than operator of the ascending opfamily,
+     * or the greater than operator for the descending opfamily.
+     */
+    opBti = (OpBtreeInterpretation*)linitial(opBtis);
+ 
+    switch (opBti->strategy) {
+        case BTLessStrategyNumber:
+            return CmptLT;
+        case BTLessEqualStrategyNumber:
+            return CmptLEq;
+        case BTEqualStrategyNumber:
+            return CmptEq;
+        case BTGreaterEqualStrategyNumber:
+            return CmptGEq;
+        case BTGreaterStrategyNumber:
+            return CmptGT;
+        case ROWCOMPARE_NE:
+            return CmptNEq;
+        default:
+            elog(ERROR, "unknown B-tree strategy: %d", opBti->strategy);
+            return CmptOther;
+    }
+}
+/*
+ * index_exists
+ *	  Is there an index with the given oid
+ */
+bool index_exists(Oid oid)
+{
+    return SearchSysCacheExists(INDEXRELID, oid, 0, 0, 0);
+}
+bool aggregate_exists(Oid oid)
+{
+    return SearchSysCacheExists(AGGFNOID, oid, 0, 0, 0);
+}
+/*
+ * get_aggregate
+ * Get oid of aggregate with given name and argument type
+ */
+Oid get_aggregate(const char *aggname, Oid oidType)
+{
+    CatCList *catlist;
+    int i;
+    Oid oidResult;
+ 
+    // lookup pg_proc for functions with the given name and arg type
+    catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum((char *)aggname));
+ 
+    oidResult = InvalidOid;
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple htup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+        Oid oidProc = HeapTupleGetOid(htup);
+        Form_pg_proc proctuple = (Form_pg_proc)GETSTRUCT(htup);
+ 
+        // skip functions with the wrong number of type of arguments
+        if (1 != proctuple->pronargs || oidType != proctuple->proargtypes.values[0]) {
+            continue;
+        }
+ 
+        if (SearchSysCacheExists(AGGFNOID, ObjectIdGetDatum(oidProc), 0, 0, 0)) {
+            oidResult = oidProc;
+            break;
+        }
+    }
+ 
+    ReleaseSysCacheList(catlist);
+ 
+    return oidResult;
+}
+/*
+ * function_exists
+ *	  Is there a function with the given oid
+ */
+bool function_exists(Oid oid)
+{
+    return SearchSysCacheExists(PROCOID, oid, 0, 0, 0);
+}
+/*
+ * check_constraint_exists
+ *	  Is there a check constraint with the given oid
+ */
+bool check_constraint_exists(Oid oidCheckconstraint)
+{
+    return SearchSysCacheExists1(CONSTROID, ObjectIdGetDatum(oidCheckconstraint));
+}
+/*
+ * get_check_constraint_name
+ *        returns the name of the check constraint with the given oidConstraint.
+ *
+ * Note: returns a palloc'd copy of the string, or NULL if no such constraint.
+ */
+char *get_check_constraint_name(Oid oidCheckconstraint)
+{
+    return get_constraint_name(oidCheckconstraint);
+}
+/*
+ * get_comparison_operator
+ * Retrieve comparison operator between given types
+ */
+Oid get_comparison_operator(Oid oidLeft, Oid oidRight, CmpType cmpt)
+{
+    int16 opstrat;
+    HeapTuple ht;
+    Oid result = InvalidOid;
+    Relation pg_amop;
+    ScanKeyData scankey[4];
+    SysScanDesc sscan;
+ 
+    switch (cmpt) {
+        case CmptLT:
+            opstrat = BTLessStrategyNumber;
+            break;
+        case CmptLEq:
+            opstrat = BTLessEqualStrategyNumber;
+            break;
+        case CmptEq:
+            opstrat = BTEqualStrategyNumber;
+            break;
+        case CmptGEq:
+            opstrat = BTGreaterEqualStrategyNumber;
+            break;
+        case CmptGT:
+            opstrat = BTGreaterStrategyNumber;
+            break;
+        default:
+            return InvalidOid;
+    }
+ 
+    pg_amop = heap_open(AccessMethodOperatorRelationId, AccessShareLock);
+ 
+    /*
+     * SELECT * FROM pg_amop
+     * WHERE amoplefttype = :1 and amoprighttype = :2 and amopmethod = :3 and amopstrategy = :4
+     */
+    ScanKeyInit(&scankey[0], Anum_pg_amop_amoplefttype, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(oidLeft));
+    ScanKeyInit(&scankey[1], Anum_pg_amop_amoprighttype, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(oidRight));
+    ScanKeyInit(&scankey[2], Anum_pg_amop_amopmethod, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(BTREE_AM_OID));
+    ScanKeyInit(&scankey[3], Anum_pg_amop_amopstrategy, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(opstrat));
+ 
+    /* XXX: There is no index for this, so this is slow! */
+    sscan = systable_beginscan(pg_amop, InvalidOid, false, NULL, 4, scankey);
+ 
+    /* XXX: There can be multiple results. Arbitrarily use the first one */
+    while (HeapTupleIsValid(ht = systable_getnext(sscan))) {
+        Form_pg_amop amoptup = (Form_pg_amop)GETSTRUCT(ht);
+ 
+        result = amoptup->amopopr;
+        break;
+    }
+ 
+    systable_endscan(sscan);
+    heap_close(pg_amop, AccessShareLock);
+ 
+    return result;
+}
+/*
+ * pfree_ptr_array
+ * 		Free an array of pointers, after freeing each individual element
+ */
+void pfree_ptr_array(char **ptrarray, int nelements)
+{
+    int i;
+    if (NULL == ptrarray)
+        return;
+ 
+    for (i = 0; i < nelements; i++) {
+        if (NULL != ptrarray[i]) {
+            pfree(ptrarray[i]);
+        }
+    }
+    pfree(ptrarray);
+}
+ 
+/*
+ * get_func_output_arg_types
+ * 		Given procedure id, return the function's output argument types
+ */
+List *get_func_output_arg_types(Oid funcid)
+{
+    HeapTuple tp;
+    int numargs;
+    Oid *argtypes = NULL;
+    char **argnames = NULL;
+    char *argmodes = NULL;
+    List *l_argtypes = NIL;
+    int i;
+ 
+    tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for function %u", funcid);
+ 
+    numargs = get_func_arg_info(tp, &argtypes, &argnames, &argmodes);
+ 
+    if (NULL == argmodes) {
+        pfree_ptr_array(argnames, numargs);
+        if (NULL != argtypes) {
+            pfree(argtypes);
+        }
+        ReleaseSysCache(tp);
+        return NULL;
+    }
+ 
+    for (i = 0; i < numargs; i++) {
+        Oid argtype = argtypes[i];
+        char argmode = argmodes[i];
+ 
+        if (PROARGMODE_INOUT == argmode || PROARGMODE_OUT == argmode || PROARGMODE_TABLE == argmode) {
+            l_argtypes = lappend_oid(l_argtypes, argtype);
+        }
+    }
+ 
+    pfree_ptr_array(argnames, numargs);
+    pfree(argtypes);
+    pfree(argmodes);
+ 
+    ReleaseSysCache(tp);
+    return l_argtypes;
+}
+/*
+ * func_data_access
+ *		Given procedure id, return the function's data access flag.
+ */
+char func_data_access(Oid funcid)
+{
+    return PRODATAACCESS_NONE;
+}
+ 
+/*
+ * func_exec_location
+ *		Given procedure id, return the function's proexeclocation field
+ */
+char func_exec_location(Oid funcid)
+{
+    return PRODATAACCESS_ANY;
+}
+ 
+/*
+ * get_func_arg_types
+ * 		Given procedure id, return all the function's argument types
+ */
+List *get_func_arg_types(Oid funcid)
+{
+    HeapTuple tp;
+    Form_pg_proc procstruct;
+    oidvector *args;
+    List *result = NIL;
+ 
+    tp = SearchSysCache(PROCOID, ObjectIdGetDatum(funcid), 0, 0, 0);
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for function %u", funcid);
+ 
+    procstruct = (Form_pg_proc)GETSTRUCT(tp);
+    args = &procstruct->proargtypes;
+    for (int i = 0; i < args->dim1; i++) {
+        result = lappend_oid(result, args->values[i]);
+    }
+ 
+    ReleaseSysCache(tp);
+    return result;
+}
+/*
+ * get_type_name
+ *	  returns the name of the type with the given oid
+ *
+ * Note: returns a palloc'd copy of the string, or NULL if no such type.
+ */
+char *get_type_name(Oid oid)
+{
+    HeapTuple tp;
+
+    tp = SearchSysCache(TYPEOID, ObjectIdGetDatum(oid), 0, 0, 0);
+    if (HeapTupleIsValid(tp)) {
+        Form_pg_type typtup = (Form_pg_type) GETSTRUCT(tp);
+        char *result;
+
+        result = pstrdup(NameStr(typtup->typname));
+        ReleaseSysCache(tp);
+        return result;
+    } else
+        return NULL;
+}
+/*
+ * get_att_stats
+ *		Get attribute statistics. Return a copy of the HeapTuple object, or NULL
+ *		if no stats found for attribute
+ *
+ */
+HeapTuple get_att_stats(Oid relid, AttrNumber attrnum)
+{
+    HeapTuple result;
+ 
+    char stakind = STARELKIND_CLASS;
+ 
+    /*
+     * This is used by ORCA, and ORCA doesn't know that there are two different kinds of stats,
+     * the inherited stats and the non-inherited. Use the inherited stats, i.e. stats that
+     * cover all the child tables, too, if available.
+     */
+    result = SearchSysCacheCopy4(STATRELATTINH,
+                                 ObjectIdGetDatum(relid),
+                                 CharGetDatum(stakind),
+                                 Int16GetDatum(attrnum),
+                                 BoolGetDatum(true));
+    if (!result)
+        result = SearchSysCacheCopy4(STATRELATTINH,
+                                     ObjectIdGetDatum(relid),
+                                     CharGetDatum(stakind),
+                                     Int16GetDatum(attrnum),
+                                     BoolGetDatum(false));
+ 
+    return result;
+}
+/*
+ * has_subclass_slow
+ *
+ * Performs the exhaustive check whether a relation has a subclass. This is
+ * different from has_subclass(), in that the latter can return true if a relation.
+ * *might* have a subclass. See comments in has_subclass() for more details.
+ */
+bool has_subclass_slow(Oid relationId)
+{
+    ScanKeyData scankey;
+    Relation rel;
+    SysScanDesc sscan;
+    bool result;
+ 
+    if (!has_subclass(relationId)) {
+        return false;
+    }
+ 
+    rel = heap_open(InheritsRelationId, AccessShareLock);
+ 
+    ScanKeyInit(&scankey, Anum_pg_inherits_inhparent, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relationId));
+ 
+    /* no index on inhparent */
+    sscan = systable_beginscan(rel, InvalidOid, false, NULL, 1, &scankey);
+ 
+    result = (systable_getnext(sscan) != NULL);
+ 
+    systable_endscan(sscan);
+ 
+    heap_close(rel, AccessShareLock);
+ 
+    return result;
+}
+/*
+ * get_index_opfamilies
+ * 		Get the oid of operator families for the index keys
+ */
+List *get_index_opfamilies(Oid oidIndex)
+{
+    HeapTuple htup;
+    List *opfam_oids;
+    bool isnull = false;
+    int indnkeyatts;
+    Datum indclassDatum;
+    oidvector *indclass;
+ 
+    htup = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(oidIndex));
+    if (!HeapTupleIsValid(htup))
+        elog(ERROR, "Index %u not found", oidIndex);
+ 
+    /*
+     * use SysCacheGetAttr() to retrieve number of index attributes, and the oid
+     * vector of indclass
+     */
+    indnkeyatts = DatumGetInt16(SysCacheGetAttr(INDEXRELID, htup, Anum_pg_index_indnkeyatts, &isnull));
+    Assert(!isnull);
+ 
+    indclassDatum = SysCacheGetAttr(INDEXRELID, htup, Anum_pg_index_indclass, &isnull);
+    if (isnull)
+        return NIL;
+    indclass = (oidvector *)DatumGetPointer(indclassDatum);
+ 
+    opfam_oids = NIL;
+    for (int i = 0; i < indnkeyatts; i++) {
+        Oid oidOpClass = indclass->values[i];
+        Oid opfam = get_opclass_family(oidOpClass);
+ 
+        opfam_oids = lappend_oid(opfam_oids, opfam);
+    }
+ 
+    ReleaseSysCache(htup);
+    return opfam_oids;
+}
+/* GPDB_12_MERGE_FIXME: only used by ORCA. Fix the callers to check
+ * Relation->relkind == RELKIND_PARTITIONED_TABLE instead. They should
+ * have the relcache entry at hand anyway.
+ */
+bool relation_is_partitioned(Oid relid)
+{
+    HeapTuple tuple;
+    tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(relid));
+ 
+    if (HeapTupleIsValid(tuple)) {
+        ReleaseSysCache(tuple);
+        return true;
+    } else
+        return false;
+}
+bool index_is_partitioned(Oid relid)
+{
+    HeapTuple tuple;
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tuple))
+        elog(ERROR, "cache lookup failed for relation %u", relid);
+    Form_pg_class pg_class_tuple = (Form_pg_class)GETSTRUCT(tuple);
+    ReleaseSysCache(tuple);
+    return pg_class_tuple->relkind == RELKIND_GLOBAL_INDEX;//todo RELKIND_PARTITIONED_INDEX;
+}
+/*
+ * get_operator_opfamilies
+ * 		Get the oid of operator families the given operator belongs to
+ *
+ * MPP calls this.
+ */
+List *get_operator_opfamilies(Oid opno)
+{
+    List *opfam_oids;
+    CatCList *catlist;
+    int i;
+ 
+    opfam_oids = NIL;
+ 
+    /* SELECT * FROM pg_amop WHERE amopopr = :1 */
+    catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple htup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+        Form_pg_amop amop_tuple = (Form_pg_amop)GETSTRUCT(htup);
+ 
+        opfam_oids = lappend_oid(opfam_oids, amop_tuple->amopfamily);
+    }
+ 
+    ReleaseSysCacheList(catlist);
+ 
+    return opfam_oids;
+}
+ 
+Oid get_compatible_hash_opfamily(Oid opno)
+{
+    Oid result = InvalidOid;
+    CatCList *catlist;
+    int i;
+ 
+    /*
+     * Search pg_amop to see if the target operator is registered as the "="
+     * operator of any hash opfamily.  If the operator is registered in
+     * multiple opfamilies, assume we can use any one.
+     */
+    catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
+ 
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+        Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
+ 
+        if (aform->amopmethod == HASH_AM_OID && aform->amopstrategy == HTEqualStrategyNumber) {
+            result = aform->amopfamily;
+            break;
+        }
+    }
+ 
+    ReleaseSysCacheList(catlist);
+ 
+    return result;
+}
+Oid get_compatible_legacy_hash_opfamily(Oid opno)
+{
+    return InvalidOid;
+}
+/*				---------- TRIGGER CACHE ----------					 */
+ 
+/*
+ * child_triggers
+ * Return true if the table is partitioned and any of the child partitions
+ * have a trigger of the given type.
+ */
+bool child_triggers(Oid relationId, int32 triggerType)
+{
+    /* GPDB_12_MERGE_FIXME */
+    return false;
+}
+ 
+/*
+ * get_trigger_type
+ * 		Given trigger id, return the trigger's type
+ */
+int32 get_trigger_type(Oid triggerid)
+{
+    Relation rel;
+    HeapTuple tp;
+    int32 result = -1;
+    ScanKeyData scankey;
+    SysScanDesc sscan;
+ 
+    /* ObjectIdAttributeNumber as other systable_beginscan called */
+    ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(triggerid));
+    rel = heap_open(TriggerRelationId, AccessShareLock);
+    sscan = systable_beginscan(rel, TriggerOidIndexId, true, NULL, 1, &scankey);
+ 
+    tp = systable_getnext(sscan);
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for trigger %u", triggerid);
+ 
+    result = ((Form_pg_trigger)GETSTRUCT(tp))->tgtype;
+ 
+    systable_endscan(sscan);
+    heap_close(rel, AccessShareLock);
+ 
+    return result;
+}
+ 
+/*
+ * trigger_enabled
+ * 		Given trigger id, return the trigger's enabled flag
+ */
+bool trigger_enabled(Oid triggerid)
+{
+    Relation rel;
+    HeapTuple tp;
+    bool result = false;
+    ScanKeyData scankey;
+    SysScanDesc sscan;
+ 
+    /* ObjectIdAttributeNumber as other systable_beginscan called */
+    ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(triggerid));
+    rel = heap_open(TriggerRelationId, AccessShareLock);
+    sscan = systable_beginscan(rel, TriggerOidIndexId, true, NULL, 1, &scankey);
+ 
+    tp = systable_getnext(sscan);
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for trigger %u", triggerid);
+ 
+    char tgenabled = ((Form_pg_trigger)GETSTRUCT(tp))->tgenabled;
+    switch (tgenabled) {
+        case TRIGGER_FIRES_ON_ORIGIN:
+            /* fallthrough */
+            /*
+             * FIXME: we should probably return false when
+             * SessionReplicationRole isn't SESSION_REPLICATION_ROLE_ORIGIN,
+             * but does that means we'll also have to flush ORCA's metadata
+             * cache on every assignment of session_replication_role?
+             */
+        case TRIGGER_FIRES_ALWAYS:
+            result = true;
+            break;
+        case TRIGGER_FIRES_ON_REPLICA:
+        case TRIGGER_DISABLED:
+            result = false;
+            break;
+        default:
+            elog(ERROR, "Unknown trigger type: %c", tgenabled);
+    }
+ 
+    systable_endscan(sscan);
+    heap_close(rel, AccessShareLock);
+ 
+    return result;
+}
+ 
+/* Does table have update triggers? */
+bool has_update_triggers(Oid relid)
+{
+    Relation relation;
+    bool result = false;
+ 
+    /* Assume the caller already holds a suitable lock. */
+    relation = heap_open(relid, NoLock);
+ 
+    if (relation->rd_rel->relhastriggers) {
+        bool found = false;
+ 
+        if (relation->trigdesc == NULL)
+            RelationBuildTriggers(relation);
+ 
+        if (relation->trigdesc) {
+            for (int i = 0; i < relation->trigdesc->numtriggers && !found; i++) {
+                Trigger trigger = relation->trigdesc->triggers[i];
+                found = trigger_enabled(trigger.tgoid) &&
+                    (get_trigger_type(trigger.tgoid) & TRIGGER_TYPE_UPDATE) == TRIGGER_TYPE_UPDATE;
+                if (found)
+                    break;
+            }
+        }
+ 
+        /* GPDB_96_MERGE_FIXME: Why is this not allowed? */
+        if (found || child_triggers(relation->rd_id, TRIGGER_TYPE_UPDATE))
+            result = true;
+    }
+    heap_close(relation, NoLock);
+ 
+    return result;
+}
+ 
+bool spq_get_attstatsslot(AttStatsSlot *sslot, HeapTuple statstuple, int reqkind, Oid reqop, int flags)
+{
+    Form_pg_statistic stats = (Form_pg_statistic)GETSTRUCT(statstuple);
+    int i;
+    Datum val;
+    bool isnull;
+    ArrayType *statarray;
+    Oid arrayelemtype;
+    int narrayelem;
+    HeapTuple typeTuple;
+    Form_pg_type typeForm;
+ 
+    /* initialize *sslot properly */
+    memset(sslot, 0, sizeof(AttStatsSlot));
+ 
+    for (i = 0; i < STATISTIC_NUM_SLOTS; i++) {
+        if ((&stats->stakind1)[i] == reqkind && (reqop == InvalidOid || (&stats->staop1)[i] == reqop))
+            break;
+    }
+    if (i >= STATISTIC_NUM_SLOTS)
+        return false; /* not there */
+ 
+    sslot->staop = (&stats->staop1)[i];
+ 
+    /*
+     * XXX Hopefully-temporary hack: if stacoll isn't set, inject the default
+     * collation.  This won't matter for non-collation-aware datatypes.  For
+     * those that are, this covers cases where stacoll has not been set.  In
+     * the short term we need this because some code paths involving type NAME
+     * do not pass any collation to prefix_selectivity and related functions.
+     * Even when that's been fixed, it's likely that some add-on typanalyze
+     * functions won't get the word right away about filling stacoll during
+     * ANALYZE, so we'll probably need this for awhile.
+     */
+ 
+    if (flags & ATTSTATSSLOT_VALUES) {
+        val = SysCacheGetAttr(STATRELATTINH, statstuple, Anum_pg_statistic_stavalues1 + i, &isnull);
+        if (isnull)
+            elog(ERROR, "stavalues is null");
+ 
+        /*
+         * Detoast the array if needed, and in any case make a copy that's
+         * under control of this AttStatsSlot.
+         */
+        statarray = DatumGetArrayTypePCopy(val);
+ 
+        /*
+         * Extract the actual array element type, and pass it back in case the
+         * caller needs it.
+         */
+        sslot->valuetype = arrayelemtype = ARR_ELEMTYPE(statarray);
+ 
+        /* Need info about element type */
+        typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(arrayelemtype));
+        if (!HeapTupleIsValid(typeTuple))
+            elog(ERROR, "cache lookup failed for type %u", arrayelemtype);
+        typeForm = (Form_pg_type)GETSTRUCT(typeTuple);
+ 
+        /* Deconstruct array into Datum elements; NULLs not expected */
+        deconstruct_array(statarray, arrayelemtype, typeForm->typlen, typeForm->typbyval, typeForm->typalign,
+            &sslot->values, NULL, &sslot->nvalues);
+ 
+        /*
+         * If the element type is pass-by-reference, we now have a bunch of
+         * Datums that are pointers into the statarray, so we need to keep
+         * that until free_attstatsslot.  Otherwise, all the useful info is in
+         * sslot->values[], so we can free the array object immediately.
+         */
+        if (!typeForm->typbyval)
+            sslot->values_arr = statarray;
+        else
+            pfree(statarray);
+ 
+        ReleaseSysCache(typeTuple);
+    }
+ 
+    if (flags & ATTSTATSSLOT_NUMBERS) {
+        val = SysCacheGetAttr(STATRELATTINH, statstuple, Anum_pg_statistic_stanumbers1 + i, &isnull);
+        if (isnull)
+            elog(ERROR, "stanumbers is null");
+ 
+        /*
+         * Detoast the array if needed, and in any case make a copy that's
+         * under control of this AttStatsSlot.
+         */
+        statarray = DatumGetArrayTypePCopy(val);
+        narrayelem = ARR_DIMS(statarray)[0];
+ 
+        /* Give caller a pointer directly into the statarray */
+        sslot->numbers = (float4 *)ARR_DATA_PTR(statarray);
+        sslot->nnumbers = narrayelem;
+ 
+        /* We'll free the statarray in free_attstatsslot */
+        sslot->numbers_arr = statarray;
+    }
+ 
+    return true;
+}
+ 
+void spq_free_attstatsslot(AttStatsSlot *sslot)
+{
+    /* The values[] array was separately palloc'd by deconstruct_array */
+    if (sslot->values)
+        pfree(sslot->values);
+    /* The numbers[] array points into numbers_arr, do not pfree it */
+    /* Free the detoasted array objects, if any */
+    if (sslot->values_arr)
+        pfree(sslot->values_arr);
+    if (sslot->numbers_arr)
+        pfree(sslot->numbers_arr);
+}
+#endif

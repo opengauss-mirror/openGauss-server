@@ -939,6 +939,10 @@ typedef struct knl_t_shemem_ptr_context {
     struct HTAB* undoGroupLinkMap;
     /* Maintain an image of DCF paxos index file */
     struct DCFData *dcfData;
+#ifdef USE_SPQ
+    /* shared memory hash table holding 'shareinput_Xslice_state' entries */
+    HTAB *shareinput_Xslice_hash;
+#endif
 } knl_t_shemem_ptr_context;
 
 typedef struct knl_t_cstore_context {
@@ -3559,6 +3563,9 @@ typedef struct knl_thrd_context {
     knl_t_dms_context dms_cxt;
     knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
+#ifdef USE_SPQ
+    knl_t_spq_context spq_ctx;
+#endif
     knl_t_dms_auxiliary_context dms_aux_cxt;
 } knl_thrd_context;
 

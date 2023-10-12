@@ -94,6 +94,9 @@
 
 /* Hook for plugins to get control in planner() */
 THR_LOCAL ndp_pushdown_hook_type ndp_pushdown_hook = NULL;
+#ifdef USE_SPQ
+THR_LOCAL spq_planner_hook_type spq_planner_hook = NULL;
+#endif
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -376,6 +379,12 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
     PlannedStmt* result = NULL;
     instr_time starttime;
     double totaltime = 0;
+
+#ifdef USE_SPQ
+    if (spq_planner_hook) {
+        return (*spq_planner_hook) (parse, cursorOptions, boundParams);
+    }
+#endif
 
     INSTR_TIME_SET_CURRENT(starttime);
 
@@ -3525,12 +3534,14 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     wflists,
                     &needSecondLevelAgg,
                     collectiveGroupExpr);
-#ifdef ENABLE_MULTIPLE_NODES
-                /*
-                 * grouping_tlist was modified by build_groupingsets_plan,
-                 * we have to change tlist at the same time.
-                 */
-                tlist = grouping_tlist;
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+                if (IS_SPQ_RUNNING) {
+                    /*
+                     * grouping_tlist was modified by build_groupingsets_plan,
+                     * we have to change tlist at the same time.
+                     */
+                    tlist = grouping_tlist;
+                }
 #endif
                 /* Delete eq class expr after grouping */
                 delete_eq_member(root, tlist, collectiveGroupExpr);

@@ -82,6 +82,9 @@ typedef struct knl_session_attr {
     knl_session_attr_memory attr_memory;
     knl_session_attr_resource attr_resource;
     knl_session_attr_common attr_common;
+#ifdef USE_SPQ
+    knl_session_attr_spq attr_spq;
+#endif
 } knl_session_attr;
 
 typedef struct knl_u_stream_context {
@@ -2660,6 +2663,54 @@ typedef struct knl_u_mot_context {
 } knl_u_mot_context;
 #endif
 
+#ifdef USE_SPQ
+namespace spqdxl {
+    class CDXLMemoryManager;
+    class CDXLTokens;
+}
+ 
+namespace spqos {
+    class CMemoryPool;
+    class CMemoryPoolManager;
+    class CWorkerPoolManager;
+    template <class T, class K>class CCache;
+}
+ 
+namespace spqmd {
+    class IMDCacheObject;
+}
+ 
+namespace spqopt {
+    class CMDKey;
+}
+ 
+ 
+typedef struct knl_u_spq_context {
+    /* dxl information */
+    spqdxl::CDXLMemoryManager* dxl_memory_manager;
+    spqos::CMemoryPool* pmpXerces;
+    spqos::CMemoryPool* pmpDXL;
+    uintptr_t m_ulpInitDXL;
+    uintptr_t m_ulpShutdownDXL;
+    void *m_pstrmap;
+    void *m_pxmlszmap;
+    spqos::CMemoryPool* m_mp;
+    spqdxl::CDXLMemoryManager* m_dxl_memory_manager;
+    /* memory pool manager */
+    spqos::CMemoryPoolManager* m_memory_pool_mgr;
+    /* worker pool manager */
+    spqos::CWorkerPoolManager* m_worker_pool_manager;
+    /* mdcache */
+    spqos::CCache<spqmd::IMDCacheObject *, spqopt::CMDKey *> *m_pcache;
+    uint64 m_ullCacheQuota;
+    int spq_node_all_configs_size;
+    int spq_node_configs_size;
+    MemoryContext spq_worker_context;
+    MemoryContext s_tupSerMemCtxt;
+    int32 spq_max_tuple_chunk_size;
+} knl_u_spq_context;
+#endif
+
 typedef struct knl_u_gtt_context {
     bool gtt_cleaner_exit_registered;
     HTAB* gtt_storage_local_hash;
@@ -2908,6 +2959,10 @@ typedef struct knl_session_context {
 
 #ifdef ENABLE_MOT
     knl_u_mot_context mot_cxt;
+#endif
+
+#ifdef USE_SPQ
+    knl_u_spq_context spq_cxt;
 #endif
 
     /* instrumentation */

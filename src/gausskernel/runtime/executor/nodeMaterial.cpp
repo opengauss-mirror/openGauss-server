@@ -294,6 +294,12 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
     int64 operator_mem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop);
     AllocSetContext* set = (AllocSetContext*)(estate->es_query_cxt);
     set->maxSpaceSize = operator_mem * 1024L + SELF_GENRIC_MEMCTX_LIMITATION;
+#ifdef USE_SPQ
+    if (node->spq_strict)
+        eflags |= EXEC_FLAG_REWIND;
+    if (node->spq_shield_child_from_rescans || IsA(outerPlan((Plan *) node), Stream))
+        eflags |= EXEC_FLAG_REWIND;
+#endif
 
     /*
      * We must have a tuplestore buffering the subplan output to do backward
@@ -369,7 +375,7 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
      * so that it can be run before main plan in ExecutePlan.
      */
     if (IS_PGXC_DATANODE && estate->es_under_subplan && IsA(left_tree, Stream) &&
-        ((Stream*)left_tree)->type == STREAM_BROADCAST)
+        ((Stream*)left_tree)->type == STREAM_BROADCAST && !IS_SPQ_RUNNING)
         estate->es_material_of_subplan = lappend(estate->es_material_of_subplan, (PlanState*)mat_state);
 
     return mat_state;

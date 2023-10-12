@@ -10328,3 +10328,29 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
 
     return NULL;
 }
+
+#ifdef USE_SPQ
+/* ----------------
+ * 		try_table_open - open a heap relation by relation OID
+ *
+ * 		As above, but relation return NULL for relation-not-found
+ * ----------------
+ */
+Relation try_table_open(Oid relationId, LOCKMODE lockmode)
+{
+    Relation r;
+ 
+    r = try_relation_open(relationId, lockmode);
+ 
+    if (!RelationIsValid(r))
+        return NULL;
+ 
+    if (r->rd_rel->relkind == RELKIND_INDEX)
+        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is an index", RelationGetRelationName(r))));
+    else if (r->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is a composite type", RelationGetRelationName(r))));
+ 
+    return r;
+}
+#endif

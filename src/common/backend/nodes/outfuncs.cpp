@@ -578,7 +578,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_INT_FIELD(gather_count);
     WRITE_INT_FIELD(num_nodes);
 
-    if (t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0) {
+    if (t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0 || IS_SPQ_RUNNING) {
 	    for (int i = 0; i < node->num_nodes; i++) {
 	        /* Write the field name only one time and just append the value of each field */
 	        appendStringInfo(str, " :nodesDefinition[%d]", i);
@@ -641,6 +641,11 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     if (t_thrd.proc->workingVersionNum >= SLOW_SQL_VERSION_NUM) {
         WRITE_UINT_FIELD(cause_type);
     }
+#ifdef USE_SPQ
+    WRITE_UINT64_FIELD(spq_session_id);
+    WRITE_INT_FIELD(current_id);
+    WRITE_BOOL_FIELD(is_spq_optmized);
+#endif
 }
 
 /*
@@ -784,6 +789,10 @@ static void _outJoinPlanInfo(StringInfo str, Join* node)
     WRITE_BOOL_FIELD(optimizable);
     WRITE_NODE_FIELD(nulleqqual);
     WRITE_UINT_FIELD(skewoptimize);
+#ifdef USE_SPQ
+    WRITE_BOOL_FIELD(prefetch_inner);
+    WRITE_BOOL_FIELD(is_set_op_join);
+#endif
 }
 
 static void _outPlan(StringInfo str, Plan* node)
@@ -1075,6 +1084,45 @@ static void _outSeqScan(StringInfo str, SeqScan* node)
 
     _outScanInfo(str, (Scan*)node);
 }
+#ifdef USE_SPQ
+static void _outSpqSeqScan(StringInfo str, SpqSeqScan* node)
+{
+    WRITE_NODE_TYPE("SPQSEQSCAN");
+ 
+    _outScanInfo(str, (Scan*)node);
+    WRITE_BOOL_FIELD(isFullTableScan);
+    WRITE_BOOL_FIELD(isAdaptiveScan);
+    WRITE_BOOL_FIELD(isDirectRead);
+}
+ 
+static void _outAssertOp(StringInfo str, const AssertOp *node)
+{
+    WRITE_NODE_TYPE("ASSERTOP");
+    _outPlanInfo(str, (Plan *) node);
+    WRITE_INT_FIELD(errcode);
+    WRITE_NODE_FIELD(errmessage);
+}
+ 
+static void _outShareInputScan(StringInfo str, const ShareInputScan *node)
+{
+    WRITE_NODE_TYPE("SHAREINPUTSCAN");
+ 
+    WRITE_BOOL_FIELD(cross_slice);
+    WRITE_INT_FIELD(share_id);
+    WRITE_INT_FIELD(producer_slice_id);
+    WRITE_INT_FIELD(this_slice_id);
+    WRITE_INT_FIELD(nconsumers);
+ 
+    _outPlanInfo(str, (Plan *) node);
+}
+ 
+static void _outSequence(StringInfo str, const Sequence *node)
+{
+    WRITE_NODE_TYPE("SEQUENCE");
+    _outPlanInfo(str, (Plan *)node);
+    WRITE_NODE_FIELD(subplans);
+}
+#endif
 
 template <typename T>
 static void _outCommonIndexScanPart(StringInfo str, T* node)
@@ -1143,6 +1191,9 @@ static void _outStream(StringInfo str, Stream* node)
     WRITE_INT_FIELD(stream_level);
     WRITE_NODE_FIELD(origin_consumer_nodes);
     WRITE_BOOL_FIELD(is_recursive_local);
+#ifdef USE_SPQ
+    WRITE_INT_FIELD(streamID);
+#endif
 }
 
 /*
@@ -1673,7 +1724,7 @@ static void _outHashJoin(StringInfo str, HashJoin* node)
     WRITE_BOOL_FIELD(isSonicHash);
     out_mem_info(str, &node->mem_info);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_NODE_FIELD(hash_collations);
     }
 #endif
@@ -1702,6 +1753,9 @@ static void _outVecHashAgg(StringInfo str, VecAgg* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_ENUM_FIELD(aggstrategy, AggStrategy);
+#ifdef USE_SPQ
+    WRITE_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     WRITE_INT_FIELD(numCols);
 
     appendStringInfo(str, " :grpColIdx");
@@ -1736,6 +1790,9 @@ static void _outAgg(StringInfo str, Agg* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_ENUM_FIELD(aggstrategy, AggStrategy);
+#ifdef USE_SPQ
+    WRITE_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     WRITE_INT_FIELD(numCols);
 
     appendStringInfo(str, " :grpColIdx");
@@ -1745,7 +1802,7 @@ static void _outAgg(StringInfo str, Agg* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
@@ -1824,7 +1881,7 @@ static void _outGroup(StringInfo str, Group* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
@@ -1858,6 +1915,10 @@ static void _outMaterial(StringInfo str, Material* node)
     _outPlanInfo(str, (Plan*)node);
     WRITE_BOOL_FIELD(materialize_all);
     out_mem_info(str, &node->mem_info);
+#ifdef USE_SPQ
+    WRITE_BOOL_FIELD(spq_strict);
+    WRITE_BOOL_FIELD(spq_shield_child_from_rescans);
+#endif
 }
 
 static void _outSimpleSort(StringInfo str, SimpleSort* node)
@@ -1995,7 +2056,7 @@ static void _outUnique(StringInfo str, Unique* node)
 
     WRITE_GRPOP_FIELD(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(uniq_collations, numCols);
     }
 #endif
@@ -2054,7 +2115,7 @@ static void _outSetOp(StringInfo str, SetOp* node)
 
     WRITE_GRPOP_FIELD(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(dup_collations, numCols);
     }
 #endif
@@ -2408,6 +2469,9 @@ static void _outAggref(StringInfo str, Aggref* node)
     WRITE_BOOL_FIELD(agghas_collectfn);
     WRITE_INT_FIELD(aggstage);
 #endif /* PGXC */
+#ifdef USE_SPQ
+    WRITE_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     WRITE_OID_FIELD(aggcollid);
     WRITE_OID_FIELD(inputcollid);
     WRITE_NODE_FIELD(aggdirectargs);
@@ -3474,7 +3538,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_BITMAPSET_FIELD(lateral_relids);
     WRITE_NODE_FIELD(indexlist);
 #ifndef ENABLE_MULTIPLE_NODES
-    WRITE_NODE_FIELD(statlist);
+    if (!IS_SPQ_RUNNING) {
+        WRITE_NODE_FIELD(statlist);
+    }
 #endif
     WRITE_FLOAT_FIELD(pages, "%.0f");
     WRITE_FLOAT_FIELD(tuples, "%.0f");
@@ -4770,6 +4836,11 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= INDEX_HINT_VERSION_NUM) {
         WRITE_NODE_FIELD(indexhintList);
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_support_spq);
+    }
+#endif
 }
 
 static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)
@@ -6102,6 +6173,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_Plan:
                 _outPlan(str, (Plan*)obj);
                 break;
+#ifdef USE_SPQ
+            case T_Result:
+#endif
             case T_BaseResult:
                 _outResult(str, (BaseResult*)obj);
                 break;
@@ -6144,6 +6218,20 @@ static void _outNode(StringInfo str, const void* obj)
             case T_SeqScan:
                 _outSeqScan(str, (SeqScan*)obj);
                 break;
+#ifdef USE_SPQ
+            case T_SpqSeqScan:
+                _outSpqSeqScan(str, (SpqSeqScan*)obj);
+                break;
+            case T_AssertOp:
+                _outAssertOp(str, (AssertOp*)obj);
+                break;
+            case T_ShareInputScan:
+                _outShareInputScan(str, (ShareInputScan*)obj);
+                break;
+            case T_Sequence:
+                _outSequence(str, (Sequence*)obj);
+                break;
+#endif
 #ifdef PGXC
             case T_RemoteQuery:
                 _outRemoteQuery(str, (RemoteQuery*)obj);
