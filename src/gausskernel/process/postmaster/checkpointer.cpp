@@ -543,7 +543,7 @@ void CheckpointerMain(void)
                 } else {
                     CheckPointBuffers(flags, true);
                 }
-            } else if (!do_restartpoint && !SS_REPLICATION_MAIN_STANBY_NODE) {
+            } else if (!do_restartpoint && !SS_REPLICATION_STANDBY_CLUSTER) {
                 CreateCheckPoint(flags);
                 ckpt_performed = true;
                 if (!bgwriter_first_startup && CheckFpwBeforeFirstCkpt()) {
