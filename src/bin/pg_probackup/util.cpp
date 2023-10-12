@@ -595,9 +595,30 @@ ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog)
 }
 
 bool
+ss_create_if_pg_replication(pgFile* dir, const char* vgdata, const char* vglog)
+{
+    if (pg_strcasecmp(dir->rel_path, "pg_replication") == 0) {
+        char path[MAXPGPATH];
+        errno_t rc = sprintf_s(path, sizeof(path), "%s/%s", vglog, dir->rel_path);
+        securec_check_ss_c(rc, "\0", "\0");
+        char link_path[MAXPGPATH];
+        rc = sprintf_s(link_path, sizeof(link_path), "%s/%s", vgdata, dir->rel_path);
+        securec_check_ss_c(rc, "\0", "\0");
+        dir_create_dir(path, DIR_PERMISSION);
+        if (symlink(path, link_path) < 0) {
+            elog(ERROR, "can not link dss  dir \"%s\" to dss  dir \"%s\": %s", link_path, path,
+                strerror(errno));
+        }
+        return true;
+    } else {
+        return false;
+    }
+}
+
+bool
 ss_create_if_doublewrite(pgFile* dir, const char* vgdata, int instance_id)
 {
-    char ss_doublewrite[MAXPGPATH];;  
+    char ss_doublewrite[MAXPGPATH];
     errno_t rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s%d", "pg_doublewrite", instance_id);
     securec_check_ss_c(rc, "\0", "\0");
     if (pg_strcasecmp(dir->rel_path, ss_doublewrite) == 0) {
