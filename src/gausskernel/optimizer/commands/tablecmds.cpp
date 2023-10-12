@@ -847,6 +847,8 @@ static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, 
 static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
                                                 Oid nspOid, ObjectAddresses* objsMoved, char* newrelname);
 static void check_unsupported_charset_for_column(Oid collation, const char* col_name);
+static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
+                                                Oid nspOid, ObjectAddresses* objsMoved, char* newrelname);
 
 inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 {
