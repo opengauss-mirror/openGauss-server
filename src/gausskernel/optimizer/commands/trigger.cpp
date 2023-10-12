@@ -730,13 +730,13 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
                 }
             }
         } else {
-            values[Anum_pg_trigger_tgordername - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
-            values[Anum_pg_trigger_tgorder - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+            nulls[Anum_pg_trigger_tgordername - 1] = true;
+            nulls[Anum_pg_trigger_tgorder - 1] = true;
         }
     } else {
-        values[Anum_pg_trigger_tgordername - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
-        values[Anum_pg_trigger_tgorder - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
-        values[Anum_pg_trigger_tgtime - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+        nulls[Anum_pg_trigger_tgordername - 1] = true;
+        nulls[Anum_pg_trigger_tgorder - 1] = true;
+        nulls[Anum_pg_trigger_tgtime - 1] = true;
     }
     if (stmt->args) {
         ListCell* le = NULL;
@@ -1699,13 +1699,12 @@ void RelationBuildTriggers(Relation relation)
             char* trigname = DatumGetCString(DirectFunctionCall1(nameout, NameGetDatum(&pg_trigger->tgname)));
             char* tgordername = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgordername, tgrel->rd_att, &isnull));
             char* tgorder = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgorder, tgrel->rd_att, &isnull));
-            char* tgtime = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgtime, tgrel->rd_att, &isnull));
-            if (strcmp(tgorder, "follows") == 0) {
+            if (!isnull && strcmp(tgorder, "follows") == 0) {
                 tgNameInfo->follows_name = tgordername;
                 tgNameInfo->precedes_name = NULL;
                 is_has_follows = true;
             }
-            else if (strcmp(tgorder, "precedes") == 0) {
+            else if (!isnull && strcmp(tgorder, "precedes") == 0) {
                 tgNameInfo->follows_name = NULL;
                 tgNameInfo->precedes_name = tgordername;
                 is_has_follows = true;
@@ -1714,8 +1713,9 @@ void RelationBuildTriggers(Relation relation)
                 tgNameInfo->follows_name = NULL;
                 tgNameInfo->precedes_name = NULL;
             }
+            char* tgtime = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgtime, tgrel->rd_att, &isnull));
             tgNameInfo->trg_name = trigname;
-            tgNameInfo->time = tgtime;
+            tgNameInfo->time = isnull ? NULL:tgtime;
         }
         build = &(triggers[numtrigs]);
         build->tgoid = HeapTupleGetOid(htup);
@@ -1787,7 +1787,7 @@ void RelationBuildTriggers(Relation relation)
                 TriggerNameInfo temp = tgNameInfos[end+gap];
                 Trigger tgtmp = triggers[end+gap];
                 while (end >= 0) {
-                    if (strcmp(tmp, tgNameInfos[end].time)<0) {
+                    if (tmp != NULL && tgNameInfos[end].time != NULL && strcmp(tmp, tgNameInfos[end].time)<0) {
                         tgNameInfos[end+gap] = tgNameInfos[end];
                         triggers[end+gap] = triggers[end];
                         end -= gap;

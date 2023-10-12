@@ -3193,9 +3193,11 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
     }
 
     if (tgfbody != NULL) {
-        char* tgordername = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgordername, tgrel->rd_att, &isnull));
-        char* tgorder = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgorder, tgrel->rd_att, &isnull));
-        if (tgorder != NULL)
+        bool isordernull = false;
+        bool isordernamenull = false;
+        char* tgordername = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgordername, tgrel->rd_att, &isordernamenull));
+        char* tgorder = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgorder, tgrel->rd_att, &isordernull));
+        if (!isordernull && !isordernamenull)
             appendStringInfo(&buf, "%s %s ", tgorder, tgordername);
 
         appendStringInfo(&buf, "%s;", tgfbody);
