@@ -21,7 +21,9 @@ include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 
 
-override CPPFLAGS := -DFRONTEND $(CPPFLAGS)
+override CPPFLAGS := -DFRONTEND $(CPPFLAGS)  -fstack-protector-all -Wl,-z,relro,-z,now
+override LDFLAGS += -Wl,-z,relro,-z,now
+override CFLAGS += -fstack-protector-all
 
 xlogreader.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/transam/%
 	rm -f $@ && $(LN_S) $< .
