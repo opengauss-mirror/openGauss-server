@@ -9332,11 +9332,11 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "CASE ");
             if (TabExists(fout, "pg_catalog", "pg_set")) {
                 appendPQExpBuffer(q,
-                    "WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' ");
+                    "WHEN t.typtype = 's' THEN concat('set(', (select pg_catalog.string_agg(concat('''', setlabel, ''''), ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid), ')') ");
 
             }
             appendPQExpBuffer(q,
-                "WHEN t.typtype = 'e' THEN 'enum(' || (select pg_catalog.string_agg(''''||enumlabel||'''', ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid) || ')' ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
+                "WHEN t.typtype = 'e' THEN concat('enum(', (select pg_catalog.string_agg(concat('''', enumlabel, ''''), ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid), ')') ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
                 "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
                 "CASE WHEN a.attcollation <> t.typcollation "
