@@ -797,7 +797,11 @@ static bool dw_batch_file_recycle(dw_batch_file_context *cxt, uint16 pages_to_wr
         wait_dw_page_finish_flush(cxt->id);
     }
 
-    PageWriterSync();
+    if (USE_CKPT_THREAD_SYNC) {
+        ProcessSyncRequests();
+    } else {
+        PageWriterSync();
+    }
 
     if (trunc_file) {
         if (!LWLockConditionalAcquire(cxt->flush_lock, LW_EXCLUSIVE)) {
