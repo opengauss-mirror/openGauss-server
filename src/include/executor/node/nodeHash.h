@@ -29,6 +29,10 @@ extern HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool k
 extern void ExecHashTableDestroy(HashJoinTable hashtable);
 extern void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot* slot, uint32 hashvalue, int planid, int dop,
     Instrumentation* instrument = NULL);
+#ifdef USE_SPQ
+extern bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* hashkeys, bool outer_tuple,
+    bool keep_nulls, uint32* hashvalue, bool *hashkeys_null);
+#endif
 extern bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* hashkeys, bool outer_tuple,
     bool keep_nulls, uint32* hashvalue);
 extern void ExecHashGetBucketAndBatch(HashJoinTable hashtable, uint32 hashvalue, int* bucketno, int* batchno);

@@ -6850,6 +6850,7 @@ void WLMInitQueryPlan(QueryDesc* queryDesc, bool isQueryDesc)
 #else
     if (!StreamThreadAmI() &&
 #endif
+        !IS_SPQ_EXECUTOR &&
         u_sess->attr.attr_resource.enable_resource_track &&
         u_sess->exec_cxt.need_track_resource && t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan == NULL && isQueryDesc) {

@@ -1445,12 +1445,14 @@ static void start_ss_node(int i)
 
     (void)snprintf(buf,
                    sizeof(buf),
-                   SYSTEMQUOTE "\"%s/gaussdb\" -p %d -D \"%s/%s\" -c log_statement=all -c logging_collector=true -c "
+                   SYSTEMQUOTE "\"%s/gaussdb\" -p %d -D \"%s/%s\" -c comm_sctp_port=%d -c comm_control_port=%d -c log_statement=all -c logging_collector=true -c "
                                "\"listen_addresses=%s\" & > \"%s/log/postmaster_%s.log\" 2>&1" SYSTEMQUOTE,
                                bindir,
                                port_number,
                                temp_install,
                                data_folder,
+                               port_number + 10,
+                               port_number + 20,
                                hostname ? hostname : "*",
                                outputdir,
                                data_folder);
@@ -5466,7 +5468,7 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
     return;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 224
+#define BASE_GLOBAL_VARIABLE_NUM 229
 
 #define CMAKE_CMD_BUF_LEN 1000
 
@@ -5515,7 +5517,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1393
+#define BASE_PGXC_LIKE_MACRO_NUM 1396
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 

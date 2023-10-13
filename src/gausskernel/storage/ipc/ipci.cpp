@@ -84,6 +84,10 @@
 #include "storage/cfs/cfs_buffers.h"
 #include "ddes/dms/ss_txnstatus.h"
 
+#ifdef USE_SPQ
+#include "executor/node/nodeShareInputScan.h"
+#endif
+
 /* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
 pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -149,6 +153,9 @@ Size ComputeTotalSizeOfShmem()
         size = add_size(size, SInvalShmemSize());
         size = add_size(size, PMSignalShmemSize());
         size = add_size(size, ProcSignalShmemSize());
+#ifdef USE_SPQ
+        size = add_size(size, ShareInputShmemSize());
+#endif
         size = add_size(size, CheckpointerShmemSize());
         size = add_size(size, PageWriterShmemSize());
         size = add_size(size, AutoVacuumShmemSize());
@@ -354,7 +361,9 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      */
     PMSignalShmemInit();
     ProcSignalShmemInit();
-
+#ifdef USE_SPQ
+    ShareInputShmemInit();
+#endif
     {
         CheckpointerShmemInit();
         CBMShmemInit();

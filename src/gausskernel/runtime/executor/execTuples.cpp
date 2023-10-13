@@ -442,7 +442,7 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
     slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
     slot->tts_flags &= ~TTS_FLAG_SHOULDFREEMIN;
 
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ) 
     if (TTS_SHOULDFREE_ROW(slot)) {
         pfree_ext(slot->tts_dataRow);
     }

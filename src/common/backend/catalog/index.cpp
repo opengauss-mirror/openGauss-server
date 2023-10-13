@@ -90,11 +90,21 @@
 #include "utils/rel.h"
 #include "pgxc/redistrib.h"
 
+#ifdef USE_SPQ
+#include "access/spq_btbuild.h"
+#endif
+
 #ifdef ENABLE_MOT
 #include "foreign/fdwapi.h"
 #endif
 
-
+#ifdef USE_SPQ
+void spq_validate_index_heapscan(Relation heapRelation,
+                                 Relation indexRelation,
+                                 IndexInfo* indexInfo,
+                                 Snapshot snapshot,
+                                 v_i_state* state);
+#endif
 /* non-export function prototypes */
 static bool relationHasPrimaryKey(Relation rel);
 static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* indexInfo, List* indexColNames,
@@ -4823,7 +4833,12 @@ void validate_index(Oid heapId, Oid indexId, Snapshot snapshot, bool isPart)
     /*
      * Now scan the heap and "merge" it with the index
      */
-    tableam_index_validate_scan(heapRelation, indexRelation, indexInfo, snapshot, &state);
+#ifdef USE_SPQ
+    if (enable_spq_btbuild_cic(indexRelation)) {
+        spq_validate_index_heapscan(heapRelation, indexRelation, indexInfo, snapshot, &state);
+    } else
+#endif
+        tableam_index_validate_scan(heapRelation, indexRelation, indexInfo, snapshot, &state);
 
     /* Done with tuplesort object */
     tuplesort_end(state.tuplesort);
@@ -7494,3 +7509,155 @@ void cbi_set_enable_clean(Relation rel)
     heap_close(pg_class, RowExclusiveLock);
     
 }
+
+
+#ifdef USE_SPQ
+/*
+ *  spq_validate_index_heapscan - second table scan for concurrent index build
+ *
+ *  This has much code in common with validate_index_heapscan, scan use SPI module.
+ *  expressions and predicates index not supported.
+ */
+void spq_validate_index_heapscan(
+    Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo, Snapshot snapshot, v_i_state* state)
+{
+    bool in_index[MaxHeapTuplesPerPage];
+    OffsetNumber root_offsets[MaxHeapTuplesPerPage];
+
+    /* state variables for the merge */
+    ItemPointer indexcursor = NULL;
+    bool tuplesort_empty = false;
+
+    SPIPlanPtr	plan;
+    Portal		portal;
+
+    bool old_enable_spq = u_sess->attr.attr_spq.gauss_enable_spq;
+    bool old_spq_enable_index_scan = u_sess->attr.attr_spq.spq_optimizer_enable_indexscan;
+    bool old_spq_enable_indexonly_scan = u_sess->attr.attr_spq.spq_optimizer_enable_indexonlyscan;
+
+    /*
+     * sanity checks
+     */
+    Assert(OidIsValid(indexRelation->rd_rel->relam));
+
+    StringInfo sql = makeStringInfo();
+
+    /* generate sql */
+    {
+        StringInfo attrs = makeStringInfo();     /* attrs in SELECT clause */
+        TupleDesc tupdes = RelationGetDescr(indexRelation);
+        int natts = tupdes->natts;
+        Assert(natts > 0);
+        Form_pg_attribute lastattr = TupleDescAttr(tupdes, natts-1);
+
+        for (int i = 0; i < natts -1; i++) {
+            Form_pg_attribute att = TupleDescAttr(tupdes, i);
+            appendStringInfo(attrs, "%s, ", NameStr(att->attname));
+        }
+        appendStringInfo(attrs, "%s", NameStr(lastattr->attname));
+        appendStringInfo(sql, "select ctid %s from %s order by ctid", attrs->data,
+                         RelationGetRelationName(heapRelation));
+    }
+
+    u_sess->attr.attr_spq.gauss_enable_spq = true;
+    u_sess->attr.attr_spq.spq_optimizer_enable_indexscan = false;
+    u_sess->attr.attr_spq.spq_optimizer_enable_indexonlyscan = false;
+
+    SPI_connect();
+
+    if ((plan = SPI_prepare(sql->data, 0, NULL)) == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_SPI_PREPARE_FAILURE),
+                 errmsg("SPI_prepare(\"%s\") failed: %s", sql->data, SPI_result_code_string(SPI_result))));
+
+    if ((portal = SPI_cursor_open(NULL, plan, NULL, NULL, true)) == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_SPI_CURSOR_OPEN_FAILURE),
+                 errmsg("SPI_cursor_open(\"%s\") failed: %s", sql->data, SPI_result_code_string(SPI_result))));
+
+    u_sess->attr.attr_spq.gauss_enable_spq = old_enable_spq;
+    u_sess->attr.attr_spq.spq_optimizer_enable_indexscan = old_spq_enable_index_scan;
+    u_sess->attr.attr_spq.spq_optimizer_enable_indexonlyscan = old_spq_enable_indexonly_scan;
+
+    SPI_cursor_fetch(portal, true, SPQ_BATCH_SIZE);
+    while (SPI_processed > 0) {
+        uint64 i;
+        for (i = 0; i < SPI_processed; i++) {
+            BlockNumber	root_blkno = InvalidBlockNumber;
+            OffsetNumber root_offnum;
+            Datum values[INDEX_MAX_KEYS + 1];
+            bool nulls[INDEX_MAX_KEYS + 1];
+            ItemPointer heapcursor;
+            ItemPointerData rootTuple;
+            HeapTuple tup = SPI_tuptable->vals[i];
+
+            heap_deform_tuple(tup, SPI_tuptable->tupdesc, values, nulls);
+
+            /* ctid for current heap tuple */
+            heapcursor = (ItemPointer)values[0];
+            rootTuple = *heapcursor;
+            root_blkno = ItemPointerGetBlockNumber(heapcursor);
+            root_offnum = ItemPointerGetOffsetNumber(heapcursor);
+            if (HeapTupleIsHeapOnly(tup)) {
+                root_offnum = root_offsets[root_offnum - 1];
+                Assert(OffsetNumberIsValid(root_offnum));
+                ItemPointerSetOffsetNumber(&rootTuple, root_offnum);
+            }
+            CHECK_FOR_INTERRUPTS();
+
+            /*
+             * "merge" by skipping through the index tuples until we find or pass
+             * the current root tuple.
+             */
+            while (!tuplesort_empty &&
+                   (!indexcursor ||
+                    ItemPointerCompare(indexcursor, &rootTuple) < 0)) {
+                Datum ts_val;
+                bool ts_isnull = false;
+
+                if (indexcursor) {
+                    /*
+                     * Remember index items seen earlier on the current heap page
+                     */
+                    if (ItemPointerGetBlockNumber(indexcursor) == root_blkno)
+                        in_index[ItemPointerGetOffsetNumber(indexcursor) - 1] = true;
+                    pfree(indexcursor);
+                    indexcursor = NULL;
+                }
+
+                tuplesort_empty = !tuplesort_getdatum(state->tuplesort, true,
+                                                      &ts_val, &ts_isnull);
+                Assert(tuplesort_empty || !ts_isnull);
+                indexcursor = (ItemPointer)DatumGetPointer(ts_val);
+            }
+
+            /*
+             * If the tuplesort has overshot *and* we didn't see a match earlier,
+             * then this tuple is missing from the index, so insert it.
+             */
+            if ((tuplesort_empty ||
+                 ItemPointerCompare(indexcursor, &rootTuple) > 0) &&
+                !in_index[root_offnum - 1]) {
+                (void)index_insert(indexRelation,
+                                   values + 1,
+                                   nulls + 1,
+                                   &rootTuple,
+                                   heapRelation,
+                                   indexInfo->ii_Unique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO);
+
+                state->tups_inserted += 1;
+            }
+        }
+        SPI_freetuptable(SPI_tuptable);
+        SPI_cursor_fetch(portal, true, SPQ_BATCH_SIZE);
+    }
+
+    SPI_cursor_close(portal);
+    SPI_freeplan(plan);
+    SPI_finish();
+
+    /* These may have been pointing to the now-gone estate */
+    indexInfo->ii_ExpressionsState = NIL;
+    indexInfo->ii_PredicateState = NIL;
+}
+#endif

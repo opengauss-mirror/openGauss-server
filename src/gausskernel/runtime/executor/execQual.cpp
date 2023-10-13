@@ -1978,7 +1978,7 @@ static TupleDesc get_cached_rowtype(Oid type_id, int32 typmod, TupleDesc* cache_
 /*
 * Callback function to release a tupdesc refcount at expression tree shutdown
 */
-static void ShutdownTupleDescRef(Datum arg)
+void ShutdownTupleDescRef(Datum arg)
 {
    TupleDesc* cache_field = (TupleDesc*)DatumGetPointer(arg);
 
@@ -7232,3 +7232,31 @@ void ExecCopyDataToDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* source_cu
    cursor_var->value = Int32GetDatum(source_cursor->row_count);
    cursor_var->isnull = source_cursor->null_open;
 }
+
+#ifdef USE_SPQ
+bool IsJoinExprNull(List *joinExpr, ExprContext *econtext)
+{
+    ListCell *lc;
+    bool joinkeys_null = true;
+ 
+    Assert(joinExpr != nullptr);
+ 
+    foreach(lc, joinExpr) {
+        ExprState *keyexpr = (ExprState *) lfirst(lc);
+        bool isNull = false;
+ 
+        /*
+         * Evaluate the current join attribute value of the tuple
+         */
+        ExecEvalExpr(keyexpr, econtext, &isNull, NULL);
+ 
+        if (!isNull) {
+            /* Found at least one non-null join expression, we're done */
+            joinkeys_null = false;
+            break;
+        }
+    }
+ 
+    return joinkeys_null;
+}
+#endif

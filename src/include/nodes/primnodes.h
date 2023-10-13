@@ -285,6 +285,9 @@ typedef struct Aggref {
     bool agghas_collectfn; /* is collection function available */
     int8 aggstage;         /* in which stage this aggref is in */
 #endif                     /* PGXC */
+#ifdef USE_SPQ
+    AggSplit aggsplittype;  /* expected agg-splitting mode of parent Agg */
+#endif
     List* aggdirectargs;   /* direct arguments, if an ordered-set agg */
     List* args;            /* arguments and sort expressions */
     List* aggorder;        /* ORDER BY (list of SortGroupClause) */
@@ -352,6 +355,9 @@ typedef struct WindowFunc {
     bool winstar;    /* TRUE if argument list was really '*' */
     bool winagg;     /* is function a simple aggregate? */
     int location;    /* token location, or -1 if unknown */
+#ifdef USE_SPQ
+    bool windistinct;	/* TRUE if it's agg(DISTINCT ...) */
+#endif
 } WindowFunc;
 
 /*
@@ -600,6 +606,9 @@ typedef enum SubLinkType {
     ROWCOMPARE_SUBLINK,
     EXPR_SUBLINK,
     ARRAY_SUBLINK,
+#ifdef USE_SPQ
+    NOT_EXISTS_SUBLINK, /* spq uses NOT_EXIST_SUBLINK to implement correlated left anti semijoin. */
+#endif
     CTE_SUBLINK /* for SubPlans only */
 } SubLinkType;
 
@@ -678,6 +687,10 @@ typedef struct SubPlan {
     /* Estimated execution costs: */
     Cost startup_cost;  /* one-time setup cost */
     Cost per_call_cost; /* cost for each subplan evaluation */
+#ifdef USE_SPQ
+    bool is_initplan; /* SPQ: Is the subplan implemented as an initplan? */
+    bool is_multirow; /* SPQ: May the subplan return more than one row? */
+#endif
 } SubPlan;
 
 /*

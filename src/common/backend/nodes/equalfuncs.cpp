@@ -223,6 +223,9 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
     COMPARE_SCALAR_FIELD(agghas_collectfn);
     COMPARE_SCALAR_FIELD(aggstage);
 #endif /* PGXC */
+#ifdef USE_SPQ
+    COMPARE_SCALAR_FIELD(aggsplittype);
+#endif
     COMPARE_SCALAR_FIELD(aggcollid);
     COMPARE_SCALAR_FIELD(inputcollid);
     COMPARE_NODE_FIELD(aggdirectargs);

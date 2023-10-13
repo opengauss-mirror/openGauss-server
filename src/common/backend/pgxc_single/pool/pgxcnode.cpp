@@ -134,13 +134,310 @@ valid_pgxc_handle(PGXCNodeHandle *pgxc_handle)
                 (errcode(ERRCODE_OUT_OF_MEMORY),
                  errmsg("invalid input/output buffer in node handle")));
 }
-
+#ifdef USE_SPQ
+void init_spq_handle(PGXCNodeHandle *pgxc_handle)
+{
+    /*
+     * Socket descriptor is small non-negative integer,
+     * Indicate the handle is not initialized yet
+     */
+    pgxc_handle->sock = NO_SOCKET;
+    pgxc_handle->state = DN_CONNECTION_STATE_IDLE;
+ 
+    /* Initialise buffers */
+    pgxc_handle->error = NULL;
+    pgxc_handle->outSize = 16 * 1024;
+    pgxc_handle->outBuffer = (char *)palloc0(pgxc_handle->outSize);
+    pgxc_handle->inSize = 16 * 1024;
+    pgxc_handle->inBuffer = (char *)palloc0(pgxc_handle->inSize);
+    pgxc_handle->combiner = NULL;
+    pgxc_handle->stream = NULL;
+    pgxc_handle->inStart = 0;
+    pgxc_handle->inEnd = 0;
+    pgxc_handle->inCursor = 0;
+    pgxc_handle->outEnd = 0;
+    pgxc_handle->outNum = 0;
+ 
+    /* for sctp connection */
+    pgxc_handle->listenPort = -1;
+    pgxc_handle->tcpCtlPort = -1;
+ 
+    pgxc_handle->remoteNodeName = NULL;
+    pgxc_handle->nodeIdx = -1;
+ 
+    pgxc_handle->is_logic_conn = false;
+    pgxc_handle->gsock = GS_INVALID_GSOCK;
+ 
+    pgxc_handle->pg_conn = NULL;
+ 
+    valid_pgxc_handle(pgxc_handle);
+}
+void pgxc_spqnode_init(PGXCNodeHandle *handle, int sock)
+{
+    handle->sock = sock;
+    handle->transaction_status = 'I';
+    handle->state = DN_CONNECTION_STATE_IDLE;
+    handle->combiner = NULL;
+    handle->stream = NULL;
+#ifdef DN_CONNECTION_DEBUG
+    handle->have_row_desc = false;
+#endif
+    pfree_ext(handle->error);
+    handle->outEnd = 0;
+    handle->inStart = 0;
+    handle->inEnd = 0;
+    handle->inCursor = 0;
+ 
+    handle->is_logic_conn = false;
+    handle->gsock = GS_INVALID_GSOCK;
+ 
+    handle->pg_conn = NULL;
+}
+ 
+bool spq_node_receive(const int conn_count, PGXCNodeHandle **connections, struct timeval *timeout)
+{
+    int i;
+    bool logic_conn_ret = NO_ERROR_OCCURED;
+    bool physic_conn_ret = NO_ERROR_OCCURED;
+    int physic_conn_count = 0;
+    int logic_conn_count = 0;
+    int time_out = -1;
+    PGXCNodeHandle *tmp_connect = NULL;
+ 
+    pgxc_palloc_net_ctl(conn_count);
+ 
+    /*
+     * as the connection between CN and CN is still physical.
+     * we need to seperate physical and logic connection and call different function
+     */
+    if (g_instance.attr.attr_storage.comm_cn_dn_logic_conn) {
+        for (i = 0; i < conn_count; i++) {
+            /*
+             * for physical channel always put them in the front of connections list
+             * so just swith the connection between physical conn and the first logic conn
+             */
+            if (!connections[i]->is_logic_conn) {
+                tmp_connect = connections[physic_conn_count];
+                connections[physic_conn_count] = connections[i];
+                connections[i] = tmp_connect;
+                physic_conn_count++;
+            } else {
+                logic_conn_count++;
+            }
+        }
+    } else {
+        physic_conn_count = conn_count;
+    }
+ 
+    if (physic_conn_count != 0) {
+        physic_conn_ret = datanode_receive_from_physic_conn(physic_conn_count, connections, timeout);
+    }
+ 
+    if (logic_conn_count != 0) {
+        if (timeout != NULL)
+            time_out = (int)timeout->tv_sec;
+ 
+        /*
+         * as the physical conn has been put in the front
+         * so the first logic conn is place in connections[physic_conn_count]
+         */
+        logic_conn_ret =
+            datanode_receive_from_logic_conn(logic_conn_count, &connections[physic_conn_count], NULL, time_out);
+    }
+ 
+    /* anyone is ERROR_OCCURED, return ERROR_OCCURED. */
+    return logic_conn_ret || physic_conn_ret;
+}
+static bool IsExistMsgBuffered(const int connCount, PGXCNodeHandle **connections)
+{
+    bool isMsgBuffered = false;
+    for (int i = 0; i < connCount; i++) {
+        if (HAS_MESSAGE_BUFFERED(connections[i])) {
+            isMsgBuffered = true;
+            break;
+        }
+    }
+    return isMsgBuffered;
+}
+ 
+static bool IsFinishedSend(int idx, PGXCNodeHandle **connections)
+{
+    if (connections[idx]->state == DN_CONNECTION_STATE_IDLE || HAS_MESSAGE_BUFFERED(connections[idx])) {
+        return true;
+    }
+    return false;
+}
+int spq_node_send_query(PGXCNodeHandle *handle, const char *query, bool isPush, bool isCreateSchemaPush, 
+    bool trigger_ship, bool check_gtm_mode, const char *compressedPlan, int cLen)
+{
+    int strLen;
+    int msgLen;
+    char *tmpQuery = (char *)query;
+    errno_t ss_rc = 0;
+ 
+    /* Invalid connection state, return error */
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        return EOF;
+ 
+    if (unlikely(query == NULL)) {
+        ereport(ERROR,
+                (errmodule(MOD_EXECUTOR),
+                 errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                 errmsg("Input query should not be NULL when send.")));
+    }
+ 
+    /* The message which includes compressed plan is typed "Z". */
+    if ('Z' == tmpQuery[0]) {
+        int nodeId = 1;
+        int oLen = 0;
+        int cLen_n32 = 0;
+ 
+        if (IS_PGXC_COORDINATOR)
+            nodeId = PGXCNodeGetNodeId(handle->nodeoid, PGXC_NODE_DATANODE);  // start from 0
+        else
+            /* DWS DN sends ... to CN of the compute pool if run here. */
+            nodeId = u_sess->pgxc_cxt.PGXCNodeId;
+ 
+        oLen = strlen(tmpQuery);
+        // Four integer values(msgLen, nodeId, oLen, cLen) and the length of compressed plan.
+        msgLen = (4 * sizeof(int)) + cLen;
+ 
+        // msgType + msgLen
+        ensure_out_buffer_capacity(1 + msgLen, handle);
+ 
+        Assert(handle->outBuffer != NULL);
+        handle->outBuffer[handle->outEnd++] = 'Z';
+        msgLen = htonl(msgLen);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msgLen, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        nodeId = htonl(nodeId);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &nodeId, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        oLen = htonl(oLen);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &oLen, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        cLen_n32 = htonl(cLen);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &cLen_n32, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, compressedPlan, cLen);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += cLen;
+    }
+    /*
+     * @hdfs
+     * the message which includes sql sentances + information is typed "h"
+     */
+    else if ('h' == tmpQuery[0]) {
+        int nodeId = 1;
+ 
+        if (IS_PGXC_COORDINATOR)
+            nodeId = PGXCNodeGetNodeId(handle->nodeoid, PGXC_NODE_DATANODE);  // start from 0
+        else
+            /* DWS DN sends ... to CN of the compute pool if run here. */
+            nodeId = u_sess->pgxc_cxt.PGXCNodeId;
+        strLen = strlen(query) + 1;
+        /* size + strlen */
+        msgLen = 4 + strLen + 4;  // the extra 4 byte is for pgxc node id
+ 
+        /* msgType + msgLen */
+        ensure_out_buffer_capacity(1 + msgLen, handle);
+        Assert(handle->outBuffer != NULL);
+        handle->outBuffer[handle->outEnd++] = 'h';
+        tmpQuery++;
+        strLen--;
+        msgLen--;
+        msgLen = htonl(msgLen);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msgLen, 4);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        nodeId = htonl(nodeId);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &nodeId, 4);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, tmpQuery, strLen);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += strLen;
+    }  else {
+        if (check_gtm_mode && (t_thrd.proc->workingVersionNum >= 92012))
+            pgxc_node_send_gtm_mode(handle);
+        strLen = strlen(query) + 1;
+        /* size + strlen */
+        msgLen = 4 + strLen;
+ 
+        /* msgType + msgLen, If trigger is being shipped to DN. */
+        if (trigger_ship) {
+            ensure_out_buffer_capacity(2 + msgLen, handle);
+            handle->outBuffer[handle->outEnd++] = 'a';
+        } else {
+            ensure_out_buffer_capacity(1 + msgLen, handle);
+        }
+        Assert(handle->outBuffer != NULL);
+        handle->outBuffer[handle->outEnd++] = 'Q';
+        msgLen = htonl(msgLen);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msgLen, 4);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, tmpQuery, strLen);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += strLen;
+    }
+ 
+    if (isPush || isCreateSchemaPush)
+        pgxc_node_send_popschema(handle, isPush);
+ 
+    handle->state = DN_CONNECTION_STATE_QUERY;
+ 
+    return pgxc_node_flush(handle);
+}
+/*
+ * Send the Command ID down to the PGXC node
+ */
+int spq_node_send_cmd_id(PGXCNodeHandle *handle, CommandId cid)
+{
+    int msglen = CMD_ID_MSG_LEN;
+    int i32;
+ 
+    /* No need to send command ID if its sending flag is not enabled.
+     * Ignore sending flag if acceleration_with_compute_pool is enabled.
+     */
+    if (!IsSendCommandId() && !u_sess->attr.attr_sql.acceleration_with_compute_pool)
+        return 0;
+ 
+    /* Invalid connection state, return error */
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        return EOF;
+ 
+    errno_t ss_rc = 0;
+    /* msgType + msgLen */
+    ensure_out_buffer_capacity(1 + msglen, handle);
+    Assert(handle->outBuffer != NULL);
+    handle->outBuffer[handle->outEnd++] = 'M';
+    msglen = htonl(msglen);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+    i32 = htonl(cid);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &i32, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+ 
+    return 0;
+}
+#endif
 /*
  * Initialize PGXCNodeHandle struct
  */
 void
 init_pgxc_handle(PGXCNodeHandle *pgxc_handle)
 {
+#ifdef USE_SPQ
+	return init_spq_handle(pgxc_handle);
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -1388,15 +1685,16 @@ PGXCNodeConnected(NODE_CONNECTION *conn)
  */
 void pgxc_node_free(PGXCNodeHandle *handle)
 {
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined ENABLE_MULTIPLE_NODES) && (!defined USE_SPQ)
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 	return;
 #else
-
-	close(handle->sock);
-	handle->sock = NO_SOCKET;
-
+    if (handle->sock >= 0) {
+        close(handle->sock);
+        handle->sock = NO_SOCKET;
+    }
+    handle->gsock = GS_INVALID_GSOCK;
 #endif
 }
 
@@ -1458,6 +1756,10 @@ pgxc_node_all_free(void)
 void
 pgxc_node_init(PGXCNodeHandle *handle, int sock)
 {
+#ifdef USE_SPQ
+    return pgxc_spqnode_init(handle,sock);
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -1895,6 +2197,10 @@ pgxc_node_receive(const int conn_count,
 							PGXCNodeHandle **connections,
 							struct timeval *timeout, bool ignoreTimeoutWarning)
 {
+#ifdef USE_SPQ
+    return spq_node_receive(conn_count, connections, timeout);
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -2150,7 +2456,198 @@ retry:
 	pgstat_reset_waitStatePhase(oldStatus, oldPhase);
 	return NO_ERROR_OCCURED;
 }
-
+#ifdef USE_SPQ
+static bool datanode_read_data_from_logic_conn(
+    PGXCNodeHandle **connections, StreamNetCtl *ctl, int target, int nfds, int waitNodeId, int timeout)
+{
+    int i, retval, error_code;
+    int *datamarks = NULL;
+    int *poll2conn = NULL;
+    gsocket *gs_sock = NULL;
+ 
+    /*
+     * for logic connection between cn and dn, we do not have StreamNetCtl
+     * so null pointer in this case. we just use local variable list to save the
+     * datamarks and gs_sock
+     *
+     */
+    if (ctl != NULL) {
+        datamarks = ctl->layer.sctpLayer.datamarks;
+        poll2conn = ctl->layer.sctpLayer.poll2conn;
+        gs_sock = ctl->layer.sctpLayer.gs_sock;
+    } else {
+        datamarks = t_thrd.pgxc_cxt.pgxc_net_ctl->datamarks;
+        poll2conn = t_thrd.pgxc_cxt.pgxc_net_ctl->poll2conn;
+        gs_sock = t_thrd.pgxc_cxt.pgxc_net_ctl->gs_sock;
+    }
+ 
+    /* for CN pgstat use nodeoid and for DN pgstat use nodeIdx. */
+    WaitStatePhase oldPhase = pgstat_report_waitstatus_phase(PHASE_NONE, true);
+    WaitState oldStatus = pgstat_report_waitstatus_comm(STATE_WAIT_NODE,
+        IS_PGXC_COORDINATOR ? connections[target]->nodeoid : connections[target]->nodeIdx,
+        nfds,
+        waitNodeId,
+        global_node_definition ? global_node_definition->num_nodes : -1);
+ 
+retry:
+ 
+    NetWorkTimePollStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+ 
+    retval = gs_wait_poll(gs_sock, nfds, datamarks, timeout, false);
+ 
+    NetWorkTimePollEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+ 
+    /* no data but wake up, check interrupts then retry */
+    if (retval == 0) {
+        goto retry;
+    } else if (retval == -2) {
+        /* logical connection error because remote */
+        for (i = 0; i < nfds; i++) {
+            if (datamarks[i] == -1) {
+                break;
+            }
+        }
+ 
+        if (i < nfds) {
+            PGXCNodeHandle *conn = connections[poll2conn[i]];
+            error_code = getStreamSocketError(gs_comm_strerror());
+            ereport(WARNING,
+                (errcode(error_code),
+                    errmsg("Failed to read response from node, remote:%s, detail:%s.",
+                        conn->remoteNodeName,
+                        gs_comm_strerror())));
+ 
+            conn->state = DN_CONNECTION_STATE_ERROR_FATAL;
+            add_error_message(conn,
+                "Logic connecion closed by remote,remote %s[%u], detail:%s.",
+                conn->remoteNodeName,
+                conn->nodeoid,
+                gs_comm_strerror());
+ 
+            pgstat_reset_waitStatePhase(oldStatus, oldPhase);
+            return ERROR_OCCURED;
+        } else {
+            error_code = getStreamSocketError(gs_comm_strerror());
+            ereport(WARNING,
+                (errcode(error_code), errmsg("Failed to read response from Datanode, detail:%s", gs_comm_strerror())));
+ 
+            pgstat_reset_waitStatePhase(oldStatus, oldPhase);
+            return ERROR_OCCURED;
+        }
+    } else if (retval == -1) {
+        /* local logical connection error */
+        error_code = getStreamSocketError(gs_comm_strerror());
+        ereport(WARNING,
+            (errcode(error_code), errmsg("Failed to read response from Datanodes, detail:%s", gs_comm_strerror())));
+ 
+        pgstat_reset_waitStatePhase(oldStatus, oldPhase);
+        return ERROR_OCCURED;
+    }
+ 
+    /* read data */
+    for (i = 0; i < nfds; i++) {
+        if (datamarks[i] > 0) {
+            PGXCNodeHandle *conn = connections[poll2conn[i]];
+            int read_status = pgxc_node_read_data_from_logic_conn(conn, true);
+            if (read_status == EOF || read_status < 0) {
+                /* Can not read - no more actions, just discard connection */
+                conn->state = DN_CONNECTION_STATE_ERROR_FATAL;
+                add_error_message(conn,
+                    "Failed to recv on logic connection, remote %s[%u], detail:%s.",
+                    conn->remoteNodeName,
+                    conn->nodeoid,
+                    gs_comm_strerror());
+ 
+                /* Should we read from the other connections before returning? */
+                error_code = getStreamSocketError(gs_comm_strerror());
+                ereport(WARNING,
+                    (errcode(error_code),
+                        errmsg("Failed to read response from node, remote:%s, detail:%s.",
+                            conn->remoteNodeName,
+                            gs_comm_strerror())));
+ 
+                pgstat_reset_waitStatePhase(oldStatus, oldPhase);
+                return ERROR_OCCURED;
+            }
+        }
+    }
+ 
+    pgstat_reset_waitStatePhase(oldStatus, oldPhase);
+    return NO_ERROR_OCCURED;
+}
+ 
+bool datanode_receive_from_logic_conn(
+    const int conn_count, PGXCNodeHandle **connections, StreamNetCtl *ctl, int timeout)
+{
+    int i, nfds = 0;
+    bool is_msg_buffered = false;
+    int *datamarks = NULL;
+    int *poll2conn = NULL;
+    gsocket *gs_sock = NULL;
+    int waitNodeId = -1;
+ 
+    if (conn_count == 0)
+        return NO_ERROR_OCCURED;
+ 
+    /*
+     * for logic connection between cn and dn, we do not have StreamNetCtl
+     * so null pointer in this case. we just use local variable list to save the
+     * datamarks and gs_sock
+     *
+     */
+    if (ctl != NULL) {
+        datamarks = ctl->layer.sctpLayer.datamarks;
+        poll2conn = ctl->layer.sctpLayer.poll2conn;
+        gs_sock = ctl->layer.sctpLayer.gs_sock;
+    } else {
+        datamarks = t_thrd.pgxc_cxt.pgxc_net_ctl->datamarks;
+        poll2conn = t_thrd.pgxc_cxt.pgxc_net_ctl->poll2conn;
+        gs_sock = t_thrd.pgxc_cxt.pgxc_net_ctl->gs_sock;
+    }
+ 
+    int target = 0;
+ 
+    is_msg_buffered = IsExistMsgBuffered(conn_count, connections);
+ 
+    nfds = 0;
+    for (i = 0; i < conn_count; i++) {
+        /* If connection finished sending do not wait input from it */
+        if (IsFinishedSend(i, connections)) {
+            continue;
+        }
+ 
+        /* prepare select params */
+        if (connections[i]->gsock.type != GSOCK_INVALID) {
+            target = i;
+            datamarks[nfds] = 0;
+            gs_sock[nfds] = connections[i]->gsock;
+            poll2conn[nfds] = i;
+            ++nfds;
+        } else {
+            /* flag as bad, it will be removed from the list */
+            connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
+            elog(WARNING,
+                "pgxc_node_stream_receive set DN_CONNECTION_STATE_ERROR_FATAL for node %s",
+                connections[i]->remoteNodeName);
+        }
+    }
+ 
+    /*
+     * Return if we do not have connections to receive input
+     */
+    if (nfds == 0) {
+        if (is_msg_buffered)
+            return NO_ERROR_OCCURED;
+        return ERROR_OCCURED;
+    }
+ 
+    if (IS_PGXC_DATANODE && connections[target]->stream != NULL) {
+        waitNodeId = connections[target]->stream->ss.ps.plan->plan_node_id;
+    }
+ 
+    return datanode_read_data_from_logic_conn(connections, ctl, target, nfds, waitNodeId, timeout);
+}
+#else
 
 /*
  * @Description: For logic connection mode. Wait while at least one of specified connections
@@ -2171,7 +2668,7 @@ datanode_receive_from_logic_conn(const int conn_count,
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 	return false;
 }
-
+#endif
 /*
  * Get one character from the connection buffer and advance cursor
  */
@@ -2237,7 +2734,7 @@ get_int(PGXCNodeHandle *conn, size_t len, int *out)
  */
 char get_message(PGXCNodeHandle *conn, int *len, char **msg)
 {
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return '\0';
@@ -2257,7 +2754,7 @@ char get_message(PGXCNodeHandle *conn, int *len, char **msg)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("message len is too short")));
     }
 
-    if (unlikely(conn->inCursor > (INT_MAX - *len))) {
+ 	if (unlikely(conn->inCursor > (size_t)(INT_MAX - *len))){
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("conn cursor overflow")));
     }
     if ((((size_t)*len) > MaxAllocSize)) {
@@ -2697,6 +3194,9 @@ ensure_in_buffer_capacity(size_t bytes_needed, PGXCNodeHandle *handle)
 void
 ensure_out_buffer_capacity(size_t bytes_needed, PGXCNodeHandle *handle)
 {
+#ifdef USE_SPQ
+	return enlargeBufferSize(bytes_needed, handle->outEnd, &handle->outSize, &handle->outBuffer);
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -3535,6 +4035,26 @@ pgxc_node_send_plan_with_params(PGXCNodeHandle *handle, const char *query,
 int
 pgxc_node_flush(PGXCNodeHandle *handle)
 {
+#ifdef USE_SPQ
+	while (handle->outEnd) {
+        if (send_some(handle, handle->outEnd) < 0) {
+            elog(LOG,
+                "send some data to %s[%u] failed, remote_host[%s], remote_port[%s].",
+                handle->remoteNodeName,
+                handle->nodeoid,
+                u_sess->proc_cxt.MyProcPort->remote_host,
+                u_sess->proc_cxt.MyProcPort->remote_port);
+            handle->state = DN_CONNECTION_STATE_ERROR_FATAL;
+            add_error_message(handle,
+                "failed to send data to %s[%u], detail:%s",
+                handle->remoteNodeName,
+                handle->nodeoid,
+                gs_comm_strerror());
+            return EOF;
+        }
+    }
+    return 0;
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -3606,6 +4126,25 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
 int
 pgxc_node_send_queryid(PGXCNodeHandle *handle, uint64 queryid)
 {
+#ifdef USE_SPQ
+	int msglen = 12;
+    errno_t ss_rc = 0;
+    /* Invalid connection state, return error */
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        return EOF;
+    /* msgType + msgLen */
+    ensure_out_buffer_capacity(1 + msglen, handle);
+    Assert(handle->outBuffer != NULL);
+    handle->outBuffer[handle->outEnd++] = 'q';
+    msglen = htonl(msglen);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &queryid, sizeof(uint64));
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += sizeof(uint64);
+    return 0;
+#endif
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 	return 0;
@@ -3620,6 +4159,109 @@ pgxc_node_send_queryid(PGXCNodeHandle *handle, uint64 queryid)
 int
 pgxc_node_send_unique_sql_id(PGXCNodeHandle *handle)
 {
+#ifdef USE_SPQ
+	Assert(is_unique_sql_enabled());
+    if (handle == NULL) {
+        return 1;
+    }
+ 
+    uint64 unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
+    ereport(DEBUG1,
+        (errmodule(MOD_INSTR),
+            errmsg("[UniqueSQL] unique id: %lu, send unique sql ID to %s", unique_sql_id, handle->remoteNodeName)));
+ 
+    const int N32_BIT = 32;
+    /*
+     * whole msg content
+     * 'i' + 4       +  1 + 8 		+ 4        + 4
+     * 'i' + msg_len + 'q'+ unique_sql_id   + user oid + cn id + qid.procId + qid.queryId + qid.stamp
+     */
+    int msg_len = sizeof(uint32) + sizeof(char) + sizeof(uint64) + sizeof(uint32) + sizeof(uint32);
+    if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION)
+        msg_len += (sizeof(Oid) + sizeof(uint64) + sizeof(int64));
+ 
+    int rc;
+    int n32;
+    uint64 n64 = 0;
+ 
+    WLMGeneralParam *g_wlm_params = &u_sess->wlm_cxt->wlm_params;
+ 
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        return EOF;
+ 
+    ensure_out_buffer_capacity(1 + msg_len, handle);
+    Assert(handle->outBuffer != NULL);
+    /* instrumentation */
+    handle->outBuffer[handle->outEnd++] = 'i';
+ 
+    /* message length, not including 'i' */
+    msg_len = htonl(msg_len);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, sizeof(int), &msg_len, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(uint32);
+ 
+    handle->outBuffer[handle->outEnd++] = 'q';
+ 
+    /* cn id */
+    n32 = htonl(u_sess->unique_sql_cxt.unique_sql_cn_id);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, sizeof(Oid));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(Oid);
+ 
+    /* user id */
+    n32 = htonl(u_sess->unique_sql_cxt.unique_sql_user_id);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, sizeof(Oid));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(Oid);
+ 
+    /* unique sql id */
+    /* high order half first */
+    n32 = (uint32)(unique_sql_id >> N32_BIT);
+    n32 = htonl(n32);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(uint32);
+ 
+    /* low order half */
+    n32 = (uint32)unique_sql_id;
+    n32 = htonl(n32);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(uint32);
+ 
+    if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
+        /* qid.procId */
+        n32 = htonl(g_wlm_params->qid.procId);
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, sizeof(Oid));
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += sizeof(Oid);
+ 
+        /* qid.queryId */
+        n64 = htonl64(g_wlm_params->qid.queryId);
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n64, sizeof(uint64));
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += sizeof(uint64);
+ 
+        /* qid.stamp */
+        n64 = htonl64(g_wlm_params->qid.stamp);
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n64, sizeof(uint64));
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += sizeof(uint64);
+    }
+ 
+    if (unique_sql_id == START_TRX_UNIQUE_SQL_ID && t_thrd.postgres_cxt.debug_query_string != NULL) {
+        char* mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
+        if (mask_string == NULL)
+            mask_string = (char*)t_thrd.postgres_cxt.debug_query_string;
+        ereport(LOG, (errmodule(MOD_INSTR), errmsg("[UniqueSQL] send 'START TRANSACTION' to DN - (%s)", mask_string)));
+ 
+        if (mask_string != t_thrd.postgres_cxt.debug_query_string)
+            pfree(mask_string);
+    }
+ 
+    return 0;
+ 
+#endif
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 	return 0;
@@ -3737,6 +4379,11 @@ int
 pgxc_node_send_query(PGXCNodeHandle * handle, const char *query, bool isPush, bool isCreateSchemaPush,
     bool trigger_ship, bool check_gtm_mode, const char* compressedPlan, int cLen)
 {
+#ifdef USE_SPQ
+    return spq_node_send_query(handle, query, isPush, isCreateSchemaPush, trigger_ship,
+            check_gtm_mode, compressedPlan, cLen);
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -3878,6 +4525,10 @@ pgxc_node_notify_commit(PGXCNodeHandle * handle)
 int
 pgxc_node_send_cmd_id(PGXCNodeHandle *handle, CommandId cid)
 {
+#ifdef USE_SPQ
+    return spq_node_send_cmd_id(handle, cid);
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -3931,6 +4582,137 @@ pgxc_node_send_wlm_cgroup(PGXCNodeHandle *handle)
 int
 pgxc_node_dywlm_send_params_for_jobs(PGXCNodeHandle *handle, int tag, const char *keystr)
 {
+#ifdef USE_SPQ
+	int cg_len = 0; /* cgroup length */
+    int sr_len = 0; /* session_respool length*/
+    int ng_len = 0; /* node group length*/
+    int msgLen;
+    errno_t ss_rc = 0;
+    WLMGeneralParam *g_wlm_params = &u_sess->wlm_cxt->wlm_params;
+    uint32 n32;
+    int procId = 0;
+    uint64 queryId = 0;
+    int flags[2] = {0};
+    int dop = g_wlm_params->dopvalue;
+    int64 stamp = g_wlm_params->qid.stamp;
+    int io_priority_value = g_wlm_params->io_priority;
+    int iops_limit_value = g_wlm_params->iops_limits;
+    char *cgroup = GSCGROUP_INVALID_GROUP;
+ 
+    /*
+     * for autovacuum work threads
+     * autovac_iops_limits = -1 means use default iops_limits
+     * autovac_iops_limits >= 0 means use seft-defined iops_limits
+     */
+    if (IsAutoVacuumWorkerProcess() && 0 <= u_sess->attr.attr_resource.autovac_iops_limits)
+        iops_limit_value = u_sess->attr.attr_resource.autovac_iops_limits;
+ 
+    if (!t_thrd.wlm_cxt.parctl_state.simple)
+        cgroup = u_sess->wlm_cxt->control_group;
+ 
+    /* Invalid connection state, return error */
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        return EOF;
+ 
+    ss_rc = memcpy_s(&flags[0], sizeof(char), &g_wlm_params->cpuctrl, sizeof(char));
+    securec_check(ss_rc, "\0", "\0");
+ 
+    ss_rc = memcpy_s((char *)&flags[0] + sizeof(char), sizeof(char), &g_wlm_params->memtrack, sizeof(char));
+    securec_check(ss_rc, "\0", "\0");
+ 
+    ss_rc = memcpy_s((char *)&flags[0] + 2 * sizeof(char), sizeof(char), &g_wlm_params->iostate, sizeof(char));
+    securec_check(ss_rc, "\0", "\0");
+ 
+    ss_rc = memcpy_s((char *)&flags[0] + 3 * sizeof(char), sizeof(char), &g_wlm_params->iotrack, sizeof(char));
+    securec_check(ss_rc, "\0", "\0");
+ 
+    ss_rc = memcpy_s(&flags[1], sizeof(char), &g_wlm_params->iocontrol, sizeof(char));
+    securec_check(ss_rc, "\0", "\0");
+ 
+    ss_rc = memcpy_s((char *)&flags[1] + sizeof(char), sizeof(char), &t_thrd.wlm_cxt.parctl_state.simple, sizeof(char));
+    securec_check(ss_rc, "\0", "\0");
+ 
+    /* msgType + msgLen */
+    cg_len = strlen(cgroup) + 1;
+    sr_len = strlen(g_wlm_params->rpdata.rpname) + 1;
+    ng_len = strlen(g_wlm_params->ngroup) + 1;
+ 
+    /* size + strlen */
+    msgLen = 4 + cg_len + sr_len + ng_len + 4 * 8 + 8;  // the extra 8 byte is for wlm qid
+ 
+    /* msgType + msgLen */
+    ensure_out_buffer_capacity(1 + msgLen, handle);
+    Assert(handle->outBuffer != NULL);
+    handle->outBuffer[handle->outEnd++] = 'W';
+    msgLen = htonl(msgLen);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msgLen, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+ 
+    procId = htonl(g_wlm_params->qid.procId);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &procId, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+    queryId = htonl64(g_wlm_params->qid.queryId);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &queryId, 8);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 8;
+ 
+    for (int i = 0; i < (int)(sizeof(flags) / sizeof(int)); i++) {
+        flags[i] = htonl(flags[i]);
+        ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &flags[i], 4);
+        securec_check(ss_rc, "\0", "\0");
+        handle->outEnd += 4;
+    }
+ 
+    dop = htonl(dop);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &dop, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+    io_priority_value = htonl(io_priority_value);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &io_priority_value, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+    iops_limit_value = htonl(iops_limit_value);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &iops_limit_value, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+ 
+    /* High order half first */
+#ifdef INT64_IS_BUSTED
+    /* don't try a right shift of 32 on a 32-bit word */
+    n32 = (stamp < 0) ? -1 : 0;
+#else
+    n32 = (uint32)((uint64)stamp >> 32);
+#endif
+    n32 = htonl(n32);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+ 
+    /* Now the low order half */
+    n32 = (uint32)stamp;
+    n32 = htonl(n32);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &n32, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+ 
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, cgroup, cg_len);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += cg_len;
+ 
+    ss_rc = memcpy_s(
+        handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, g_wlm_params->rpdata.rpname, sr_len);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += sr_len;
+ 
+    ss_rc =
+        memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, g_wlm_params->ngroup, ng_len);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += ng_len;
+ 
+    return 0;
+#endif
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 	return 0;
@@ -4016,6 +4798,12 @@ pgxc_node_send_pgfdw(PGXCNodeHandle *handle, int tag, const char *keystr, int le
 int
 pgxc_node_send_snapshot(PGXCNodeHandle *handle, Snapshot snapshot, int max_push_sqls)
 {
+#ifdef USE_SPQ
+	if (handle->state != DN_CONNECTION_STATE_IDLE)
+		return EOF;
+ 
+	return 0;
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
 	DISTRIBUTED_FEATURE_NOT_SUPPORTED();

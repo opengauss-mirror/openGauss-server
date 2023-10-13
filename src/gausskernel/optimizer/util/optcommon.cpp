@@ -31,6 +31,11 @@ void GetPlanNodePlainText(
     RemoteQuery* rq = NULL;
     char* extensible_name = NULL;
     switch (nodeTag(plan)) {
+#ifdef USE_SPQ
+        case T_Result:
+            *pname = *sname = *pt_operation = "SPQ Result";
+            break;
+#endif
         case T_BaseResult:
             *pname = *sname = *pt_operation = "Result";
             break;
@@ -125,6 +130,33 @@ void GetPlanNodePlainText(
                 }
             }
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+            *pt_operation = "TABLE ACCESS";
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned Seq Scan";
+                } else {
+                    *pname = *sname = *pt_options = "Spq Seq Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned Sample Scan";
+                } else {
+                    *pname = *sname = *pt_options = "Spq Sample Scan";
+                }
+            }
+            break;
+        case T_AssertOp:
+            *pname = *sname = "Assert";
+            break;
+        case T_ShareInputScan:
+            *pname = *sname = *pt_options = "ShareInputScan";
+            break;
+        case T_Sequence:
+            *pname = *sname = *pt_options = "Sequence";
+            break;
+#endif
         case T_CStoreScan:
             *pt_operation = "TABLE ACCESS";
             if (!((Scan*)plan)->tablesample) {

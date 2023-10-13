@@ -140,6 +140,9 @@ StreamProducer::StreamProducer(
     m_dest = DestNone;
     m_channelCalVecFun = NULL;
     m_channelCalFun = NULL;
+    m_hasExprKey = false;
+    m_exprkeystate = NULL;
+    m_econtext = NULL;
     initStringInfo(&m_tupleBuffer);
     initStringInfo(&m_tupleBufferWithCheck);
 
@@ -325,6 +328,10 @@ void StreamProducer::setDistributeInfo()
         nodeLen = list_length(m_consumerNodes->nodeList);
     }
 
+    if (IS_SPQ_RUNNING) {
+        nodeLen = m_plan->num_nodes;
+    }
+
     Assert(nodeLen > 0);
 
     m_disQuickLocator = (uint2**)palloc0(nodeLen * sizeof(uint2*));
@@ -343,7 +350,13 @@ void StreamProducer::setDistributeInfo()
             m_disQuickLocator[i][j] = i + j * nodeLen;
     }
 
+#ifdef USE_SPQ
+    if (m_parallel_desc.distriType != REMOTE_DIRECT_DISTRIBUTE) {
+        setDistributeIdx();
+    }
+#else
     setDistributeIdx();
+#endif
 
     if (((Plan*)m_streamNode)->vec_output == false)
         BindingRedisFunction<false>();
@@ -359,7 +372,9 @@ void StreamProducer::setDistributeInfo()
 void StreamProducer::initStreamKey()
 {
     int nodeLen = list_length(m_consumerNodes->nodeList);
-
+#ifdef USE_SPQ
+    nodeLen = m_plan->num_nodes;
+#endif
     for (int i = 0; i < m_connNum; i++) {
         StreamCOMM* scomm = (StreamCOMM*)m_transport[i];
 
@@ -491,7 +506,13 @@ void StreamProducer::setDistributeIdx()
     ListCell* cell = NULL;
 
     foreach (cell, m_distributeKey) {
-        Var* distriVar = (Var*)lfirst(cell);
+        Node* node = (Node*)lfirst(cell);
+        if (!IsA(node, Var)) {
+            m_hasExprKey = true;
+            m_exprkeystate = ExecInitExprList(m_streamNode->distribute_keys, NULL);
+            break;
+        }
+        Var* distriVar = (Var*)node;
         m_distributeIdx[i++] = distriVar->varattno - 1;
         ereport(DEBUG2, (errmodule(MOD_STREAM), errmsg("[StreamProducer] node id is: %d, distributeIdx[%d] is: %d",
             m_streamNode->scan.plan.plan_node_id, i - 1,  m_distributeIdx[i - 1])));
@@ -566,7 +587,11 @@ void StreamProducer::BindingRedisFunction()
     Oid dataType;
     m_hashFun = (hashFun*)palloc0(sizeof(hashFun) * len);
     for (int i = 0; i < len; i++) {
-        dataType = m_desc->attrs[m_distributeIdx[i]].atttypid;
+        if (m_hasExprKey) {
+            dataType = ((ExprState*)list_nth(m_exprkeystate, i))->resultType;
+        } else {
+            dataType = m_desc->attrs[m_distributeIdx[i]].atttypid;
+        }
         switch (dataType) {
             case INT8OID:
                 m_hashFun[i] = &computeHashT<INT8OID, LOCATOR_TYPE_HASH, vectorized>;
@@ -1250,6 +1275,50 @@ void StreamProducer::redistributeTupleChannel(TupleTableSlot* tuple)
 }
 
 template<int distrType>
+void StreamProducer::redistributeTupleChannelWithExpr(TupleTableSlot* tuple)
+{
+    /*
+    * For dn gather case, we do not need to compute hash value.
+    * we only has one execute datanode in consumer list.
+    * So, send and receive channel will always be channel 0.
+     */
+    if (distrType == REMOTE_DIRECT_DISTRIBUTE) {
+        return;
+    }
+
+    Datum data;
+    MemoryContext oldContext;
+    ListCell *cell;
+    bool isNull = false;
+    bool allIsNULL = true;
+    uint64 hashValue = 0;
+    int i = 0;
+    m_econtext->ecxt_outertuple = tuple;
+
+    oldContext = MemoryContextSwitchTo(m_econtext->ecxt_per_tuple_memory);
+    /* foreach key exprs */
+    foreach(cell, m_exprkeystate) {
+        ExprState *state = (ExprState*)lfirst(cell);
+        data = ExecEvalExpr(state, m_econtext, &isNull, NULL);
+        if (!isNull) {
+            if (!allIsNULL) {
+                hashValue = (hashValue << 1) | ((hashValue & 0x80000000) ? 1 : 0);
+                hashValue ^= m_hashFun[i](data);
+            } else {
+                hashValue = m_hashFun[i](data);
+                allIsNULL = false;
+            }
+        }
+        ++i;
+    }
+
+    MemoryContextSwitchTo(oldContext);
+
+    m_locator[0] = ChannelLocalizer<distrType>(
+        hashValue, m_parallel_desc.consumerDop, list_length(m_consumerNodes->nodeList));
+}
+
+template<int distrType>
 void StreamProducer::redistributeTupleChannelForSlice(TupleTableSlot* tuple)
 {
     int keyNum;
@@ -1307,16 +1376,30 @@ void StreamProducer::DispatchBatchRedistrFunctionByRedisType()
         case PARALLEL_NONE:
 #ifdef ENABLE_MULTIPLE_NODES
         case REMOTE_DISTRIBUTE:
-            m_channelCalVecFun = (list_length(m_consumerNodes->nodeList) == 1) ?
-                                 &StreamProducer::redistributeBatchChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
-                                 &StreamProducer::redistributeBatchChannel<len, REMOTE_DISTRIBUTE>;
+            if (m_hasExprKey) {
+                m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
+                                  &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_DIRECT_DISTRIBUTE> :
+                                  &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_DISTRIBUTE>);
+            } else {
+                m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
+                                  &StreamProducer::redistributeTupleChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
+                                  &StreamProducer::redistributeTupleChannel<len, REMOTE_DISTRIBUTE>);
+            }
             break;
         case REMOTE_SPLIT_DISTRIBUTE:
-            m_channelCalVecFun = &StreamProducer::redistributeBatchChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
+            if (m_hasExprKey) {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_SPLIT_DISTRIBUTE>;
+            } else {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
+            }
             break;
 #endif
         case LOCAL_DISTRIBUTE:
-            m_channelCalVecFun = &StreamProducer::redistributeBatchChannel<len, LOCAL_DISTRIBUTE>;
+            if (m_hasExprKey) {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<LOCAL_DISTRIBUTE>;
+            } else {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, LOCAL_DISTRIBUTE>;
+            }
             break;
 
         default:
@@ -1334,19 +1417,37 @@ void StreamProducer::DispatchRowRedistrFunctionByRedisType()
 {
     switch (m_parallel_desc.distriType) {
         case PARALLEL_NONE:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
         case REMOTE_DISTRIBUTE:
-            m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
-                              &StreamProducer::redistributeTupleChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
-                              &StreamProducer::redistributeTupleChannel<len, REMOTE_DISTRIBUTE>);
+            if (m_hasExprKey) {
+                m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
+                                  &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_DIRECT_DISTRIBUTE> :
+                                  &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_DISTRIBUTE>);
+            } else {
+                m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
+                                  &StreamProducer::redistributeTupleChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
+                                  &StreamProducer::redistributeTupleChannel<len, REMOTE_DISTRIBUTE>);
+            }
             break;
 
         case REMOTE_SPLIT_DISTRIBUTE:
-            m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
+            if (m_hasExprKey) {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_SPLIT_DISTRIBUTE>;
+            } else {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
+            }
+            break;
+        case REMOTE_DIRECT_DISTRIBUTE:
+            // REMOTE_DIRECT_DISTRIBUTE will not calculate distribute key
+            m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, REMOTE_DIRECT_DISTRIBUTE>;
             break;
 #endif
         case LOCAL_DISTRIBUTE:
-            m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, LOCAL_DISTRIBUTE>;
+            if (m_hasExprKey) {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<LOCAL_DISTRIBUTE>;
+            } else {
+                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, LOCAL_DISTRIBUTE>;
+            }
             break;
 
         default:
@@ -1358,7 +1459,7 @@ void StreamProducer::DispatchBatchRedistrFunctionForSlice()
 {
     switch (m_parallel_desc.distriType) {
         case PARALLEL_NONE:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
         case REMOTE_DISTRIBUTE:
             m_channelCalVecFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
                                  &StreamProducer::redistributeBatchChannelForSlice<REMOTE_DIRECT_DISTRIBUTE> :
@@ -1829,6 +1930,651 @@ void StreamProducer::initSharedContext()
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
+#ifdef USE_SPQ
+void StreamProducer::serializeStream(VectorBatch* batch, int index)
+{
+    uint32 tempBufferSize = m_bitNullLen + m_bitNumericLen;
+    uint8* bitNull = (uint8*)m_tempBuffer - 1;
+    uint8* bitNumericFlag = (uint8*)m_tempBuffer + m_bitNullLen - 1;
+ 
+    uint8 bitMaskNull = HIGHBIT;
+    uint8 bitMaskNumeric;
+    int dataLen;
+    Form_pg_attribute attr;
+    char* writeBuffer = NULL;
+    Datum columnVal;
+    int32 numericIdx = -1;
+    char* string = NULL;
+    errno_t rc;
+ 
+    /* reset m_tupleBuffer and m_tempBuffer */
+    resetStringInfo(&m_tupleBuffer);
+    rc = memset_s(m_tempBuffer, tempBufferSize, '\0', tempBufferSize);
+    securec_check(rc, "\0", "\0");
+ 
+    m_tupleBuffer.cursor = 'B';
+    /*
+     * the first tempBufferSize Bits of m_tupleBuffer.data will be assigned at the end of this function
+     * when null flag and numeric flag are finally determinded.
+     */
+    m_tupleBuffer.len = tempBufferSize;
+ 
+    for (int i = 0; i < batch->m_cols; i++) {
+        if (unlikely(bitMaskNull == HIGHBIT)) {
+            /* Get null flag if i % 8 equals to 0. */
+            bitNull++;
+            bitMaskNull = 1;
+        } else {
+            /* Get next null flag for next column */
+            bitMaskNull <<= 1;
+        }
+ 
+        if (NOT_NULL(batch->m_arr[i].m_flag[index])) {
+            attr = &(m_desc->attrs[i]);
+            /* Set null flag for index column */
+            *bitNull |= bitMaskNull;
+ 
+            columnVal = batch->m_arr[i].m_vals[index];
+            /* can be stored by value directly */
+            switch (m_colsType[i]) {
+                case VALUE_TYPE:
+                    enlargeStringInfo(&m_tupleBuffer, attr->attlen);
+                    writeBuffer = m_tupleBuffer.data + m_tupleBuffer.len;
+                    store_att_byval(writeBuffer, columnVal, attr->attlen);
+                    m_tupleBuffer.len += attr->attlen;
+                    m_tupleBuffer.data[m_tupleBuffer.len] = '\0';
+                    break;
+                case NUMERIC_TYPE:
+                    dataLen = VARSIZE_ANY(columnVal);
+                    Assert(dataLen > 0);
+                    numericIdx++;
+                    /*
+                     * initialize numeric flag if numericIdx % 4 equals to 0.
+                     * we use 01 to denote values less that 0xFF;
+                     *        10 to denote values less that 0xFFFF;
+                     *        11 to denote values less than 0xFFFFFFFF;
+                     *        00 to denote other values.
+                     */
+                    if (numericIdx % 4 == 0) {
+                        bitNumericFlag++;
+                    }
+ 
+                    if (!VARATT_IS_SHORT(columnVal) && NUMERIC_IS_BI64((Numeric)columnVal)) {
+                        uint64 numericVal = (uint64)NUMERIC_64VALUE((Numeric)columnVal);
+                        if (unlikely(numericVal <= 0xFF)) {
+                            /* numeric_8_compress */
+                            bitMaskNumeric = 1 << (uint32)(2 * (numericIdx % 4));  // 0x01
+                            /* set numeric size flag */
+                            *bitNumericFlag |= bitMaskNumeric;
+                            enlargeStringInfo(&m_tupleBuffer, 2);
+                            writeBuffer = m_tupleBuffer.data + m_tupleBuffer.len;
+                            *(uint8*)(writeBuffer) = NUMERIC_BI_SCALE((Numeric)columnVal);
+                            *(uint8*)(writeBuffer + 1) = (uint8)numericVal;
+                            m_tupleBuffer.len += 2;
+                            continue;
+                        } else if (numericVal <= 0xFFFF) {
+                            /* numeric_16_compress */
+                            bitMaskNumeric = 2 << (uint32)(2 * (numericIdx % 4));  // 0x10
+                            *bitNumericFlag |= bitMaskNumeric;
+                            enlargeStringInfo(&m_tupleBuffer, 3);
+                            writeBuffer = m_tupleBuffer.data + m_tupleBuffer.len;
+                            *(uint8*)(writeBuffer) = NUMERIC_BI_SCALE((Numeric)columnVal);
+                            *(uint16*)(writeBuffer + 1) = (uint16)numericVal;
+                            m_tupleBuffer.len += 3;
+                            continue;
+                        } else if (numericVal <= 0xFFFFFFFF) {
+                            /* numeric_32_compress */
+                            bitMaskNumeric = 3 << (uint32)(2 * (numericIdx % 4));  // 0x11
+                            *bitNumericFlag |= bitMaskNumeric;
+                            enlargeStringInfo(&m_tupleBuffer, 5);
+                            writeBuffer = m_tupleBuffer.data + m_tupleBuffer.len;
+                            *(uint8*)(writeBuffer) = NUMERIC_BI_SCALE((Numeric)columnVal);
+                            *(uint32*)(writeBuffer + 1) = (uint32)numericVal;
+                            m_tupleBuffer.len += 5;
+                            continue;
+                        }
+                    }
+                    /* other numeric value lager than MAX INT32, bitMaskNumeric equals to 0x00 */
+                    appendBinaryStringInfo(&m_tupleBuffer, DatumGetPointer(columnVal), dataLen);
+                    break;
+                case VARLENA_TYPE:
+                    dataLen = VARSIZE_ANY(columnVal);
+                    Assert(dataLen > 0);
+                    appendBinaryStringInfo(&m_tupleBuffer, DatumGetPointer(columnVal), dataLen);
+                    break;
+                case CSTRING_TYPE:
+                    string = VARDATA_ANY(columnVal);
+                    dataLen = strlen(string) + 1;
+                    appendBinaryStringInfo(&m_tupleBuffer, string, dataLen);
+                    break;
+                case TID_TYPE:
+                    enlargeStringInfo(&m_tupleBuffer, 8);
+                    writeBuffer = m_tupleBuffer.data + m_tupleBuffer.len;
+                    store_att_byval(writeBuffer, columnVal, 8);
+                    m_tupleBuffer.len += 8;
+                    m_tupleBuffer.data[m_tupleBuffer.len] = '\0';
+                    break;
+                case NAME_TYPE:
+                    string = ((Name)columnVal)->data;
+                    dataLen = strlen(string) + 1;
+                    columnVal = PointerGetDatum((char*)columnVal);
+                    appendBinaryStringInfo(&m_tupleBuffer, DatumGetPointer(columnVal), dataLen);
+                    break;
+                case FIXED_TYPE:
+                    /* extract fixed length variable. */
+                    columnVal = PointerGetDatum((char*)columnVal + VARHDRSZ_SHORT);
+                    appendBinaryStringInfo(&m_tupleBuffer, DatumGetPointer(columnVal), attr->attlen);
+                    break;
+                default:
+                    Assert(false);
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                            errmodule(MOD_STREAM),
+                            (errmsg("unrecognize data type %u.", m_colsType[i]))));
+                    break;
+            }
+        }
+    }
+ 
+    /* copy null flags nd numeric flags into m_tupleBuffer */
+    rc = memcpy_s(m_tupleBuffer.data, tempBufferSize, m_tempBuffer, tempBufferSize);
+    securec_check(rc, "\0", "\0");
+}
+ 
+void StreamProducer::SetDest(bool is_vec_plan)
+{
+    switch (m_streamType) {
+        case STREAM_BROADCAST:
+            switch (m_parallel_desc.distriType) {
+                case LOCAL_BROADCAST:
+                    if (is_vec_plan)
+                        m_dest = DestBatchLocalBroadCast;
+                    else
+                        m_dest = DestTupleLocalBroadCast;
+                    break;
+                case REMOTE_BROADCAST:
+                    if (is_vec_plan)
+                        m_dest = DestBatchBroadCast;
+                    else
+                        m_dest = DestTupleBroadCast;
+                    break;
+                default:
+                    break;
+            }
+        case STREAM_GATHER:
+        if (m_parallel_desc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
+            if (is_vec_plan) {
+                m_dest = DestBatchRedistribute;
+            }
+            else{
+                m_dest = DestTupleRedistribute;
+            }
+            setDistributeInfo();
+        }
+        break;
+        case STREAM_REDISTRIBUTE:
+            switch (m_parallel_desc.distriType) {
+                case LOCAL_BROADCAST:
+                    if (is_vec_plan)
+                        m_dest = DestBatchLocalBroadCast;
+                    else
+                        m_dest = DestTupleLocalBroadCast;
+ 
+                    break;
+ 
+                case LOCAL_DISTRIBUTE:
+                    if (is_vec_plan)
+                        m_dest = DestBatchLocalRedistribute;
+                    else
+                        m_dest = DestTupleLocalRedistribute;
+ 
+                    setDistributeInfo();
+                    break;
+ 
+                case LOCAL_ROUNDROBIN:
+                    if (is_vec_plan)
+                        m_dest = DestBatchLocalRoundRobin;
+                    else
+                        m_dest = DestTupleLocalRoundRobin;
+                    break;
+                case REMOTE_ROUNDROBIN:
+                    if (is_vec_plan)
+                        m_dest = DestBatchRoundRobin;
+                    else
+                        m_dest = DestTupleRoundRobin;
+                    break;
+                case PARALLEL_NONE:
+                case REMOTE_DISTRIBUTE:
+                case REMOTE_SPLIT_DISTRIBUTE:
+                    if (is_vec_plan)
+                        m_dest = DestBatchRedistribute;
+                    else
+                        m_dest = DestTupleRedistribute;
+ 
+                    setDistributeInfo();
+                    break;
+                default:
+                    break;
+            }
+ 
+            break;
+ 
+        case STREAM_HYBRID: {
+            if (m_streamNode->distribute_keys != NIL)
+                setDistributeInfo();
+ 
+            if (is_vec_plan)
+                m_dest = DestBatchHybrid;
+            else
+                m_dest = DestTupleHybrid;
+        } break;
+        default:
+            break;
+    }
+    return;
+}
+ 
+void StreamProducer::reportNotice()
+{
+    m_nodeGroup->saveProducerEdata();
+ 
+    /* for NOTICE message, report it through 0 channel only one time. */
+    if (STREAM_IS_LOCAL_NODE(m_parallel_desc.distriType) && !m_isDummy) {
+        if (m_sharedContextInit) {
+            stream_send_message_to_consumer();
+        } else {
+            gs_memory_disconnect(m_sharedContext, m_nth);
+        }
+    } else {
+        if (m_transport != NULL) {
+            if (netSwitchDest(0)) {
+                stream_send_message_to_consumer();
+                netStatusSave(0);
+            }
+        }
+    }
+}
+ 
+void StreamProducer::redistributeStream(VectorBatch* batch)
+{
+    Assert(batch != NULL);
+ 
+    /* calc the location for each tuple in batch. */
+    (this->*m_channelCalVecFun)(batch);
+ 
+    for (int i = 0; i < batch->m_rows; i++) {
+        StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+        serializeStream(batch, i);
+        StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+        sendByteStream(m_locator[i]);
+    }
+}
+ 
+void StreamProducer::redistributeStream(TupleTableSlot* tuple, DestReceiver* self)
+{
+    /* calc the location for tuple. */
+    (this->*m_channelCalFun)(tuple);
+ 
+    assembleStreamMessage(tuple, self, &m_tupleBuffer);
+ 
+    sendByteStream(m_locator[0]);
+ 
+    /* reset the buffer. */
+    resetStringInfo(&m_tupleBuffer);
+}
+ 
+void StreamProducer::broadCastStream(VectorBatch* batch)
+{
+    int i;
+ 
+    Assert(m_originConsumerNodeList == NIL);
+ 
+    assembleStreamBatchMessage(BCT_NOCOMP, batch, &m_tupleBuffer);
+ 
+    m_broadcastSize += m_tupleBuffer.len;
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize =
+        Max(m_broadcastSize, t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize);
+ 
+    if (m_broadcastSize / (1 << 20) >= WARNING_BROADCAST_SIZE) {
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning |= (1 << WLM_WARN_BROADCAST_LARGE);
+    }
+ 
+    /* When it's simple query, m_wlmParams.ptr is NULL */
+    if (m_wlmParams.ptr) {
+        WLMDNodeInfo* info = (WLMDNodeInfo*)m_wlmParams.ptr;
+        /* Check if the broadcast size exceeds the threshold */
+        if (info->geninfo.broadcastThreshold > 0 && m_broadcastSize > info->geninfo.broadcastThreshold)
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmsg("Broadcast size exceeds the threshold: BroadcastSize=%ld, ThresholdSize=%ld, PlanId=%d",
+                        m_broadcastSize,
+                        info->geninfo.broadcastThreshold,
+                        m_streamNode->scan.plan.plan_node_id)));
+    }
+ 
+    for (i = 0; i < m_connNum; i++)
+        sendByteStream(i);
+ 
+    resetStringInfo(&m_tupleBuffer);
+}
+ 
+void StreamProducer::broadCastStream(TupleTableSlot* tuple, DestReceiver* self)
+{
+    int i;
+    /* assemble tuple message. */
+    assembleStreamMessage(tuple, self, &m_tupleBuffer);
+ 
+    m_broadcastSize += m_tupleBuffer.len;
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize =
+        Max(m_broadcastSize, t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize);
+ 
+    if (m_broadcastSize / (1 << 20) >= WARNING_BROADCAST_SIZE) {
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning |= (1 << WLM_WARN_BROADCAST_LARGE);
+    }
+ 
+    /* When it's simple query, m_wlmParams.ptr is NULL */
+    if (m_wlmParams.ptr) {
+        WLMDNodeInfo* info = (WLMDNodeInfo*)m_wlmParams.ptr;
+        /* Check if the broadcast size exceeds the threshold */
+        if (info->geninfo.broadcastThreshold > 0 && m_broadcastSize > info->geninfo.broadcastThreshold)
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmsg("Broadcast size exceeds the threshold: BroadcastSize=%ld, ThresholdSize=%ld, PlanId=%d",
+                        m_broadcastSize,
+                        info->geninfo.broadcastThreshold,
+                        m_streamNode->scan.plan.plan_node_id)));
+    }
+ 
+    /*
+     * If original Cosumer node list is not null, we need send data to target datanode
+     * with refs from its original exec_node lists.
+     *
+     * Only for recursive union execution
+     */
+    if (unlikely(m_originConsumerNodeList != NIL)) {
+        for (i = 0; i < m_connNum; i++) {
+            if (!list_member_int(m_originConsumerNodeList, i)) {
+                continue;
+            }
+ 
+            sendByteStream(i);
+        }
+    } else {
+        for (i = 0; i < m_connNum; i++)
+            sendByteStream(i);
+    }
+ 
+    /* reset tuple buffer. */
+    resetStringInfo(&m_tupleBuffer);
+}
+ 
+void StreamProducer::broadCastStreamCompress(VectorBatch* batch)
+{
+    int i;
+ 
+    Assert(m_originConsumerNodeList == NIL);
+ 
+    assembleStreamBatchMessage(BCT_LZ4, batch, &m_tupleBuffer);
+ 
+    for (i = 0; i < m_connNum; i++)
+        sendByteStream(i);
+ 
+    resetStringInfo(&m_tupleBuffer);
+}
+ 
+void StreamProducer::roundRobinStream(TupleTableSlot* tuple, DestReceiver* self)
+{
+    assembleStreamMessage(tuple, self, &m_tupleBuffer);
+ 
+    sendByteStream(m_roundRobinIdx);
+ 
+    m_roundRobinIdx++;
+    m_roundRobinIdx = m_roundRobinIdx % m_connNum;
+ 
+    /* reset tuple buffer. */
+    resetStringInfo(&m_tupleBuffer);
+}
+
+void StreamProducer::roundRobinStream(VectorBatch* batch)
+{
+    roundRobinBatch<BCT_LZ4>(batch);
+}
+ 
+template<BatchCompressType ctype>
+void StreamProducer::roundRobinBatch(VectorBatch* batch)
+{
+    assembleStreamBatchMessage(ctype, batch, &m_tupleBuffer);
+ 
+    sendByteStream(m_roundRobinIdx);
+ 
+    m_roundRobinIdx++;
+    m_roundRobinIdx = m_roundRobinIdx % m_connNum;
+ 
+    /* reset tuple buffer. */
+    resetStringInfo(&m_tupleBuffer);
+}
+ 
+void StreamProducer::hybridStream(TupleTableSlot* tuple, DestReceiver* self)
+{
+    StreamSkew* sskew = (StreamSkew*)m_skewState;
+ 
+    assembleStreamMessage(tuple, self, &m_tupleBuffer);
+ 
+    switch (sskew->chooseStreamType(tuple)) {
+        case STREAM_REDISTRIBUTE: {
+            (this->*m_channelCalFun)(tuple);
+            sendByteStream(m_locator[0]);
+            break;
+        }
+        case STREAM_BROADCAST: {
+            for (int i = 0; i < m_connNum; i++)
+                sendByteStream(i);
+            break;
+        }
+        case STREAM_ROUNDROBIN: {
+            sendByteStream(m_roundRobinIdx);
+ 
+            m_roundRobinIdx++;
+            if (m_roundRobinIdx == m_connNum)
+                m_roundRobinIdx = 0;
+ 
+            break;
+        }
+        case STREAM_LOCAL: {
+            Assert(sskew->m_localNodeId != -1);
+            sendByteStream(sskew->m_localNodeId);
+            break;
+        }
+        case STREAM_NONE: {
+            break;
+        }
+        default:
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("Invalid stream type for data skew.")));
+    }
+ 
+    resetStringInfo(&m_tupleBuffer);
+}
+ 
+void StreamProducer::hybridStream(VectorBatch* batch, DestReceiver* self)
+{
+    StreamSkew* sskew = (StreamSkew*)m_skewState;
+    errno_t rc = EOK;
+ 
+    rc = memset_s(m_skewMatch, sizeof(int) * BatchMaxSize, 0, sizeof(int) * BatchMaxSize);
+    securec_check(rc, "\0", "\0");
+ 
+    sskew->chooseVecStreamType(batch, m_skewMatch);
+ 
+    if (m_channelCalVecFun != NULL)
+        (this->*m_channelCalVecFun)(batch);
+ 
+    for (int i = 0; i < batch->m_rows; i++) {
+        m_tupleBuffer.cursor = 'B';
+ 
+        if (m_streamNode->jitted_serialize) {
+            typedef void (*serialize_func)(VectorBatch* batch, StringInfo tuplebuf, int idx);
+            (void)((serialize_func)(m_streamNode->jitted_serialize))(batch, &m_tupleBuffer, i);
+        } else {
+            serializeStream(batch, i);
+        }
+ 
+        switch (m_skewMatch[i]) {
+            case STREAM_REDISTRIBUTE: {
+                sendByteStream(m_locator[i]);
+                break;
+            }
+            case STREAM_BROADCAST: {
+                for (int i = 0; i < m_connNum; i++)
+                    sendByteStream(i);
+                break;
+            }
+            case STREAM_ROUNDROBIN: {
+                sendByteStream(m_roundRobinIdx);
+                m_roundRobinIdx++;
+                if (m_roundRobinIdx == m_connNum)
+                    m_roundRobinIdx = 0;
+ 
+                break;
+            }
+            case STREAM_LOCAL: {
+                Assert(sskew->m_localNodeId != -1);
+                sendByteStream(sskew->m_localNodeId);
+                break;
+            }
+            case STREAM_NONE: {
+                break;
+            }
+            default:
+                ereport(
+                    ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("Invalid stream type for data skew.\n")));
+        }
+ 
+        resetStringInfo(&m_tupleBuffer);
+    }
+}
+ 
+void StreamProducer::sendByteStream(int nthChannel)
+{
+    if (netSwitchDest(nthChannel)) {
+        t_thrd.int_cxt.StreamConnectionLost = false;
+ 
+#ifdef USE_ASSERT_CHECKING
+        AddCheckInfo(nthChannel);
+#else
+        if (anls_opt_is_on(ANLS_STREAM_DATA_CHECK)) {
+            AddCheckInfo(nthChannel);
+        } else {
+            m_transport[nthChannel]->send(m_tupleBuffer.cursor, m_tupleBuffer.data, m_tupleBuffer.len);
+        }
+#endif
+ 
+        /* Stop query when cancel happend */
+        if (t_thrd.int_cxt.QueryCancelPending) {
+            t_thrd.int_cxt.QueryCancelPending = false;
+ 
+            /* Must close all connection, */
+            /* otherwise error message can insert into data! */
+            for (int i = 0; i < m_connNum; i++)
+                m_transport[i]->release();
+ 
+            u_sess->exec_cxt.executorStopFlag = true;
+        }
+ 
+        if (t_thrd.int_cxt.StreamConnectionLost) {
+            t_thrd.int_cxt.StreamConnectionLost = false;
+ 
+            m_transport[nthChannel]->release();
+ 
+            bool allInValid = true;
+            for (int i = 0; i < m_connNum; i++) {
+                if (m_transport[i]->isClosed() == false) {
+                    allInValid = false;
+                    break;
+                }
+            }
+ 
+            if (allInValid)
+                u_sess->exec_cxt.executorStopFlag = true;
+        }
+ 
+        netStatusSave(nthChannel);
+    }
+}
+ 
+void StreamProducer::connectConsumer(libcomm_addrinfo** consumerAddr, int& count, int totalNum)
+{
+    int consumerNum = 0;
+    NodeDefinition* nodesDef = NULL;
+    int startCount = count;
+    errno_t rc = EOK;
+    int i = 0, j = 0;
+    CommStreamKey key = {0};
+    /* only broadcast stream support parallel send mode in libcomm */
+    bool parallel_send_mode = false;
+ 
+    if (IS_PGXC_DATANODE && ContainRecursiveUnionSubplan(m_plan)) {
+        parallel_send_mode = false;
+    } else {
+        parallel_send_mode = (m_streamNode->type == STREAM_BROADCAST) ? true : false;
+    }
+    consumerNum = m_plan->num_nodes;
+    nodesDef = (NodeDefinition*)palloc0(sizeof(NodeDefinition) * consumerNum);
+ 
+    for (i = 0; i < consumerNum; i++) {
+        rc = memcpy_s(&nodesDef[i], sizeof(NodeDefinition), &m_plan->nodesDefinition[i], sizeof(NodeDefinition));
+        securec_check(rc, "\0", "\0");
+        nodesDef[i].nodeid = i;
+    }
+ 
+    key.queryId = m_key.queryId;
+    key.planNodeId = m_key.planNodeId;
+    key.producerSmpId = m_key.smpIdentifier;
+ 
+    for (i = 0; i < m_streamNode->smpDesc.consumerDop; i++) {
+        /* The local stream's consumer number is 1. */
+        for (j = 0; j < consumerNum; j++) {
+            Assert(count < totalNum);
+            int nodeNameLen = strlen(nodesDef[j].nodename.data);
+            int nodehostLen = strlen(nodesDef[j].nodehost.data);
+            consumerAddr[count] = (libcomm_addrinfo*)palloc0(sizeof(libcomm_addrinfo));
+            consumerAddr[count]->host = (char*)palloc0(NAMEDATALEN);
+            consumerAddr[count]->ctrl_port = nodesDef[j].nodectlport;
+            consumerAddr[count]->listen_port = nodesDef[j].nodesctpport;
+            consumerAddr[count]->nodeIdx = nodesDef[j].nodeid;
+            rc = strncpy_s(consumerAddr[count]->host, NAMEDATALEN, nodesDef[j].nodehost.data, nodehostLen + 1);
+            securec_check(rc, "\0", "\0");
+            rc = strncpy_s(consumerAddr[count]->nodename, NAMEDATALEN, nodesDef[j].nodename.data, nodeNameLen + 1);
+            securec_check(rc, "\0", "\0");
+            /* use ai_next buile address info list */
+            if (count > startCount)
+                consumerAddr[count - 1]->addr_list_next = consumerAddr[count];
+            /* set flag for parallel send mode */
+            consumerAddr[count]->parallel_send_mode = parallel_send_mode;
+ 
+            consumerAddr[count]->streamKey.queryId = m_key.queryId;
+            consumerAddr[count]->streamKey.planNodeId = m_key.planNodeId;
+            consumerAddr[count]->streamKey.producerSmpId = m_key.smpIdentifier;
+            consumerAddr[count]->streamKey.consumerSmpId = i;
+ 
+            count++;
+        }
+    }
+ 
+    if (parallel_send_mode) {
+        Assert(startCount < totalNum);
+        /* set flag for the head of address info list */
+        consumerAddr[startCount]->addr_list_size = count - startCount;
+    }
+ 
+    m_transport = (StreamTransport**)MemoryContextAllocZero(m_memoryCxt, m_connNum * sizeof(StreamTransport*));
+    for (i = 0; i < m_connNum; i++) {
+        Assert(i + startCount < totalNum);
+        m_transport[i] = New(m_memoryCxt) StreamCOMM(consumerAddr[i + startCount], true);
+    }
+ 
+    pfree_ext(nodesDef);
+}
+#else
 /*
  * @Description: Get the destnation of producer
  *
@@ -1964,6 +2710,7 @@ void StreamProducer::connectConsumer(libcomm_addrinfo** consumerAddr, int& count
     return;
 }
 #endif
+#endif
 
 static int GetListConsumerNodeIdx(ExecBoundary* enBoundary, Const** values, int distLen)
 {
@@ -2061,4 +2808,7 @@ uint2 GetTargetConsumerNodeIdx(ExecBoundary* enBoundary, Const** distValues, int
 
     return (uint2)idx;
 }
-
+void StreamProducer::setEcontext(ExprContext* econtext)
+{
+    m_econtext = econtext;
+}

@@ -216,7 +216,6 @@ static char* get_str_from_var_sci(NumericVar* var, int rscale);
 static void apply_typmod(NumericVar* var, int32 typmod);
 
 static int32 numericvar_to_int32(const NumericVar* var, bool can_ignore = false);
-static double numeric_to_double_no_overflow(Numeric num);
 static double numericvar_to_double_no_overflow(NumericVar* var);
 
 static Datum numeric_abbrev_convert(Datum original_datum, SortSupport ssup);
@@ -5397,7 +5396,7 @@ void int64_to_numericvar(int64 val, NumericVar* var)
 /*
  * Convert numeric to float8; if out of range, return +/- HUGE_VAL
  */
-static double numeric_to_double_no_overflow(Numeric num)
+double numeric_to_double_no_overflow(Numeric num)
 {
     char* tmp = NULL;
     double val;

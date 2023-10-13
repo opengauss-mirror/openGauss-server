@@ -1387,3 +1387,156 @@ add_sp_items_to_pathtarget(PathTarget *target, List *items)
         add_sp_item_to_pathtarget(target, item);
     }
 }
+
+#ifdef USE_SPQ
+typedef struct maxSortGroupRef_context {
+    Index maxsgr;
+    bool include_orderedagg;
+} maxSortGroupRef_context;
+/*
+ * tlist_members
+ *	  Finds all members of the given tlist whose expression is
+ *	  equal() to the given expression.	Result is NIL if no such member.
+ *	  Note: We do not make a copy of the tlist entries that match.
+ *	  The caller is responsible for cleaning up the memory allocated
+ *	  to the List returned.
+ */
+List* tlist_members(Node *node, List *targetlist)
+{
+    List *tlist = NIL;
+    ListCell *temp = NULL;
+ 
+    foreach (temp, targetlist) {
+        TargetEntry *tlentry = (TargetEntry *) lfirst(temp);
+ 
+        Assert(IsA(tlentry, TargetEntry));
+ 
+        if (equal(node, tlentry->expr)) {
+            tlist = lappend(tlist, tlentry);
+        }
+    }
+ 
+    return tlist;
+}
+ 
+static void get_sortgroupclauses_tles_recurse(List *clauses, List *targetList, List **tles, List **sortops,
+    List **eqops)
+{
+    ListCell *lc;
+    ListCell *lc_sortop;
+    ListCell *lc_eqop;
+    List *sub_grouping_tles = NIL;
+    List *sub_grouping_sortops = NIL;
+    List *sub_grouping_eqops = NIL;
+ 
+    foreach (lc, clauses) {
+        Node *node = (Node *)lfirst(lc);
+ 
+        if (node == NULL)
+            continue;
+ 
+        if (IsA(node, SortGroupClause)) {
+            SortGroupClause *sgc = (SortGroupClause *)node;
+            TargetEntry *tle = get_sortgroupclause_tle(sgc, targetList);
+ 
+            if (!list_member(*tles, tle)) {
+                *tles = lappend(*tles, tle);
+                *sortops = lappend_oid(*sortops, sgc->sortop);
+                *eqops = lappend_oid(*eqops, sgc->eqop);
+            }
+        } else if (IsA(node, List)) {
+            get_sortgroupclauses_tles_recurse((List *)node, targetList, tles, sortops, eqops);
+        } else
+            elog(ERROR, "unrecognized node type in list of sort/group clauses: %d", (int)nodeTag(node));
+    }
+ 
+    /*
+     * Put SortGroupClauses before GroupingClauses.
+     */
+    forthree(lc, sub_grouping_tles, lc_sortop, sub_grouping_sortops, lc_eqop, sub_grouping_eqops)
+    {
+        if (!list_member(*tles, lfirst(lc))) {
+            *tles = lappend(*tles, lfirst(lc));
+            *sortops = lappend_oid(*sortops, lfirst_oid(lc_sortop));
+            *eqops = lappend_oid(*eqops, lfirst_oid(lc_eqop));
+        }
+    }
+}
+ 
+void get_sortgroupclauses_tles(List *clauses, List *targetList, List **tles, List **sortops, List **eqops)
+{
+    *tles = NIL;
+    *sortops = NIL;
+    *eqops = NIL;
+ 
+    get_sortgroupclauses_tles_recurse(clauses, targetList, tles, sortops, eqops);
+}
+ 
+bool maxSortGroupRef_walker(Node *node, maxSortGroupRef_context *cxt)
+{
+    if (node == NULL)
+        return false;
+ 
+    if (IsA(node, TargetEntry)) {
+        TargetEntry *tle = (TargetEntry *)node;
+        if (tle->ressortgroupref > cxt->maxsgr)
+            cxt->maxsgr = tle->ressortgroupref;
+ 
+        return maxSortGroupRef_walker((Node *)tle->expr, cxt);
+    }
+ 
+    /* Aggref nodes don't nest, so we can treat them here without recurring
+     * further.
+     */
+ 
+    if (IsA(node, Aggref)) {
+        Aggref *ref = (Aggref *)node;
+ 
+        if (cxt->include_orderedagg) {
+            ListCell *lc;
+ 
+            foreach (lc, ref->aggorder) {
+                SortGroupClause *sort = (SortGroupClause *)lfirst(lc);
+                Assert(IsA(sort, SortGroupClause));
+                Assert(sort->tleSortGroupRef != 0);
+                if (sort->tleSortGroupRef > cxt->maxsgr)
+                    cxt->maxsgr = sort->tleSortGroupRef;
+            }
+        }
+        return false;
+    }
+ 
+    return expression_tree_walker(node, (bool (*)())maxSortGroupRef_walker, cxt);
+}
+ 
+/*
+ * Return the largest sortgroupref value in use in the given
+ * target list.
+ *
+ * If include_orderedagg is false, consider only the top-level
+ * entries in the target list, i.e., those that might be occur
+ * in a groupClause, distinctClause, or sortClause of the Query
+ * node that immediately contains the target list.
+ *
+ * If include_orderedagg is true, also consider AggOrder entries
+ * embedded in Aggref nodes within the target list.  Though
+ * such entries will only occur in the aggregation sub_tlist
+ * (input) they affect sortgroupref numbering for both sub_tlist
+ * and tlist (aggregate).
+ */
+Index maxSortGroupRef(List *targetlist, bool include_orderedagg)
+{
+    maxSortGroupRef_context context;
+    context.maxsgr = 0;
+    context.include_orderedagg = include_orderedagg;
+ 
+    if (targetlist != NIL) {
+        if (!IsA(targetlist, List) || !IsA(linitial(targetlist), TargetEntry))
+            elog(ERROR, "non-targetlist argument supplied");
+ 
+        maxSortGroupRef_walker((Node *)targetlist, &context);
+    }
+ 
+    return context.maxsgr;
+}
+#endif

@@ -2952,9 +2952,13 @@ int PostmasterMain(int argc, char* argv[])
         InitCommLogicResource();
     }
 
+#ifdef USE_SPQ
+    if (ENABLE_DSS) {
+#else
     if ((!IS_SINGLE_NODE) &&
         ((IS_PGXC_DATANODE && !dummyStandbyMode && !isRestoreMode) ||
             (IS_PGXC_COORDINATOR && g_instance.attr.attr_storage.comm_cn_dn_logic_conn && !isRestoreMode))) {
+#endif
         status = init_stream_comm();
         if (status != STATUS_OK)
             ereport(FATAL, (errmsg("Init libcomm for stream failed, maybe listen port already in use")));
@@ -13733,6 +13737,12 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     MemoryContextInit();
     knl_thread_init(thread_role);
 
+#ifdef USE_SPQ
+    if (arg->spq_role == ROLE_QUERY_EXECUTOR) {
+        t_thrd.spq_ctx.spq_role = ROLE_QUERY_EXECUTOR;
+    }
+#endif
+
     MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
     t_thrd.fake_session = create_session_context(t_thrd.top_mem_cxt, 0);
     t_thrd.fake_session->status = KNL_SESS_FAKE;
@@ -14546,6 +14556,13 @@ ThreadId initialize_util_thread(knl_thread_role role, void* payload)
     }
     thr_argv->m_thd_arg.role = role;
     thr_argv->m_thd_arg.payload = payload;
+#ifdef USE_SPQ
+    if (IS_SPQ_EXECUTOR) {
+        thr_argv->m_thd_arg.spq_role = ROLE_QUERY_EXECUTOR;
+    } else {
+        thr_argv->m_thd_arg.spq_role = ROLE_UTILITY;
+    }
+#endif
     Port port;
     ThreadId pid;
     errno_t rc;

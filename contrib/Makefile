@@ -56,7 +56,8 @@ SUBDIRS = \
 		unaccent	\
 		vacuumlo	\
 		security_plugin	\
-		ndpplugin
+		ndpplugin \
+		spq_plugin
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo

@@ -1383,6 +1383,30 @@ void knl_u_mot_init(knl_u_mot_context* mot_cxt)
 }
 #endif
 
+#ifdef USE_SPQ
+static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
+{
+    Assert(spq_cxt != NULL);
+    spq_cxt->dxl_memory_manager = NULL;
+    spq_cxt->pmpXerces = NULL;
+    spq_cxt->pmpDXL = NULL;
+    spq_cxt->m_ulpInitDXL = 0;
+    spq_cxt->m_ulpShutdownDXL = 0;
+    spq_cxt->m_pstrmap = NULL;
+    spq_cxt->m_pxmlszmap = NULL;
+    spq_cxt->m_mp = NULL;
+    spq_cxt->m_memory_pool_mgr = NULL;
+    spq_cxt->m_worker_pool_manager = NULL;
+    spq_cxt->m_pcache = NULL;
+    spq_cxt->m_ullCacheQuota = 0;
+    spq_cxt->spq_node_all_configs_size = 0;
+    spq_cxt->spq_node_configs_size = 0;
+    spq_cxt->spq_worker_context = NULL;
+    spq_cxt->spq_max_tuple_chunk_size = 0;
+    spq_cxt->s_tupSerMemCtxt = NULL;
+}
+#endif
+
 static void knl_u_clientConnTime_init(knl_u_clientConnTime_context* clientConnTime_cxt)
 {
     Assert(clientConnTime_cxt != NULL);
@@ -1490,6 +1514,9 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_ledger_init(&sess_cxt->ledger_cxt);
 #ifdef ENABLE_MOT
     knl_u_mot_init(&sess_cxt->mot_cxt);
+#endif
+#ifdef USE_SPQ
+    knl_u_spq_init(&sess_cxt->spq_cxt);
 #endif
     knl_u_libsw_init(&sess_cxt->libsw_cxt);
     KnlURepOriginInit(&sess_cxt->reporigin_cxt);

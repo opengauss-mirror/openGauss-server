@@ -1633,6 +1633,9 @@ static int FigureColnameInternal(Node* node, char** name)
                 case ANY_SUBLINK:
                 case ROWCOMPARE_SUBLINK:
                 case CTE_SUBLINK:
+#ifdef USE_SPQ
+                case NOT_EXISTS_SUBLINK:
+#endif
                     break;
             }
             break;

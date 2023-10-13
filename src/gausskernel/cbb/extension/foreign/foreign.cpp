@@ -1769,3 +1769,23 @@ void AdvanceFDWUpperPlan(FDWUpperRelCxt* ufdwCxt, UpperRelationKind stage, Plan*
 
     ufdwCxt->currentRel->fdwroutine->GetForeignUpperPaths(ufdwCxt, stage, localPlan);
 }
+
+#ifdef USE_SPQ
+bool rel_is_external_table(Oid relid)
+{
+    Form_pg_foreign_table tableform;
+    HeapTuple tp;
+    bool result;
+ 
+    tp = SearchSysCache1(FOREIGNTABLEREL, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tp))
+        return false;
+    tableform = (Form_pg_foreign_table) GETSTRUCT(tp);
+ 
+    result = (tableform->ftserver == get_foreign_server_oid(GS_EXTTABLE_SERVER_NAME, false));
+ 
+    ReleaseSysCache(tp);
+ 
+    return result;
+}
+#endif

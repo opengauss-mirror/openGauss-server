@@ -153,6 +153,10 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
         case DestTupleLocalRedistribute:
         case DestTupleLocalRoundRobin:
         case DestTupleHybrid:
+#ifdef USE_SPQ
+        case DestTupleRoundRobin:
+        case DestBatchRoundRobin:
+#endif
         case DestBatchBroadCast:
         case DestBatchLocalBroadCast:
         case DestBatchRedistribute:

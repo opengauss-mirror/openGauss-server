@@ -74,8 +74,14 @@ void StreamConsumer::init(StreamKey key, List* execProducerNodes, ParallelDesc d
     bool localNodeOnly = STREAM_IS_LOCAL_NODE(desc.distriType);
     if (localNodeOnly)
         producerNum = desc.producerDop;
-    else
+    else {
         producerNum = desc.producerDop * list_length(execProducerNodes);
+#ifdef USE_SPQ
+        if (IS_SPQ_EXECUTOR && m_plan) {
+            producerNum = desc.producerDop * m_plan->num_nodes;
+        }
+#endif
+    }
 
     Assert(producerNum > 0);
 
@@ -111,6 +117,23 @@ void StreamConsumer::init(StreamKey key, List* execProducerNodes, ParallelDesc d
         }
     }
     copyLock.unLock();
+#endif
+#ifdef USE_SPQ
+    if (IS_SPQ_EXECUTOR && m_plan != nullptr) {
+        for (int j = 0; j < desc.producerDop; j++) {
+            for(;i < m_plan->num_nodes; i++) {
+                if (localNodeOnly) {
+                    continue;
+                }
+                rc = strncpy_s(&m_expectProducer[i].nodeName[0],
+                    NAMEDATALEN,
+                    m_plan->nodesDefinition[i].nodename.data,
+                    strlen(m_plan->nodesDefinition[i].nodename.data) + 1);
+                securec_check(rc, "\0", "\0");
+                m_expectProducer[i].nodeIdx = i;
+            }
+        }
+    }
 #endif
     for (i = 0; i < producerNum; i++) {
         int nodeNameLen = 0;
@@ -308,6 +331,23 @@ int StreamConsumer::getNodeIdx(const char* nodename)
     return -1;
 }
 
+#ifdef USE_SPQ
+/*
+ * @Description: Get expectProducer nodeName
+ *
+ * @return: nodeName
+ */
+char* StreamConsumer::getExpectProducerNodeName()
+{
+    return m_expectProducer->nodeName;
+}
+
+void StreamConsumer::setPstmt(PlannedStmt* p_stmt)
+{
+    m_plan = p_stmt;
+}
+#endif
+
 /*
  * @Description: Find un connect producer
  *
@@ -405,8 +445,11 @@ void StreamConsumer::waitProducerReady()
                     getFirstUnconnectedProducerNodeIdx(),
                     m_connNum - m_currentProducerNum,
                     m_key.planNodeId,
+#ifdef USE_SPQ
+                    m_plan ? m_plan->num_nodes : -1);
+#else
                     global_node_definition ? global_node_definition->num_nodes : -1);
-
+#endif
                 if (ntimes == 300) {
                     if (t_thrd.int_cxt.QueryCancelPending) {
                         ereport(WARNING, (errmodule(MOD_STREAM),

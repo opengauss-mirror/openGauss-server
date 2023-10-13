@@ -75,6 +75,12 @@ int StreamMain()
 
     InitStreamThread();
 
+#ifdef USE_SPQ
+    t_thrd.spq_ctx.spq_session_id = u_sess->stream_cxt.producer_obj->m_plan->spq_session_id;
+    t_thrd.spq_ctx.current_id = u_sess->stream_cxt.producer_obj->getStream()->streamID;
+    t_thrd.spq_ctx.skip_direct_distribute_result = false;
+#endif
+
     SetProcessingMode(NormalProcessing);
 
     on_proc_exit(StreamQuitAndClean, 0);
@@ -505,6 +511,8 @@ static void execute_stream_plan(StreamProducer* producer)
     receiver = CreateDestReceiver(dest);
     if (dest >= DestTupleBroadCast)
         SetStreamReceiverParams(receiver, producer, portal);
+
+    producer->setEcontext(GetPerTupleExprContext(portal->queryDesc->estate));
 
     /*
      * Run the portal to completion, and then drop it (and the receiver).

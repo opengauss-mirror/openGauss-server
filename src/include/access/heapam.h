@@ -482,4 +482,7 @@ extern bool ResolveCminCmaxDuringDecoding(
     struct HTAB* tuplecid_data, Snapshot snapshot, HeapTuple htup, Buffer buffer, CommandId* cmin, CommandId* cmax);
 extern TableScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     uint32 flags, ParallelHeapScanDesc parallel_scan, RangeScanInRedis rangeScanInRedis = {false, 0, 0});
+#ifdef USE_SPQ
+extern Relation try_table_open(Oid relationId, LOCKMODE lockmode);
+#endif
 #endif /* HEAPAM_H */

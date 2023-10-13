@@ -9250,6 +9250,12 @@ bool is_projection_capable_plan(Plan* plan)
         case T_MergeAppend:
         case T_RecursiveUnion:
         case T_Stream:
+#ifdef USE_SPQ
+        case T_Motion:
+        case T_ShareInputScan:
+        case T_Sequence:
+        case T_PartitionSelector:
+#endif
             return false;
 
         case T_PartIterator:
@@ -10697,3 +10703,10 @@ bool is_projection_capable_path(Path *path)
     }
     return true;
 }
+
+#ifdef USE_SPQ
+List* spq_make_null_eq_clause(List* joinqual, List** otherqual, List* nullinfo)
+{
+    return make_null_eq_clause(joinqual, otherqual, nullinfo);
+}
+#endif

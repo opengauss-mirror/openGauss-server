@@ -41,6 +41,10 @@
 #include "optimizer/streamplan.h"
 #include "optimizer/stream_remove.h"
 
+#ifdef USE_SPQ
+#include "optimizer/planmem_walker.h"
+#endif
+
 typedef struct {
     Index varno;         /* RT index of Var */
     AttrNumber varattno; /* attr number of Var */
@@ -309,6 +313,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
      */
     switch (nodeTag(plan)) {
         case T_SeqScan:
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -647,6 +654,20 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             /* resconstantqual can't contain any subplan variable refs */
             splan->resconstantqual = fix_scan_expr(root, splan->resconstantqual, rtoffset);
         } break;
+#ifdef USE_SPQ
+        case T_Result: {
+            Result* splan = (Result*)plan;
+
+            if (splan->plan.lefttree != NULL)
+                set_upper_references(root, plan, rtoffset);
+            else {
+                splan->plan.targetlist = fix_scan_list(root, splan->plan.targetlist, rtoffset);
+                splan->plan.qual = fix_scan_list(root, splan->plan.qual, rtoffset);
+            }
+            /* resconstantqual can't contain any subplan variable refs */
+            splan->resconstantqual = fix_scan_expr(root, splan->resconstantqual, rtoffset);
+        }
+#endif
         case T_ProjectSet:
             set_upper_references(root, plan, rtoffset);
             break;
@@ -2791,3 +2812,47 @@ static void set_foreignscan_references(PlannerInfo *root, ForeignScan *fscan, in
         fix_dfs_private_item(root, rtoffset, item);
     }
 }
+
+#ifdef USE_SPQ
+typedef struct {
+    PlannerInfo *root;
+    plan_tree_base_prefix base;
+} spq_extract_plan_dependencies_context;
+ 
+static bool spq_extract_plan_dependencies_walker(Node *node, spq_extract_plan_dependencies_context *context)
+{
+    if (node == NULL)
+        return false;
+    /* Extract function dependencies and check for regclass Consts */
+    fix_expr_common(context->root, node);
+ 
+    return plan_tree_walker(node, (MethodWalker)spq_extract_plan_dependencies_walker, (void *)context);
+}
+ 
+/*
+ * spq_extract_plan_dependencies()
+ *              Given a fully built Plan tree, extract their dependencies just as
+ *              set_plan_references_ would have done.
+ *
+ * This is used to extract dependencies from a plan that has been created
+ * by ORCA (set_plan_references() does this usually, but ORCA doesn't use
+ * it). This adds the new entries directly to PlannerGlobal.relationOids
+ * and invalItems.
+ *
+ * Note: This recurses into SubPlans. You better still call this for
+ * every subplan in a overall plan, to make sure you capture dependencies
+ * from subplans that are not referenced from the main plan, because
+ * changes to the relations in eliminated subplans might require
+ * re-planning, too. (XXX: it would be better to not recurse into SubPlans
+ * here, as that's a waste of time.)
+ */
+void spq_extract_plan_dependencies(PlannerInfo *root, Plan *plan)
+{
+    spq_extract_plan_dependencies_context context;
+ 
+    context.base.node = (Node *)(root->glob);
+    context.root = root;
+ 
+    (void)spq_extract_plan_dependencies_walker((Node *)plan, &context);
+}
+#endif

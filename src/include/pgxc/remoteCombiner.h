@@ -170,6 +170,11 @@ typedef struct RemoteQueryState {
     char* serializedPlan;   /* the serialized plan tree */
     ParallelFunctionState* parallel_function_state;
     bool has_stream_for_loop; /* has stream node in for loop sql which may cause hang. */
+#ifdef USE_SPQ
+    uint64 queryId;
+    PGXCNodeHandle** spq_connections_info;
+    pg_conn **nodeCons;
+#endif
 } RemoteQueryState;
 
 extern RemoteQueryState* CreateResponseCombiner(int node_count, CombineType combine_type);

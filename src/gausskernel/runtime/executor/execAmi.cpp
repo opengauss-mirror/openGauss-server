@@ -64,6 +64,12 @@
 #ifdef PGXC
 #include "pgxc/execRemote.h"
 #endif
+#ifdef USE_SPQ
+#include "executor/node/nodeSpqSeqscan.h"
+#include "executor/node/nodeAssertOp.h"
+#include "executor/node/nodeShareInputScan.h"
+#include "executor/node/nodeSequence.h"
+#endif
 
 static bool target_list_supports_backward_scan(List* targetlist);
 static bool index_supports_backward_scan(Oid indexid);
@@ -141,6 +147,28 @@ void ExecReScanByType(PlanState* node)
         case T_SeqScanState:
             ExecReScanSeqScan((SeqScanState*)node);
             break;
+
+#ifdef USE_SPQ
+        case T_SpqSeqScanState:
+            if (spqscan_rescan_hook) {
+                spqscan_rescan_hook((SpqSeqScanState*)node);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("spqscan hook init_spqscan_hook uninited.")));
+            }
+            break;
+ 
+        case T_AssertOpState:
+            ExecReScanAssertOp((AssertOpState *) node);
+            break;
+ 
+        case T_ShareInputScanState:
+            ExecReScanShareInputScan((ShareInputScanState *) node);
+            break;
+ 
+        case T_SequenceState:
+            ExecReScanSequence((SequenceState *) node);
+            break;
+#endif
 
         case T_IndexScanState:
             ExecReScanIndexScan((IndexScanState*)node);
@@ -365,6 +393,12 @@ void ExecMarkPos(PlanState* node)
             ExecSeqMarkPos((SeqScanState*)node);
             break;
 
+#ifdef USE_SPQ
+        case T_SpqSeqScanState:
+            ExecSpqSeqMarkPos((SpqSeqScanState*)node);
+            break;
+#endif
+
         case T_IndexScanState:
             ExecIndexMarkPos((IndexScanState*)node);
             break;
@@ -419,6 +453,12 @@ void ExecRestrPos(PlanState* node)
         case T_SeqScanState:
             ExecSeqRestrPos((SeqScanState*)node);
             break;
+
+#ifdef USE_SPQ
+        case T_SpqSeqScanState:
+            ExecSpqSeqRestrPos((SpqSeqScanState*)node);
+            break;
+#endif
 
         case T_IndexScanState:
             ExecIndexRestrPos((IndexScanState*)node);
@@ -479,6 +519,10 @@ bool ExecSupportsMarkRestore(Path *pathnode)
         case T_Material:
         case T_Sort:
             return true;
+
+#ifdef USE_SPQ
+        case T_ShareInputScan:
+#endif
 
         case T_BaseResult:
 
@@ -565,6 +609,11 @@ bool ExecSupportsBackwardScan(Plan* node)
         case T_ExtensiblePlan:
             return ((ExtensiblePlan *)node)->flags & EXTENSIBLEPATH_SUPPORT_BACKWARD_SCAN;
 
+#ifdef USE_SPQ
+        case T_ShareInputScan:
+            return true;
+#endif
+
         case T_Material:
         case T_Sort:
             /* these don't evaluate tlist */
@@ -648,6 +697,9 @@ bool ExecMaterializesOutput(NodeTag plantype)
         case T_CteScan:
         case T_WorkTableScan:
         case T_Sort:
+#ifdef USE_SPQ
+        case T_ShareInputScan:
+#endif
             return true;
 
         default:

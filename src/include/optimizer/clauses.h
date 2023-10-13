@@ -50,6 +50,11 @@ typedef struct {
     List* active_fns;
     Node* case_val;
     bool estimate;
+#ifdef USE_SPQ
+    bool recurse_queries; /* recurse into query structures */
+    bool recurse_sublink_testexpr; /* recurse into sublink test expressions */
+    Size max_size; /* max constant binary size in bytes, 0: no restrictions */
+#endif
 } eval_const_expressions_context;
 
 typedef enum { UNIQUE_CONSTRAINT, NOT_NULL_CONSTRAINT } constraintType;
@@ -157,5 +162,10 @@ extern List* get_quals_lists(Node *jtnode);
 extern bool isTableofType(Oid typeOid, Oid* base_oid, Oid* indexbyType);
 extern Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid result_collid, Oid input_collid,
     List** args_p, bool process_args, bool allow_non_const, eval_const_expressions_context* context);
-
+ 
+#ifdef USE_SPQ
+extern Query *fold_constants(PlannerInfo *root, Query *q, ParamListInfo boundParams, Size max_size);
+extern Query *flatten_join_alias_var_optimizer(Query *query, int queryLevel);
+extern Expr *transform_array_Const_to_ArrayExpr(Const *c);
+#endif
 #endif /* CLAUSES_H */

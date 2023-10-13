@@ -288,4 +288,5 @@ extern void set_varratio_after_calc_selectivity(
 extern double get_windowagg_selectivity(PlannerInfo* root, WindowClause* wc, WindowFunc* wfunc, List* partitionExprs,
     int32 constval, double tuples, unsigned int num_datanodes);
 extern bool contain_single_col_stat(List* stat_list);
+extern double convert_timevalue_to_scalar(Datum value, Oid typid);
 #endif /* SELFUNCS_H */

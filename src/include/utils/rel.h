@@ -411,6 +411,10 @@ typedef struct StdRdOptions {
     int check_option_offset; /* for views */
     int view_security_option_offset; /* for views */
     Oid collate; /* table's default collation in b format. */
+#ifdef USE_SPQ
+    /* SPQ OPTIONS */
+    int spq_bt_build_offset;
+#endif
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10

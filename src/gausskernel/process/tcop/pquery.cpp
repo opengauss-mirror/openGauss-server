@@ -909,10 +909,12 @@ void PortalSetResultFormat(Portal portal, int nFormats, int16* formats)
     int i;
 
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef USE_SPQ
     if (StreamTopConsumerAmI()) {
         portal->streamInfo.RecordSessionInfo();
         u_sess->stream_cxt.global_obj->m_portal = portal;
     }
+#endif
 #endif
 
     /* Do nothing if portal won't return tuples */
@@ -1070,6 +1072,13 @@ bool PortalRun(
         queryDesc->plannedstmt->has_obsrel) {
         increase_rp_number();
     }
+
+#ifdef USE_SPQ
+    if (!IS_SPQ_RUNNING && queryDesc != NULL && (queryDesc->plannedstmt) != NULL &&
+        queryDesc->plannedstmt->is_spq_optmized) {
+        t_thrd.spq_ctx.spq_role = ROLE_QUERY_COORDINTOR;
+    }
+#endif /* USE_SPQ */
 
     /*
      * Set up global portal context pointers.
@@ -1419,7 +1428,8 @@ static uint64 PortalRunSelect(Portal portal, bool forward, long count, DestRecei
              * <<IS_PGXC_COORDINATOR && !StreamTopConsumerAmI()>> means that
              * we are on DWS CN.
              */
-            if (IS_PGXC_COORDINATOR && !StreamTopConsumerAmI() && queryDesc->plannedstmt->has_obsrel &&
+            if ((IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) &&
+	        !StreamTopConsumerAmI() && queryDesc->plannedstmt->has_obsrel &&
                 u_sess->instr_cxt.obs_instr) {
                 u_sess->instr_cxt.obs_instr->insertData(queryDesc->plannedstmt->queryId);
             }

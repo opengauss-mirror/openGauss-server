@@ -63,6 +63,9 @@
 #include "utils/memprot.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
+#ifdef USE_SPQ
+#include "executor/node/nodeShareInputScan.h"
+#endif
 
 /*
  * Possible states of a Tuplestore object.	These denote the states that
@@ -94,6 +97,14 @@ typedef struct {
     off_t offset;     /* byte offset in file */
 } TSReadPointer;
 
+#ifdef USE_SPQ
+typedef enum {
+    TSHARE_NOT_SHARED,
+    TSHARE_WRITER,
+    TSHARE_READER
+} TSSharedStatus;
+#endif
+ 
 /*
  * Private state of a Tuplestore operation.
  */
@@ -180,6 +191,12 @@ struct Tuplestorestate {
     int planId;            /* id of plan that used this state */
     int dop;               /* parallel num of the plan */
     bool isMemCtl;         /* whether context is under memory control */
+#ifdef USE_SPQ
+    TSSharedStatus share_status;
+    bool frozen;
+    SharedFileSet *fileset;
+    char *shared_filename;
+#endif
 };
 
 #define COPYTUP(state, tup) ((*(state)->copytup)(state, tup))
@@ -531,6 +548,14 @@ void tuplestore_end(Tuplestorestate* state)
             pfree_ext(state->memtuples[i]);
         pfree_ext(state->memtuples);
     }
+
+#ifdef USE_SPQ
+    if (state->share_status == TSHARE_WRITER)
+        BufFileDeleteShared(state->fileset, state->shared_filename);
+    if (state->shared_filename)
+        pfree(state->shared_filename);
+#endif
+
     pfree_ext(state->readptrs);
     pfree_ext(state);
 }
@@ -1514,3 +1539,102 @@ int tuplestore_get_memtupcount(Tuplestorestate* state)
 {
     return state->memtupcount;
 }
+
+#ifdef USE_SPQ
+/*
+ * tuplestore_make_shared
+ *
+ * Make a tuplestore available for sharing later. This must be called
+ * immediately after tuplestore_begin_heap().
+ */
+void tuplestore_make_shared(Tuplestorestate *state, SharedFileSet *fileset, const char *filename)
+{   
+    ResourceOwner oldowner;
+    
+    Assert(state->status == TSS_INMEM);
+    Assert(state->share_status == TSHARE_NOT_SHARED);
+    state->share_status = TSHARE_WRITER;
+    state->fileset = fileset;
+    state->shared_filename = pstrdup(filename);
+    
+    /*
+     * Switch to tape-based operation, like in tuplestore_puttuple_common().
+     * We could delay this until tuplestore_freeze(), but we know we'll have
+     * to write everything to the file anyway, so let's not waste memory
+     * buffering the tuples in the meanwhile.
+     */
+    PrepareTempTablespaces();
+    
+    /* associate the file with the store's resource owner */
+    oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = state->resowner;
+    
+    state->myfile = BufFileCreateShared(fileset, filename);
+    t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+    
+    /*
+     * For now, be conservative and always use trailing length words for
+     * cross-process tuplestores. It's important that the writer and the
+     * reader processes agree on this, and forcing it to true is the
+     * simplest way to achieve that.
+     */
+    state->backward = true;
+    state->status = TSS_WRITEFILE;
+}
+ 
+static void writetup_forbidden(Tuplestorestate *state, void *tup)
+{   
+    elog(ERROR, "cannot write to tuplestore, it is already frozen");
+}
+ 
+/*
+ * tuplestore_freeze
+ *
+ * Flush the current buffer to disk, and forbid further inserts. This
+ * prepares the tuplestore for reading from a different process.
+ */
+void tuplestore_freeze(Tuplestorestate *state)
+{
+    Assert(state->share_status == TSHARE_WRITER);
+    Assert(!state->frozen);
+    dumptuples(state);
+    BufFileExportShared(state->myfile);
+    state->frozen = true;
+}
+ 
+/*
+ * tuplestore_open_shared
+ *
+ * Open a shared tuplestore that has been populated in another process
+ * for reading.
+ */
+Tuplestorestate *tuplestore_open_shared(SharedFileSet *fileset, const char *filename)
+{
+    Tuplestorestate *state;
+    int eflags;
+ 
+    eflags = EXEC_FLAG_BACKWARD | EXEC_FLAG_REWIND;
+ 
+    state = tuplestore_begin_common(eflags,
+                                    false /* interXact, ignored because we open existing files */,
+                                    10 /* no need for memory buffers */);
+ 
+    state->backward = true;
+ 
+    state->copytup = copytup_heap;
+    state->writetup = writetup_forbidden;
+    state->readtup = readtup_heap;
+ 
+    state->myfile = BufFileOpenShared(fileset, filename);
+    state->readptrs[0].file = 0;
+    state->readptrs[0].offset = 0L;
+    state->status = TSS_READFILE;
+ 
+    state->share_status = TSHARE_READER;
+    state->frozen = false;
+    state->fileset = fileset;
+    state->shared_filename = pstrdup(filename);
+ 
+    return state;
+}
+#endif

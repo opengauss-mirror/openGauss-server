@@ -23,6 +23,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/log_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/gc_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/ndpplugin
+    ${CMAKE_CURRENT_SOURCE_DIR}/spq_plugin
 )
 
 add_subdirectory(hstore)
@@ -44,4 +45,6 @@ if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     add_subdirectory(gc_fdw)
 endif()
 add_subdirectory(ndpplugin)
-
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/spq_plugin)
+    add_subdirectory(spq_plugin)
+endif()

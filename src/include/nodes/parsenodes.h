@@ -207,9 +207,15 @@ typedef enum RTEKind {
 #ifdef PGXC
     RTE_REMOTE_DUMMY, /* RTEs created by remote plan reduction */
 #endif               /* PGXC */
-    RTE_RESULT       /* RTE represents an empty FROM clause; such
+    RTE_RESULT,      /* RTE represents an empty FROM clause; such
                       * RTEs are added by the planner, they're not
                       * present during parsing or rewriting */
+#ifdef USE_SPQ
+    RTE_NAMEDTUPLESTORE,
+    RTE_TABLEFUNC, /* TableFunc(.., column list) */
+    RTE_VOID, /* CDB: deleted RTE */
+    RTE_TABLEFUNCTION /* CDB: Functions over multiset input */
+#endif
 } RTEKind;
 
 typedef struct RangeTblEntry {
@@ -374,6 +380,9 @@ typedef struct RangeTblEntry {
                                  * Select * from table_name subpartition (subpartition_name);
                                  * or delete from table_name partition (partition_name, ...)
                                  */
+#ifdef USE_SPQ
+    bool forceDistRandom;
+#endif
 } RangeTblEntry;
 
 /*
@@ -2386,6 +2395,24 @@ typedef struct GetDiagStmt {
     bool hasCondNum;
     List *condNum;
 } GetDiagStmt;
+
+#ifdef USE_SPQ
+typedef struct RangeTblFunction {
+    NodeTag type;
+    Node *funcexpr; /* expression tree for func call */
+    int funccolcount; /* number of columns it contributes to RTE */
+    /* These fields record the contents of a column definition list, if any: */
+    List *funccolnames; /* column names (list of String) */
+    List *funccoltypes; /* OID list of column type OIDS */
+    List *funccoltypmods; /* integer list of column typmods */
+    List *funccolcollations; /* OID list of column collation OIDS */
+
+    bytea *funcuserdata; /* describe function user data. assume bytea */
+
+    /* This is set during planning for use by the executor: */
+    Bitmapset *funcparams; /* PARAM_EXEC Param IDs affecting this func */
+} RangeTblFunction;
+#endif
 
 extern inline NodeTag transform_node_tag(Node* raw_parse_tree)
 {

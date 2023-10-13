@@ -444,4 +444,7 @@ extern void AdvanceFDWUpperPlan(FDWUpperRelCxt* ufdwCxt, UpperRelationKind stage
     (strncmp(passwd, ENCRYPT_STR_PREFIX, strlen(ENCRYPT_STR_PREFIX)) == 0 && \
         strlen(passwd) >= MIN_ENCRYPTED_PASSWORD_LENGTH)
 
+#ifdef USE_SPQ
+bool rel_is_external_table(Oid relid);
+#endif
 #endif /* FOREIGN_H */

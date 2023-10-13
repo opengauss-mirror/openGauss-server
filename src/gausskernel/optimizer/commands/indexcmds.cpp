@@ -73,6 +73,10 @@
 
 #include "securec.h"
 
+#ifdef USE_SPQ
+#include "access/spq_btbuild.h"
+#endif
+
 /* non-export function prototypes */
 void CheckPredicate(Expr* predicate);
 Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId);
@@ -2020,7 +2024,13 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      * Index can now be marked valid -- update its pg_index entry
      */
     index_set_state_flags(indexRelationId, INDEX_CREATE_SET_VALID);
-
+#ifdef USE_SPQ
+    Relation indexRelation;
+    indexRelation = index_open(indexRelationId, RowExclusiveLock);
+    if (enable_spq_btbuild(indexRelation))
+        spq_btbuild_update_pg_class(rel, indexRelation);
+    index_close(indexRelation, NoLock);
+#endif
     /*
      * The pg_index update will cause backends (including this one) to update
      * relcache entries for the index itself, but we should also send a

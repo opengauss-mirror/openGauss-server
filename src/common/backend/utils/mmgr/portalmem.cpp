@@ -105,7 +105,7 @@ typedef struct portalhashent {
 inline void ReleaseStreamGroup(Portal portal)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!StreamThreadAmI()) {
+    if (!IS_SPQ_RUNNING && !StreamThreadAmI()) {
         portal->streamInfo.AttachToSession();
         StreamNodeGroup::ReleaseStreamGroup(true);
         portal->streamInfo.Reset();
@@ -542,6 +542,14 @@ void PortalDrop(Portal portal, bool isTopCommit)
 
     u_sess->exec_cxt.isFlashBack = false;
 
+#ifdef USE_SPQ
+    QueryDesc* queryDesc = portal->queryDesc;
+    if (!IS_SPQ_RUNNING && queryDesc != NULL && (queryDesc->plannedstmt) != NULL &&
+        queryDesc->plannedstmt->is_spq_optmized) {
+        t_thrd.spq_ctx.spq_role = ROLE_QUERY_COORDINTOR;
+    }
+#endif /* USE_SPQ */
+
     /*
      * Allow portalcmds.c to clean up the state it knows about, in particular
      * shutting down the executor if still active.	This step potentially runs
@@ -613,7 +621,7 @@ void PortalDrop(Portal portal, bool isTopCommit)
      */
 #ifndef ENABLE_MULTIPLE_NODES
     /* autonomous transactions procedure out param portal cleaned by its parent session */
-    if (portal->holdStore && !portal->isAutoOutParam) {
+    if (portal->holdStore && (IS_SPQ_RUNNING || !portal->isAutoOutParam)) {
 #else
     if (portal->holdStore) {
 #endif

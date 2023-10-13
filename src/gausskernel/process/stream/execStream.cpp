@@ -89,6 +89,31 @@ bool IsThreadProcessStreamRecursive()
     return true;
 }
 
+#ifdef USE_SPQ
+bool IsThreadSkipDirectResult(StreamState* node)
+{
+    if (node == NULL || node->consumer == NULL) {
+        return false;
+    }
+    if (IS_SPQ_EXECUTOR) {
+        Plan* plan = node->ss.ps.plan;
+        Assert(IsA(plan, Stream));
+        Stream* stream = (Stream*) plan;
+        if (node->type == STREAM_GATHER && stream->smpDesc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
+            const char* nodeName = GetConfigOption("pgxc_node_name", false, false);
+            if (!(strcmp(node->consumer->getExpectProducerNodeName(), nodeName) == 0)) {
+                return true;
+            }
+            if (u_sess->stream_cxt.smp_id != 0) {
+               return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
+#endif
+
 /*
  * @Description: Check if Stream node is dummy
  *
@@ -143,6 +168,11 @@ const char* GetStreamTypeRedistribute(Stream* node)
             }
             break;
         }
+#ifdef USE_SPQ
+        case REMOTE_ROUNDROBIN:
+            stream_tag = "ROUNDROBIN";
+            break;
+#endif
 
         default: {
             if (isRangeListRedis) {
@@ -253,7 +283,14 @@ const char* GetStreamType(Stream* node)
 
             appendStringInfo(type, "%sStreaming(type: %s%s%s)", vector_tag, stream_tag, dop_tag, ng_tag);
         } break;
-
+#ifdef USE_SPQ
+        case STREAM_GATHER: {
+            if(node->smpDesc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
+                stream_tag = "DIRECT DISTRIBUTE";
+            }
+            appendStringInfo(type, "%sStreaming(type: %s%s%s)", vector_tag, stream_tag, dop_tag, ng_tag);
+        } break;
+#endif
         case STREAM_REDISTRIBUTE: {
             stream_tag = GetStreamTypeRedistribute(node);
             appendStringInfo(type, "%sStreaming(type: %s%s%s)", vector_tag, stream_tag, dop_tag, ng_tag);
@@ -568,7 +605,7 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
     List* consumer_nodeList = NIL;
     List* producer_nodeList = NIL;
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
     if (!isLocalStream) {
         ereport(ERROR, (errmsg("Single Node should only has local stream operator.")));
     }
@@ -683,6 +720,13 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
 
             /* Set smp identifier. */
             key.smpIdentifier = i;
+#ifdef USE_SPQ
+            if (IS_SPQ_EXECUTOR) {
+                consumer->setPstmt(pstmt);
+            } else {
+                consumer->setPstmt(NULL);
+            }
+#endif
             consumer->init(key, execNodes, streamNode->smpDesc, transType, sharedContext);
 
             consumerSMPList = lappend(consumerSMPList, consumer);
@@ -698,6 +742,9 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
 
     /* 2. Start the setup the Producer part */
     consumerNum = list_length(streamNode->consumer_nodes->nodeList);
+#ifdef USE_SPQ
+    consumerNum = pstmt->num_nodes;
+#endif
 
     /* Set connection number of producer. */
     if (STREAM_IS_LOCAL_NODE(streamNode->smpDesc.distriType))
@@ -824,6 +871,19 @@ static void InitStreamFlow(StreamFlowCtl* ctl)
                     InitStreamFlow(ctl);
                 }
             } break;
+#ifdef USE_SPQ
+            case T_Sequence: {
+                Sequence* sequence = (Sequence*)oldPlan;
+                ListCell* lc = NULL;
+                foreach(lc, sequence->subplans) {
+                    Plan* subplan = (Plan*)lfirst(lc);
+                    ctl->plan = subplan;
+                    /* Set parent info as checkInfo for every sub plan. */
+                    SetCheckInfo(&ctl->checkInfo, oldPlan);
+                    InitStreamFlow(ctl);
+                }
+            } break;
+#endif
             case T_ModifyTable:
             case T_VecModifyTable: {
                 ModifyTable* mt = (ModifyTable*)oldPlan;
@@ -1128,6 +1188,9 @@ void SetupStreamRuntime(StreamState* node)
 
     /* Set consumer object in streamState. */
     node->consumer = consumer;
+#ifdef USE_SPQ
+    node->skip_direct_distribute_result = IsThreadSkipDirectResult(node);
+#endif
 
     RegisterStreamSnapshots();
 }
@@ -1165,7 +1228,7 @@ static void StartupStreamThread(StreamState* node)
 /* Set up Stream thread in parallel */
 void StartUpStreamInParallel(PlannedStmt* pstmt, EState* estate)
 {
-    if (!IS_PGXC_DATANODE || pstmt->num_streams <= 0) {
+    if (IS_SPQ_COORDINATOR || !IS_PGXC_DATANODE || pstmt->num_streams <= 0) {
         return;
     }
 
@@ -2099,7 +2162,7 @@ StreamState* BuildStreamRuntime(Stream* node, EState* estate, int eflags)
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR) {
 #else
-    if (StreamTopConsumerAmI()) {
+    if ((IS_SPQ_COORDINATOR) || (!IS_SPQ_RUNNING && StreamTopConsumerAmI())) {
 #endif
         if (innerPlan(node))
             innerPlanState(stream_state) = ExecInitNode(innerPlan(node), estate, eflags);
@@ -2112,8 +2175,9 @@ StreamState* BuildStreamRuntime(Stream* node, EState* estate, int eflags)
     }
 
     /* Stream runtime only set up on datanode. */
-    if (IS_PGXC_DATANODE)
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) {
         SetupStreamRuntime(stream_state);
+    }
 
     return stream_state;
 }
@@ -2183,6 +2247,10 @@ static TupleTableSlot* ExecStream(PlanState* state)
         }
     }
 
+#ifdef USE_SPQ
+    t_thrd.spq_ctx.skip_direct_distribute_result = node->skip_direct_distribute_result;
+#endif
+
     node->receive_message = true;
 
     if (node->StreamScan(node)) {
@@ -2208,7 +2276,7 @@ static TupleTableSlot* ExecStream(PlanState* state)
 void ExecEarlyDeinitConsumer(PlanState* node)
 {
     /* A Coordinator has no stream thread, so do not bother about that */
-    if (IS_PGXC_COORDINATOR)
+    if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR)
         return;
 
     /* Exit if skip early deinit consumer */

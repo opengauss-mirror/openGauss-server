@@ -5468,3 +5468,109 @@ List *get_quals_lists(Node *jtnode)
     return quallist;
 }
 
+#ifdef USE_SPQ
+
+/*
+ * fold_constants
+ *
+ * Recurses into query tree and folds all constant expressions.
+ */
+Query *fold_constants(PlannerInfo *root, Query *q, ParamListInfo boundParams, Size max_size)
+{
+    eval_const_expressions_context context;
+
+    context.root = root;
+    context.boundParams = boundParams;
+    context.active_fns = NIL;	/* nothing being recursively simplified */
+    context.case_val = NULL;	/* no CASE being examined */
+    context.estimate = false;	/* safe transformations only */
+    context.recurse_queries = true; /* recurse into query structures */
+    context.recurse_sublink_testexpr = false; /* do not recurse into sublink test expressions */
+
+    context.max_size = max_size;
+
+    return (Query *) query_or_expression_tree_mutator(
+        (Node *) q,
+        (Node* (*)(Node*, void*)) eval_const_expressions_mutator,
+        &context,0);
+}
+
+/*
+ * flatten_join_alias_var_optimizer
+ *	  Replace Vars that reference JOIN outputs with references to the original
+ *	  relation variables instead.
+ */
+Query * flatten_join_alias_var_optimizer(Query *query, int queryLevel)
+{
+    Query *queryNew = (Query *) copyObject(query);
+ 
+    /*
+     * Flatten join alias for expression in
+     * 1. targetlist
+     * 2. returningList
+     * 3. having qual
+     * 4. scatterClause
+     * 5. limit offset
+     * 6. limit count
+     *
+     * We flatten the above expressions since these entries may be moved during the query
+     * normalization step before algebrization. In contrast, the planner flattens alias
+     * inside quals to allow predicates involving such vars to be pushed down.
+     *
+     * Here we ignore the flattening of quals due to the following reasons:
+     * 1. we assume that the function will be called before Query->DXL translation:
+     * 2. the quals never gets moved from old query to the new top-level query in the
+     * query normalization phase before algebrization. In other words, the quals hang of
+     * the same query structure that is now the new derived table.
+     * 3. the algebrizer can resolve the abiquity of join aliases in quals since we maintain
+     * all combinations of <query level, varno, varattno> to DXL-ColId during Query->DXL translation.
+     *
+     */
+ 
+    return queryNew;
+}
+ 
+Expr *transform_array_Const_to_ArrayExpr(Const *c)
+{
+    Oid elemtype;
+    int16 elemlen;
+    bool elembyval;
+    char elemalign;
+    int nelems;
+    Datum *elems;
+    bool *nulls;
+    ArrayType *ac;
+    ArrayExpr *aexpr;
+    int i;
+ 
+    Assert(IsA(c, Const));
+ 
+    /* Does it look like the right kind of an array Const? */
+    if (c->constisnull)
+        return (Expr *)c; /* NULL const */
+ 
+    elemtype = get_element_type(c->consttype);
+    if (elemtype == InvalidOid)
+        return (Expr *)c; /* not an array */
+ 
+    ac = DatumGetArrayTypeP(c->constvalue);
+    nelems = ArrayGetNItems(ARR_NDIM(ac), ARR_DIMS(ac));
+ 
+    /* All set, extract the elements, and an ArrayExpr to hold them. */
+    get_typlenbyvalalign(elemtype, &elemlen, &elembyval, &elemalign);
+    deconstruct_array(ac, elemtype, elemlen, elembyval, elemalign, &elems, &nulls, &nelems);
+ 
+    aexpr = makeNode(ArrayExpr);
+    aexpr->array_typeid = c->consttype;
+    aexpr->element_typeid = elemtype;
+    aexpr->multidims = false;
+    aexpr->location = c->location;
+ 
+    for (i = 0; i < nelems; i++) {
+        aexpr->elements =
+            lappend(aexpr->elements, makeConst(elemtype, -1, c->constcollid, elemlen, elems[i], nulls[i], elembyval));
+    }
+ 
+    return (Expr *)aexpr;
+}
+#endif

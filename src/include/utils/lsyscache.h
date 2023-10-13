@@ -19,6 +19,9 @@
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
 #include "catalog/pgxc_node.h"
+#ifdef USE_SPQ
+#include "parser/parse_coerce.h"
+#endif
 
 /* Result list element for get_op_btree_interpretation */
 typedef struct OpBtreeInterpretation {
@@ -219,6 +222,75 @@ extern Oid get_valid_relname_relid(const char* relnamespace, const char* relname
 extern bool get_func_iswindow(Oid funcid);
 extern char get_func_prokind(Oid funcid);
 extern char get_typecategory(Oid typid);
+
+#ifdef USE_SPQ
+/* comparison types */
+typedef enum CmpType {
+    CmptEq, // equality
+    CmptNEq, // inequality
+    CmptLT, // less than
+    CmptLEq, // less or equal to
+    CmptGT, // greater than
+    CmptGEq, // greater or equal to
+    CmptOther // other operator
+} CmpType;
+ 
+#define ATTSTATSSLOT_VALUES 0x01
+#define ATTSTATSSLOT_NUMBERS 0x02
+/* Result struct for get_attstatsslot */
+typedef struct AttStatsSlot {
+    /* Always filled: */
+    Oid staop;   /* Actual staop for the found slot */
+    Oid stacoll; /* Actual collation for the found slot */
+    /* Filled if ATTSTATSSLOT_VALUES is specified: */
+    Oid valuetype; /* Actual datatype of the values */
+    Datum *values; /* slot's "values" array, or NULL if none */
+    int nvalues;   /* length of values[], or 0 */
+    /* Filled if ATTSTATSSLOT_NUMBERS is specified: */
+    float4 *numbers; /* slot's "numbers" array, or NULL if none */
+    int nnumbers;    /* length of numbers[], or 0 */
+ 
+    /* Remaining fields are private to get_attstatsslot/free_attstatsslot */
+    void *values_arr;  /* palloc'd values array, if any */
+    void *numbers_arr; /* palloc'd numbers array, if any */
+} AttStatsSlot;
+extern Oid get_compatible_hash_opfamily(Oid opno);
+extern Oid get_compatible_legacy_hash_opfamily(Oid opno);
+extern void MemoryContextDeclareAccountingRoot(MemoryContext context);
+extern Oid get_agg_transtype(Oid aggid);
+extern bool is_agg_ordered(Oid aggid);
+extern bool is_agg_partial_capable(Oid aggid);
+extern List *get_func_output_arg_types(Oid funcid);
+extern List *get_func_arg_types(Oid funcid);
+extern char func_data_access(Oid funcid);
+extern char func_exec_location(Oid funcid);
+extern bool index_exists(Oid oid);
+extern bool aggregate_exists(Oid oid);
+extern Oid get_aggregate(const char *aggname, Oid oidType);
+extern bool function_exists(Oid oid);
+extern bool get_cast_func(Oid oidSrc, Oid oidDest, bool *is_binary_coercible, Oid *oidCastFunc, CoercionPathType *pathtype);
+extern bool check_constraint_exists(Oid oidCheckconstraint);
+extern char *get_check_constraint_name(Oid oidCheckconstraint);
+extern Oid get_check_constraint_relid(Oid oidCheckconstraint);
+extern List *get_check_constraint_oids(Oid oidRel);
+extern Node *get_check_constraint_expr_tree(Oid oidCheckconstraint);
+extern bool operator_exists(Oid oid);
+extern bool relation_exists(Oid oid);
+extern bool type_exists(Oid oid);
+extern CmpType get_comparison_type(Oid oidOp);
+extern Oid get_comparison_operator(Oid oidLeft, Oid oidRight, CmpType cmpt);
+extern bool has_subclass_slow(Oid relationId);
+extern List *get_operator_opfamilies(Oid opno);
+extern List *get_index_opfamilies(Oid oidIndex);
+extern bool relation_is_partitioned(Oid oid);
+extern bool index_is_partitioned(Oid oid);
+extern bool has_update_triggers(Oid relid);
+extern bool spq_get_attstatsslot(AttStatsSlot *sslot, HeapTuple statstuple, int reqkind, Oid reqop, int flags);
+extern void spq_free_attstatsslot(AttStatsSlot *sslot);
+extern char * get_type_name(Oid typid);
+extern int32 get_trigger_type(Oid triggerid);
+extern HeapTuple get_att_stats(Oid relid, AttrNumber attrnum);
+#endif
 
 #define type_is_array(typid) (get_element_type(typid) != InvalidOid)
 /* type_is_array_domain accepts both plain arrays and domains over arrays */

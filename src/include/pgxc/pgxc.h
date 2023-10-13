@@ -70,4 +70,14 @@ typedef enum {
 #define XC_LOCK_FOR_BACKUP_KEY_1 0xFFFF
 #define XC_LOCK_FOR_BACKUP_KEY_2 0xFFFF
 
+#ifdef USE_SPQ
+#define IS_SPQ_RUNNING (t_thrd.spq_ctx.spq_role != ROLE_UTILITY)
+#define IS_SPQ_COORDINATOR (t_thrd.spq_ctx.spq_role == ROLE_QUERY_COORDINTOR)
+#define IS_SPQ_EXECUTOR (t_thrd.spq_ctx.spq_role == ROLE_QUERY_EXECUTOR)
+#else
+#define IS_SPQ_RUNNING (false)
+#define IS_SPQ_COORDINATOR (false)
+#define IS_SPQ_EXECUTOR (false)
+#endif
+
 #endif /* PGXC_H */

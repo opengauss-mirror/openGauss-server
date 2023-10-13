@@ -471,6 +471,11 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PROARGMODE_VARIADIC 'v'
 #define PROARGMODE_TABLE    't'
 
+#ifdef USE_SPQ
+#define PRODATAACCESS_NONE  'n'
+#define PRODATAACCESS_ANY   'a'
+#endif
+
 #define PROC_LIB_PATH           "$libdir/"
 #define PORC_PLUGIN_LIB_PATH    "$libdir/pg_plugin/"
 #define PORC_SRC_LIB_PATH       "$libdir/proc_srclib/"

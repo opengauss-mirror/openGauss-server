@@ -27,6 +27,10 @@
 #include "access/relscan.h"
 #include "nodes/execnodes.h"
 
+#ifdef USE_SPQ
+#include "access/spq_btbuild.h"
+#endif
+
 /* There's room for a 16-bit vacuum cycle ID in BTPageOpaqueData */
 typedef uint16 BTCycleId;
 
@@ -1104,6 +1108,9 @@ typedef struct BTWriteState {
     BlockNumber btws_pages_alloced; /* # pages allocated */
     BlockNumber btws_pages_written; /* # pages written out */
     Page btws_zeropage;             /* workspace for filling zeroes */
+#ifdef USE_SPQ
+    SPQLeaderState *spqleader;      /* spq btbuild leader */
+#endif
 } BTWriteState;
 
 typedef struct BTOrderedIndexListElement {
@@ -1242,6 +1249,10 @@ typedef struct {
      * BTBuildState.  Workers have their own spool and spool2, though.)
      */
     BTLeader   *btleader;
+#ifdef USE_SPQ
+    /* spq btbuild leader */
+    SPQLeaderState *spqleader;
+#endif
 } BTBuildState;
 
 /* 
@@ -1414,6 +1425,9 @@ extern void btree_check_third_page(Relation rel, Relation heap, bool need_heapti
 extern int btree_num_keep_atts_fast(Relation rel, IndexTuple lastleft, IndexTuple firstright);
 extern bool btree_allequalimage(Relation rel, bool debugmessage);
 
+#ifdef USE_SPQ
+extern void spq_load(BTWriteState wstate);
+#endif
 
 /*
  * prototypes for functions in nbtxlog.c

@@ -89,6 +89,14 @@ void set_default_stream()
                                      u_sess->stream_cxt.global_obj == NULL);
         u_sess->opt_cxt.is_stream_support = u_sess->opt_cxt.is_stream;
     }
+#ifdef USE_SPQ
+    if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+        u_sess->opt_cxt.is_stream_support = true;
+    }
+    if (t_thrd.spq_ctx.spq_role  == ROLE_QUERY_COORDINTOR) {
+        u_sess->opt_cxt.is_stream = u_sess->attr.attr_sql.enable_stream_operator;
+    }
+#endif
 }
 
 int2vector* get_baserel_distributekey_no(Oid relid)
@@ -205,13 +213,346 @@ ExecNodes* stream_merge_exec_nodes(Plan* lefttree, Plan* righttree, bool push_no
     return lefttree->exec_nodes;
 }
 
+#ifdef USE_SPQ
+char* SpqCompressSerializedPlan(const char* plan_string, int* cLen)
+{
+    char* compressedPlan = NULL;
+    int oLen = strlen(plan_string) + 1;
+    compressedPlan = (char*)palloc0(LZ4_COMPRESSBOUND(oLen));
+    *cLen = LZ4_compress_default(plan_string, compressedPlan, oLen, LZ4_compressBound(oLen));
+    validate_LZ4_compress_result(*cLen, MOD_OPT, "compress serialized plan");
+    return compressedPlan;
+}
+// Decompress the serialized plan with LZ4 compression algorithm.
+//
+char* SpqDecompressSerializedPlan(const char* comp_plan_string, int cLen, int oLen)
+{
+    char* serializedPlan = (char*)palloc0(oLen);
+    int returnLen = LZ4_decompress_safe(comp_plan_string, serializedPlan, cLen, oLen);
+ 
+    if (returnLen < 0) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("LZ4 decompressing serialize plan failed, decompressing result %d", returnLen)));
+    }
+ 
+    if (returnLen != oLen) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                errmsg("LZ4 decompressing serialize plan failed, returnLen not equal with oLen.")));
+    }
+    if (strlen(serializedPlan) + 1 != (uint32)oLen) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                errmsg("LZ4 decompressing serialize plan failed, length of serializedPlan not euqal with oLen.")));
+    }
+ 
+    return serializedPlan;
+}
+static bool IsModifyTable(PlannedStmt* planned_stmt, Plan* node)
+{
+    /*
+     * fix plan on enable_force_vector_engine = on
+     * ->Vector Streaming (type: GATHER)
+     *	->Vector Adapter
+     *	   -> ModifyTable
+     */
+    if (IsA(node, RowToVec) || IsA(node, VecToRow))
+        node = node->lefttree;
+ 
+    if (IsA(node, ModifyTable) || IsA(node, VecModifyTable) ||
+        (CMD_SELECT != planned_stmt->commandType && IsModifyTableForDfsTable(node)))
+        return true;
+ 
+    return false;
+}
+/*
+ * @Description: get all referenced subplans from current plan.
+ *
+ * @in result_plan:  current plan
+ * @in/out context: the context the current plan reference all subplan info
+ */
+void set_node_ref_subplan_walker(Plan* result_plan, set_node_ref_subplan_context* context)
+{
+    if (NULL == result_plan)
+        return;
+ 
+    ListCell* lc = NULL;
+    List* subplan_list = check_subplan_list(result_plan); /* find all subplan exprs from main plan */
+ 
+    foreach (lc, subplan_list) {
+        Node* pnode = (Node*)lfirst(lc);
+        SubPlan* subplan = NULL;
+        Plan* plan = NULL;
+ 
+        if (IsA(pnode, SubPlan)) {
+            subplan = (SubPlan*)lfirst(lc);
+            /* this is for the case that initplan hidden in testexpr of subplan */
+            subplan_list = list_concat(subplan_list, check_subplan_expr(subplan->testexpr));
+        } else {
+            AssertEreport(IsA(pnode, Param), MOD_OPT, "The current node is not a param node");
+            Param* param = (Param*)pnode;
+            ListCell* lc2 = NULL;
+            foreach (lc2, context->org_initPlan) {
+                subplan = (SubPlan*)lfirst(lc2);
+                if (list_member_int(subplan->setParam, param->paramid))
+                    break;
+            }
+            if (subplan == NULL || lc2 == NULL)
+                continue;
+        }
+ 
+        plan = (Plan*)list_nth(context->org_subplans, subplan->plan_id - 1);
+        set_node_ref_subplan_walker(plan, context);
+ 
+        /* We should serialize the subplans only if current node reference the subplan */
+        context->subplan_plan_ids = lappend_int(context->subplan_plan_ids, subplan->plan_id);
+    }
+ 
+    switch (nodeTag(result_plan)) {
+        case T_Append:
+        case T_VecAppend: {
+            Append* append = (Append*)result_plan;
+            ListCell* lc3 = NULL;
+            foreach (lc3, append->appendplans) {
+                Plan* plan = (Plan*)lfirst(lc3);
+                set_node_ref_subplan_walker(plan, context);
+            }
+        } break;
+        case T_ModifyTable:
+        case T_VecModifyTable: {
+            ModifyTable* mt = (ModifyTable*)result_plan;
+            ListCell* lc4 = NULL;
+            foreach (lc4, mt->plans) {
+                Plan* plan = (Plan*)lfirst(lc4);
+                set_node_ref_subplan_walker(plan, context);
+            }
+        } break;
+        case T_SubqueryScan:
+        case T_VecSubqueryScan: {
+            SubqueryScan* ss = (SubqueryScan*)result_plan;
+            if (ss->subplan)
+                set_node_ref_subplan_walker(ss->subplan, context);
+        } break;
+        case T_MergeAppend: {
+            MergeAppend* ma = (MergeAppend*)result_plan;
+            ListCell* lc5 = NULL;
+            foreach (lc5, ma->mergeplans) {
+                Plan* plan = (Plan*)lfirst(lc5);
+                set_node_ref_subplan_walker(plan, context);
+            }
+        } break;
+        case T_BitmapAnd:
+        case T_CStoreIndexAnd: {
+            BitmapAnd* ba = (BitmapAnd*)result_plan;
+            ListCell* lc6 = NULL;
+            foreach (lc6, ba->bitmapplans) {
+                Plan* plan = (Plan*)lfirst(lc6);
+                set_node_ref_subplan_walker(plan, context);
+            }
+        } break;
+ 
+        case T_BitmapOr:
+        case T_CStoreIndexOr: {
+            BitmapOr* bo = (BitmapOr*)result_plan;
+            ListCell* lc7 = NULL;
+            foreach (lc7, bo->bitmapplans) {
+                Plan* plan = (Plan*)lfirst(lc7);
+                set_node_ref_subplan_walker(plan, context);
+            }
+        } break;
+        case T_ExtensiblePlan: {
+            ListCell* lc8 = NULL;
+            foreach(lc8, ((ExtensiblePlan*)result_plan)->extensible_plans) {
+                set_node_ref_subplan_walker((Plan*)lfirst(lc8), context);
+            }
+        } break;
+#ifdef USE_SPQ
+        case T_Sequence: {
+            Sequence* sequence = (Sequence*)result_plan;
+            ListCell* lc9 = NULL;
+            foreach(lc9, sequence->subplans) {
+                Plan* plan = (Plan*)lfirst(lc9);
+                set_node_ref_subplan_walker(plan, context);    
+            }
+        } break;
+#endif
+        default: {
+            if (result_plan->lefttree)
+                set_node_ref_subplan_walker(result_plan->lefttree, context);
+ 
+            if (result_plan->righttree)
+                set_node_ref_subplan_walker(result_plan->righttree, context);
+        } break;
+    }
+ 
+    return;
+}
+static void set_node_ref_subplan(Plan* plan, PlannedStmt* planned_stmt, PlannedStmt* ship_planned_stmt)
+{
+    List *ret_subplans = NIL, *ret_initPlans = NIL;
+    ListCell *lc1 = NULL, *lc2 = NULL;
+    set_node_ref_subplan_context context;
+ 
+    /* Construct context members. */
+    context.org_subplans = planned_stmt->subplans;
+    context.org_initPlan = planned_stmt->initPlan;
+    context.subplan_plan_ids = NIL;
+ 
+    set_node_ref_subplan_walker(plan, &context);
+ 
+    /* Set non-referenced subplans of the current plan as NULL. */
+    foreach (lc2, planned_stmt->subplans) {
+        if (NIL == context.subplan_plan_ids)
+            ret_subplans = lappend(ret_subplans, NULL);
+        else {
+            Plan* tmp_plan = NULL;
+ 
+            foreach (lc1, context.subplan_plan_ids) {
+                int planid = lfirst_int(lc1);
+                tmp_plan = (Plan*)list_nth(planned_stmt->subplans, planid - 1);
+ 
+                if (((Plan*)lfirst(lc2))->plan_node_id == tmp_plan->plan_node_id)
+                    break;
+            }
+ 
+            if (NULL == lc1)
+                ret_subplans = lappend(ret_subplans, NULL);
+            else
+                ret_subplans = lappend(ret_subplans, tmp_plan);
+        }
+    }
+ 
+    /* Set non-referenced initPlans of the current plan as NULL. */
+    foreach (lc2, planned_stmt->initPlan) {
+        if (NIL == context.subplan_plan_ids)
+            ret_initPlans = lappend(ret_initPlans, NULL);
+        else {
+            SubPlan* subplan = (SubPlan*)lfirst(lc2);
+            if (list_member_int(context.subplan_plan_ids, subplan->plan_id))
+                ret_initPlans = lappend(ret_initPlans, subplan);
+            else
+                ret_initPlans = lappend(ret_initPlans, NULL);
+        }
+    }
+ 
+    ship_planned_stmt->subplans = ret_subplans;
+    ship_planned_stmt->initPlan = ret_initPlans;
+}
+ 
+/*
+ * Serialized the plan tree to string
+ */
+void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str,
+                    int num_stream, int num_gather, bool push_subplan, uint64 queryId)
+{
+    PlannedStmt* ShipPlannedStmt = NULL;
+    ShipPlannedStmt = makeNode(PlannedStmt);
+ 
+    if (planned_stmt->commandType != CMD_SELECT && IsModifyTable(planned_stmt, node)) {
+        ShipPlannedStmt->commandType = planned_stmt->commandType;
+        ShipPlannedStmt->hasReturning = planned_stmt->hasReturning;
+    } else {
+        ShipPlannedStmt->commandType = CMD_SELECT;
+        ShipPlannedStmt->hasReturning = false;
+    }
+ 
+    ShipPlannedStmt->queryId = queryId;
+    ShipPlannedStmt->spq_session_id = planned_stmt->spq_session_id;
+    ShipPlannedStmt->current_id = planned_stmt->current_id;
+    ShipPlannedStmt->hasModifyingCTE = planned_stmt->hasModifyingCTE;
+    ShipPlannedStmt->canSetTag = planned_stmt->canSetTag;
+    ShipPlannedStmt->transientPlan = planned_stmt->transientPlan;
+    ShipPlannedStmt->dependsOnRole = planned_stmt->dependsOnRole;
+    ShipPlannedStmt->planTree = node;
+    ShipPlannedStmt->rtable = planned_stmt->rtable;
+    /* data redistribution for DFS table. */
+    ShipPlannedStmt->dataDestRelIndex = planned_stmt->dataDestRelIndex;
+    ShipPlannedStmt->MaxBloomFilterNum = planned_stmt->MaxBloomFilterNum;
+    ShipPlannedStmt->query_mem[0] = planned_stmt->query_mem[0];
+    ShipPlannedStmt->assigned_query_mem[0] = planned_stmt->assigned_query_mem[0];
+    ShipPlannedStmt->assigned_query_mem[1] = planned_stmt->assigned_query_mem[1];
+ 
+    /*
+     * Currently, when delete/update operator applied Dfs table, the append
+     * plan node will be pushed down, so set ShipPlannedStmt->resultRelations is
+     * planned_stmt->resultRelations.
+     */
+    if (IsModifyTable(planned_stmt, node))
+        ShipPlannedStmt->resultRelations = planned_stmt->resultRelations;
+    else
+        ShipPlannedStmt->resultRelations = NIL;
+ 
+    ShipPlannedStmt->utilityStmt = planned_stmt->utilityStmt;
+ 
+    /* If have subplan, we should set non-referenced subplans of the current plan as NULL, so we don't serialized them
+     */
+    if (push_subplan) {
+        bool with_recursive = ContainRecursiveUnionSubplan(planned_stmt);
+        if (planned_stmt->subplans && !with_recursive) {
+            set_node_ref_subplan(node, planned_stmt, ShipPlannedStmt);
+        } else {
+            ShipPlannedStmt->subplans = planned_stmt->subplans;
+            ShipPlannedStmt->initPlan = planned_stmt->initPlan;
+        }
+    }
+ 
+    ShipPlannedStmt->subplan_ids = planned_stmt->subplan_ids;
+    ShipPlannedStmt->rewindPlanIDs = planned_stmt->rewindPlanIDs;
+    ShipPlannedStmt->rowMarks = planned_stmt->rowMarks;
+    ShipPlannedStmt->relationOids = planned_stmt->relationOids;
+    ShipPlannedStmt->invalItems = planned_stmt->invalItems;
+    ShipPlannedStmt->nParamExec = planned_stmt->nParamExec;
+    ShipPlannedStmt->num_streams = num_stream;
+    ShipPlannedStmt->gather_count = num_gather;
+    ShipPlannedStmt->num_nodes = planned_stmt->num_nodes;
+    ShipPlannedStmt->nodesDefinition = planned_stmt->nodesDefinition;
+    /* We don't send instrument option to datanode for un-stream plan.
+     * For un-stream plan, we can not finalize node id and parent node id for result plan.
+     */
+    /* IS_PGXC_DATANODE means in DWS DN, in_compute_pool means in CN of the compute pool. */
+    if (IS_STREAM_PLAN || IS_PGXC_DATANODE || planned_stmt->in_compute_pool) {
+        ShipPlannedStmt->instrument_option = planned_stmt->instrument_option;
+    } else
+        ShipPlannedStmt->instrument_option = 0;
+ 
+    ShipPlannedStmt->num_plannodes = planned_stmt->num_plannodes;
+    ShipPlannedStmt->query_string = planned_stmt->query_string;
+    ShipPlannedStmt->in_compute_pool = planned_stmt->in_compute_pool;
+    ShipPlannedStmt->has_obsrel = planned_stmt->has_obsrel;
+    ShipPlannedStmt->num_bucketmaps = planned_stmt->num_bucketmaps;
+    ShipPlannedStmt->query_dop = planned_stmt->query_dop;
+ 
+    appendStringInfoChar(str, FLAG_SERIALIZED_PLAN);  // Flag to indicate it's serialized plan
+    for (int i = 0; i < ShipPlannedStmt->num_bucketmaps; i++) {
+        ShipPlannedStmt->bucketMap[i] = planned_stmt->bucketMap[i];
+        ShipPlannedStmt->bucketCnt[i] = planned_stmt->bucketCnt[i];
+    }
+ 
+    /* not ship planB */
+    ShipPlannedStmt->ng_num = planned_stmt->ng_num;
+    ShipPlannedStmt->ng_queryMem = planned_stmt->ng_queryMem;
+ 
+    appendStringInfoString(str, nodeToString(ShipPlannedStmt));
+}
+#endif
+
 char* CompressSerializedPlan(const char* plan_string, int* cLen)
 {
+#ifdef USE_SPQ
+    return SpqCompressSerializedPlan(plan_string, cLen);
+#endif
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;
 }
 char* DecompressSerializedPlan(const char* comp_plan_string, int cLen, int oLen)
 {
+#ifdef USE_SPQ
+    return SpqDecompressSerializedPlan(comp_plan_string,  cLen,  oLen);
+#endif
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;
 }
