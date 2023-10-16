@@ -1909,7 +1909,7 @@ void WaitRedoFinish()
     pmState = PM_RUN;
     write_stderr_with_prefix("[On-demand] LOG: database system is ready to accept connections");
 
-    g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= CLUSTER_IN_ONDEMAND_REDO;
+    g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_IN_ONDEMAND_REDO;
     /* for other nodes in cluster */
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_REDO;

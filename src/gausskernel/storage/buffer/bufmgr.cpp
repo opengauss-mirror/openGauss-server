@@ -2414,27 +2414,24 @@ found_branch:
 
     /* DMS: Try get page remote */
     if (ENABLE_DMS) {
-        // standby node must notify primary node for prepare lastest page in ondemand recovery
-        while (SS_STANDBY_ONDEMAND_NOT_NORMAL) {
-            /* in new reform */
-            if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
-                return 0;
-            }
-            if (SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
-                break;
-            }
-            SSReadControlFile(REFORM_CTRL_PAGE);
-        }
         MarkReadHint(bufHdr->buf_id, relpersistence, isExtend, pblk);
         if (mode != RBM_FOR_REMOTE && relpersistence != RELPERSISTENCE_TEMP && !isLocalBuf) {
             Assert(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
 
             do {
                 if (!DmsCheckBufAccessible()) {
-                    if(LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                    if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
                     }
                     pg_usleep(5000L);
+                    continue;
+                }
+
+                // standby node must notify primary node for prepare lastest page in ondemand recovery
+                if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
+                    if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                        TerminateBufferIO(bufHdr, false, 0);
+                    }
                     continue;
                 }
 
@@ -2479,7 +2476,7 @@ found_branch:
                     buf_ctrl->state |= BUF_NEED_LOAD;
                 }
                 break;
-            }while (true);
+            } while (true);
 
             return TerminateReadPage(bufHdr, mode, pblk);
         }
