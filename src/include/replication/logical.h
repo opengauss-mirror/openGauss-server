@@ -358,5 +358,7 @@ extern void FreeLogicalLog(ParallelReorderBuffer *rb, logicalLog *logChange, int
 extern bool LogicalDecodeParseOptionsDefault(const char* defaultStr, void **options);
 extern DecodeOptionsDefault* LogicalDecodeGetOptionsDefault();
 template <typename T> void LogicalDecodeReportLostChanges(const T *iterstate);
+extern void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld,
+    bool printOid = false);
 
 #endif

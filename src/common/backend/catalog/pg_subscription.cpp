@@ -103,6 +103,14 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
         sub->binary = DatumGetBool(datum);
     }
 
+    /* Get skiplsn */
+    datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subskiplsn, &isnull);
+    if (unlikely(isnull)) {
+        sub->skiplsn = InvalidXLogRecPtr;
+    } else {
+        sub->skiplsn = TextDatumGetLsn(datum);
+    }
+
     ReleaseSysCache(tup);
 
     return sub;
@@ -237,7 +245,7 @@ static List *textarray_to_stringlist(ArrayType *textarray)
     return res;
 }
 
-static Datum LsnGetTextDatum(XLogRecPtr lsn)
+Datum LsnGetTextDatum(XLogRecPtr lsn)
 {
     char clsn[MAXFNAMELEN];
     int ret = snprintf_s(clsn, sizeof(clsn), sizeof(clsn) - 1, "%X/%X", (uint32)(lsn >> 32), (uint32)lsn);
@@ -246,7 +254,7 @@ static Datum LsnGetTextDatum(XLogRecPtr lsn)
     return CStringGetTextDatum(clsn);
 }
 
-static XLogRecPtr TextDatumGetLsn(Datum datum)
+XLogRecPtr TextDatumGetLsn(Datum datum)
 {
     XLogRecPtr lsn;
     uint32  lsn_hi;

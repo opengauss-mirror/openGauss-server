@@ -18574,6 +18574,16 @@ AlterSubscriptionStmt:
 					n->options = list_make1(makeDefElem("enabled",
 											(Node *)makeInteger(TRUE)));
 					$$ = (Node *)n;
+				}
+			| ALTER SUBSCRIPTION name DISABLE_P
+				{
+					AlterSubscriptionStmt *n =
+						makeNode(AlterSubscriptionStmt);
+					n->refresh = false;
+					n->subname = $3;
+					n->options = list_make1(makeDefElem("enabled",
+											(Node *)makeInteger(FALSE)));
+					$$ = (Node *)n;
 				}		;
 
 /*****************************************************************************

@@ -25,6 +25,7 @@ ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> CONNECTION 
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> SET PUBLICATION <replaceable class="parameter">publication_name</replaceable> [, ...]
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> REFRESH PUBLICATION [ WITH ( <replaceable class="parameter">refresh_option</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] ) ]
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> ENABLE
+ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> DISABLE
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> SET ( <replaceable class="parameter">subscription_parameter</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] )
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> OWNER TO <replaceable>new_owner</replaceable>
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> RENAME TO <replaceable>new_name</replaceable>
@@ -130,6 +131,16 @@ ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> RENAME TO <
      <para>
       Enables the previously disabled subscription, starting the logical
       replication worker at the end of transaction.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>DISABLE</literal></term>
+    <listitem>
+     <para>
+      Disables a running subscription, stopping the logical replication
+      worker at the end of the transaction.
      </para>
     </listitem>
    </varlistentry>

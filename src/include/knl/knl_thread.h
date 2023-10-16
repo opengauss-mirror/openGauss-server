@@ -3336,6 +3336,7 @@ typedef struct knl_t_apply_worker_context {
     List *tableStates;
     XLogRecPtr remoteFinalLsn;
     CommitSeqNo curRemoteCsn;
+    bool isSkipTransaction;
 } knl_t_apply_worker_context;
 
 typedef struct knl_t_publication_context {

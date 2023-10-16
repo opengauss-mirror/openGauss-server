@@ -11,3 +11,7 @@ encoding
 ddl
 matviews
 change_wal_level
+skiplsn
+disable
+pub_subconflict
+bugs
