@@ -952,6 +952,12 @@ void PageManagerProcLsnForwarder(RedoItem *lsnForwarder)
     for (uint32 i = 0; i < WorkerNumPerMng; ++i) {
         AddPageRedoItem(myRedoLine->redoThd[i], lsnForwarder);
     }
+
+    uint32 refCount;
+    do {
+        refCount = pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount);
+        RedoInterruptCallBack();
+    } while (refCount != 0);
 }
 
 void PageManagerDistributeBcmBlock(XLogRecParseState *preState)
@@ -1182,10 +1188,8 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
             RedoPageManagerDistributeBlockRecord(hashMap, NULL);
             return true;
         } else if (eleArry[i] == (void *)&g_GlobalLsnForwarder) {
-            SetCompletedReadEndPtr(g_redoWorker, ((RedoItem *)eleArry[i])->record.ReadRecPtr,
-                ((RedoItem *)eleArry[i])->record.EndRecPtr);
-            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
             PageManagerProcLsnForwarder((RedoItem *)eleArry[i]);
+            RedoPageManagerDistributeBlockRecord(hashMap, NULL);
             continue;
         } else if (eleArry[i] == (void *)&g_cleanupMark) {
             PageManagerProcCleanupMark((RedoItem *)eleArry[i]);
