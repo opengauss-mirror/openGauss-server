@@ -466,7 +466,7 @@ void ProcessSyncRequests(void)
         t_thrd.xlog_cxt.CheckpointStats->ckpt_longest_sync = longest;
         t_thrd.xlog_cxt.CheckpointStats->ckpt_agg_sync_time = totalElapsed;
     }
-
+    smgrcloseall();
     /* Flag successful completion of ProcessSyncRequests */
     syncInProgress = false;
 }
