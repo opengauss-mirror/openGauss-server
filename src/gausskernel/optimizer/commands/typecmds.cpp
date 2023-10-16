@@ -3653,7 +3653,7 @@ Oid AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses* objsMoved)
  * Returns the type's old namespace OID.
  */
 Oid AlterTypeNamespaceInternal(
-    Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved)
+    Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved, char* newTypeName)
 {
     Relation rel;
     HeapTuple tup;
@@ -3687,7 +3687,8 @@ Oid AlterTypeNamespaceInternal(
     CheckSetNamespace(oldNspOid, nspOid, TypeRelationId, typeOid);
 
     /* check for duplicate name (more friendly than unique-index failure) */
-    if (SearchSysCacheExists2(TYPENAMENSP, CStringGetDatum(NameStr(typform->typname)), ObjectIdGetDatum(nspOid)))
+    char* checkTypeName = (newTypeName == NULL) ? NameStr(typform->typname) : newTypeName;
+    if (SearchSysCacheExists2(TYPENAMENSP, CStringGetDatum(checkTypeName), ObjectIdGetDatum(nspOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("type \"%s\" already exists in schema \"%s\"",
@@ -3709,6 +3710,9 @@ Oid AlterTypeNamespaceInternal(
      * tup is a copy, so we can scribble directly on it
      */
     typform->typnamespace = nspOid;
+    if (newTypeName != NULL) {
+    	(void)namestrcpy(&(typform->typname), newTypeName);
+    }
 
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
@@ -3756,8 +3760,10 @@ Oid AlterTypeNamespaceInternal(
     add_exact_object_address(&thisobj, objsMoved);
 
     /* Recursively alter the associated array type, if any */
-    if (OidIsValid(arrayOid))
-        AlterTypeNamespaceInternal(arrayOid, nspOid, true, true, objsMoved);
+    if (OidIsValid(arrayOid)) {
+        AlterTypeNamespaceInternal(arrayOid, nspOid, true, true, objsMoved,
+                                    (newTypeName == NULL) ? NULL : makeArrayTypeName(newTypeName, nspOid));
+    }
 
     return oldNspOid;
 }
