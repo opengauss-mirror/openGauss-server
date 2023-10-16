@@ -42,6 +42,8 @@ const char *gdatcompatibility = NULL;
 char* binary_upgrade_oldowner = NULL;
 char* binary_upgrade_newowner = NULL;
 
+int dolphin_lower_case_table_names = -1;
+
 #define MAX_ON_EXIT_NICELY 20
 
 static struct {
@@ -1177,7 +1179,11 @@ bool processSQLNamePattern(PGconn* conn, PQExpBuffer buf, const char* pattern, b
             }
             cp++;
         } else if (!inquotes && isupper((unsigned char)ch)) {
-            appendPQExpBufferChar(&namebuf, pg_tolower((unsigned char)ch));
+            if (dolphin_lower_case_table_names == 0){
+                appendPQExpBufferChar(&namebuf, ch);
+            } else {
+                appendPQExpBufferChar(&namebuf, pg_tolower((unsigned char)ch));
+            }
             cp++;
         } else if (!inquotes && ch == '*') {
             appendPQExpBufferStr(&namebuf, ".*");
