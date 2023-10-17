@@ -10201,7 +10201,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
-        SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
             /* update cluster_run_mode in case failover has been performed between two dorado cluster. */
             g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
