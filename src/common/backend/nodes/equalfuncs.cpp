@@ -1579,6 +1579,7 @@ static bool _equalRenameStmt(const RenameStmt* a, const RenameStmt* b)
     COMPARE_NODE_FIELD(objarg);
     COMPARE_STRING_FIELD(subname);
     COMPARE_STRING_FIELD(newname);
+    COMPARE_STRING_FIELD(newschema);
     COMPARE_SCALAR_FIELD(behavior);
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_NODE_FIELD(renameTargetList);
