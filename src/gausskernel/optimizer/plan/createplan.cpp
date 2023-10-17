@@ -2668,7 +2668,7 @@ static Scan* create_indexscan_plan(
     return scan_plan;
 }
 
-static bool CheckBitmapScanQualExists(PlannerInfo *root, List *indexquals, Node *clause)
+static bool checkBitmapScanQualExists(PlannerInfo *root, List *indexquals, Node *clause)
 {
     foreach_cell (cell, indexquals) {
         Node *node = lfirst_node(Node, cell);
@@ -2681,7 +2681,7 @@ static bool CheckBitmapScanQualExists(PlannerInfo *root, List *indexquals, Node 
             if (be->boolop != AND_EXPR) {
                 continue;
             }
-            if (CheckBitmapScanQualExists(root, be->args, clause)) {
+            if (checkBitmapScanQualExists(root, be->args, clause)) {
                 return true;
             }
         }
@@ -2750,7 +2750,7 @@ static BitmapHeapScan* create_bitmap_scan_plan(
         Assert(IsA(rinfo, RestrictInfo));
         if (rinfo->pseudoconstant)
             continue; /* we may drop pseudoconstants here */
-        if (CheckBitmapScanQualExists(root, indexquals, clause))
+        if (checkBitmapScanQualExists(root, indexquals, clause))
             continue; /* simple duplicate */
         if (rinfo->parent_ec && list_member_ptr(indexECs, rinfo->parent_ec))
             continue; /* derived from same EquivalenceClass */
