@@ -1371,3 +1371,23 @@ int GetMinDnNum()
 
     return dataNodeNum;
 }
+
+#ifdef USE_SPQ
+bool IsSpqTypeDistributable(Oid col_type)
+{
+    if (col_type == INT8OID || col_type == INT1OID || col_type == INT2OID || col_type == INT4OID ||
+        col_type == NUMERICOID || col_type == CHAROID || col_type == BPCHAROID || col_type == VARCHAROID ||
+        col_type == NVARCHAR2OID || col_type == DATEOID || col_type == TIMEOID || col_type == TIMESTAMPOID ||
+        col_type == TIMESTAMPTZOID || col_type == INTERVALOID || col_type == TIMETZOID ||
+        col_type == SMALLDATETIMEOID || col_type == TEXTOID || col_type == CLOBOID || col_type == UUIDOID)
+        return true;
+    /* SPQ support extended data types*/
+    if (col_type == OIDOID || col_type == ABSTIMEOID ||
+        col_type == RELTIMEOID || col_type == CASHOID || col_type == BYTEAOID || col_type == RAWOID ||
+        col_type == BOOLOID || col_type == NAMEOID || col_type == INT2VECTOROID || col_type == OIDVECTOROID ||
+        col_type == FLOAT4OID || col_type == FLOAT8OID || col_type == BYTEAWITHOUTORDERWITHEQUALCOLOID)
+        return true;
+
+    return false;
+}
+#endif

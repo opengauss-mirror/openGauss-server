@@ -1395,6 +1395,8 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->m_pstrmap = NULL;
     spq_cxt->m_pxmlszmap = NULL;
     spq_cxt->m_mp = NULL;
+    spq_cxt->m_token_parse_handler_func_map = NULL;
+    spq_cxt->m_xform_mp = NULL;
     spq_cxt->m_memory_pool_mgr = NULL;
     spq_cxt->m_worker_pool_manager = NULL;
     spq_cxt->m_pcache = NULL;
@@ -1404,6 +1406,7 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->spq_worker_context = NULL;
     spq_cxt->spq_max_tuple_chunk_size = 0;
     spq_cxt->s_tupSerMemCtxt = NULL;
+    spq_cxt->spq_opt_initialized = false;
 }
 #endif
 

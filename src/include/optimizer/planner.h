@@ -217,4 +217,9 @@ extern bool queryIsReadOnly(Query* query);
 
 typedef PlannedStmt* (*plannerFunc)(Query* parse, int cursorOptions, ParamListInfo boundParams);
 
+#ifdef USE_SPQ
+extern List* spq_get_distributekey_from_tlist(
+    PlannerInfo* root, List* tlist, List* groupcls, double rows, double* result_multiple, void* skew_info = NULL);
+#endif
+
 #endif /* PLANNER_H */

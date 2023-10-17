@@ -2667,6 +2667,7 @@ typedef struct knl_u_mot_context {
 namespace spqdxl {
     class CDXLMemoryManager;
     class CDXLTokens;
+    class CParseHandlerFactory;
 }
  
 namespace spqos {
@@ -2674,6 +2675,8 @@ namespace spqos {
     class CMemoryPoolManager;
     class CWorkerPoolManager;
     template <class T, class K>class CCache;
+    class CCacheFactory;
+    class CMessageRepository;
 }
  
 namespace spqmd {
@@ -2682,6 +2685,7 @@ namespace spqmd {
  
 namespace spqopt {
     class CMDKey;
+    class CXformFactory;
 }
  
  
@@ -2694,6 +2698,7 @@ typedef struct knl_u_spq_context {
     uintptr_t m_ulpShutdownDXL;
     void *m_pstrmap;
     void *m_pxmlszmap;
+    void *m_token_parse_handler_func_map;
     spqos::CMemoryPool* m_mp;
     spqdxl::CDXLMemoryManager* m_dxl_memory_manager;
     /* memory pool manager */
@@ -2702,12 +2707,19 @@ typedef struct knl_u_spq_context {
     spqos::CWorkerPoolManager* m_worker_pool_manager;
     /* mdcache */
     spqos::CCache<spqmd::IMDCacheObject *, spqopt::CMDKey *> *m_pcache;
+    /* cache factory */
+    spqos::CCacheFactory* m_factory;
+    spqos::CMessageRepository *m_repository;
+    /* CXformFactory */
+    spqos::CMemoryPool* m_xform_mp;
+    spqopt::CXformFactory* m_pxff;
     uint64 m_ullCacheQuota;
     int spq_node_all_configs_size;
     int spq_node_configs_size;
     MemoryContext spq_worker_context;
     MemoryContext s_tupSerMemCtxt;
     int32 spq_max_tuple_chunk_size;
+    bool spq_opt_initialized;
 } knl_u_spq_context;
 #endif
 
