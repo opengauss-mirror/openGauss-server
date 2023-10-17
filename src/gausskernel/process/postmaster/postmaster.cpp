@@ -10020,7 +10020,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
-        SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
             SSDoSwitchover();
         } else {
