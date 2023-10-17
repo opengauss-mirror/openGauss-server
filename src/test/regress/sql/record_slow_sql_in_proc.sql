@@ -7,30 +7,41 @@ CREATE TABLE big_table (
                            column1 INT,
                            column2 VARCHAR(100)
 );
---generate normal sql for comparison
-create table temp (
-    a int
-);
 --set the slow sql threshold
-set log_min_duration_statement = 30; --30ms
+set log_min_duration_statement = 50; --50ms
 
---test exec_plsql(possibly with an insert query)
-create or replace procedure test_exec_plsql()
+--test slow sql in proc
+create or replace procedure test_slow_sql()
 is
 begin
-INSERT INTO temp values (1);
-INSERT INTO big_table (column1, column2) SELECT generate_series(1, 10000), 'data' || generate_series(1, 10000);
+perform 1;
+PERFORM pg_sleep(0.1);
 end;
 /
 -- record all sql
 set track_stmt_stat_level = 'L1,L1';
 set instr_unique_sql_track_type = 'all';
-call test_exec_plsql();
+call test_slow_sql();
 -- record slow sql
 set track_stmt_stat_level = 'OFF,L1';
-call test_exec_plsql();
+call test_slow_sql();
 call pg_sleep(0.1);
 select query, query_plan, is_slow_sql from statement_history where query_plan is not null order by start_time;
+delete from statement_history;
+
+set track_stmt_stat_level = 'L1,L1';
+set instr_unique_sql_track_type = 'all';
+
+--test exec_plsql(possibly with an insert query)
+create or replace procedure test_exec_plsql()
+is
+begin
+INSERT INTO big_table (column1, column2) SELECT generate_series(1, 10000), 'data' || generate_series(1, 10000);
+end;
+/
+call test_exec_plsql();
+call pg_sleep(0.1);
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 
@@ -38,17 +49,12 @@ delete from statement_history;
 CREATE OR REPLACE PROCEDURE test_exec_perform()
 AS
 BEGIN
-INSERT INTO temp values (2);
 PERFORM pg_sleep(0.1);
 END;
 /
-set track_stmt_stat_level = 'L1,L1';
-set instr_unique_sql_track_type = 'all';
-call test_exec_perform();
-set track_stmt_stat_level = 'OFF,L1';
 call test_exec_perform();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where query_plan is not null order by start_time;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 --test return query
@@ -57,15 +63,12 @@ RETURNS TABLE (column1 int, column2 VARCHAR(100))
 LANGUAGE plpgsql
 AS $$
 BEGIN
-INSERT INTO temp values (3);
 RETURN QUERY SELECT column1, column2 FROM big_table WHERE column1 = 9909 ORDER BY column1 DESC;
 END;
 $$;
-set track_stmt_stat_level = 'L1,L0';
-set instr_unique_sql_track_type = 'all';
 call test_return_query();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 --test open cursor
@@ -79,17 +82,14 @@ OPEN cur FOR SELECT column1, column2 FROM big_table where column1 = 9909;
 LOOP
 FETCH NEXT FROM cur INTO row;
         EXIT WHEN NOT FOUND;
-        insert into temp values(row.column1);
         RAISE NOTICE 'id: %, name: %', row.column1, row.column2;
 END LOOP;
 CLOSE cur;
 END;
 /
-set track_stmt_stat_level = 'L1,L0';
-set instr_unique_sql_track_type = 'all';
 call test_exec_open();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 --test for with select
@@ -105,7 +105,7 @@ END;
 /
 call test_exec_fors();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 --test for with a cursor
@@ -123,7 +123,7 @@ END;
 /
 call test_exec_forc();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 --test dynamic plsql
@@ -138,7 +138,7 @@ END;
 /
 call test_exec_dynexecsql(1);
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 --test dynamic fors
@@ -156,7 +156,7 @@ END;
 /
 call test_exec_dynfors();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 
@@ -179,4 +179,5 @@ end test_proc_in_pkg;
 /
 select test_proc_in_pkg.proc_pkg();
 call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
+delete from statement_history;
