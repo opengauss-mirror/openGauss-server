@@ -91,6 +91,7 @@
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_trigger.h"
+#include "parser/parse_coerce.h"
 #endif
 
 /*				---------- AMOP CACHES ----------						 */
@@ -5713,7 +5714,7 @@ bool type_exists(Oid oid)
  * get_comparison_type
  *      Retrieve comparison type
  */
-CmpType get_comparison_type(Oid oidOp)
+SPQCmpType get_comparison_type(Oid oidOp)
 {
     OpBtreeInterpretation *opBti;
     List *opBtis;
@@ -5828,7 +5829,7 @@ char *get_check_constraint_name(Oid oidCheckconstraint)
  * get_comparison_operator
  * Retrieve comparison operator between given types
  */
-Oid get_comparison_operator(Oid oidLeft, Oid oidRight, CmpType cmpt)
+Oid get_comparison_operator(Oid oidLeft, Oid oidRight, SPQCmpType cmpt)
 {
     int16 opstrat;
     HeapTuple ht;

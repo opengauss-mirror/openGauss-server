@@ -39,9 +39,6 @@
 #define SRC_INCLUDE_KNL_KNL_SESSION_ATTR_MPP_H_
  
 #include "knl/knl_guc/knl_guc_common.h"
-#ifdef PGXC
-#include "pgxc/nodemgr.h"
-#endif
 
 struct NodeDefinition;
  

@@ -249,4 +249,9 @@ extern void ConstructSliceBoundary(ExecNodes* en);
 
 extern Expr* pgxc_find_distcol_expr(void* query, Index varno, AttrNumber attrNum, Node* quals);
 extern bool IsFunctionShippable(Oid foid);
+
+#ifdef USE_SPQ
+extern bool IsSpqTypeDistributable(Oid colType);
+#endif
+
 #endif /* LOCATOR_H */
