@@ -19,9 +19,6 @@
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
 #include "catalog/pgxc_node.h"
-#ifdef USE_SPQ
-#include "parser/parse_coerce.h"
-#endif
 
 /* Result list element for get_op_btree_interpretation */
 typedef struct OpBtreeInterpretation {
@@ -225,7 +222,7 @@ extern char get_typecategory(Oid typid);
 
 #ifdef USE_SPQ
 /* comparison types */
-typedef enum CmpType {
+typedef enum SPQCmpType {
     CmptEq, // equality
     CmptNEq, // inequality
     CmptLT, // less than
@@ -233,7 +230,7 @@ typedef enum CmpType {
     CmptGT, // greater than
     CmptGEq, // greater or equal to
     CmptOther // other operator
-} CmpType;
+} SPQCmpType;
  
 #define ATTSTATSSLOT_VALUES 0x01
 #define ATTSTATSSLOT_NUMBERS 0x02
@@ -268,7 +265,6 @@ extern bool index_exists(Oid oid);
 extern bool aggregate_exists(Oid oid);
 extern Oid get_aggregate(const char *aggname, Oid oidType);
 extern bool function_exists(Oid oid);
-extern bool get_cast_func(Oid oidSrc, Oid oidDest, bool *is_binary_coercible, Oid *oidCastFunc, CoercionPathType *pathtype);
 extern bool check_constraint_exists(Oid oidCheckconstraint);
 extern char *get_check_constraint_name(Oid oidCheckconstraint);
 extern Oid get_check_constraint_relid(Oid oidCheckconstraint);
@@ -277,8 +273,8 @@ extern Node *get_check_constraint_expr_tree(Oid oidCheckconstraint);
 extern bool operator_exists(Oid oid);
 extern bool relation_exists(Oid oid);
 extern bool type_exists(Oid oid);
-extern CmpType get_comparison_type(Oid oidOp);
-extern Oid get_comparison_operator(Oid oidLeft, Oid oidRight, CmpType cmpt);
+extern SPQCmpType get_comparison_type(Oid oidOp);
+extern Oid get_comparison_operator(Oid oidLeft, Oid oidRight, SPQCmpType cmpt);
 extern bool has_subclass_slow(Oid relationId);
 extern List *get_operator_opfamilies(Oid opno);
 extern List *get_index_opfamilies(Oid oidIndex);
