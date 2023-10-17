@@ -884,7 +884,7 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         }
 
         XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-        if (!SS_IN_REFORM) {
+        if (!SS_IN_REFORM && !SS_IN_ONDEMAND_RECOVERY) {
             ereport(PANIC,
                 (errmsg("[SS] this buffer should not exist with BUF_DIRTY_NEED_FLUSH but not in reform, "
                 "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u",
