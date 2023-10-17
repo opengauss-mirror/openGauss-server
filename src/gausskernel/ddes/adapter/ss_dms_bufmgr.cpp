@@ -452,7 +452,7 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
     return TerminateReadSegPage(buf_desc, read_mode);
 }
 
-Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool* with_io)
+Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io)
 {
     BufferDesc *buf_desc = GetBufferDescriptor(buffer - 1);
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -484,15 +484,8 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     }
 
     // standby node must notify primary node for prepare lastest page in ondemand recovery
-    while (SS_STANDBY_ONDEMAND_NOT_NORMAL) {
-        /* in new reform */
-        if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
-            return 0;
-        }
-        if (SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
-            break;
-        }
-        SSReadControlFile(REFORM_CTRL_PAGE);
+    if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
+        return 0;
     }
 
     if (!StartReadPage(buf_desc, mode)) {
@@ -508,7 +501,7 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
 
     if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
         return false;
-    } else if (SS_STANDBY_ONDEMAND_NORMAL) {
+    } else if (SS_STANDBY_ONDEMAND_NORMAL || SS_PRIMARY_MODE) {
         return true;
     }
 
@@ -521,6 +514,7 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
     dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
     if (dms_reform_req_opengauss_ondemand_redo_buffer(&dms_ctx, &tag,
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
         ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[On-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
@@ -744,9 +738,9 @@ dms_session_e DMSGetProcType4RequestPage()
          * page in recovery state.
          */
         if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
-            return DMS_SESSION_RECOVER_HOT_STANDBY; 
+            return DMS_SESSION_RECOVER_HOT_STANDBY;
         } else {
-            return DMS_SESSION_RECOVER;   
+            return DMS_SESSION_RECOVER;
         }
     } else {
         return DMS_SESSION_NORMAL;
@@ -891,7 +885,7 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         }
 
         XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-        if (!SS_IN_REFORM) {
+        if (!SS_IN_REFORM && !SS_IN_ONDEMAND_RECOVERY) {
             ereport(PANIC,
                 (errmsg("[SS] this buffer should not exist with BUF_DIRTY_NEED_FLUSH but not in reform, "
                 "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u",

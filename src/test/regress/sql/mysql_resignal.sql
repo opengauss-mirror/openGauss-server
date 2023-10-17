@@ -1250,5 +1250,56 @@ call p2();
 show warnings;
 select @a, @error_count;
 
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value;
+    END;
+    DROP TABLE t1;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values;
+    END;
+    DROP TABLE t1;
+END;
+/
+
+
 \c regression
 drop database mysql_test_resignal;

@@ -157,7 +157,7 @@ extern ObjectAddress RenameConstraint(RenameStmt* stmt);
 
 extern ObjectAddress RenameRelation(RenameStmt* stmt);
 
-extern void RenameRelationInternal(Oid myrelid, const char* newrelname);
+extern void RenameRelationInternal(Oid myrelid, const char* newrelname, char* newschema = NULL);
 
 extern void find_composite_type_dependencies(Oid typeOid, Relation origRelation, const char* origTypeName);
 

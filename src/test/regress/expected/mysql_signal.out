@@ -1544,5 +1544,60 @@ show warnings;
  Error | 22   | duplicated!
 (1 row)
 
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate 01001;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near "01001"
+LINE 2:     signal sqlstate 01001;
+                            ^
+QUERY:   DECLARE BEGIN
+    signal sqlstate 01001;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate value 01001;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near "01001"
+LINE 2:     signal sqlstate value 01001;
+                                  ^
+QUERY:   DECLARE BEGIN
+    signal sqlstate value 01001;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate values 01001;
+END;
+/
+ERROR:  syntax error, the expected word is value. at or near "values"
+LINE 2:     signal sqlstate values 01001;
+                            ^
+QUERY:   DECLARE BEGIN
+    signal sqlstate values 01001;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate value;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near ";"
+LINE 2:     signal sqlstate value;
+                                 ^
+QUERY:   DECLARE BEGIN
+    signal sqlstate value;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    signal sqlstate values;
+END;
+/
+ERROR:  syntax error, the expected word is value. at or near "values"
+LINE 2:     signal sqlstate values;
+                            ^
+QUERY:   DECLARE BEGIN
+    signal sqlstate values;
+END
 \c regression
 drop database mysql_test_signal;

@@ -346,7 +346,7 @@ loop:
                 ereport(FATAL, (errmsg("incorrect checksum in control file")));
             }
         }
-        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status= g_instance.dms_cxt.SSReformerControl.clusterStatus;
+        g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = g_instance.dms_cxt.SSReformerControl.clusterStatus;
     } else {
         ControlFileData* controlFile = NULL;
         ControlFileData tempControlFile;

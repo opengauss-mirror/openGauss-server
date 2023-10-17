@@ -91,6 +91,7 @@
 #include "commands/verify.h"
 #include "catalog/pg_control.h"
 #include "dbmind/hypopg_index.h"
+#include "ddes/dms/ss_dms.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_user.h"
 #include "instruments/percentile.h"
@@ -3981,8 +3982,9 @@ static int ServerLoop(void)
                             result = BackendStartup(port, isConnectHaPort);
                         }
 
-                        if (SS_CLUSTER_ONDEMAND_RECOVERY && SS_IN_REFORM &&
-                            result != STATUS_OK && pmState == PM_WAIT_BACKENDS) {
+                        if (SS_IN_ONDEMAND_RECOVERY && SS_IN_REFORM &&
+                            result != STATUS_OK && pmState == PM_WAIT_BACKENDS &&
+                            (dms_reform_failed() || dms_reform_last_failed())) {
                             SSOndemandProcExitIfStayWaitBackends();
                         }
                         if (result != STATUS_OK) {
@@ -10201,7 +10203,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
-        SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
             /* update cluster_run_mode in case failover has been performed between two dorado cluster. */
             g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
@@ -15123,10 +15124,10 @@ void SSOndemandProcExitIfStayWaitBackends()
         failTimes++;
     }
     if (pmState == PM_WAIT_BACKENDS) {
-        ereport(WARNING, (errmsg("Proc exit because pmState stay %s for %d times, "
-            "when reform failed and in ondemand recovery, "
-            "to avoid pmState being stuck in PM_WAIT_BACKENDS.", 
-            GetPMState(pmState), WAIT_PMSTATE_UPDATE_TRIES)));
-        proc_exit(1);
+        ereport(WARNING, (errmodule(MOD_DMS), 
+            errmsg("[On-demand] Proc exit because pmState stay PM_WAIT_BACKENDS for %d times, "
+                "when reform failed and in ondemand recovery, to avoid pmState being stuck in PM_WAIT_BACKENDS.", 
+                WAIT_PMSTATE_UPDATE_TRIES)));
+        _exit(0);
     }
 }

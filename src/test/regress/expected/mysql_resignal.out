@@ -1961,5 +1961,100 @@ select @a, @error_count;
   0 |            2
 (1 row)
 
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near "01001"
+LINE 4:         resignal sqlstate 01001;
+                                  ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate 01001;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near "01001"
+LINE 4:         resignal sqlstate value 01001;
+                                        ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value 01001;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected word is value. at or near "values"
+LINE 4:         resignal sqlstate values 01001;
+                                  ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values 01001;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near ";"
+LINE 4:         resignal sqlstate value;
+                                       ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected word is value. at or near "values"
+LINE 4:         resignal sqlstate values;
+                                  ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values;
+    END;
+    DROP TABLE t1;
+END
 \c regression
 drop database mysql_test_resignal;

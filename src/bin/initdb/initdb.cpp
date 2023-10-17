@@ -4932,7 +4932,7 @@ int main(int argc, char* argv[])
     }
     
     if (enable_dss && ss_issharedstorage) {
-        ss_need_mkspecialdir = (ss_enable_dorado && !ss_check_specialdir(vgdata));
+        ss_need_mkspecialdir = !ss_check_specialdir(vgdata);
         ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir, ss_need_mkspecialdir);
     } else {
         /* Create required subdirectories */

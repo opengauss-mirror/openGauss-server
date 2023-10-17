@@ -1321,6 +1321,10 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
             if (ss_create_if_doublewrite(dir, instance_config.dss.vgdata, instance_config.dss.instance_id)) {
                 continue;
             }
+
+            if (ss_create_if_pg_replication(dir, instance_config.dss.vgdata, instance_config.dss.vglog)) {
+                continue;
+            }
         }
 
         /* tablespace_map exists */
