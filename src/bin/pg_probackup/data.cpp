@@ -30,6 +30,7 @@
 #include "lz4.h"
 #include "zstd.h"
 #include "storage/file/fio_device.h"
+#include "storage/buf/bufmgr.h"
 
 typedef struct PreReadBuf
 {
@@ -569,11 +570,7 @@ prepare_page(ConnectionArgs *conn_arg,
                  blknum, from_fullpath, read_len, BLCKSZ);
         }
         else
-        {
-            /* If it is in DSS mode, the validation is skipped */
-            if (IsDssMode())
-                return PageIsOk;
-                
+        {       
             /* We have BLCKSZ of raw data, validate it */
             rc = validate_one_page(page, absolute_blknum,
                 InvalidXLogRecPtr, page_st,
@@ -1735,6 +1732,11 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
                                     XLogRecPtr stop_lsn, PageState *page_st,
                                     uint32 checksum_version)
 {
+    // if page is new page , skip validate
+    if (PageIsNew(page) && PageIsEmpty(page))
+    {
+        return PAGE_IS_VALID;
+    }
     page_st->lsn = InvalidXLogRecPtr;
     page_st->checksum = 0;
 
