@@ -108,8 +108,8 @@ set_gaussdb_port()
     pg_port=$2
     echo "" >> ${data_node}/postgresql.conf
     echo "port = ${pg_port}" >> ${data_node}/postgresql.conf
-    echo "comm_sctp_port = $((pg_port + 10))" >> ${data_node}/postgresql.conf
-    echo "comm_control_port = $((pg_port + 20))" >> ${data_node}/postgresql.conf
+    echo "comm_sctp_port = $((pg_port + 30))" >> ${data_node}/postgresql.conf
+    echo "comm_control_port = $((pg_port + 40))" >> ${data_node}/postgresql.conf
 }
 
 start_gaussdb()

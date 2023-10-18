@@ -1239,9 +1239,6 @@ ifeq ($(enable_libnet), yes)
 endif
 
 override CPPFLAGS := $(CPPFLAGS) -DUSE_SPQ
-ifneq ($(wildcard $(top_builddir)/contrib/spq_plugin/.),)
-LIBS += -lxerces-c
-endif
 
 ##########################################################################
 #

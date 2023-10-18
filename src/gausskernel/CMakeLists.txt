@@ -352,13 +352,6 @@ list(APPEND gaussdb_LINK_DIRS
     ${BOOST_LIB_PATH}
 )
 
-list(FIND MACRO_OPTIONS "-DUSE_SPQ" RET_SPQ)
-if(NOT ${RET_SPQ} EQUAL -1)
-    if(EXISTS ${PROJECT_OPENGS_DIR}/contrib/spq_plugin)
-        list(APPEND gaussdb_LINK_LIBS -lxerces-c)
-    endif()
-endif()
-
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     list(APPEND gaussdb_LINK_DIRS
         ${LIBOBS_LIB_PATH}
