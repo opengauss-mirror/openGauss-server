@@ -3,12 +3,11 @@ CREATE DATABASE db_gin_utf8 TEMPLATE template0 encoding 'UTF8';
 SET ENABLE_SEQSCAN=OFF;
 SET ENABLE_INDEXSCAN=OFF;
 SET ENABLE_BITMAPSCAN=ON;
-SET ENABLE_FAST_QUERY_SHIPPING=OFF;
 --- import data
-create table import_data(id int, chepai varchar(10), shenfenzheng varchar(20), duanxin text) distribute by hash (id);
-copy import_data from '@abs_srcdir@/data/gin_data_1000.txt';
+create table import_data(id int, chepai varchar(10), shenfenzheng varchar(20), duanxin text);
+copy import_data from '/usr3/data1/jiangyan/openGauss-server/src/test/regress/data/gin_data_1000.txt';
 --- import data then create index
-create table gin_test_data(id int, chepai varchar(10), shenfenzheng varchar(20), duanxin text) distribute by hash (id);
+create table gin_test_data(id int, chepai varchar(10), shenfenzheng varchar(20), duanxin text);
 insert into gin_test_data select 1, chepai, shenfenzheng, duanxin from import_data;
 --- 6 times
 insert into gin_test_data select * from gin_test_data;
@@ -59,7 +58,7 @@ select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ t
 (1 row)
 
 --- gin data page split
-create table gin_test_data_1(id int, shenfenzheng varchar(20)) distribute by hash (id);
+create table gin_test_data_1(id int, shenfenzheng varchar(20));
 insert into gin_test_data_1 select id, shenfenzheng from gin_test_data;
 --- 7 times
 insert into gin_test_data_1 select * from gin_test_data_1;

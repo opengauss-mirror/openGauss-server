@@ -161,7 +161,7 @@ ALTER INDEX idx1_table_unusable_index_exchange REBUILD;
 ALTER INDEX idx1_partition_unsable_index_3 UNUSABLE;
 ALTER TABLE partition_unsable_index_3 EXCHANGE PARTITION (p1_partition_unsable_index_3)
 	WITH TABLE table_unusable_index_exchange;
-ERROR:  index mismatch for tables in ALTER TABLE EXCHANGE PARTITION
+ERROR:  tables in ALTER TABLE EXCHANGE PARTITION must have the same number of indexs
 ALTER INDEX idx1_partition_unsable_index_3 REBUILD;
 -- modify one index partition unusable
 -- exchange failed due to unusable index partition

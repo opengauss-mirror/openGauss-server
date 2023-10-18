@@ -6,8 +6,8 @@ set current_schema = col_distribute_subplan_base;
 -- Create Table and Insert Data
 create table t_subplan1(a1 int, b1 int, c1 int, d1 int) with (orientation = column)  ;
 create table t_subplan2(a2 int, b2 int, c2 int, d2 int) with (orientation = column)  ;
-insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6 from public.src;
-insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9 from public.src;
+insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6;
+insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9;
 
 -- 1. initplan
 explain (costs off)

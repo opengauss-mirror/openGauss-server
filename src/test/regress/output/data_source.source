@@ -21,7 +21,8 @@ CREATE DATA SOURCE llt_mppdb_8 TYPE 'MPPDB' VERSION NULL OPTIONS (dsn 'mppdb', e
 CREATE DATA SOURCE llt_mppdb_9 OPTIONS (username '', dsn 'mppdb');
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.cipher
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.rand
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o datasource > /dev/null 2>&1
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc generate -S 123456@pwd -D {}/bin -o datasource
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -S ******** -D /data1/jiangyan/openGauss-server//dest/bin/..//bin -o datasource generate ].
 gs_guc generate -S *** 
 CREATE DATA SOURCE llt_mppdb_10 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password 'pwd@123456789');
 CREATE DATA SOURCE llt_mppdb_11 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password 'pwd');
@@ -95,7 +96,7 @@ CREATE DATA SOURCE llt_tst_ds_1 options (dsn 'encryptOpt');
 CREATE DATA SOURCE llt_tst_ds_2 options (encoding 'encryptOpt123');
 CREATE DATA SOURCE llt_tst_ds_3 options (dsn 'tst', username 'encryptOpt12345678901234567', password 'encryptOpt12345671234567890');
 NOTICE:  Using probably encrypted option (prefix='encryptOpt') directly and it is not recommended.
-HINT:  The DATA SOURCE object can't be used if the option is not encrypted correctly.
+HINT:  The datasource object can't be used if the option is not encrypted correctly.
 SELECT srcoptions FROM pg_extension_data_source where srcname='llt_tst_ds_1';
     srcoptions    
 ------------------
@@ -255,9 +256,10 @@ SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.cipher
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.rand
 ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP encoding, username '123user', SET password '123456@pwd');
---?.*
---?.*
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o datasource > /dev/null 2>&1
+ERROR:  No key file datasource.key.cipher
+HINT:  Please create datasource.key.cipher file with gs_guc and gs_ssh, such as :gs_ssh -c "gs_guc generate -S XXX -D $GAUSSHOME/bin -o datasource"
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc generate -S 123456@pwd -D {}/bin -o datasource
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -S ******** -D /data1/jiangyan/openGauss-server//dest/bin/..//bin -o datasource generate ].
 gs_guc generate -S *** 
 SELECT PG_SLEEP(1);
  pg_sleep 
@@ -269,9 +271,9 @@ ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP enc
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.cipher
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.rand
 SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
---?.*
---?.*
---? llt_mppdb_31 |       10 | MPPDB3  | V1R7C20    |        | {dsn=mppdb2,password=.*,username=.*}
+   srcname    | srcowner | srctype | srcversion | srcacl |                                                                                      srcoptions                                                                                      
+--------------+----------+---------+------------+--------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ llt_mppdb_31 |       10 | MPPDB3  | V1R7C20    |        | {dsn=mppdb2,password=encryptOptvj5E4r/A+1gzoFLm+HHetKWyCPWQB3uD9EyBSq7Yun6n7ih1Tnyk+dbBKJtWNcoT,username=encryptOptYEkl7iYwIlMreLTJV3QKXd+nCGXA9GxKEr5RywDEoIWYsZhvDZH1WkEVWbyxRpzA}
 (1 row)
 
 -- duplicated options
@@ -298,7 +300,7 @@ ALTER DATA SOURCE llt_mppdb_31 RENAME TO llt_mppdb_31_new;
 SELECT srcname, srcowner FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31_new';
      srcname      | srcowner 
 ------------------+----------
---? llt_mppdb_31_new |.*
+ llt_mppdb_31_new |       10
 (1 row)
 
 -- alter owner 
@@ -311,7 +313,7 @@ ALTER DATA SOURCE llt_mppdb_31_new OWNER TO PLOKEN1;
 SELECT srcname, srcowner FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31_new';
      srcname      | srcowner 
 ------------------+----------
---? llt_mppdb_31_new |.*
+ llt_mppdb_31_new |    16429
 (1 row)
 
 DROP DATA SOURCE IF EXISTS llt_mppdb_31_new CASCADE;
@@ -326,34 +328,35 @@ CREATE USER PLOKEN3 IDENTIFIED BY 'Gs@654321';
 -- grant invalid privileges
 GRANT SELECT ON DATA SOURCE llt_mppdb_41 TO PLOKEN2;
 ERROR:  invalid privilege type SELECT for data source
+DETAIL:  N/A
 -- grant valid privileges, here usage == all 
 GRANT USAGE ON DATA SOURCE llt_mppdb_41 TO PLOKEN2;
 GRANT ALL PRIVILEGES ON DATA SOURCE llt_mppdb_42 TO PLOKEN2;
 SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_41';
---?.*
---?.*
- llt_mppdb_41 | {@login_user@=U/@login_user@,ploken2=U/@login_user@}
+   srcname    |                  srcacl                  
+--------------+------------------------------------------
+ llt_mppdb_41 | {jiangyan=U/jiangyan,ploken2=U/jiangyan}
 (1 row)
 
 SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
---?.*
---?.*
- llt_mppdb_42 | {@login_user@=U/@login_user@,ploken2=U/@login_user@}
+   srcname    |                  srcacl                  
+--------------+------------------------------------------
+ llt_mppdb_42 | {jiangyan=U/jiangyan,ploken2=U/jiangyan}
 (1 row)
 
 -- revoke privileges
 REVOKE USAGE ON DATA SOURCE llt_mppdb_41 FROM PLOKEN2;
 REVOKE ALL ON DATA SOURCE llt_mppdb_42 FROM PLOKEN2;
 SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_41';
---?.*
---?.*
- llt_mppdb_41 | {@login_user@=U/@login_user@}
+   srcname    |        srcacl         
+--------------+-----------------------
+ llt_mppdb_41 | {jiangyan=U/jiangyan}
 (1 row)
 
 SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
---?.*
---?.*
- llt_mppdb_42 | {@login_user@=U/@login_user@}
+   srcname    |        srcacl         
+--------------+-----------------------
+ llt_mppdb_42 | {jiangyan=U/jiangyan}
 (1 row)
 
 -- change owner
@@ -363,18 +366,18 @@ ALTER DATA SOURCE llt_mppdb_42 OWNER TO PLOKEN3;
 GRANT ALL ON DATA SOURCE llt_mppdb_42 TO PLOKEN3;
 GRANT ALL ON DATA SOURCE llt_mppdb_42 TO PLOKEN2;
 SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
---?.*
---?.*
- llt_mppdb_42 | {@login_user@=U/@login_user@,ploken3=U/ploken3,ploken2=U/ploken3}
+   srcname    |                          srcacl                           
+--------------+-----------------------------------------------------------
+ llt_mppdb_42 | {jiangyan=U/jiangyan,ploken3=U/ploken3,ploken2=U/ploken3}
 (1 row)
 
 -- revoke usage (test all == usage)
 REVOKE USAGE ON DATA SOURCE llt_mppdb_42 FROM PLOKEN3;
 REVOKE USAGE ON DATA SOURCE llt_mppdb_42 FROM PLOKEN2;
 SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
---?.*
---?.*
- llt_mppdb_42 | {@login_user@=U/@login_user@}
+   srcname    |        srcacl         
+--------------+-----------------------
+ llt_mppdb_42 | {jiangyan=U/jiangyan}
 (1 row)
 
 DROP DATA SOURCE llt_mppdb_41;
@@ -390,11 +393,11 @@ create data source mpp_llt_01 options (dsn 'mpp_llt_01');
 create data source mpp_llt_01;
 ERROR:  data source "mpp_llt_01" already exists
 grant usage on data source mpp_llt_01 to ds_user_llt_01;
-\! @abs_bindir@/gsql -d postgres -p @portstring@  -U ds_user_llt_01 -W Gs@123456 -c "grant usage on data source mpp_llt_01 to ds_user_llt_02;"
-WARNING:  no privileges were granted for "mpp_llt_01"
-GRANT
-\! @abs_bindir@/gsql -d postgres -p @portstring@  -U ds_user_llt_01 -W Gs@123456 -c "alter data source mpp_llt_01 version '11.1';"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gsql -d postgres -p 25632  -U ds_user_llt_01 -W Gs@123456 -c "grant usage on data source mpp_llt_01 to ds_user_llt_02;"
+ERROR:  no privileges were granted for "mpp_llt_01"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gsql -d postgres -p 25632  -U ds_user_llt_01 -W Gs@123456 -c "alter data source mpp_llt_01 version '11.1';"
 ERROR:  must be owner of data source mpp_llt_01
+DETAIL:  N/A
 drop data source mpp_llt_01;
 drop user ds_user_llt_01;
 drop user ds_user_llt_02;
@@ -404,70 +407,50 @@ drop user ds_user_llt_02;
 create data source myself options (dsn 'myself');
 create table ds_s2_tbl_001 (c1 int);
 explain (costs off) select * from exec_on_extension('myself', 'select * from a') as (c1 int);
-                QUERY PLAN                
-------------------------------------------
- Streaming (type: GATHER)
---?   Node/s: datanode.*
-   ->  Function Scan on exec_on_extension
-(3 rows)
+             QUERY PLAN             
+------------------------------------
+ Function Scan on exec_on_extension
+(1 row)
 
 explain (costs off) select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int);
-               QUERY PLAN               
-----------------------------------------
- Streaming (type: GATHER)
---?   Node/s: datanode.*
-   ->  Function Scan on exec_hadoop_sql
-(3 rows)
+            QUERY PLAN            
+----------------------------------
+ Function Scan on exec_hadoop_sql
+(1 row)
 
 explain (costs off) insert into ds_s2_tbl_001 select * from exec_on_extension('myself', 'select * from a') as (c1 int);
-                      QUERY PLAN                      
-------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Insert on ds_s2_tbl_001
-         ->  Streaming(type: REDISTRIBUTE)
---?               Spawn on: datanode.*
-               ->  Function Scan on exec_on_extension
-(6 rows)
+                QUERY PLAN                
+------------------------------------------
+ Insert on ds_s2_tbl_001
+   ->  Function Scan on exec_on_extension
+(2 rows)
 
 explain (costs off) insert into ds_s2_tbl_001 select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int);
-                     QUERY PLAN                     
-----------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Insert on ds_s2_tbl_001
-         ->  Streaming(type: REDISTRIBUTE)
---?               Spawn on: datanode.*
-               ->  Function Scan on exec_hadoop_sql
-(6 rows)
+               QUERY PLAN               
+----------------------------------------
+ Insert on ds_s2_tbl_001
+   ->  Function Scan on exec_hadoop_sql
+(2 rows)
 
 explain (costs off) select * from (select * from exec_on_extension('myself', 'select * from a') as (c1 int)) a inner join ds_s2_tbl_001 b on a.c1=b.c1;
-                     QUERY PLAN                      
------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Hash Join
-         Hash Cond: (exec_on_extension.c1 = b.c1)
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (b.c1 = exec_on_extension.c1)
+   ->  Seq Scan on ds_s2_tbl_001 b
+   ->  Hash
          ->  Function Scan on exec_on_extension
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     Spawn on: All datanodes
-                     ->  Seq Scan on ds_s2_tbl_001 b
-(9 rows)
+(5 rows)
 
 explain (costs off) select * from (select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int)) a inner join ds_s2_tbl_001 b on a.c1=b.c1;
-                     QUERY PLAN                      
------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Hash Join
-         Hash Cond: (exec_hadoop_sql.c1 = b.c1)
+                  QUERY PLAN                  
+----------------------------------------------
+ Hash Join
+   Hash Cond: (b.c1 = exec_hadoop_sql.c1)
+   ->  Seq Scan on ds_s2_tbl_001 b
+   ->  Hash
          ->  Function Scan on exec_hadoop_sql
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     Spawn on: All datanodes
-                     ->  Seq Scan on ds_s2_tbl_001 b
-(9 rows)
+(5 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -476,28 +459,20 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_on_extension('myself', 'select * from a') as (c1 int));
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Hash Join
-         Hash Cond: (exec_on_extension.c1 = ds_s2_tbl_001.c1)
-         ->  Function Scan on exec_on_extension
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     Spawn on: All datanodes
-                     ->  Hash Join
-                           Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
-                           ->  Seq Scan on ds_s2_tbl_001
-                           ->  Hash
-                                 ->  HashAggregate
-                                       Group By Key: exec_on_extension.c1
-                                       ->  Streaming(type: REDISTRIBUTE)
---?                                             Spawn on: datanode.*
-                                             ->  HashAggregate
-                                                   Group By Key: exec_on_extension.c1
-                                                   ->  Function Scan on exec_on_extension
-(19 rows)
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
+   ->  Seq Scan on ds_s2_tbl_001
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (exec_on_extension.c1 = exec_on_extension.c1)
+               ->  Function Scan on exec_on_extension
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: exec_on_extension.c1
+                           ->  Function Scan on exec_on_extension
+(11 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -506,28 +481,20 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int));
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Hash Join
-         Hash Cond: (exec_hadoop_sql.c1 = ds_s2_tbl_001.c1)
-         ->  Function Scan on exec_hadoop_sql
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     Spawn on: All datanodes
-                     ->  Hash Join
-                           Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
-                           ->  Seq Scan on ds_s2_tbl_001
-                           ->  Hash
-                                 ->  HashAggregate
-                                       Group By Key: exec_hadoop_sql.c1
-                                       ->  Streaming(type: REDISTRIBUTE)
---?                                             Spawn on: datanode.*
-                                             ->  HashAggregate
-                                                   Group By Key: exec_hadoop_sql.c1
-                                                   ->  Function Scan on exec_hadoop_sql
-(19 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
+   ->  Seq Scan on ds_s2_tbl_001
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (exec_hadoop_sql.c1 = exec_hadoop_sql.c1)
+               ->  Function Scan on exec_hadoop_sql
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: exec_hadoop_sql.c1
+                           ->  Function Scan on exec_hadoop_sql
+(11 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -536,28 +503,20 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int));
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Hash Join
-         Hash Cond: (exec_on_extension.c1 = ds_s2_tbl_001.c1)
-         ->  Function Scan on exec_on_extension
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     Spawn on: All datanodes
-                     ->  Hash Join
-                           Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
-                           ->  Seq Scan on ds_s2_tbl_001
-                           ->  Hash
-                                 ->  HashAggregate
-                                       Group By Key: exec_hadoop_sql.c1
-                                       ->  Streaming(type: REDISTRIBUTE)
---?                                             Spawn on: datanode.*
-                                             ->  HashAggregate
-                                                   Group By Key: exec_hadoop_sql.c1
-                                                   ->  Function Scan on exec_hadoop_sql
-(19 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
+   ->  Seq Scan on ds_s2_tbl_001
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (exec_on_extension.c1 = exec_hadoop_sql.c1)
+               ->  Function Scan on exec_on_extension
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: exec_hadoop_sql.c1
+                           ->  Function Scan on exec_hadoop_sql
+(11 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -566,28 +525,20 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_on_extension('myself', 'select * from a') as (c1 int));
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Node/s: All datanodes
-   ->  Hash Join
-         Hash Cond: (exec_hadoop_sql.c1 = ds_s2_tbl_001.c1)
-         ->  Function Scan on exec_hadoop_sql
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     Spawn on: All datanodes
-                     ->  Hash Join
-                           Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
-                           ->  Seq Scan on ds_s2_tbl_001
-                           ->  Hash
-                                 ->  HashAggregate
-                                       Group By Key: exec_on_extension.c1
-                                       ->  Streaming(type: REDISTRIBUTE)
---?                                             Spawn on: datanode.*
-                                             ->  HashAggregate
-                                                   Group By Key: exec_on_extension.c1
-                                                   ->  Function Scan on exec_on_extension
-(19 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
+   ->  Seq Scan on ds_s2_tbl_001
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (exec_hadoop_sql.c1 = exec_on_extension.c1)
+               ->  Function Scan on exec_hadoop_sql
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: exec_on_extension.c1
+                           ->  Function Scan on exec_on_extension
+(11 rows)
 
                 
 drop table ds_s2_tbl_001;

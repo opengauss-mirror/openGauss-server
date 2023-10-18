@@ -1,7 +1,7 @@
 -- 6. test table has tablespace
-\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
-\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
-create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+\! rm -fr '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+\! mkdir '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1';
 -- a. partitioned table has tablespace
 create table test_modify_column_type_tablespace (a int, b int, c int, d int)
 tablespace hw_partition_sql_adapt_ts1

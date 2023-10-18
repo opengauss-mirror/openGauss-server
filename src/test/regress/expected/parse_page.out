@@ -37,51 +37,39 @@ END;
 $$
 ;
 SELECT gs_parse_page_bypath_test('test_astore', 0, 'heap', true);
---?.*
---?.*
---?.*
+                                   gs_parse_page_bypath_test                                   
+-----------------------------------------------------------------------------------------------
+ /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/1663_16384_16387_0.page
 (1 row)
 
 SELECT gs_parse_page_bypath_test('test_segment', 0, 'segment', true);
---?.*
---?.*
---?.*
+                                  gs_parse_page_bypath_test                                   
+----------------------------------------------------------------------------------------------
+ /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/1663_16384_4157_0.page
 (1 row)
 
 CHECKPOINT;
 SELECT gs_parse_page_bypath_test('test_astore', -1, 'heap', true);
---?.*
---?.*
---?.*
-(1 row)
-
+ERROR:  could not read block 2 in file "base/16384/16387": read only 0 of 8192 bytes
+CONTEXT:  referenced column: gs_parse_page_bypath
+PL/pgSQL function gs_parse_page_bypath_test(character varying,integer,character varying,boolean) line 6 at RETURN QUERY
+referenced column: gs_parse_page_bypath_test
 SELECT gs_parse_page_bypath_test('test_astore_idx', 1, 'btree', false);
---?.*
---?.*
---?.*
-(1 row)
-
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 SELECT gs_parse_page_bypath_test('test_ustore', -1, 'uheap', false);
---?.*
---?.*
---?.*
-(1 row)
-
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 SELECT gs_parse_page_bypath_test('test_ustore_idx', 1, 'ubtree', false);
---?.*
---?.*
---?.*
-(1 row)
-
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 SELECT gs_parse_page_bypath_test('test_segment', 0, 'segment', false);
---?.*
---?.*
---?.*
-(1 row)
-
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 DROP INDEX IF EXISTS test_astore_idx;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 DROP TABLE IF EXISTS test_astore;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 DROP INDEX IF EXISTS test_ustore_idx;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 DROP TABLE IF EXISTS test_ustore;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 DROP TABLE IF EXISTS test_segment;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 COMMIT;

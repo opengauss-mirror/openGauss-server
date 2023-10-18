@@ -331,7 +331,6 @@ create table partition_truncate_table2
 	c1 int references partition_truncate_table1(c1),
 	c2 int
 );
-ERROR:  REFERENCES constraint is not yet supported.
 --insert into partition_truncate_table1 values (1,200);
 --insert into partition_truncate_table1 values (2,200);
 --insert into partition_truncate_table2 values (2,200);
@@ -347,7 +346,6 @@ ERROR:  REFERENCES constraint is not yet supported.
 --select * from partition_truncate_table2;
 ----0 rows
 drop table if exists partition_truncate_table1,partition_truncate_table2;
-NOTICE:  table "partition_truncate_table2" does not exist, skipping
 create table partition_truncate_table1
 (
 	c1 int unique,
@@ -365,20 +363,17 @@ partition by range (c1)
 	partition partition_truncate_table2_p1 values less than (100),
 	partition partition_truncate_table2_p2 values less than (150)
 );
-ERROR:  REFERENCES constraint is not yet supported.
 insert into partition_truncate_table1 values (1,200);
 insert into partition_truncate_table1 values (2,200);
 insert into partition_truncate_table2 values (2,200);
-ERROR:  relation "partition_truncate_table2" does not exist
-LINE 1: insert into partition_truncate_table2 values (2,200);
-                    ^
 insert into partition_truncate_table2 values (2,200);
-ERROR:  relation "partition_truncate_table2" does not exist
-LINE 1: insert into partition_truncate_table2 values (2,200);
-                    ^
 truncate table partition_truncate_table1 restrict;
+ERROR:  cannot truncate a table referenced in a foreign key constraint
+DETAIL:  Table "partition_truncate_table2" references "partition_truncate_table1".
+HINT:  Truncate table "partition_truncate_table2" at the same time, or use TRUNCATE ... CASCADE.
 --can't truncate table partition_truncate_table1
 truncate table partition_truncate_table1 cascade ;
+NOTICE:  truncate cascades to table "partition_truncate_table2"
 select * from partition_truncate_table1 order by 1, 2;
  c1 | c2 
 ----+----
@@ -386,12 +381,12 @@ select * from partition_truncate_table1 order by 1, 2;
 
 --0 rows
 select * from partition_truncate_table2 order by 1, 2;
-ERROR:  relation "partition_truncate_table2" does not exist
-LINE 1: select * from partition_truncate_table2 order by 1, 2;
-                      ^
+ c1 | c2 
+----+----
+(0 rows)
+
 --0 rows
 drop table if exists partition_truncate_table1,partition_truncate_table2;
-NOTICE:  table "partition_truncate_table2" does not exist, skipping
 --05--------------------------------------------------------------------
 --cascade test
 --partitioned table has fk on a partitioned table
@@ -446,6 +441,7 @@ revoke truncate on table partition_truncate_table from partition_truncate_user1;
 set session authorization partition_truncate_user1 password 'gauss@123';
 truncate partition_truncate_table;
 ERROR:  permission denied for relation partition_truncate_table
+DETAIL:  N/A
 --permission de
 reset session authorization;
 drop table partition_truncate_table;
@@ -513,12 +509,15 @@ revoke truncate on table partition_truncate_user1.partition_truncate_table from 
 set session authorization partition_truncate_user1 password 'gauss@123';
 truncate partition_truncate_table;
 ERROR:  permission denied for relation partition_truncate_table
+DETAIL:  N/A
 --fail , no permission
 alter table partition_truncate_table truncate partition partition_truncate_table_p0;
 ERROR:  permission denied for relation partition_truncate_table
+DETAIL:  N/A
 --fail , no permission
 alter table partition_truncate_table truncate partition for (0);
 ERROR:  permission denied for relation partition_truncate_table
+DETAIL:  N/A
 --fail , no permission
 drop table partition_truncate_table;
 reset session authorization;
@@ -625,7 +624,7 @@ select count(*) from partition_truncate_table;
 truncate partition_truncate_table;
 rollback;
 select count(*) from partition_truncate_table;
-ERROR:  relation "partition_truncate_table" does not exist
+ERROR:  relation "partition_truncate_table" does not exist on datanode1
 LINE 1: select count(*) from partition_truncate_table;
                              ^
 --can not find the table
@@ -808,7 +807,7 @@ where c.relname = 'partition_truncate_table' and p.parentid = c.oid and ct.oid =
 truncate partition_truncate_table;
 rollback;
 select count(*) from partition_truncate_table;
-ERROR:  relation "partition_truncate_table" does not exist
+ERROR:  relation "partition_truncate_table" does not exist on datanode1
 LINE 1: select count(*) from partition_truncate_table;
                              ^
 --table do not exist

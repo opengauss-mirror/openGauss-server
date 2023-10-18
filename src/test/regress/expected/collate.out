@@ -606,9 +606,9 @@ explain (verbose, costs off) SELECT collation for ((SELECT b FROM collate_test1 
    Output: pg_collation_for($0)
    InitPlan 1 (returns $0)
      ->  Limit
-           Output: b
+           Output: collate_test1.b
            ->  Seq Scan on collate_tests.collate_test1
-                 Output: b
+                 Output: collate_test1.b
 (7 rows)
 
 --

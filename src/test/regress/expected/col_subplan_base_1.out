@@ -6,8 +6,8 @@ set current_schema = col_distribute_subplan_base;
 -- Create Table and Insert Data
 create table t_subplan1(a1 int, b1 int, c1 int, d1 int) with (orientation = column)  ;
 create table t_subplan2(a2 int, b2 int, c2 int, d2 int) with (orientation = column)  ;
-insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6 from public.src;
-insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9 from public.src;
+insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6;
+insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9;
 -- 1. initplan
 explain (costs off)
 select case when (select count(*)
@@ -269,8 +269,8 @@ from t ctr2
 where ctr1.d2 = ctr2.d2)
 order by 1
 limit 10;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Limit
    CTE t
      ->  Row Adapter
@@ -283,14 +283,15 @@ limit 10;
    ->  Sort
          Sort Key: ctr1.total
          ->  Hash Join
-               Hash Cond: (ctr1.d2 = ctr2.d2)
-               Join Filter: ((ctr1.total)::numeric > ((avg(ctr2.total) * 1.2)))
+               Hash Cond: (ctr1.d2 = subquery."?column?")
+               Join Filter: ((ctr1.total)::numeric > (subquery."?column?" * 1.2))
                ->  CTE Scan on t ctr1
                ->  Hash
-                     ->  HashAggregate
-                           Group By Key: ctr2.d2
-                           ->  CTE Scan on t ctr2
-(19 rows)
+                     ->  Subquery Scan on subquery
+                           ->  HashAggregate
+                                 Group By Key: ctr2.d2
+                                 ->  CTE Scan on t ctr2
+(20 rows)
 
 with t as
 (select d1
@@ -341,8 +342,8 @@ from t ctr3
 where ctr2.d2=ctr3.d2))
 order by 1
 limit 10;
-                                                  QUERY PLAN                                                  
---------------------------------------------------------------------------------------------------------------
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
  Limit
    CTE t
      ->  Row Adapter
@@ -359,15 +360,16 @@ limit 10;
                SubPlan 2
                  ->  Aggregate
                        ->  Nested Loop
-                             Join Filter: (((ctr1.d2 + ctr2.d2))::numeric < ((avg(ctr3.total) * 3::numeric)))
+                             Join Filter: (((ctr1.d2 + ctr2.d2))::numeric < (subquery."?column?" * 3::numeric))
                              ->  CTE Scan on t ctr2
                                    Filter: (d2 = ctr1.d2)
                              ->  Materialize
-                                   ->  GroupAggregate
-                                         Group By Key: ctr3.d2
-                                         ->  CTE Scan on t ctr3
-                                               Filter: (d2 = ctr1.d2)
-(24 rows)
+                                   ->  Subquery Scan on subquery
+                                         ->  GroupAggregate
+                                               Group By Key: ctr3.d2
+                                               ->  CTE Scan on t ctr3
+                                                     Filter: (d2 = ctr1.d2)
+(25 rows)
 
 with t as
 (select d1
@@ -610,15 +612,16 @@ select  a1, count(*) cnt
                      ->  Vector Sonic Hash Join
                            Hash Cond: (col_distribute_subplan_base.t_subplan1.a1 = t_subplan2.a2)
                            ->  Vector Sonic Hash Join
-                                 Hash Cond: (col_distribute_subplan_base.t_subplan1.c1 = t2.c2)
-                                 Join Filter: ((col_distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * (avg(t2.b2))))
+                                 Hash Cond: (col_distribute_subplan_base.t_subplan1.c1 = subquery."?column?")
+                                 Join Filter: ((col_distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * subquery.avg))
                                  ->  CStore Scan on t_subplan1
-                                 ->  Vector Sonic Hash Aggregate
-                                       Group By Key: t2.c2
-                                       ->  CStore Scan on t_subplan2 t2
+                                 ->  Vector Subquery Scan on subquery
+                                       ->  Vector Sonic Hash Aggregate
+                                             Group By Key: t2.c2
+                                             ->  CStore Scan on t_subplan2 t2
                            ->  CStore Scan on t_subplan2
                                  Filter: ((c2)::numeric > $0)
-(22 rows)
+(23 rows)
 
  
 select  a1, count(*) cnt
@@ -755,18 +758,19 @@ select  a1, count(*) cnt
                            ->  CStore Scan on t_subplan2
                                  Filter: ((c2)::numeric > $0)
                            ->  Vector Sonic Hash Join
-                                 Hash Cond: (col_distribute_subplan_base.t_subplan1.c1 = t2.c2)
-                                 Join Filter: ((col_distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * (avg(t2.b2))))
+                                 Hash Cond: (col_distribute_subplan_base.t_subplan1.c1 = subquery."?column?")
+                                 Join Filter: ((col_distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * subquery.avg))
                                  ->  CStore Scan on t_subplan1
-                                 ->  Vector Sonic Hash Aggregate
-                                       Group By Key: t2.c2
-                                       InitPlan 2 (returns $1)
-                                         ->  Row Adapter
-                                               ->  Vector Aggregate
-                                                     ->  CStore Scan on t_subplan1 (min-max optimization)
-                                       ->  CStore Scan on t_subplan2 t2
-                                             Filter: (d2 > $1)
-(27 rows)
+                                 ->  Vector Subquery Scan on subquery
+                                       ->  Vector Sonic Hash Aggregate
+                                             Group By Key: t2.c2
+                                             InitPlan 2 (returns $1)
+                                               ->  Row Adapter
+                                                     ->  Vector Aggregate
+                                                           ->  CStore Scan on t_subplan1 (min-max optimization)
+                                             ->  CStore Scan on t_subplan2 t2
+                                                   Filter: (d2 > $1)
+(28 rows)
 
 select  a1, count(*) cnt
  from t_subplan1
@@ -818,12 +822,13 @@ select  a1, count(*) cnt
            ->  Row Adapter
                  ->  Vector Aggregate
                        ->  Vector Sonic Hash Join
-                             Hash Cond: (t1.d1 = t2.d2)
-                             Join Filter: ((t1.a1)::numeric > (avg(t2.a2)))
+                             Hash Cond: (t1.d1 = subquery."?column?")
+                             Join Filter: ((t1.a1)::numeric > subquery.avg)
                              ->  CStore Scan on t_subplan1 t1
-                             ->  Vector Sonic Hash Aggregate
-                                   Group By Key: t2.d2
-                                   ->  CStore Scan on t_subplan2 t2
+                             ->  Vector Subquery Scan on subquery
+                                   ->  Vector Sonic Hash Aggregate
+                                         Group By Key: t2.d2
+                                         ->  CStore Scan on t_subplan2 t2
          ->  Vector Sort
                Sort Key: t_subplan1.a1, (count(*))
                ->  Vector Sonic Hash Aggregate
@@ -833,7 +838,7 @@ select  a1, count(*) cnt
                            ->  CStore Scan on t_subplan1
                            ->  CStore Scan on t_subplan2
                                  Filter: ((c2)::numeric > $0)
-(21 rows)
+(22 rows)
 
 select  a1, count(*) cnt
  from t_subplan1

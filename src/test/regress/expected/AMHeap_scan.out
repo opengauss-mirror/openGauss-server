@@ -60,7 +60,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -75,7 +75,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -96,7 +96,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -117,7 +117,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -138,7 +138,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -157,7 +157,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Nested Loop Left Join
@@ -179,7 +179,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (17 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Nested Loop
@@ -201,7 +201,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (17 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Nested Loop
@@ -315,7 +315,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -330,7 +330,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -348,7 +348,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (12 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -366,7 +366,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (12 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -384,7 +384,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (12 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -403,7 +403,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  Nested Loop Left Join
@@ -419,7 +419,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                Selected Partitions:  1..4
 (11 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  Nested Loop
@@ -435,7 +435,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                Selected Partitions:  NONE
 (11 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  Nested Loop
@@ -543,7 +543,7 @@ SET enable_nestloop = OFF;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -558,7 +558,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Sort
@@ -580,7 +580,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (16 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Sort
@@ -602,7 +602,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (16 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Sort
@@ -624,7 +624,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (16 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Sort
@@ -646,7 +646,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (16 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Merge Left Join
@@ -666,7 +666,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (15 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Merge Join
@@ -687,7 +687,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (16 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Merge Join
@@ -802,7 +802,7 @@ SET enable_hashjoin = OFF;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -817,7 +817,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -836,7 +836,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -855,7 +855,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -874,7 +874,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -893,7 +893,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Right Join
@@ -910,7 +910,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -928,7 +928,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -1038,7 +1038,7 @@ SET enable_nestloop = OFF;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -1053,7 +1053,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1072,7 +1072,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1091,7 +1091,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1110,7 +1110,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1129,7 +1129,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Left Join
@@ -1146,7 +1146,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -1164,7 +1164,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -1274,7 +1274,7 @@ SET enable_nestloop = OFF;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -1289,7 +1289,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -1310,7 +1310,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -1331,7 +1331,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -1352,7 +1352,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1371,7 +1371,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Nested Loop Left Join
@@ -1393,7 +1393,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (17 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Merge Join
@@ -1420,7 +1420,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                            Selected Partitions:  NONE
 (22 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Merge Join
@@ -1539,7 +1539,7 @@ SET enable_nestloop = OFF;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -1554,7 +1554,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1573,7 +1573,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1592,7 +1592,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1611,7 +1611,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -1630,7 +1630,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Left Join
@@ -1647,7 +1647,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -1665,7 +1665,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -1775,7 +1775,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -1790,7 +1790,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -1809,7 +1809,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -1828,7 +1828,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -1847,7 +1847,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -1866,7 +1866,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Hash Right Join
@@ -1883,7 +1883,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Hash Join
@@ -1901,7 +1901,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Hash Join
@@ -2013,7 +2013,7 @@ SET enable_hashjoin = ON;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -2028,7 +2028,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2047,7 +2047,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2066,7 +2066,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2085,7 +2085,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2104,7 +2104,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Right Join
@@ -2121,7 +2121,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2139,7 +2139,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2220,7 +2220,7 @@ SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_sca
 (4 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Right Join
@@ -2237,7 +2237,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2255,7 +2255,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2303,7 +2303,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -2318,7 +2318,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2337,7 +2337,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2356,7 +2356,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2375,7 +2375,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2394,7 +2394,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Left Join
@@ -2411,7 +2411,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2429,7 +2429,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2510,7 +2510,7 @@ SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_sca
 (4 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Left Join
@@ -2527,7 +2527,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2545,7 +2545,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -2593,7 +2593,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -2608,7 +2608,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -2629,7 +2629,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -2650,7 +2650,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -2671,7 +2671,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (15 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2690,7 +2690,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Nested Loop Left Join
@@ -2712,7 +2712,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (17 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Hash Join
@@ -2736,7 +2736,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                            Selected Partitions:  NONE
 (19 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Hash Join
@@ -2823,7 +2823,7 @@ SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_sca
 (4 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Nested Loop Left Join
@@ -2845,7 +2845,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (17 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Hash Join
@@ -2869,7 +2869,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                            Selected Partitions:  NONE
 (19 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Hash Join
@@ -2923,7 +2923,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -2938,7 +2938,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2957,7 +2957,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2976,7 +2976,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -2995,7 +2995,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                                   QUERY PLAN                                                  
 --------------------------------------------------------------------------------------------------------------
  Sort
@@ -3014,7 +3014,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Left Join
@@ -3031,7 +3031,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  1..4
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -3049,7 +3049,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Merge Join
@@ -3159,7 +3159,7 @@ SET enable_nestloop = ON;
 SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
                         QUERY PLAN                         
 -----------------------------------------------------------
  Nested Loop
@@ -3174,7 +3174,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (9 rows)
 
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -3193,7 +3193,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -3212,7 +3212,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -3231,7 +3231,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -3250,7 +3250,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
 (13 rows)
 
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Hash Right Join
@@ -3267,7 +3267,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (12 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Hash Join
@@ -3285,7 +3285,7 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_
                      Selected Partitions:  NONE
 (13 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+EXPLAIN (COSTS OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Hash Join

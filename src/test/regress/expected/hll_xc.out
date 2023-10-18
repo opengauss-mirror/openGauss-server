@@ -53,19 +53,19 @@ select weekday, #hll_add_agg(hll_hash_integer(id)) as unique_users from traffic 
  weekday |   unique_users   
 ---------+------------------
        1 |              100
-       2 | 203.813355588808
-       3 | 308.048239950384
-       4 | 410.529188080374
-       5 | 514.549096958669
-       6 | 513.263875705319
-       7 | 513.263875705319
+       2 | 200.217861303237
+       3 |  301.76494508014
+       4 | 400.862650860414
+       5 | 502.626444091693
+       6 | 502.626933349694
+       7 | 502.626933349694
 (7 rows)
 
 -- should be around 500
 select  #hll_union_agg(users) from report;
      ?column?     
 ------------------
- 514.549096958669
+ 503.657946119357
 (1 row)
 
 drop table traffic;
@@ -103,20 +103,20 @@ SELECT date, hll_cardinality(users) FROM daily_uniques order by date;
            date           | hll_cardinality  
 --------------------------+------------------
  Wed Feb 20 00:00:00 2019 |              100
- Thu Feb 21 00:00:00 2019 | 203.813355588808
- Fri Feb 22 00:00:00 2019 | 308.048239950384
- Sat Feb 23 00:00:00 2019 | 410.529188080374
- Sun Feb 24 00:00:00 2019 | 513.263875705319
- Mon Feb 25 00:00:00 2019 | 609.271181107416
- Tue Feb 26 00:00:00 2019 | 702.941844662509
- Wed Feb 27 00:00:00 2019 | 792.249946595237
+ Thu Feb 21 00:00:00 2019 | 200.217913059312
+ Fri Feb 22 00:00:00 2019 |  301.76494508014
+ Sat Feb 23 00:00:00 2019 | 400.862858326446
+ Sun Feb 24 00:00:00 2019 | 502.626933349694
+ Mon Feb 25 00:00:00 2019 | 601.922606454213
+ Tue Feb 26 00:00:00 2019 | 696.602316769498
+ Wed Feb 27 00:00:00 2019 | 798.111731634412
 (8 rows)
 
 -- ask for one week uniques
 SELECT hll_cardinality(hll_union_agg(users)) FROM daily_uniques WHERE date >= '2019-02-20'::date AND date <= '2019-02-26'::date;
  hll_cardinality  
 ------------------
- 702.941844662509
+ 696.602316769498
 (1 row)
 
 -- or a sliding window of uniques over the past 6 days
@@ -126,13 +126,13 @@ WINDOW seven_days AS (ORDER BY date ASC ROWS 6 PRECEDING);
            date           |     ?column?     
 --------------------------+------------------
  Wed Feb 20 00:00:00 2019 |              100
- Thu Feb 21 00:00:00 2019 | 203.813355588808
- Fri Feb 22 00:00:00 2019 | 308.048239950384
- Sat Feb 23 00:00:00 2019 | 410.529188080374
- Sun Feb 24 00:00:00 2019 | 513.263875705319
- Mon Feb 25 00:00:00 2019 | 609.271181107416
- Tue Feb 26 00:00:00 2019 | 702.941844662509
- Wed Feb 27 00:00:00 2019 | 792.249946595237
+ Thu Feb 21 00:00:00 2019 | 200.217913059312
+ Fri Feb 22 00:00:00 2019 |  301.76494508014
+ Sat Feb 23 00:00:00 2019 | 400.862858326446
+ Sun Feb 24 00:00:00 2019 | 502.626933349694
+ Mon Feb 25 00:00:00 2019 | 601.922606454213
+ Tue Feb 26 00:00:00 2019 | 696.602316769498
+ Wed Feb 27 00:00:00 2019 | 798.111731634412
 (8 rows)
 
 -- or the number of uniques you saw yesterday that you did not see today
@@ -170,7 +170,7 @@ select hll_cardinality(hll_add_agg(hll_text)) , hll_cardinality(hll_add_agg(hll_
       ) x;
  hll_cardinality  | hll_cardinality  
 ------------------+------------------
- 1017.70298739098 | 492.809273714462
+ 995.709856341669 | 502.624949567292
 (1 row)
 
 select hll_cardinality(hll_union_agg(hll_add_value))
@@ -180,7 +180,7 @@ select hll_cardinality(hll_union_agg(hll_add_value))
        ) x;
  hll_cardinality  
 ------------------
- 492.809273714462
+ 502.624949567292
 (1 row)
 
 select hll_cardinality(hll_union_agg(hll_add_value))
@@ -190,7 +190,7 @@ select hll_cardinality(hll_union_agg(hll_add_value))
        ) x;
  hll_cardinality  
 ------------------
- 504.289839437176
+ 496.450281194173
 (1 row)
 
 select hll_cardinality(hll_union_agg(hll_add_value))
@@ -203,7 +203,7 @@ select hll_cardinality(hll_union_agg(hll_add_value))
        ) x;
  hll_cardinality  
 ------------------
- 1017.70298739098
+ 995.709856341669
 (1 row)
 
 insert into test_name1
@@ -213,7 +213,7 @@ insert into test_name1
 select hll_cardinality(hll_union_agg(name1)) from test_name1;
  hll_cardinality  
 ------------------
- 510.695850290471
+ 499.542425550241
 (1 row)
 
 insert into test_name1_name2
@@ -223,7 +223,7 @@ insert into test_name1_name2
 select hll_cardinality(hll_union_agg(name1_name2)) from test_name1_name2;
  hll_cardinality  
 ------------------
- 504.289839437176
+ 496.450281194173
 (1 row)
 
 drop table test_hll;
@@ -249,56 +249,56 @@ insert into t_b_cd_hll select b, hll_add_agg(hll_hash_text(c||d))  from t_data g
 select a, #c from t_a_c_hll order by a;
  a |     ?column?     
 ---+------------------
- 0 | 250.741759091658
- 1 | 250.741759091658
+ 0 | 247.862354346299
+ 1 | 250.908710610377
 (2 rows)
 
 select a, #cd from t_a_cd_hll order by a;
  a |     ?column?     
 ---+------------------
- 0 | 250.741759091658
- 1 | 245.098327579089
+ 0 | 249.894992356239
+ 1 | 250.910160017494
 (2 rows)
 
 select b, #c from t_b_c_hll order by b;
  b |     ?column?     
 ---+------------------
- 0 | 165.511411011356
- 1 | 169.852695095884
- 2 | 170.939455535288
+ 0 | 165.837309898492
+ 1 | 164.828002932655
+ 2 | 166.848221800016
 (3 rows)
 
 select b, #cd from t_b_cd_hll order by b;
  b |     ?column?     
 ---+------------------
- 0 | 167.680902739657
- 1 | 164.427526360495
- 2 | 164.427526360495
+ 0 | 164.828159955429
+ 1 | 167.858709928037
+ 2 | 165.838429363155
 (3 rows)
 
 --should all be around 500
 select #hll_union_agg(c) from t_a_c_hll;
      ?column?     
 ------------------
- 496.628982624022
+ 498.496062953313
 (1 row)
 
 select #hll_union_agg(cd) from t_a_cd_hll;
      ?column?     
 ------------------
- 495.354954589157
+ 499.540451882883
 (1 row)
 
 select #hll_union_agg(c) from t_b_c_hll;
      ?column?     
 ------------------
- 496.628982624022
+ 498.496062953313
 (1 row)
 
 select #hll_union_agg(cd) from t_b_cd_hll;
      ?column?     
 ------------------
- 495.354954589157
+ 499.540451882883
 (1 row)
 
 --prepare
@@ -306,13 +306,13 @@ prepare p1(int) as select a, hll_cardinality( hll_add_agg(hll_hash_text(c)) || h
 execute p1(0);
  a | hll_cardinality  
 ---+------------------
- 0 | 250.741759091658
+ 0 | 247.862354346299
 (1 row)
 
 execute p1(1);
  a | hll_cardinality  
 ---+------------------
- 1 | 250.741759091658
+ 1 | 250.908710610377
 (1 row)
 
 deallocate p1;
@@ -320,19 +320,19 @@ prepare p2(int) as select b, hll_cardinality( hll_add_agg(hll_hash_text(c)) || h
 execute p2(0);
  b | hll_cardinality  
 ---+------------------
- 0 | 165.511411011356
+ 0 | 165.837309898492
 (1 row)
 
 execute p2(1);
  b | hll_cardinality  
 ---+------------------
- 1 | 169.852695095884
+ 1 | 164.828002932655
 (1 row)
 
 execute p2(2);
  b | hll_cardinality  
 ---+------------------
- 2 | 170.939455535288
+ 2 | 166.848221800016
 (1 row)
 
 deallocate p2;
@@ -342,13 +342,13 @@ declare c cursor for  select a, hll_cardinality( hll_add_agg(hll_hash_text(c)) |
 fetch next from c;
  a | hll_cardinality  
 ---+------------------
- 0 | 250.741759091658
+ 0 | 247.862354346299
 (1 row)
 
 fetch next from c;
  a | hll_cardinality  
 ---+------------------
- 1 | 250.741759091658
+ 1 | 250.908710610377
 (1 row)
 
 close c;
@@ -358,19 +358,19 @@ declare c cursor for  select b, hll_cardinality( hll_add_agg(hll_hash_text(c)) |
 fetch next from c;
  b | hll_cardinality  
 ---+------------------
- 0 | 165.511411011356
+ 0 | 165.837309898492
 (1 row)
 
 fetch next from c;
  b | hll_cardinality  
 ---+------------------
- 1 | 169.852695095884
+ 1 | 164.828002932655
 (1 row)
 
 fetch next from c;
  b | hll_cardinality  
 ---+------------------
- 2 | 170.939455535288
+ 2 | 166.848221800016
 (1 row)
 
 close c;

@@ -300,9 +300,8 @@ where heap_tbl_a.c2 = heap_tbl_b.c2;
  Nested Loop
    Join Filter: (heap_tbl_a.c2 = heap_tbl_b.c2)
    ->  Seq Scan on heap_tbl_a
-   ->  Materialize
-         ->  Seq Scan on heap_tbl_b
-(5 rows)
+   ->  Seq Scan on heap_tbl_b
+(4 rows)
 
 select ac1, sum(bc2) from (
 	select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
@@ -337,17 +336,16 @@ explain (costs off)
 select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
 from heap_tbl_a, heap_tbl_c
 where heap_tbl_a.c2 = heap_tbl_c.c2;
-                      QUERY PLAN                      
-------------------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Nested Loop
    Join Filter: (heap_tbl_a.c2 = heap_tbl_c.c2)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_c
+               Selected Partitions:  1..4
    ->  Seq Scan on heap_tbl_a
-   ->  Materialize
-         ->  Partition Iterator
-               Iterations: 4
-               ->  Partitioned Seq Scan on heap_tbl_c
-                     Selected Partitions:  1..4
-(8 rows)
+(7 rows)
 
 select ac1, sum(bc2) from (
 	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
@@ -383,21 +381,20 @@ explain (costs off)
 select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
 from heap_tbl_a, heap_tbl_b, heap_tbl_c
 where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
-                         QUERY PLAN                         
-------------------------------------------------------------
+                      QUERY PLAN                      
+------------------------------------------------------
  Hash Join
    Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
    ->  Nested Loop
          Join Filter: (heap_tbl_a.c2 = heap_tbl_c.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_c
+                     Selected Partitions:  1..4
          ->  Seq Scan on heap_tbl_a
-         ->  Materialize
-               ->  Partition Iterator
-                     Iterations: 4
-                     ->  Partitioned Seq Scan on heap_tbl_c
-                           Selected Partitions:  1..4
    ->  Hash
          ->  Seq Scan on heap_tbl_b
-(12 rows)
+(11 rows)
 
 select ac1, sum(bc2) from (
 	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
