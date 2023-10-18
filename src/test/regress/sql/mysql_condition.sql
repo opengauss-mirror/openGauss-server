@@ -1107,6 +1107,40 @@ call p_resig1();
 get diagnostics condition 1 @p1 = CLASS_ORIGIN,@p2 = SUBCLASS_ORIGIN,@p3 = MESSAGE_TEXT,@p4 = MYSQL_ERRNO,@p5 = CONSTRAINT_CATALOG,@p6 = CONSTRAINT_SCHEMA,
 @p7 = CONSTRAINT_NAME,@p8 = CATALOG_NAME,@p9 = SCHEMA_NAME,@p10 = TABLE_NAME,@p11 = COLUMN_NAME,@p12 = CURSOR_NAME;
 select @p1,@p2,@p3,@p4;
+
+-- core 
+drop table if exists t1;
+create table t3 (w char unique, x char);
+insert into t3 values ('a', 'b');
+
+create or replace procedure bug6900_9074(a int)
+AS
+begin
+  declare exit handler for sqlstate '23000' 
+  begin
+      RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+  end;
+  begin
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+
+    if a = 1 then
+      insert into t3 values ('a', 'b');
+    elseif a = 2 then
+      insert into t3 values ('c', 'd');
+    else
+      insert into t3 values ('x', 'y', 'z');
+    end if;
+  end;
+  drop table t1;
+end;
+/
+call bug6900_9074(0);
+call bug6900_9074(1);
+call bug6900_9074(2);
+drop procedure bug6900_9074;
 \c regression
 -- test access to exception data
 create function zero_divide() returns int as $$

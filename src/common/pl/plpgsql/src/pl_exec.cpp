@@ -3403,7 +3403,8 @@ static int expand_stmts(PLpgSQL_execstate* estate, List* stmts, bool& exception_
 
     while(stmtid < num_stmts && !early_exit) {
         if (exception_flag) {
-            rc = PLPGSQL_RC_EXIT;
+            if (rc == -1)
+                rc = PLPGSQL_RC_EXIT;
             break;
         }
         PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)list_nth(stmts, stmtid);
@@ -3544,8 +3545,6 @@ static int expand_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* stmt
 {
     int rc = -1;
     if (stmt->exceptions != NULL) {
-        stmt->exceptions->exc_list = list_concat(stmt->exceptions->exc_list,
-                                     ((PLpgSQL_stmt_block*)lfirst(block_ptr_stack->head))->exceptions->exc_list);
         lcons(stmt,block_ptr_stack);
     }
 
