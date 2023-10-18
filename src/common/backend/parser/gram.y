@@ -17433,23 +17433,25 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-			| ALTER TABLE relation_expr RENAME TO name
+			| ALTER TABLE relation_expr RENAME TO qualified_name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TABLE;
 					n->relation = $3;
 					n->subname = NULL;
-					n->newname = $6;
+					n->newname = $6->relname;
+					n->newschema = $6->schemaname;
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
-			| ALTER TABLE IF_P EXISTS relation_expr RENAME TO name
+			| ALTER TABLE IF_P EXISTS relation_expr RENAME TO qualified_name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TABLE;
 					n->relation = $5;
 					n->subname = NULL;
-					n->newname = $8;
+					n->newname = $8->relname;
+					n->newschema = $8->schemaname;
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}

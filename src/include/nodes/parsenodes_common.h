@@ -2349,6 +2349,7 @@ typedef struct RenameStmt {
     char* subname;           /* name of contained object (column, rule,
                               * trigger, etc) */
     char* newname;           /* the new name */
+    char* newschema;         /* the new schema name */
     DropBehavior behavior;   /* RESTRICT or CASCADE behavior */
     bool missing_ok;         /* skip error if missing? */
     List* renameTargetList = NULL;
