@@ -1126,7 +1126,7 @@ static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     if ((buf_state & BM_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL)) {
         ret = true;
-    } else if ((buf_state & BM_TAG_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL)) {
+    } else if ((buf_state & BM_TAG_VALID) && (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL) && !(buf_ctrl->state | BUF_IS_EXTEND)) {
         if (LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_SHARED)) {
             ret = true;
         } else {
@@ -1138,6 +1138,9 @@ static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
              * page. The stucked process will request the page again when it add content lock and the reformer will
              * become owner when it request the page.
              */
+            ereport(WARNING, (errmsg("[%u/%u/%u/%d/0 %d-%u] Set lock mode to NULL, desc state:%u, ctrl state:%u, lock mode:%d.",
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_state, buf_ctrl->state, buf_ctrl->lock_mode)));
             buf_ctrl->lock_mode = DMS_LOCK_NULL;
         }
     }
