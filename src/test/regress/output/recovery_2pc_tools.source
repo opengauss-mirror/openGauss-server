@@ -115,9 +115,27 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  codegen_cost_threshold                           | integer |      | 0         | 2147483647
  codegen_strategy                                 | enum    |      |           | 
  collation_connection                             | string  |      |           | 
+ comm_ackchk_time                                 | integer | ms   | 0         | 20000
+ comm_client_bind                                 | bool    |      |           |
+ comm_control_port                                | integer |      | 1         | 65535
+ comm_debug_mode                                  | bool    |      |           |
  commit_delay                                     | integer |      | 0         | 100000
  commit_siblings                                  | integer |      | 0         | 1000
+ comm_max_datanode                                | integer |      | 1         | 8192
+ comm_max_receiver                                | integer |      | 1         | 50
+ comm_max_stream                                  | integer |      | 1         | 60000
+ comm_memory_pool                                 | integer | kB   | 102400    | 1073741823
+ comm_memory_pool_percent                         | integer |      | 0         | 100
+ comm_no_delay                                    | bool    |      |           |
  comm_proxy_attr                                  | string  |      |           | 
+ comm_quota_size                                  | integer | kB   | 0         | 2048000
+ comm_sctp_port                                   | integer |      | 1         | 65535
+ comm_sender_buffer_size                          | integer |      | 1         | 1024
+ comm_ssl                                         | bool    |      |           |
+ comm_stat_mode                                   | bool    |      |           |
+ comm_tcp_mode                                    | bool    |      |           |
+ comm_timer_mode                                  | bool    |      |           |
+ comm_usable_memory                               | integer | kB   | 102400    | 1073741823
  config_file                                      | string  |      |           | 
  connection_alarm_rate                            | real    |      | 0         | 1
  connection_info                                  | string  |      |           | 
@@ -261,6 +279,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_fast_allocate                             | bool    |      |           | 
  enable_fast_numeric                              | bool    |      |           | 
  enable_ffic_log                                  | bool    |      |           | 
+ enable_force_reuse_connections                   | bool    |      |           |
  enable_force_vector_engine                       | bool    |      |           | 
  enable_functional_dependency                     | bool    |      |           | 
  enable_global_plancache                          | bool    |      |           | 
@@ -328,6 +347,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sortgroup_agg                             | bool    |      |           | 
  ss_enable_dorado                                 | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
+ enable_stateless_pooler_reuse                    | bool    |      |           |
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 
  enable_tde                                       | bool    |      |           | 
@@ -467,6 +487,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_compile_functions                            | integer |      | 1         | 2147483647
  max_concurrent_autonomous_transactions           | integer |      | 0         | 1024
  max_connections                                  | integer |      | 10        | 262143
+ max_coordinators                                 | integer |      | 2         | 1024
  max_error_count                                  | integer |      | 0         | 65535
  max_files_per_process                            | integer |      | 25        | 2147483647
  max_function_args                                | integer |      | 8192      | 8192
@@ -478,6 +499,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_loaded_cudesc                                | integer |      | 100       | 1073741823
  max_locks_per_transaction                        | integer |      | 10        | 2147483647
  max_logical_replication_workers                  | integer |      | 0         | 262143
+ max_pool_size                                    | integer |      | 1         | 65535
  max_pred_locks_per_transaction                   | integer |      | 10        | 2147483647
  max_prepared_transactions                        | integer |      | 0         | 262143
  max_process_memory                               | integer | kB   | 2097152   | 2147483647
@@ -501,6 +523,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  memorypool_size                                  | integer | kB   | 131072    | 1073741823
  memory_trace_level                               | enum    |      |           | 
  memory_tracking_mode                             | enum    |      |           | 
+ minimum_pool_size                                | integer |      | 1         | 65535
  modify_initial_password                          | bool    |      |           | 
  most_available_sync                              | bool    |      |           | 
  multi_stats_type                                 | enum    |      |           | 
@@ -549,6 +572,13 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  plog_merge_age                                   | integer | ms   | 0         | 2147483647
  plsql_compile_check_options                      | string  |      |           | 
  plsql_show_all_error                             | bool    |      |           | 
+ pooler_cancel_timeout                            | integer | s    | 0         | 7200
+ pooler_connect_interval_time                     | integer | s    | 0         | 7200
+ pooler_connect_max_loops                         | integer |      | 0         | 20
+ pooler_connect_timeout                           | integer | s    | 0         | 7200
+ pooler_maximum_idle_time                         | integer | s    | 0         | 2147483647
+ pooler_port                                      | integer |      | 1         | 65535
+ pooler_timeout                                   | integer | s    | 0         | 7200
  port                                             | integer |      | 1         | 65535
  post_auth_delay                                  | integer | s    | 0         | 2147
  pre_auth_delay                                   | integer | s    | 0         | 60

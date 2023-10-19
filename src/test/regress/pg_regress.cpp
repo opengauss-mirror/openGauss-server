@@ -1451,8 +1451,8 @@ static void start_ss_node(int i)
                                port_number,
                                temp_install,
                                data_folder,
-                               port_number + 10,
-                               port_number + 20,
+                               port_number + 30,
+                               port_number + 40,
                                hostname ? hostname : "*",
                                outputdir,
                                data_folder);
