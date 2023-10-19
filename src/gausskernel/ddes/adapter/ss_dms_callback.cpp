@@ -2019,6 +2019,7 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     SegSpace *spc = NULL;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     *redo_status = ONDEMAND_REDO_DONE;
+    smgrcloseall();
     PG_TRY();
     {
         if (IsSegmentPhysicalRelNode(tag->rnode)) {
