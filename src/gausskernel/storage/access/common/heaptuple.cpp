@@ -1761,10 +1761,16 @@ void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
 #endif
 
     int attno = attnum;
-    if (slot->tts_tuple) {
+    if (likely(slot->tts_tuple)) {
         attno = GetAttrNumber(slot, attnum);
 
         slot_deform_tuple(slot, attno);
+    } else {
+        /* tuple is null, now only happen in B mode, with sql_mode_full_group trun off. set all isnull to true */
+        int rc = memset_s(slot->tts_isnull, slot->tts_tupleDescriptor->natts * sizeof(bool),
+            true, slot->tts_tupleDescriptor->natts * sizeof(bool));
+        securec_check(rc, "\0", "\0");
+        slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
     }
 
     /* If tuple doesn't have all the atts indicated by tupleDesc, read the rest as null */
@@ -1776,7 +1782,7 @@ void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
              * example code: slot->tts_isnull[attno] = true;
              */
             slot->tts_values[attno] = heapGetInitDefVal(attno + 1, slot->tts_tupleDescriptor, &slot->tts_isnull[attno]);
-    }
+        }
         slot->tts_nvalid = attnum;
     }
 }
