@@ -8,8 +8,8 @@ create table test_schema.test_table(
     ADDRESS  varchar2(20)   NOT NULL,
     TELE     varchar2(20)   DEFAULT '101'
 );
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "TEST_TABLE_PKEY" for table "TEST_TABLE"
-NOTICE:  CREATE TABLE / UNIQUE will create implicit index "TEST_TABLE_NAME_KEY" for table "TEST_TABLE"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_table_pkey" for table "test_table"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_table_name_key" for table "test_table"
 insert into test_schema.test_table values(1,'steve',10,'adsf');
 insert into test_schema.test_table values(2,'warfield',20,'zcv','234');
 insert into test_schema.test_table values(3,'henry',30,'zcv','567');
@@ -33,7 +33,7 @@ $$LANGUAGE plpgsql;
 call sp_declare1();
 INFO:  NAME1 is steve
 INFO:  NAME2 is warfield
- SP_DECLARE1 
+ sp_declare1 
 -------------
            0
 (1 row)
@@ -65,7 +65,7 @@ call sp_declare2();
 INFO:  ID is 1
 INFO:  ID is 2
 INFO:  ID is 3
- SP_DECLARE2 
+ sp_declare2 
 -------------
            0
 (1 row)
@@ -98,7 +98,7 @@ INFO:  NAME is steve
 INFO:  AGE is 10
 INFO:  ADDRESS is adsf
 INFO:  TELE is 101
- SP_BLOCK1 
+ sp_block1 
 -----------
          0
 (1 row)
@@ -128,21 +128,24 @@ END;
 $$LANGUAGE plpgsql;
 select sp_block2(1000);
 INFO:  EXCEPTION is NO_DATA_FOUND
- SP_BLOCK2 
+CONTEXT:  referenced column: sp_block2
+ sp_block2 
 -----------
          0
 (1 row)
 
 select sp_block2(2);
 INFO:  name is henry
- SP_BLOCK2 
+CONTEXT:  referenced column: sp_block2
+ sp_block2 
 -----------
          0
 (1 row)
 
 select sp_block2(0);
 INFO:  EXCEPTION is TOO_MANY_ROWS
- SP_BLOCK2 
+CONTEXT:  referenced column: sp_block2
+ sp_block2 
 -----------
          0
 (1 row)
@@ -165,7 +168,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block3();
 INFO:  NAME is steve
- SP_BLOCK3 
+ sp_block3 
 -----------
          0
 (1 row)
@@ -187,7 +190,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block4();
 INFO:  TELE IS MMM
- SP_BLOCK4 
+ sp_block4 
 -----------
          0
 (1 row)
@@ -207,7 +210,8 @@ END;
 $$LANGUAGE plpgsql;
 select sp_block5('MMM');
 INFO:  TELE IS MMM
- SP_BLOCK5 
+CONTEXT:  referenced column: sp_block5
+ sp_block5 
 -----------
          0
 (1 row)
@@ -239,9 +243,9 @@ call sp_tempsp6();
 NOTICE:  MYCHAR is THIS IS TEST
 CONTEXT:  SQL statement "call  sp_block6(:a)"
 PL/pgSQL function inline_code_block line 1 at EXECUTE statement
-PL/pgSQL function SP_TEMPSP6() line 7 at EXECUTE statement
+PL/pgSQL function sp_tempsp6() line 8 at EXECUTE statement
 INFO:  MYCHAR is sp_block is called
- SP_TEMPSP6 
+ sp_tempsp6 
 ------------
           0
 (1 row)
@@ -280,9 +284,9 @@ call sp_tempsp7();
 INFO:  MYINTEGER is 1
 CONTEXT:  SQL statement "call  sp_block7(:a,:b)"
 PL/pgSQL function inline_code_block line 1 at EXECUTE statement
-PL/pgSQL function SP_TEMPSP7() line 8 at EXECUTE statement
+PL/pgSQL function sp_tempsp7() line 9 at EXECUTE statement
 INFO:  MYCHAR is sp_block is called
- SP_TEMPSP7 
+ sp_tempsp7 
 ------------
           0
 (1 row)
@@ -301,7 +305,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block8(:a);
 NOTICE:  NAME is warfield
- RETURNCODE 
+ returncode 
 ------------
            
 (1 row)
@@ -320,7 +324,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block9(:a);
 NOTICE:  NAME is steve
- RETURNCODE 
+ returncode 
 ------------
            
 (1 row)
@@ -360,7 +364,7 @@ call sp_block11();
 INFO:  result is:101
 INFO:  result is:202
 INFO:  result is:404
- SP_BLOCK11 
+ sp_block11 
 ------------
  
 (1 row)
@@ -389,7 +393,7 @@ BEGIN
 END;
 $$LANGUAGE plpgsql;
 call sp_insert1();
- SP_INSERT1 
+ sp_insert1 
 ------------
           0
 (1 row)
@@ -487,8 +491,8 @@ begin
              using in b, in c;
 end;
 /
-ERROR:  query has no destination for result data
-CONTEXT:  PL/pgSQL function inline_code_block line 8 at EXECUTE statement
+ERROR:  query has no destination for result data in EXECUTE statement
+CONTEXT:  PL/pgSQL function inline_code_block line 7 at EXECUTE statement
 drop table test;
 CREATE OR REPLACE PROCEDURE sp_test_1
 (
@@ -541,7 +545,7 @@ begin
 end;
 /
 select * from test;
- ID |   NAME    |   ADD1    
+ id |   name    |   add1    
 ----+-----------+-----------
   4 | july      | henan    
   6 | june      | xian     
@@ -558,6 +562,11 @@ AS
 BEGIN
 END  SP_HW_SUB_ADDMODULES ;
 /
+ERROR:  end label "sp_hw_sub_addmodules" specified for unlabelled block
+LINE 2: END  SP_HW_SUB_ADDMODULES 
+             ^
+QUERY:   DECLARE BEGIN
+END  SP_HW_SUB_ADDMODULES 
 create or replace PROCEDURE  sp_test
 (
 temp IN varchar2
@@ -574,12 +583,14 @@ BEGIN
      EXECUTE IMMEDIATE PSV_SQL;
 END;
 /
+ERROR:  schema "dbms_output" does not exist
+CONTEXT:  compilation of PL/pgSQL function "sp_test" near line 3
 call sp_test('jack');
-BEGIN SP_HW_SUB_ADDMODULES(:1,'jack'); END;
-ERROR:  the number of place holders doesn't match the number of parameters.
-CONTEXT:  PL/pgSQL function SP_TEST(CHARACTER VARYING) line 9 at EXECUTE statement
+ERROR:  function "sp_test" doesn't exist 
 drop procedure SP_HW_SUB_ADDMODULES;
+ERROR:  function sp_hw_sub_addmodules does not exist
 drop procedure sp_test;
+ERROR:  function sp_test does not exist
 --Dynamic SQL Anonymous Block TEST
 --CREATE schema and table ,INSERT data
 CREATE SCHEMA test_schema;
@@ -590,8 +601,8 @@ create table test_schema.test_table(
     ADDRESS  varchar2(20)   NOT NULL,
     TELE     varchar2(20)   DEFAULT '101'
 );
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "TEST_TABLE_PKEY" for table "TEST_TABLE"
-NOTICE:  CREATE TABLE / UNIQUE will create implicit index "TEST_TABLE_NAME_KEY" for table "TEST_TABLE"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_table_pkey" for table "test_table"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_table_name_key" for table "test_table"
 insert into test_schema.test_table values(1,'steve',10,'adsf');
 insert into test_schema.test_table values(2,'warfield',20,'zcv','234');
 insert into test_schema.test_table values(3,'henry',30,'zcv','567');
@@ -615,7 +626,7 @@ $$LANGUAGE plpgsql;
 call sp_declare1();
 INFO:  NAME1 is steve
 INFO:  NAME2 is warfield
- SP_DECLARE1 
+ sp_declare1 
 -------------
            0
 (1 row)
@@ -647,7 +658,7 @@ call sp_declare2();
 INFO:  ID is 1
 INFO:  ID is 2
 INFO:  ID is 3
- SP_DECLARE2 
+ sp_declare2 
 -------------
            0
 (1 row)
@@ -680,7 +691,7 @@ INFO:  NAME is steve
 INFO:  AGE is 10
 INFO:  ADDRESS is adsf
 INFO:  TELE is 101
- SP_BLOCK1 
+ sp_block1 
 -----------
          0
 (1 row)
@@ -710,21 +721,24 @@ END;
 $$LANGUAGE plpgsql;
 select sp_block2(1000);
 INFO:  EXCEPTION is NO_DATA_FOUND
- SP_BLOCK2 
+CONTEXT:  referenced column: sp_block2
+ sp_block2 
 -----------
          0
 (1 row)
 
 select sp_block2(2);
 INFO:  name is henry
- SP_BLOCK2 
+CONTEXT:  referenced column: sp_block2
+ sp_block2 
 -----------
          0
 (1 row)
 
 select sp_block2(0);
 INFO:  EXCEPTION is TOO_MANY_ROWS
- SP_BLOCK2 
+CONTEXT:  referenced column: sp_block2
+ sp_block2 
 -----------
          0
 (1 row)
@@ -747,7 +761,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block3();
 INFO:  NAME is steve
- SP_BLOCK3 
+ sp_block3 
 -----------
          0
 (1 row)
@@ -769,7 +783,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block4();
 INFO:  TELE IS MMM
- SP_BLOCK4 
+ sp_block4 
 -----------
          0
 (1 row)
@@ -789,7 +803,8 @@ END;
 $$LANGUAGE plpgsql;
 select sp_block5('MMM');
 INFO:  TELE IS MMM
- SP_BLOCK5 
+CONTEXT:  referenced column: sp_block5
+ sp_block5 
 -----------
          0
 (1 row)
@@ -821,9 +836,9 @@ call sp_tempsp6();
 NOTICE:  MYCHAR is THIS IS TEST
 CONTEXT:  SQL statement "call  sp_block6(:a)"
 PL/pgSQL function inline_code_block line 1 at EXECUTE statement
-PL/pgSQL function SP_TEMPSP6() line 7 at EXECUTE statement
+PL/pgSQL function sp_tempsp6() line 8 at EXECUTE statement
 INFO:  MYCHAR is sp_block is called
- SP_TEMPSP6 
+ sp_tempsp6 
 ------------
           0
 (1 row)
@@ -862,9 +877,9 @@ call sp_tempsp7();
 INFO:  MYINTEGER is 1
 CONTEXT:  SQL statement "call  sp_block7(:a,:b)"
 PL/pgSQL function inline_code_block line 1 at EXECUTE statement
-PL/pgSQL function SP_TEMPSP7() line 8 at EXECUTE statement
+PL/pgSQL function sp_tempsp7() line 9 at EXECUTE statement
 INFO:  MYCHAR is sp_block is called
- SP_TEMPSP7 
+ sp_tempsp7 
 ------------
           0
 (1 row)
@@ -883,7 +898,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block8(:a);
 NOTICE:  NAME is warfield
- RETURNCODE 
+ returncode 
 ------------
            
 (1 row)
@@ -902,7 +917,7 @@ END;
 $$LANGUAGE plpgsql;
 call sp_block9(:a);
 NOTICE:  NAME is steve
- RETURNCODE 
+ returncode 
 ------------
            
 (1 row)
@@ -942,7 +957,7 @@ call sp_block11();
 INFO:  result is:101
 INFO:  result is:202
 INFO:  result is:404
- SP_BLOCK11 
+ sp_block11 
 ------------
  
 (1 row)
@@ -971,7 +986,7 @@ BEGIN
 END;
 $$LANGUAGE plpgsql;
 call sp_insert1();
- SP_INSERT1 
+ sp_insert1 
 ------------
           0
 (1 row)
@@ -1069,8 +1084,8 @@ begin
              using in b, in c;
 end;
 /
-ERROR:  query has no destination for result data
-CONTEXT:  PL/pgSQL function inline_code_block line 8 at EXECUTE statement
+ERROR:  query has no destination for result data in EXECUTE statement
+CONTEXT:  PL/pgSQL function inline_code_block line 7 at EXECUTE statement
 drop table test;
 CREATE OR REPLACE PROCEDURE sp_test_1
 (
@@ -1123,7 +1138,7 @@ begin
 end;
 /
 select * from test;
- ID |   NAME    |   ADD1    
+ id |   name    |   add1    
 ----+-----------+-----------
   4 | july      | henan    
   6 | june      | xian     
@@ -1131,34 +1146,3 @@ select * from test;
 (3 rows)
 
 drop table test;
-CREATE OR REPLACE PROCEDURE "SP_HW_SUB_ADDMODULES"
-(
-    returncode       OUT     integer,
-    PSV_MODULEDESC   IN      VARCHAR2
-)
-AS
-BEGIN
-END  SP_HW_SUB_ADDMODULES ;
-/
-create or replace PROCEDURE  sp_test
-(
-temp IN varchar2
-)
-AS
-  PSV_SQL  VARCHAR2(200);
-BEGIN
-     PSV_SQL := 'BEGIN '
-               ||'SP_HW_SUB_ADDMODULES('
-      ||':1,'
-      ||''''||to_char(TEMP)||''''
-               ||'); END;';    
-     dbms_output.put_line(PSV_SQL); 
-     EXECUTE IMMEDIATE PSV_SQL;
-END;
-/
-call sp_test('jack');
-BEGIN SP_HW_SUB_ADDMODULES(:1,'jack'); END;
-ERROR:  the number of place holders doesn't match the number of parameters.
-CONTEXT:  PL/pgSQL function SP_TEST(CHARACTER VARYING) line 9 at EXECUTE statement
-drop procedure SP_HW_SUB_ADDMODULES;
-drop procedure sp_test;

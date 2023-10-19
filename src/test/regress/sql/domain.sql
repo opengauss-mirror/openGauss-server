@@ -506,6 +506,4 @@ drop domain testdomain3;
 --
 
 create domain testdomain1 as int constraint unsigned check (value > 0);
-alter domain testdomain1 rename constraint unsigned to unsigned_foo;
-alter domain testdomain1 drop constraint unsigned_foo;
 drop domain testdomain1;

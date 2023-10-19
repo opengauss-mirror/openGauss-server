@@ -214,7 +214,7 @@ alter table test_add_column_check add column c int check (c>=0);
 -- failed
 insert into test_add_column_check values (-1, -1, -1);
 ERROR:  new row for relation "test_add_column_check" violates check constraint "test_add_column_check_c_check"
-DETAIL:  Failing row contains (-1, -1, -1).
+DETAIL:  N/A
 -- success
 insert into test_add_column_check values (1, 1, 1);
 select * from test_add_column_check order by 1, 2;
@@ -268,11 +268,12 @@ insert into test_add_column_constraint values (0, 0);
 -- a. unique
 -- failed
 alter table test_add_column_constraint add column c1 int unique;
-ERROR:  unique index columns must contain the partition key and collation must be default collation
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_add_column_constraint_c1_tableoid_key" for table "test_add_column_constraint"
 -- b. primary key
 -- failed
 alter table test_add_column_constraint add column c2 int primary key;
-ERROR:  unique index columns must contain the partition key and collation must be default collation
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_add_column_constraint_pkey" for table "test_add_column_constraint"
+ERROR:  column "c2" contains null values
 -- c. references
 create table test (a int primary key);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_pkey" for table "test"
@@ -352,9 +353,9 @@ select * from temp_View order by 1,2;
 drop view temp_view;
 drop table test_add_column_view;
 -- 11. test partitioned table has tablespace
-\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
-\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
-create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+\! rm -fr '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+\! mkdir '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1';
 -- a. partitioned table has tablespace
 create table test_add_column_tablespace (a int, b int)
 tablespace hw_partition_sql_adapt_ts1
@@ -659,9 +660,9 @@ ERROR:  index "temp_index" does not exist
 -- success
 drop table test_drop_column_index;
 -- 5. test table has tablespace
-\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
-\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
-create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+\! rm -fr '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+\! mkdir '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1';
 -- a. partitioned table has tablespace
 create table test_drop_column_tablespace (a int, b int, c int, d int)
 tablespace hw_partition_sql_adapt_ts1

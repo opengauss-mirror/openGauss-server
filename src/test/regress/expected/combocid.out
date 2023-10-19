@@ -2,7 +2,7 @@
 -- Tests for some likely failure cases with combo cmin/cmax mechanism
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-CREATE TEMP TABLE combocidtest (foobar int) distribute by replication;
+CREATE TEMP TABLE combocidtest (foobar int);
 START TRANSACTION;
 -- a few dummy ops to push up the CommandId counter
 INSERT INTO combocidtest SELECT 1 LIMIT 0;
@@ -60,8 +60,8 @@ DELETE FROM combocidtest;
 FETCH ALL FROM c;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,1) |    2 |      1
- (0,2) |    2 |      2
+ (0,1) |    1 |      1
+ (0,2) |    1 |      2
  (0,5) |    0 |    333
 (3 rows)
 
@@ -69,8 +69,8 @@ ROLLBACK;
 SELECT ctid,cmin,* FROM combocidtest ORDER BY ctid;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,1) |    2 |      1
- (0,2) |    2 |      2
+ (0,1) |    1 |      1
+ (0,2) |    1 |      2
 (2 rows)
 
 -- check behavior with locked tuples
@@ -90,8 +90,8 @@ INSERT INTO combocidtest VALUES (444);
 SELECT ctid,cmin,* FROM combocidtest ORDER BY ctid;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,1) |    2 |      1
- (0,2) |    2 |      2
+ (0,1) |    1 |      1
+ (0,2) |    1 |      2
  (0,6) |   10 |    444
 (3 rows)
 
@@ -100,16 +100,16 @@ SAVEPOINT s1;
 SELECT ctid,cmin,* FROM combocidtest FOR UPDATE;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,1) |    2 |      1
- (0,2) |    2 |      2
+ (0,1) |    1 |      1
+ (0,2) |    1 |      2
  (0,6) |   10 |    444
 (3 rows)
 
 SELECT ctid,cmin,* FROM combocidtest ORDER BY ctid;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,1) |    2 |      1
- (0,2) |    2 |      2
+ (0,1) |    1 |      1
+ (0,2) |    1 |      2
  (0,6) |   10 |    444
 (3 rows)
 
@@ -118,17 +118,17 @@ UPDATE combocidtest SET foobar = foobar + 10;
 SELECT ctid,cmin,* FROM combocidtest ORDER BY ctid;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,7) |   11 |     11
- (0,8) |   11 |     12
- (0,9) |   11 |    454
+ (0,7) |   12 |     11
+ (0,8) |   12 |     12
+ (0,9) |   12 |    454
 (3 rows)
 
 ROLLBACK TO s1;
 SELECT ctid,cmin,* FROM combocidtest ORDER BY ctid;
  ctid  | cmin | foobar 
 -------+------+--------
- (0,1) |   11 |      1
- (0,2) |   11 |      2
+ (0,1) |   12 |      1
+ (0,2) |   12 |      2
  (0,6) |    0 |    444
 (3 rows)
 

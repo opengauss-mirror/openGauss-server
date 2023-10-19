@@ -18,8 +18,7 @@ CREATE TABLE lineitem_with_null
   , L_SHIPMODE     CHAR(10)
   , L_COMMENT      VARCHAR(44)
 )
-with (orientation = column)
-distribute by hash(L_ORDERKEY);
+with (orientation = column);
 COPY lineitem_with_null FROM '@abs_srcdir@/data/lineitem.data' with (format 'text', delimiter '|', null '');
 analyze lineitem_with_null;
 analyze lineitem_with_null(L_PARTKEY);

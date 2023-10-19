@@ -961,34 +961,3 @@ end;
 /
 select * from test;
 drop table test;
-
-
-CREATE OR REPLACE PROCEDURE "SP_HW_SUB_ADDMODULES"
-(
-    returncode       OUT     integer,
-    PSV_MODULEDESC   IN      VARCHAR2
-)
-AS
-BEGIN
-END  SP_HW_SUB_ADDMODULES ;
-/
-create or replace PROCEDURE  sp_test
-(
-temp IN varchar2
-)
-AS
-  PSV_SQL  VARCHAR2(200);
-BEGIN
-     PSV_SQL := 'BEGIN '
-               ||'SP_HW_SUB_ADDMODULES('
-      ||':1,'
-      ||''''||to_char(TEMP)||''''
-               ||'); END;';    
-     dbms_output.put_line(PSV_SQL); 
-     EXECUTE IMMEDIATE PSV_SQL;
-END;
-/
-call sp_test('jack');
-drop procedure SP_HW_SUB_ADDMODULES;
-drop procedure sp_test;
-

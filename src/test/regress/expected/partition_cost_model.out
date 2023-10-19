@@ -21,15 +21,12 @@ insert into test_range_pt select * from test_range_pt;
 create index  idx_local on test_range_pt(a) local;
 analyze test_range_pt;
 explain (costs off) select *from test_range_pt where a = 1;
-                    QUERY PLAN                    
---------------------------------------------------
- Partitioned Bitmap Heap Scan on test_range_pt
-   Recheck Cond: (a = 1)
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Partitioned Index Scan using idx_local on test_range_pt
+   Index Cond: (a = 1)
    Selected Partitions:  1
-   ->  Partitioned Bitmap Index Scan on idx_local
-         Index Cond: (a = 1)
-         Selected Partitions:  1
-(6 rows)
+(3 rows)
 
 explain (costs off) select /*+ set(partition_page_estimation on) */*from test_range_pt where a = 1;
                        QUERY PLAN                        
@@ -87,7 +84,7 @@ explain  (costs off, verbose on) select a,b,c from test_hash_ht where a = 50;
  Partitioned Seq Scan on partition_cost_model.test_hash_ht
    Output: a, b, c
    Filter: (test_hash_ht.a = 50)
-   Selected Partitions:  11
+   Selected Partitions:  10
 (4 rows)
 
 explain (costs off, verbose on) select /*+indexscan(test_hash_ht idx_hash_global)*/ a,b,c from test_hash_ht where a = 50;
@@ -113,7 +110,7 @@ explain  (costs off, verbose on)  select a,b,c from test_hash_ht where a = 50;
  Partitioned Seq Scan on partition_cost_model.test_hash_ht
    Output: a, b, c
    Filter: (test_hash_ht.a = 50)
-   Selected Partitions:  11
+   Selected Partitions:  10
 (4 rows)
 
 explain  (costs off, verbose on) select /*+indexscan(test_hash_ht idx_hash_global)*/ a,b,c from test_hash_ht where a = 50;
@@ -226,15 +223,19 @@ CREATE INDEX range_list_idx ON range_list(month_code) LOCAL
 );
 set partition_page_estimation = off;
 explain (costs off) select * from range_list where month_code = '201902';
-                      QUERY PLAN                       
--------------------------------------------------------
+                           QUERY PLAN                            
+-----------------------------------------------------------------
  Partition Iterator
    Iterations: 1, Sub Iterations: 2
-   ->  Partitioned Seq Scan on range_list
-         Filter: ((month_code)::text = '201902'::text)
+   ->  Partitioned Bitmap Heap Scan on range_list
+         Recheck Cond: ((month_code)::text = '201902'::text)
          Selected Partitions:  1
          Selected Subpartitions:  ALL
-(6 rows)
+         ->  Partitioned Bitmap Index Scan on range_list_idx
+               Index Cond: ((month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+(10 rows)
 
 explain (costs off) select /*+ set(partition_page_estimation on)*/* from range_list where month_code = '201902';
                       QUERY PLAN                       

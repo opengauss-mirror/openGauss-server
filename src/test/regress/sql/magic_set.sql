@@ -1,9 +1,9 @@
 create schema magic_set;
 set search_path=magic_set;
 
-create table magic_t1(a int, b varchar, c int, d int) distribute by hash(a);
-create table magic_t2(a int, b varchar, c int, d int) distribute by hash(a);
-create table magic_t3(a int, b varchar, c int, d int) distribute by hash(a);
+create table magic_t1(a int, b varchar, c int, d int);
+create table magic_t2(a int, b varchar, c int, d int);
+create table magic_t3(a int, b varchar, c int, d int);
 
 insert into magic_t1 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from public.src;
 insert into magic_t2 select generate_series(1, 100), generate_series(1, 200), generate_series(1, 300), generate_series(1, 500) from public.src;
@@ -430,9 +430,9 @@ drop table magic_t1;
 drop table magic_t2;
 drop table magic_t3;
 
-create table magic_t1(a int, b int, c int) distribute by hash(a);
-create table magic_t2(a int, b int, c int) distribute by hash(a);
-create table magic_t3(a int, b int, c int) distribute by hash(a);
+create table magic_t1(a int, b int, c int);
+create table magic_t2(a int, b int, c int);
+create table magic_t3(a int, b int, c int);
 insert into magic_t1 values(1, 1, 1);
 insert into magic_t2 values(1, 1, 1);
 insert into magic_t3 values(1, 1, 1);
@@ -448,10 +448,10 @@ drop table magic_t1;
 drop table magic_t2;
 drop table magic_t3;
 
-create table magic_t1(t1_a int, t1_b varchar, t1_c int, t1_d int) distribute by hash(t1_a);
-create table magic_t2(t2_a int, t2_b varchar, t2_c int, t2_d int) distribute by hash(t2_a);
-create table magic_t3(t3_a int, t3_b varchar, t3_c int, t3_d int) distribute by hash(t3_a);
-create table magic_t4(t4_a int, t4_b varchar, t4_c int, t4_d int) distribute by hash(t4_a);
+create table magic_t1(t1_a int, t1_b varchar, t1_c int, t1_d int);
+create table magic_t2(t2_a int, t2_b varchar, t2_c int, t2_d int);
+create table magic_t3(t3_a int, t3_b varchar, t3_c int, t3_d int);
+create table magic_t4(t4_a int, t4_b varchar, t4_c int, t4_d int);
 
 insert into magic_t1 values(generate_series(1, 100), generate_series(1, 100), generate_series(1, 100), generate_series(1, 100));
 insert into magic_t2 values(generate_series(1, 30), generate_series(1, 30), generate_series(1, 30), generate_series(1, 30));
@@ -631,3 +631,4 @@ drop table magic_t3;
 drop table magic_t4;
 
 drop schema magic_set cascade;
+

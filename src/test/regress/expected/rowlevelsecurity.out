@@ -272,12 +272,13 @@ CREATE ROW LEVEL SECURITY POLICY p06 ON document_row AS RESTRICTIVE FOR SELECT T
 Indexes:
     "document_row_pkey" PRIMARY KEY, btree (did) TABLESPACE pg_default
 Row Level Security Policies:
-    POLICY "p01"
+    POLICY "p01" FOR ALL
+      TO public
       USING ((dlevel <= (SELECT account_row.aid FROM account_row WHERE ((account_row.aname)::name = "current_user"()))))
-    POLICY "p02" AS RESTRICTIVE
+    POLICY "p02" AS RESTRICTIVE FOR ALL
       TO regress_rls_david
       USING ((cid < 50))
-    POLICY "p03" AS RESTRICTIVE
+    POLICY "p03" AS RESTRICTIVE FOR ALL
       TO regress_rls_david
       USING ((cid <> 44))
     POLICY "p04" AS RESTRICTIVE FOR UPDATE
@@ -434,27 +435,27 @@ NOTICE:  f_leak => regress_rls_bob
 
 -- EXPLAIN (COSTS OFF, VERBOSE ON) SELECT * FROM document_row INNER JOIN category_row ON document_row.cid=category_row.cid WHERE rls_fleak2(dauthor) ORDER BY did;
 \d
-                                                       List of relations
-       Schema       |      Name      | Type  |       Owner       |                           Storage                            
---------------------+----------------+-------+-------------------+--------------------------------------------------------------
- regress_rls_schema | account_col    | table | regress_rls_alice | {orientation=column,compression=low}
- regress_rls_schema | account_row    | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | alice_public_1 | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | category_col   | table | regress_rls_alice | {orientation=column,compression=low}
- regress_rls_schema | category_row   | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | document_col   | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | document_row   | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | par_col_t1     | table | regress_rls_alice | {orientation=column,compression=low,enable_rowsecurity=true}
- regress_rls_schema | par_row_t1     | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | tt_rep         | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
+                                                 List of relations
+       Schema       |      Name      | Type  | Owner |                           Storage                            
+--------------------+----------------+-------+-------+--------------------------------------------------------------
+ regress_rls_schema | account_col    | table |       | {orientation=column,compression=low}
+ regress_rls_schema | account_row    | table |       | {orientation=row,compression=no}
+ regress_rls_schema | alice_public_1 | table |       | {orientation=row,compression=no}
+ regress_rls_schema | category_col   | table |       | {orientation=column,compression=low}
+ regress_rls_schema | category_row   | table |       | {orientation=row,compression=no}
+ regress_rls_schema | document_col   | table |       | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | document_row   | table |       | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | par_col_t1     | table |       | {orientation=column,compression=low,enable_rowsecurity=true}
+ regress_rls_schema | par_row_t1     | table |       | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | tt_rep         | table |       | {orientation=row,compression=no,enable_rowsecurity=true}
 (10 rows)
 
 \df
-                                              List of functions
-       Schema       |    Name    | Result data type | Argument data types |  Type  | fencedmode | propackage 
---------------------+------------+------------------+---------------------+--------+------------+------------
- regress_rls_schema | rls_fleak1 | boolean          | text                | normal | f          | f
- regress_rls_schema | rls_fleak2 | boolean          | text                | normal | f          | f
+                                                   List of functions
+       Schema       |    Name    | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------------------+------------+------------------+---------------------+--------+------------+------------+---------
+ regress_rls_schema | rls_fleak1 | boolean          | text                | normal | f          | f          | f
+ regress_rls_schema | rls_fleak2 | boolean          | text                | normal | f          | f          | f
 (2 rows)
 
 -- viewpoint from regress_rls_peter
@@ -725,8 +726,10 @@ DELETE FROM document_row WHERE did = 100 RETURNING dauthor, did;
 -- only owner can change policies
 ALTER POLICY p01 ON document_row USING (true);    --fail
 ERROR:  must be owner of relation document_row
+DETAIL:  N/A
 DROP POLICY p01 ON document_col;                  --fail
 ERROR:  must be owner of relation document_col
+DETAIL:  N/A
 -- check data from partition table
 SELECT * FROM par_row_t1 WHERE a > 7 ORDER BY 1, 2;
  id | a  |   b    
@@ -777,25 +780,25 @@ SELECT COUNT(*) FROM document_row_david;
                                                          List of relations
        Schema       |        Name        | Type  |       Owner       |                           Storage                            
 --------------------+--------------------+-------+-------------------+--------------------------------------------------------------
- regress_rls_schema | account_col        | table | regress_rls_alice | {orientation=column,compression=low}
- regress_rls_schema | account_row        | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | alice_public_2     | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | category_col       | table | regress_rls_alice | {orientation=column,compression=low}
- regress_rls_schema | category_row       | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | document_col       | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | document_row       | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | account_col        | table |                   | {orientation=column,compression=low}
+ regress_rls_schema | account_row        | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | alice_public_2     | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | category_col       | table |                   | {orientation=column,compression=low}
+ regress_rls_schema | category_row       | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | document_col       | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | document_row       | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
  regress_rls_schema | document_row_david | table | regress_rls_david | {orientation=row,compression=no}
- regress_rls_schema | par_col_t1         | table | regress_rls_alice | {orientation=column,compression=low,enable_rowsecurity=true}
- regress_rls_schema | par_row_t1         | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | tt_rep             | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | par_col_t1         | table |                   | {orientation=column,compression=low,enable_rowsecurity=true}
+ regress_rls_schema | par_row_t1         | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | tt_rep             | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
 (11 rows)
 
 \df
-                                              List of functions
-       Schema       |    Name    | Result data type | Argument data types |  Type  | fencedmode | propackage 
---------------------+------------+------------------+---------------------+--------+------------+------------
- regress_rls_schema | rls_fleak1 | boolean          | text                | normal | f          | f
- regress_rls_schema | rls_fleak2 | boolean          | text                | normal | f          | f
+                                                   List of functions
+       Schema       |    Name    | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------------------+------------+------------------+---------------------+--------+------------+------------+---------
+ regress_rls_schema | rls_fleak1 | boolean          | text                | normal | f          | f          | f
+ regress_rls_schema | rls_fleak2 | boolean          | text                | normal | f          | f          | f
 (2 rows)
 
 -- change to super user
@@ -834,10 +837,13 @@ SELECT * FROM pg_rlspolicies ORDER BY tablename, policyname;
  regress_rls_schema | par_row_t1   | par_row_t1_rls2  | RESTRICTIVE      | {regress_rls_group2} | ALL       | (id < 30)
  pg_catalog         | pg_attribute | pg_attribute_rls | PERMISSIVE       | {public}             | SELECT    | has_table_privilege("current_user"(), attrelid, 'select'::text)
  pg_catalog         | pg_class     | pg_class_rls     | PERMISSIVE       | {public}             | SELECT    | has_table_privilege("current_user"(), oid, 'select'::text)
+ pg_catalog         | pg_namespace | pg_namespace_rls | PERMISSIVE       | {public}             | SELECT    | has_schema_privilege("current_user"(), oid, 'USAGE'::text)
+ pg_catalog         | pg_partition | pg_partition_rls | PERMISSIVE       | {public}             | SELECT    | has_table_privilege("current_user"(), parentid, 'select'::text)
  pg_catalog         | pg_proc      | pg_proc_rls      | PERMISSIVE       | {public}             | SELECT    | has_function_privilege("current_user"(), oid, 'execute'::text)
+ pg_catalog         | pgxc_slice   | pgxc_slice_rls   | PERMISSIVE       | {public}             | SELECT    | has_table_privilege("current_user"(), relid, 'select'::text)
  regress_rls_schema | tt_rep       | tt_rep_rls1      | PERMISSIVE       | {regress_rls_group1} | SELECT    | ((name)::name = "current_user"())
  regress_rls_schema | tt_rep       | tt_rep_rls2      | PERMISSIVE       | {regress_rls_group2} | SELECT    | (id = 1)
-(17 rows)
+(20 rows)
 
 -- enable private object
 ALTER DATABASE regression DISABLE PRIVATE OBJECT;
@@ -975,30 +981,30 @@ SELECT * FROM tt_rep;
                                                                    List of relations
        Schema       |        Name        | Type  |       Owner       |                                     Storage                                     
 --------------------+--------------------+-------+-------------------+---------------------------------------------------------------------------------
- regress_rls_schema | account_col        | table | regress_rls_alice | {orientation=column,compression=low}
- regress_rls_schema | account_row        | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | alice_private      | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | alice_public_1     | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | alice_public_2     | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | category_col       | table | regress_rls_alice | {orientation=column,compression=low}
- regress_rls_schema | category_row       | table | regress_rls_alice | {orientation=row,compression=no}
- regress_rls_schema | document_col       | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | document_row       | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | account_col        | table |                   | {orientation=column,compression=low}
+ regress_rls_schema | account_row        | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | alice_private      | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | alice_public_1     | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | alice_public_2     | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | category_col       | table |                   | {orientation=column,compression=low}
+ regress_rls_schema | category_row       | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | document_col       | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | document_row       | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
  regress_rls_schema | document_row_david | table | regress_rls_david | {orientation=row,compression=no}
  regress_rls_schema | inlist_t1          | table | regress_rls_david | {orientation=row,compression=no,enable_rowsecurity=true,force_rowsecurity=true}
- regress_rls_schema | par_col_t1         | table | regress_rls_alice | {orientation=column,compression=low,enable_rowsecurity=true}
- regress_rls_schema | par_row_t1         | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | tt_rep             | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | par_col_t1         | table |                   | {orientation=column,compression=low,enable_rowsecurity=true}
+ regress_rls_schema | par_row_t1         | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
+ regress_rls_schema | tt_rep             | table |                   | {orientation=row,compression=no,enable_rowsecurity=true}
 (14 rows)
 
 \df
-                                                       List of functions
-       Schema       |          Name          | Result data type |    Argument data types     |  Type  | fencedmode | propackage 
---------------------+------------------------+------------------+----------------------------+--------+------------+------------
- regress_rls_schema | rls_auto_create_policy | integer          | t_name text, p_num integer | normal | f          | f
- regress_rls_schema | rls_auto_drop_policy   | integer          | t_name text, p_num integer | normal | f          | f
- regress_rls_schema | rls_fleak1             | boolean          | text                       | normal | f          | f
- regress_rls_schema | rls_fleak2             | boolean          | text                       | normal | f          | f
+                                                            List of functions
+       Schema       |          Name          | Result data type |    Argument data types     |  Type  | fencedmode | propackage | prokind 
+--------------------+------------------------+------------------+----------------------------+--------+------------+------------+---------
+ regress_rls_schema | rls_auto_create_policy | integer          | t_name text, p_num integer | normal | f          | f          | f
+ regress_rls_schema | rls_auto_drop_policy   | integer          | t_name text, p_num integer | normal | f          | f          | f
+ regress_rls_schema | rls_fleak1             | boolean          | text                       | normal | f          | f          | f
+ regress_rls_schema | rls_fleak2             | boolean          | text                       | normal | f          | f          | f
 (4 rows)
 
 -- viewpoint from regress_rls_alice again
@@ -1018,8 +1024,8 @@ ALTER TABLE par_row_t1 FORCE ROW LEVEL SECURITY;
  regress_rls_schema | category_row       | table | regress_rls_alice | {orientation=row,compression=no}
  regress_rls_schema | document_col       | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
  regress_rls_schema | document_row       | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true}
- regress_rls_schema | document_row_david | table | regress_rls_david | {orientation=row,compression=no}
- regress_rls_schema | inlist_t1          | table | regress_rls_david | {orientation=row,compression=no,enable_rowsecurity=true,force_rowsecurity=true}
+ regress_rls_schema | document_row_david | table |                   | {orientation=row,compression=no}
+ regress_rls_schema | inlist_t1          | table |                   | {orientation=row,compression=no,enable_rowsecurity=true,force_rowsecurity=true}
  regress_rls_schema | par_col_t1         | table | regress_rls_alice | {orientation=column,compression=low,enable_rowsecurity=true}
  regress_rls_schema | par_row_t1         | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true,force_rowsecurity=true}
  regress_rls_schema | tt_rep             | table | regress_rls_alice | {orientation=row,compression=no,enable_rowsecurity=true,force_rowsecurity=true}

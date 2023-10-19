@@ -3,7 +3,7 @@
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
 
-CREATE TEMP TABLE combocidtest (foobar int) distribute by replication;
+CREATE TEMP TABLE combocidtest (foobar int);
 
 START TRANSACTION;
 

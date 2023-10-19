@@ -82,11 +82,11 @@ SET enable_indexscan = OFF;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 -- merged index check, indexcan
 SET enable_seqscan = OFF;
@@ -94,11 +94,11 @@ SET enable_indexscan = ON;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 -- merged index check, indexonlycan
 SET enable_seqscan = OFF;
@@ -106,11 +106,11 @@ SET enable_indexscan = OFF;
 SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 --4.2 merge 3 partitions into one
 alter table test_merge_index_test merge partitions 
@@ -122,11 +122,11 @@ SET enable_indexscan = OFF;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 -- merged index check, indexcan
 SET enable_seqscan = OFF;
@@ -134,11 +134,11 @@ SET enable_indexscan = ON;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 -- merged index check, indexonlycan
 SET enable_seqscan = OFF;
@@ -146,11 +146,11 @@ SET enable_indexscan = OFF;
 SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 --4.3 merge multiple partitions into one
 alter table test_merge_index_test merge partitions 
@@ -188,11 +188,11 @@ SET enable_indexscan = OFF;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 -- merged index check, indexcan
 SET enable_seqscan = OFF;
@@ -200,11 +200,11 @@ SET enable_indexscan = ON;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 -- merged index check, indexonlycan
 SET enable_seqscan = OFF;
@@ -212,11 +212,11 @@ SET enable_indexscan = OFF;
 SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
 select * from test_merge_index_test order by c1;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
 select * from test_merge_index_test order by c1, c2;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
 select * from test_merge_index_test order by c1, c2, c3;
 
 --clean up
@@ -247,3 +247,4 @@ alter table test_merge_VM merge partitions test_merge_VM_px, test_merge_VM_p3 in
 select * from test_merge_VM partition (test_merge_VM_p1);
 
 drop table test_merge_VM;
+

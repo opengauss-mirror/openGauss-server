@@ -76,7 +76,7 @@ CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_02(
  C_DP double precision,
  C_DATE DATE,
  C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
- C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_INT))WITH (ORIENTATION=COLUMN)  DISTRIBUTE BY HASH (C_INT);
+ C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_INT))WITH (ORIENTATION=COLUMN);
 
 CREATE TABLE vector_hashjoin_engine.ROW_HASHJOIN_TABLE_03(
  C_CHAR_1 CHAR(1),
@@ -151,55 +151,55 @@ CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_03(
    c1 int
   ,c2 int
   ,c3 char(100)
-)distribute by hash(c1);
+);
 
 create table vector_hashjoin_engine.ROW_HASHJOIN_TABLE_06
 (
    c1 int
   ,c2 int
   ,c3 char(100)
-)distribute by hash(c2);
+);
 
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_05
 (
    c1 int
   ,c2 int
   ,c3 char(100)
-)with (orientation = column) distribute by hash(c1);
+)with (orientation = column);
 
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_06
 (
    c1 int
   ,c2 int
   ,c3 char(100)
-)with (orientation = column) distribute by hash(c2);
+)with (orientation = column);
 
 
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_09
 (
    c1 int1
   ,c2 int
-)with (orientation = column) distribute by hash(c2);
+)with (orientation = column);
 
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_10
 (
    c1 int1
   ,c2 int
-)with (orientation = column) distribute by hash(c2);
+)with (orientation = column);
 
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_13
 (
     c1  int not null
    ,c2  bigint  not null
    ,c3  char(6) not null
-)with (orientation = column) distribute by hash(c1);
+)with (orientation = column);
 
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_14
 (
     c1  int not null
    ,c2  bigint  not null
    ,c3  char(6) not null
-)with (orientation = column) distribute by hash(c1);
+)with (orientation = column);
 
 
 
@@ -308,7 +308,7 @@ explain (verbose on, costs off) SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE
 SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT >10 AND  A.C_BIGINT>5 ORDER BY 1, 2;
 --SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <10 AND  A.C_BIGINT>5 ORDER BY 1, 2;
 
-explain (verbose on, costs off, nodes off) SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
+explain (verbose on, costs off) SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
 SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
 
 SELECT B.C_INT, A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 order by 1,2;
@@ -318,10 +318,10 @@ SELECT B.C_INT, A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HA
 ----
 --- case 3: HashJoin Anti Join
 ----
-explain (verbose on, costs off, nodes off)  SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
+explain (verbose on, costs off)  SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
 SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
 
-explain (verbose on, costs off, nodes off) SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT where B.C_INT is NULL order by 1,2;
+explain (verbose on, costs off) SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT where B.C_INT is NULL order by 1,2;
 SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT  where B.C_INT is NULL order by 1,2;
 
 ----

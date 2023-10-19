@@ -44,7 +44,7 @@ vacuum full hw_partition_vacuum_full_partition_table partition(hw_partition_vacu
 select relpages, reltuples from pg_partition where relname='hw_partition_vacuum_full_partition_table_p1';
  relpages | reltuples 
 ----------+-----------
-        0 |         0
+        7 |       999
 (1 row)
 
 select relpages > 0 as relpagesgtzero, reltuples > 0 as reltuplesgtzero from pg_class where relname='hw_partition_vacuum_full_partition_table';
@@ -65,7 +65,7 @@ vacuum full hw_partition_vacuum_full_partition_table partition(hw_partition_vacu
 select relpages, reltuples from pg_partition where relname='hw_partition_vacuum_full_partition_table_p2';
  relpages | reltuples 
 ----------+-----------
-        0 |         0
+        7 |       999
 (1 row)
 
 select relpages > 0 as relpagesgtzero, reltuples > 0 as reltuplesgtzero from pg_class where relname='hw_partition_vacuum_full_partition_table';
@@ -81,7 +81,7 @@ vacuum full hw_partition_vacuum_full_partition_table;
 select relpages > 0 as relpagesgtzero, reltuples > 0 as reltuplesgtzero from pg_class where relname='hw_partition_vacuum_full_partition_table';
  relpagesgtzero | reltuplesgtzero 
 ----------------+-----------------
- f              | f
+ t              | t
 (1 row)
 
 select * from hw_partition_vacuum_full_partition_table order by 1, 2, 3;

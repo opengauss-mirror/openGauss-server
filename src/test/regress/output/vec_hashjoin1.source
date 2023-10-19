@@ -71,7 +71,7 @@ CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_02(
  C_DP double precision,
  C_DATE DATE,
  C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
- C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_INT))WITH (ORIENTATION=COLUMN)  DISTRIBUTE BY HASH (C_INT);
+ C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_INT))WITH (ORIENTATION=COLUMN);
 CREATE TABLE vector_hashjoin_engine.ROW_HASHJOIN_TABLE_03(
  C_CHAR_1 CHAR(1),
  C_CHAR_2 CHAR(10),
@@ -141,47 +141,47 @@ CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_03(
    c1 int
   ,c2 int
   ,c3 char(100)
-)distribute by hash(c1);
+);
 create table vector_hashjoin_engine.ROW_HASHJOIN_TABLE_06
 (
    c1 int
   ,c2 int
   ,c3 char(100)
-)distribute by hash(c2);
+);
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_05
 (
    c1 int
   ,c2 int
   ,c3 char(100)
-)with (orientation = column) distribute by hash(c1);
+)with (orientation = column);
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_06
 (
    c1 int
   ,c2 int
   ,c3 char(100)
-)with (orientation = column) distribute by hash(c2);
+)with (orientation = column);
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_09
 (
    c1 int1
   ,c2 int
-)with (orientation = column) distribute by hash(c2);
+)with (orientation = column);
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_10
 (
    c1 int1
   ,c2 int
-)with (orientation = column) distribute by hash(c2);
+)with (orientation = column);
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_13
 (
     c1  int not null
    ,c2  bigint  not null
    ,c3  char(6) not null
-)with (orientation = column) distribute by hash(c1);
+)with (orientation = column);
 create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_14
 (
     c1  int not null
    ,c2  bigint  not null
    ,c3  char(6) not null
-)with (orientation = column) distribute by hash(c1);
+)with (orientation = column);
 CREATE OR REPLACE PROCEDURE func_insert_tbl_hashjoin_01()
 AS  
 BEGIN  
@@ -260,9 +260,9 @@ CALL func_insert_tbl_hashjoin_04();
 
 \parallel on  2
 --insert into ROW_HASHJOIN_TABLE_05 select generate_series(1,2000), generate_series(1,2000), 'row'|| generate_series(1,2000);
-copy ROW_HASHJOIN_TABLE_05 from '@abs_srcdir@/data/vec_hashjoin1_data1.txt' delimiter as ' ';
+copy ROW_HASHJOIN_TABLE_05 from '/usr3/data1/jiangyan/openGauss-server/src/test/regress/data/vec_hashjoin1_data1.txt' delimiter as ' ';
 --insert into ROW_HASHJOIN_TABLE_06 select generate_series(5000,6000,1), generate_series(5000,6000,1), 'row'|| generate_series(1,1001);
-copy ROW_HASHJOIN_TABLE_06 from '@abs_srcdir@/data/vec_hashjoin1_data2.txt' delimiter as ' ';
+copy ROW_HASHJOIN_TABLE_06 from '/usr3/data1/jiangyan/openGauss-server/src/test/regress/data/vec_hashjoin1_data2.txt' delimiter as ' ';
 \parallel off
 \parallel on 8
 INSERT INTO vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_01 SELECT * FROM vector_hashjoin_engine.ROW_HASHJOIN_TABLE_01;
@@ -294,33 +294,23 @@ set enable_mergejoin=off;
 --- case 1: HashJoin Inner Join
 ----
 explain (verbose on, costs off) SELECT A.C_INT, A.C_BIGINT, A.C_VARCHAR_3, A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A INNER JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <8  AND  A.C_BIGINT<9  ORDER BY 1, 2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
    Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-   ->  Vector Streaming (type: GATHER)
+   ->  Vector Sort
          Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-         Merge Sort Key: a.c_int, a.c_bigint
-         Node/s: All datanodes
-         ->  Vector Sort
+         Sort Key: a.c_int, a.c_bigint
+         ->  Vector Sonic Hash Join
                Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-               Sort Key: a.c_int, a.c_bigint
-               ->  Vector Sonic Hash Join
+               Hash Cond: (a.c_int = b.c_int)
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_01 a
                      Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-                     Hash Cond: (a.c_int = b.c_int)
-                     ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_01 a
-                           Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-                           Distribute Key: a.c_char_1
-                           Filter: ((a.c_int < 8) AND (a.c_bigint < 9))
-                     ->  Vector Streaming(type: BROADCAST)
-                           Output: b.c_int
-                           Spawn on: All datanodes
-                           Consumer Nodes: All datanodes
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_02 b
-                                 Output: b.c_int
-                                 Distribute Key: b.c_int
-                                 Filter: (b.c_int < 8)
-(24 rows)
+                     Filter: ((a.c_int < 8) AND (a.c_bigint < 9))
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_02 b
+                     Output: b.c_int
+                     Filter: (b.c_int < 8)
+(14 rows)
 
 SELECT A.C_INT, A.C_BIGINT, A.C_VARCHAR_3, A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A INNER JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <10  AND  A.C_BIGINT<5  ORDER BY 1, 2;
  c_int | c_bigint |               c_varchar_3                |          c_date          
@@ -658,33 +648,22 @@ SELECT count(*) from VECTOR_HASHJOIN_TABLE_03 A inner join VECTOR_HASHJOIN_TABLE
 --- case 2: HashJoin Left/Right Join
 ----
 explain (verbose on, costs off) SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT >45 AND  A.C_BIGINT>28 ORDER BY 1, 2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
    Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-   ->  Vector Streaming (type: GATHER)
+   ->  Vector Sort
          Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-         Merge Sort Key: a.c_int, a.c_bigint
-         Node/s: All datanodes
-         ->  Vector Sort
+         Sort Key: a.c_int, a.c_bigint
+         ->  Vector Hash Right Join
                Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-               Sort Key: a.c_int, a.c_bigint
-               ->  Vector Hash Left Join
+               Hash Cond: (b.c_int = a.c_int)
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_02 b
+                     Output: b.c_int
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_01 a
                      Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-                     Hash Cond: (a.c_int = b.c_int)
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-                           Distribute Key: a.c_int
-                           Spawn on: All datanodes
-                           Consumer Nodes: All datanodes
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_01 a
-                                 Output: a.c_int, a.c_bigint, a.c_varchar_3, a.c_date
-                                 Distribute Key: a.c_char_1
-                                 Filter: ((a.c_int > 45) AND (a.c_bigint > 28))
-                     ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_02 b
-                           Output: b.c_int
-                           Distribute Key: b.c_int
-(24 rows)
+                     Filter: ((a.c_int > 45) AND (a.c_bigint > 28))
+(13 rows)
 
 SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT >10 AND  A.C_BIGINT>5 ORDER BY 1, 2;
  c_int | c_bigint |                c_varchar_3                |          c_date          
@@ -1193,31 +1172,23 @@ SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A
 
 --SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <10 AND  A.C_BIGINT>5 ORDER BY 1, 2;
 explain (verbose on, costs off) SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
    Output: a.c_int, a.c_bigint
-   ->  Vector Streaming (type: GATHER)
+   ->  Vector Sort
          Output: a.c_int, a.c_bigint
-         Merge Sort Key: a.c_int, a.c_bigint
-         ->  Vector Sort
+         Sort Key: a.c_int, a.c_bigint
+         ->  Vector Hash Right Join
                Output: a.c_int, a.c_bigint
-               Sort Key: a.c_int, a.c_bigint
-               ->  Vector Hash Left Join
+               Hash Cond: (b.c_int = a.c_int)
+               Join Filter: (a.c_bigint > 1000)
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_02 b
+                     Output: b.c_int
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_01 a
                      Output: a.c_int, a.c_bigint
-                     Hash Cond: (a.c_int = b.c_int)
-                     Join Filter: (a.c_bigint > 1000)
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Output: a.c_int, a.c_bigint
-                           Distribute Key: a.c_int
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_01 a
-                                 Output: a.c_int, a.c_bigint
-                                 Distribute Key: a.c_char_1
-                                 Filter: (a.c_int < 4)
-                     ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_02 b
-                           Output: b.c_int
-                           Distribute Key: b.c_int
-(22 rows)
+                     Filter: (a.c_int < 4)
+(14 rows)
 
 SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
  c_int | c_bigint 
@@ -1355,33 +1326,22 @@ SELECT B.C_INT, A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HA
 --- case 3: HashJoin Anti Join
 ----
 explain (verbose on, costs off)  SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
    Output: b.c_int, a.c_bigint
-   ->  Vector Streaming (type: GATHER)
+   ->  Vector Sort
          Output: b.c_int, a.c_bigint
-         Merge Sort Key: b.c_int, a.c_bigint
-         ->  Vector Sort
+         Sort Key: b.c_int, a.c_bigint
+         ->  Vector Hash Anti Join
                Output: b.c_int, a.c_bigint
-               Sort Key: b.c_int, a.c_bigint
-               ->  Vector Hash Anti Join
-                     Output: b.c_int, a.c_bigint
-                     Hash Cond: (a.c_int = b.c_int)
-                     Join Filter: (a.c_bigint < 2)
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Output: a.c_bigint, a.c_int
-                           Distribute Key: a.c_int
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_03 a
-                                 Output: a.c_bigint, a.c_int
-                                 Distribute Key: a.c_char_1
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Output: b.c_int
-                           Distribute Key: b.c_int
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_04 b
-                                 Output: b.c_int
-                                 Distribute Key: b.c_char_1
-(24 rows)
+               Hash Cond: (a.c_int = b.c_int)
+               Join Filter: (a.c_bigint < 2)
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_03 a
+                     Output: a.c_bigint, a.c_int
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_04 b
+                     Output: b.c_int
+(13 rows)
 
 SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
  c_int | c_bigint 
@@ -1429,32 +1389,21 @@ SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_
 (40 rows)
 
 explain (verbose on, costs off) SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT where B.C_INT is NULL order by 1,2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
    Output: b.c_int, a.c_bigint
-   ->  Vector Streaming (type: GATHER)
+   ->  Vector Sort
          Output: b.c_int, a.c_bigint
-         Merge Sort Key: b.c_int, a.c_bigint
-         ->  Vector Sort
+         Sort Key: b.c_int, a.c_bigint
+         ->  Vector Hash Anti Join
                Output: b.c_int, a.c_bigint
-               Sort Key: b.c_int, a.c_bigint
-               ->  Vector Hash Anti Join
-                     Output: b.c_int, a.c_bigint
-                     Hash Cond: (a.c_int = b.c_int)
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Output: a.c_bigint, a.c_int
-                           Distribute Key: a.c_int
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_03 a
-                                 Output: a.c_bigint, a.c_int
-                                 Distribute Key: a.c_char_1
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Output: b.c_int
-                           Distribute Key: b.c_int
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_04 b
-                                 Output: b.c_int
-                                 Distribute Key: b.c_char_1
-(23 rows)
+               Hash Cond: (a.c_int = b.c_int)
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_03 a
+                     Output: a.c_bigint, a.c_int
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_04 b
+                     Output: b.c_int
+(12 rows)
 
 SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT  where B.C_INT is NULL order by 1,2;
  c_int | c_bigint 
@@ -8017,27 +7966,20 @@ reset work_mem;
 --- case : test innerjoin codegen with fast path
 ----
 explain (verbose on, costs off) select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c1 = B.c1;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
-   Output: (pg_catalog.count(*))
+   Output: (count(*))
    ->  Vector Aggregate
-         Output: pg_catalog.count(*)
-         ->  Vector Streaming (type: GATHER)
-               Output: (count(*))
-               Node/s: All datanodes
-               ->  Vector Aggregate
-                     Output: count(*)
-                     ->  Vector Sonic Hash Join
-                           Output: 'Dummy'
-                           Hash Cond: (b.c1 = a.c1)
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_14 b
-                                 Output: b.c1
-                                 Distribute Key: b.c1
-                           ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_13 a
-                                 Output: a.c1
-                                 Distribute Key: a.c1
-(18 rows)
+         Output: count(*)
+         ->  Vector Sonic Hash Join
+               Output: 'Dummy'
+               Hash Cond: (b.c1 = a.c1)
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_14 b
+                     Output: b.c1
+               ->  CStore Scan on vector_hashjoin_engine.vector_hashjoin_table_13 a
+                     Output: a.c1
+(11 rows)
 
 select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c1 = B.c1;
  count 
@@ -8073,22 +8015,17 @@ set enable_nestloop=off;
 set query_dop=1;
 explain (costs off)
 select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  Row Adapter
-   ->  Vector Streaming (type: GATHER)
-         Merge Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
-         Node/s: All datanodes
-         ->  Vector Sort
-               Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
-               ->  Vector Sonic Hash Join
-                     Hash Cond: (t2.c2 = t1.c1)
-                     Join Filter: ((COALESCE(t2.c1, 0) + COALESCE(t1.c2, 0)) > 0)
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Spawn on: All datanodes
-                           ->  CStore Scan on t2
-                     ->  CStore Scan on t1
-(13 rows)
+   ->  Vector Sort
+         Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c2)
+               Join Filter: ((COALESCE(t2.c1, 0) + COALESCE(t1.c2, 0)) > 0)
+               ->  CStore Scan on t1
+               ->  CStore Scan on t2
+(8 rows)
 
 select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by  1;
      ?column?     
@@ -8104,22 +8041,17 @@ set enable_nestloop=off;
 set query_dop=1;
 explain (costs off)
 select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  Row Adapter
-   ->  Vector Streaming (type: GATHER)
-         Merge Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
-         Node/s: All datanodes
-         ->  Vector Sort
-               Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
-               ->  Vector Hash Join
-                     Hash Cond: (t2.c2 = t1.c1)
-                     Join Filter: ((COALESCE(t2.c1, 0) + COALESCE(t1.c2, 0)) > 0)
-                     ->  Vector Streaming(type: REDISTRIBUTE)
-                           Spawn on: All datanodes
-                           ->  CStore Scan on t2
-                     ->  CStore Scan on t1
-(13 rows)
+   ->  Vector Sort
+         Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
+         ->  Vector Hash Join
+               Hash Cond: (t1.c1 = t2.c2)
+               Join Filter: ((COALESCE(t2.c1, 0) + COALESCE(t1.c2, 0)) > 0)
+               ->  CStore Scan on t1
+               ->  CStore Scan on t2
+(8 rows)
 
 select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by  1;
      ?column?     
@@ -8134,26 +8066,21 @@ set enable_nestloop=off;
 set query_dop=1;
 explain (costs off)
 select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  Row Adapter
-   ->  Vector Streaming (type: GATHER)
-         Merge Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
-         Node/s: All datanodes
-         ->  Vector Sort
-               Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
-               ->  Vector Merge Join
-                     Merge Cond: (t1.c1 = t2.c2)
-                     Join Filter: ((COALESCE(t2.c1, 0) + COALESCE(t1.c2, 0)) > 0)
-                     ->  Vector Sort
-                           Sort Key: t1.c1
-                           ->  CStore Scan on t1
-                     ->  Vector Sort
-                           Sort Key: t2.c2
-                           ->  Vector Streaming(type: REDISTRIBUTE)
-                                 Spawn on: All datanodes
-                                 ->  CStore Scan on t2
-(17 rows)
+   ->  Vector Sort
+         Sort Key: ((2 / (COALESCE(t1.c2, 0) + COALESCE(t2.c1, 0))))
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c2)
+               Join Filter: ((COALESCE(t2.c1, 0) + COALESCE(t1.c2, 0)) > 0)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t1
+               ->  Vector Sort
+                     Sort Key: t2.c2
+                     ->  CStore Scan on t2
+(12 rows)
 
 select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by  1;
      ?column?     
