@@ -145,6 +145,7 @@ private:
     uint m_idx;
     knl_session_context* m_currentSession;
     volatile ThreadStatus m_threadStatus;
+    bool m_thrd_idle_waiting;
     ThreadStayReason m_reason;
     Dlelem m_elem;
     ThreadPoolGroup* m_group;
