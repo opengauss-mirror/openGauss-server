@@ -418,6 +418,8 @@ select json_object('{a,b,NULL,"d e f"}','{1,2,3,"a b c"}');
 
 select json_object('{a,b,"","d e f"}','{1,2,3,"a b c"}');
 
+-- execced max stack depath
+select json_in(REPEAT('{"a":[', 100000)::cstring);
 
 -- json_to_record and json_to_recordset
 
