@@ -249,6 +249,7 @@ const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
+const uint32 RB_OBJECT_VERSION_NUM = 92831;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -824,6 +825,8 @@ int main(int argc, char** argv)
         exit_horribly(NULL, "connection to database \"%s\" failed: %s ",
             ((dbname != NULL) ? dbname : ""), errorMessages);
     }
+
+    fout->workingVersionNum = GetVersionNumFromServer(fout);
 
 #ifndef ENABLE_MULTIPLE_NODES
     /*
@@ -2334,9 +2337,10 @@ static void selectDumpableTable(Archive* fout, TableInfo* tbinfo)
     /*
      * skipping recycle bin object
      */
-    if (GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
+    if (tbinfo->dobj.dump && GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
         IsRbObject(fout, tbinfo->dobj.catId.tableoid, tbinfo->dobj.catId.oid, tbinfo->dobj.name)) {
         tbinfo->dobj.dump = false;
+        return;
     }
 }
 
@@ -2356,20 +2360,6 @@ static void selectDumpableTable(Archive* fout, TableInfo* tbinfo)
  */
 static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
 {
-    /*
-     * Do not dump type defined by package.
-     */
-    if (GetVersionNum(fout) >= PACKAGE_ENHANCEMENT &&
-        IsPackageObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid)) {
-        tyinfo->dobj.dump = false;
-        return;
-    }
-
-    if (GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
-        IsRbObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid, tyinfo->dobj.name)) {
-        tyinfo->dobj.dump = false;
-        return;
-    }
     /* skip complex types, except for standalone composite types */
     if (OidIsValid(tyinfo->typrelid) && tyinfo->typrelkind != RELKIND_COMPOSITE_TYPE) {
         TableInfo* tytable = findTableByOid(tyinfo->typrelid);
@@ -2405,6 +2395,21 @@ static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
         tyinfo->dobj.dump = false;
     else
         tyinfo->dobj.dump = true;
+
+    if (tyinfo->dobj.dump && GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
+        IsRbObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid, tyinfo->dobj.name)) {
+        tyinfo->dobj.dump = false;
+        return;
+    }
+
+    /*
+     * Do not dump type defined by package.
+     */
+    if (tyinfo->dobj.dump && GetVersionNum(fout) >= PACKAGE_ENHANCEMENT &&
+        IsPackageObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid)) {
+        tyinfo->dobj.dump = false;
+        return;
+    }
 }
 
 /*
@@ -2464,11 +2469,6 @@ static void selectDumpablePublicationTable(DumpableObject *dobj)
  */
 static void selectDumpableObject(DumpableObject* dobj, Archive* fout = NULL)
 {
-    if (GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
-        IsRbObject(fout, dobj->catId.tableoid, dobj->catId.oid, dobj->name)) {
-        dobj->dump = false;
-        return;
-    }
     /*
      * Default policy is to dump if parent nmspace is dumpable, or always
      * for non-nmspace-associated items.
@@ -2477,6 +2477,12 @@ static void selectDumpableObject(DumpableObject* dobj, Archive* fout = NULL)
         dobj->dump = dobj->nmspace->dobj.dump;
     else
         dobj->dump = true;
+
+    if (dobj->dump && GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
+        IsRbObject(fout, dobj->catId.tableoid, dobj->catId.oid, dobj->name)) {
+        dobj->dump = false;
+        return;
+    }
 }
 
 /*
@@ -5728,36 +5734,34 @@ ConvInfo* getConversions(Archive* fout, int* numConversions)
 bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname)
 {
     PGresult* res = NULL;
-    PQExpBuffer query = createPQExpBuffer();
     bool isRecycleObj = false;
     int colNum = 0;
     int tupNum = 0;
     char* recycleObject = NULL;
     char* f = "f";
 
-    /* Make sure we are in proper schema */
-    selectSourceSchema(fout, "pg_catalog");
+    if (GetVersionNum(fout) >= RB_OBJECT_VERSION_NUM) {
+        PQExpBuffer query = createPQExpBuffer();
+        /* Make sure we are in proper schema */
+        selectSourceSchema(fout, "pg_catalog");
+        appendPQExpBuffer(query,
+            "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
+            classid,
+            objid);
+        res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
-    if (FuncExists(fout, "pg_catalog", "gs_is_recycle_obj")) {
-            appendPQExpBuffer(query,
-                "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
-                classid,
-                objid);
-            res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-
-            colNum = PQfnumber(res, "gs_is_recycle_obj");
-            recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
-            if (strcmp(recycleObject, f) == 0) {
-                isRecycleObj = false;
-            } else {
-                isRecycleObj = true;
-            }
-            GS_FREE(recycleObject);
-            PQclear(res);
-            destroyPQExpBuffer(query);
-            return isRecycleObj;
-    } else {
+        colNum = PQfnumber(res, "gs_is_recycle_obj");
+        recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
+        if (strcmp(recycleObject, f) == 0) {
+            isRecycleObj = false;
+        } else {
+            isRecycleObj = true;
+        }
+        GS_FREE(recycleObject);
+        PQclear(res);
         destroyPQExpBuffer(query);
+        return isRecycleObj;
+    } else {
         return false;
     }
     
@@ -5765,16 +5769,21 @@ bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname)
 
 uint32 GetVersionNum(Archive *fout)
 {
+    if (unlikely(fout->workingVersionNum == 0)) {
+        fout->workingVersionNum = GetVersionNumFromServer(fout);
+    }
+    return fout->workingVersionNum;
+}
+
+uint32 GetVersionNumFromServer(Archive *fout)
+{
     PGresult* res = NULL;
     PQExpBuffer query = createPQExpBuffer();
     uint32 versionNum = 0;
     int colNum = 0;
     int tupNum = 0;
 
-    /* Make sure we are in proper schema */
-    selectSourceSchema(fout, "pg_catalog");
-
-    appendPQExpBuffer(query, "SELECT working_version_num()");
+    appendPQExpBuffer(query, "SELECT pg_catalog.working_version_num()");
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     colNum = PQfnumber(res, "working_version_num");
     versionNum = atooid(PQgetvalue(res, tupNum, colNum));
@@ -6150,8 +6159,9 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
      */
 
     if (fout->remoteVersion >= 70300) {
+        /* enable_hashjoin in this sql */
         appendPQExpBuffer(query,
-            "SELECT tableoid, oid, proname, prolang, "
+            "SELECT /*+ set(enable_hashjoin on) */ tableoid, oid, proname, prolang, "
             "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, "
             "prorettype, proacl, "
             "pronamespace, "

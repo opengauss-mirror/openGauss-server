@@ -67,6 +67,7 @@ struct Archive {
     int verbose;
     char* remoteVersionStr; /* server's version string */
     int remoteVersion;      /* same in numeric form */
+    int workingVersionNum;  /* working_version_num value */
 
     int minRemoteVersion; /* allowable range */
     int maxRemoteVersion;
