@@ -2315,7 +2315,7 @@ PUSH_DIRTY:
         item->bucketNode = buf_desc->tag.rnode.bucketNode;
         item->forkNum = buf_desc->tag.forkNum;
         item->blockNum = buf_desc->tag.blockNum;
-        if (IsSegmentFileNode(buf_desc->tag.rnode)) {
+        if (IsSegmentFileNode(buf_desc->tag.rnode) || buf_desc->tag.rnode.opt != 0) {
             *contain_hashbucket = true;
         }
 

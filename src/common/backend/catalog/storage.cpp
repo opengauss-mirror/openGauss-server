@@ -758,15 +758,25 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
 
     if (RelationNeedsWAL(parent)) {
         XLogRecPtr lsn;
-        xl_smgr_truncate xlrec;
-
-        xlrec.blkno = nblocks;
-        RelFileNodeRelCopy(xlrec.rnode, part->pd_node);
-
+        xl_smgr_truncate_compress xlrec;
+        uint size;
+        uint8 info = XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE;
+        
+        xlrec.xlrec.blkno = nblocks;
+        
+        if (rel->rd_node.opt != 0) {
+            xlrec.pageCompressOpts = part->pd_node.opt;
+            size = sizeof(xl_smgr_truncate_compress);
+            info |= XLR_REL_COMPRESS;
+        } else {
+            size = sizeof(xl_smgr_truncate);
+        }
+        
+        RelFileNodeRelCopy(xlrec.xlrec.rnode, part->pd_node);
+        
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, sizeof(xlrec));
-
-        lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, part->pd_node.bucketNode);
+        XLogRegisterData((char*)&xlrec, size);
+        lsn = XLogInsert(RM_SMGR_ID, info, part->pd_node.bucketNode);
 
         /*
          * Flush, because otherwise the truncation of the main relation might
