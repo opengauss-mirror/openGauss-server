@@ -65,6 +65,9 @@
 #define static
 #endif
 
+#ifdef USE_SPQ
+extern void gs_s_build_reply_conntion(libcommaddrinfo* addr_info, int remote_version);
+#endif
 
 /*
  * function name    : gs_r_build_reply_connection
@@ -78,13 +81,22 @@
  * return value     : -1: error
  *                  :   0:Succeed
  */
+#ifdef USE_SPQ
+int gs_r_build_reply_connection(BackConnInfo* fcmsgr, int local_version, uint16 *sid)
+#else
 static int gs_r_build_reply_connection(FCMSG_T* fcmsgr, int local_version)
+#endif
 {
     errno_t ss_rc;
     uint32 cpylen;
 
     int node_idx = fcmsgr->node_idx;
+#ifdef USE_SPQ
+    int streamid = gs_get_stream_id(node_idx);
+    *sid = streamid;
+#else
     int streamid = fcmsgr->streamid;
+#endif
     int remote_version = fcmsgr->version;
 
     // get remote nodename and host from global variable
@@ -124,6 +136,12 @@ static int gs_r_build_reply_connection(FCMSG_T* fcmsgr, int local_version)
     ss_rc = strncpy_s(libcomm_addrinfo.nodename, NAMEDATALEN, remote_nodename, cpylen + 1);
     securec_check(ss_rc, "\0", "\0");
     libcomm_addrinfo.nodename[cpylen] = '\0';
+#ifdef USE_SPQ
+    libcomm_addrinfo.gs_sock.idx = fcmsgr->node_idx;
+    libcomm_addrinfo.gs_sock.sid = streamid;
+    libcomm_addrinfo.gs_sock.ver = local_version;
+    libcomm_addrinfo.streamKey = fcmsgr->stream_key;
+#endif /* USE_SPQ */
 
     COMM_DEBUG_LOG("(r|build reply conn)\tBuild TCP connect for node[%d]:%s.",
         node_idx,
@@ -162,6 +180,76 @@ static int gs_r_build_reply_connection(FCMSG_T* fcmsgr, int local_version)
     COMM_DEBUG_LOG("(r|build reply conn)\tBuild data logical connection for node[%d]:%s.",
         node_idx,
         REMOTE_NAME(g_instance.comm_cxt.g_s_node_sock, node_idx));
+
+#ifdef USE_SPQ
+    char* node_name = g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename;
+    if (0 == strcmp(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, node_name)) {
+        QCConnKey key = {
+            .query_id = fcmsgr->stream_key.queryId,
+            .plan_node_id = fcmsgr->stream_key.planNodeId,
+            .node_id = node_idx,
+            .type = SPQ_QE_CONNECTION,
+        };
+        bool found = false;
+        QCConnEntry* entry;
+        /* notice: here dont use lock, so outer function call should guaranteed adp_connects has been locked */
+        entry = (QCConnEntry*)hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_FIND, &found);
+        if (found) {
+            entry->backward = {
+                .idx = node_idx,
+                .sid = streamid,
+                .ver = remote_version,
+                .type = GSOCK_DAUL_CHANNEL,
+            };
+            gs_s_build_reply_conntion(&libcomm_addrinfo, local_version);
+        } else {
+            LIBCOMM_ELOG(WARNING, "(s|connect)\tFailed to build local connection to node[%d]:%s, detail:%s.", node_idx,
+                         REMOTE_NAME(g_instance.comm_cxt.g_s_node_sock, node_idx), mc_strerror(errno));
+            errno = ECOMMTCPTCPDISCONNECT;
+            gs_close_gsocket(fcmsgr->backward);
+            return -1;
+        }
+    } else {
+        struct FCMSG_T fcmsgs = {0x0};
+
+        // for connect between cn and dn, channel is duplex
+        fcmsgs.type = CTRL_BACKWARD_REGIST;
+        fcmsgs.extra_info = 0;
+
+        fcmsgs.node_idx = node_idx;
+        fcmsgs.streamid = streamid;
+        // send pmailbox version to cmailbox,
+        // and cmailbox will save as cmailbox->remote_version.
+        fcmsgs.version = remote_version;
+        fcmsgs.stream_key = libcomm_addrinfo.streamKey;
+        fcmsgs.query_id = fcmsgr->query_id;
+        cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
+        ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
+        securec_check(ss_rc, "\0", "\0");
+        ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+        securec_check(ss_rc, "\0", "\0");
+        fcmsgs.nodename[cpylen] = '\0';
+        fcmsgs.streamcap = fcmsgr->streamcap;
+
+        int rc = gs_send_ctrl_msg(&g_instance.comm_cxt.g_s_node_sock[node_idx], &fcmsgs, ROLE_PRODUCER);
+        if (rc <= 0) {
+            LIBCOMM_ELOG(WARNING, "(s|connect)\tFailed to send ready msg to node[%d]:%s, detail:%s.", node_idx,
+                         REMOTE_NAME(g_instance.comm_cxt.g_s_node_sock, node_idx), mc_strerror(errno));
+
+            errno = ECOMMTCPTCPDISCONNECT;
+            gs_close_gsocket(fcmsgr->backward);
+            return -1;
+        }
+        char ack;
+        do {
+            rc = gs_recv(fcmsgr->backward, &ack, sizeof(char));
+        } while (rc == 0 || errno == ECOMMTCPNODATA);
+        if (rc < 0 || ack != 'o') {
+            gs_close_gsocket(fcmsgr->backward);
+            return -1;
+        }
+    }
+#endif
 
     struct p_mailbox* pmailbox = &P_MAILBOX(node_idx, streamid);
 
@@ -362,6 +450,7 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
             deal_time, u_sess->debug_query_id);
     }
 
+#ifndef USE_SPQ
     // for dual connection, we need to build an inverse logic conn with same gs_sock
     if (fcmsgr->type == CTRL_CONN_DUAL) {
         u_sess->pgxc_cxt.NumDataNodes = (int)(fcmsgr->extra_info);
@@ -374,12 +463,33 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
             goto accept_failed;
         }
     }
+#endif
 
     gs_sock.idx = node_idx;
     gs_sock.sid = streamid;
     gs_sock.ver = local_version;
 
     if (fcmsgr->type == CTRL_CONN_DUAL) {
+#ifdef USE_SPQ
+        bool found = false;
+        QCConnKey key = {
+            .query_id = fcmsgr->stream_key.queryId,
+            .plan_node_id = fcmsgr->stream_key.planNodeId,
+            .node_id = 0,
+            .type = SPQ_QC_CONNECTION,
+        };
+        gs_sock.type = GSOCK_CONSUMER;
+        pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        QCConnEntry* entry = (QCConnEntry*)hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_ENTER, &found);
+        if (!found) {
+            entry->backward = gs_sock;
+            entry->forward.idx = 0;
+            entry->streamcap = fcmsgr->streamcap;
+        }
+        pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+        ereport(LOG, (errmsg("Receive dual connect request from qc, queryid: %lu, nodeid: %u",
+                             fcmsgr->stream_key.queryId, fcmsgr->stream_key.planNodeId)));
+#else
         // CN request this logic connection, is a dual channel
         gs_sock.type = GSOCK_DAUL_CHANNEL;
 
@@ -393,6 +503,7 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
             gs_close_gsocket(&gs_sock);
             goto accept_failed;
         }
+#endif
     }
 
     // reply MAIL_READY message to producer

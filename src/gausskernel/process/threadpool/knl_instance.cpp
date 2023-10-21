@@ -934,6 +934,25 @@ void knl_plugin_vec_func_init(knl_g_plugin_vec_func_context* func_cxt) {
     }
 }
 
+#ifdef USE_SPQ
+void knl_g_spq_context_init(knl_g_spq_context* spq_context)
+{
+    HASHCTL hash_ctl;
+    errno_t rc = 0;
+
+    spq_context->adp_connects_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+    rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    securec_check(rc, "\0", "\0");
+
+    hash_ctl.keysize = sizeof(QCConnKey);
+    hash_ctl.entrysize = sizeof(QCConnEntry);
+    hash_ctl.hash = tag_hash;
+    hash_ctl.hcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
+    spq_context->adp_connects = hash_create("QC_CONNECTS", 4096, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+#endif
+
 void knl_instance_init()
 {
     g_instance.binaryupgrade = false;
@@ -1040,6 +1059,10 @@ void knl_instance_init()
 
     knl_g_datadir_init(&g_instance.datadir_cxt);
     knl_g_listen_sock_init(&g_instance.listen_cxt);
+
+#ifdef USE_SPQ
+    knl_g_spq_context_init(&g_instance.spq_cxt);
+#endif
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

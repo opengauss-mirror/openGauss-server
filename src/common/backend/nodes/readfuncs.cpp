@@ -4711,6 +4711,7 @@ static PlannedStmt* _readPlannedStmt(void)
 #ifdef USE_SPQ
     READ_UINT64_FIELD(spq_session_id);
     READ_INT_FIELD(current_id);
+    READ_BOOL_FIELD(enable_adaptive_scan);
     READ_BOOL_FIELD(is_spq_optmized);
 #endif
 

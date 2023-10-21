@@ -186,6 +186,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(spq_session_id);
     COPY_SCALAR_FIELD(current_id);
+    COPY_SCALAR_FIELD(enable_adaptive_scan);
     COPY_SCALAR_FIELD(is_spq_optmized);
 #endif
     /*

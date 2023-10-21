@@ -2954,7 +2954,7 @@ int PostmasterMain(int argc, char* argv[])
     }
 
 #ifdef USE_SPQ
-    if (ENABLE_DSS) {
+    if (ENABLE_DSS && strstr(g_instance.attr.attr_common.shared_preload_libraries_string, "spqplugin")) {
 #else
     if ((!IS_SINGLE_NODE) &&
         ((IS_PGXC_DATANODE && !dummyStandbyMode && !isRestoreMode) ||
@@ -13419,6 +13419,12 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
             break;
         }
 #endif
+#ifdef USE_SPQ
+        case SPQ_COORDINATOR: {
+            t_thrd.spq_ctx.qc_ctx = (spq_qc_ctx *)arg->payload;
+            break;
+        }
+#endif
         case THREADPOOL_LISTENER: {
             t_thrd.threadpool_cxt.listener = (ThreadPoolListener*)arg->payload;
             break;
@@ -13694,6 +13700,10 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
     return 0;
 }
 
+#ifdef USE_SPQ
+void spq_adps_coordinator_thread_main();
+#endif
+
 static void is_memory_backend_reserved(const knl_thread_arg* arg)
 {
     if (arg->role == WORKER) {
@@ -13948,7 +13958,12 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             GaussDbAuxiliaryThreadMain<thread_role>(arg);
             proc_exit(0);
         } break;
-
+#ifdef USE_SPQ
+        case SPQ_COORDINATOR: {
+            spq_adps_coordinator_thread_main();
+            proc_exit(0);
+        } break;
+#endif
         case LOGICAL_READ_RECORD: {
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
             if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
@@ -14480,6 +14495,9 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<APPLY_LAUNCHER>, APPLY_LAUNCHER, "applylauncher", "apply launcher" },
     { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
     { GaussDbThreadMain<STACK_PERF_WORKER>, STACK_PERF_WORKER, "stack_perf", "stack perf worker" },
+#ifdef USE_SPQ
+    { GaussDbThreadMain<SPQ_COORDINATOR>, SPQ_COORDINATOR, "spqcoordinator", "QC node coordinating thread" },
+#endif
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
     { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
 

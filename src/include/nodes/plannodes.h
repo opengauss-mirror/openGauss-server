@@ -197,6 +197,7 @@ typedef struct PlannedStmt {
 #ifdef USE_SPQ
     uint64 spq_session_id;
     int current_id;
+    bool enable_adaptive_scan;
     bool is_spq_optmized;
 #endif
 } PlannedStmt;

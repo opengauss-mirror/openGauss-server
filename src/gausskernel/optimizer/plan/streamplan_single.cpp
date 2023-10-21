@@ -535,7 +535,10 @@ void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str
     /* not ship planB */
     ShipPlannedStmt->ng_num = planned_stmt->ng_num;
     ShipPlannedStmt->ng_queryMem = planned_stmt->ng_queryMem;
- 
+
+#ifdef USE_SPQ
+    ShipPlannedStmt->enable_adaptive_scan = planned_stmt->enable_adaptive_scan;
+#endif
     appendStringInfoString(str, nodeToString(ShipPlannedStmt));
 }
 #endif

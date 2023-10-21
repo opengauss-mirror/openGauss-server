@@ -78,6 +78,9 @@ static int libcomm_delay_no = 0;
 LibcommAdaptLayer g_libcomm_adapt;
 extern HTAB* g_htab_fd_id_node_idx;
 extern pthread_mutex_t g_htab_fd_id_node_idx_lock;
+#ifdef USE_SPQ
+extern void gs_s_build_reply_conntion(libcommaddrinfo* addr_info, int remote_version);
+#endif
 
 static int gs_tcp_write_noblock(int node_idx, int sock, const char* msg, int msg_len, int *send_count);
 static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx);
@@ -680,7 +683,11 @@ void gs_accept_ctrl_conntion(struct sock_id* t_fd_id, struct FCMSG_T* fcmsgr)
     g_instance.comm_cxt.g_r_node_sock[idx].unlock();
 
     /* send response to remote, thus ready control msg arrived after connection has established */
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_PGXC_COORDINATOR
+#ifdef USE_SPQ
+        || fcmsgr->type == CTRL_QE_BACKWARD
+#endif
+        ) {
         ack = 'o';
         rc = mc_tcp_write_block(t_fd_id->fd, &ack, sizeof(ack));
         // if tcp send failed, close tcp connction
@@ -690,6 +697,51 @@ void gs_accept_ctrl_conntion(struct sock_id* t_fd_id, struct FCMSG_T* fcmsgr)
 
             return;
         }
+#ifdef USE_SPQ
+    } else if (fcmsgr->type == CTRL_BACKWARD_REGIST) {
+        QCConnKey key = {
+            .query_id = fcmsgr->stream_key.queryId,
+            .plan_node_id = fcmsgr->stream_key.planNodeId,
+            .node_id = idx,
+            .type = SPQ_QE_CONNECTION,
+        };
+        bool found = false;
+        QCConnEntry* entry;
+        pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        entry = (QCConnEntry*)hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_FIND, &found);
+        if (!found) {
+            ack = 'r';
+        } else {
+            entry->backward = {
+                .idx = idx,
+                .sid = fcmsgr->streamid,
+                .ver = fcmsgr->version,
+                .type = GSOCK_CONSUMER,
+            };
+            libcommaddrinfo addrinfo;
+            addrinfo.gs_sock = entry->backward;
+            addrinfo.gs_sock.ver = entry->forward.ver;
+            addrinfo.streamKey = {
+                .queryId = entry->key.query_id,
+                .planNodeId = entry->key.plan_node_id,
+                .producerSmpId = 0,
+                .consumerSmpId = 0,
+            };
+            gs_s_build_reply_conntion(&addrinfo, entry->backward.ver);
+            ack = 'o';
+        }
+        pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+
+        rc = gs_send(&(entry->forward), &ack, sizeof(ack), -1, TRUE);
+        // if tcp send failed, close logic connction
+        if (rc <= 0) {
+            LIBCOMM_ELOG(WARNING, "(r|flow ctrl)\tFailed to send dual channel back ack, error:%s.", mc_strerror(errno));
+            gs_close_gsocket(&entry->forward);
+            gs_close_gsocket(&entry->backward);
+            return;
+        }
+        return;
+#endif
     } else if (fcmsgr->type == CTRL_CONN_REGIST_CN) {
         if (g_instance.comm_cxt.g_ha_shm_data) {
             current_mode = g_instance.comm_cxt.g_ha_shm_data->current_mode;
@@ -1161,8 +1213,12 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
 #endif
     // wait ack from remote node, reject when the state of remote node is incorrect, such as standby mode;
     struct FCMSG_T fcmsgs = {0x0};
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) {
         fcmsgs.type = CTRL_CONN_REGIST_CN;
+#ifdef USE_SPQ
+    } else if (is_reply) {
+        fcmsgs.type = CTRL_QE_BACKWARD;
+#endif
     } else {
         fcmsgs.type = CTRL_CONN_REGIST;
     }
@@ -1199,7 +1255,7 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     // cn need to ask the remote datanode status when make connection
     // 'r' is received when remote is standby or pending mode
     // for conn between dns, skip this step, ip is given by executor
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) {
         error = mc_tcp_read_block(tcp_sock, &ack, sizeof(char), 0);
         if (error < 0 || ack != 'o') {
 #ifdef USE_SSL

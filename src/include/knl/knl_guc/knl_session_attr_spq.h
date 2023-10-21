@@ -40,6 +40,8 @@
  
 #include "knl/knl_guc/knl_guc_common.h"
 
+#define PREALLOC_PAGE_ARRAY_SIZE 16
+
 struct NodeDefinition;
  
 typedef struct knl_session_attr_spq {
@@ -117,6 +119,7 @@ typedef struct knl_session_attr_spq {
     bool spq_optimizer_enable_redistribute_nestloop_loj_inner_child;
     bool spq_optimizer_force_comprehensive_join_implementation;
     bool spq_optimizer_enable_replicated_table;
+    bool spq_optimizer_calc_multiple_dop;
  
     /* Optimizer plan enumeration related GUCs */
     bool spq_optimizer_enumerate_plans;
@@ -194,9 +197,44 @@ typedef struct knl_session_attr_spq {
     int  spq_batch_size;
     int  spq_mem_size;
     int  spq_queue_size;
+
+    bool spq_enable_adaptive_scan;
 } knl_session_attr_spq;
+
+struct RemoteQueryState;
+
+typedef struct SpqAdpScanReqState {
+    bool this_round_finish;
+    int plan_node_id;
+    int direction;
+    int node_num;
+    int64_t nblocks;
+    int64_t cur_scan_iter_no;
+    int64_t scan_start;
+    int64_t cur_page_num;
+    int64_t scan_end;
+    int64_t batch_size;
+    int64_t current_num;
+} SpqAdpScanReqState;
+
+/* struct for paging state container */
+typedef struct SpqScanAdpReqs {
+    int size = 0;
+    int max;
+    SpqAdpScanReqState **req_states;
+} SpqScanAdpReqs;
+
+typedef struct spq_qc_ctx {
+    pthread_mutex_t spq_pq_mutex;
+    pthread_cond_t pq_wait_cv;
+    bool is_done;
+    bool is_exited;
+    uint64 query_id;
+    RemoteQueryState* scanState;
+    List* connects;
+    SpqScanAdpReqs seq_paging_array;
+} spq_qc_ctx;
  
-/* TODO SPQ Thread Role*/
 typedef struct knl_t_spq_context {
     SpqRole spq_role;
     uint64 spq_session_id;
@@ -204,5 +242,9 @@ typedef struct knl_t_spq_context {
     bool skip_direct_distribute_result;
     int num_nodes;
     NodeDefinition* nodesDefinition;
+
+    /* Spq coordinator thread */
+    bool adaptive_scan_setup;
+    spq_qc_ctx* qc_ctx;
 } knl_t_spq_context;
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_MPP_H_ */
