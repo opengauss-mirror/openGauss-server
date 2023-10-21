@@ -545,10 +545,11 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         n->parameters = NULL;
         n->returnType = makeTypeName("trigger");
         const char* inlineProcessDesc = " return NEW;end";
-        size_t bodySrcTempSize = strlen(stmt->funcSource->bodySrc) + strlen(inlineProcessDesc);
+        size_t originBodyLen = strlen(stmt->funcSource->bodySrc);
+        size_t bodySrcTempSize = originBodyLen + strlen(inlineProcessDesc) + 1;
         char* bodySrcTemp = (char*)palloc(bodySrcTempSize);
         int last_end = -1;
-        for (int i = bodySrcTempSize - 3; i > 0; i--) {
+        for (int i = originBodyLen - 3; i > 0; i--) {
             if (pg_strncasecmp(stmt->funcSource->bodySrc + i, "end", strlen("end")) == 0) {
                 last_end = i;
                 break;
@@ -559,10 +560,10 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
                     errmsg("trigger function body has syntax error")));
         }
         ret = memcpy_s(bodySrcTemp, bodySrcTempSize, stmt->funcSource->bodySrc, last_end);
-        securec_check_c(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         bodySrcTemp[last_end] = '\0';
         ret = strcat_s(bodySrcTemp, bodySrcTempSize, inlineProcessDesc);
-        securec_check_c(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         n->options = lappend(n->options, makeDefElem("as", (Node*)list_make1(makeString(bodySrcTemp))));
         n->options = lappend(n->options, makeDefElem("language", (Node*)makeString("plpgsql")));
         n->withClause = NIL;
