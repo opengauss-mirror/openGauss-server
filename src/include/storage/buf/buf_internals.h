@@ -308,6 +308,7 @@ typedef struct CkptSortItem {
     Oid tsId;
     Oid relNode;
     int2 bucketNode;
+	/* compress optionv is not used here current */
     ForkNumber forkNum;
     BlockNumber blockNum;
     int buf_id;

@@ -37,14 +37,14 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = XLogRecGetInfo(record) & XLR_REL_COMPRESS;
     if (info == XLOG_SMGR_CREATE) {
         xl_smgr_create *xlrec = (xl_smgr_create *)rec;
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-
+        rnode.opt = compress ? ((xl_smgr_create_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
         char *path = relpathperm(rnode, xlrec->forkNum);
-
-        appendStringInfo(buf, "file create: %s", path);
+        appendStringInfo(buf, "file create[opt: %d]: %s", rnode.opt, path);
 #ifdef FRONTEND
         free(path);
         path = NULL;
@@ -55,10 +55,9 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
         xl_smgr_truncate *xlrec = (xl_smgr_truncate *)rec;
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-
+        rnode.opt = compress ? ((xl_smgr_create_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
         char *path = relpathperm(rnode, MAIN_FORKNUM);
-
-        appendStringInfo(buf, "file truncate: %s to %u blocks", path, xlrec->blkno);
+        appendStringInfo(buf, "file truncate[opt: %d]: %s to %u blocks", rnode.opt, path, xlrec->blkno);
 #ifdef FRONTEND
         free(path);
         path = NULL;
