@@ -211,7 +211,7 @@ Node *TvTransformVersionExpr(ParseState *pstate, TvVersionType tvtype, Node *tvv
 {
     Node *verExpr = tvver;
 
-    verExpr = transformExpr(pstate, tvver, pstate->p_expr_kind);
+    verExpr = transformExpr(pstate, tvver, EXPR_KIND_OTHER);
     if (checkExprHasSubLink(verExpr)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("timecapsule clause not support sublink.")));
     }
