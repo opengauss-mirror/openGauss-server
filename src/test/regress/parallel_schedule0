@@ -1011,7 +1011,7 @@ test: gtt_trunc_pre
 test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gtt_trunc_parallel_ddl2
 #test: gtt_trunc_clean
 
-test: toomanyparams
+test: toomanyparams tableof_unsupported
 
 test: test_astore_multixact
 test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test row_compression/alter_compress_params
