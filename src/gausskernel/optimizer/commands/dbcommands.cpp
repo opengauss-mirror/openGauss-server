@@ -790,7 +790,7 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
 #ifdef WIN32
             encoding == PG_UTF8 ||
 #endif
-            (encoding == PG_SQL_ASCII && superuser() ||
+            ((encoding == PG_SQL_ASCII && superuser()) ||
             (encoding == PG_GB18030_2022 && ctype_encoding == PG_GB18030))))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -802,7 +802,7 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
 #ifdef WIN32
             encoding == PG_UTF8 ||
 #endif
-            (encoding == PG_SQL_ASCII && superuser() ||
+            ((encoding == PG_SQL_ASCII && superuser()) ||
             (encoding == PG_GB18030_2022 && collate_encoding == PG_GB18030))))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

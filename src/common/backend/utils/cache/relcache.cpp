@@ -1367,7 +1367,7 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
      * relfilenode of non mapped system relations during decoding.
      */
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive() && !force_non_historic || IS_EXRTO_RECOVERY_IN_PROGRESS) {
+    if ((HistoricSnapshotActive() && !force_non_historic) || IS_EXRTO_RECOVERY_IN_PROGRESS) {
         snapshot = GetCatalogSnapshot();
     }
 

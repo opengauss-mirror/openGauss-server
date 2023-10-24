@@ -1308,7 +1308,7 @@ bool PortalRun(
         }
 
         /* PortalRun using unique_sql_start_time as unique sql elapse start time */
-        if (IsNeedUpdateUniqueSQLStat(portal) && IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL()
+        if ((IsNeedUpdateUniqueSQLStat(portal) && IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL())
             || IS_UNIQUE_SQL_TRACK_ALL) {
             instr_unique_sql_report_elapse_time(u_sess->unique_sql_cxt.unique_sql_start_time);
         }
