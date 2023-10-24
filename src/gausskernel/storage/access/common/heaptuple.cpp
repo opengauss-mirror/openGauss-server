@@ -1577,8 +1577,13 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
      */
     /* internal error */
     if (tuple == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        /* tuple is null, now only happen in B mode, with sql_mode_full_group trun off. set all isnull to true */
+        int rc = memset_s(slot->tts_isnull, slot->tts_tupleDescriptor->natts * sizeof(bool),
+            true, slot->tts_tupleDescriptor->natts * sizeof(bool));
+        securec_check(rc, "\0", "\0");
+        slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
+        *isnull = true;
+        return (Datum) 0;
     }
 
     /*
