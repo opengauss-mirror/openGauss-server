@@ -123,6 +123,9 @@ typedef enum knl_thread_role {
     APPLY_LAUNCHER,
     APPLY_WORKER,
     STACK_PERF_WORKER,
+#ifdef USE_SPQ
+    SPQ_COORDINATOR,
+#endif
     DMS_AUXILIARY_THREAD,
     EXRTO_RECYCLER,
     BARRIER_PREPARSE,

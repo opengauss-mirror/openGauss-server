@@ -1246,6 +1246,13 @@ typedef struct knl_g_dms_context {
     ss_xmin_info_t SSXminInfo;
 } knl_g_dms_context;
 
+#ifdef USE_SPQ
+typedef struct knl_g_spq_context {
+    pthread_rwlock_t adp_connects_lock;
+    struct HTAB* adp_connects;
+} knl_g_spq_context;
+#endif
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -1385,6 +1392,9 @@ typedef struct knl_instance_context {
     knl_g_listen_context listen_cxt;
     knl_g_datadir_context datadir_cxt;
     knl_g_dms_context dms_cxt;
+#ifdef USE_SPQ
+    knl_g_spq_context spq_cxt;
+#endif
 } knl_instance_context;
 
 extern long random();

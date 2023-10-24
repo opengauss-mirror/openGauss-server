@@ -644,6 +644,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
 #ifdef USE_SPQ
     WRITE_UINT64_FIELD(spq_session_id);
     WRITE_INT_FIELD(current_id);
+    WRITE_BOOL_FIELD(enable_adaptive_scan);
     WRITE_BOOL_FIELD(is_spq_optmized);
 #endif
 }

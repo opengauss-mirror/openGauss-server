@@ -103,7 +103,7 @@ unsigned long LIBCOMM_BUFFER_SIZE  = 1024 * 8;
 
 gsocket gs_invalid_gsock = {0, 0, 0, 0};
 
-static void gs_s_build_reply_conntion(libcommaddrinfo* addr_info, int remote_version);
+void gs_s_build_reply_conntion(libcommaddrinfo* addr_info, int remote_version);
 
 extern GlobalNodeDefinition* global_node_definition;
 
@@ -1630,7 +1630,7 @@ void gs_libcomm_handle_assert(bool condition, int nidx, int sidx, int node_role)
  *                    cn need to inital cmailbox to recv msgs from dn
  * arguments        : fcmsgr: provides gs_sock
  */
-static void gs_s_build_reply_conntion(libcommaddrinfo* addr_info, int remote_version)
+void gs_s_build_reply_conntion(libcommaddrinfo* addr_info, int remote_version)
 {
     int node_idx = addr_info->gs_sock.idx;
     int streamid = addr_info->gs_sock.sid;
@@ -1738,7 +1738,7 @@ int gs_check_all_mailbox(libcommaddrinfo** libcomm_addrinfo, int addr_num, int r
 
                     // before continue or goto clean_connection, we must release the sinfo_lock.
                     LIBCOMM_PTHREAD_MUTEX_UNLOCK(&pmailbox->sinfo_lock);
-                    if (IS_PGXC_COORDINATOR) {
+                    if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) {
                         addr_info->gs_sock = GS_INVALID_GSOCK;
                         continue;
                     } else {
@@ -1750,7 +1750,7 @@ int gs_check_all_mailbox(libcommaddrinfo** libcomm_addrinfo, int addr_num, int r
                 } else {
                     pmailbox->semaphore = NULL;
                     // for cn initial cmailbox as well as the connection is duplex
-                    if (IS_PGXC_COORDINATOR) {
+                    if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) {
                         remote_version = pmailbox->remote_version;
                         build_reply_conn = true;
                     }
@@ -1762,12 +1762,14 @@ int gs_check_all_mailbox(libcommaddrinfo** libcomm_addrinfo, int addr_num, int r
 
             LIBCOMM_PTHREAD_MUTEX_UNLOCK(&pmailbox->sinfo_lock);
 
+#ifndef USE_SPQ
             // for cn initial cmailbox as well as the connection is duplex
             if (build_reply_conn) {
                 // build cmailbox with the same version and remote_verion as pmailbox,
                 // when this connection is duplex.
                 gs_s_build_reply_conntion(addr_info, remote_version);
             }
+#endif
         }
 
         // we wait on the last mailbox that state is not MAIL_READY
@@ -1780,7 +1782,7 @@ int gs_check_all_mailbox(libcommaddrinfo** libcomm_addrinfo, int addr_num, int r
 
             re = gs_poll(timeout);
             if (re == ETIMEDOUT) {
-                if (IS_PGXC_COORDINATOR) {
+                if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) {
                     /* close all timeout connections */
                     gs_close_timeout_connections(libcomm_addrinfo, addr_num, node_idx, streamid);
                 } else {

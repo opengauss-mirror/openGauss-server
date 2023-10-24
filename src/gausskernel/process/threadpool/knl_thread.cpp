@@ -1801,6 +1801,11 @@ void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
 static void knlTSPQCxtInit(knl_t_spq_context *spqCxt)
 {
     spqCxt->spq_role = ROLE_UTILITY;
+    spqCxt->qc_ctx = (spq_qc_ctx*)palloc(sizeof(spq_qc_ctx));
+    spqCxt->qc_ctx->is_done = false;
+    spqCxt->qc_ctx->is_exited = false;
+    spqCxt->qc_ctx->query_id = 0;
+    spqCxt->qc_ctx->scanState = NULL;
 }
 #endif
 

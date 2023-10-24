@@ -8970,6 +8970,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 exec_simple_plan(planstmt);
 
+                if (planstmt->enable_adaptive_scan) {
+                    disconnect_qc_conn((void*)planstmt->planTree);
+                }
                 MemoryContextSwitchTo(old_cxt);
 
                 // After query done, producer container is not usable anymore.

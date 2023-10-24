@@ -3893,7 +3893,7 @@ static void exec_lookups_agg(AggState *aggstate, Agg *node, EState *estate)
 #ifdef USE_SPQ
             /* Final function only required if we're finalizing the aggregates */
         if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
-            if (DO_AGGSPLIT_SKIPFINAL(aggstate->aggsplittype))
+            if (DO_AGGSPLIT_SKIPFINAL(aggstate->aggsplittype) && peraggstate->aggref->aggfnoid != STRINGAGGFUNCOID)
                 peraggstate->finalfn_oid = finalfn_oid = InvalidOid;
             else
                 peraggstate->finalfn_oid = finalfn_oid = aggform->aggfinalfn;

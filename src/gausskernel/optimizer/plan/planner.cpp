@@ -3534,14 +3534,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     wflists,
                     &needSecondLevelAgg,
                     collectiveGroupExpr);
-#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
-                if (IS_SPQ_RUNNING) {
-                    /*
-                     * grouping_tlist was modified by build_groupingsets_plan,
-                     * we have to change tlist at the same time.
-                     */
-                    tlist = grouping_tlist;
-                }
+#ifdef ENABLE_MULTIPLE_NODES
+                /*
+                 * grouping_tlist was modified by build_groupingsets_plan,
+                 * we have to change tlist at the same time.
+                 */
+                tlist = grouping_tlist;
 #endif
                 /* Delete eq class expr after grouping */
                 delete_eq_member(root, tlist, collectiveGroupExpr);
