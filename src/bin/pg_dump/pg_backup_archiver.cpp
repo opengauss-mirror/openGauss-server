@@ -2120,6 +2120,7 @@ static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, co
     AH->publicArc.exit_on_error = true;
     AH->publicArc.n_errors = 0;
     AH->publicArc.getHashbucketInfo = false;
+    AH->publicArc.workingVersionNum = 0;
 
     AH->archiveDumpVersion = gs_strdup(PG_VERSION);
 
