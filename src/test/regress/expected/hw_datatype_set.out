@@ -4125,6 +4125,7 @@ ERROR:  invalid input value for set t1_c1_set: ''
 LINE 1: insert into t1 values ('a,,b');
                                ^
 CONTEXT:  referenced column: c1
+COPY t1(c1) FROM stdin WITH NULL 'NULL' CSV QUOTE '"' DELIMITER ',' ESCAPE '"';
 -- 2. define set type include ''
 drop table if exists t2;
 create table t2 (c1 set('a', '', 'b') default '');
@@ -4140,14 +4141,16 @@ select c1, c1+0 from t2;
 
 insert into t2 values ('a,,b'); -- expect 2, not 0
 insert into t2 values (',a,b'); -- expect 2, not 0
+COPY t2(c1) FROM stdin WITH NULL 'NULL' CSV QUOTE '"' DELIMITER ',' ESCAPE '"';
 select c1, c1+0 from t2 order by 2;
   c1  | ?column? 
 ------+----------
       |        0
       |        0
+      |        0
  a,,b |        7
  a,,b |        7
-(4 rows)
+(5 rows)
 
 drop table t1;
 drop table t2;
