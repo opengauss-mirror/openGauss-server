@@ -722,6 +722,9 @@ insert into t1 values ('');
 insert into t1 values (default);
 select c1, c1+0 from t1; -- expect value 0
 insert into t1 values ('a,,b'); -- expect error
+COPY t1(c1) FROM stdin WITH NULL 'NULL' CSV QUOTE '"' DELIMITER ',' ESCAPE '"';
+""
+\.
 
 -- 2. define set type include ''
 drop table if exists t2;
@@ -731,6 +734,9 @@ insert into t2 values (default);
 select c1, c1+0 from t2;
 insert into t2 values ('a,,b'); -- expect 2, not 0
 insert into t2 values (',a,b'); -- expect 2, not 0
+COPY t2(c1) FROM stdin WITH NULL 'NULL' CSV QUOTE '"' DELIMITER ',' ESCAPE '"';
+""
+\.
 select c1, c1+0 from t2 order by 2;
 drop table t1;
 drop table t2;
