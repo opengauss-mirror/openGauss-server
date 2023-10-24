@@ -34,7 +34,7 @@ extern Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ow
 extern bool IsFunctionInPackage(List* wholename); 
 extern PLpgSQL_package* PackageInstantiation(Oid packageOid);
 extern void PackageInit(PLpgSQL_package* pkg, bool isCreate);
-extern NameData* GetPackageName(Oid packageOid);
+extern char* GetPackageName(Oid packageOid);
 extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok);
 extern Oid PackageNameGetOid(const char* pkgname, Oid namespaceId);
 extern bool IsExistPackageName(const char* pkgname);

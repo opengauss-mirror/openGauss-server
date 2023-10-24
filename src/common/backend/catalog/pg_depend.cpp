@@ -35,6 +35,11 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
+#include "catalog/pg_proc.h"
+#include "catalog/pg_rewrite.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/gs_dependencies_obj.h"
+#include "catalog/pg_object.h"
 
 static bool isObjectPinned(const ObjectAddress* object, Relation rel);
 
@@ -45,9 +50,10 @@ static bool isObjectPinned(const ObjectAddress* object, Relation rel);
  *
  * This simply creates an entry in pg_depend, without any other processing.
  */
-void recordDependencyOn(const ObjectAddress* depender, const ObjectAddress* referenced, DependencyType behavior)
+void recordDependencyOn(const ObjectAddress* depender, const ObjectAddress* referenced, DependencyType behavior,
+    GsDependParamBody* gsdependParamBody)
 {
-    recordMultipleDependencies(depender, referenced, 1, behavior);
+    recordMultipleDependencies(depender, referenced, 1, behavior, gsdependParamBody);
 }
 
 /*
@@ -55,7 +61,8 @@ void recordDependencyOn(const ObjectAddress* depender, const ObjectAddress* refe
  * object.	This has a little less overhead than recording each separately.
  */
 void recordMultipleDependencies(
-    const ObjectAddress* depender, const ObjectAddress* referenced, int nreferenced, DependencyType behavior)
+    const ObjectAddress* depender, const ObjectAddress* referenced, int nreferenced, DependencyType behavior,
+    GsDependParamBody* gsdependParamBody)
 {
     Relation dependDesc;
     CatalogIndexState indstate;
@@ -90,7 +97,20 @@ void recordMultipleDependencies(
          * need to record dependencies on it.  This saves lots of space in
          * pg_depend, so it's worth the time taken to check.
          */
-        if (!isObjectPinned(referenced, dependDesc)) {
+        bool isPinned = isObjectPinned(referenced, dependDesc);
+        if (enable_plpgsql_gsdependency() && DEPENDENCY_NORMAL == behavior &&
+            gsplsql_need_build_gs_dependency(gsdependParamBody, referenced, isPinned)) {
+            bool ret = gsplsql_build_gs_type_dependency(gsdependParamBody, referenced);
+            if (ret) {
+                gsdependParamBody->hasDependency = true;
+            }
+        }
+        if (isPinned) {
+            continue;
+        }
+        if (!enable_plpgsql_gsdependency() || NULL == gsdependParamBody ||
+            (GSDEPEND_REFOBJ_POS_IN_TYPE == gsdependParamBody->refPosType
+             && GSDEPEND_OBJECT_TYPE_TYPE == gsdependParamBody->type)) {
             /*
              * Record the Dependency.  Note we don't bother to check for
              * duplicate dependencies; there's no harm in them.
@@ -448,6 +468,17 @@ long changeDependencyFor(Oid classId, Oid objectId, Oid refClassId, Oid oldRefOb
     heap_close(depRel, RowExclusiveLock);
 
     return count;
+}
+
+bool IsPinnedObject(Oid classOid, Oid objOid) {
+    ObjectAddress objAddr;
+    objAddr.classId = classOid;
+    objAddr.objectId = objOid;
+    objAddr.objectSubId = 0;
+    Relation dependDesc = heap_open(DependRelationId, AccessShareLock);
+    bool isPinned = isObjectPinned(&objAddr, dependDesc);
+    heap_close(dependDesc, AccessShareLock);
+    return isPinned;
 }
 
 /*
@@ -1002,4 +1033,33 @@ bool IsPackageDependType(Oid typOid, Oid pkgOid, bool isRefCur)
     heap_close(depRel, RowExclusiveLock);
 
     return isFind;
+}
+
+void DeletePgDependObject(const ObjectAddress* object, const ObjectAddress* ref_object)
+{
+    int keyNum = 0;
+    ScanKeyData key[2];
+    ScanKeyInit(&key[keyNum++], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->classId));
+    ScanKeyInit(&key[keyNum++], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
+    Relation relation = heap_open(DependRelationId, RowExclusiveLock);
+    SysScanDesc scan = systable_beginscan(relation, DependDependerIndexId, true, NULL, keyNum, key);
+    bool is_null = false;
+    HeapTuple tuple;
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        
+        Datum refclassid_datum = heap_getattr(tuple, Anum_pg_depend_refclassid,
+                                               RelationGetDescr(relation), &is_null);
+        Datum refobjid_datum = heap_getattr(tuple, Anum_pg_depend_refobjid,
+                                        RelationGetDescr(relation), &is_null);
+        if (ref_object->classId == DatumGetObjectId(refclassid_datum) &&
+            ref_object->objectId == DatumGetObjectId(refobjid_datum)) {
+            simple_heap_delete(relation, &tuple->t_self);
+            systable_endscan(scan);
+            heap_close(relation, RowExclusiveLock);
+            CommandCounterIncrement();
+            return;
+        }
+    }
+    systable_endscan(scan);
+    heap_close(relation, RowExclusiveLock);
 }

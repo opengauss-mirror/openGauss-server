@@ -41,6 +41,7 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/pg_type_fn.h"
 
 static void parseNameAndArgTypes(const char* string, bool allowNone, List** names, int* nargs, Oid* argtypes);
 
@@ -339,6 +340,39 @@ format_procedure_parts(Oid procedure_oid, List **objnames, List **objargs)
     ReleaseSysCache(proctup);                                                                                                                                  
 }                                                                                                                                                              
 
+
+char * format_procedure_no_visible(Oid procedure_oid)
+{
+    char* result = NULL;
+    HeapTuple proctup;
+    proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procedure_oid));
+    if (HeapTupleIsValid(proctup)) {
+        Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
+        char* proname = NameStr(procform->proname);
+        StringInfoData buf;
+        initStringInfo(&buf);
+        appendStringInfo(&buf, "%s(", proname);
+        bool isNull = false;
+        Datum argTypeDtum = ProcedureGetAllArgTypes(proctup, &isNull);
+        oidvector* proargs = (oidvector*)PG_DETOAST_DATUM(argTypeDtum);
+        int nargs = proargs->dim1;
+        int i;
+        for (i = 0; i < nargs; i++) {
+            if (i > 0)
+                appendStringInfoChar(&buf, ',');
+            MakeTypeNamesStrForTypeOid(&buf, proargs->values[i]);
+        }
+        appendStringInfoChar(&buf, ')');
+        result = buf.data;
+        ReleaseSysCache(proctup);
+    } else {
+        /* If OID doesn't match any pg_proc entry, return it numerically */
+        result = (char*)palloc(NAMEDATALEN);
+        errno_t rc = snprintf_s(result, NAMEDATALEN, NAMEDATALEN - 1, "%u", procedure_oid);
+        securec_check_ss(rc, "\0", "\0");
+    }
+    return result;
+}
 
  /*
   * Routine to produce regprocedure names; see format_procedure above.

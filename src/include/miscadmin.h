@@ -37,6 +37,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 SUPPORT_GS_DEPENDENCY_VERSION_NUM;
 extern const uint32 TXNSTATUS_CACHE_DFX_VERSION_NUM;
 extern const uint32 PARAM_MARK_VERSION_NUM;
 extern const uint32 TIMESCALE_DB_VERSION_NUM;
@@ -199,7 +200,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN 33554432
 #define OPT_SELECT_INTO_RETURN_NULL 67108864
 #define OPT_ACCEPT_EMPTY_STR 134217728
-#define OPT_MAX 28
+#define OPT_PLPGSQL_DEPENDENCY 268435456
+#define OPT_MAX 29
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -241,6 +243,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define PLSQL_COMPILE_OUTPARAM (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_OUTPARAM)
 
 #define SELECT_INTO_RETURN_NULL (u_sess->utils_cxt.behavior_compat_flags & OPT_SELECT_INTO_RETURN_NULL)
+#define PLPGSQL_DEPENDENCY (u_sess->utils_cxt.behavior_compat_flags & OPT_PLPGSQL_DEPENDENCY)
 
 /* define database compatibility Attribute */
 typedef struct {

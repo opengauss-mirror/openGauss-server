@@ -135,7 +135,8 @@ extern Oid heap_create_with_catalog(const char *relname,
 						 List* ceLst = NULL,
 						 StorageType storage_type = HEAP_DISK,
 						 LOCKMODE partLockMode = AccessExclusiveLock,
-                         ObjectAddress *typaddress= NULL);
+                         ObjectAddress *typaddress= NULL,
+                         List* depend_extend = NIL);
 
 extern void heap_create_init_fork(Relation rel);
 
@@ -261,4 +262,5 @@ extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 extern bool GetIndexVisibleStateByTuple(HeapTuple indexTuple);
 
 extern void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids);
+extern char* heap_serialize_row_attr(Oid rel_oid, bool* depend_undefined);
 #endif   /* HEAP_H */

@@ -116,6 +116,8 @@
 #include "foreign/fdwapi.h"
 #include "instruments/generate_report.h"
 #include "catalog/gs_encrypted_columns.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "utils/plpgsql.h"
 
 #ifdef PGXC
 #include "catalog/pgxc_class.h"
@@ -998,6 +1000,34 @@ void InsertPgAttributeTuple(Relation pg_attribute_rel, Form_pg_attribute new_att
     heap_freetuple(tup);
 }
 
+static bool make_gs_depend_param_body(GsDependParamBody* gs_depend_param_body, const char* typ_name,
+    const char relkind, const Oid namespace_oid)
+{
+    bool need_build_depend = false;
+    int cw = CompileWhich();
+    need_build_depend = (relkind == RELKIND_RELATION || relkind == RELKIND_COMPOSITE_TYPE) &&
+        (cw == PLPGSQL_COMPILE_PACKAGE_PROC || cw == PLPGSQL_COMPILE_PACKAGE || cw == PLPGSQL_COMPILE_PROC);
+    if (!need_build_depend) {
+        return false;
+    }
+    gs_depend_param_body->dependNamespaceOid = namespace_oid;
+    if (NULL != u_sess->plsql_cxt.curr_compile_context &&
+        NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+        PLpgSQL_package* pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+        gs_depend_param_body->dependPkgOid = pkg->pkg_oid;
+        gs_depend_param_body->dependPkgName = pkg->pkg_signature;
+    }
+    char* real_typ_name = ParseTypeName((char*)typ_name, gs_depend_param_body->dependPkgOid);
+    if (real_typ_name == NULL) {
+        gs_depend_param_body->dependName = pstrdup(typ_name);
+    } else {
+        gs_depend_param_body->dependName = real_typ_name;
+    }
+    gs_depend_param_body->refPosType = GSDEPEND_REFOBJ_POS_IN_TYPE;
+    gs_depend_param_body->type = GSDEPEND_OBJECT_TYPE_TYPE;
+    return true;
+}
+
 /* --------------------------------
  *		AddNewAttributeTuples
  *
@@ -1005,7 +1035,8 @@ void InsertPgAttributeTuple(Relation pg_attribute_rel, Form_pg_attribute new_att
  *		tuples to pg_attribute.
  * --------------------------------
  */
-static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relkind, bool oidislocal, int oidinhcount, bool hasbucket, bool hasuids)
+static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relkind,
+    bool oidislocal, int oidinhcount, bool hasbucket, bool hasuids, List* depend_extend, const char* typ_name, Oid namespace_oid)
 {
     Form_pg_attribute attr;
     int i;
@@ -1020,7 +1051,13 @@ static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relki
     rel = heap_open(AttributeRelationId, RowExclusiveLock);
 
     indstate = CatalogOpenIndexes(rel);
-
+    GsDependParamBody gs_depend_param_body;
+    gsplsql_init_gs_depend_param_body(&gs_depend_param_body);
+    bool need_build_depend = false;
+    if (enable_plpgsql_gsdependency()) {
+        need_build_depend = make_gs_depend_param_body(&gs_depend_param_body, typ_name, relkind, namespace_oid);
+    }
+    ListCell* depend_extend_cell = list_head(depend_extend);
     /*
      * First we add the user attributes.  This is also a convenient place to
      * add dependencies on their datatypes and collations.
@@ -1048,7 +1085,17 @@ static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relki
             referenced.classId = TypeRelationId;
             referenced.objectId = attr->atttypid;
             referenced.objectSubId = 0;
-            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+            
+            if (need_build_depend) {
+                if (NULL != depend_extend_cell) {
+                    gs_depend_param_body.dependExtend = (TypeDependExtend*)lfirst(depend_extend_cell);
+                } else {
+                    gs_depend_param_body.dependExtend = NULL;
+                }
+                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gs_depend_param_body);
+            } else {
+                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+            }
 
             /* The default collation is pinned, so don't bother recording it */
             if (OidIsValid(attr->attcollation) && attr->attcollation != DEFAULT_COLLATION_OID) {
@@ -1058,6 +1105,12 @@ static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relki
                 recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
             }
         }
+        if (need_build_depend && NULL != depend_extend_cell) {
+            depend_extend_cell = lnext(depend_extend_cell);
+        }
+    }
+    if (need_build_depend) {
+        pfree_ext(gs_depend_param_body.dependName);
     }
 
     /*
@@ -2600,7 +2653,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
                              int oidinhcount, OnCommitAction oncommit, Datum reloptions, bool use_user_acl,
                              bool allow_system_table_mods, PartitionState *partTableState, int8 row_compress,
                              HashBucketInfo *bucketinfo, bool record_dependce, List *ceLst, StorageType storage_type,
-                             LOCKMODE partLockMode, ObjectAddress *typaddress)
+                             LOCKMODE partLockMode, ObjectAddress *typaddress, List* depend_extend)
 {
     Relation pg_class_desc;
     Relation new_rel_desc;
@@ -3002,7 +3055,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
      * now add tuples to pg_attribute for the attributes in our new relation.
      */
     AddNewAttributeTuples(
-        relid, new_rel_desc->rd_att, relkind, oidislocal, oidinhcount, relhasbucket, relhasuids);
+        relid, new_rel_desc->rd_att, relkind, oidislocal, oidinhcount, relhasbucket, relhasuids, depend_extend, relname, relnamespace);
     if (ceLst != NULL) {
         AddNewGsSecEncryptedColumnsTuples(relid, ceLst);
     }
@@ -8208,3 +8261,64 @@ void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids)
     }
 }
 
+static void heap_serialize_rel_attribute(Relation att_rel, Oid rel_oid,
+    int att_idx, StringInfoData* concat_name, bool* depend_undefined)
+{
+    ScanKeyData skey[2];
+    SysScanDesc scan;
+    HeapTuple tuple;
+    bool is_null = false;
+    int key_num = 0;
+    ScanKeyInit(&skey[key_num++], Anum_pg_attribute_attrelid, BTEqualStrategyNumber,
+        F_OIDEQ, ObjectIdGetDatum(rel_oid));
+    ScanKeyInit(&skey[key_num++], Anum_pg_attribute_attnum, BTEqualStrategyNumber,
+        F_INT4EQ, Int32GetDatum(att_idx));
+    scan = systable_beginscan(att_rel, AttributeRelidNumIndexId, true, SnapshotSelf, key_num, skey);
+    tuple = systable_getnext(scan);
+    if (!HeapTupleIsValid(tuple)) {
+        systable_endscan(scan);
+        return;
+    }
+    Datum id_dropped_datum = heap_getattr(tuple, Anum_pg_attribute_attisdropped,
+        RelationGetDescr(att_rel), &is_null);
+    if (is_null || DatumGetBool(id_dropped_datum)) {
+        systable_endscan(scan);
+        return;
+    }
+    Datum att_name_datum = heap_getattr(tuple, Anum_pg_attribute_attname,
+        RelationGetDescr(att_rel), &is_null);
+    if (!is_null) {
+        appendStringInfoString(concat_name, DatumGetName(att_name_datum)->data);
+    }
+    Datum typ_oid_datum = heap_getattr(tuple, Anum_pg_attribute_atttypid,
+        RelationGetDescr(att_rel), &is_null);
+    appendStringInfoString(concat_name, ":");
+    Oid typ_oid = DatumGetObjectId(typ_oid_datum);
+    if (!is_null && OidIsValid(typ_oid) && typ_oid != UNDEFINEDOID) {
+        (void)MakeTypeNamesStrForTypeOid(DatumGetObjectId(typ_oid_datum), depend_undefined, concat_name);
+    } else if (NULL != depend_undefined) {
+        *depend_undefined = true;
+    }
+    appendStringInfoString(concat_name, ",");
+    systable_endscan(scan);
+}
+
+char* heap_serialize_row_attr(Oid rel_oid, bool* depend_undefined)
+{
+    Relation rel;
+    StringInfoData concat_name;
+    char rel_kind = get_rel_relkind(rel_oid);
+    if (rel_kind != RELKIND_COMPOSITE_TYPE && rel_kind != RELKIND_RELATION) {
+        return NULL;
+    }
+    int att_num = get_relnatts(rel_oid);
+    rel = heap_open(AttributeRelationId, AccessShareLock);
+    initStringInfo(&concat_name);
+    for (int i = 1; i <= att_num; i++) {
+       heap_serialize_rel_attribute(rel, rel_oid, i, &concat_name, depend_undefined);
+    }
+    heap_close(rel, AccessShareLock);
+    char* ret = pstrdup(concat_name.data);
+    FreeStringInfo(&concat_name);
+    return ret;
+}

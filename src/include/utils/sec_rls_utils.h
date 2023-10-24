@@ -115,5 +115,6 @@ extern EnableRlsFeature CheckEnableRlsPolicies(const Relation relation, Oid role
 extern SelectStmt* MakeRlsSelectStmtForCopyTo(const Relation relation, const CopyStmt* stmt);
 extern void LicenseSupportRls();
 extern void SupportRlsForRel(const Relation relation);
+extern bool IsRlsFunction(Oid funcid);
 
 #endif /* UTILS_SEC_RLS_UTILS_H */

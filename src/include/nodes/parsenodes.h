@@ -1384,6 +1384,21 @@ typedef struct AlterFunctionStmt {
     List* actions;      /* list of DefElem */
 } AlterFunctionStmt;
 
+enum CompileEntry {
+    COMPILE_PROCEDURE,
+    COMPILE_FUNCTION,
+    COMPILE_PACKAGE,
+    COMPILE_PKG_SPECIFICATION,
+    COMPILE_PKG_BODY
+};
+
+typedef struct CompileStmt {
+    NodeTag type;
+    List* objName;
+    List* funcArgs;
+    CompileEntry compileItem;
+} CompileStmt;
+
 typedef struct InlineCodeBlock {
     NodeTag type;
     char* source_text;  /* source text of anonymous code block */

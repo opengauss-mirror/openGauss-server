@@ -60,6 +60,7 @@ CATALOG(pg_object,9025)   BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
     timestamptz    mtime;              /* When modify the object. */
     int8           createcsn;          /* When create relation */
     int8           changecsn;          /* When modify the table structure or store properties */
+    bool           valid;              /* Is valid? */
 } FormData_pg_object;
 
 #ifdef new_timestamptz
@@ -78,7 +79,7 @@ typedef FormData_pg_object* Form_pg_object;
  *        compiler constants for pg_object
  *-------------------------------------------------------------------------
  */
-#define Natts_pg_object                          7
+#define Natts_pg_object                          8
 #define Anum_pg_object_oid                       1
 #define Anum_pg_object_type                      2
 #define Anum_pg_object_creator                   3
@@ -86,6 +87,7 @@ typedef FormData_pg_object* Form_pg_object;
 #define Anum_pg_object_mtime                     5
 #define Anum_pg_object_createcsn                 6
 #define Anum_pg_object_changecsn                 7
+#define Anum_pg_object_valid                     8
 
 #define PgObjectType char
 
@@ -103,7 +105,13 @@ typedef FormData_pg_object* Form_pg_object;
 #define OBJECT_TYPE_PKGSPEC 'S'
 #define OBJECT_TYPE_PKGBODY 'B'
 
-extern void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt);
+extern bool GetPgObjectValid(Oid oid, PgObjectType objectType);
+extern bool SetPgObjectValid(Oid oid, PgObjectType objectType, bool valid);
+extern bool GetCurrCompilePgObjStatus();
+extern void SetCurrCompilePgObjStatus(bool status);
+extern void UpdateCurrCompilePgObjStatus(bool status);
+extern void InvalidateCurrCompilePgObj();
+extern void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt, bool isValid = true);
 extern void DeletePgObject(Oid objectOid, PgObjectType objectType);
 extern void GetObjectCSN(Oid objectOid, Relation userRel, PgObjectType objectType, ObjectCSN * const csnInfo);
 void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType);

@@ -1368,6 +1368,7 @@ scanner_init(const char *str,
 	yyext->include_ora_comment = false;
 	yyext->func_param_begin = 0;
 	yyext->func_param_end = 0;
+	yyext->return_pos_end = 0;
 
 	/*
 	 * Make a scan buffer with special termination needed by flex.

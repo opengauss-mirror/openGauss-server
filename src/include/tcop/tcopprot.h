@@ -41,6 +41,8 @@ extern List* pg_parse_query(const char* query_string, List** query_string_locati
 extern List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams);
 extern List* pg_analyze_and_rewrite_params(
     Node* parsetree, const char* query_string, ParserSetupHook parserSetup, void* parserSetupArg);
+extern Query* pg_analyze_and_get_query(Node* parsetree, const char* query_string,
+                                ParserSetupHook parserSetup, void* parserSetupArg);
 extern PlannedStmt* pg_plan_query(
     Query* querytree, int cursorOptions, ParamListInfo boundParams, bool underExplain = false);
 extern List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundParams);

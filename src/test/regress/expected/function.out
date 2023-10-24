@@ -1484,7 +1484,7 @@ call sche1.pro();
 ERROR:  relation "test" already exists in schema "sche1"
 DETAIL:  creating new table with existing name in the same schema
 CONTEXT:  SQL statement "create table test as select * from sche_t1"
-PL/pgSQL function sche1.subpro() line 2 at SQL statement
+PL/pgSQL function subpro() line 2 at SQL statement
 SQL statement "CALL subpro()"
 PL/pgSQL function sche1.pro() line 3 at PERFORM
 drop schema sche1 cascade;

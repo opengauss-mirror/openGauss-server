@@ -39,6 +39,9 @@
 #include "utils/pl_package.h"
 #include "catalog/gs_collation.h"
 #include "parser/parse_utilcmd.h"
+#include "catalog/pg_object.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/pg_type_fn.h"
 
 static int32 typenameTypeMod(ParseState* pstate, const TypeName* typname, Type typ);
 
@@ -71,13 +74,35 @@ Oid LookupPctTypeInPackage(RangeVar* rel, Oid pkgOid, const char* field)
     }
 }
 
+Type LookupTypeNameSupportUndef(ParseState *pstate, const TypeName *typeName, int32 *typmod_p, bool print_notice)
+{
+    Type typtup = NULL;
+    CreatePlsqlType oldCreatePlsqlType = u_sess->plsql_cxt.createPlsqlType;
+    PG_TRY();
+    {
+        set_create_plsql_type_not_check_nsp_oid();
+        TypeDependExtend* dependExt = NULL;
+        InstanceTypeNameDependExtend(&dependExt);
+        typtup = LookupTypeName(pstate, typeName, typmod_p, print_notice, dependExt);
+        pfree_ext(dependExt);
+    }
+    PG_CATCH();
+    {
+        set_create_plsql_type(oldCreatePlsqlType);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    set_create_plsql_type(oldCreatePlsqlType);
+    return typtup;
+}
+
 /*
  * LookupTypeName
  *       Wrapper for typical case.
  */
-Type LookupTypeName(ParseState *pstate, const TypeName *typeName, int32 *typmod_p, bool print_notice)
+Type LookupTypeName(ParseState *pstate, const TypeName *typeName, int32 *typmod_p, bool print_notice, TypeDependExtend* dependExtend)
 {
-       return LookupTypeNameExtended(pstate, typeName, typmod_p, true, print_notice);
+       return LookupTypeNameExtended(pstate, typeName, typmod_p, true, print_notice, dependExtend);
 }
 
 /*
@@ -108,14 +133,16 @@ Type LookupTypeName(ParseState *pstate, const TypeName *typeName, int32 *typmod_
  * pstate is only used for error location info, and may be NULL.
  */
 Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* typmod_p, bool temp_ok,
-                            bool print_notice)
+                            bool print_notice, TypeDependExtend* dependExtend)
 {
     Oid typoid = InvalidOid;
-    HeapTuple tup;
+    HeapTuple tup = NULL;
     int32 typmod = -1;
     Oid pkgOid = InvalidOid;
     bool notPkgType = false;
-
+    char* schemaname = NULL;
+    char* typeName = NULL;
+    char* pkgName = NULL;
     if (typname->names == NIL) {
         /* We have the OID already if it's an internally generated TypeName */
         typoid = typname->typeOid;
@@ -128,10 +155,12 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
         char* pkgName = NULL;
         char* schemaName = NULL;
         /* deconstruct the name list */
+        int typTupStatus = InvalidTypeTup;
         switch (list_length(typname->names)) {
             case 1:
                 tup = getPLpgsqlVarTypeTup(strVal(linitial(typname->names)));
-                if (HeapTupleIsValid(tup)) {
+                typTupStatus = GetTypeTupStatus(tup);
+                if (typTupStatus == NormalTypeTup) {
                     return tup;
                 }
                 ereport(ERROR,
@@ -141,16 +170,18 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                         parser_errposition(pstate, typname->location)));
                 break;
             case 2:
-                tup = FindPkgVariableType(pstate, typname, typmod_p);
-                if (HeapTupleIsValid(tup)) {
+                tup = FindPkgVariableType(pstate, typname, typmod_p, dependExtend);
+                typTupStatus = GetTypeTupStatus(tup);
+                if (typTupStatus == NormalTypeTup) {
                     return (Type)tup;
                 }
                 rel->relname = strVal(linitial(typname->names));
                 field = strVal(lsecond(typname->names));
                 break;
             case 3:
-                tup = FindPkgVariableType(pstate, typname, typmod_p);
-                if (HeapTupleIsValid(tup)) {
+                tup = FindPkgVariableType(pstate, typname, typmod_p, dependExtend);
+                typTupStatus = GetTypeTupStatus(tup);
+                if (typTupStatus == NormalTypeTup) {
                     return (Type)tup;
                 }
                 pkgName = strVal(linitial(typname->names));
@@ -164,8 +195,9 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                 field = strVal(lthird(typname->names));
                 break;
             case 4:
-                tup = FindPkgVariableType(pstate, typname, typmod_p);
-                if (HeapTupleIsValid(tup)) {
+                tup = FindPkgVariableType(pstate, typname, typmod_p, dependExtend);
+                typTupStatus = GetTypeTupStatus(tup);
+                if (typTupStatus == NormalTypeTup) {
                     return (Type)tup;
                 }
                 pkgName = strVal(lsecond(typname->names));
@@ -203,14 +235,38 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid, field);
         }
         if (!OidIsValid(relid)) {
-            relid = RangeVarGetRelidExtended(rel, NoLock, false, false, false, true, NULL, NULL, NULL, NULL);
+            if (enable_plpgsql_undefined()) {
+                relid = RangeVarGetRelidExtended(rel, NoLock, true, false, false, true, NULL, NULL, NULL, NULL);
+                if (!OidIsValid(relid) && HeapTupleIsValid(tup)) {
+                    if (NULL != dependExtend) {
+                        dependExtend->dependUndefined = true;
+                    }
+                    if (GetCurrCompilePgObjStatus() &&
+                        u_sess->plsql_cxt.functionStyleType != FUNCTION_STYLE_TYPE_REFRESH_HEAD) {
+                        ereport(WARNING,
+                            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                errmsg("TYPE %s does not exist in type.", rel->relname)));
+                    }
+                    InvalidateCurrCompilePgObj();
+                    return tup;
+                }
+            } else {
+                relid = RangeVarGetRelidExtended(rel, NoLock, false, false, false, true, NULL, NULL, NULL, NULL);
+            }
         }
         attnum = get_attnum(relid, field);
         if (attnum == InvalidAttrNumber) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_COLUMN),
-                    errmsg("column \"%s\" of relation \"%s\" does not exist", field, rel->relname),
-                    parser_errposition(pstate, typname->location)));
+            if (enable_plpgsql_undefined()) {
+                if (NULL != dependExtend) {
+                    dependExtend->dependUndefined = true;
+                }
+                return SearchSysCache1(TYPEOID, ObjectIdGetDatum(UNDEFINEDOID));
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_COLUMN),
+                        errmsg("column \"%s\" of relation \"%s\" does not exist", field, rel->relname),
+                        parser_errposition(pstate, typname->location)));
+            }
         }
         typoid = get_atttype(relid, attnum);
 
@@ -218,6 +274,16 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
             typoid = get_atttypmod(relid, attnum);
         } else {
             typmod = get_atttypmod(relid, attnum);
+        }
+
+        if (enable_plpgsql_undefined() && UndefineTypeTup == typTupStatus && NULL != dependExtend) {
+            gsplsql_delete_unrefer_depend_obj_oid(dependExtend->undefDependObjOid, false);
+            dependExtend->undefDependObjOid = InvalidOid;
+            ReleaseSysCache(tup);
+            tup = NULL;
+        }
+        if (enable_plpgsql_gsdependency() && NULL != dependExtend) {
+            dependExtend->typeOid = get_rel_type_id(relid);
         }
 
         /* If an array reference, return the array type instead */
@@ -235,10 +301,6 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
         }
     } else {
         /* Normal reference to a type name */
-        char* schemaname = NULL;
-        char* typeName = NULL;
-        char* pkgName = NULL;
-
         /* Handle %ROWTYPE reference to type of an existing table. */
         if (typname->pct_rowtype) {
             RangeVar* relvar = NULL;
@@ -266,14 +328,25 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
             }
             Oid class_oid = RangeVarGetRelidExtended(relvar, NoLock, true, false, false, true, NULL, NULL);
             if (!OidIsValid(class_oid)) {
-                pfree_ext(relvar);
                 /* if case: cursor%rowtype */
                 tup = getCursorTypeTup(strVal(linitial(typname->names)));
                 if (HeapTupleIsValid(tup)) {
                     return (Type)tup;
                 }
-                
-                ereport(ERROR,
+                if (enable_plpgsql_undefined() && NULL != dependExtend) {
+                    Oid undefRefObjOid = gsplsql_try_build_exist_schema_undef_table(relvar);
+                    if (OidIsValid(undefRefObjOid)) {
+                        dependExtend->undefDependObjOid = undefRefObjOid;
+                        dependExtend->dependUndefined = true;
+                        InvalidateCurrCompilePgObj();
+                        tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(UNDEFINEDOID));
+                        if (typmod_p != NULL) {
+                            *typmod_p = -1;
+                        }
+                    }
+                }
+                pfree_ext(relvar);
+                ereport(NULL != tup ? WARNING : ERROR,
                     (errmodule(MOD_PARSER),
                         errcode(ERRCODE_UNDEFINED_TABLE),
                         errmsg("relation does not exist when parse word."),
@@ -281,6 +354,7 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                                 NameListToString(typname->names)),
                         errcause("incorrectly referencing relation"),
                         erraction("check the relation name for %%ROWTYPE")));
+                return (Type)tup;
             }
             char relkind = get_rel_relkind(class_oid);
             /* onyl table is allowed for %ROWTYPE. */
@@ -328,13 +402,23 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                 /* find type in current packgae first */
                 typoid = LookupTypeInPackage(typname->names, typeName);
             }
-            if (isPkgType) {
-                typoid = LookupTypeInPackage(typname->names, typeName, pkgOid);
-            }
-            if (!OidIsValid(typoid)) {
-                /* Unqualified type name, so search the search path */
-                typoid = TypenameGetTypidExtended(typeName, temp_ok);
-                notPkgType = true; /* should also track type dependency, fix when refactoring */
+            if (enable_plpgsql_gsdependency_guc()) {
+                if (isPkgType) {
+                    typoid = LookupTypeInPackage(typname->names, typeName, pkgOid);
+                } else if (!OidIsValid(typoid)) {
+                    /* Unqualified type name, so search the search path */
+                    typoid = TypenameGetTypidExtended(typeName, temp_ok);
+                    notPkgType = true; /* should also track type dependency, fix when refactoring */
+                }
+            } else {
+                if (isPkgType) {
+                    typoid = LookupTypeInPackage(typname->names, typeName, pkgOid);
+                }
+                if (!OidIsValid(typoid)) {
+                    /* Unqualified type name, so search the search path */
+                    typoid = TypenameGetTypidExtended(typeName, temp_ok);
+                    notPkgType = true; /* should also track type dependency, fix when refactoring */
+                }
             }
         }
 
@@ -355,29 +439,58 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
         if (typmod_p != NULL) {
             *typmod_p = -1;
         }
-        return NULL;
-    }
+        if (enable_plpgsql_undefined() && NULL != dependExtend) {
+            if (NULL != schemaname && NULL == pkgName && !OidIsValid(get_namespace_oid(schemaname, true))) {
+                pkgName = schemaname;
+                schemaname = NULL;
+            }
+            GsDependObjDesc objDesc;
+            objDesc.schemaName = schemaname;
+            char* activeSchemaName = NULL;
+            if (schemaname == NULL) {
+                activeSchemaName = get_namespace_name(get_compiled_object_nspoid());
+                objDesc.schemaName = activeSchemaName;
+            }
+            objDesc.packageName = pkgName;
+            objDesc.name = typeName;
+            objDesc.type = GSDEPEND_OBJECT_TYPE_TYPE;
+            if (u_sess->plsql_cxt.functionStyleType != FUNCTION_STYLE_TYPE_REFRESH_HEAD) {
+                dependExtend->undefDependObjOid = gsplsql_flush_undef_ref_depend_obj(&objDesc);
+            } else {
+                dependExtend->undefDependObjOid = InvalidOid;
+            }
+            dependExtend->dependUndefined = true;
+            pfree_ext(activeSchemaName);
+            if (GetCurrCompilePgObjStatus() &&
+                u_sess->plsql_cxt.functionStyleType != FUNCTION_STYLE_TYPE_REFRESH_HEAD) {
+                    ereport(WARNING,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                     errmsg("Type %s does not exist.", typeName)));
+            }
+            InvalidateCurrCompilePgObj();
+            tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(UNDEFINEDOID));
+        }
+    } else {
+        /* Don't support the type in blacklist. */
+        bool is_unsupported_type = !u_sess->attr.attr_common.IsInplaceUpgrade && IsTypeInBlacklist(typoid);
+        if (is_unsupported_type) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type %s is not yet supported.", format_type_be(typoid))));
+        }
 
-    /* Don't support the type in blacklist. */
-    bool is_unsupported_type = !u_sess->attr.attr_common.IsInplaceUpgrade && IsTypeInBlacklist(typoid);
-    if (is_unsupported_type) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type %s is not yet supported.", format_type_be(typoid))));
-    }
+        tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
 
-    tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
-
-    /* should not happen */
-    if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typoid)));
+        /* should not happen */
+        if (!HeapTupleIsValid(tup)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typoid)));
+        }
+        if (!typname->pct_type) {
+            typmod = typenameTypeMod(pstate, typname, (Type)tup);
+        }
+        if (typmod_p != NULL) {
+            *typmod_p = typmod;
+        }
     }
-    if (!typname->pct_type) {
-        typmod = typenameTypeMod(pstate, typname, (Type)tup);
-    }
-    if (typmod_p != NULL) {
-        *typmod_p = typmod;
-    }
-
     return (Type)tup;
 }
 
@@ -388,11 +501,11 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
  * a suitable error message if the type cannot be found or is not defined.
  * Callers of this can therefore assume the result is a fully valid type.
  */
-Type typenameType(ParseState* pstate, const TypeName* typname, int32* typmod_p)
+Type typenameType(ParseState* pstate, const TypeName* typname, int32* typmod_p, TypeDependExtend* dependExtend)
 {
     Type tup;
 
-    tup = LookupTypeName(pstate, typname, typmod_p);
+    tup = LookupTypeName(pstate, typname, typmod_p, true, dependExtend);
 
     /*
      * If the type is relation, then we check
@@ -447,11 +560,11 @@ Oid typenameTypeId(ParseState* pstate, const TypeName* typname)
  * This is equivalent to typenameType, but we only hand back the type OID
  * and typmod, not the syscache entry.
  */
-void typenameTypeIdAndMod(ParseState* pstate, const TypeName* typname, Oid* typeid_p, int32* typmod_p)
+void typenameTypeIdAndMod(ParseState* pstate, const TypeName* typname, Oid* typeid_p, int32* typmod_p, TypeDependExtend* dependExtend)
 {
     Type tup;
 
-    tup = typenameType(pstate, typname, typmod_p);
+    tup = typenameType(pstate, typname, typmod_p, dependExtend);
     *typeid_p = HeapTupleGetOid(tup);
     ReleaseSysCache(tup);
 }
@@ -906,7 +1019,7 @@ static void pts_error_callback(void* arg)
  * such as "int4" or "integer" or "character varying(32)", parse
  * the string and convert it to a type OID and type modifier.
  */
-void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
+void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p, TypeDependExtend* dependExtend)
 {
     StringInfoData buf;
     buf.data = NULL;
@@ -970,7 +1083,7 @@ void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
         goto fail;
     }
 
-    typenameTypeIdAndMod(NULL, typname, typeid_p, typmod_p);
+    typenameTypeIdAndMod(NULL, typname, typeid_p, typmod_p, dependExtend);
 
     pfree_ext(buf.data);
 
@@ -979,7 +1092,13 @@ void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p)
 fail:
     pfree_ext(buf.data);
     InsertErrorMessage("invalid type name", u_sess->plsql_cxt.plpgsql_yylloc);
-    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid type name \"%s\"", str)));
+    if (enable_plpgsql_undefined()) {
+        InvalidateCurrCompilePgObj();
+        *typeid_p = UNDEFINEDOID;
+        ereport(WARNING, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid type name \"%s\"", str)));
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid type name \"%s\"", str)));
+    }
 }
 
 /*
@@ -1448,8 +1567,31 @@ char* CastPackageTypeName(const char* typName, Oid objOid, bool isPackage, bool 
     return castTypName.data;
 }
 
+char* ParseTypeName(const char* typName, Oid pkgOid)
+{
+    if (!OidIsValid(pkgOid)) {
+        return NULL;
+    }
+    char* oldStr = NULL;
+    const int oldStrLen  =12;
+    oldStr = (char*)palloc0(oldStrLen * sizeof(char));
+    pg_ltoa(pkgOid, oldStr);
+    int len = strlen(oldStr);
+    char* pos = strstr((char*)typName, oldStr);
+    pfree_ext(oldStr);
+    if (NULL == pos) {
+        return NULL;
+    }
+    pos +=len;
+    if (*pos != '.') {
+        return NULL;
+    }
+    return pstrdup(++pos);
+}
+
 /* find if %type ref a package variable type */
-HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32* typmod_p)
+HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32* typmod_p,
+    TypeDependExtend* depend_extend)
 {
     HeapTuple tup = NULL;
 
@@ -1457,8 +1599,7 @@ HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32
     return tup;
 #else
     int32 typmod = -1;
-
-    if (u_sess->plsql_cxt.curr_compile_context == NULL) {
+    if (!enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.curr_compile_context == NULL) {
         return tup;
     }
 
@@ -1469,15 +1610,14 @@ HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32
     }
 
     /* find package.var%TYPE second */
-    if (list_length(typname->names) <= 1 || list_length(typname->names) >= 4) {
+    if (list_length(typname->names) <= 1) {
+        return tup;
+    }
+    if (list_length(typname->names) >= (enable_plpgsql_gsdependency_guc() ? 5 :4)) {
         return tup;
     }
     PLpgSQL_datum* datum = GetPackageDatum(typname->names);
     if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_VAR) {
-        if (OidIsValid(((PLpgSQL_var*)datum)->datatype->tableOfIndexType)) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("not support ref table of variable as procedure argument type")));
-        }
         Oid typOid =  ((PLpgSQL_var*)datum)->datatype->typoid;
         tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typOid));
         /* should not happen */
@@ -1488,6 +1628,19 @@ HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32
         typmod = typenameTypeMod(pstate, typname, (Type)tup);
         if (typmod_p != NULL) {
             *typmod_p = typmod;
+        }
+        if (enable_plpgsql_gsdependency() && NULL != depend_extend) {
+            DeconstructQualifiedName(typname->names, &depend_extend->schemaName,
+                                     &depend_extend->objectName, &depend_extend->packageName);
+        }
+    } else if (enable_plpgsql_undefined() && NULL != depend_extend) {
+        Oid undefRefObjOid = gsplsql_try_build_exist_pkg_undef_var(typname->names);
+        if (OidIsValid(undefRefObjOid)) {
+            depend_extend->undefDependObjOid = undefRefObjOid;
+            tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(UNDEFINEDOID));
+            if (typmod_p != NULL) {
+                *typmod_p = -1;
+            }
         }
     }
     return tup;
@@ -1535,13 +1688,18 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
 
     /* pkgOid is invalid, try to find the type in current compile package */
     if (!OidIsValid(pkgOid)) {
-        /* if not compiling packgae, just return invalid oid */
-        if (u_sess->plsql_cxt.curr_compile_context == NULL ||
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL) {
-            return typOid;
+        if (enable_plpgsql_gsdependency_guc() &&
+            u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_REFRESH_HEAD &&
+            OidIsValid(u_sess->plsql_cxt.currRefreshPkgOid)) {
+            pkgOid = u_sess->plsql_cxt.currRefreshPkgOid;
+        } else {
+            /* if not compiling packgae, just return invalid oid */
+            if (u_sess->plsql_cxt.curr_compile_context == NULL ||
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL) {
+                return typOid;
+            }
+            pkgOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
         }
-
-        pkgOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
         /* find public package type first */
         castTypeName = CastPackageTypeName(typeName, pkgOid, true, true);
         typOid = TypenameGetTypidExtended(castTypeName, false);
@@ -1574,7 +1732,13 @@ Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid n
     pfree_ext(castTypeName);
 
     if (OidIsValid(typOid)) {
-        check_record_nest_tableof_index_type(NULL, typeNames);
+        bool pkgValid = true;
+        if (enable_plpgsql_gsdependency_guc()) {
+            pkgValid = GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGSPEC);
+        } 
+        if (pkgValid) {
+            // check_record_nest_tableof_index_type(NULL, typeNames);
+        }
         return typOid;
     }
 
@@ -1638,4 +1802,12 @@ void check_type_supports_multi_charset(Oid typid, bool allow_array)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("multi character set for datatype '%s' is not supported", get_typename(typid))));
     }
+}
+
+TypeTupStatus GetTypeTupStatus(Type typ)
+{
+    if (HeapTupleIsValid(typ)) {
+        return (UNDEFINEDOID == HeapTupleGetOid(typ) ? UndefineTypeTup : NormalTypeTup);
+    }
+    return InvalidTypeTup;
 }

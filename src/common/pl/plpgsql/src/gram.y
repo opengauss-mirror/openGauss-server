@@ -18,6 +18,7 @@
 #include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_package.h"
+#include "catalog/gs_dependencies_fn.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_synonym.h"
@@ -240,7 +241,7 @@ static Oid get_table_type(PLpgSQL_datum* datum);
 static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr);
 static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype);
 static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace);
-static void  plpgsql_build_package_array_type(const char* typname, Oid elemtypoid, char arraytype);
+static void  plpgsql_build_package_array_type(const char* typname, Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend = NULL);
 static void plpgsql_build_package_refcursor_type(const char* typname);
 int plpgsql_yylex_single(void);
 static void get_datum_tok_type(PLpgSQL_datum* target, int* tok_flag);
@@ -1299,6 +1300,9 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                             parser_errposition(@5)));
                                 }
                             }
+                            if (enable_plpgsql_gsdependency()) {
+                                gsplsql_build_gs_type_in_body_dependency($3);
+                            }
                             }
                             pfree_ext(varname->name);
                         }
@@ -1442,7 +1446,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
 
                         plpgsql_build_varrayType($2->name, $2->lineno, $9, true);
                         if (IS_PACKAGE) {
-                            plpgsql_build_package_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY);
+                            plpgsql_build_package_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY, $9->dependExtend);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1596,7 +1600,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         }
                         plpgsql_build_tableType($2->name, $2->lineno, $6, true);
                         if (IS_PACKAGE) {
-                            plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF);
+                            plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF, $6->dependExtend);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1767,9 +1771,9 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
 
                         if (IS_PACKAGE) {
                             if ($10->typoid == VARCHAROID) {
-                                plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_VARCHAR);
+                                plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_VARCHAR, $6->dependExtend);
                             } else {
-                                plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_INTEGER);
+                                plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_INTEGER, $6->dependExtend);
                             }
                         }
                         pfree_ext($2->name);
@@ -1914,6 +1918,11 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         }
                         if (IS_PACKAGE) {
                             newp->typoid = plpgsql_build_package_record_type($2->name, $6, true);
+                        } else if (enable_plpgsql_gsdependency()) {
+                            ListCell* cell =  NULL;
+                            foreach(cell, $6) {
+                                gsplsql_build_gs_type_in_body_dependency(((PLpgSQL_rec_attr*)lfirst(cell))->type);
+                            }
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -5968,6 +5977,9 @@ cursor_variable	: T_DATUM
                                             $1.ident),
                                      parser_errposition(@1)));
                         }
+                        if (enable_plpgsql_gsdependency()) {
+                            gsplsql_build_gs_variable_dependency($1.idents);
+                        }
                         $$ = $1.dno;
                     }
                 | T_WORD
@@ -8279,6 +8291,12 @@ static bool construct_cword(StringInfo ds, ArrayParseContext *context, int *tok,
     } else {
         yyerror("syntax error");
     }
+    if (enable_plpgsql_gsdependency()) {
+        FuncCandidateList clist = FuncnameGetCandidates(idents, -1, NIL, false, false, true);
+        if (clist == NULL) {
+            gsplsql_build_gs_variable_dependency(idents);
+        }
+    }
     if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
         int dno = -1;
         char *name = NameListToString(idents);
@@ -8300,7 +8318,21 @@ static bool construct_cword(StringInfo ds, ArrayParseContext *context, int *tok,
     int curloc = yylloc;
     *tok = yylex();
     plpgsql_push_back_token(*tok);
-    return construct_object_type(ds, context, makeTypeNameFromNameList(idents), tok, parenlevel, curloc, loc);
+    bool result;
+    CreatePlsqlType oldCreatePlsqlType = u_sess->plsql_cxt.createPlsqlType;
+    PG_TRY();
+    {
+        set_create_plsql_type_not_check_nsp_oid();
+        result = construct_object_type(ds, context, makeTypeNameFromNameList(idents), tok, parenlevel, curloc, loc);
+        set_create_plsql_type(oldCreatePlsqlType);
+    }
+    PG_CATCH();
+    {
+        set_create_plsql_type(oldCreatePlsqlType);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    return result;
 }
 
 /* Convenience routine to read an expression with one possible terminator */
@@ -8879,6 +8911,9 @@ read_sql_construct6(int until,
                 idents = yylval.wdatum.idents;
                 int var_dno = yylval.wdatum.dno;
 
+                if (enable_plpgsql_gsdependency()) {
+                    gsplsql_build_gs_variable_dependency(idents);
+                }
                 if (type_flag == PLPGSQL_TOK_TABLE_VAR) {
                     /*
                      * table var name may be schema.pkg.table_var
@@ -9591,16 +9626,20 @@ read_datatype(int tok)
             if (tok_is_keyword(tok, &yylval,
                                K_TYPE, "type"))
             {
+                TypeDependExtend* typeDependExtend = NULL;
+                if (enable_plpgsql_gsdependency()) {
+                    InstanceTypeNameDependExtend(&typeDependExtend);
+                }
                 /* find val.col%TYPE first */
                 HeapTuple tup = NULL;
                 int collectionType = PLPGSQL_COLLECTION_NONE;
                 Oid tableOfIndexType = InvalidOid;
                 int32 typMod = -1;
-                tup = FindRowVarColType(dtnames, &collectionType, &tableOfIndexType, &typMod);
+                tup = FindRowVarColType(dtnames, &collectionType, &tableOfIndexType, &typMod, typeDependExtend);
                 if (tup != NULL) {
                     Oid typOid = typeTypeId(tup);
                     ReleaseSysCache(tup);
-                    PLpgSQL_type* type = plpgsql_build_datatype(typOid, typMod, InvalidOid);
+                    PLpgSQL_type* type = plpgsql_build_datatype(typOid, typMod, InvalidOid, typeDependExtend);
                     if (OidIsValid(tableOfIndexType)) {
                         type->collectionType = collectionType;
                         type->tableOfIndexType = tableOfIndexType;
@@ -9610,22 +9649,47 @@ read_datatype(int tok)
 
                 /* find pkg.var%TYPE second */
                 PLpgSQL_datum* datum = GetPackageDatum(dtnames);
-                if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_VAR) {
-                    PLpgSQL_var* var = (PLpgSQL_var*)datum;
-                    Oid typOid =  var->datatype->typoid;
-                    int32 typmod = var->datatype->atttypmod;
-                    Oid collation = var->datatype->collation;
-                    int collectionType = var->datatype->collectionType;
-                    Oid tableOfIndexType = var->datatype->tableOfIndexType;
-
-                    PLpgSQL_type* type = plpgsql_build_datatype(typOid, typmod, collation);
-                    type->collectionType = collectionType;
-                    type->tableOfIndexType = tableOfIndexType;
-                    return type;
+                if (datum != NULL) {
+                    if (datum->dtype == PLPGSQL_DTYPE_VAR) {
+                        PLpgSQL_var* var = (PLpgSQL_var*)datum;
+                        Oid typOid =  var->datatype->typoid;
+                        int32 typmod = var->datatype->atttypmod;
+                        Oid collation = var->datatype->collation;
+                        int collectionType = var->datatype->collectionType;
+                        Oid tableOfIndexType = var->datatype->tableOfIndexType;
+                        if (var->pkg != NULL && enable_plpgsql_gsdependency()) {
+                            typeDependExtend->objectName = pstrdup(var->refname);
+                            typeDependExtend->packageName = pstrdup(var->pkg->pkg_signature);
+                            typeDependExtend->schemaName = get_namespace_name(var->pkg->namespaceOid);
+                        }
+                        PLpgSQL_type* type = plpgsql_build_datatype(typOid, typmod, collation, typeDependExtend);
+                        type->collectionType = collectionType;
+                        type->tableOfIndexType = tableOfIndexType;
+                        return type;
+                    } else if (datum->dtype == PLPGSQL_DTYPE_ROW){
+                        PLpgSQL_row* row = (PLpgSQL_row*)datum;
+                        if (row->rowtupdesc && row->rowtupdesc->tdtypeid != RECORDOID &&
+                            OidIsValid(row->rowtupdesc->tdtypeid)) {
+                            if (row->pkg != NULL && enable_plpgsql_gsdependency()) {
+                                typeDependExtend->objectName = pstrdup(row->refname);
+                                typeDependExtend->packageName = pstrdup(row->pkg->pkg_signature);
+                                typeDependExtend->schemaName = get_namespace_name(row->pkg->namespaceOid);
+                            }
+                            return plpgsql_build_datatype(row->rowtupdesc->tdtypeid, -1, InvalidOid, typeDependExtend);
+                        }
+                    }
                 }
-                result = plpgsql_parse_cwordtype(dtnames);
+                result = plpgsql_parse_cwordtype(dtnames, typeDependExtend);
                 if (result)
                     return result;
+                if (enable_plpgsql_undefined()) {
+                    Oid tryUndefObjOid = gsplsql_try_build_exist_pkg_undef_var(dtnames);
+                    if (OidIsValid(tryUndefObjOid)) {
+                        typeDependExtend->undefDependObjOid = tryUndefObjOid;
+                        typeDependExtend->dependUndefined = true;
+                        return plpgsql_build_datatype(UNDEFINEDOID, -1, InvalidOid, typeDependExtend);
+                    }
+                }
             }
             else if (tok_is_keyword(tok, &yylval,
                                     K_ROWTYPE, "rowtype"))
@@ -12031,7 +12095,25 @@ parse_datatype(const char *string, int location)
 
     u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
     /* Let the main parser try to parse it under standard SQL rules */
-    parseTypeString(string, &type_id, &typmod);
+    TypeDependExtend* typeDependExtend = NULL;
+    if (enable_plpgsql_gsdependency()) {
+        InstanceTypeNameDependExtend(&typeDependExtend);
+        CreatePlsqlType oldCreatePlsqlType = u_sess->plsql_cxt.createPlsqlType;
+        PG_TRY();
+        {
+            set_create_plsql_type_not_check_nsp_oid();
+            parseTypeString(string, &type_id, &typmod, typeDependExtend);
+            set_create_plsql_type(oldCreatePlsqlType);
+        }
+        PG_CATCH();
+        {
+            set_create_plsql_type(oldCreatePlsqlType);
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    } else {
+        parseTypeString(string, &type_id, &typmod, typeDependExtend);
+    }
 
     (void)MemoryContextSwitchTo(oldCxt);
 
@@ -12041,11 +12123,11 @@ parse_datatype(const char *string, int location)
     /* Okay, build a PLpgSQL_type data structure for it */
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile == NULL)
     {
-        return plpgsql_build_datatype(type_id, typmod, 0);
+        return plpgsql_build_datatype(type_id, typmod, 0, typeDependExtend);
     }
 
     return plpgsql_build_datatype(type_id, typmod,
-                                  u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation);
+                                  u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation, typeDependExtend);
 }
 
 /* Build a arrary_type by elem_type. */
@@ -12420,6 +12502,9 @@ static PLpgSQL_type* build_type_from_record_var(int dno, int location)
             /* already build one, just use it */
             if(IsPackageDependType(oldtypeoid, pkgoid)) {
                 newtypeoid = oldtypeoid;
+                if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE) {
+                    (void)gsplsql_flush_undef_ref_type_dependency(newtypeoid);
+                }
             } else {
                 ereport(errstate,
                     (errmodule(MOD_PLSQL),
@@ -12459,6 +12544,9 @@ static PLpgSQL_type* build_type_from_record_var(int dno, int location)
 
             /* build dependency on created composite type. */
             buildDependencyForCompositeType(newtypeoid);
+            if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE) {
+                (void)gsplsql_flush_undef_ref_type_dependency(newtypeoid);
+            }
         }
 
         /* build datatype of the created composite type. */
@@ -12496,6 +12584,7 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
     Oid oldtypeoid = InvalidOid;
     Oid newtypeoid = InvalidOid;
     char* schamaName = NULL;
+    Oid pkgOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
     Oid pkgNamespaceOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->namespaceOid;
     if (OidIsValid(pkgNamespaceOid)) {
         schamaName = get_namespace_name(pkgNamespaceOid);
@@ -12503,7 +12592,7 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
         pkgNamespaceOid = getCurrentNamespace();
     }
     char* casttypename = CastPackageTypeName(typname,
-        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid, true,
+        pkgOid, true,
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->is_spec_compiling);
     if (strlen(casttypename) >= NAMEDATALEN ) {
         ereport(errstate,
@@ -12518,10 +12607,14 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
     }
 
     oldtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename), ObjectIdGetDatum(pkgNamespaceOid));
-    if (OidIsValid(oldtypeoid)) {
+    bool oldTypeOidIsValid = OidIsValid(oldtypeoid);
+    if (oldTypeOidIsValid) {
         /* already build on, just use it */
-        if(IsPackageDependType(oldtypeoid, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid)) {
+        if(IsPackageDependType(oldtypeoid, pkgOid)) {
             newtypeoid = oldtypeoid;
+            if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE) {
+                (void)gsplsql_flush_undef_ref_type_dependency(newtypeoid);
+            }
         } else {
             ereport(errstate,
                 (errmodule(MOD_PLSQL),
@@ -12568,6 +12661,9 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
         CommandCounterIncrement();
         pfree_ext(r);
         list_free_deep(codeflist);
+        if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE) {
+            gsplsql_build_ref_type_dependency(newtypeoid);
+        }
     }
 
     PLpgSQL_type *newtype = NULL;
@@ -12583,7 +12679,7 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
     return newtypeoid;
 }
 
-static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid, char arraytype)
+static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend)
 {
     char typtyp;
     ObjectAddress myself, referenced;
@@ -12604,8 +12700,25 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         pkgNamespaceOid = getCurrentNamespace();
     }
 
+    Oid pkgOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
     Oid oldtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename),
         ObjectIdGetDatum(pkgNamespaceOid));
+    bool oldtypeoidIsValid = OidIsValid(oldtypeoid);
+    if (enable_plpgsql_gsdependency() && u_sess->plsql_cxt.need_create_depend) {
+        char* schemaName = get_namespace_name(pkgNamespaceOid);
+        char* packageName = GetPackageName(pkgOid);
+        bool dependUndef = gsplsql_check_type_depend_undefined(schemaName, packageName, typname);
+        pfree_ext(schemaName);
+        pfree_ext(packageName);
+        if (dependUndef) {
+            ObjectAddress address;
+            address.classId = TypeRelationId;
+            address.objectId = oldtypeoid;
+            address.objectSubId = 0;
+            performDeletion(&address, DROP_CASCADE, PERFORM_DELETION_INTERNAL);
+            oldtypeoidIsValid = false;
+        }
+    }
     if (OidIsValid(oldtypeoid)) {
         /* alread build one, just return */
         if(IsPackageDependType(oldtypeoid, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid)) {
@@ -12624,7 +12737,9 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     if (arraytype == TYPCATEGORY_TABLEOF ||
         arraytype == TYPCATEGORY_TABLEOF_VARCHAR ||
         arraytype == TYPCATEGORY_TABLEOF_INTEGER) {
-        elemtypoid = get_array_type(elemtypoid);
+        if (UNDEFINEDOID != elemtypoid) {
+            elemtypoid = get_array_type(elemtypoid);
+        }
         typtyp = TYPTYPE_TABLEOF;
     } else {
         typtyp = TYPTYPE_BASE;
@@ -12665,7 +12780,8 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         -1,                         /* typmod */
         0,                          /* array dimensions for typBaseType */
         false,                      /* Type NOT NULL */
-        get_typcollation(elemtypoid));
+        get_typcollation(elemtypoid),
+        dependExtend);
 
     CommandCounterIncrement();
 
@@ -12677,6 +12793,7 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     CommandCounterIncrement();
     pfree_ext(casttypename);
 }
+
 
 static void plpgsql_build_package_refcursor_type(const char* typname)
 {
@@ -12789,7 +12906,7 @@ static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr)
 
 static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype)
 {
-    return makeTypeNameFromOid(datatype->typoid, datatype->atttypmod);
+    return makeTypeNameFromOid(datatype->typoid, datatype->atttypmod, datatype->dependExtend);
 }
 
 /*

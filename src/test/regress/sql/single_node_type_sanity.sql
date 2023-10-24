@@ -61,7 +61,7 @@ WHERE p1.typtype not in ('c','d','p') AND p1.typname NOT LIKE E'\\_%'
     AND NOT EXISTS
     (SELECT 1 FROM pg_type as p2
      WHERE p2.typname = ('_' || p1.typname)::name AND
-           p2.typelem = p1.oid and p1.typarray = p2.oid) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table');
+           p2.typelem = p1.oid and p1.typarray = p2.oid) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table') order by p1.oid;
 
 -- Make sure typarray points to a varlena array type of our own base
 SELECT p1.oid, p1.typname as basetype, p2.typname as arraytype,

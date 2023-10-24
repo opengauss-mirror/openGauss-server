@@ -120,6 +120,7 @@ static const event_trigger_support_data event_trigger_support[] = {
     {"VIEW", true},
     {"PACKAGE", true},
     {"PACKAGE BODY", true},
+    {"PACKAGE SPECIFICATION", true},
     {"ROW LEVEL SECURITY POLICY", true},
     {"SYNONYM", true},
     { NULL, false }    

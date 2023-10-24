@@ -38,6 +38,7 @@
 #include "miscadmin.h"
 #include "catalog/index.h"
 #include "utils/knl_relcache.h"
+#include "utils/pl_package.h"
 
 /*
  * @Description: Insert a new record to pg_object.
@@ -50,7 +51,7 @@
  * @in changecsn - the commit sequence number when the old version expires. 
  * @returns - void
  */
-void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt)
+void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt, bool isValid)
 {
     Datum values[Natts_pg_object];
     bool nulls[Natts_pg_object];
@@ -95,7 +96,7 @@ void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const P
     } else {
         nulls[Anum_pg_object_mtime - 1] = true;
     }
-
+    values[Anum_pg_object_valid - 1] = BoolGetDatum(isValid);
     if (objectOpt.hasCreatecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM)) {
         values[Anum_pg_object_createcsn - 1] = UInt64GetDatum(csn);
     } else {
@@ -498,6 +499,89 @@ void recordCommentObjectTime(ObjectAddress addr, Relation rel, ObjectType objTyp
             if (addr.objectId != InvalidOid) {
                 UpdatePgObjectMtime(addr.objectId, OBJECT_TYPE_PROC);
             }
+            break;
+        default:
+            break;
+    }
+}
+
+bool GetPgObjectValid(Oid oid, PgObjectType objectType)
+{
+    HeapTuple tuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(oid), CharGetDatum(objectType));
+    if (!HeapTupleIsValid(tuple)) {
+        return false;
+    }
+    bool isNull;
+    Datum validDatum = SysCacheGetAttr(PGOBJECTID, tuple, Anum_pg_object_valid, &isNull);
+    if (isNull) {
+        ReleaseSysCache(tuple);
+        return false;
+    }
+    ReleaseSysCache(tuple);
+    return DatumGetBool(validDatum);
+}
+
+bool SetPgObjectValid(Oid oid, PgObjectType objectType, bool valid)
+{
+    Relation relation = heap_open(PgObjectRelationId, RowExclusiveLock);
+    HeapTuple tuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(oid), CharGetDatum(objectType));
+    if (!HeapTupleIsValid(tuple)) {
+        heap_close(relation, RowExclusiveLock);
+        return false;
+    }
+    bool isNull;
+    Datum oldValidDatum = SysCacheGetAttr(PGOBJECTID, tuple, Anum_pg_object_valid, &isNull);
+    if (isNull) {
+        ReleaseSysCache(tuple);
+        heap_close(relation, RowExclusiveLock);
+        return false;
+    }
+    bool oldValid = DatumGetBool(oldValidDatum);
+    if (oldValid == valid) {
+        ReleaseSysCache(tuple);
+        heap_close(relation, RowExclusiveLock);
+        return oldValid;
+    }
+    Datum values[Natts_pg_object];
+    bool nulls[Natts_pg_object] = {false};
+    bool replaces[Natts_pg_object] = {false};
+    values[Anum_pg_object_valid -1] = BoolGetDatum(valid);
+    replaces[Anum_pg_object_valid -1] = true;
+    HeapTuple new_tuple = heap_modify_tuple(tuple, RelationGetDescr(relation), values, nulls, replaces);
+    (void)simple_heap_update(relation, &new_tuple->t_self, new_tuple, true);//debug tuple->t_self
+    CatalogUpdateIndexes(relation, new_tuple);
+    heap_freetuple(new_tuple);
+    ReleaseSysCache(tuple);
+    heap_close(relation, RowExclusiveLock);
+    CommandCounterIncrement();
+    return oldValid;
+}
+
+bool GetCurrCompilePgObjStatus()
+{
+    return u_sess->plsql_cxt.currCompilingObjStatus;
+}
+
+void SetCurrCompilePgObjStatus(bool status)
+{
+    u_sess->plsql_cxt.currCompilingObjStatus = status;
+}
+
+void UpdateCurrCompilePgObjStatus(bool status)
+{
+    u_sess->plsql_cxt.currCompilingObjStatus = status && u_sess->plsql_cxt.currCompilingObjStatus;
+}
+
+void InvalidateCurrCompilePgObj()
+{
+    if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_REFRESH_HEAD) {
+        return;
+    }
+    switch (CompileWhich()) {
+        case PLPGSQL_COMPILE_PACKAGE:
+        case PLPGSQL_COMPILE_PACKAGE_PROC:
+        case PLPGSQL_COMPILE_PROC:
+            u_sess->plsql_cxt.currCompilingObjStatus = false;
             break;
         default:
             break;

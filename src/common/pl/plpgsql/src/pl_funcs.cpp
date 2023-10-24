@@ -224,7 +224,7 @@ static char* GetPackageSchemaName()
     return packageSchemaName;
 }
 
-static char* GetPackageSchemaName(Oid packageOid)
+char* GetPackageSchemaName(Oid packageOid)
 {
     Oid packageSchemaOid = GetPackageNamespace(packageOid);
     char* packageSchemaName = get_namespace_name(packageSchemaOid);
@@ -270,8 +270,8 @@ PLpgSQL_nsitem* plpgsql_ns_lookup(
     char* currCompilePackageSchemaName = NULL;
     rc = CompileWhich();
     if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
-        NameData* CompilePackageName = GetPackageName(u_sess->plsql_cxt.running_pkg_oid);
-        currCompilePackageName = CompilePackageName->data;
+        char* CompilePackageName = GetPackageName(u_sess->plsql_cxt.running_pkg_oid);
+        currCompilePackageName = CompilePackageName;
         currCompilePackageSchemaName = GetPackageSchemaName(u_sess->plsql_cxt.running_pkg_oid);
     } else if (rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) {
         currCompilePackageName = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_signature;

@@ -254,6 +254,18 @@ DECLARE_UNIQUE_INDEX(gs_package_oid_index, 9993, on gs_package using btree(oid o
 DECLARE_UNIQUE_INDEX(gs_package_name_index, 9736, on gs_package using btree(pkgname name_ops, pkgnamespace oid_ops));
 #define PackageNameIndexId  9736
 
+DECLARE_INDEX(gs_dependencies_name_index, 8004, on gs_dependencies using btree(schemaname name_ops, packagename name_ops, refobjpos int4_ops));
+#define DependenciesNameIndexId  8004
+
+DECLARE_INDEX(gs_dependencies_refoid_index, 8006, on gs_dependencies using btree(refobjoid oid_ops));
+#define DependenciesRefOidIndexId  8006
+
+DECLARE_UNIQUE_INDEX(gs_dependencies_obj_oid_index, 8007, on gs_dependencies_obj using btree(oid oid_ops));
+#define DependenciesObjOidIndexId  8007
+
+DECLARE_INDEX(gs_dependencies_obj_name_index, 8008, on gs_dependencies_obj using btree(schemaname name_ops, packagename name_ops, type int4_ops));
+#define DependenciesObjNameIndexId  8008
+
 /* This following index is not used for a cache and is not unique */
 DECLARE_INDEX(pg_shdepend_depender_index, 1232, on pg_shdepend using btree(dbid oid_ops, classid oid_ops, objid oid_ops, objsubid int4_ops));
 #define SharedDependDependerIndexId		1232

@@ -628,7 +628,6 @@ static void fix_attr_notnull(const char* name, int attnum)
 void DefineAttr(const char* name, char* type, int attnum)
 {
     Oid typeoid;
-
     if (t_thrd.bootstrap_cxt.boot_reldesc != NULL) {
         ereport(WARNING, (errmsg("no open relations allowed with CREATE command")));
         closerel(NULL);

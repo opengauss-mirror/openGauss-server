@@ -155,6 +155,16 @@ typedef struct DropRoleStmt {
     DropBehavior behavior;    /* CASCADE or RESTRICT */
 } DropRoleStmt;
 
+typedef struct TypeDependExtend {
+    Oid typeOid;       /* real depend type OID */
+    Oid undefDependObjOid; /* undefined oid in gs_dependencies_obj when the column's type is undefined */
+    bool dependUndefined;
+    char* schemaName;
+    char* packageName;
+    char* objectName;
+    char typType;
+    char typCategory;
+} TypeDependExtend;
 /*
  * TypeName - specifies a type in definitions
  *
@@ -181,6 +191,7 @@ typedef struct TypeName {
     int end_location;  /* %TYPE and date specified, token end location */
     bool pct_rowtype;  /* %ROWTYPE specified? */
     int charset;
+    TypeDependExtend* dependExtend = NULL;
 } TypeName;
 
 typedef enum FunctionParameterMode {
@@ -2244,6 +2255,7 @@ typedef struct CreateFunctionStmt {
     List* withClause;     /* a list of DefElem */
     bool isProcedure;     /* true if it is a procedure */
     char* inputHeaderSrc;
+    char* funcHeadSrc;
     bool isPrivate;       /* in package, it's true is a private procedure*/
     bool isFunctionDeclare; /* in package,it's true is a function delcare*/
     bool isExecuted;

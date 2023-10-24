@@ -1386,12 +1386,20 @@ CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 1
 NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
 CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 3
 call proc_label(5);
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 1
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label" near line 3
  proc_label 
 ------------
  
 (1 row)
 
 call proc_label1(5);
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 1
+NOTICE:  identifier "label11111111111111111111111111111111111111111111111111111111112" will be truncated to "label1111111111111111111111111111111111111111111111111111111111"
+CONTEXT:  compilation of PL/pgSQL function "proc_label1" near line 3
  proc_label1 
 -------------
  

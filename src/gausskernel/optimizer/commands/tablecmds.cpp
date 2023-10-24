@@ -176,6 +176,7 @@
 #include "pgstat.h"
 #include "postmaster/rbcleaner.h"
 #include "catalog/gs_collation.h"
+#include "catalog/gs_dependencies_fn.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/ts_relcache.h"
 #include "tsdb/common/ts_tablecmds.h"
@@ -2067,6 +2068,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     bool relhasuids = false;
     Oid nspdefcoll = InvalidOid;
     Oid rel_coll_oid = InvalidOid;
+    List* depend_extend = NIL;
 
     /*
      * isalter is true, change the owner of the objects as the owner of the
@@ -2603,6 +2605,14 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     } else
         ofTypeId = InvalidOid;
 
+    if (enable_plpgsql_gsdependency()) {
+        ListCell* cell = NULL;
+        foreach(cell, schema) {
+            ColumnDef* col_def = (ColumnDef*)lfirst(cell);
+            depend_extend = lappend(depend_extend, col_def->typname->dependExtend);
+        }
+    }
+
     /*
      * Look up inheritance ancestors and generate relation schema, including
      * inherited attributes.
@@ -2922,7 +2932,8 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         ceLst,
         storage_type,
         AccessShareLock,
-        typaddress);
+        typaddress,
+        depend_extend);
     if (bucketinfo != NULL) {
         pfree_ext(bucketinfo->bucketcol);
         pfree_ext(bucketinfo->bucketlist);
@@ -3066,7 +3077,11 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     relation_close(rel, NoLock);
     list_free_ext(rawDefaults);
     list_free_ext(ceLst);
-
+    if (enable_plpgsql_gsdependency_guc() && relkind != RELKIND_TOASTVALUE) {
+        if (CompileWhich() == PLPGSQL_COMPILE_NULL) {
+            (void)gsplsql_build_ref_type_dependency(get_rel_type_id(relationId));
+        }
+    }
     return address;
 }
 
@@ -5981,7 +5996,33 @@ ObjectAddress renameatt(RenameStmt* stmt)
     }
 
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
-
+    if (enable_plpgsql_gsdependency_guc()) {
+        Oid type_oid = get_rel_type_id(relid);
+        if (OidIsValid(type_oid)) {
+            GsDependObjDesc obj;
+            gsplsql_get_depend_obj_by_typ_id(&obj, type_oid, InvalidOid);
+            HeapTuple obj_tup = gsplsql_search_object(&obj, false);
+            if (HeapTupleIsValid(obj_tup)) {
+                heap_freetuple(obj_tup);
+                pfree_ext(obj.schemaName);
+                pfree_ext(obj.packageName);
+                pfree_ext(obj.name);
+                ereport(ERROR,
+                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                     errmsg("cannot rename attribute of the type because it is dependent on another object.")));
+            }
+            obj.refPosType = GSDEPEND_REFOBJ_POS_IN_TYPE;
+            bool exist_dep = gsplsql_exist_dependency(&obj);
+            pfree_ext(obj.schemaName);
+            pfree_ext(obj.packageName);
+            pfree_ext(obj.name);
+            if (exist_dep) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                     errmsg("cannot rename attribute of the type because it is dependent on another object."))); 
+            }
+        }
+    }
     // Check relations's internal mask
     Relation rel = relation_open(relid, AccessShareLock);
     if ((((uint32)RelationGetInternalMask(rel)) & INTERNAL_MASK_DALTER))
@@ -6562,7 +6603,19 @@ ObjectAddress RenameRelation(RenameStmt* stmt)
                 errdetail("%s table doesn't support this ALTER yet.", ISMLOG(relname) ? "mlog" : "matviewmap"))));
         }
         ReleaseSysCache(tuple);
-
+        if (enable_plpgsql_gsdependency_guc()) {
+            bool exist_dep = false;
+            char rel_kind = get_rel_relkind(relid);
+            if (RELKIND_RELATION == rel_kind) {
+                exist_dep = gsplsql_is_object_depend(get_rel_type_id(relid), GSDEPEND_OBJECT_TYPE_TYPE);
+            }
+            if (exist_dep) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                     errmsg("The rename operator on %s is not allowed, "
+                            "because it is dependent on another object.", stmt->relation->relname)));
+            }
+        }
         TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
         /* If table has history table, we need rename corresponding history table */
         if (is_ledger_usertable(relid)) {
@@ -7811,6 +7864,9 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
     if (stmt->cmds != NIL) {
         /* process 'ALTER TABLE' cmd */
         ATController(stmt, rel, stmt->cmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
+        if (enable_plpgsql_gsdependency_guc()) {
+            (void)gsplsql_build_ref_type_dependency(get_rel_type_id(relid));
+        }
     } else {
         /* if do not call ATController, close the relation in here, but keep lock until commit */
         relation_close(rel, NoLock);

@@ -6003,7 +6003,8 @@ static bool check_and_assign_type_oids(List* elemlist)
 
     if ((typeoid = atooid(static_cast<char*>(list_nth(elemlist, 1)))) >= FirstBootstrapObjectId ||
         (arraytypeid = atooid(static_cast<char*>(list_nth(elemlist, 2)))) >= FirstBootstrapObjectId ||
-        ((typtype = *static_cast<char*>(list_nth(elemlist, 3))) != TYPTYPE_BASE && typtype != TYPTYPE_PSEUDO && typtype != TYPTYPE_SET))
+        ((typtype = *static_cast<char*>(list_nth(elemlist, 3))) != TYPTYPE_BASE 
+         && typtype != TYPTYPE_PSEUDO && typtype != TYPTYPE_SET && typtype != TYPTYPE_UNDEFINE))
         return false;
 
     u_sess->upg_cxt.Inplace_upgrade_next_pg_type_oid = typeoid;

@@ -6082,7 +6082,7 @@ static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitm
  * on the relation associated with the tuple).	Any failure is reported
  * via ereport().
  */
-void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
+void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup, bool allow_update_self)
 {
     TM_Result result;
     TM_FailureData tmfd;
@@ -6113,7 +6113,7 @@ void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
         true /* wait for commit */,
         &tmfd,
         &lockmode,
-        false);
+        allow_update_self);
     switch (result) {
         case TM_SelfModified:
             /* Tuple was already updated in current command? */

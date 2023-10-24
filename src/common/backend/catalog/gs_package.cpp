@@ -56,7 +56,7 @@
 #include "utils/plpgsql.h"
 #include "utils/pl_global_package_runtime_cache.h"
 #include "utils/pl_package.h"
-
+#include "catalog/gs_dependencies_fn.h"
 #include "tcop/pquery.h"
 #include "executor/executor.h"
 #include "executor/tstoreReceiver.h"
@@ -70,6 +70,8 @@ static void CopyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgL
 static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit = false);
 static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs);
 static void ReleaseUnusedPortalContext(List* portalContexts, bool releaseAll = false);
+static bool gspkg_is_same_pkg_spec(HeapTuple tup, const char* pkg_spec_src);
+
 #define MAXSTRLEN ((1 << 11) - 1)
 
 static Acl* PackageAclDefault(Oid ownerId)
@@ -230,14 +232,14 @@ Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok, bool isPkgBody)
     return pkgOid;
 }
 
-NameData* GetPackageName(Oid packageOid) 
+char* GetPackageName(Oid packageOid) 
 {
     bool isNull = false;
     HeapTuple pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(packageOid));
-    NameData* pkgName = NULL;
+    char* pkgName = NULL;
     if (HeapTupleIsValid(pkgTuple)) {
         Datum pkgName_datum = SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgname, &isNull);
-        pkgName = DatumGetName(pkgName_datum);
+        pkgName = pstrdup(NameStr(*(DatumGetName(pkgName_datum))));
         ReleaseSysCache(pkgTuple);
     } else {
         pkgName = NULL;
@@ -299,8 +301,23 @@ PLpgSQL_package* PackageInstantiation(Oid packageOid)
     return pkg;
 }
 
+void plpgsql_clear_created_pkg(Oid pkg_oid)
+{
+    if (u_sess->SPI_cxt._connected > -1 &&
+        u_sess->plsql_cxt.plpgsql_pkg_HashTable != NULL) {
+        PLpgSQL_pkg_hashkey hashkey;
+        hashkey.pkgOid = pkg_oid;
+        plpgsql_hashtable_delete_and_check_invalid_item(PACKAGEOID, pkg_oid);
+        PLpgSQL_package* pkg = plpgsql_pkg_HashTableLookup(&hashkey);
+        if (pkg) {
+            delete_package(pkg);
+        }
+    }
+}
+
 Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, const char* pkgSpecSrc, bool replace, bool pkgSecDef)
 {
+    u_sess->plsql_cxt.compile_has_warning_info = false;
     Relation pkgDesc;
     Oid pkgOid = InvalidOid;
     bool nulls[Natts_gs_package];
@@ -310,6 +327,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     TupleDesc tupDesc;
     ObjectAddress myself;
     ObjectAddress referenced;
+    bool is_same = false;
     int i;
     bool isReplaced = false;
     bool isUpgrade = false;
@@ -379,6 +397,9 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
                         errcause("System error"),
                         erraction("Drop and rebuild package.")));
             }
+            if (enable_plpgsql_gsdependency_guc()) {
+                is_same = gspkg_is_same_pkg_spec(oldpkgtup, pkgSpecSrc);
+            }
             if (!pg_package_ownercheck(HeapTupleGetOid(oldpkgtup), ownerId)) {
                 ReleaseSysCache(oldpkgtup);
                 aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PACKAGE, pkgName);
@@ -402,18 +423,18 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     Assert(OidIsValid(pkgOid));
 
     CatalogUpdateIndexes(pkgDesc, tup);
-
-    if (isReplaced) {
+    if (isReplaced && !(is_same && GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGSPEC))) {
         (void)deleteDependencyRecordsFor(PackageRelationId, pkgOid, true);
-        DeleteTypesDenpendOnPackage(PackageRelationId, pkgOid);
         /* the 'shared dependencies' also change when update. */
-        deleteSharedDependencyRecordsFor(PackageRelationId, pkgOid, 0); 
+        deleteSharedDependencyRecordsFor(PackageRelationId, pkgOid, 0);
         DeleteFunctionByPackageOid(pkgOid);
-    }  
+        DeleteTypesDenpendOnPackage(PackageRelationId, pkgOid);
+    }
     heap_freetuple_ext(tup);
 
     heap_close(pkgDesc, RowExclusiveLock);
 
+    CacheInvalidateFunction(InvalidOid, pkgOid);
     /* Record dependencies */
     ObjectAddressSet(myself, PackageRelationId, pkgOid);
     isUpgrade = u_sess->attr.attr_common.IsInplaceUpgrade && myself.objectId < FirstBootstrapObjectId && !isReplaced;
@@ -434,9 +455,6 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     /* Post creation hook for new schema */
     InvokeObjectAccessHook(OAT_POST_CREATE, PackageRelationId, pkgOid, 0, NULL);
 
-    /* Advance command counter so new tuple can be seen by validator */
-    CommandCounterIncrement();
-
         /* Recode the procedure create time. */
     if (OidIsValid(pkgOid)) {
         if (!isReplaced) {
@@ -444,20 +462,31 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
             CreatePgObject(pkgOid, OBJECT_TYPE_PKGSPEC, ownerId, objectOpt);      
         } else {
             UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PROC);
+            if (enable_plpgsql_gsdependency_guc()) {
+                CommandCounterIncrement();
+                SetPgObjectValid(pkgOid, OBJECT_TYPE_PKGSPEC, true);
+            }
         }
     }
+    SetCurrCompilePgObjStatus(true);
+    /* Advance command counter so new tuple can be seen by validator */
+    CommandCounterIncrement();
+
 
     /* dependency between packages are only needed for package spec */
     if (!isUpgrade) {
         u_sess->plsql_cxt.pkg_dependencies = NIL;
         u_sess->plsql_cxt.need_pkg_dependencies = true;
     }
+
     PG_TRY();
     {
+        list_free_ext(u_sess->plsql_cxt.func_compiled_list);
         plpgsql_package_validator(pkgOid, true, true);
     }
     PG_CATCH();
     {
+        list_free_ext(u_sess->plsql_cxt.func_compiled_list);
         u_sess->plsql_cxt.need_pkg_dependencies = false;
         if (u_sess->plsql_cxt.pkg_dependencies != NIL) {
             list_free(u_sess->plsql_cxt.pkg_dependencies);
@@ -469,12 +498,12 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     u_sess->plsql_cxt.need_pkg_dependencies = false;
 
     /* record dependency discovered during validation */
-    if (!isUpgrade && u_sess->plsql_cxt.pkg_dependencies != NIL) {
+    if (!isUpgrade && u_sess->plsql_cxt.pkg_dependencies != NIL && !enable_plpgsql_gsdependency_guc()) {
         recordDependencyOnPackage(PackageRelationId, pkgOid, u_sess->plsql_cxt.pkg_dependencies);
         list_free(u_sess->plsql_cxt.pkg_dependencies);
         u_sess->plsql_cxt.pkg_dependencies = NIL;
     }
-
+    plpgsql_clear_created_pkg(oldPkgOid);
     return pkgOid;
 }
 
@@ -488,6 +517,7 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     TupleDesc tupDesc;
     int i = 0;
     bool isReplaced = false;
+    bool is_same = false;
 #ifndef ENABLE_MULTIPLE_NODES
     if (u_sess->attr.attr_common.plsql_show_all_error == true) {
         if (pkgBodySrc == NULL) {
@@ -495,6 +525,7 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
         } 
     }
 #endif
+    u_sess->plsql_cxt.compile_has_warning_info = false;
     Assert(PointerIsValid(pkgBodySrc));
     HeapTuple tup = NULL;
     HeapTuple oldpkgtup = NULL;
@@ -539,6 +570,7 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     pkgDesc = heap_open(PackageRelationId, RowExclusiveLock);
     tupDesc = RelationGetDescr(pkgDesc);
 
+    bool pkgBodyDeclSrcIsNull = false;
     if (OidIsValid(oldPkgOid)) {
         oldpkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(oldPkgOid));
         if (!HeapTupleIsValid(oldpkgtup)) {
@@ -549,13 +581,23 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
                     errcause("System error"),
                     erraction("Drop and rebuild package")));
         }
-        bool isNull = false;
-        SysCacheGetAttr(PACKAGEOID, oldpkgtup, Anum_gs_package_pkgbodydeclsrc, &isNull);
-        if (!isNull && !replace) {
-            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_PACKAGE), errmsg("package body already exists")));
-        } else if (!isNull) {
-            DeleteFunctionByPackageOid(oldPkgOid);
-            DeleteTypesDenpendOnPackage(PackageRelationId, oldPkgOid, false);
+
+        Datum pkgBodyDeclSrcDatum =SysCacheGetAttr(PACKAGEOID, oldpkgtup, Anum_gs_package_pkgbodydeclsrc, &pkgBodyDeclSrcIsNull);
+        if (enable_plpgsql_gsdependency_guc()) {
+            if (!pkgBodyDeclSrcIsNull) {
+                char* pkgBodyDeclSrcStr = TextDatumGetCString(pkgBodyDeclSrcDatum);
+                is_same = (0 == strcmp(pkgBodyDeclSrcStr, pkgBodySrc));
+            }
+        }
+        if (!pkgBodyDeclSrcIsNull) {
+            if (!replace) {
+                ereport(ERROR, (errcode(ERRCODE_DUPLICATE_PACKAGE), errmsg("package body already exists")));
+            } else {
+                DeleteFunctionByPackageOid(oldPkgOid);
+                if (!(is_same && GetPgObjectValid(oldPkgOid, OBJECT_TYPE_PKGBODY))) {
+                    DeleteTypesDenpendOnPackage(PackageRelationId, oldPkgOid, false);
+                }
+            }
         }
         tup = heap_modify_tuple(oldpkgtup, tupDesc, values, nulls, replaces);
         simple_heap_update(pkgDesc, &tup->t_self, tup); 
@@ -577,24 +619,31 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
 
     heap_close(pkgDesc, RowExclusiveLock);
 
+    CacheInvalidateFunction(InvalidOid, oldPkgOid);
     /* Post creation hook for new schema */
     InvokeObjectAccessHook(OAT_POST_CREATE, PackageRelationId, oldPkgOid, 0, NULL);
 
-    /* Advance command counter so new tuple can be seen by validator */
-    CommandCounterIncrement();
-
         /* Recode the procedure create time. */
     if (OidIsValid(oldPkgOid)) {
-        if (!isReplaced) {
+        if (pkgBodyDeclSrcIsNull) {
             PgObjectOption objectOpt = {true, true, false, false};
-            CreatePgObject(oldPkgOid, OBJECT_TYPE_PKGSPEC, ownerId, objectOpt);
+            CreatePgObject(oldPkgOid, OBJECT_TYPE_PKGBODY, ownerId, objectOpt);
         } else {
             UpdatePgObjectMtime(oldPkgOid, OBJECT_TYPE_PROC);
+            if (enable_plpgsql_gsdependency_guc()) {
+                CommandCounterIncrement();
+                SetPgObjectValid(oldPkgOid, OBJECT_TYPE_PKGSPEC, true);
+                SetPgObjectValid(oldPkgOid, OBJECT_TYPE_PKGBODY, true);
+            }
         }
     }
-
+    /* Advance command counter so new tuple can be seen by validator */
+    CommandCounterIncrement();
+    SetCurrCompilePgObjStatus(true);
+    list_free_ext(u_sess->plsql_cxt.func_compiled_list);
+    u_sess->plsql_cxt.real_func_num = 0;
     plpgsql_package_validator(oldPkgOid, false, true);
-
+    plpgsql_clear_created_pkg(oldPkgOid);
     return oldPkgOid;
 }
 
@@ -1821,8 +1870,13 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
         Type typtup1;
         Type typtup2;
         errno_t rc;
-        typtup1 = LookupTypeName(NULL, t1, NULL);
-        typtup2 = LookupTypeName(NULL, t2, NULL);
+        if (enable_plpgsql_undefined()) {
+            typtup1 = LookupTypeNameSupportUndef(NULL, t1, NULL);
+            typtup2 = LookupTypeNameSupportUndef(NULL, t2, NULL);
+        } else {
+            typtup1 = LookupTypeName(NULL, t1, NULL);
+            typtup2 = LookupTypeName(NULL, t2, NULL);
+        }
         bool isTableOf1 = false;
         bool isTableOf2 = false;
         Oid baseOid1 = InvalidOid;
@@ -1908,6 +1962,22 @@ bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
                 NameListToString(stmt1->funcname))));
     }
     return true;
+}
+
+static bool gspkg_is_same_pkg_spec(HeapTuple tup, const char* pkg_spec_src)
+{
+    bool is_null;
+    Datum old_pkg_spec_src_datum = SysCacheGetAttr(PACKAGEOID, tup, Anum_gs_package_pkgspecsrc, &is_null);
+    if (is_null) {
+        return pkg_spec_src == NULL;
+    }
+    char* old_pkg_spec_src = TextDatumGetCString(old_pkg_spec_src_datum);
+    if (strcmp(pkg_spec_src, old_pkg_spec_src) == 0) {
+        pfree_ext(old_pkg_spec_src);
+        return true;
+    }
+    pfree_ext(old_pkg_spec_src);
+    return false;
 }
 
 #endif

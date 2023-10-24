@@ -21,12 +21,14 @@
 #include "catalog/indexing.h"
 #include "catalog/pg_enum.h"
 #include "catalog/pg_type.h"
+#include "catalog/gs_dependencies_fn.h"
 #include "storage/lmgr.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "utils/lsyscache.h"
 
 static void RenumberEnumType(Relation pg_enum, HeapTuple* existing, int nelems);
 static int sort_order_cmp(const void* p1, const void* p2);
@@ -136,6 +138,13 @@ void EnumValuesCreate(Oid enumTypeOid, List* vals, Oid collation)
  */
 void EnumValuesDelete(Oid enumTypeOid)
 {
+    GsDependObjDesc refObj;
+    if (enable_plpgsql_gsdependency_guc()) {
+        refObj.name = NULL;
+        if (!OidIsValid(enumTypeOid)) {
+            gsplsql_get_depend_obj_by_typ_id(&refObj, enumTypeOid, InvalidOid);
+        }
+    }
     Relation pg_enum = NULL;
     ScanKeyData key[1];
     SysScanDesc scan = NULL;
@@ -154,6 +163,13 @@ void EnumValuesDelete(Oid enumTypeOid)
     systable_endscan(scan);
 
     heap_close(pg_enum, RowExclusiveLock);
+    if (enable_plpgsql_gsdependency_guc() && NULL != refObj.name) {
+        CommandCounterIncrement();
+        (void)gsplsql_remove_ref_dependency(&refObj);
+        pfree_ext(refObj.schemaName);
+        pfree_ext(refObj.packageName);
+        pfree_ext(refObj.name);
+    }
 }
 
 /*
@@ -413,6 +429,10 @@ restart:
     heap_freetuple_ext(enum_tup);
 
     heap_close(pg_enum, RowExclusiveLock);
+    if (enable_plpgsql_gsdependency_guc()) {
+        CommandCounterIncrement();
+        (void)gsplsql_build_ref_type_dependency(enumTypeOid);
+    }
 }
 
 /*
@@ -434,6 +454,12 @@ void RenameEnumLabel(Oid enumTypeOid, const char* oldVal, const char* newVal)
     checkEnumLableValue(newVal);
     checkEnumLableValue(oldVal);
 
+    if (enable_plpgsql_gsdependency_guc() && gsplsql_is_object_depend(enumTypeOid, GSDEPEND_OBJECT_TYPE_TYPE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                errmsg("The rename operator on %s is not allowed, "
+                    "because it is dependent on another object.", get_typename(enumTypeOid))));
+    }
     /*
      * Acquire a lock on the enum type, which we won't release until commit.
      * This ensures that two backends aren't concurrently modifying the same
@@ -570,4 +596,36 @@ static int sort_order_cmp(const void* p1, const void* p2)
         return 1;
     else
         return 0;
+}
+
+char* SerializeEnumAttr(Oid enumTypeOid)
+{
+    if (!type_is_enum(enumTypeOid)) {
+        return NULL;
+    }
+    CatCList* list = SearchSysCacheList1(ENUMTYPOIDNAME, ObjectIdGetDatum(enumTypeOid));
+    if (list == NULL) {
+        return NULL;
+    }
+    if (0 == list->n_members) {
+        ReleaseSysCacheList(list);
+        return NULL;
+    }
+    HeapTuple* enumList = (HeapTuple*)palloc(list->n_members * sizeof(HeapTuple));
+    for (int i = 0; i < list->n_members; i++) {
+        enumList[i] = t_thrd.lsc_cxt.FetchTupleFromCatCList(list, i);
+    }
+    qsort(enumList, list->n_members, sizeof(HeapTuple), sort_order_cmp);
+    StringInfoData concatName;
+    initStringInfo(&concatName);
+    for (int i = 0; i < list->n_members; i++) {
+        Form_pg_enum en = (Form_pg_enum)GETSTRUCT(enumList[i]);
+        appendStringInfoString(&concatName, NameStr(en->enumlabel));
+        appendStringInfoString(&concatName, ",");
+    }
+    pfree_ext(enumList);
+    ReleaseSysCacheList(list);
+    char* ret = pstrdup(concatName.data);
+    FreeStringInfo(&concatName);
+    return ret;
 }

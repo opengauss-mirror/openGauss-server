@@ -6290,6 +6290,32 @@ static UserVar* _readUserVar()
     READ_DONE();
 }
 
+static DependenciesProchead* _readDependenciesProchead()
+{
+    READ_LOCALS(DependenciesProchead);
+
+    READ_BOOL_FIELD(undefined);
+    READ_STRING_FIELD(proName);
+    READ_STRING_FIELD(proArgSrc);
+    READ_STRING_FIELD(funcHeadSrc);
+
+    READ_DONE();
+}
+
+static DependenciesType* _readDependenciesType()
+{
+    READ_LOCALS(DependenciesType);
+
+    READ_CHAR_FIELD(typType);
+    READ_CHAR_FIELD(typCategory);
+    READ_STRING_FIELD(attrInfo);
+    READ_BOOL_FIELD(isRel);
+    READ_STRING_FIELD(elemTypName);
+    READ_STRING_FIELD(idxByTypName);
+
+    READ_DONE();
+}
+
 /*
  * parseNodeString
  *
@@ -6781,7 +6807,11 @@ Node* parseNodeString(void)
         return_value = _readCharsetcollateOptions();
     } else if (MATCH("CHARSET", 7)) {
         return_value = _readCharsetClause();
-    } else {
+    }  else if (MATCH("DependenciesProchead", 20)) {
+        return_value = _readDependenciesProchead();
+    }  else if (MATCH("DependenciesType", 16)) {
+        return_value = _readDependenciesType();
+    }  else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("parseNodeString(): badly formatted node string \"%s\"...", token)));

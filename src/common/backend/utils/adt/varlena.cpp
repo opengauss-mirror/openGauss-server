@@ -806,6 +806,26 @@ Datum unknownsend(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
+Datum undefinedin(PG_FUNCTION_ARGS)
+{
+    return unknownin(fcinfo);
+}
+
+Datum undefinedout(PG_FUNCTION_ARGS)
+{
+    return unknownout(fcinfo);
+}
+
+Datum undefinedrecv(PG_FUNCTION_ARGS)
+{
+    return unknownrecv(fcinfo);
+}
+
+Datum undefinedsend(PG_FUNCTION_ARGS)
+{
+    return unknownsend(fcinfo);
+}
+
 static Datum text_length_huge(Datum str)
 {
     if (pg_database_encoding_max_length() == 1) {

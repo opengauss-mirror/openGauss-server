@@ -48,7 +48,9 @@
 #include "miscadmin.h"
 #include "tcop/tcopprot.h"
 #include "commands/event_trigger.h"
-
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/pg_object.h"
+#include "catalog/pg_type_fn.h"
 
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
@@ -124,13 +126,14 @@ static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple proc_tup
     return check_search_path_interface(func->fn_searchpath->schemas, proc_tup);
 }
 
-PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator)
+PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, bool isRecompile)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
     PLpgSQL_func_hashkey hashkey;
     bool function_valid = false;
     bool hashkey_valid = false;
     bool isnull = false;
+    bool func_valid = true;
     /*
      * Lookup the pg_proc tuple by Oid; we'll need it in any case
      */
@@ -149,7 +152,25 @@ PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator)
     Datum pkgoiddatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
     Oid packageOid = DatumGetObjectId(pkgoiddatum);
     Oid old_value = saveCallFromPkgOid(packageOid);
-    
+    if (enable_plpgsql_gsdependency_guc()) {
+        if (func == NULL) {
+            /* Compute hashkey using function signature and actual arg types */
+            compute_function_hashkey(proc_tup, fcinfo, proc_struct, &hashkey, for_validator);
+            hashkey_valid = true;
+            /* And do the lookup */
+            func = plpgsql_HashTableLookup(&hashkey);
+        }
+        /**
+         * only check for func need recompile or not,
+        */
+        if (func_oid >= FirstNormalObjectId) {
+            func_valid = GetPgObjectValid(func_oid, OBJECT_TYPE_PROC);
+        }
+        if (!func_valid) {
+            fcinfo->flinfo->fn_extra = NULL;
+        }
+    }
+ 
 recheck:
     if (func == NULL) {
         /* Compute hashkey using function signature and actual arg types */
@@ -160,10 +181,16 @@ recheck:
         func = plpgsql_HashTableLookup(&hashkey);
     }
 
+    if (!func_valid && func != NULL && !u_sess->plsql_cxt.need_create_depend &&
+        !isRecompile && u_sess->SPI_cxt._connected >= 0 && !u_sess->plsql_cxt.during_compile) {
+            func->is_need_recompile = true;
+        }
+
     if (func != NULL) {
         /* We have a compiled function, but is it still valid? */
         if (func->fn_xmin == HeapTupleGetRawXmin(proc_tup) &&
-            ItemPointerEquals(&func->fn_tid, &proc_tup->t_self) && plpgsql_check_search_path(func, proc_tup)) {
+            ItemPointerEquals(&func->fn_tid, &proc_tup->t_self) && plpgsql_check_search_path(func, proc_tup) &&
+            !isRecompile && !func->is_need_recompile) {
             function_valid = true;
         } else {
             /*
@@ -230,9 +257,14 @@ recheck:
          */
         PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
         int save_compile_status = getCompileStatus();
+        bool save_curr_status = GetCurrCompilePgObjStatus();
         PG_TRY();
         {
+            List* ref_obj_list = gsplsql_prepare_recompile_func(func_oid, proc_struct->pronamespace, packageOid, isRecompile);
+            SetCurrCompilePgObjStatus(true);
             func = do_compile(fcinfo, proc_tup, func, &hashkey, for_validator);
+            UpdateCurrCompilePgObjStatus(save_curr_status);
+            gsplsql_complete_recompile_func(ref_obj_list);
             (void)CompileStatusSwtichTo(save_compile_status);
         }
         PG_CATCH();
@@ -245,6 +277,7 @@ recheck:
                 InsertError(func_oid);
             }
 #endif
+            SetCurrCompilePgObjStatus(save_compile_status);
             popToOldCompileContext(save_compile_context);
             (void)CompileStatusSwtichTo(save_compile_status);
             PG_RE_THROW();
@@ -590,6 +623,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     int* in_arg_varnos = NULL;
     PLpgSQL_variable** out_arg_variables;
     Oid pkgoid = InvalidOid;
+    Oid namespaceOid = InvalidOid;
 
     Oid* saved_pseudo_current_userId = NULL;
     char* signature = NULL;
@@ -631,6 +665,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         /* Null prokind items are created when there is no procedure */
         isFunc = true;
     }
+    Datum pronamespaceDatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_pronamespace, &isnull);
+    namespaceOid = DatumGetObjectId(pronamespaceDatum);
     /*
      * Setup error traceback support for ereport()
      */
@@ -715,6 +751,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(curr_compile->compile_cxt);
     func->fn_signature = pstrdup(signature);
     func->is_private = BoolGetDatum(proisprivatedatum);
+    func->namespaceOid = namespaceOid;
     /*
      * if function belong to a package, it will use package search path.
      */
@@ -1196,8 +1233,63 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      * Now parse the function's text
      */
     bool saved_flag = u_sess->plsql_cxt.have_error;
-    u_sess->plsql_cxt.have_error = false;
-    parse_rc = plpgsql_yyparse();
+    ResourceOwnerData* oldowner = NULL;
+    int64 stackId = 0;
+    MemoryContext oldcxt;
+    volatile bool has_error = false;
+    if (enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.isCreateFunction && !IsInitdb) {
+        oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+        oldcxt = CurrentMemoryContext;
+        SPI_savepoint_create("createFunction");
+        stackId = u_sess->plsql_cxt.nextStackEntryId;
+        MemoryContextSwitchTo(oldcxt);
+        bool save_isPerform = u_sess->parser_cxt.isPerform;
+        PG_TRY();
+        {
+            u_sess->parser_cxt.isPerform = false;
+            parse_rc = plpgsql_yyparse();
+            u_sess->parser_cxt.isPerform = save_isPerform;
+            SPI_savepoint_release("createFunction");
+            stp_cleanup_subxact_resource(stackId);
+            MemoryContextSwitchTo(oldcxt);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+        }
+        PG_CATCH();
+        {
+            u_sess->parser_cxt.isPerform = save_isPerform;
+            SPI_savepoint_rollbackAndRelease("createFunction", InvalidTransactionId);
+            stp_cleanup_subxact_resource(stackId);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            MemoryContextSwitchTo(oldcxt);
+            has_error = true;
+            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+            ereport(WARNING,
+                    (errmodule(MOD_PLSQL),
+                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("%s", edata->message),
+                     errdetail("N/A"),
+                     errcause("compile package or procedure error."),
+                     erraction("check package or procedure error and redefine")));
+            if (edata->sqlerrcode == ERRCODE_OUT_OF_LOGICAL_MEMORY) {
+                PG_RE_THROW();
+            }
+            FlushErrorState();
+        }
+        PG_END_TRY();
+    }else {
+        bool save_isPerform = u_sess->parser_cxt.isPerform;
+        u_sess->parser_cxt.isPerform = false;
+        parse_rc = plpgsql_yyparse();
+        u_sess->parser_cxt.isPerform = save_isPerform;
+    }
+    if (enable_plpgsql_gsdependency_guc() && has_error) {
+        plpgsql_scanner_finish();
+        pfree_ext(proc_source);
+        PopOverrideSearchPath();
+        u_sess->plsql_cxt.curr_compile_context = popCompileContext();
+        clearCompileContext(curr_compile);
+        return NULL;
+    }
 #ifndef ENABLE_MULTIPLE_NODES
     if (u_sess->plsql_cxt.have_error && u_sess->attr.attr_common.plsql_show_all_error) {
         u_sess->plsql_cxt.have_error = false;
@@ -1322,6 +1414,31 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     /* Debug dump for completed functions */
     if (curr_compile->plpgsql_DumpExecTree) {
         plpgsql_dumptree(func);
+    }
+        
+    if (enable_plpgsql_gsdependency_guc()) {
+        bool curr_compile_status = GetCurrCompilePgObjStatus();
+        if (curr_compile_status) {
+            bool is_undefined = gsplsql_is_undefined_func(func->fn_oid);
+            func->isValid = !is_undefined;
+
+            if (!func->isValid && u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_RECOMPILE) {
+                GsDependObjDesc obj = gsplsql_construct_func_head_obj(func->fn_oid, func->namespaceOid, func->pkg_oid);
+                obj.type = GSDEPEND_OBJECT_TYPE_PROCHEAD;
+                gsplsql_do_refresh_proc_header(&obj, &is_undefined);
+            }
+
+            if (is_undefined && !u_sess->plsql_cxt.compile_has_warning_info) {
+                u_sess->plsql_cxt.compile_has_warning_info = true;
+                ereport(WARNING, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
+                                  errmsg("The header information of function %s is not defined.", NameStr(proc_struct->proname))));
+            }
+            UpdateCurrCompilePgObjStatus(!is_undefined);
+        } else {
+            func->isValid = GetCurrCompilePgObjStatus();
+        }
+    } else {
+        func->isValid = true;
     }
     /*
      * add it to the hash table except specified function.
@@ -2075,7 +2192,7 @@ void getTableofTypeFromVar(PLpgSQL_var* var, int* collectionType, Oid* tableofIn
     }
 }
 
-HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofIndexType, int32* typMod)
+HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofIndexType, int32* typMod, TypeDependExtend* dependExtend)
 {
     if (u_sess->plsql_cxt.curr_compile_context == NULL) {
         return NULL;
@@ -2083,28 +2200,31 @@ HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofInd
 
     PLpgSQL_datum* datum = NULL;
     char* field = NULL;
-
+    char* schemaName = NULL;
+    char* packageName = NULL;
+    char* objectName = NULL;
     /* find row var and field first */
     switch (list_length(nameList)) {
         case 2: {
+            objectName = strVal(linitial(nameList));
             datum = plpgsql_lookup_datum(false, strVal(linitial(nameList)), NULL, NULL, NULL);
             field = strVal(lsecond(nameList));
             break;
         }
         case 3: {
-            char* word1 = strVal(linitial(nameList));
-            char* word2 = strVal(lsecond(nameList));
-            List *names2 = list_make2(makeString(word1), makeString(word2));
+            packageName = strVal(linitial(nameList));
+            objectName = strVal(lsecond(nameList));
+            List *names2 = list_make2(makeString(packageName), makeString(objectName));
             datum = GetPackageDatum(names2);
             list_free_ext(names2);
             field = strVal(lthird(nameList));
             break;
         }
         case 4: {
-            char* word1 = strVal(linitial(nameList));
-            char* word2 = strVal(lsecond(nameList));
-            char* word3 = strVal(lthird(nameList));
-            List *names3 = list_make3(makeString(word1), makeString(word2), makeString(word3));
+            schemaName = strVal(linitial(nameList));
+            packageName = strVal(lsecond(nameList));
+            objectName = strVal(lthird(nameList));
+            List *names3 = list_make3(makeString(schemaName), makeString(packageName), makeString(objectName));
             datum = GetPackageDatum(names3);
             list_free_ext(names3);
             field = strVal(lfourth(nameList));
@@ -2152,6 +2272,12 @@ HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofInd
 
     if (!OidIsValid(typOid)) {
         return NULL;
+    }
+
+    if (enable_plpgsql_gsdependency() && NULL != dependExtend) {
+        dependExtend->schemaName = schemaName;
+        dependExtend->packageName = packageName;
+        dependExtend->objectName = objectName;
     }
 
     HeapTuple tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typOid));
@@ -3035,11 +3161,26 @@ PLpgSQL_type* plpgsql_parse_wordtype(char* ident)
     return NULL;
 }
 
+static PLpgSQL_type* gsplsql_make_type_for_pkg_var_ref_type(GsDependObjDesc* obj, PLpgSQL_datum* datum,
+    TypeDependExtend* dependExtend)
+{
+    InstanceTypeNameDependExtend(&dependExtend);
+    dependExtend->schemaName = pstrdup(obj->schemaName);
+    dependExtend->packageName = pstrdup(obj->packageName);
+    dependExtend->objectName = pstrdup(obj->name);
+    PLpgSQL_var* var = (PLpgSQL_var*)datum;
+    PLpgSQL_type* type = plpgsql_build_datatype(var->datatype->typoid, var->datatype->atttypmod,
+                                                var->datatype->collation, dependExtend);
+    type->collectionType = var->datatype->collectionType;
+    type->tableOfIndexType = var->datatype->tableOfIndexType;
+    return type;
+}
+
 /* ----------
  * plpgsql_parse_cwordtype		Same lookup for compositeword%TYPE
  * ----------
  */
-PLpgSQL_type* plpgsql_parse_cwordtype(List* idents)
+PLpgSQL_type* plpgsql_parse_cwordtype(List* idents, TypeDependExtend* dependExtend)
 {
     PLpgSQL_type* dtype = NULL;
     PLpgSQL_nsitem* nse = NULL;
@@ -3119,6 +3260,21 @@ PLpgSQL_type* plpgsql_parse_cwordtype(List* idents)
             goto done;
         }
         fldname = strVal(lthird(idents));
+    } else if (enable_plpgsql_gsdependency_guc()) {
+        GsDependObjDesc objDesc;
+        Oid schemaOId = gsplsql_parse_pkg_var_obj4(&objDesc, idents);
+        if (!OidIsValid(schemaOId) || !OidIsValid(PackageNameGetOid(objDesc.packageName, schemaOId))) {
+            goto done;
+        }
+        List* new_var_name = list_make3(makeString(objDesc.schemaName), makeString(objDesc.packageName),
+            makeString(objDesc.name));
+        PLpgSQL_datum* datum = GetPackageDatum(new_var_name);
+        list_free_ext(new_var_name);
+        if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_VAR) {
+            MemoryContextSwitchTo(old_cxt);
+            return gsplsql_make_type_for_pkg_var_ref_type(&objDesc, datum, dependExtend);
+        }
+        goto done;
     } else {
         goto done;
     }
@@ -3160,6 +3316,13 @@ PLpgSQL_type* plpgsql_parse_cwordtype(List* idents)
      */
     MemoryContextSwitchTo(old_cxt);
     dtype = build_datatype(type_tup, attr_struct->atttypmod, attr_struct->attcollation);
+    if (enable_plpgsql_gsdependency() && NULL != dtype) {
+        Oid typ_oid = get_rel_type_id(class_oid);
+        AssertEreport(InvalidOid != typ_oid, MOD_PLSQL, "all relation must have type");
+        dtype->dependExtend = dependExtend;
+        InstanceTypeNameDependExtend(&dtype->dependExtend);
+        dtype->dependExtend->typeOid = typ_oid;
+    }
     MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
 
 done:
@@ -3191,20 +3354,45 @@ PLpgSQL_type* plpgsql_parse_wordrowtype(char* ident)
      * but no need to collect more errdetails.
      */
     (void)RelnameGetRelidExtended(ident, &class_oid);
-
+    Oid typ_oid = InvalidOid;
+    TypeDependExtend* dependExtend = NULL;
     if (!OidIsValid(class_oid)) {
         char message[MAXSTRLEN]; 
         errno_t rc = 0;
         rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist when parse word.", ident);
         securec_check_ss(rc, "", "");
         InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_UNDEFINED_TABLE),
-                errmsg("relation \"%s\" does not exist when parse word.", ident)));
+        if (enable_plpgsql_undefined()) {
+            RangeVar rangvar;
+            rangvar.schemaname = NULL;
+            rangvar.relname = ident;
+            Oid undefRefObjOid = gsplsql_try_build_exist_schema_undef_table(&rangvar);
+            if (OidIsValid(undefRefObjOid)) {
+                InstanceTypeNameDependExtend(&dependExtend);
+                dependExtend->undefDependObjOid = undefRefObjOid;
+                dependExtend->dependUndefined = true;
+                typ_oid = UNDEFINEDOID;
+                ereport(WARNING,
+                    (errmodule(MOD_PLSQL),
+                        errcode(ERRCODE_UNDEFINED_TABLE),
+                        errmsg("relation \"%s\" does not exist when parse word.", ident)));
+            } else {
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL),
+                        errcode(ERRCODE_UNDEFINED_TABLE),
+                        errmsg("relation \"%s\" does not exist when parse word.", ident)));               
+            }
+        } else {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_UNDEFINED_TABLE),
+                    errmsg("relation \"%s\" does not exist when parse word.", ident)));
+        }
+    } else {
+        typ_oid = get_rel_type_id(class_oid);
     }
     /* Build and return the row type struct */
-    return plpgsql_build_datatype(get_rel_type_id(class_oid), -1, InvalidOid);
+    return plpgsql_build_datatype(typ_oid, -1, InvalidOid, dependExtend);
 }
 
 /* ----------
@@ -3218,23 +3406,64 @@ PLpgSQL_type* plpgsql_parse_cwordrowtype(List* idents)
     RangeVar* relvar = NULL;
     MemoryContext old_cxt = NULL;
 
-    if (list_length(idents) != 2) {
+    if (!enable_plpgsql_gsdependency_guc() && list_length(idents) != 2) {
         return NULL;
+    }
+    switch (list_length(idents))
+    {
+    case 1:
+        relvar = makeRangeVar(NULL, strVal(linitial(idents)), -1);
+        break;
+    case 2:
+        relvar = makeRangeVar(strVal(linitial(idents)), strVal(lsecond(idents)), -1);
+        break; 
+    case 3:
+        relvar = makeRangeVar(strVal(lsecond(idents)), strVal(lthird(idents)), -1);
+        relvar->catalogname = strVal(linitial(idents));
+        break;
+    default:
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("improper %%ROWTYPE reference")));
+        break;
     }
 
     /* Avoid memory leaks in long-term function context */
     old_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
 
     /* Look up relation name.  Can't lock it - we might not have privileges. */
-    relvar = makeRangeVar(strVal(linitial(idents)), strVal(lsecond(idents)), -1);
-
+    Oid typ_oid = InvalidOid;
+    TypeDependExtend* dependExtend = NULL;
     /* Here relvar is allowed to be a synonym object. */
-    class_oid = RangeVarGetRelidExtended(relvar, NoLock, false, false, false, true, NULL, NULL);
+    if (!enable_plpgsql_undefined()) {
+        class_oid = RangeVarGetRelidExtended(relvar, NoLock, false, false, false, true, NULL, NULL);
+        pfree_ext(relvar);
+        typ_oid = get_rel_type_id(class_oid);
+    } else {
+        class_oid = RangeVarGetRelidExtended(relvar, NoLock, true, false, false, true, NULL, NULL);
+        typ_oid = get_rel_type_id(class_oid);
+        if (!OidIsValid(typ_oid) && enable_plpgsql_undefined()) {
+            Oid undefRefObjOid = gsplsql_try_build_exist_schema_undef_table(relvar);
+            pfree_ext(relvar);
+            if (OidIsValid(undefRefObjOid)) {
+                InstanceTypeNameDependExtend(&dependExtend);
+                dependExtend->undefDependObjOid = undefRefObjOid;
+                dependExtend->dependUndefined = true;
+                typ_oid = UNDEFINEDOID;
+            }
+        }
+        if (!OidIsValid(typ_oid) || UNDEFINEDOID == typ_oid) {
+            ereport((typ_oid == UNDEFINEDOID ? WARNING : ERROR),
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("relation does not exist when parse word.")));
+        }
+    }
+    
 
     MemoryContextSwitchTo(old_cxt);
 
     /* Build and return the row type struct */
-    return plpgsql_build_datatype(get_rel_type_id(class_oid), -1, InvalidOid);
+    return plpgsql_build_datatype(typ_oid, -1, InvalidOid, dependExtend);
 }
 
 /* cursor generate a composite type, find its col type */
@@ -3970,7 +4199,7 @@ PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_re
  * If collation is not InvalidOid then it overrides the type's default
  * collation.  But collation is ignored if the datatype is non-collatable.
  */
-PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation)
+PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation, TypeDependExtend* type_depend_extend)
 {
     HeapTuple type_tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
     if (!HeapTupleIsValid(type_tup)) {
@@ -4003,7 +4232,11 @@ PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation)
         typ = build_datatype(type_tup, typmod, collation);
     }
     ReleaseSysCache(type_tup);
-
+    if (enable_plpgsql_gsdependency() && NULL != typ) {
+        InstanceTypeNameDependExtend(&type_depend_extend);
+        typ->dependExtend = type_depend_extend;
+        typ->dependExtend->typeOid = typeOid;
+    }
     return typ;
 }
 
@@ -4045,6 +4278,7 @@ PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation)
         case TYPTYPE_DOMAIN:
         case TYPTYPE_ENUM:
         case TYPTYPE_RANGE:
+        case TYPTYPE_UNDEFINE:
             typ->ttype = PLPGSQL_TTYPE_SCALAR;
             break;
         case TYPTYPE_COMPOSITE:
@@ -4075,6 +4309,7 @@ PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation)
     typ->typrelid = type_struct->typrelid;
     typ->typioparam = getTypeIOParam(type_tup);
     typ->collation = type_struct->typcollation;
+    typ->dependExtend = NULL;
     if (OidIsValid(collation) && OidIsValid(typ->collation)) {
         typ->collation = collation;
     }

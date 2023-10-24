@@ -95,5 +95,6 @@ extern int read_objtype_from_string(const char *objtype);
 extern char *getObjectIdentityParts(const ObjectAddress *address,
                                     List **objname, List **objargs);
 extern ArrayType *strlist_to_textarray(List *list);
+extern Oid get_object_package(const ObjectAddress* address);
 
 #endif   /* PARSE_OBJECT_H */

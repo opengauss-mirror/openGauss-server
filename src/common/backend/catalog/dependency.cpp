@@ -118,7 +118,8 @@
 #include "utils/snapmgr.h"
 #include "datasource/datasource.h"
 #include "postmaster/rbcleaner.h"
-
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/gs_dependencies_obj.h"
 /*
  * This constant table maps ObjectClasses to the corresponding catalog OIDs.
  * See also getObjectClass().
@@ -126,6 +127,7 @@
 static const Oid object_classes[MAX_OCLASS] = {
     RelationRelationId,              /* OCLASS_CLASS */
     ProcedureRelationId,             /* OCLASS_PROC */
+    DependenciesObjRelationId,       /* OCLASS_GS_DEPENDENCIES */
     TypeRelationId,                  /* OCLASS_TYPE */
     CastRelationId,                  /* OCLASS_CAST */
     CollationRelationId,             /* OCLASS_COLLATION */
@@ -873,7 +875,6 @@ void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressS
                 subflags = 0; /* keep compiler quiet */
                 break;
         }
-
         findDependentObjects(&otherObject, subflags, &mystack, targetObjects, pendingObjects, depRel);
     }
 
