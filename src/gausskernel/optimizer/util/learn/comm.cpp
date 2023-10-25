@@ -420,7 +420,7 @@ bool TryConnectRemoteServer(AiEngineConnInfo* conninfo, char** buf)
         if (!InitAiConnHandle(connHandle)) {
             t_thrd.int_cxt.ImmediateInterruptOK = immediateInterruptOKOld;
             DestoryAiHandle(connHandle);
-            return false;
+            PG_TRY_RETURN(false);
         }
         SetOptForCurl(connHandle, conninfo, timeout);
 

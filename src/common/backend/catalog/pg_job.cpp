@@ -1584,7 +1584,7 @@ void RemoveJobById(Oid objectId)
         heap_endscan(scan);
         if (!HeapTupleIsValid(cp_tuple)) {
             heap_close(relation, RowExclusiveLock);
-            return;
+            PG_TRY_RETURN();
         }
         /* If remove job by function remove_job, we should check the permission. */
         if (ischeck) {

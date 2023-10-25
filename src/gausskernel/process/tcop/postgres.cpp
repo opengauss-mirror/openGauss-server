@@ -2272,7 +2272,7 @@ void exec_init_poolhandles(void)
                     PoolHandle* pool_handle = GetPoolManagerHandle();
                     if (pool_handle == NULL) {
                         ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Can not connect to pool manager")));
-                        return;
+                        PG_TRY_RETURN();
                     }
 
                     /*

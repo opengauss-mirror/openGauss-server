@@ -276,19 +276,19 @@ int UBTreeVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTupl
             PG_TRY();
             {
                 if (TransactionIdDidCommit(xmax) && !TransactionIdDidCommit(xmin)) {
-                    return VERIFY_XID_ORDER_ERROR;
+                    PG_TRY_RETURN(VERIFY_XID_ORDER_ERROR);
                 }
                 CommitSeqNo csn1 = TransactionIdGetCommitSeqNo(xmin, false, false, false, NULL);
                 CommitSeqNo csn2 = TransactionIdGetCommitSeqNo(xmax, false, false, false, NULL);
                 if (COMMITSEQNO_IS_COMMITTED(csn1) && COMMITSEQNO_IS_COMMITTED(csn2) &&
                     (csn1 > csn2)) {
-                    return VERIFY_CSN_ORDER_ERROR;
+                    PG_TRY_RETURN(VERIFY_CSN_ORDER_ERROR);
                 }
                 bool xminCommittedByCSN = COMMITSEQNO_IS_COMMITTED(csn1);
                 bool xmaxCommittedByCSN = COMMITSEQNO_IS_COMMITTED(csn2);
                 if (TransactionIdDidCommit(xmin) != xminCommittedByCSN ||
                     TransactionIdDidCommit(xmax) != xmaxCommittedByCSN) {
-                    return VERIFY_INCONSISTENT_XID_STATUS;
+                    PG_TRY_RETURN(VERIFY_INCONSISTENT_XID_STATUS);
                 }
             }
             PG_CATCH();

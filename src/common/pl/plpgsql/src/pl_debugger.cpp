@@ -1364,7 +1364,7 @@ static void debug_server_set_variable(DebugInfo* debug, PLpgSQL_execstate* estat
             ReleaseCurrentSubTransaction();
             func_context = MemoryContextSwitchTo(debug->debug_cxt);
             t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
-            return;
+            PG_TRY_RETURN();
         }
         exec_assign_expr(estate, targetDatum, expr);
         /* Commit the inner transaction and return to the outer context */

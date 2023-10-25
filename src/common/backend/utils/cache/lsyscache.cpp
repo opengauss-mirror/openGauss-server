@@ -2812,7 +2812,7 @@ void get_node_info(const char* nodename, bool* node_is_ccn, ItemPointer tuple_po
             *node_is_ccn = false;
             ReleaseSysCacheList(memlist);
             heap_close(rel, AccessShareLock);
-            return;
+            PG_TRY_RETURN();
         }
         tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, 0);
         /* get nodeis_central for the node */

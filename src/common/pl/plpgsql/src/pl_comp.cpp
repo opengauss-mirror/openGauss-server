@@ -5201,7 +5201,7 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
                     }
                     expr->func = NULL;
                     list_free_deep(parsetreeList);
-                    return NULL;
+                    PG_TRY_RETURN(NULL);
                 }
             }
             queryList = pg_analyze_and_rewrite_params(parsetree, expr->query, 
