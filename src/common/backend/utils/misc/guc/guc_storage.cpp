@@ -984,7 +984,7 @@ static void InitStorageConfigureNamesBool()
             PGC_SIGHUP,
             NODE_ALL,
             UNGROUPED,
-            gettext_noop("create segment table, only used in debug mode"),
+            gettext_noop("create segment table."),
             NULL},
             &u_sess->attr.attr_storage.enable_segment,
             false,

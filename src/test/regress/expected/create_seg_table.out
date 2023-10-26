@@ -1,0 +1,106 @@
+-- modify enble_segment parameter
+drop table if exists tab_segment;
+NOTICE:  table "tab_segment" does not exist, skipping
+drop table if exists tab_segment_off;
+NOTICE:  table "tab_segment_off" does not exist, skipping
+drop table if exists tab_segment_on;
+NOTICE:  table "tab_segment_on" does not exist, skipping
+show enable_segment;
+ enable_segment 
+----------------
+ off
+(1 row)
+
+alter system set enable_segment = on;
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show enable_segment;
+ enable_segment 
+----------------
+ on
+(1 row)
+
+create table tab_segment(a int);
+create table tab_segment_off(a int) with(segment=off);
+ERROR:  Only support segment storage type while parameter enable_segment is ON.
+create table tab_segment_on(a int) with(segment=on);
+\d+ tab_segment;
+                     Table "public.tab_segment"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, segment=on
+
+\d+ tab_segment_off;
+\d+ tab_segment_on;
+                    Table "public.tab_segment_on"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, segment=on, compression=no
+
+drop table tab_segment;
+drop table if exists tab_segment_off;
+NOTICE:  table "tab_segment_off" does not exist, skipping
+drop table if exists tab_segment_on;
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show enable_segment;
+ enable_segment 
+----------------
+ on
+(1 row)
+
+alter system set enable_segment = off;
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show enable_segment;
+ enable_segment 
+----------------
+ off
+(1 row)
+
+create table tab_segment(a int);
+create table tab_segment_off(a int) with(segment=off);
+create table tab_segment_on(a int) with(segment=on);
+\d+ tab_segment;
+                     Table "public.tab_segment"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ tab_segment_off;
+                   Table "public.tab_segment_off"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, segment=off, compression=no
+
+\d+ tab_segment_on;
+                    Table "public.tab_segment_on"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, segment=on, compression=no
+
+drop table tab_segment;
+drop table if exists tab_segment_off;
+drop table if exists tab_segment_on;

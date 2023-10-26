@@ -3109,6 +3109,34 @@ void CheckCompressOption(TableCreateSupport *tableCreateSupport)
     }
 }
 
+bool CheckSegmentStorageOption(List *options)
+{
+    if (options == NULL) {
+        return true;
+    }
+
+    ListCell *opt = NULL;
+    bool result = true;
+    foreach (opt, options) {
+        DefElem *def = (DefElem *)lfirst(opt);
+
+        if (pg_strcasecmp(def->defname, "segment") == 0) {
+            /*
+             * def->arg is NULL, that means it's a RESET action. ignore it.
+             * def->arg is not NULL, that means it's a SET action, so check it.
+             */
+            if (def->arg) {
+                const char *valstr = defGetString(def);
+                if (pg_strcasecmp(valstr, "off") == 0)
+                    result = false;
+            }
+            break;
+        }
+    }
+
+    return result;
+}
+
 #ifdef USE_SPQ
 /*
  * before check spq reloption, make sure guc params of spq_enable_btbuild is on
