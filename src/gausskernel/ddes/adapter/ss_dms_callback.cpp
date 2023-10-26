@@ -1777,7 +1777,7 @@ static void AliveFailoverCleanBackends()
 }
 
 static int reform_type_str_len = 30;
-static void ReformTypeToString(SSReformType reform_type, char* ret_str)
+static void ReformTypeToString(dms_reform_type_t reform_type, char* ret_str)
 {
     switch (reform_type)
     {
@@ -1825,7 +1825,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->is_hashmap_constructed = false;
-    reform_info->reform_type = (SSReformType)reform_type;
+    reform_info->reform_type = (dms_reform_type_t)reform_type;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;

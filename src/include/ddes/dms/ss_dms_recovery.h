@@ -62,7 +62,7 @@ typedef struct st_reformer_ctrl {
 typedef struct st_reform_info {
     bool in_reform;
     dms_role_t dms_role;
-    SSReformType reform_type;
+    dms_reform_type_t reform_type;
     unsigned long long bitmap_nodes;
     timeval reform_start_time;
     timeval reform_end_time;
