@@ -55,6 +55,7 @@ void InitDmsBufCtrl(void)
             buf_ctrl->pblk_relno = InvalidOid;
             buf_ctrl->pblk_blkno = InvalidBlockNumber;
             buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
+            buf_ctrl->been_loaded = false;
         }
     }
 }
@@ -160,6 +161,8 @@ void ClearReadHint(int buf_id, bool buf_deleted)
     if (buf_deleted) {
         buf_ctrl->state = 0;
     }
+    buf_ctrl->seg_fileno = EXTENT_INVALID;
+    buf_ctrl->seg_blockno = InvalidBlockNumber;
 }
 
 /*
@@ -794,6 +797,13 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
             .bucketNode = SegmentBktId,
             .opt = 0
         };
+
+        /* Check whether the physical location info match! */
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
+        if (buf_ctrl->seg_fileno != EXTENT_INVALID && (buf_ctrl->seg_fileno != buf_desc->extra->seg_fileno ||
+            buf_ctrl->seg_blockno != buf_desc->extra->seg_blockno)) {
+            ereport(PANIC, (errmsg("It seemd physical location of drc not match with buf desc!")));
+        }
 
         seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->extra->seg_blockno, (char *)buffer);
         if (PageIsVerified((Page)buffer, buf_desc->extra->seg_blockno)) {
