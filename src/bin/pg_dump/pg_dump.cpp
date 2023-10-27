@@ -826,8 +826,6 @@ int main(int argc, char** argv)
             ((dbname != NULL) ? dbname : ""), errorMessages);
     }
 
-    fout->workingVersionNum = GetVersionNumFromServer(fout);
-
 #ifndef ENABLE_MULTIPLE_NODES
     /*
      * During gs_dump, PQfnumber() is matched according to the lowercase column name.
@@ -841,6 +839,8 @@ int main(int argc, char** argv)
         exit_horribly(NULL, "%s set uppercase_attribute_name to off failed.\n", progname);
     }
 #endif
+
+    fout->workingVersionNum = GetVersionNumFromServer(fout);
 
     if (CheckIfStandby(fout)) {
         (void)remove(filename);
