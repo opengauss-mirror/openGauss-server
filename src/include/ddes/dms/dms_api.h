@@ -46,6 +46,11 @@ extern "C" {
 #define DMS_VERSION_MAX_LEN     256
 #define DMS_OCK_LOG_PATH_LEN    256
 #define DMS_LOG_PATH_LEN        (256)
+
+// The values of the following two macros must be same with (GS_MAX_XA_BASE16_GTRID_LEN GS_MAX_XA_BASE16_BQUAL_LEN)
+#define DMS_MAX_XA_BASE16_GTRID_LEN    (128)
+#define DMS_MAX_XA_BASE16_BQUAL_LEN    (128)
+
 typedef enum en_dms_online_status {
     DMS_ONLINE_STATUS_OUT = 0,
     DMS_ONLINE_STATUS_JOIN = 1,
@@ -133,6 +138,7 @@ typedef struct st_dms_drid {
         struct {
             unsigned long long key1;
             unsigned long long key2;
+            unsigned int key3;
         };
         struct {
             unsigned short  type;  // lock type
@@ -154,6 +160,7 @@ typedef enum en_drc_res_type {
     DRC_RES_TXN_TYPE,
     DRC_RES_LOCAL_TXN_TYPE,
     DRC_RES_LOCK_ITEM_TYPE,
+    DRC_RES_GLOBAL_XA_TYPE,
 } drc_res_type_e;
 
 typedef enum en_dms_session {
@@ -162,6 +169,67 @@ typedef enum en_dms_session {
     DMS_SESSION_RECOVER = 2,    // can access DRC when DRC is inaccessible, buf if no owner, should set in recovery
     DMS_SESSION_RECOVER_HOT_STANDBY = 3, // can access DRC when pmstate = PM_HOT_STANDBY
 } dms_session_e;
+
+/*
+ * before construct CR page, we need to obtain the basic page,
+ * and rollback those unvisible transaction on the basic page's content,
+ * it represents where the basic page comes from.
+ */
+typedef enum st_dms_cr_version_t {
+    DMS_CR_VERSION_NONE = 0,
+    DMS_CR_VERSION_CURR_PAGE,
+    DMS_CR_VERSION_EDP_PAGE,
+    DMS_CR_VERSION_CR_PAGE,
+} dms_cr_version_t;
+
+/*
+ * CR construct state machine:
+ * first try to read page from local node's data buffer (DMS_CR_PHASE_TRY_READ_PAGE),
+ * if the current page or edp page is usable, we use it to construct CR;
+ * otherwise, check status from the master node (DMS_CR_PHASE_CHECK_MASTER),
+ * if master is remote node, the request CR to the master (DMS_CR_PHASE_REQ_MASTER),
+ * otherwise obtain the owner's position, the either request CR to the remote owner (DMS_CR_PHASE_REQ_OWNER),
+ * or trigger local node to read current page and do the CR construct (DMS_CR_PHASE_READ_PAGE);
+ * the master receives CR request, it will route the request to the owner,
+ * and the owner will do CR construct operations,
+ * meanwhile it will decide whether the other node needs to continue CR construct (DMS_CR_PHASE_CONSTRUCT).
+ * if all CR construct operations have done, the phase will be DMS_CR_PHASE_DONE.
+ */
+typedef enum st_dms_cr_phase_t {
+    DMS_CR_PHASE_TRY_READ_PAGE = 0,
+    DMS_CR_PHASE_CHECK_MASTER,
+    DMS_CR_PHASE_REQ_MASTER,
+    DMS_CR_PHASE_REQ_OWNER,
+    DMS_CR_PHASE_READ_PAGE,
+    DMS_CR_PHASE_CONSTRUCT,
+    DMS_CR_PHASE_DONE,
+} dms_cr_phase_t;
+
+typedef enum st_dms_cr_status_t {
+    DMS_CR_STATUS_ABORT = 0,
+    DMS_CR_STATUS_INVISIBLE_TXN,            /* local node invisible transaction */
+    DMS_CR_STATUS_OTHER_NODE_INVISIBLE_TXN, /* other node invisible transaction */
+    DMS_CR_STATUS_PENDING_TXN,              /* prepared transaction */
+    DMS_CR_STATUS_ALL_VISIBLE,
+} dms_cr_status_t;
+
+typedef struct st_dms_cr_assist_t {
+    void *handle;                           /* IN parameter */
+    unsigned long long query_scn;           /* IN parameter */
+    unsigned int ssn;                       /* IN parameter */
+    unsigned int relay_inst;                /* OUT parameter */
+    char *page;                             /* IN & OUT parameter */
+    char *fb_mark;                          /* IN & OUT parameter */
+    char page_id[DMS_PAGEID_SIZE];          /* IN parameter */
+    char curr_xid[DMS_XID_SIZE];            /* IN parameter */
+    char wxid[DMS_XID_SIZE];                /* OUT parameter */
+    char entry[DMS_PAGEID_SIZE];            /* IN parameter */
+    char profile[DMS_INDEX_PROFILE_SIZE];   /* IN parameter */
+    unsigned int check_restart;             /* IN parameter */
+    unsigned int *check_found;              /* IN & OUT parameter */
+    dms_cr_phase_t phase;                   /* OUT parameter */
+    dms_cr_status_t status;                 /* OUT parameter */
+} dms_cr_assist_t;
 
 #define DMS_RESID_SIZE  32
 #define DMS_DRID_SIZE   sizeof(dms_drid_t)
@@ -207,6 +275,14 @@ typedef struct st_dms_process_context {
     unsigned int inst_id;  // current instance id
 } dms_process_context_t;
 
+typedef struct st_drc_global_xid {
+    unsigned long long fmt_id;
+    char   gtrid[DMS_MAX_XA_BASE16_GTRID_LEN];
+    char   bqual[DMS_MAX_XA_BASE16_BQUAL_LEN];
+    unsigned char gtrid_len;
+    unsigned char bqual_len;
+} drc_global_xid_t;
+
 typedef struct st_dms_context {
     union {
         struct {
@@ -229,6 +305,7 @@ typedef struct st_dms_context {
         dms_xmap_ctx_t xmap_ctx;
         dms_rfn_t rfn;
         unsigned char edp_inst;
+        drc_global_xid_t global_xid;
     };
 } dms_context_t;
 
@@ -238,6 +315,8 @@ typedef struct st_dms_cr {
     unsigned int ssn;
     char *page;
     unsigned char *fb_mark;
+    dms_cr_status_t status;
+    dms_cr_phase_t phase;
 } dms_cr_t;
 
 typedef struct st_dms_opengauss_xid_csn {
@@ -311,7 +390,6 @@ typedef struct st_dms_broadcast_context {
     unsigned int len;
     char *output_msg;
     unsigned int *output_msg_len;
-    unsigned int msg_version;
 } dms_broadcast_context_t;
 
 typedef struct st_dms_buf_ctrl {
@@ -324,6 +402,7 @@ typedef struct st_dms_buf_ctrl {
     volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
     volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
     volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
+    volatile unsigned char break_wal;
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
@@ -375,18 +454,6 @@ typedef enum en_dms_buf_load_status {
     DMS_BUF_LOAD_FAILED = 0x02,
     DMS_BUF_NEED_TRANSFER = 0x04,          // used only in DTC, means need ask master/coordinator for latest version
 } dms_buf_load_status_t;
-
-typedef enum en_dms_cr_status {
-    DMS_CR_TRY_READ = 0,
-    DMS_CR_LOCAL_READ,
-    DMS_CR_READ_PAGE,
-    DMS_CR_READ_EDP_PAGE,
-    DMS_CR_CONSTRUCT,
-    DMS_CR_PAGE_VISIBLE,
-    DMS_CR_CHECK_MASTER,
-    DMS_CR_REQ_MASTER,
-    DMS_CR_REQ_OWNER,
-} dms_cr_status_t;
 
 typedef enum en_dms_log_level {
     DMS_LOG_LEVEL_ERROR = 0,  // error conditions
@@ -475,6 +542,8 @@ typedef enum en_dms_wait_event {
     DMS_EVT_TXN_REQ_SNAPSHOT,
     DMS_EVT_DLS_REQ_LOCK,
     DMS_EVT_DLS_REQ_TABLE,
+    DMS_EVT_DLS_REQ_PART_X,
+    DMS_EVT_DLS_REQ_PART_S,
     DMS_EVT_DLS_WAIT_TXN,
     DMS_EVT_DEAD_LOCK_TXN,
     DMS_EVT_DEAD_LOCK_TABLE,
@@ -489,7 +558,11 @@ typedef enum en_dms_wait_event {
     DMS_EVT_ONDEMAND_REDO,
     DMS_EVT_PAGE_STATUS_INFO,
     DMS_EVT_OPENGAUSS_SEND_XMIN,
-
+    DMS_EVT_DCS_REQ_CREATE_XA_RES,
+    DMS_EVT_DCS_REQ_DELETE_XA_RES,
+    DMS_EVT_DCS_REQ_XA_OWNER_ID,
+    DMS_EVT_DCS_REQ_XA_IN_USE,
+    DMS_EVT_DCS_REQ_END_XA,
 
     DMS_EVT_COUNT,
 } dms_wait_event_t;
@@ -519,6 +592,28 @@ typedef enum en_reform_phase {
     DMS_PHASE_BEFORE_ROLLBACK = 4,
     DMS_PHASE_END = 5,
 } reform_phase_t;
+
+typedef enum en_dms_reform_type {
+    // for multi_write
+    DMS_REFORM_TYPE_FOR_NORMAL = 0,
+
+    // for Gauss100
+    DMS_REFORM_TYPE_FOR_BUILD,
+    DMS_REFORM_TYPE_FOR_FAILOVER,
+    DMS_REFORM_TYPE_FOR_SWITCHOVER,
+
+    // for openGauss
+    DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS,
+    DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS,
+    DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS,
+
+    // common
+    DMS_REFORM_TYPE_FOR_FULL_CLEAN, // for all instances are online and stable, and all instances status is IN
+    DMS_REFORM_TYPE_FOR_MAINTAIN,   // for start database without CM, every instance is supported
+    // New type need to be added start from here
+    DMS_REFORM_TYPE_FOR_RST_RECOVER,
+    DMS_REFORM_TYPE_COUNT
+} dms_reform_type_t;
 
 typedef enum en_dms_status {
     DMS_STATUS_OUT = 0,
@@ -581,6 +676,11 @@ typedef struct st_stat_drc_info {
     char                    data[DMS_RESID_SIZE];            /* user defined resource(page) identifier */
 } stat_drc_info_t;
 
+typedef enum en_broadcast_scope {
+    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
+    DMS_BROADCAST_ONLINE_LIST = 1,
+} dms_broadcast_scope_e;
+
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
     unsigned long long list_in, unsigned int save_ctrl);
@@ -592,11 +692,13 @@ typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lo
     unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
 typedef int(*dms_need_flush)(void *db_handle, char *pageid);
+typedef int(*dms_edp_to_owner)(void *db_handle, char *pageid);
 typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
-typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int is_reformer);
+typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
+typedef int(*dms_recovery_analyse)(void *db_handle, void *recovery_list, int is_reformer);
 typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, int is_reformer);
-typedef int(*dms_df_recovery)(void *db_handle);
+typedef int(*dms_df_recovery)(void *db_handle, unsigned long long list_in, void *recovery_list);
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
@@ -605,6 +707,7 @@ typedef void(*dms_reform_start_notify)(void *db_handle, dms_role_t role, unsigne
 typedef int(*dms_undo_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_load)(void *db_handle, unsigned char inst_id);
+typedef int(*dms_convert_to_readwrite)(void *db_handle);
 typedef int(*dms_tx_rollback_finish)(void *db_handle, unsigned char inst_id);
 typedef unsigned char(*dms_recovery_in_progress)(void *db_handle);
 typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE]);
@@ -631,28 +734,15 @@ typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
 typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index, dms_session_type_e session_type);
 typedef void (*dms_release_db_handle)(void *db_handle);
-typedef void *(*dms_stack_push_cr_cursor)(void *db_handle);
-typedef void (*dms_stack_pop_cr_cursor)(void *db_handle);
-typedef int(*dms_init_cr_cursor)(void *cr_cursor, char pageid[DMS_PAGEID_SIZE], char xid[DMS_XID_SIZE],
-    unsigned long long query_scn, unsigned int ssn);
-typedef void(*dms_init_index_cr_cursor)(void *cr_cursor, char pageid[DMS_PAGEID_SIZE], char xid[DMS_XID_SIZE],
-    unsigned long long query_scn, unsigned int ssn, char entry[DMS_PAGEID_SIZE], char *index_profile);
-typedef void(*dms_init_check_cr_cursor)(void *cr_cursor, char rowid[DMS_ROWID_SIZE], char xid[DMS_XID_SIZE],
-    unsigned long long query_scn, unsigned int ssn);
 typedef char *(*dms_get_wxid_from_cr_cursor)(void *cr_cursor);
-typedef unsigned char(*dms_get_instid_of_xid_from_cr_cursor)(void *db_handle, void *cr_cursor);
-typedef int(*dms_get_page_invisible_txn_list)(void *db_handle, void *cr_cursor, void *cr_page,
-    unsigned char *is_empty_txn_list, unsigned char *exist_waiting_txn);
-typedef int(*dms_reorganize_heap_page_with_undo)(void *db_handle, void *cr_cursor, void *cr_page,
-    unsigned char *fb_mark);
-typedef int(*dms_reorganize_index_page_with_undo)(void *db_handle, void *cr_cursor, void *cr_page);
-typedef int(*dms_check_heap_page_visible_with_undo_snapshot)(void *db_handle, void *cr_cursor, void *page,
-    unsigned char *is_found);
 typedef void(*dms_set_page_force_request)(void *db_handle, char pageid[DMS_PAGEID_SIZE]);
 typedef void(*dms_get_entry_pageid_from_cr_cursor)(void *cr_cursor, char index_entry_pageid[DMS_PAGEID_SIZE]);
 typedef void(*dms_get_index_profile_from_cr_cursor)(void *cr_cursor, char index_profile[DMS_INDEX_PROFILE_SIZE]);
 typedef void(*dms_get_xid_from_cr_cursor)(void *cr_cursor, char xid[DMS_XID_SIZE]);
 typedef void(*dms_get_rowid_from_cr_cursor)(void *cr_cursor, char rowid[DMS_ROWID_SIZE]);
+typedef int (*dms_heap_construct_cr_page)(dms_cr_assist_t *pcr);
+typedef int (*dms_btree_construct_cr_page)(dms_cr_assist_t *pcr);
+typedef int (*dms_check_heap_page_visible)(dms_cr_assist_t *pcr);
 typedef int(*dms_read_page)(void *db_handle, dms_read_page_assist_t *assist, char **page_addr, unsigned int *status);
 typedef void(*dms_leave_page)(void *db_handle, unsigned char changed, unsigned int status);
 typedef char *(*dms_mem_alloc)(void *context, unsigned int size);
@@ -698,6 +788,8 @@ typedef int (*dms_mount_to_recovery)(void *db_handle, unsigned int *has_offline)
 typedef int(*dms_get_open_status)(void *db_handle);
 typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
 typedef void (*dms_reset_user)(void *db_handle, unsigned long long list_in);
+typedef int (*dms_drc_xa_res_rebuild)(void *db_handle, unsigned char thread_index, unsigned char parall_num);
+typedef void (*dms_reform_shrink_xa_rms)(unsigned char undo_seg_id);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
@@ -740,7 +832,10 @@ typedef int (*dms_update_node_oldest_xmin)(void *db_handle, unsigned char inst_i
 typedef void (*dms_set_inst_behavior)(void *db_handle, dms_inst_behavior_t inst_behavior);
 typedef int (*dms_db_prepare)(void *db_handle);
 typedef void (*dms_get_buf_info)(char* resid, stat_buf_info_t *buf_info);
-
+typedef int (*dms_end_xa)(void *db_handle, void *knl_xa_xid, unsigned long long flags, unsigned long long scn,
+    unsigned char is_commit);
+typedef unsigned char (*dms_xa_inuse)(void *db_handle, void *knl_xa_xid);
+typedef int (*dms_get_part_changed)(void *db_handle, char* resid);
 typedef struct st_dms_callback {
     // used in reform
     dms_get_list_stable get_list_stable;
@@ -751,10 +846,11 @@ typedef struct st_dms_callback {
     dms_confirm_converting confirm_converting;
     dms_flush_copy flush_copy;
     dms_need_flush need_flush;
+    dms_edp_to_owner edp_to_owner;
     dms_edp_lsn edp_lsn;
     dms_disk_lsn disk_lsn;
     dms_recovery recovery;
-    dms_recovery recovery_analyse;
+    dms_recovery_analyse recovery_analyse;
     dms_dw_recovery dw_recovery;
     dms_df_recovery df_recovery;
     dms_db_is_primary db_is_primary;
@@ -762,6 +858,7 @@ typedef struct st_dms_callback {
     dms_undo_init undo_init;
     dms_tx_area_init tx_area_init;
     dms_tx_area_load tx_area_load;
+    dms_convert_to_readwrite convert_to_readwrite;
     dms_tx_rollback_finish tx_rollback_finish;
     dms_recovery_in_progress recovery_in_progress;
     dms_drc_buf_res_rebuild dms_reform_rebuild_buf_res;
@@ -770,6 +867,8 @@ typedef struct st_dms_callback {
     dms_check_if_build_complete check_if_build_complete;
     dms_check_if_restore_recover check_if_restore_recover;
     dms_reset_user reset_user;
+    dms_drc_xa_res_rebuild dms_reform_rebuild_xa_res;
+    dms_reform_shrink_xa_rms dms_shrink_xa_rms;
 
     // used in reform for opengauss
     dms_thread_init_t dms_thread_init;
@@ -802,23 +901,15 @@ typedef struct st_dms_callback {
     dms_invalidate_page invalidate_page;
     dms_get_db_handle get_db_handle;
     dms_release_db_handle release_db_handle;
-    dms_stack_push_cr_cursor stack_push_cr_cursor;
-    dms_stack_pop_cr_cursor stack_pop_cr_cursor;
-    dms_init_cr_cursor init_heap_cr_cursor;
-    dms_init_index_cr_cursor init_index_cr_cursor;
-    dms_init_check_cr_cursor init_check_cr_cursor;
     dms_get_wxid_from_cr_cursor get_wxid_from_cr_cursor;
-    dms_get_instid_of_xid_from_cr_cursor get_instid_of_xid_from_cr_cursor;
-    dms_get_page_invisible_txn_list get_heap_invisible_txn_list;
-    dms_get_page_invisible_txn_list get_index_invisible_txn_list;
-    dms_reorganize_heap_page_with_undo reorganize_heap_page_with_undo;
-    dms_reorganize_index_page_with_undo reorganize_index_page_with_undo;
-    dms_check_heap_page_visible_with_undo_snapshot check_heap_page_visible_with_udss;
     dms_set_page_force_request set_page_force_request;
     dms_get_entry_pageid_from_cr_cursor get_entry_pageid_from_cr_cursor;
     dms_get_index_profile_from_cr_cursor get_index_profile_from_cr_cursor;
     dms_get_xid_from_cr_cursor get_xid_from_cr_cursor;
     dms_get_rowid_from_cr_cursor get_rowid_from_cr_cursor;
+    dms_heap_construct_cr_page heap_construct_cr_page;
+    dms_btree_construct_cr_page btree_construct_cr_page;
+    dms_check_heap_page_visible check_heap_page_visible;
     dms_read_page read_page;
     dms_leave_page leave_page;
     dms_verify_page verify_page;
@@ -887,6 +978,9 @@ typedef struct st_dms_callback {
     dms_db_prepare db_prepare;
 
     dms_get_buf_info get_buf_info;
+    dms_end_xa end_xa;
+    dms_xa_inuse xa_inuse;
+    dms_get_part_changed get_part_changed;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -958,20 +1052,11 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
 
-typedef enum st_dms_protocol_version {
-    DMS_PROTO_VER_0 = 0,    // invalid version
-    DMS_PROTO_VER_1 = 1,    // first version
-} dms_protocol_version_e;
-
-#define DMS_INVALID_PROTO_VER DMS_PROTO_VER_0
-#define DMS_SW_PROTO_VER      DMS_PROTO_VER_1
-
 #define DMS_LOCAL_MAJOR_VER_WEIGHT  1000000
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           95
-
+#define DMS_LOCAL_VERSION           104
 #ifdef __cplusplus
 }
 #endif
