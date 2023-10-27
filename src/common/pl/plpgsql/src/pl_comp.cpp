@@ -1276,7 +1276,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             FlushErrorState();
         }
         PG_END_TRY();
-    }else {
+    } else {
         bool save_isPerform = u_sess->parser_cxt.isPerform;
         u_sess->parser_cxt.isPerform = false;
         parse_rc = plpgsql_yyparse();

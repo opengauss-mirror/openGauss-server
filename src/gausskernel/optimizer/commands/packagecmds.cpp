@@ -273,6 +273,7 @@ static void RecompileSinglePackage(Oid package_oid, bool is_spec)
         u_sess->plsql_cxt.curr_compile_context = save_compile_context;
         u_sess->plsql_cxt.compile_status = save_compile_status;
         u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        u_sess->plsql_cxt.during_compile = false;
         clearCompileContextList(save_compile_list_length);
         u_sess->plsql_cxt.running_pkg_oid = InvalidOid;
         clear_plsql_ctx_line_info();

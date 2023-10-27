@@ -2651,7 +2651,7 @@ select a.schemaname as sn, a.packagename as pn, a.objectname as on, a.refobjpos 
  order by a.schemaname, a.objectname, a.refobjpos, b.type, b.name;
          sn          |  pn  |                 on                  | refpos |        refsn        | refpn |                refon                | refot |                                                                       refast                                                                        
 ---------------------+------+-------------------------------------+--------+---------------------+-------+-------------------------------------+-------+-----------------------------------------------------------------------------------------------------------------------------------------------------
- plpgsql_depend_type | null | proc1(plpgsql_depend_type.pkg.arr1) |      4 | plpgsql_depend_type | pkg   | arr1                                |     3 | {DependenciesUndefined}
+ plpgsql_depend_type | null | proc1(plpgsql_depend_type.pkg.arr1) |      4 | plpgsql_depend_type | pkg   | arr1                                |     3 | {DependenciesType :typType b :typCategory A :attrInfo <> :isRel false :elemTypName plpgsql_depend_type.sr :idxByTypName <>}
                      |      |                                     |        | plpgsql_depend_type | null  | proc1(plpgsql_depend_type.pkg.arr1) |     5 | {DependenciesProchead :undefined false :proName proc1 :proArgSrc v_1\ pkg.arr1 :funcHeadSrc create\ or\ replace\ procedure\ proc1\(v_1\ pkg.arr1\)}
 (2 rows)
 

@@ -105,6 +105,77 @@ end pkg;
 /
 alter package pkg compile;
 
--- select oid,* from pg_type where typname='stu';
+-- test 3
+create procedure test_subtype_proc is
+xx s_type;
+begin
+xx := (1,'aaa','bbb');
+raise notice '%',xx;
+end;
+/
+
+call test_subtype_proc();
+alter type s_type ADD attribute a int;
+--修改后，预期调用成功
+call test_subtype_proc();
+--手动触发编译， 调用成功
+alter procedure test_subtype_proc compile;
+call test_subtype_proc();
+
+-- test 4
+create or replace package pkg
+is    
+procedure proc1();
+end pkg;
+/
+create or replace package body pkg
+is
+xxx s_type;
+procedure proc1() as
+yyy s_type;
+begin        
+xxx:= (1,'aaa','aaaaa');
+yyy:= (2,'bbb','bbbbb');
+RAISE INFO 'call xxx: %, yyy: %', xxx, yyy;
+end;
+end pkg;
+/
+
+call pkg.proc1();
+alter type s_type ADD attribute b int;
+--修改后，预期调用成功
+call pkg.proc1();
+--手动触发编译， 调用成功
+alter package pkg compile;
+call pkg.proc1();
+
+-- test 5
+create or replace package pkg
+is    
+procedure proc1(p_in s_type);
+end pkg;
+/
+create or replace package body pkg
+is
+xxx s_type;
+procedure proc1(p_in s_type) as
+yyy s_type;
+begin        
+xxx:= (1,'aaa','aaaaa');
+yyy:= (2,'bbb','bbbbb');
+RAISE INFO 'call xxx: %, yyy: %, p_in: %', xxx, yyy, p_in;
+end;
+end pkg;
+/
+
+call pkg.proc1((1,'zhang','M',1,2));
+alter type s_type ADD attribute c int;
+--修改后，预期调用成功
+call pkg.proc1((1,'zhang','M',1,2,3));
+--手动触发编译， 调用成功
+alter package pkg compile;
+call pkg.proc1((1,'zhang','M',1,2,3));
+
+-- clean
 drop schema plpgsql_recompile cascade;
 reset behavior_compat_options;

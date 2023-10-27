@@ -2390,7 +2390,7 @@ static void RecompileFunctionWithArgs(CompileStmt* stmt)
     if (PROC_IS_PRO(get_func_prokind(func_oid)) && stmt->compileItem == COMPILE_FUNCTION) {
         ReportRecompileFuncWarning(stmt);
     }
-    if (!IsNeedRecompile(func_oid)) {
+    if (IsNeedRecompile(func_oid)) {
         RecompileSingleFunction(func_oid, stmt->compileItem == COMPILE_PROCEDURE);
         return;
     }

@@ -1447,6 +1447,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         plpgsql_build_varrayType($2->name, $2->lineno, $9, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY, $9->dependExtend);
+                        } else if (enable_plpgsql_gsdependency()) {
+                            gsplsql_build_gs_type_in_body_dependency($9);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1482,6 +1484,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         plpgsql_build_varrayType($2->name, $2->lineno, newp, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_ARRAY);
+                        } else if (enable_plpgsql_gsdependency()) {
+                            PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
+                            int i;
+                            for (i = 0; i < rec_var->attrnum; i++) {
+                                gsplsql_build_gs_type_in_body_dependency(rec_var->types[i]);
+                            }
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1601,6 +1609,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         plpgsql_build_tableType($2->name, $2->lineno, $6, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF, $6->dependExtend);
+                        } else if (enable_plpgsql_gsdependency()) {
+                            gsplsql_build_gs_type_in_body_dependency($6);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1663,6 +1673,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         plpgsql_build_tableType($2->name, $2->lineno, newp, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF);
+                        } else if (enable_plpgsql_gsdependency()) {
+                            PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
+                            int i;
+                            for (i = 0; i < rec_var->attrnum; i++) {
+                                gsplsql_build_gs_type_in_body_dependency(rec_var->types[i]);
+                            }
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1775,6 +1791,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             } else {
                                 plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF_INTEGER, $6->dependExtend);
                             }
+                        } else if (enable_plpgsql_gsdependency()) {
+                            gsplsql_build_gs_type_in_body_dependency($6);
                         }
                         pfree_ext($2->name);
 						pfree($2);
@@ -1857,6 +1875,12 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                 plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF_VARCHAR);
                             } else {
                                 plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF_INTEGER);
+                            }
+                        } else if (enable_plpgsql_gsdependency()) {
+                            int i;
+                            PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
+                            for (i = 0; i < rec_var->attrnum; i++) {
+                                gsplsql_build_gs_type_in_body_dependency(rec_var->types[i]);
                             }
                         }
                         pfree_ext($2->name);
@@ -12704,24 +12728,12 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     Oid oldtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename),
         ObjectIdGetDatum(pkgNamespaceOid));
     bool oldtypeoidIsValid = OidIsValid(oldtypeoid);
-    if (enable_plpgsql_gsdependency() && u_sess->plsql_cxt.need_create_depend) {
-        char* schemaName = get_namespace_name(pkgNamespaceOid);
-        char* packageName = GetPackageName(pkgOid);
-        bool dependUndef = gsplsql_check_type_depend_undefined(schemaName, packageName, typname);
-        pfree_ext(schemaName);
-        pfree_ext(packageName);
-        if (dependUndef) {
-            ObjectAddress address;
-            address.classId = TypeRelationId;
-            address.objectId = oldtypeoid;
-            address.objectSubId = 0;
-            performDeletion(&address, DROP_CASCADE, PERFORM_DELETION_INTERNAL);
-            oldtypeoidIsValid = false;
-        }
-    }
     if (OidIsValid(oldtypeoid)) {
         /* alread build one, just return */
-        if(IsPackageDependType(oldtypeoid, u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid)) {
+        if(IsPackageDependType(oldtypeoid, pkgOid)) {
+            if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE) {
+                (void)gsplsql_flush_undef_ref_type_dependency(oldtypeoid);
+            }
             return;
         } else {
             ereport(errstate,
@@ -12791,6 +12803,9 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     myself.objectSubId = 0;
     recordDependencyOn(&referenced, &myself, DEPENDENCY_AUTO);
     CommandCounterIncrement();
+    if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE && typtyp != TYPTYPE_TABLEOF) {
+        (void)gsplsql_build_ref_type_dependency(referenced.objectId);
+    }
     pfree_ext(casttypename);
 }
 

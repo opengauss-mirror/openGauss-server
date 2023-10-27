@@ -143,5 +143,4 @@ extern void gsplsql_delete_unrefer_depend_obj_oid(Oid ref_obj_oid, bool skip_in_
 extern bool gsplsql_check_type_depend_ast_equal(Relation obj_rel, Oid obj_oid, const char* equal_ast);
 extern bool gsplsql_search_depend_obj_by_oid(Oid oid, GsDependObjDesc* obj_desc);
 extern void gsplsql_remove_type_gs_dependency(const GsDependObjDesc* obj_desc);
-
 #endif   /* GS_DEPENDENCIES_FN_H */
