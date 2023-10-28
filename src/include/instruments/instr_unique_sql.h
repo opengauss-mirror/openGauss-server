@@ -158,37 +158,28 @@ extern int GetUniqueSQLTrackType();
 
 
 #define INIT_UNIQUE_SQL_CXT()                                                                               \
+PLSQLStmtTrackStack stack;                                                                                  \
 int64 timeInfo[TOTAL_TIME_INFO_TYPES] = {0};                                                                \
-PLSQLStmtTrackStack stack;                                                                                 \
-errno_t err_no;                                                                                             \
 if (IS_UNIQUE_SQL_TRACK_ALL) {                                                                              \
-    for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {                                                       \
-    timeInfo[i] = u_sess->stat_cxt.localTimeInfoArray[i];                                                   \
-    u_sess->stat_cxt.localTimeInfoArray[i] = 0;                                                             \
-    }                                                                                                       \
+    timeInfo[DB_TIME] = GetCurrentTimestamp();                                                              \
+    timeInfo[CPU_TIME] = getCpuTime();                                                                      \
 }                                                                                                           \
-u_sess->stat_cxt.localTimeInfoArray[DB_TIME] = GetCurrentTimestamp();                                       \
-u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();                                               \
+
 
 #define BACKUP_UNIQUE_SQL_CXT()                                                             \
         stack.push();
 
+/* In order to ensure the accuracy of WDR statistical time,                                              
+we solely measure dbtime and consider db_time as entirely constituted by pl_exec time.*/ 
 #define RESTORE_UNIQUE_SQL_CXT()                                                                                 \
 if (IS_UNIQUE_SQL_TRACK_ALL) {                                                                                   \
         int64 cur = getCpuTime();                                                                                \
-        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];     \
-        u_sess->stat_cxt.localTimeInfoArray[DB_TIME] =                                                           \
-        GetCurrentTimestamp() - u_sess->stat_cxt.localTimeInfoArray[DB_TIME];                                    \
-        UniqueSQLStat sql_stat;                                                                                  \
-        sql_stat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;                                                 \
-        instr_stmt_report_unique_sql_info(NULL, sql_stat.timeInfo, NULL);                                        \
+        timeInfo[CPU_TIME] = cur - timeInfo[CPU_TIME];                                                           \
+        timeInfo[DB_TIME] = GetCurrentTimestamp() - timeInfo[DB_TIME];                                           \
+        timeInfo[PL_EXECUTION_TIME] = timeInfo[DB_TIME];                                                         \
+        instr_stmt_report_unique_sql_info(NULL, timeInfo, NULL);                                                 \
     }                                                                                                            \
 stack.pop();                                                                                                     \
-if (IS_UNIQUE_SQL_TRACK_ALL) {                                                                                   \
-        for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {                                                        \
-    u_sess->stat_cxt.localTimeInfoArray[i] = timeInfo[i];                                                        \
-    }                                                                                                            \
-}                                                                                                                \
 
 
 #define START_TRX_UNIQUE_SQL_ID 2718638560
