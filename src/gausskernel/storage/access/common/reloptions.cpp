@@ -2451,6 +2451,13 @@ static void ValidateStrOptCompression(const char *val)
  */
 static void ValidateStrOptTableAccessMethod(const char* val)
 {
+#ifdef ENABLE_FINANCE_MODE
+    if (pg_strcasecmp(val, TABLE_ACCESS_METHOD_USTORE) == 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for \"TABLE_ACCESS_METHOD\" option."),
+                errdetail("TABLE_ACCESS_METHOD==USTORE is incorrect, not work on finance mode.")));
+#endif
     if (pg_strcasecmp(val, TABLE_ACCESS_METHOD_ASTORE) != 0 && pg_strcasecmp(val, TABLE_ACCESS_METHOD_USTORE) != 0)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -3065,6 +3072,12 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
 
 void CheckCompressOption(TableCreateSupport *tableCreateSupport)
 {
+#ifdef ENABLE_FINANCE_MODE
+    if (HasCompressOption(tableCreateSupport)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("ERROR: The function of compress is incorrect. not work on finance mode.")));
+    }
+#endif
     if (tableCreateSupport->compressType != (int)COMPRESS_TYPE_NONE && !tableCreateSupport->is_orientation_row) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
                         errmsg("row-compression feature only support orientation is row.")));

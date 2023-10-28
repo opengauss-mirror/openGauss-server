@@ -6099,6 +6099,11 @@ static char* CreatestmtGetOrientation(CreateStmt *stmt)
     foreach (lc, stmt->options) {
         DefElem* def = (DefElem*)lfirst(lc);
         if (pg_strcasecmp(def->defname, "orientation") == 0) {
+#ifdef ENABLE_FINANCE_MODE
+            if (defGetString(def) == ORIENTATION_COLUMN)
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("ORIENTATION==COLUMN is not supported on finance mode")));
+#endif
             return defGetString(def);
         }
     }

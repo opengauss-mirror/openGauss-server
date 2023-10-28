@@ -1115,6 +1115,14 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errdetail("Valid string are \"column\", \"row\".")));
                 }
 #endif   /* ENABLE_MULTIPLE_NODES */
+#ifdef ENABLE_FINANCE_MODE
+                if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_OPTION),
+                                errmsg("Invalid string for  \"ORIENTATION\" option"),
+                                errdetail("ORIENTATION=COLUNMN is incorrect, not work on finance mode.")));
+                }
+#endif
             }
             if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0 && isCUFormat != NULL) {
                 *isCUFormat = true;

@@ -533,6 +533,7 @@ static void CheckAbsoluteLocationDataPath(const char *location)
  */
 Oid CreateTableSpace(CreateTableSpaceStmt* stmt)
 {
+#ifndef ENABLE_FINANCE_MODE
 #ifdef HAVE_SYMLINK
     Relation rel;
     Datum values[Natts_pg_tablespace];
@@ -839,13 +840,19 @@ Oid CreateTableSpace(CreateTableSpaceStmt* stmt)
 
     /* We keep the lock on pg_tablespace until commit */
     heap_close(rel, NoLock);
+    return tablespaceoid;
 #else  /* !HAVE_SYMLINK */
     ereport(ERROR,
         (errmodule(MOD_TBLSPC),
             errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("tablespaces are not supported on this platform")));
-#endif /* HAVE_SYMLINK */
-   return tablespaceoid; 
+#endif /* HAVE_SYMLINK */   
+#else /* ENABLE_FINANCE_MODE */
+    ereport(ERROR,
+        (errmodule(MOD_TBLSPC),
+            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("create tablespaces is incorrect, not work on finance mode")));
+#endif /* ENABLE_FINANCE_MODE */ 
 }
 
 /*
