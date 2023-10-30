@@ -168,7 +168,7 @@ static TupleTableSlot* ExecIndexScan(PlanState* state)
     /*
      * If we have runtime keys and they've not already been set up, do it now.
      */
-    if (node->iss_NumRuntimeKeys != 0 && !node->iss_RuntimeKeysReady) {
+    if (node->iss_NumRuntimeKeys != 0 && (!node->iss_RuntimeKeysReady || (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)))) {
         /*
          * set a flag for partitioned table, so we can deal with it specially
          * when we rescan the partitioned table
