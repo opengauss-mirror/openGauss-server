@@ -621,6 +621,9 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
            /* INDEX_VAR is handled by default case */
        default: /* get the tuple from the relation being scanned */
            slot = econtext->ecxt_scantuple;
+           if (u_sess->parser_cxt.in_userset) {
+               u_sess->parser_cxt.has_set_uservar = true;
+           }
            break;
    }
 
@@ -720,6 +723,9 @@ static Datum ExecEvalScalarVarFast(ExprState* exprstate, ExprContext* econtext, 
            /* INDEX_VAR is handled by default case */
        default: /* get the tuple from the relation being scanned */
            slot = econtext->ecxt_scantuple;
+           if (u_sess->parser_cxt.in_userset) {
+               u_sess->parser_cxt.has_set_uservar = true;
+           }
            break;
    }
 
@@ -1104,6 +1110,9 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
         } else {
             con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
         }
+        if (u_sess->parser_cxt.in_userset) {
+            u_sess->parser_cxt.has_set_uservar = true;
+        }
     } else if (IsA(exprstate->expr, SetVariableExpr)) {
         SetVariableExpr* setvar = (SetVariableExpr*)transformSetVariableExpr((SetVariableExpr*)exprstate->expr);
         con = (Const*)setvar->value;
@@ -1290,6 +1299,9 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     Node* res = NULL;
     char* value  =  NULL;
 
+    if (nodeTag(usestate->instate) != T_CaseExprState && DB_IS_CMPT(B_FORMAT))
+        u_sess->parser_cxt.in_userset = true;
+
     Datum result = ExecEvalExpr(usestate->instate, econtext, isNull, isDone);
 
     if (*isNull) {
@@ -1329,6 +1341,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     }
 
     check_set_user_message(&elemcopy);
+    u_sess->parser_cxt.in_userset = false;
 
     return result;
 }
@@ -1346,6 +1359,10 @@ static Datum ExecEvalParamExec(ExprState* exprstate, ExprContext* econtext, bool
 
    if (isDone != NULL)
        *isDone = ExprSingleResult;
+    
+    if (u_sess->parser_cxt.in_userset) {
+        u_sess->parser_cxt.has_set_uservar = true;
+    }
 
    /*
     * PARAM_EXEC params (internal executor parameters) are stored in the
@@ -1356,7 +1373,9 @@ static Datum ExecEvalParamExec(ExprState* exprstate, ExprContext* econtext, bool
        /* Parameter not evaluated yet, so go do it */
        ExecSetParamPlan((SubPlanState*)prm->execPlan, econtext);
        /* ExecSetParamPlan should have processed this param... */
-       Assert(prm->execPlan == NULL);
+       if (!u_sess->parser_cxt.has_set_uservar || !DB_IS_CMPT(B_FORMAT)) {
+            Assert(prm->execPlan == NULL);
+       }
        prm->isConst = true;
        prm->valueType = expression->paramtype;
    }

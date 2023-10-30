@@ -1304,6 +1304,168 @@ select @a, @b, @c, @d, @e, @f, @@session_timeout;
   2 |  1 |  2 |  1 |  1 |  1 |      700
 (1 row)
 
+set b_format_behavior_compat_options="enable_set_variables";
+-- @variable recursive call
+CREATE TABLE  demo  (
+ id  int NOT NULL AUTO_INCREMENT,
+ name  varchar(255) NOT NULL,
+ parent_id  int NOT NULL,
+PRIMARY KEY ( id )
+);
+NOTICE:  CREATE TABLE will create implicit sequence "demo_id_seq" for serial column "demo.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "demo_pkey" for table "demo"
+INSERT INTO  demo  VALUES ('1', 'A', '0');
+INSERT INTO  demo  VALUES ('2', 'B', '1');
+INSERT INTO  demo  VALUES ('3', 'C', '1');
+INSERT INTO  demo  VALUES ('4', 'D', '2');
+INSERT INTO  demo  VALUES ('5', 'E', '4');
+INSERT INTO  demo  VALUES ('6', 'F', '1');
+INSERT INTO  demo  VALUES ('7', 'G', '1');
+SELECT @r ,
+(SELECT @r:= parent_id FROM demo WHERE id = @r) AS parent_id,
+@l:= @l+ 1 AS lvl
+FROM
+(SELECT @r:= 5, @l:= 0) vars,
+demo h
+WHERE @r<> 0;
+ @r | parent_id | lvl 
+----+-----------+-----
+ 5  |         4 |   1
+ 4  |         2 |   2
+ 2  |         1 |   3
+ 1  |         0 |   4
+(4 rows)
+
+SELECT @r ,
+(SELECT @r:= parent_id FROM demo WHERE id = @r) AS parent_id,
+@l:= @l+ 1 AS lvl
+FROM demo
+WHERE @r<> 0;
+ @r | parent_id | lvl 
+----+-----------+-----
+(0 rows)
+
+drop table if exists my_table;
+NOTICE:  table "my_table" does not exist, skipping
+CREATE TABLE my_table (
+id int,
+name varchar(255),
+parent_id int
+);
+INSERT INTO my_table VALUES ('1', 'A', '0');
+INSERT INTO my_table VALUES ('2', 'B', '2');
+INSERT INTO my_table VALUES ('3', 'C', '1');
+INSERT INTO my_table VALUES ('4', 'D', '2');
+INSERT INTO my_table VALUES ('5', 'E', '4');
+INSERT INTO my_table VALUES ('6', 'F', '1');
+INSERT INTO my_table VALUES ('7', 'G', '1');
+SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2,
+@l:= @l+ 1 AS lvl FROM
+(SELECT @r:= 5, @l:= 0) vars,
+my_table h WHERE @r<> 0;
+ @r | parent_id2 | lvl 
+----+------------+-----
+  5 |          4 |   1
+  4 |          2 |   2
+  2 |          2 |   3
+  2 |          2 |   4
+  2 |          2 |   5
+  2 |          2 |   6
+  2 |          2 |   7
+(7 rows)
+
+SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2,
+@l:= @l+ 1 AS lvl FROM
+(SELECT @r:= 0, @l:= 0) vars,
+my_table h WHERE @r<> 0;
+ @r | parent_id2 | lvl 
+----+------------+-----
+(0 rows)
+
+drop table if exists my_table;
+create table my_table(id int, num_col int);
+insert into my_table values
+(1,5),
+(2,10),
+(3,15),
+(4,20);
+-- 设置初始值
+SET @sum := 0;
+SET @counter := 0;
+-- 递归查询和计算
+SELECT
+@counter := @counter + 1 AS iteration,
+@sum := @sum + num_col AS running_sum,
+num_col
+FROM
+my_table
+WHERE
+@counter <= (SELECT COUNT(*) FROM my_table)
+ORDER BY
+id;
+ iteration | running_sum | num_col 
+-----------+-------------+---------
+         1 |           5 |       5
+         2 |          15 |      10
+         3 |          30 |      15
+         4 |          50 |      20
+(4 rows)
+
+-- 输出最终的累加和
+SELECT @sum AS total_sum;
+ total_sum 
+-----------
+        50
+(1 row)
+
+drop table if exists my_table;
+CREATE TABLE my_table (
+    id INT,
+    parent_id INT,
+    name VARCHAR(50)
+);
+INSERT INTO my_table (id, parent_id, name) VALUES
+(1, NULL, 'Node 1'),
+(2, 1, 'Node 1.1'),
+(3, 1, 'Node 1.2'),
+(4, 2, 'Node 1.1.1'),
+(5, 4, 'Node 1.1.1.1'),
+(6, NULL, 'Node 2'),
+(7, 6, 'Node 2.1'),
+(8, 7, 'Node 2.1.1');
+SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2,
+ @l:= @l+ 1 AS lvl FROM
+(SELECT @r:= 5, @l:= 0) vars,
+my_table h WHERE @r <>0;
+ @r | parent_id2 | lvl 
+----+------------+-----
+  5 |          4 |   1
+  4 |          2 |   2
+  2 |          1 |   3
+  1 |            |   4
+(4 rows)
+
+SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2 FROM
+(SELECT @r:= 5) vars,
+my_table h WHERE @r<> 0;
+ERROR:  failed to find conversion function from bigint to integer
+SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2 FROM
+(SELECT @r:= 5) vars,
+my_table h WHERE @r<> 0;
+ @r | parent_id2 
+----+------------
+  5 |          4
+  4 |          2
+  2 |          1
+  1 |           
+(4 rows)
+
+SELECT (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id1 FROM
+my_table h WHERE @r<> 0;
+ parent_id1 
+------------
+(0 rows)
+
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
