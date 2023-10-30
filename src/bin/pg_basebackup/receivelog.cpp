@@ -66,6 +66,8 @@ pthread_t hearbeatTimerId;
 volatile uint32 timerFlag = 0;
 volatile uint32 heartbeatRunning = 0;
 pthread_mutex_t heartbeatMutex;
+pthread_mutex_t heartbeatQuitMutex;
+pthread_cond_t heartbeatQuitCV;
 
 typedef enum { DO_WAL_DATA_WRITE_DONE, DO_WAL_DATA_WRITE_STOP, DO_WAL_DATA_WRITE_ERROR } DoWalDataWriteResult;
 static TimestampTz localGetCurrentTimestamp(void);
@@ -211,6 +213,18 @@ static int open_walfile(XLogRecPtr startpoint, uint32 timeline, const char* base
     return f;
 }
 
+static void heartbeatSleep(void)
+{
+    struct timespec time_to_wait;
+    int res = 0;
+
+    pthread_mutex_lock(&heartbeatQuitMutex);
+    clock_gettime(CLOCK_REALTIME, &time_to_wait);
+    time_to_wait.tv_sec += HEART_BEAT;
+    res = pthread_cond_timedwait(&heartbeatQuitCV, &heartbeatQuitMutex, &time_to_wait);
+    pthread_mutex_unlock(&heartbeatQuitMutex);
+}
+
 /*
  * This is timer handler.
  * Sending keepalive packet during the walreceiver running.
@@ -227,7 +241,7 @@ void* heartbeatTimerHandler(void* data)
         (void)checkForReceiveTimeout(xlogconn);
         ping_sent = false;
         pthread_mutex_unlock(&heartbeatMutex);
-        sleep(HEART_BEAT);
+        heartbeatSleep();
     }
     return NULL;
 }
@@ -268,6 +282,9 @@ void closeHearBeatTimer(void)
 {
     heartbeatRunning = 0;
     pthread_mutex_unlock(&heartbeatMutex);
+    pthread_mutex_lock(&heartbeatQuitMutex);
+    pthread_cond_signal(&heartbeatQuitCV);
+    pthread_mutex_unlock(&heartbeatQuitMutex);
     (void)pthread_join(hearbeatTimerId, NULL);
     return;
 }
