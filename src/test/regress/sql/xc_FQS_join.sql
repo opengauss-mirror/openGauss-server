@@ -286,3 +286,33 @@ SELECT 1
 drop table t1;
 drop table rt1;
 
+--test inner unique + smp
+set query_dop=32;
+set enable_inner_unique_opt=true;
+set enable_material=off;
+create table test_a(a int, b int);
+create table test_b(c int, d int);
+insert into test_a values(1,2),(1,3),(1,4);
+insert into test_b values(1,2),(1,2),(1,3),(1,3),(1,4),(1,4);
+create unique index test_inner_idx on test_a(b);
+
+--merge join
+explain (verbose ,costs off)
+select /*+ mergejoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d;
+select /*+ mergejoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d;
+
+--hash join
+explain (verbose ,costs off)
+select /*+ hashjoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+select /*+ hashjoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+
+--nestloop
+explain (verbose ,costs off)
+select /*+ nestloop(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+select /*+ nestloop(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+
+drop table test_a;
+drop table test_b;
+reset query_dop;
+reset enable_inner_unique_opt;
+reset enable_material;
