@@ -3379,9 +3379,11 @@ void final_cost_mergejoin(
      * all the joinclauses are merge clauses, this means we don't ever need to
      * back up the merge, and so we can skip mark/restore overhead.
      */
+    Assert(extra->inner_unique == path->jpath.inner_unique);
     if (u_sess->attr.attr_sql.enable_inner_unique_opt) {
-        if ((path->jpath.jointype == JOIN_SEMI || path->jpath.jointype == JOIN_ANTI || extra->inner_unique) &&
-            (list_length(path->jpath.joinrestrictinfo) == list_length(path->path_mergeclauses)))
+        if ((path->jpath.jointype == JOIN_SEMI || path->jpath.jointype == JOIN_ANTI
+                                || (extra->inner_unique && path->jpath.inner_unique))
+            && (list_length(path->jpath.joinrestrictinfo) == list_length(path->path_mergeclauses)))
             path->skip_mark_restore = true;
         else
             path->skip_mark_restore = false;
