@@ -189,7 +189,6 @@ function install_gaussdb()
         else
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-lite-mode>> "$LOG_FILE" 2>&1
         fi
-    fi
     elif [ "$product_mode"x == "finance"x ]; then
         shared_opt="--gcc-version=${gcc_version}.${gcc_sub_version} --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline}  ${with_tassl}  --without-zlib  --without-gssapi --without-krb5"
         if [ "$version_mode"x == "release"x ]; then
