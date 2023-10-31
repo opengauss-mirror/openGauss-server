@@ -319,7 +319,8 @@ void OgRecordOperator::enter(NetInfoType net_type)
 
 void OgRecordOperator::enter(const RecordType& record_type)
 {
-    if (!report_enable()) {
+    report_record = report_enable();
+    if (!report_record) {
         return;
     }
     if (record_type != RTT_UNKNOWN) {
@@ -343,7 +344,7 @@ void OgRecordOperator::exit(NetInfoType net_type, ssize_t str_len)
 
 void OgRecordOperator::exit(const RecordType& record_type)
 {
-    if (!report_enable()) {
+    if (!report_record || !report_enable()) {
         return;
     }
     if (record_type != RTT_UNKNOWN) {
@@ -396,6 +397,43 @@ void OgRecordOperator::init(bool auto_record, const RecordType& record_type)
     }
 }
 
+OgRecordAutoController::OgRecordAutoController(TimeInfoType time_info_type)
+{
+    time_info = time_info_type;
+    bool report_enable = OgRecordAutoController::report_enable();
+    if (report_enable) {
+        MemoryContext old = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        og_operator = New(CurrentMemoryContext) OgRecordOperator(time_info);
+        MemoryContextSwitchTo(old);
+    } else {
+        og_operator = NULL;
+    }
+}
+
+OgRecordAutoController::~OgRecordAutoController()
+{
+    if (og_operator != NULL && u_sess != NULL) {
+        MemoryContext old = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        DELETE_EX_TYPE(og_operator,OgRecordOperator);
+        MemoryContextSwitchTo(old);
+    }
+}
+
+bool OgRecordAutoController::report_enable()
+{
+    if (u_sess == NULL) {
+        return false;
+    }
+
+    OgRecordStat* record_stat = (OgRecordStat*)get_record_cxt()->og_record_stat;
+    if (record_stat == NULL) {
+        return false;
+    }
+    // for future, we can control diff level record time.
+    int level = record_stat->get_time_record_level();
+    return level == 0;
+}
+
 OgTimeDataVo& OgTimeDataStack::top()
 {
     Assert(cur_pos >= 0 && cur_pos < DEFAULT_TIME_DATA_STACK_DEPTH);
@@ -440,6 +478,12 @@ void OgTimeDataStack::reset()
     cur_pos = -1;
 }
 
+void OgTimeDataStack::smart_reset()
+{
+    cur_pos = 0;
+    data_list[0].reset();
+}
+
 OgRecordStat::OgRecordStat(int64* local_time_info, uint64* loca_net_info)
 :first_record_opt(false, DB_TIME)
 {
@@ -473,8 +517,7 @@ void OgRecordStat::reset()
     depth = INVALID_DEPTH;
     record_start = false;
     free_first_record_opt();
-    records_stack.reset();
-    records_stack.push(OgTimeDataVo());
+    records_stack.smart_reset();
 }
 
 void OgRecordStat::reinit()
@@ -690,7 +733,7 @@ void OgRecordStat::log_vo(const char* tag, const OgTimeDataVo& vo) const
 
 void OgRecordStat::logtrace(int level, const char* fmt, ...) const
 {
-    if (!log_enable() || log_trace_msg == NULL) {
+    if (!log_enable(level) || log_trace_msg == NULL) {
         return;
     }
     if (fmt != log_trace_msg->data) {

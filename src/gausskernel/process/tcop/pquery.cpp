@@ -1013,7 +1013,7 @@ bool PortalRun(
 {
     gstrace_entry(GS_TRC_ID_PortalRun);
     increase_instr_portal_nesting_level();
-    OgRecordOperator _local_opt(EXECUTION_TIME);
+    OgRecordAutoController _local_opt(EXECUTION_TIME);
 
     bool result = false;
     uint64 nprocessed;
@@ -1772,7 +1772,7 @@ static void PortalRunMulti(
 {
     bool active_snapshot_set = false;
     ListCell* stmtlist_item = NULL;
-    OgRecordOperator _local_opt(EXECUTION_TIME);
+    OgRecordAutoController _local_opt(EXECUTION_TIME);
     PGSTAT_INIT_TIME_RECORD();
 #ifdef PGXC
     CombineTag combine;

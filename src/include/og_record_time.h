@@ -243,6 +243,14 @@ public:
     explicit OgTimeDataVo(const RecordType& cur_record_type): begin(0), end(0), depth(INVALID_DEPTH)
     , record_type(cur_record_type), other_cost(0), id(og_get_time_unique_id()) {}
 
+    void reset()
+    {
+        begin = 0;
+        end = 0;
+        other_cost = 0;
+        depth = INVALID_DEPTH;
+    }
+
     /**
      * Get this stage total time.
      * @return total record time.
@@ -317,12 +325,13 @@ public:
     bool empty() const;
     size_t size() const;
     void reset();
+    void smart_reset();
 private:
     int cur_pos;
     OgTimeDataVo data_list[DEFAULT_TIME_DATA_STACK_DEPTH];
 };
 
-class OgRecordOperator {
+class OgRecordOperator : public BaseObject {
 public:
     /* You must be careful when auto_record = false, it means you need ensure enter/exit pair called!
      * The only situation is in loop, like in timeRecordStart/End.
@@ -339,6 +348,7 @@ public:
     explicit OgRecordOperator(bool auto_record, TimeInfoType time_type);
     explicit OgRecordOperator(bool auto_record, SelfRecordType self_type);
     virtual ~OgRecordOperator();
+    void Destroy() {}
     void enter(TimeInfoType time_type=RTT_UNKNOWN);
     void enter(NetInfoType net_type);
     void enter(const RecordType& record_type);
@@ -374,6 +384,17 @@ private:
 private:
     OgTimeDataVo base_record;
     bool auto_record;
+    bool report_record;
+};
+
+class OgRecordAutoController {
+public:
+    OgRecordAutoController(TimeInfoType time_info_type);
+    ~OgRecordAutoController();
+    static bool report_enable();
+private:
+    OgRecordOperator* og_operator;
+    TimeInfoType time_info;
 };
 
 class OgRecordStat : public BaseObject {
