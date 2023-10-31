@@ -1294,11 +1294,14 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
         /* Drop lock acquired by ExecOpenIndices */
         index_close(indexDescs[i], RowExclusiveLock);
     }
+    pfree_ext(resultRelInfo->ri_IndexRelationDescs);
 
-    /*
-     * XXX should free indexInfo array here too?  Currently we assume that
-     * such stuff will be cleaned up automatically in FreeExecutorState.
-     */
+    if (resultRelInfo->ri_IndexRelationInfo) {
+        for (i = 0; i < numIndices; i++) {
+            pfree_ext(resultRelInfo->ri_IndexRelationInfo[i]);
+        }
+        pfree_ext(resultRelInfo->ri_IndexRelationInfo);
+    }
 }
 
 /*
