@@ -2412,7 +2412,7 @@ BEGIN
   end loop;
 end; 
 /
-ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
+ERROR:  while-loop syntax is mixed with while-do syntax
 LINE 3:   while _i < 10 do
           ^
 QUERY:  declare _i integer = 0;

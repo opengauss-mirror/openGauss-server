@@ -3474,7 +3474,7 @@ stmt_while		: opt_block_label K_WHILE expr_until_while_loop loop_body
                         {
                             if($3.endtoken != K_LOOP)
                                  ereport(ERROR,
-                                    (errcode(ERRCODE_SYNTAX_ERROR), errmsg("'while-do' is only supported in database which dbcompatibility='B'."), parser_errposition(@2)));
+                                    (errcode(ERRCODE_SYNTAX_ERROR), errmsg("while-loop syntax is mixed with while-do syntax"), parser_errposition(@2)));
                         }
 
                         PLpgSQL_stmt_while *newp;
