@@ -489,76 +489,175 @@ static SpqAdpScanReqState *make_adps_state(SpqAdpScanPagesReq *req)
         return NULL;
     paging_state->plan_node_id = req->plan_node_id;
     paging_state->direction = req->direction;
-
-    if (req->direction == ForwardScanDirection) { /* forward */
-        paging_state->current_num = 0;
-    } else {
-        paging_state->current_num = req->nblocks - 1;
-    }
     paging_state->nblocks = req->nblocks;
-
     paging_state->cur_scan_iter_no = req->cur_scan_iter_no;
-    paging_state->node_num = 0;
+    paging_state->node_num = t_thrd.spq_ctx.qc_ctx->num_nodes;
+    paging_state->node_states = (NodePagingState *)palloc(sizeof(NodePagingState) * paging_state->node_num);
     return paging_state;
 }
 
 static void init_adps_state_per_worker(SpqAdpScanReqState *p_state)
 {
-    p_state->this_round_finish = false;
-    p_state->batch_size = 512;
-    if (p_state->direction == ForwardScanDirection) {
-        p_state->scan_start = 0;
-        p_state->cur_page_num = 0;
-        p_state->scan_end = p_state->nblocks - 1;
-        if (p_state->scan_start > p_state->scan_end)
-            p_state->this_round_finish = true;
-    } else { /* Backward scan blocks */
-        p_state->scan_start = p_state->nblocks - 1;
-        p_state->cur_page_num = p_state->scan_start;
-        p_state->scan_end = 0;
-        if (p_state->scan_start < p_state->scan_end)
-            p_state->this_round_finish = true;
+    for (int i = 0; i < p_state->node_num; ++i) {
+        NodePagingState *n_state = &p_state->node_states[i];
+        n_state->finish = false;
+        n_state->batch_size = 512;
+
+        int64 cached_unit_pages = n_state->batch_size * p_state->node_num;
+
+        int64 start, end;
+        int64 header_unit_page;
+        int64 tail_unit_page;
+        if (p_state->nblocks == InvalidBlockNumber) {
+            /* Scan all the blocks */
+            start = 0;
+            end = p_state->nblocks - 1;
+        } else {
+            /* Forward scan part of blocks */
+            if (p_state->direction == ForwardScanDirection) {
+                start = 0;
+                end = p_state->nblocks - 1;
+            } else {
+                start = p_state->nblocks - 1;
+                end = 0;
+                if (start < 0)
+                    start = 0;
+            }
+        }
+        header_unit_page = cached_unit_pages * (int64_t)(start / cached_unit_pages);
+        tail_unit_page = cached_unit_pages * (int64_t)(end / cached_unit_pages);
+
+        n_state->tail_unit_begin = tail_unit_page + n_state->batch_size * i;
+        n_state->tail_unit_end = tail_unit_page + n_state->batch_size * (i + 1) - 1;
+        if (n_state->tail_unit_begin > end) {
+            n_state->tail_unit_begin -= cached_unit_pages;
+            n_state->tail_unit_end -= cached_unit_pages;
+        } else if (n_state->tail_unit_end > end) {
+            n_state->tail_unit_end = end;
+        }
+        if (n_state->tail_unit_end < start) {
+            n_state->finish = true;
+        } else if (n_state->tail_unit_begin < start) {
+            n_state->tail_unit_begin = start;
+        }
+
+        n_state->header_unit_begin = header_unit_page + n_state->batch_size * i;
+        n_state->header_unit_end = header_unit_page + n_state->batch_size * (i + 1) - 1;
+        if (n_state->header_unit_end < start) {
+            n_state->header_unit_begin += cached_unit_pages;
+            n_state->header_unit_end += cached_unit_pages;
+        } else if (n_state->header_unit_begin < start) {
+            n_state->header_unit_begin = start;
+        }
+        if (n_state->header_unit_begin > end) {
+            n_state->finish = true;
+        } else if (n_state->header_unit_end > end) {
+            n_state->header_unit_end = end;
+        }
+        if (p_state->direction == ForwardScanDirection) {
+            n_state->current_page = n_state->header_unit_begin;
+        } else {
+            n_state->current_page = n_state->tail_unit_end;
+        }
     }
 }
 
-static bool adps_get_next_scan_unit(SpqAdpScanReqState *p_state, SpqAdpScanPagesRes *pRes)
+static bool adps_get_next_unit(SpqAdpScanReqState *p_state, int idx, int64_t *start, int64_t *end, bool current_is_last)
 {
-    int64_t start = -1, end = -1;
-    if (p_state->this_round_finish)
+    NodePagingState *n_state = &p_state->node_states[idx];
+    int cached_unit_pages = n_state->batch_size * p_state->node_num;
+
+    if (n_state->finish) {
         return false;
+    }
+
     /* Forward scan */
     if (p_state->direction == ForwardScanDirection) {
-        start = p_state->cur_page_num;
-        /* use small batch_size in sutiable range */
-        if (start + p_state->batch_size >= p_state->scan_end) {
-            int small_batch = p_state->batch_size / 16;
-            if (small_batch < 1)
-                small_batch = 1;
-            end = p_state->cur_page_num + small_batch - 1;
-            if (end > p_state->scan_end)
-                end = p_state->scan_end;
-            p_state->cur_page_num += small_batch;
+        if (n_state->current_page == n_state->header_unit_begin) {
+            *start = n_state->current_page;
+            *end = n_state->header_unit_end;
+            n_state->current_page = n_state->header_unit_end + cached_unit_pages - n_state->batch_size + 1;
+        } else if (n_state->current_page >= n_state->tail_unit_begin) {
+            if (current_is_last) {
+                /* When this is the last only slice, make batch_size small */
+                int small_batch = n_state->batch_size / 16;
+                /* But at least one page */
+                if (small_batch < 1)
+                    small_batch = 1;
+                *start = n_state->current_page;
+                *end = n_state->current_page + small_batch - 1;
+                /* And not large than tail */
+                if (*end > n_state->tail_unit_end)
+                    *end = n_state->tail_unit_end;
+                n_state->current_page += small_batch;
+            } else {
+                *start = n_state->current_page;
+                *end = n_state->tail_unit_end;
+                n_state->finish = true;
+            }
         } else {
-            end = p_state->cur_page_num + p_state->batch_size - 1;
-            p_state->cur_page_num += p_state->batch_size;
+            *start = n_state->current_page;
+            *end = n_state->current_page + n_state->batch_size - 1;
+            n_state->current_page += cached_unit_pages;
         }
-        if (p_state->cur_page_num > p_state->scan_end)
-            p_state->this_round_finish = true;
-    } else { /* Backward scan */
-        start = p_state->cur_page_num;
-        if (p_state->cur_page_num == p_state->scan_start) {
-            end = (int64_t)((p_state->scan_start - p_state->scan_end) / p_state->batch_size) * p_state->batch_size;
-            p_state->cur_page_num = end - 1;
+        if (n_state->current_page > n_state->tail_unit_end)
+            n_state->finish = true;
+    } else {
+        if (n_state->current_page == n_state->header_unit_end) {
+            *start = n_state->current_page;
+            *end = n_state->header_unit_begin;
+            n_state->finish = true;
+        } else if (n_state->current_page == n_state->tail_unit_end) {
+            *start = n_state->current_page;
+            *end = n_state->tail_unit_begin;
+            n_state->current_page = n_state->tail_unit_begin - cached_unit_pages + n_state->batch_size - 1;
         } else {
-            end = p_state->cur_page_num - p_state->batch_size + 1;
-            p_state->cur_page_num -= p_state->batch_size;
+            *start = n_state->current_page;
+            *end = n_state->current_page - n_state->batch_size + 1;
+            n_state->current_page -= cached_unit_pages;
         }
-        if (p_state->cur_page_num < p_state->scan_start)
-            p_state->this_round_finish = true;
+        if (n_state->current_page < n_state->header_unit_begin)
+            n_state->finish = true;
     }
-    pRes->page_start = start;
-    pRes->page_end = end;
     return true;
+}
+
+static bool adps_get_next_scan_unit(SpqAdpScanReqState *p_state, SpqAdpScanPagesRes *pRes, int node_idx)
+{
+    int i;
+    bool found_next_unit;
+    int last_only_idx = -1, unfinished = 0;
+    int64_t start = -1, end = -1;
+
+    for (i = 0; i < p_state->node_num; ++i) {
+        if (!p_state->node_states[i].finish) {
+            ++unfinished;
+            last_only_idx = i;
+        }
+    }
+    last_only_idx = (unfinished == 1) ? i : (-1);
+
+    found_next_unit = adps_get_next_unit(p_state, node_idx, &start, &end, last_only_idx == node_idx);
+    if (!found_next_unit) {
+        /*
+         * May be first task is empty, scan the other tasks.
+         */
+        for (i = 0; i < p_state->node_num; i++) {
+            /* Skip the worker in the first task */
+            if (i == node_idx)
+                continue;
+
+            /* Scan other tasks on each px workers */
+            found_next_unit = adps_get_next_unit(p_state, i, &start, &end, last_only_idx == i);
+            if (found_next_unit)
+                break;
+        }
+    }
+
+    /* Get the scan unit, update the result's page_start and page_end */
+    pRes->page_start = (BlockNumber)start;
+    pRes->page_end = (BlockNumber)end;
+    return found_next_unit;
 }
 
 static bool check_match_and_update_state(SpqAdpScanReqState *p_state, SpqAdpScanPagesReq *seqReq, bool *has_finished)
@@ -600,14 +699,14 @@ static void adps_array_append(SpqScanAdpReqs *array, SpqAdpScanReqState *state)
     array->req_states[array->size - 1] = state;
 }
 
-SpqAdpScanPagesRes adps_get_response_block(SpqAdpScanPagesReq* seqReq)
+SpqAdpScanPagesRes adps_get_response_block(SpqAdpScanPagesReq* seqReq, int node_idx)
 {
     SpqAdpScanPagesRes seqRes;
     SpqAdpScanReqState *p_state;
     seqRes.page_start = InvalidBlockNumber;
     seqRes.page_end = InvalidBlockNumber;
     seqRes.success = 0;
-    if (seqReq->plan_node_id < 0) {
+    if (node_idx < 0 || seqReq->plan_node_id < 0) {
         elog(ERROR, "adps_get_response_block: unrecognized node_id");
         return seqRes;
     }
@@ -627,7 +726,7 @@ SpqAdpScanPagesRes adps_get_response_block(SpqAdpScanPagesReq* seqReq)
             found = true;
 
             /* Search all the nodes to find the next unit(or page) to read */
-            if (adps_get_next_scan_unit(p_state, &seqRes)) {
+            if (adps_get_next_scan_unit(p_state, &seqRes, node_idx)) {
                 BlockNumber page_count;
                 seqRes.success = 1;
                 page_count = Abs((int64_t)seqRes.page_end - (int64_t)seqRes.page_start) + 1;
@@ -645,7 +744,7 @@ SpqAdpScanPagesRes adps_get_response_block(SpqAdpScanPagesReq* seqReq)
         /* init node state */
         adps_array_append(&t_thrd.spq_ctx.qc_ctx->seq_paging_array, p_state);
         init_adps_state_per_worker(p_state);
-        if (adps_get_next_scan_unit(p_state, &seqRes)) {
+        if (adps_get_next_scan_unit(p_state, &seqRes, node_idx)) {
             BlockNumber page_count;
             seqRes.success = 1;
             page_count = Abs((int64_t)seqRes.page_end - (int64_t)seqRes.page_start) + 1;
@@ -990,6 +1089,7 @@ bool build_connections(Node* plan, void* cxt)
         entry->scannedPageNum = 0;
         entry->forward = addressArray[i]->gs_sock;
         entry->backward.idx = 0;
+        entry->internal_node_id = i;
         t_thrd.spq_ctx.qc_ctx->connects = lappend(t_thrd.spq_ctx.qc_ctx->connects, (void*)entry);
         pfree(addressArray[i]);
     }
@@ -1001,7 +1101,7 @@ void spq_adps_initconns()
 {
     MethodPlanWalkerContext cxt;
     RemoteQueryState *node = t_thrd.spq_ctx.qc_ctx->scanState;
-    plan_tree_walker((Node*)node->ss.ps.plan->lefttree, (MethodWalker)build_connections, (void*)&cxt);
+    build_connections((Node*)node->ss.ps.plan->lefttree, (void*)&cxt);
 }
 
 void spq_adps_consumer()
@@ -1043,7 +1143,7 @@ void spq_adps_consumer()
                 return;
             }
 
-            res = adps_get_response_block(&req);
+            res = adps_get_response_block(&req, entry->internal_node_id);
 
             rc = gs_send(&entry->forward, (char *)&res, sizeof(SpqAdpScanPagesRes), -1, true);
             if (rc <= 0) {
@@ -1110,6 +1210,7 @@ void spq_startQcThread(RemoteQueryState *node)
     }
     pthread_mutex_lock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
 
+    t_thrd.spq_ctx.qc_ctx->num_nodes = node->ss.ps.state->es_plannedstmt->num_nodes;
     t_thrd.spq_ctx.qc_ctx->scanState = node;
     t_thrd.spq_ctx.qc_ctx->seq_paging_array.size = 0;
     t_thrd.spq_ctx.qc_ctx->seq_paging_array.max = PREALLOC_PAGE_ARRAY_SIZE;

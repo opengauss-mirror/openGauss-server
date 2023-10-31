@@ -831,11 +831,7 @@ static void InitNetworkConfigureNamesInt()
             NULL},
         {{"pooler_port",
             PGC_POSTMASTER,
-#ifdef USE_SPQ
-            NODE_ALL,
-#else
             NODE_DISTRIBUTE,
-#endif
             COORDINATORS,
             gettext_noop("Legacy port of the Pool Manager. Now it is used for cn HA port for build and replication "
                          "under thread pool mode."),

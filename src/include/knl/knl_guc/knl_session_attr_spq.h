@@ -203,18 +203,30 @@ typedef struct knl_session_attr_spq {
 
 struct RemoteQueryState;
 
+typedef struct NodePagingState {
+    bool finish;
+    int64_t batch_size; /* The count of unit number which px worker to read */
+    /* header or tail may less than batch_size, so remember it */
+    int64_t header_unit_begin; /* first slice begin */
+    int64_t header_unit_end;
+    /* first slice end, abs(header_unit_end - header_unit_begin) = one unit size */
+    int64_t tail_unit_begin; /* last slice begin */
+    int64_t tail_unit_end; /* last slice end */
+    /* last slice end, abs(tail_unit_end - tail_unit_begin) = one unit size */
+    int64_t current_page;
+} NodePagingState;
+
 typedef struct SpqAdpScanReqState {
     bool this_round_finish;
     int plan_node_id;
     int direction;
-    int node_num;
     int64_t nblocks;
     int64_t cur_scan_iter_no;
     int64_t scan_start;
-    int64_t cur_page_num;
     int64_t scan_end;
     int64_t batch_size;
-    int64_t current_num;
+    int node_num;
+    NodePagingState* node_states;
 } SpqAdpScanReqState;
 
 /* struct for paging state container */
@@ -231,6 +243,7 @@ typedef struct spq_qc_ctx {
     bool is_exited;
     uint64 query_id;
     RemoteQueryState* scanState;
+    int num_nodes;
     List* connects;
     SpqScanAdpReqs seq_paging_array;
 } spq_qc_ctx;
