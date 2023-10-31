@@ -3220,12 +3220,7 @@ ltrmark:
 
                     /* treat it as deleted; do not process */
                     ReleaseBuffer(buffer);
-                    if (RELATION_IS_PARTITIONED(relation)) {
-                        partitionClose(relation, part, NoLock);
-                    }
-                    if (RELATION_OWN_BUCKET(relation)) {
-                        releaseDummyRelation(&fakeRelation);
-                    }
+                    ReleaseFakeRelation(relation, part, &fakeRelation);
                     return NULL;
                 case TM_SelfCreated:
                     ReleaseBuffer(buffer);
@@ -3248,8 +3243,10 @@ ltrmark:
                      * to the caller (it must do additional rechecking, and
                      * might end up executing a different action entirely).
                      */
-                    if (tmresultp && estate->es_plannedstmt->commandType == CMD_MERGE)
+                    if (tmresultp && estate->es_plannedstmt->commandType == CMD_MERGE) {
+                        ReleaseFakeRelation(relation, part, &fakeRelation);
                         return NULL;
+                    }
 
                     /* it was updated, so look at the updated version */
                     TupleTableSlot* epqslot = NULL;
@@ -3274,12 +3271,7 @@ ltrmark:
                      * if tuple was deleted or PlanQual failed for updated tuple -
                      * we must not process this tuple!
                      */
-                    if (RELATION_IS_PARTITIONED(relation)) {
-                        partitionClose(relation, part, NoLock);
-                    }
-                    if (RELATION_OWN_BUCKET(relation)) {
-                        releaseDummyRelation(&fakeRelation);
-                    }
+                    ReleaseFakeRelation(relation, part, &fakeRelation);
                     return NULL;
                 }
 
