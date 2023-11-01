@@ -27,6 +27,7 @@
 #include "fmgr/fmgr_core.h"
 #include "lib/stringinfo.h"
 #include "access/tupdesc.h"
+#include "nodes/primnodes.h"
 
 #ifndef FRONTEND_PARSER
 
@@ -168,6 +169,7 @@ typedef struct FunctionCallInfoData {
     RefcusorInfoData refcursor_data;
     UDFInfoType udfInfo;
     StartWithFuncEvalInfo  swinfo;
+    CoercionContext ccontext;
 
     FunctionCallInfoData()
     {
@@ -182,6 +184,7 @@ typedef struct FunctionCallInfoData {
         nargs = 0;
         isnull = false;
         can_ignore = false;
+        ccontext = COERCION_UNKNOWN;
     }
 } FunctionCallInfoData;
 
