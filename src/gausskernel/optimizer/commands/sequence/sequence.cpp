@@ -2102,22 +2102,6 @@ static void PreProcessSequenceOptions(
     foreach (option, options) {
         DefElem* defel = (DefElem*)lfirst(option);
 
-        /* Now we only support ALTER SEQUENCE OWNED BY and MAXVALUE to support upgrade. */
-        if (!isInit) {
-            /* isInit is true for DefineSequence, false for AlterSequence, we use it
-             * to differentiate them
-             */
-            bool isDefOwnedAndMaxValue =
-                strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0;
-#ifndef ENABLE_MULTIPLE_NODES
-            isDefOwnedAndMaxValue = isDefOwnedAndMaxValue && strcmp(defel->defname, "cache") != 0;
-#endif
-            if (isDefOwnedAndMaxValue) {
-                ereport(
-                    ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE is not yet supported.")));
-            }
-        }
-
         if (strcmp(defel->defname, "increment") == 0) {
             CheckDuplicateDef(elms[DEF_IDX_INCREMENT_BY]);
             elms[DEF_IDX_INCREMENT_BY] = defel;

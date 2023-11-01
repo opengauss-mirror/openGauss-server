@@ -214,7 +214,7 @@ test: vec_delete_part1 vec_delete_part2
 test: vec_set_func
 test: hw_cursor_rollback hw_cursor_rollback_ustore
 
-test: alter_schema_db_rename_seq
+test: alter_schema_db_rename_seq alter_sequence_001
 
 test: a_outerjoin_conversion
 

@@ -1059,7 +1059,7 @@ test: sytcomp_del_upt4orderby
 test: aioptimizer
 test: aioptimizer_small
 test: pgfincore 
-test: rename_table test_plsql_core
+test: rename_table test_plsql_core alter_sequence_001
 
 # debug instrument
 test: test_debug5

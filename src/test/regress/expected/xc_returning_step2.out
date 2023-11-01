@@ -157,7 +157,6 @@ select * from t order by 1;
 
 truncate table products;
 alter sequence products_product_id_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- functions in returning
 -------------------------------------------------------------
@@ -338,11 +337,13 @@ update products set price = price + 1.0 WHERE product_id = ANY('{1,4,5}'::int[])
 select * from t order by 1;
  product_id | ?column? 
 ------------+----------
-(0 rows)
+          1 | t
+          4 | t
+          5 | t
+(3 rows)
 
 truncate table products;
 alter sequence products_product_id_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- functions in returning
 -------------------------------------------------------------
@@ -557,11 +558,13 @@ DELETE FROM products WHERE product_id = ANY('{1,4,5}'::int[]) returning product_
 select * from t order by 1;
  product_id | ?column? 
 ------------+----------
-(0 rows)
+          1 | t
+          4 | t
+          5 | t
+(3 rows)
 
 truncate table products;
 alter sequence products_product_id_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- functions in returning
 -------------------------------------------------------------
