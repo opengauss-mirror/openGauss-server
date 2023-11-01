@@ -557,7 +557,7 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
              * physical location, they will find data on disk are too old, incurring LSN check failing.
              */
             BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
-            uint32 buf_state = LockBufHdr(buf_desc);
+            uint64 buf_state = LockBufHdr(buf_desc);
             UnlockBufHdr(buf_desc, buf_state);
             if (buf_state & BM_DIRTY) {
                 FlushOneBufferIncludeDW(buf_desc);
@@ -1094,7 +1094,7 @@ static void invalidate_metadata_buffer(SegExtentGroup *seg, BlockNumber target_s
 {
     for (int i = SegmentBufferStartID; i < TOTAL_BUFFER_NUM; i++) {
         BufferDesc *bufdesc = GetBufferDescriptor(i);
-        uint32 state;
+        uint64 state;
 
         if (IsBufferToBeTruncated(bufdesc, seg, target_size)) {
             state = LockBufHdr(bufdesc);
