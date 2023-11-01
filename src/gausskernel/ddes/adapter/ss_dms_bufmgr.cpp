@@ -321,7 +321,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
 static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
 {
-    uint32 buf_state;
+    uint64 buf_state;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
 
     if (IsSegmentBufferID(buf_desc->buf_id)) {
@@ -335,7 +335,7 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
     }
 
     if (LockModeCompatible(buf_ctrl, mode)) {
-        if (!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_IN_PROGRESS)) {
+        if (!(pg_atomic_read_u64(&buf_desc->state) & BM_IO_IN_PROGRESS)) {
             return false;
         }
     }
@@ -680,7 +680,7 @@ void SSCheckBufferIfNeedMarkDirty(Buffer buf)
 
 void SSRecheckBufferPool()
 {
-    uint32 buf_state;
+    uint64 buf_state;
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
         /*
          * BUF_DIRTY_NEED_FLUSH was removed during mark buffer dirty and lsn_on_disk was set during sync buffer
@@ -690,7 +690,7 @@ void SSRecheckBufferPool()
          */
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         pg_memory_barrier();
-        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        buf_state = pg_atomic_read_u64(&buf_desc->state);
         if (!(buf_state & BM_VALID || buf_state & BM_TAG_VALID)) {
             continue;
         }
@@ -783,7 +783,7 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
     BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
     bool ret = false;
 
-    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->extra->seg_fileno != EXTENT_INVALID) {
+    if ((pg_atomic_read_u64(&buf_desc->state) & BM_VALID) && buf_desc->extra->seg_fileno != EXTENT_INVALID) {
         SMGR_READ_STATUS rdStatus;
         if (reln->seg_space == NULL) {
             reln->seg_space = spc_open(reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode, false);
@@ -982,7 +982,7 @@ bool SSWaitIOTimeout(BufferDesc *buf)
 {
     bool ret = false;
     for (;;) {
-        uint32 buf_state;
+        uint64 buf_state;
         buf_state = LockBufHdr(buf);
         UnlockBufHdr(buf, buf_state);
 

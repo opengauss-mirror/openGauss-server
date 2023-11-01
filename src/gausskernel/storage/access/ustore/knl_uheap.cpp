@@ -4438,8 +4438,9 @@ void UHeapResetPreparedUndo()
                 BufferDesc *bufdesc = GetBufferDescriptor(t_thrd.ustore_cxt.undo_buffers[i].buf - 1);
                 if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufdesc), LW_EXCLUSIVE)) {
                     LWLock *lock = BufferDescriptorGetContentLock(bufdesc);
-                    ereport(PANIC, (errmodule(MOD_USTORE), errmsg(
-                        "xid %lu, oid %u, blockno %u. buffer %d is not unlocked, lock state %u.",
+                    ereport(PANIC, (
+                        errmodule(MOD_USTORE),
+                        errmsg("xid %lu, oid %u, blockno %u. buffer %d is not unlocked, lock state %lu.",
                         GetTopTransactionId(), bufdesc->tag.rnode.relNode,
                         BufferGetBlockNumber(t_thrd.ustore_cxt.undo_buffers[i].buf),
                         t_thrd.ustore_cxt.undo_buffers[i].buf, lock->state)));

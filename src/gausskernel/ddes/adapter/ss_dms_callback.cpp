@@ -555,7 +555,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                 break;
             }
 
-            if (!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) {
+            if (!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is not valid, state = 0x%x",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
@@ -566,7 +566,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                 break;
             }
 
-            if (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR) {
+            if (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is io error, state = 0x%x",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
@@ -636,7 +636,7 @@ static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
         return 0;
     }
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
-    bool is_dirty = (pg_atomic_read_u32(&buf_desc->state) & (BM_DIRTY | BM_JUST_DIRTIED)) > 0;
+    bool is_dirty = (pg_atomic_read_u64(&buf_desc->state) & (BM_DIRTY | BM_JUST_DIRTIED)) > 0;
     return (unsigned char)is_dirty;
 }
 
@@ -670,7 +670,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     BufferTag* tag = (BufferTag *)pageid;
     uint32 hash;
     LWLock *partition_lock = NULL;
-    uint32 buf_state;
+    uint64 buf_state;
     int ret = DMS_SUCCESS;
 
     hash = BufTableHashCode(tag);
@@ -753,8 +753,8 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             return ret;
         }
 
-        if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
-            (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
+        if ((!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) ||
+            (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR)) {
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
                 tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
@@ -832,7 +832,7 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     /* page content is not valid */
-    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) == 0) {
+    if ((pg_atomic_read_u64(&buf_desc->state) & BM_VALID) == 0) {
         return;
     }
 
@@ -1162,7 +1162,7 @@ static void CBSetDmsStatus(void *db_handle, int dms_status)
     g_instance.dms_cxt.dms_status = (dms_status_t)dms_status;
 }
 
-static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
+static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint64 buf_state)
 {
     bool ret = false;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -1180,7 +1180,7 @@ static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
              * page. The stucked process will request the page again when it add content lock and the reformer will
              * become owner when it request the page.
              */
-            ereport(WARNING, (errmsg("[%u/%u/%u/%d/0 %d-%u] Set lock mode to NULL, desc state:%u, ctrl state:%u, lock mode:%d.",
+            ereport(WARNING, (errmsg("[%u/%u/%u/%d/0 %d-%u] Set lock mode to NULL, desc state:%lu, ctrl state:%u, lock mode:%d.",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                 buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_state, buf_ctrl->state, buf_ctrl->lock_mode)));
             buf_ctrl->lock_mode = DMS_LOCK_NULL;
@@ -1222,7 +1222,7 @@ static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
 
 static int32 CBDrcBufRebuildInternal(int begin, int len, unsigned char thread_index)
 {
-    uint32 buf_state;
+    uint64 buf_state;
     Assert(begin >= 0 && len > 0 && (begin + len) <= TOTAL_BUFFER_NUM);
     for (int i = begin; i < begin + len; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
@@ -1296,7 +1296,7 @@ static int32 CBDrcBufValidate(void *db_handle)
     SSReadControlFile(src_id, true);
     int buf_cnt = 0;
 
-    uint32 buf_state;
+    uint64 buf_state;
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform]CBDrcBufValidate starts before reform done.")));
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
@@ -1371,8 +1371,8 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
                 break;
             }
 
-            Assert(!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR));
-            *is_valid = (pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0;
+            Assert(!(pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR));
+            *is_valid = (pg_atomic_read_u64(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
         } else {
             LWLockRelease(partition_lock);

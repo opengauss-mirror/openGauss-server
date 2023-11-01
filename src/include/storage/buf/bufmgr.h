@@ -283,11 +283,11 @@ extern void UnlockReleaseBuffer(Buffer buffer);
 extern void MarkBufferDirty(Buffer buffer);
 extern void IncrBufferRefCount(Buffer buffer);
 extern Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber blockNum);
-void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock);
+void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLock);
 #ifdef USE_ASSERT_CHECKING
-void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags);
+void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags);
 #endif
-uint32 WaitBufHdrUnlocked(BufferDesc* buf);
+uint64 WaitBufHdrUnlocked(BufferDesc* buf);
 void WaitIO(BufferDesc *buf);
 void InvalidateBuffer(BufferDesc *buf);
 extern void ReservePrivateRefCountEntry(void);
@@ -365,9 +365,9 @@ extern bool HoldingBufferPinThatDelaysRecovery(void);
 extern void AsyncUnpinBuffer(volatile void* bufHdr, bool forgetBuffer);
 extern void AsyncCompltrPinBuffer(volatile void* bufHdr);
 extern void AsyncCompltrUnpinBuffer(volatile void* bufHdr);
-extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint32 set_flag_bits);
+extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint64 set_flag_bits);
 
-extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint32 set_flag_bits);
+extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint64 set_flag_bits);
 extern void AsyncAbortBufferIO(void* buf, bool isForInput);
 extern void AsyncTerminateBufferIOByVacuum(void* buffer);
 extern void AsyncAbortBufferIOByVacuum(void* buffer);
