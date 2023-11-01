@@ -124,9 +124,9 @@ Datum pg_cbm_get_merged_file(PG_FUNCTION_ARGS)
 /*
  * Normally, we return one row for each changed tblspc/db/rel/fork.
  * However, since string length for one blocknumber output can be as long as MAX_STRLEN_PER_BLOCKNO,
- * considering addtional one space and one comma, we may return multiple rows
+ * considering additional one space and one comma, we may return multiple rows
  * if total changed block number is above MAX_BLOCKNO_PER_TUPLE.
- * In latter scenarior, drop/create/truncate information should be returned in the first row, which may
+ * In latter scenario, drop/create/truncate information should be returned in the first row, which may
  * need additional order by clause by user.
  */
 Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)

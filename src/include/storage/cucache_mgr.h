@@ -143,7 +143,7 @@ public:
         CacheSlotId_t slotId, const void* buffer, uint64 size, const char* prefix, const char* dataDNA);
 
     void AcquireCompressLock(CacheSlotId_t slotId);
-    void RealeseCompressLock(CacheSlotId_t slotId);
+    void ReleaseCompressLock(CacheSlotId_t slotId);
 
     int64 m_cstoreMaxSize;
 
