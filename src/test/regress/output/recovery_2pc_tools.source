@@ -117,7 +117,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  collation_connection                             | string  |      |           | 
  comm_ackchk_time                                 | integer | ms   | 0         | 20000
  comm_client_bind                                 | bool    |      |           |
- comm_control_port                                | integer |      | 1         | 65535
+ comm_control_port                                | integer |      | 0         | 65535
  comm_debug_mode                                  | bool    |      |           |
  commit_delay                                     | integer |      | 0         | 100000
  commit_siblings                                  | integer |      | 0         | 1000
@@ -129,7 +129,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  comm_no_delay                                    | bool    |      |           |
  comm_proxy_attr                                  | string  |      |           | 
  comm_quota_size                                  | integer | kB   | 0         | 2048000
- comm_sctp_port                                   | integer |      | 1         | 65535
+ comm_sctp_port                                   | integer |      | 0         | 65535
  comm_sender_buffer_size                          | integer |      | 1         | 1024
  comm_ssl                                         | bool    |      |           |
  comm_stat_mode                                   | bool    |      |           |
@@ -577,7 +577,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  pooler_connect_max_loops                         | integer |      | 0         | 20
  pooler_connect_timeout                           | integer | s    | 0         | 7200
  pooler_maximum_idle_time                         | integer | s    | 0         | 2147483647
- pooler_port                                      | integer |      | 1         | 65535
  pooler_timeout                                   | integer | s    | 0         | 7200
  port                                             | integer |      | 1         | 65535
  post_auth_delay                                  | integer | s    | 0         | 2147

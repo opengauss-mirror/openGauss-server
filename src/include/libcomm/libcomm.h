@@ -735,6 +735,7 @@ struct QCConnEntry {
     gsocket forward;
     gsocket backward;
     int scannedPageNum;
+    int internal_node_id;
 };
 struct BackConnInfo {
     uint16 node_idx;

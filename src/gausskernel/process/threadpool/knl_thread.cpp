@@ -1801,6 +1801,12 @@ void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
 static void knlTSPQCxtInit(knl_t_spq_context *spqCxt)
 {
     spqCxt->spq_role = ROLE_UTILITY;
+    spqCxt->spq_session_id = 0;
+    spqCxt->current_id = 0;
+    spqCxt->skip_direct_distribute_result = false;
+    spqCxt->num_nodes = 0;
+    spqCxt->nodesDefinition = NULL;
+    spqCxt->adaptive_scan_setup = false;
     spqCxt->qc_ctx = (spq_qc_ctx*)palloc(sizeof(spq_qc_ctx));
     spqCxt->qc_ctx->is_done = false;
     spqCxt->qc_ctx->is_exited = false;
