@@ -534,7 +534,7 @@ void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
 
             BufferDesc *buf_desc = BufferGetBufferDescriptor(buffer);
             if (buf_desc->extra->seg_blockno == old_seg_blockno) {
-                uint32 buf_state = LockBufHdr(buf_desc);
+                uint64 buf_state = LockBufHdr(buf_desc);
                 if (buf_state & BM_DIRTY) {
                     /* spin-lock should be released before IO */
                     UnlockBufHdr(buf_desc, buf_state);

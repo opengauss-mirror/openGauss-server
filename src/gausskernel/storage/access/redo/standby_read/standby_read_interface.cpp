@@ -349,7 +349,7 @@ void buffer_drop_exrto_standby_read_buffers(StandbyReadMetaInfo *meta_info)
     int i = 0;
     while (i < TOTAL_BUFFER_NUM) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
-        uint32 buf_state;
+        uint64 buf_state;
         bool need_drop = false;
         /*
          * Some safe unlocked checks can be done to reduce the number of cycle.

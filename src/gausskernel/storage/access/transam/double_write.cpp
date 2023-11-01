@@ -2102,7 +2102,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     XLogRecPtr page_lsn = InvalidXLogRecPtr;
     Block block;
     uint16 page_num;
-    uint32 buf_state;
+    uint64 buf_state;
     errno_t rc;
     *is_skipped = true;
 

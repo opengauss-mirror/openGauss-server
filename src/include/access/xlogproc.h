@@ -95,7 +95,7 @@ typedef struct {
     int dirtyflag; /* true if the buffer changed */
 } RedoBufferInfo;
 
-extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint32 *buf_state, ReadBufferMethod flushmethod);
+extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint64 *buf_state, ReadBufferMethod flushmethod);
 
 #define MakeRedoBufferDirty(bufferinfo) ((bufferinfo)->dirtyflag = true)
 #define RedoBufferDirtyClear(bufferinfo) ((bufferinfo)->dirtyflag = false)
@@ -105,7 +105,7 @@ extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint32 *bu
 
 typedef struct {
     RedoBufferTag blockinfo;
-    pg_atomic_uint32 state;
+    pg_atomic_uint64 state;
 } RedoBufferDesc;
 
 typedef struct {
@@ -827,7 +827,7 @@ extern void XLogRedoBufferRelease(RedoBufferManager* buffermanager, Buffer buffe
 extern BlockNumber XLogRedoBufferGetBlkNumber(RedoBufferManager* buffermanager, Buffer bufferid);
 extern Block XLogRedoBufferGetBlk(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot);
 extern Block XLogRedoBufferGetPage(RedoBufferManager* buffermanager, Buffer bufferid);
-extern void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot, uint32 state);
+extern void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot, uint64 state);
 
 #define XLogRedoBufferInitFunc(bufferManager, buffernum, defOperate, interruptOperte) do { \
     XLogRedoBufferInit(bufferManager, buffernum, defOperate, interruptOperte); \
