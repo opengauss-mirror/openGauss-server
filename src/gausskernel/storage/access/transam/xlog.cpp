@@ -354,7 +354,7 @@ static void CheckRequiredParameterValues(bool DBStateShutdown);
 static void XLogReportParameters(void);
 static void LocalSetXLogInsertAllowed(void);
 static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags, bool doFullCheckpoint);
-static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curInsert);
+static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curInsert, bool getkeeper);
 
 static XLogRecPtr XLogGetReplicationSlotMinimumLSN(void);
 
@@ -12230,7 +12230,7 @@ void CreateCheckPoint(int flags)
     checkPoint.remove_seg = 1;
 
     if (_logSegNo && !GetDelayXlogRecycle()) {
-        KeepLogSeg(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo, &_logSegNo, curInsert);
+        KeepLogSeg(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo, &_logSegNo, curInsert, false);
         checkPoint.remove_seg = _logSegNo;
         _logSegNo--;
         /*
@@ -12935,7 +12935,7 @@ bool CreateRestartPoint(int flags)
         endptr = GetStandbyFlushRecPtr(NULL);
 
         /* The third param is not used */
-        KeepLogSeg(endptr, &_logSegNo, InvalidXLogRecPtr);
+        KeepLogSeg(endptr, &_logSegNo, InvalidXLogRecPtr, false);
         _logSegNo--;
 
         /*
@@ -13159,6 +13159,84 @@ static XLogSegNo CalculateCNRecycleSegNoForStreamingHadr(XLogRecPtr curInsert, X
     }
 }
 
+static void fill_keeper(XLogSegNo segno, int index, XlogKeeper *xlogkeeper)
+{
+    if(!xlogkeeper)
+        return;
+    
+    if(segno <= 0)
+        segno = 1;
+    xlogkeeper[index].segno = segno;
+    xlogkeeper[index].valid = true;
+}
+
+static void search_archive_keeper(XlogKeeper *xlogkeeper)
+{
+    DIR         *xldir = NULL;
+    struct      dirent *xlde = NULL;
+    XLogSegNo   min_ready_xlog = 0;
+    XLogSegNo   max_done_xlog = 0;
+
+    if(!XLogArchivingActive())
+        return;
+    
+
+    xldir = AllocateDir(XLOGDIR "/archive_status");
+    if (xldir == NULL) {
+        ereport(ERROR,
+                (errcode_for_file_access(),
+                errmsg("could not open transaction log directory \"%s\"/archive_status: %m", XLOGDIR)));
+    }
+    /*
+     * .ready is marking wal files need to be archive and .done are ones finished archive.
+     * So we regard min of .ready or max of .done as one keep by archive, if no .done or
+     * .ready files the archive keep nothing.
+     */
+    while ((xlde = ReadDir(xldir, XLOGDIR "/archive_status")) != NULL) {
+        if (strlen(xlde->d_name) > 24 && strspn(xlde->d_name, "0123456789ABCDEF") == 24) {
+            if (strcmp(xlde->d_name + strlen(xlde->d_name) - strlen(".ready"), ".ready") == 0) {
+                XLogSegNo   ready_segno = 0;
+                TimeLineID  tld = 0;
+                XLogFromFileName(xlde->d_name, &tld, &ready_segno);
+                if(0 == min_ready_xlog || min_ready_xlog > ready_segno)
+                    min_ready_xlog = ready_segno;
+            } else if(strcmp(xlde->d_name + strlen(xlde->d_name) - strlen(".done"), ".done") == 0) {
+                XLogSegNo   done_segno = 0;
+                TimeLineID  tld = 0;
+                XLogFromFileName(xlde->d_name, &tld, &done_segno);
+                if(0 == max_done_xlog || max_done_xlog < done_segno)
+                    max_done_xlog = done_segno;
+            }
+        }
+    }
+    FreeDir(xldir);
+
+    if(0 == min_ready_xlog && 0 == max_done_xlog)
+        return;
+    else if(0 != max_done_xlog && 0 == min_ready_xlog)
+        min_ready_xlog = max_done_xlog + 1;
+
+    fill_keeper(min_ready_xlog, WALKEEPER_ARCHIVE, xlogkeeper);
+}
+
+XlogKeeper* generate_xlog_keepers(void)
+{
+    XLogSegNo   logSegNoTemp = 0;
+    
+    XlogKeeper  *result = NULL;
+
+    if (RecoveryInProgress()) {
+        XLogRecPtr recptr = GetStandbyFlushRecPtr(NULL);
+        result = KeepLogSeg(recptr, &logSegNoTemp, InvalidXLogRecPtr, true);
+    } else {
+        XLogRecPtr curInsert = GetXLogWriteRecPtr();
+        result = KeepLogSeg(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo, &logSegNoTemp, curInsert, true);
+    }
+    search_archive_keeper(result);
+
+    return result;
+}
+
 /*
  * Retreat *logSegNo to the last segment that we need to retain because of
  * either wal_keep_segments or replication slots.
@@ -13170,16 +13248,22 @@ static XLogSegNo CalculateCNRecycleSegNoForStreamingHadr(XLogRecPtr curInsert, X
  * DCF feature: Replication slot is no longer needed as consensus of XLog
  * is achieved in DCF. Rather than WalSnd, XLog data are replicated via DCF.
  */
-static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curInsert)
+static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curInsert, bool getkeeper)
 {
     XLogSegNo segno;
     XLogSegNo wal_keep_segno;
     XLogRecPtr keep;
     XLogRecPtr xlogcopystartptr;
     ReplicationSlotState repl_slot_state;
+    XlogKeeper *xlogkeeper = NULL;
+
+    if(getkeeper)
+        xlogkeeper = (XlogKeeper*)palloc0(WALKEEPER_MAX * sizeof(XlogKeeper));
 
     gstrace_entry(GS_TRC_ID_KeepLogSeg);
     XLByteToSeg(recptr, segno);
+
+    fill_keeper(segno, WALKEEPER_BASECHECK, xlogkeeper);
 
     /* avoid underflow, don't go below 1 */
     if (segno <= (uint64)(uint32)XLogSegmentsNum(u_sess->attr.attr_storage.wal_keep_segments)) {
@@ -13193,6 +13277,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
     }
 
     wal_keep_segno = segno;
+    fill_keeper(wal_keep_segno, WALKEEPER_SEGMENT_KEEP, xlogkeeper);
 
     ReplicationSlotsComputeRequiredLSN(&repl_slot_state);
     keep = repl_slot_state.min_required;
@@ -13212,6 +13297,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         } else if (slotSegNo < segno) {
             segno = slotSegNo;
         }
+        fill_keeper(segno, WALKEEPER_SLOTS, xlogkeeper);
     }
 
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_SHARED);
@@ -13230,6 +13316,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         } else if (slotSegNo < segno) {
             segno = slotSegNo;
         }
+        fill_keeper(segno, WALKEEPER_BASEBACKUP, xlogkeeper);
     }
 
     load_server_mode();
@@ -13240,6 +13327,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
                                                                         repl_slot_state.min_tools_required);
         if (mainCNSegNo < segno && mainCNSegNo > 0) {
             segno = mainCNSegNo;
+            fill_keeper(segno, WALKEEPER_COODRECYCLE, xlogkeeper);
         }
     }
 
@@ -13260,6 +13348,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
             pg_atomic_read_u32(&g_instance.comm_cxt.current_gsrewind_count) > 0) {
             /* segno = 1 show all file should be keep */
             segno = 1;
+            fill_keeper(segno, WALKEEPER_BUILD, xlogkeeper);
             ereport(LOG, (errmsg("keep all the xlog segments, because there is a build task in the backend, "
                                  "and gs_rewind count is more than zero")));
         } else if (IS_DN_MULTI_STANDYS_MODE() && !WalSndAllInProgress(SNDROLE_PRIMARY_STANDBY) &&
@@ -13273,9 +13362,11 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
                 segno = CalcRecycleSegNo(curInsert, repl_slot_state.quorum_min_required,
                     repl_slot_state.min_tools_required);
             }
+            fill_keeper(segno, WALKEEPER_INVALIDSEND, xlogkeeper);
         } else if (IS_DN_DUMMY_STANDYS_MODE() && !WalSndInProgress(SNDROLE_PRIMARY_STANDBY)) {
             /* segno = 1 show all file should be keep */
             segno = 1;
+            fill_keeper(segno, WALKEEPER_DUMMYSTANDBY, xlogkeeper);
             ereport(LOG, (errmsg("keep all the xlog segments, because not all the wal senders are "
                 "in the role PRIMARY_STANDBY")));
         } else {
@@ -13287,6 +13378,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
                     archiveSlotSegNo == segno)) {
                 segno = CalcRecycleArchiveSegNo();
                 g_instance.roach_cxt.isXLogForceRecycled = true;
+                fill_keeper(segno, WALKEEPER_RESISTARCHIVE, xlogkeeper);
                 ereport(LOG, (errmsg("force recycle archiving xlog, because archive required xlog keep segement size "
                     "is bigger than max keep size: %lu", maxKeepSize)));
             }
@@ -13296,6 +13388,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
             !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
             /* there are slots and lsn is invalid, we keep it */
             segno = 1;
+            fill_keeper(segno, WALKEEPER_INVALIDSLOT, xlogkeeper);
             ereport(WARNING, (errmsg("invalid replication slot recptr"),
                               errhint("Check slot configuration or setup standby/secondary")));
         }
@@ -13313,12 +13406,16 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         if (cbm_tracked_segno < segno && cbm_tracked_segno > 0) {
             segno = cbm_tracked_segno;
         }
+        if(cbm_tracked_segno > 0)
+            fill_keeper(cbm_tracked_segno, WALKEEPER_CBM, xlogkeeper);
     }
     if (t_thrd.xlog_cxt.server_mode != PRIMARY_MODE && t_thrd.xlog_cxt.server_mode != NORMAL_MODE) {
         LWLockAcquire(XlogRemoveSegLock, LW_SHARED);
         if (XlogRemoveSegPrimary < segno && XlogRemoveSegPrimary > 0) {
             segno = XlogRemoveSegPrimary;
         }
+        if(XlogRemoveSegPrimary > 0)
+            fill_keeper(XlogRemoveSegPrimary, WALKEEPER_CHECKPOINT, xlogkeeper);
         LWLockRelease(XlogRemoveSegLock);
     }
     if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby &&
@@ -13346,6 +13443,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
         *logSegNo = segno;
     }
     gstrace_exit(GS_TRC_ID_KeepLogSeg);
+
+    return xlogkeeper;
 }
 
 /*

@@ -33,16 +33,12 @@ select * from pg_replication_slots order by 1;
 (3 rows)
 
 select * from pg_drop_replication_slot('dummystandby_slot');
-WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
-WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
  pg_drop_replication_slot 
 --------------------------
  
 (1 row)
 
 select * from pg_drop_replication_slot('standby_slot');
-WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
-WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
  pg_drop_replication_slot 
 --------------------------
  
@@ -51,8 +47,6 @@ WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
 select * from pg_drop_replication_slot('wrong_slot_name');
 ERROR:  replication slot "wrong_slot_name" does not exist
 select * from pg_drop_replication_slot('my_physical_slot1my_physical_slot2my_physical_slot6my_physical_');
-WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
-WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
  pg_drop_replication_slot 
 --------------------------
  
