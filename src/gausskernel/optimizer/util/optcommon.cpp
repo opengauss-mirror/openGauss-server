@@ -148,13 +148,13 @@ void GetPlanNodePlainText(
             }
             break;
         case T_AssertOp:
-            *pname = *sname = "Assert";
+            *pname = *sname = *pt_operation = "Assert";
             break;
         case T_ShareInputScan:
-            *pname = *sname = *pt_options = "ShareInputScan";
+            *pname = *sname = *pt_operation = "ShareInputScan";
             break;
         case T_Sequence:
-            *pname = *sname = *pt_options = "Sequence";
+            *pname = *sname = *pt_operation = "Sequence";
             break;
 #endif
         case T_CStoreScan:
