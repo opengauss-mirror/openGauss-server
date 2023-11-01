@@ -3251,7 +3251,15 @@ void UnpinBuffer(BufferDesc *buf, bool fixOwner)
         /* I'd better not still hold any locks on the buffer */
         Assert(!LWLockHeldByMe(buf->content_lock));
         Assert(!LWLockHeldByMe(buf->io_in_progress_lock));
-        buf_state = __sync_add_and_fetch(&buf->state, -1);
+        for(;;) {
+            buf_state = __sync_add_and_fetch(&buf->state, -1);
+            if(buf_state & BM_LOCKED) {
+                buf_state = __sync_add_and_fetch(&buf->state, 1);
+                WaitBufHdrUnlocked(buf);
+                continue;
+            }
+            break;
+        }
 
         /* Support the function LockBufferForCleanup() */
         if (buf_state & BM_PIN_COUNT_WAITER) {
