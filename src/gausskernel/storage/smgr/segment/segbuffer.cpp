@@ -727,18 +727,31 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
     INIT_BUFFERTAG(new_tag, rnode, forkNum, blockNum);
 
     new_hash = BufTableHashCode(&new_tag);
-    new_partition_lock = BufMappingPartitionLock(new_hash);
 
-    LWLockAcquire(new_partition_lock, LW_SHARED);
+retry:
     int buf_id = BufTableLookup(&new_tag, new_hash);
 
     if (buf_id >= 0) {
-        return FoundBufferInHashTable(buf_id, new_partition_lock, foundPtr);
+        buf = GetBufferDescriptor(buf_id);
+        bool valid = SegPinBuffer(buf);
+        if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &new_tag)) {
+            SegUnpinBuffer(buf);
+            goto retry;
+        }
+
+        *foundPtr = true;
+
+        if (!valid) {
+            if (SegStartBufferIO(buf, true)) {
+                *foundPtr = false;
+            }
+        }
+
+        return buf;
     }
 
     *foundPtr = FALSE;
-    LWLockRelease(new_partition_lock);
-
+    new_partition_lock = BufMappingPartitionLock(new_hash);
     for (;;) {
         ReservePrivateRefCountEntry();
 
@@ -771,6 +784,7 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
             }
         }
 
+        old_flags = buf_state & BUF_FLAG_MASK;
         old_flag_valid = old_flags & BM_TAG_VALID;
 
         if (old_flag_valid) {
@@ -787,9 +801,11 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
             old_partition_lock = NULL;
         }
 
+        buf_state = LockBufHdr(buf);
         buf_id = BufTableInsert(&new_tag, new_hash, buf->buf_id);
 
         if (buf_id >= 0) {
+            UnlockBufHdr(buf, buf_state);
             SegUnpinBuffer(buf);
             if (old_flag_valid && old_partition_lock != new_partition_lock)
                 LWLockRelease(old_partition_lock);
@@ -797,7 +813,6 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
             return FoundBufferInHashTable(buf_id, new_partition_lock, foundPtr);
         }
 
-        buf_state = LockBufHdr(buf);
         old_flags = buf_state & BUF_FLAG_MASK;
 
         if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY)) {
@@ -815,11 +830,11 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
                 break;
             }
         }
-        UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
         if (old_flag_valid && old_partition_lock != new_partition_lock) {
             LWLockRelease(old_partition_lock);
         }
+        UnlockBufHdr(buf, buf_state);
         LWLockRelease(new_partition_lock);
         SegUnpinBuffer(buf);
     }
@@ -828,7 +843,6 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
     buf_state &= ~(BM_VALID | BM_DIRTY | BM_JUST_DIRTIED | BM_CHECKPOINT_NEEDED | BM_IO_ERROR | BM_PERMANENT |
                    BUF_USAGECOUNT_MASK);
     buf_state |= BM_TAG_VALID | BM_PERMANENT | BUF_USAGECOUNT_ONE;
-    UnlockBufHdr(buf, buf_state);
 
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
@@ -842,6 +856,7 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
         }
     }
     LWLockRelease(new_partition_lock);
+    UnlockBufHdr(buf, buf_state);
     *foundPtr = !SegStartBufferIO(buf, true);
 
     return buf;
