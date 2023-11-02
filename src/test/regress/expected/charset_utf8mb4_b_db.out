@@ -1368,13 +1368,13 @@ SELECT CONCAT(_utf8mb4'楂樻柉DB楂樻柉DB' COLLATE utf8mb4_bin, CONCAT(_gbk'
 SELECT CONCAT('高斯DB', opengauss_version()) result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 高斯DB5.1.0 | utf8_general_ci
+ 高斯DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), '高斯DB') result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 5.1.0高斯DB | utf8_general_ci
+ 5.1.1高斯DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT('高斯DB', 123) result, collation for(result);
@@ -1417,13 +1417,13 @@ SELECT CONCAT(NULL, '高斯DB') result, collation for(result);
 SELECT CONCAT(_gbk'高斯DB', opengauss_version()) result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 楂樻柉DB5.1.0 | utf8_general_ci
+ 楂樻柉DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), _gbk'高斯DB') result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 5.1.0楂樻柉DB | utf8_general_ci
+ 5.1.1楂樻柉DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(_gbk'高斯DB', 123) result, collation for(result);
@@ -1467,13 +1467,13 @@ SELECT CONCAT(NULL, _gbk'高斯DB') result, collation for(result);
 SELECT CONCAT(CONCAT('高斯DB'), opengauss_version()) result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 高斯DB5.1.0 | utf8_general_ci
+ 高斯DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), CONCAT('高斯DB')) result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 5.1.0高斯DB | utf8_general_ci
+ 5.1.1高斯DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(CONCAT('高斯DB'), 123) result, collation for(result);
@@ -1516,13 +1516,13 @@ SELECT CONCAT(NULL, CONCAT('高斯DB')) result, collation for(result);
 SELECT CONCAT(CONCAT(_gbk'高斯DB'), opengauss_version()) result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 楂樻柉DB5.1.0 | utf8_general_ci
+ 楂樻柉DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), CONCAT(_gbk'高斯DB')) result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 5.1.0楂樻柉DB | utf8_general_ci
+ 5.1.1楂樻柉DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(CONCAT(_gbk'高斯DB'), 123) result, collation for(result);
@@ -2952,13 +2952,13 @@ SELECT CONCAT(futf8_uni, CONCAT(futf8_gen)) result, collation for(result) FROM t
 SELECT CONCAT(futf8_uni, opengauss_version()) result, collation for(result) FROM t_diff_charset_columns;
    result    |  pg_collation_for  
 -------------+--------------------
- 高斯db5.1.0 | utf8mb4_unicode_ci
+ 高斯db5.1.1 | utf8mb4_unicode_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), futf8_uni) result, collation for(result) FROM t_diff_charset_columns;
    result    |  pg_collation_for  
 -------------+--------------------
- 5.1.0高斯db | utf8mb4_unicode_ci
+ 5.1.1高斯db | utf8mb4_unicode_ci
 (1 row)
 
 SELECT CONCAT(futf8_uni, '高斯DB') result, collation for(result) FROM t_diff_charset_columns;
@@ -3065,13 +3065,13 @@ LINE 1: ...) result, collation for(result) FROM t_diff_charset_columns;
 SELECT CONCAT(fgbk_chi, opengauss_version()) result, collation for(result) FROM t_diff_charset_columns;
    result    | pg_collation_for 
 -------------+------------------
- 高斯db5.1.0 | gbk_chinese_ci
+ 高斯db5.1.1 | gbk_chinese_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), fgbk_bin) result, collation for(result) FROM t_diff_charset_columns;
    result    | pg_collation_for 
 -------------+------------------
- 5.1.0高斯DB | gbk_bin
+ 5.1.1高斯DB | gbk_bin
 (1 row)
 
 SELECT CONCAT(fgbk_chi, '高斯DB') result, collation for(result) FROM t_diff_charset_columns;

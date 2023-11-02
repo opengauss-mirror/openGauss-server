@@ -203,6 +203,8 @@ EState* CreateExecutorState()
 
     estate->pruningResult = NULL;
     estate->first_autoinc = 0;
+    estate->cur_insert_autoinc = 0;
+    estate->next_autoinc = 0;
     estate->es_is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
     /*
      * Return the executor state structure
@@ -1553,8 +1555,15 @@ Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tupl
         if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
             autoinc = tmptable_autoinc_nextval(rel->rd_rel->relfilenode, cons_autoinc->next);
         } else {
-            autoinc = nextval_internal(cons_autoinc->seqoid);
+            if (estate->next_autoinc > 0) {
+                autoinc = estate->next_autoinc;
+                estate->next_autoinc = 0;
+            } else {
+                autoinc = nextval_internal(cons_autoinc->seqoid);
+            }
         }
+
+        estate->cur_insert_autoinc = autoinc;
         if (estate->first_autoinc == 0) {
             estate->first_autoinc = autoinc;
         }
@@ -1586,6 +1595,26 @@ static void UpdateAutoIncrement(Relation rel, Tuple tuple, EState* estate)
 
     if (estate->first_autoinc != 0 && u_sess->cmd_cxt.last_insert_id != estate->first_autoinc) {
         u_sess->cmd_cxt.last_insert_id = estate->first_autoinc;
+    }
+}
+
+void RestoreAutoIncrement(Relation rel, EState* estate, Tuple tuple)
+{
+    bool isnull = false;
+    ConstrAutoInc* cons_autoinc = rel->rd_att->constr->cons_autoinc;
+    Datum datum = tableam_tops_tuple_fast_getattr(tuple, cons_autoinc->attnum, rel->rd_att, &isnull);
+
+    if (!isnull) {
+        int128 autoinc = datum2autoinc(cons_autoinc, datum);
+        if (autoinc >= estate->cur_insert_autoinc) {
+            return;
+        }
+    }
+
+    if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+        *cons_autoinc->next = estate->cur_insert_autoinc;
+    } else {
+        estate->next_autoinc = estate->cur_insert_autoinc;
     }
 }
 
