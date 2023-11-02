@@ -539,7 +539,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     int ret = DMS_SUCCESS;
     int buf_id = -1;
     uint32 hash;
-    LWLock *partition_lock = NULL;
     BufferDesc *buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
     bool get_lock = false;
@@ -557,24 +556,13 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
 
     *buf_ctrl = NULL;
     hash = BufTableHashCode(tag);
-    partition_lock = BufMappingPartitionLock(hash);
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
         do {
-            get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
-            if (!get_lock) {
-                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
-                    "lock:%p",
-                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum, partition_lock))));
-                ret = GS_TIMEOUT;
-                break;
-            }
             buf_id = BufTableLookup(tag, hash);
             if (buf_id < 0) {
-                LWLockRelease(partition_lock);
                 break;
             }
 
@@ -587,7 +575,11 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                 (void)PinBuffer(buf_desc, NULL);
                 is_seg = false;
             }
-            LWLockRelease(partition_lock);
+
+            if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                break;
+            }
 
             bool wait_success = SSWaitIOTimeout(buf_desc);
             if (!wait_success) {
@@ -710,25 +702,13 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
     uint32 hash;
-    LWLock *partition_lock = NULL;
     uint64 buf_state;
     int ret = DMS_SUCCESS;
-
+    bool get_lock;
     hash = BufTableHashCode(tag);
-    partition_lock = BufMappingPartitionLock(hash);
-    bool get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
-    if (!get_lock) {
-        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
-            "lwlock:%p",
-            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-            tag->forkNum, tag->blockNum, partition_lock))));
-        return GS_TIMEOUT;
-    }
-
     buf_id = BufTableLookup(tag, hash);
     if (buf_id < 0) {
         /* not found in shared buffer */
-        LWLockRelease(partition_lock);
         return ret;
     }
 
@@ -740,9 +720,9 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         buf_desc = GetBufferDescriptor(buf_id);
         if (SS_PRIMARY_MODE) {
             buf_state = LockBufHdr(buf_desc);
-            if (BUF_STATE_GET_REFCOUNT(buf_state) != 0 || BUF_STATE_GET_USAGECOUNT(buf_state) != 0) {
+            if (BUF_STATE_GET_REFCOUNT(buf_state) != 0 || BUF_STATE_GET_USAGECOUNT(buf_state) != 0 ||
+               !BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
                 UnlockBufHdr(buf_desc, buf_state);
-                LWLockRelease(partition_lock);
                 return DMS_ERROR;
             }
 
@@ -752,7 +732,6 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 UnlockBufHdr(buf_desc, buf_state);
-                LWLockRelease(partition_lock);
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                 buf_ctrl->seg_fileno = EXTENT_INVALID;
                 buf_ctrl->seg_blockno = InvalidBlockNumber;
@@ -775,7 +754,6 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             }
 
             UnlockBufHdr(buf_desc, buf_state);
-            LWLockRelease(partition_lock);
             return ret;
         }
 
@@ -785,7 +763,11 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
             (void)PinBuffer(buf_desc, NULL);
         }
-        LWLockRelease(partition_lock);
+
+        if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+            DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
+            return ret;
+        }
 
         bool wait_success = SSWaitIOTimeout(buf_desc);
         if (!wait_success) {
@@ -1359,7 +1341,6 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
 {
     int buf_id;
     uint32 hash;
-    LWLock *partition_lock = NULL;
     BufferTag *tag = (BufferTag *)pageid;
     BufferDesc *buf_desc;
     bool ret = true;
@@ -1378,21 +1359,10 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
 #endif
 
     hash = BufTableHashCode(tag);
-    partition_lock = BufMappingPartitionLock(hash);
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        bool get_lock = SSLWLockAcquireTimeout(partition_lock, LW_SHARED);
-        if (!get_lock) {
-            ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
-                    "lwlock:%p",
-                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum, partition_lock))));
-            ret = false;
-            break;
-        }
-
         buf_id = BufTableLookup(tag, hash);
         if (buf_id >= 0) {
             buf_desc = GetBufferDescriptor(buf_id);
@@ -1402,7 +1372,12 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
                 ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
                 (void)PinBuffer(buf_desc, NULL);
             }
-            LWLockRelease(partition_lock);
+
+            if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                SSUnPinBuffer(buf_desc);
+                *ret_buf_desc = NULL;
+                break;
+            }
 
             bool wait_success = SSWaitIOTimeout(buf_desc);
             if (!wait_success) {
@@ -1415,7 +1390,6 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
             *is_valid = (pg_atomic_read_u64(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
         } else {
-            LWLockRelease(partition_lock);
             *ret_buf_desc = NULL;
         }
     }

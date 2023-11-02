@@ -1607,6 +1607,12 @@ void* buf_hash_operate(HTAB* hashp, const BufferTag* keyPtr, uint32 hashvalue, b
 
         case HASH_REMOVE:
             if (currBucket != NULL) {
+                CLEAR_BUFFERTAG(*((BufferTag*)(ELEMENTKEY(currBucket))));
+                pg_memory_barrier();
+
+                /* remove record from hash bucket's chain. */
+                *prevBucketPtr = currBucket->link;
+
                 freelist_idx = FREELIST_IDX(hctl, hashvalue);
                 /* if partitioned, must lock to touch nentries and freeList */
                 if (IS_PARTITIONED(hctl)) {
@@ -1614,9 +1620,6 @@ void* buf_hash_operate(HTAB* hashp, const BufferTag* keyPtr, uint32 hashvalue, b
                 }
                 Assert(hctl->freeList[freelist_idx].nentries > 0);
                 hctl->freeList[freelist_idx].nentries--;
-
-                /* remove record from hash bucket's chain. */
-                *prevBucketPtr = currBucket->link;
 
                 /* add the record to the freelist for this table.  */
                 currBucket->link = hctl->freeList[freelist_idx].freeList;
@@ -1654,13 +1657,15 @@ void* buf_hash_operate(HTAB* hashp, const BufferTag* keyPtr, uint32 hashvalue, b
                 }
             }
 
-            /* link into hashbucket chain */
-            *prevBucketPtr = currBucket;
             currBucket->link = NULL;
 
             /* copy key into record */
             currBucket->hashvalue = hashvalue;
             BUFFERTAGS_PTR_SET((BufferTag*)(ELEMENTKEY(currBucket)), keyPtr);
+
+            pg_memory_barrier();
+            /* link into hashbucket chain */
+            *prevBucketPtr = currBucket;
 
             /*
              * Caller is expected to fill the data field on return.  DO NOT

@@ -2711,10 +2711,9 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
 
     /* determine its hash code and partition lock ID */
     new_hash = BufTableHashCode(&new_tag);
-    new_partition_lock = BufMappingPartitionLock(new_hash);
 
+retry:
     /* see if the block is in the buffer pool already */
-    (void)LWLockAcquire(new_partition_lock, LW_SHARED);
     pgstat_report_waitevent(WAIT_EVENT_BUF_HASH_SEARCH);
     buf_id = BufTableLookup(&new_tag, new_hash);
     pgstat_report_waitevent(WAIT_EVENT_END);
@@ -2728,8 +2727,10 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
 
         valid = PinBuffer(buf, strategy);
 
-        /* Can release the mapping lock as soon as we've pinned it */
-        LWLockRelease(new_partition_lock);
+        if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &new_tag)) {
+            UnpinBuffer(buf, true);
+            goto retry;
+        }
 
         *found = TRUE;
 
@@ -2761,11 +2762,7 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
         return buf;
     }
 
-    /*
-     * Didn't find it in the buffer pool.  We'll have to initialize a new
-     * buffer.	Remember to unlock the mapping lock while doing the work.
-     */
-    LWLockRelease(new_partition_lock);
+    new_partition_lock = BufMappingPartitionLock(new_hash);
     /* Loop here in case we have to try another victim buffer */
     for (;;) {
         bool needGetLock = false;
@@ -2899,6 +2896,7 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
          * To change the association of a valid buffer, we'll need to have
          * exclusive lock on both the old and new mapping partitions.
          */
+        old_flags = buf_state & BUF_FLAG_MASK;
         if (old_flags & BM_TAG_VALID) {
             /*
              * Need to compute the old tag's hashcode and partition lock ID.
@@ -2921,6 +2919,7 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
             old_partition_lock = NULL;
         }
 
+        buf_state = LockBufHdr(buf);
         /*
          * Try to make a hashtable entry for the buffer under its new tag.
          * This could fail because while we were writing someone else
@@ -2936,6 +2935,7 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
              * pool in the first place.  First, give up the buffer we were
              * planning to use.
              */
+            UnlockBufHdr(buf, buf_state);
             UnpinBuffer(buf, true);
 
             /* Can give up that buffer's mapping partition lock now */
@@ -2973,10 +2973,6 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
         }
 
         /*
-         * Need to lock the buffer header too in order to change its tag.
-         */
-        buf_state = LockBufHdr(buf);
-        /*
          * Somebody could have pinned or re-dirtied the buffer while we were
          * doing the I/O and making the new hashtable entry.  If so, we can't
          * recycle this buffer; we must undo everything we've done and start
@@ -3001,11 +2997,12 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
             }
         }
 
-        UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
         if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock) {
             LWLockRelease(old_partition_lock);
         }
+
+        UnlockBufHdr(buf, buf_state);
         LWLockRelease(new_partition_lock);
         UnpinBuffer(buf, true);
     }
@@ -3037,8 +3034,6 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
         buf_state |= BM_TAG_VALID | BUF_USAGECOUNT_ONE;
     }
 
-    UnlockBufHdr(buf, buf_state);
-
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
         GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
@@ -3064,7 +3059,7 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
         buf->extra->seg_blockno = InvalidBlockNumber;
     }
     LWLockRelease(new_partition_lock);
-
+    UnlockBufHdr(buf, buf_state);
     /*
      * Buffer contents are currently invalid.  Try to get the io_in_progress
      * lock.  If StartBufferIO returns false, then someone else managed to
@@ -7271,7 +7266,6 @@ void ForgetBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
     SMgrRelation smgr = smgropen(rnode, InvalidBackendId);
     BufferTag    tag;            /* identity of target block */
     uint32       hash;           /* hash value for tag */
-    LWLock*      partitionLock;  /* buffer partition lock for it */
     int          bufId;
     BufferDesc  *bufHdr;
     uint64       bufState;
@@ -7281,12 +7275,9 @@ void ForgetBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
 
     /* determine its hash code and partition lock ID */
     hash = BufTableHashCode(&tag);
-    partitionLock = BufMappingPartitionLock(hash);
 
     /* see if the block is in the buffer pool */
-    LWLockAcquire(partitionLock, LW_SHARED);
     bufId = BufTableLookup(&tag, hash);
-    LWLockRelease(partitionLock);
 
     /* didn't find it, so nothing to do */
     if (bufId < 0) {
@@ -7297,6 +7288,10 @@ void ForgetBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
     bufHdr = GetBufferDescriptor(bufId);
     bufState = LockBufHdr(bufHdr);
 
+    if (!BUFFERTAGS_PTR_EQUAL(&bufHdr->tag, &tag)) {
+        UnlockBufHdr(bufHdr, bufState);
+        return;
+    }
     /*
      * The buffer might been evicted after we released the partition lock and
      * before we acquired the buffer header lock.  If so, the buffer we've
@@ -7381,15 +7376,22 @@ bool IsPageHitBufferPool(RelFileNode& node, ForkNumber forkNum, BlockNumber bloc
 
     INIT_BUFFERTAG(newTag, node, forkNum, blockNum);
     uint32 new_hash = BufTableHashCode(&newTag);
-    LWLock *new_partition_lock = BufMappingPartitionLock(new_hash);
     /* see if the block is in the buffer pool already */
-    (void)LWLockAcquire(new_partition_lock, LW_SHARED);
     bufId = BufTableLookup(&newTag, new_hash);
-    LWLockRelease(new_partition_lock);
-    if (bufId != -1) {
-        return true;
+    if (bufId < 0) {
+        return false;
     }
-    return false;
+
+    BufferDesc* bufHdr = GetBufferDescriptor(bufId);
+    uint64 bufState = LockBufHdr(bufHdr);
+
+    if (!BUFFERTAGS_PTR_EQUAL(&bufHdr->tag, &newTag)) {
+        UnlockBufHdr(bufHdr, bufState);
+        return false;
+    }
+
+    UnlockBufHdr(bufHdr, bufState);
+    return true;
 }
 
 void buffer_in_progress_pop()
