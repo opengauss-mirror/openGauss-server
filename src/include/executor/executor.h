@@ -515,6 +515,7 @@ extern void ExecCopyDataFromDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* 
 extern void ExecCopyDataToDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* target_cursor);
 
 extern Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tuple tuple);
+extern void RestoreAutoIncrement(Relation rel, EState* estate, Tuple tuple);
 
 /*
  * prototypes from functions in execReplication.cpp

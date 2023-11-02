@@ -2276,6 +2276,17 @@ lreplace:
             slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
         } else {
 #endif
+            /* restore auto_increment value for multi-rows upsert-update */
+            if (node->mt_upsert != NULL && node->mt_upsert->us_action != UPSERT_NONE &&
+                RelHasAutoInc(result_relation_desc) &&
+                estate->cur_insert_autoinc > 0) {
+                RestoreAutoIncrement(result_relation_desc, estate, tuple);
+                /* avoid set last_insert_id */
+                if (estate->first_autoinc == estate->cur_insert_autoinc) {
+                    estate->first_autoinc = 0;
+                }
+            }
+
             /*
              * replace the heap tuple
              *
