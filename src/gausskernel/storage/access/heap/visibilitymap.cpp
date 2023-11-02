@@ -242,7 +242,7 @@ void visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf, XLogRe
                     Assert(PageIsAllVisible(heapPage));
                     if (ENABLE_DMS) {
                         BufferDesc* buf_desc = GetBufferDescriptor(heapBuf - 1);
-                        if ((pg_atomic_read_u32(&buf_desc->state) & BM_DIRTY) == 0) {
+                        if ((pg_atomic_read_u64(&buf_desc->state) & BM_DIRTY) == 0) {
                             MarkBufferDirty(heapBuf);
                         }
                     }

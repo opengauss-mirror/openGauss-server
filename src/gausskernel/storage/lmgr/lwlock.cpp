@@ -865,6 +865,9 @@ static bool LWLockAttemptLock(LWLock *lock, LWLockMode mode)
             }
 
             desired_state = old_state + refoneByThread;
+            if ((desired_state & (LW_VAL_EXCLUSIVE)) != 0) {
+                return true;
+            }
         } while (!pg_atomic_compare_exchange_u8((((volatile uint8*)&lock->state) + maskId), ((uint8*)&old_state) + maskId, (desired_state >> (8 * maskId))));
     } else if (mode == LW_EXCLUSIVE) {
         old_state = pg_atomic_read_u64(&lock->state);

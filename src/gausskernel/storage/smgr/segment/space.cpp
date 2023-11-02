@@ -479,9 +479,6 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
     INIT_BUFFERTAG(tag, *rnode, forknum, logic_blocknum);
 
     uint32 hashcode = BufTableHashCode(&tag);
-    LWLock *partition_lock = BufMappingPartitionLock(hashcode);
-
-    LWLockAcquire(partition_lock, LW_SHARED);
     int buf_id = BufTableLookup(&tag, hashcode);
     if (buf_id >= 0) {
         BufferDesc *buf = GetBufferDescriptor(buf_id);
@@ -491,7 +488,10 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
         /* Pin the buffer to avoid invalidated by others */
         bool valid = PinBuffer(buf, NULL);
 
-        LWLockRelease(partition_lock);
+        if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &tag)) {
+            UnpinBuffer(buf, true);
+            return InvalidBuffer;
+        }
 
         if (!valid) {
             UnpinBuffer(buf, true);
@@ -500,7 +500,6 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
 
         return BufferDescriptorGetBuffer(buf);
     }
-    LWLockRelease(partition_lock);
 
     return InvalidBuffer;
 }
