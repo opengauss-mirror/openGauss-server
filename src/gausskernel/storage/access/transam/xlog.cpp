@@ -6633,35 +6633,6 @@ static uint64 GetMACAddr(void)
     return macAddr;
 }
 
-void UpdateCtlInfoToFile(ShareStorageXLogCtl *ctlInfo)
-{
-    int fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | PG_BINARY | O_DIRECT, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open ss ctl into file \"%s\": %s", SS_DORADO_CTRL_FILE, TRANSLATE_ERRNO)));
-    }
-
-    Assert(fd > 0);
-
-    errno = EOK;
-    if (pwrite(fd, ctlInfo, SS_DORADO_CTL_INFO_SIZE, 0) != SS_DORADO_CTL_INFO_SIZE) {
-        if (errno == 0) {
-            errno = ENOSPC;
-        }  
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to ss ctl info file: %s", TRANSLATE_ERRNO)));
-    }
-
-    if (pg_fsync(fd) != 0) {
-        int save_errno = errno;
-        close(fd);
-        errno = save_errno;
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync ss ctl info file: %s", TRANSLATE_ERRNO)));
-    }
-
-    if (close(fd)) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %s", SS_DORADO_CTRL_FILE, TRANSLATE_ERRNO)));
-    }
-}
-
 /*
  * This func must be called ONCE on system install.  It creates pg_control
  * and the initial XLOG segment.
@@ -19051,40 +19022,6 @@ void UpdatePostgresqlFile(const char *optName, const char *gucLine)
         copy_file_internal(guc, gucBak, true);
     }
     release_file_lock(&filelock);
-}
-
-void SSWriteDoradoCtlInfoFile(int fd, char* buffer)
-{
-    Assert(ENABLE_DSS && SS_REPLICATION_DORADO_CLUSTER);
-    Assert(fd > 0);
-    errno = EOK;
-    if (pwrite(fd, buffer, SS_DORADO_CTL_INFO_SIZE, 0) != SS_DORADO_CTL_INFO_SIZE) {
-        if (errno == 0) {
-            errno = ENOSPC;
-        }  
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to ss ctl info file: %s", TRANSLATE_ERRNO)));
-    }
-
-    if (pg_fsync(fd) != 0) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not fsync ss ctl info file: %s", TRANSLATE_ERRNO)));
-    }
-}
-
-void SSReadDoradoCtlInfoFile()
-{
-    Assert(ENABLE_DSS && SS_REPLICATION_DORADO_CLUSTER);
-    int fd = BasicOpenFile(SS_DORADO_CTRL_FILE, O_RDWR | PG_BINARY | O_DIRECT, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open ss ctl into file \"%s\": %s",
-                                                            SS_DORADO_CTRL_FILE, TRANSLATE_ERRNO)));
-    }
-    int readSize = CalShareStorageCtlSize();
-    char buffer[readSize] __attribute__ ((__aligned__(ALIGNOF_BUFFER)));
-
-    if (pread(fd, buffer, SS_DORADO_CTL_INFO_SIZE, 0) != SS_DORADO_CTL_INFO_SIZE) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read ss ctl into file: %s", TRANSLATE_ERRNO)));
-    }
-
 }
 
 void NormalClusterDoradoStorageInit()
