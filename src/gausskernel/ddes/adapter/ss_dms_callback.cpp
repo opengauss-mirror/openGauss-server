@@ -367,11 +367,6 @@ static int CBSwitchoverDemote(void *db_handle)
     return DMS_ERROR;
 }
 
-static int CBDbIsPrimary(void *db_handle)
-{
-    return g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID ? 1 : 0;
-}
-
 static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
     g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
@@ -2163,7 +2158,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->switchover_demote = CBSwitchoverDemote;
     callback->switchover_promote_opengauss = CBSwitchoverPromote;
     callback->set_switchover_result = CBSwitchoverResult;
-    callback->db_is_primary = CBDbIsPrimary;
     callback->reform_done_notify = CBReformDoneNotify;
     callback->log_wait_flush = CBXLogWaitFlush;
     callback->drc_validate = CBDrcBufValidate;
