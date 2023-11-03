@@ -638,7 +638,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
-        if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
+        if ((IsConnFromCoord() || IS_SPQ_EXECUTOR) && atttypid >= FirstBootstrapObjectId) {
             char *typenameVar = "";
             typenameVar = get_typename_with_namespace(atttypid);
             pq_writestring(buf, typenameVar);
@@ -689,7 +689,7 @@ static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *t
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
-        if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
+        if ((IsConnFromCoord() || IS_SPQ_EXECUTOR) && atttypid >= FirstBootstrapObjectId) {
             char *typenameVar = "";
             typenameVar = get_typename_with_namespace(atttypid);
             pq_sendstring(buf, typenameVar);
