@@ -169,7 +169,7 @@ void SSClusterDoradoStorageInit()
 
 void UpdateSSDoradoCtlInfoAndSync()
 {
-    if (!SS_REPLICATION_DORADO_CLUSTER) {
+    if (!SS_REPLICATION_PRIMARY_NODE) {
         return;
     }
 

@@ -278,12 +278,12 @@ void SSUpdateReformerCtrl()
         }
 
         if (fd < 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname[i])));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %s", fname[i], TRANSLATE_ERRNO)));
         }
 
         SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, write_size);
         if (close(fd)) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %s", TRANSLATE_ERRNO)));
         }
     }
 }
