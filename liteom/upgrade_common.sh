@@ -222,10 +222,9 @@ function check_env() {
   if [[ "$GAUSSDATA" == "" ]] && [[ "$PGDATA" == "" ]]; then
     die "GAUSSDATA or PGDATA cannot be all null!" ${err_check_init}
   fi
-  if [[ "$PGDATA" == "" ]]; then
+  if [[ "$GAUSSDATA" != "" ]]; then
     PGDATA=${GAUSSDATA}
-  fi
-  if [[ "$GAUSSDATA" == "" ]]; then
+  elif [[ "$PGDATA" != "" ]]; then
     GAUSSDATA=${PGDATA}
   fi
   check_config_path "$GAUSSHOME"
@@ -1122,10 +1121,7 @@ function upgrade_post() {
     die "Step file may be changed invalid" ${err_upgrade_post}
   elif [[ "$current_step" -lt 4 ]]; then
     die "You should exec upgrade_bin first" ${err_upgrade_post}
-  elif [[ "$current_step" -eq 4 ]]; then
-    upgrade_post_step56
-  elif [[ "$current_step" -eq 5 ]]; then
-    rollback_post
+  elif [[ "$current_step" -lt 6 ]]; then
     upgrade_post_step56
   else
     log "no need do upgrade_post step"
@@ -1140,6 +1136,13 @@ function upgrade_post_step56() {
       die "Guassdb is not running" ${err_upgrade_post}
     fi
     record_step 5
+
+    if exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_rollback-post_maindb.sql maindb && exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_rollback-post_otherdb.sql otherdb; then
+      debug "upgrade-rollback post sql successfully"
+    else
+      die "upgrade-rollback post sql failed" ${err_rollback_post}
+    fi
+
     if exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_upgrade-post_maindb.sql maindb && exec_sql "$GAUSS_TMP_PATH"/temp_sql/temp_upgrade-post_otherdb.sql otherdb; then
       debug "upgrade post sql successfully"
     else
