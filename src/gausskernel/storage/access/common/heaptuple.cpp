@@ -282,6 +282,9 @@ bool heap_attisnull_impl(HeapTuple tup, int attnum, TupleDesc tupDesc)
         case BucketIdAttributeNumber:
         case UidAttributeNumber:
 #endif
+#ifdef USE_SPQ
+        case RootSelfItemPointerAttributeNumber:
+#endif
             /* these are never null */
             break;
 
@@ -601,6 +604,11 @@ static FORCE_INLINE Datum heap_getsysattr_impl(HeapTuple tup, int attnum, TupleD
             break;
         case UidAttributeNumber:
             result = UInt64GetDatum(HeapTupleGetUid(tup));
+            break;
+#endif
+#ifdef USE_SPQ
+        case RootSelfItemPointerAttributeNumber:
+            result = spq_get_root_ctid(tup, InvalidBuffer, NULL);
             break;
 #endif
         default:

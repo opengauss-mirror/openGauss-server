@@ -79,7 +79,9 @@
 #include "access/tupconvert.h"
 #include "executor/node/nodeCtescan.h"
 #include "rewrite/rewriteHandler.h"
-
+#ifdef USE_SPQ
+#include "access/sysattr.h"
+#endif
 /*
  * Use computed-goto-based opcode dispatch when computed gotos are available.
  * But use a separate symbol so that it's easy to adjust locally in this file
@@ -729,9 +731,19 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			Assert(innerslot->tts_tuple != NULL);
 			Assert(innerslot->tts_tuple != &(innerslot->tts_minhdr));
 
+#ifdef USE_SPQ
+            if (attnum == RootSelfItemPointerAttributeNumber) {
+                Assert(innerslot->tts_tuple);
+                *op->resnull = false;
+                d = spq_get_root_ctid((HeapTuple)innerslot->tts_tuple, innerslot->tts_buffer, econtext);
+                *op->resvalue = d;
+            } else
+#endif
+            {
 			/* heap_getsysattr has sufficient defenses against bad attnums */
 			d = tableam_tslot_getattr(innerslot, attnum, op->resnull);
 			*op->resvalue = d;
+            }
 
 			EEO_NEXT();
 		}
@@ -744,10 +756,19 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			/* these asserts must match defenses in slot_getattr */
 			Assert(outerslot->tts_tuple != NULL);
 			Assert(outerslot->tts_tuple != &(outerslot->tts_minhdr));
-
-			/* heap_getsysattr has sufficient defenses against bad attnums */
-			d = tableam_tslot_getattr(outerslot, attnum, op->resnull);
-			*op->resvalue = d;
+#ifdef USE_SPQ
+            if (attnum == RootSelfItemPointerAttributeNumber) {
+                Assert(outerslot->tts_tuple);
+                *op->resnull = false;
+                d = spq_get_root_ctid((HeapTuple)outerslot->tts_tuple, outerslot->tts_buffer, econtext);
+                *op->resvalue = d;
+            } else
+#endif
+            {
+            /* heap_getsysattr has sufficient defenses against bad attnums */
+            d = tableam_tslot_getattr(outerslot, attnum, op->resnull);
+            *op->resvalue = d;
+            }
 
 			EEO_NEXT();
 		}
@@ -760,10 +781,19 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			/* these asserts must match defenses in slot_getattr */
 			Assert(scanslot->tts_tuple != NULL);
 			Assert(scanslot->tts_tuple != &(scanslot->tts_minhdr));
-
-			/* heap_getsysattr has sufficient defenses against bad attnums */
-			d = tableam_tslot_getattr(scanslot, attnum, op->resnull);
-			*op->resvalue = d;
+#ifdef USE_SPQ
+            if (attnum == RootSelfItemPointerAttributeNumber) {
+                Assert(scanslot->tts_tuple);
+                *op->resnull = false;
+                d = spq_get_root_ctid((HeapTuple)scanslot->tts_tuple, scanslot->tts_buffer, econtext);
+                *op->resvalue = d;
+            } else
+#endif
+            {
+            /* heap_getsysattr has sufficient defenses against bad attnums */
+            d = tableam_tslot_getattr(scanslot, attnum, op->resnull);
+            *op->resvalue = d;
+            }
 
 			EEO_NEXT();
 

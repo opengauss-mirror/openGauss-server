@@ -29,7 +29,7 @@ void spq_build_main(const BgWorkerContext *bwc);
 
 SPQSharedContext *spq_init_shared(Relation heap, Relation index, bool isconcurrent);
 
-SPQWorkerState *spq_worker_init(Relation heap, Relation index);
+SPQWorkerState *spq_worker_init(Relation heap, Relation index, SPQSharedContext *shared);
  
 void spq_worker_produce(SPQWorkerState *workstate);
  
@@ -270,7 +270,6 @@ void spq_leader_finish(SPQLeaderState *spqleader)
     BgworkerListSyncQuit();
     /* Free last reference to MVCC snapshot, if one was used */
     if (IsMVCCSnapshot(spqleader->snapshot)) {
-        PopActiveSnapshot();
         UnregisterSnapshot(spqleader->snapshot);
     }
 }
@@ -281,6 +280,13 @@ void spq_scansort(BTBuildState *buildstate, Relation heap, Relation index, bool 
     SPQLeaderState *spqleader;
 
     SPQSharedContext *shared;
+
+    Snapshot snapshot;
+
+    if (!isconcurrent)
+        snapshot = SnapshotAny;
+    else
+        snapshot = RegisterSnapshot(GetTransactionSnapshot());
 
     shared = spq_init_shared(heap, index, isconcurrent);
 
@@ -294,20 +300,14 @@ void spq_scansort(BTBuildState *buildstate, Relation heap, Relation index, bool 
     spqleader->shared = shared;
     spqleader->buffer = NULL;
     spqleader->processed = 0;
-    spqleader->snapshot = shared->snapshot;
+    spqleader->snapshot = snapshot;
 }
  
 /* SPQSharedContext initialization */
 SPQSharedContext *spq_init_shared(Relation heap, Relation index, bool isconcurrent)
 {
     Size sharedsize;
-    Snapshot snapshot;
     SPQSharedContext *shared;
-
-    if (!isconcurrent)
-        snapshot = SnapshotAny;
-    else
-        snapshot = RegisterSnapshot(GetTransactionSnapshot());
 
     /* Calculate shared size */
     sharedsize = sizeof(SPQSharedContext);
@@ -330,7 +330,8 @@ SPQSharedContext *spq_init_shared(Relation heap, Relation index, bool isconcurre
     shared->done = false;
     shared->consumer = -1;
     shared->producer = -1;
-    shared->snapshot = snapshot;
+    shared->snapshot = GetActiveSnapshot();
+    shared->num_nodes = t_thrd.spq_ctx.num_nodes;
     return shared;
 }
 
@@ -357,8 +358,7 @@ void spq_build_main(const BgWorkerContext *bwc)
 
     /* add snapshot for spi */
     PushActiveSnapshot(shared->snapshot);
-    u_sess->opt_cxt.query_dop = shared->dop;
-    worker = spq_worker_init(heap, index);
+    worker = spq_worker_init(heap, index, shared);
     worker->shared = shared;
     spq_worker_produce(worker);
     spq_worker_finish(worker);
@@ -374,17 +374,21 @@ void spq_build_main(const BgWorkerContext *bwc)
     return;
 }
 
-SPQWorkerState *spq_worker_init(Relation heap, Relation index)
+SPQWorkerState *spq_worker_init(Relation heap, Relation index, SPQSharedContext* shared)
 {
     SPQWorkerState *worker = (SPQWorkerState *)palloc0(sizeof(SPQWorkerState));
     worker->all_fetched = true;
     worker->heap = heap;
     worker->index = index;
     worker->sql = makeStringInfo();
+    worker->shared = shared;
 
     bool old_enable_spq = u_sess->attr.attr_spq.gauss_enable_spq;
     bool old_spq_enable_index_scan = u_sess->attr.attr_spq.spq_optimizer_enable_indexscan;
     bool old_spq_enable_indexonly_scan = u_sess->attr.attr_spq.spq_optimizer_enable_indexonlyscan;
+    bool old_spq_tx = u_sess->attr.attr_spq.spq_enable_transaction;
+    bool old_spq_dop = u_sess->opt_cxt.query_dop;
+    int old_num_nodes = t_thrd.spq_ctx.num_nodes;
 
     /* generate sql */
     {
@@ -405,7 +409,7 @@ SPQWorkerState *spq_worker_init(Relation heap, Relation index)
             if (i != natts - 1)
                 appendStringInfo(sortattrs, ", ");
         }
-        appendStringInfo(worker->sql, "select ctid %s from %s order by %s, ctid", attrs->data, RelationGetRelationName(heap),
+        appendStringInfo(worker->sql, "select _root_ctid %s from %s order by %s, _root_ctid", attrs->data, RelationGetRelationName(heap),
                          sortattrs->data);
 
         elog(INFO, "sql: %s", worker->sql->data);
@@ -414,10 +418,13 @@ SPQWorkerState *spq_worker_init(Relation heap, Relation index)
     u_sess->attr.attr_spq.gauss_enable_spq = true;
     u_sess->attr.attr_spq.spq_optimizer_enable_indexscan = false;
     u_sess->attr.attr_spq.spq_optimizer_enable_indexonlyscan = false;
+    u_sess->attr.attr_spq.spq_enable_transaction = true;
+    u_sess->opt_cxt.query_dop = shared->dop;
+    t_thrd.spq_ctx.num_nodes = shared->num_nodes;
 
     SPI_connect();
 
-    if ((worker->plan = SPI_prepare(worker->sql->data, 0, NULL)) == NULL)
+    if ((worker->plan = SPI_prepare_spq(worker->sql->data, 0, NULL)) == NULL)
         ereport(ERROR,
                 (errcode(ERRCODE_SPI_PREPARE_FAILURE),
                  errmsg("SPI_prepare(\"%s\") failed: %s", worker->sql->data, SPI_result_code_string(SPI_result))));
@@ -430,6 +437,9 @@ SPQWorkerState *spq_worker_init(Relation heap, Relation index)
     u_sess->attr.attr_spq.gauss_enable_spq = old_enable_spq;
     u_sess->attr.attr_spq.spq_optimizer_enable_indexscan = old_spq_enable_index_scan;
     u_sess->attr.attr_spq.spq_optimizer_enable_indexonlyscan = old_spq_enable_indexonly_scan;
+    u_sess->attr.attr_spq.spq_enable_transaction = old_spq_tx;
+    u_sess->opt_cxt.query_dop = old_spq_dop;
+    t_thrd.spq_ctx.num_nodes = old_num_nodes;
 
     return worker;
 }
@@ -545,6 +555,7 @@ void spq_worker_finish(SPQWorkerState *worker)
     SPI_cursor_close(worker->portal);
     SPI_freeplan(worker->plan);
     SPI_finish();
+    PopActiveSnapshot();
 }
  
 void spq_leafbuild(SPQLeaderState *spqleader)

@@ -5097,6 +5097,11 @@ double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool
                     stadistinct = 1.0; /* only 1 value */
                     break;
 #endif
+#ifdef USE_SPQ
+                case RootSelfItemPointerAttributeNumber:
+                    stadistinct = 0.0; /* means "unknown" */
+                    break;
+#endif
                 default:
                     stadistinct = 0.0; /* means "unknown" */
                     break;

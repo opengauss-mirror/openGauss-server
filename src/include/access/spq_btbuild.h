@@ -61,6 +61,7 @@ typedef struct SPQSharedContext {
     char addr[0];           /* varlen */
     Snapshot snapshot;
     int dop;
+    int num_nodes;
 } SPQSharedContext;
  
 typedef struct IndexTupleBuffer {

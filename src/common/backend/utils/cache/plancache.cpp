@@ -2058,7 +2058,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
     ListCell* qlc = NULL;
     foreach (qlc, plansource->query_list) {
         Query* query = castNode(Query, lfirst(qlc));
-        query->is_support_spq = false;
+        query->is_support_spq = plansource->cursor_options & CURSOR_OPT_SPQ_OK;
     }
 #endif
     

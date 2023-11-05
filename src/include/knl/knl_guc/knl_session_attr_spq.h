@@ -194,6 +194,7 @@ typedef struct knl_session_attr_spq {
     /* enable spq btbuild */
     bool spq_enable_btbuild;
     bool spq_enable_btbuild_cic;
+    bool spq_enable_transaction;
     int  spq_batch_size;
     int  spq_mem_size;
     int  spq_queue_size;

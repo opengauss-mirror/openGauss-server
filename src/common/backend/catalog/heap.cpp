@@ -411,7 +411,28 @@ static FormData_pg_attribute a10 = {0,
     true,
     0};
 
+#ifdef USE_SPQ
+static FormData_pg_attribute a11 = {0,
+    {"_root_ctid"},
+    TIDOID,
+    0,
+    sizeof(ItemPointerData),
+    RootSelfItemPointerAttributeNumber,
+    0,
+    -1,
+    -1,
+    false,
+    'p',
+    's',
+    true,
+    false,
+    false,
+    true,
+    0};
+static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7, &a8, &a9, &a10, &a11};
+#else
 static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7, &a8, &a9, &a10};
+#endif
 #else
 static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7};
 #endif
@@ -1125,6 +1146,10 @@ static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relki
             /* skip OID where appropriate */
             if (!tupdesc->tdhasoid && SysAtt[i]->attnum == ObjectIdAttributeNumber)
                 continue;
+#ifdef USE_SPQ
+            if (SysAtt[i]->attnum == RootSelfItemPointerAttributeNumber)
+                continue;
+#endif
             if (!hasbucket && SysAtt[i]->attnum == BucketIdAttributeNumber)
                 continue;
             if (!hasuids && SysAtt[i]->attnum == UidAttributeNumber)
@@ -8322,3 +8347,43 @@ char* heap_serialize_row_attr(Oid rel_oid, bool* depend_undefined)
     FreeStringInfo(&concat_name);
     return ret;
 }
+
+#ifdef USE_SPQ
+HeapTuple heaptuple_from_pg_attribute(Relation pg_attribute_rel,
+                                      Form_pg_attribute new_attribute)
+{
+    Datum values[Natts_pg_attribute] = { 0 };
+    bool nulls[Natts_pg_attribute] = { false };
+
+    values[Anum_pg_attribute_attrelid - 1] = ObjectIdGetDatum(new_attribute->attrelid);
+    values[Anum_pg_attribute_attname - 1] = NameGetDatum(&new_attribute->attname);
+    values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(new_attribute->atttypid);
+    values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(new_attribute->attstattarget);
+    values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(new_attribute->attlen);
+    values[Anum_pg_attribute_attnum - 1] = Int16GetDatum(new_attribute->attnum);
+    values[Anum_pg_attribute_attndims - 1] = Int32GetDatum(new_attribute->attndims);
+    values[Anum_pg_attribute_attcacheoff - 1] = Int32GetDatum(new_attribute->attcacheoff);
+    values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(new_attribute->atttypmod);
+    values[Anum_pg_attribute_attbyval - 1] = BoolGetDatum(new_attribute->attbyval);
+    values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(new_attribute->attstorage);
+    values[Anum_pg_attribute_attalign - 1] = CharGetDatum(new_attribute->attalign);
+    values[Anum_pg_attribute_attnotnull - 1] = BoolGetDatum(new_attribute->attnotnull);
+    values[Anum_pg_attribute_atthasdef - 1] = BoolGetDatum(new_attribute->atthasdef);
+    values[Anum_pg_attribute_attisdropped - 1] = BoolGetDatum(new_attribute->attisdropped);
+    values[Anum_pg_attribute_attislocal - 1] = BoolGetDatum(new_attribute->attislocal);
+    values[Anum_pg_attribute_attcmprmode - 1] = Int8GetDatum(new_attribute->attcmprmode);
+    values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(new_attribute->attinhcount);
+    values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(new_attribute->attcollation);
+    values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(new_attribute->attkvtype);
+
+    /* start out with empty permissions and empty options */
+    nulls[Anum_pg_attribute_attacl - 1] = true;
+    nulls[Anum_pg_attribute_attoptions - 1] = true;
+    nulls[Anum_pg_attribute_attfdwoptions - 1] = true;
+
+    /* at default, new fileld attinitdefval of pg_attribute is null. */
+    nulls[Anum_pg_attribute_attinitdefval - 1] = true;
+
+    return heap_form_tuple(RelationGetDescr(pg_attribute_rel), values, nulls);
+}
+#endif

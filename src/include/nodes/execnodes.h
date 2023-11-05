@@ -221,6 +221,10 @@ typedef struct ExprContext {
     bool can_ignore;    // indicates whether ERROR can be ignored when type casting
 
     RightRefState* rightRefState;
+#ifdef USE_SPQ
+    OffsetNumber cached_root_offsets[MaxHeapTuplesPerPage];
+    BlockNumber cached_blkno;
+#endif
 } ExprContext;
 
 /*

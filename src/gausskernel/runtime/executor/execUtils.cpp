@@ -307,7 +307,10 @@ ExprContext* CreateExprContext(EState* estate)
     econtext->ecxt_callbacks = NULL;
     econtext->plpgsql_estate = NULL;
     econtext->hasSetResultStore = false;
-
+#ifdef USE_SPQ
+    memset(econtext->cached_root_offsets, 0, sizeof(econtext->cached_root_offsets));
+    econtext->cached_blkno = InvalidBlockNumber;
+#endif
     /*
      * Link the ExprContext into the EState to ensure it is shut down when the
      * EState is freed.  Because we use lcons(), shutdowns will occur in

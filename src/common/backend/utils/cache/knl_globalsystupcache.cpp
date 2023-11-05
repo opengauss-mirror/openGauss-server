@@ -828,6 +828,33 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
     systable_endscan(scandesc);
     heap_close(relation, AccessShareLock);
 
+#ifdef USE_SPQ
+    if ((cc_id == ATTNUM && DatumGetInt16(arguments[1]) == RootSelfItemPointerAttributeNumber) ||
+        (cc_id == ATTNAME && (strcmp(DatumGetCString(arguments[1]), "_root_ctid") == 0))) {
+
+        Form_pg_attribute tmp_attribute;
+        int attno = DatumGetInt16(arguments[1]);
+        Assert(attno > FirstLowInvalidHeapAttributeNumber && attno < 0);
+        tmp_attribute = SystemAttributeDefinition(attno, false, false, false);
+        relation = heap_open(m_relinfo.cc_reloid, AccessShareLock);
+        ntp = heaptuple_from_pg_attribute(relation, tmp_attribute);
+        heap_close(relation, AccessShareLock);
+        tup_info->ntp = ntp;
+        if (!tup_info->has_concurrent_lock) {
+            tup_info->canInsertGSC = false;
+        } else {
+            tup_info->canInsertGSC = CanTupleInsertGSC(ntp);
+            if (!tup_info->canInsertGSC) {
+                ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
+            }
+        }
+        ct = InsertHeapTupleIntoCatCacheInSingle(tup_info);
+        if (tup_info->has_concurrent_lock) {
+            ReleaseGSCTableReadLock(&tup_info->has_concurrent_lock, m_concurrent_lock);
+        }
+    }
+#endif
+
     /*
      * global catcache match disk , not need negative tuple
      */
