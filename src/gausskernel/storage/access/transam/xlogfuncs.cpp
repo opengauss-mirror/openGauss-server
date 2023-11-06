@@ -2615,3 +2615,82 @@ Datum gs_query_standby_cluster_barrier_id_exist(PG_FUNCTION_ARGS)
     }
     PG_RETURN_BOOL(found);
 }
+
+Datum gs_xlog_keepers(PG_FUNCTION_ARGS)
+{
+#define PG_GET_XLOG_KEEPERS_COLS 3
+    FuncCallContext     *funcctx = NULL;
+    XlogKeeper          *xlogkeeper = NULL;
+    int                 loop = 0;
+    WalKeeperPriv       *privdata = NULL;
+    static WalKeeperDesc wkdesc[WALKEEPER_MAX] = {
+            {WALKEEPER_BASECHECK, "Base Keep", "base on redo lsn of recently checkpoint for primary or current working segment on standby"},
+            {WALKEEPER_SEGMENT_KEEP, "Segments Keep", "base on wal_keep_segments GUC"},
+            {WALKEEPER_SLOTS, "Slots Keep", "base on physical or logical slots"},
+            {WALKEEPER_BASEBACKUP, "Basebackup Keep", "a basebackup operator keep all wal segments"},
+            {WALKEEPER_BUILD, "Build Keep", "a build operator keep all wal segments"},
+            {WALKEEPER_INVALIDSEND, "Unactived Wal Send Keep", "a wal sender unactived keep all wal segments"},
+            {WALKEEPER_DUMMYSTANDBY, "Dummystandby Keep", "Dummystandby keep all wal segments"},
+            {WALKEEPER_INVALIDSLOT, "Invalid Slot Keep", "an invalid slot keep all wal segments"},
+            {WALKEEPER_CBM, "CBM Keep", "CBM feature keep wal segments"},
+            {WALKEEPER_CHECKPOINT, "Standby Checkpoint Keep", "base on redo lsn of recently checkpoint on standby"},
+            {WALKEEPER_ARCHIVE, "Archive Keep", "base on wal archive"},
+            {WALKEEPER_RESISTARCHIVE, "Resist Archive", "resist OBS archive keeper due to max_size_for_xlog_prune"},
+            {WALKEEPER_COODRECYCLE, "Other keep", "base on recycle xlog for Coordinator"}
+    };
+
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext       oldcontext = NULL;
+        TupleDesc           resultTupleDesc = NULL;
+        
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        resultTupleDesc = CreateTemplateTupleDesc(PG_GET_XLOG_KEEPERS_COLS, false);
+        TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "keeptype", TEXTOID, -1, 0);
+        TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "keepsegment", TEXTOID, -1, 0);
+        TupleDescInitEntry(resultTupleDesc, (AttrNumber)3, "describe", TEXTOID, -1, 0);
+
+        privdata =  (WalKeeperPriv*)palloc0(sizeof(WalKeeperPriv));
+        privdata->keeper = generate_xlog_keepers();
+        funcctx->user_fctx = (void*)privdata;
+        funcctx->attinmeta = TupleDescGetAttInMetadata(resultTupleDesc);
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    privdata = (WalKeeperPriv*)funcctx->user_fctx;
+    loop = privdata->loop++;
+    xlogkeeper = privdata->keeper;
+
+    while (loop < WALKEEPER_MAX) {
+        char        **values = NULL;
+        char        xlogFile[MAXFNAMELEN] = {0};
+
+        if(xlogkeeper[loop].valid) {
+            HeapTuple   tuple = NULL;
+            Datum       result;
+
+            memset_s(xlogFile, MAXFNAMELEN, 0, MAXFNAMELEN);
+            if(1 != xlogkeeper[loop].segno)
+                XLogFileName(xlogFile, MAXFNAMELEN, t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID, xlogkeeper[loop].segno);
+            else {
+                int nRet = 0;                   
+                nRet = snprintf_s(xlogFile, MAXFNAMELEN, MAXFNAMELEN - 1, "ALL");
+                securec_check_ss(nRet, "\0", "\0"); 
+            }
+            values = (char**)palloc(PG_GET_XLOG_KEEPERS_COLS * sizeof(char*));
+            values[0] = wkdesc[loop].keeper_name;
+            values[1] = xlogFile;
+            values[2] = wkdesc[loop].keeper_desc;
+            tuple = BuildTupleFromCStrings(funcctx->attinmeta, values);
+
+            result = HeapTupleGetDatum(tuple);
+            SRF_RETURN_NEXT(funcctx, result);
+        }
+        loop = privdata->loop++;
+    }
+    if (xlogkeeper)
+        pfree(xlogkeeper);
+    SRF_RETURN_DONE(funcctx);
+}

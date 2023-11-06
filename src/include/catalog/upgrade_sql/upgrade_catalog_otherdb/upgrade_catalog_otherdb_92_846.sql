@@ -172,3 +172,11 @@ SELECT
 FROM
 	pg_shseclabel l
 	JOIN pg_authid rol ON l.classoid = rol.tableoid AND l.objoid = rol.oid;
+
+set local inplace_upgrade_next_system_object_oids = IUO_PROC,6127;
+DROP FUNCTION IF EXISTS pg_catalog.gs_xlog_keepers() CASCADE;
+CREATE OR REPLACE FUNCTION pg_catalog.gs_xlog_keepers
+(out keeptype pg_catalog.text,
+out keepsegment pg_catalog.text,
+out describe pg_catalog.text)
+RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'gs_xlog_keepers';

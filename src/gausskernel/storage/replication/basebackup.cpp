@@ -664,6 +664,8 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     SetPaxosIndex(&consensusPaxosIdx);
 #endif
     SendXlogRecPtrResult(endptr, consensusPaxosIdx);
+    elog(WARNING, "Sleep 10s");
+    sleep(10);
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
     XlogCopyStartPtr = InvalidXLogRecPtr;
     LWLockRelease(FullBuildXlogCopyStartPtrLock);

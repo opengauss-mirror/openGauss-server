@@ -5792,6 +5792,8 @@ DATA(insert OID = 5710 (  undefinedrecv		   PGNSP PGUID 12 1 0 0 0 f f f f t f i
 DESCR("I/O");
 DATA(insert OID = 5709 (  undefinedsend		   PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 17 "4408" _null_ _null_ _null_ _null_ undefinedsend _null_ _null_ _null_ "" f));
 DESCR("I/O");
+DATA(insert OID = 9040 (  gs_xlog_keepers PGNSP PGUID 12 1 0 0 0 f f f f t f s 0 0 2249 "" "{25,25,25}" "{o,o,o}" "{keeptype, keepsegment, describe}" _null_ gs_xlog_keepers _null_ _null_ _null_ "" f));
+DESCR("get xlog clean blocker");
 /*
  * Symbolic values for provolatile column: these indicate whether the result
  * of a function is dependent *only* on the values of its explicit arguments,
