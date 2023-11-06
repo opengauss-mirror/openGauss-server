@@ -562,6 +562,9 @@ bool gsplsql_set_pkg_func_status(Oid schema_oid, Oid pkg_oid, bool status)
     foreach(cell, list) {
         Oid func_oid = lfirst_oid(cell);
         result = SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, status) || result;
+        if (!status) {
+            CacheInvalidateFunction(func_oid, pkg_oid);
+        }
     }
     list_free(list);
     return result;
@@ -1118,7 +1121,9 @@ static inline bool gsplsql_invalidate_func(Oid func_oid, Oid curr_compile_oid)
     if (!OidIsValid(func_oid) || func_oid == curr_compile_oid) {
         return false;
     }
-    return SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, false);
+    bool result = SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, false);
+    CacheInvalidateFunction(func_oid, InvalidOid);
+    return result;
 }
 
 static bool gsplsql_invalidate_pkg(const char *schemaName, const char *pkgName, bool isSpec, Oid currCompileOid)

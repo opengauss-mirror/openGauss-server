@@ -548,7 +548,7 @@ bool SetPgObjectValid(Oid oid, PgObjectType objectType, bool valid)
     values[Anum_pg_object_valid -1] = BoolGetDatum(valid);
     replaces[Anum_pg_object_valid -1] = true;
     HeapTuple new_tuple = heap_modify_tuple(tuple, RelationGetDescr(relation), values, nulls, replaces);
-    (void)simple_heap_update(relation, &new_tuple->t_self, new_tuple, true);//debug tuple->t_self
+    (void)simple_heap_update(relation, &new_tuple->t_self, new_tuple, true);
     CatalogUpdateIndexes(relation, new_tuple);
     heap_freetuple(new_tuple);
     ReleaseSysCache(tuple);

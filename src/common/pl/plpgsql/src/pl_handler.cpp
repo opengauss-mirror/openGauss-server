@@ -725,6 +725,20 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         has_switch = true;
     }
 
+    bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
+    u_sess->plsql_cxt.need_create_depend = false;
+
+    _PG_init();
+    /*
+     * Connect to SPI manager
+     */
+    SPI_STACK_LOG("connect", NULL, NULL);
+    rc =  SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NONATOMIC : 0, func_oid);
+    if (rc  != SPI_OK_CONNECT) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("SPI_connect failed: %s when execute PLSQL function.", SPI_result_code_string(rc))));
+    }
+
     Oid package_oid = get_package_id(func_oid);
     if (OidIsValid(package_oid)) {
         if (u_sess->plsql_cxt.curr_compile_context == NULL ||
@@ -742,19 +756,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
             }
         }
     }
-
     int fun_arg = fcinfo->nargs;
-
-    _PG_init();
-    /*
-     * Connect to SPI manager
-     */
-    SPI_STACK_LOG("connect", NULL, NULL);
-    rc =  SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NONATOMIC : 0, func_oid);
-    if (rc  != SPI_OK_CONNECT) {
-        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
-            errmsg("SPI_connect failed: %s when execute PLSQL function.", SPI_result_code_string(rc))));
-    }
 #ifdef ENABLE_MULTIPLE_NODES
     bool outer_is_stream = false;
     bool outer_is_stream_support = false;
@@ -773,7 +775,6 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 #endif
     int connect = SPI_connectid();
     Oid firstLevelPkgOid = InvalidOid;
-    bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
     bool save_curr_status  = GetCurrCompilePgObjStatus();
     PG_TRY();
     {
@@ -787,31 +788,15 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         if (func == NULL) {
             u_sess->plsql_cxt.compile_has_warning_info = false;
             SetCurrCompilePgObjStatus(true);
-            if (enable_plpgsql_gsdependency_guc()) {
-                if (gsplsql_is_undefined_func(func_oid)) {
-                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
-                            (errmsg("\"%s\" header is undefined, you can try to recreate", get_func_name(func_oid)))));
-                }
-                if (GetPgObjectValid(func_oid, OBJECT_TYPE_PROC)) {
-                    u_sess->plsql_cxt.need_create_depend = false;
-                } else {
-                    u_sess->plsql_cxt.need_create_depend = true;
-                }
-            }
             func = plpgsql_compile(fcinfo, false);
-            if (func == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_NO_FUNCTION_PROVIDED), errmodule(MOD_PLSQL),
-                    errmsg("compile function error."),
-                    errdetail("It may be because the compilation encountered an error and the exception was caught."),
-                    errcause("compile procedure error."),
-                    erraction("compile function result is null, it has error")));
-            }
-            if (enable_plpgsql_gsdependency_guc()) {
-                if (!OidIsValid(func->pkg_oid)) {
-                    SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, true);
+            if (enable_plpgsql_gsdependency_guc() && func != NULL) {
+                SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, GetCurrCompilePgObjStatus());
+                if (!GetCurrCompilePgObjStatus()) {
+                    ereport(WARNING, (errmodule(MOD_PLSQL),
+                        errmsg("Function %s recompile with compilation errors, please use ALTER COMPILE to recompile.",
+                               get_func_name(func_oid))));
                 }
             }
-            u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
         }
         if (func->fn_readonly) {
             stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_IMMUTABLE);
@@ -1026,11 +1011,11 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 
         /* destory all the SPI connect created in this PL function. */
         SPI_disconnect(connect);
-        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
         /* re-throw the original error messages */
         ReThrowError(edata);
     }
     PG_END_TRY();
+    u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
     /* clean stp save pointer if the outermost function is end. */
     if (u_sess->SPI_cxt._connected == 0) {
         t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
