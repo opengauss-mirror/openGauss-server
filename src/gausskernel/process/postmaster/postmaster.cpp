@@ -5722,6 +5722,9 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         LWLockRelease(ConfigFileLock);
         NotifyGscSigHup();
 
+        most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
+        SyncRepUpdateSyncStandbysDefined();
+
         (void)SignalChildren(SIGHUP);
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->GetSessionCtrl()->SigHupHandler();
