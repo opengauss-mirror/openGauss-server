@@ -1,14 +1,41 @@
 drop schema if exists plpgsql_recompile cascade;
 create schema plpgsql_recompile;
 set current_schema = plpgsql_recompile;
-set behavior_compat_options = 'plpgsql_dependency';
----test 1
+
 create type s_type as (
     id integer,
     name varchar,
     addr text
 );
 
+--- 不设置 plpgsql_dependency
+set behavior_compat_options = '';
+--- test 0
+create or replace procedure proc_no_guc(a s_type)
+is
+begin
+RAISE INFO 'call a: %', a;
+end;
+/
+call proc_no_guc(((1,'zhang','shanghai')));
+
+alter type s_type ADD attribute a int;
+--- 修改后，预期新增的参数值不打印
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc_no_guc' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+call proc_no_guc((1,'zhang','shanghai',100));
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc_no_guc' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+
+alter type s_type DROP attribute a;
+--- 修改后，预期valid字段无变化
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc_no_guc' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+call proc_no_guc((1,'zhang','shanghai'));
+select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc_no_guc' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_recompile'));
+--- drop procedure
+drop procedure proc_no_guc;
+
+--- 设置 plpgsql_dependency
+set behavior_compat_options = 'plpgsql_dependency';
+--- test 1
 create or replace procedure type_alter(a s_type)
 is
 begin    

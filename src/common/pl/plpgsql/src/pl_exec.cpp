@@ -2650,15 +2650,17 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
             result = (PLpgSQL_datum*)newm;
         } break;
         case PLPGSQL_DTYPE_ROW: {
-            PLpgSQL_row* row = (PLpgSQL_row*)datum;
-            if (row->rowtupdesc && row->rowtupdesc->tdtypeid != RECORDOID) {
-                TupleDesc tup_desc = lookup_rowtype_tupdesc(row->rowtupdesc->tdtypeid, row->rowtupdesc->tdtypmod);
-                if (check_rowtype_has_been_changed(row->rowtupdesc, tup_desc)) {
-                    Oid type_oid = tup_desc->tdtypeid;
+            if (enable_plpgsql_gsdependency_guc()) {
+                PLpgSQL_row* row = (PLpgSQL_row*)datum;
+                if (row->rowtupdesc && row->rowtupdesc->tdtypeid != RECORDOID) {
+                    TupleDesc tup_desc = lookup_rowtype_tupdesc(row->rowtupdesc->tdtypeid, row->rowtupdesc->tdtypmod);
+                    if (check_rowtype_has_been_changed(row->rowtupdesc, tup_desc)) {
+                        Oid type_oid = tup_desc->tdtypeid;
+                        ReleaseTupleDesc(tup_desc);
+                        gsplsql_report_row_var_check_err(type_oid);
+                    }
                     ReleaseTupleDesc(tup_desc);
-                    gsplsql_report_row_var_check_err(type_oid);
                 }
-                ReleaseTupleDesc(tup_desc);
             }
             result = datum;
         } break;
