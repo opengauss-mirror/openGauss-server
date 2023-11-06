@@ -850,3 +850,80 @@ execute pbe_cagp(10,10);
 
 deallocate pbe_cagp;
 drop table tab_1103983;
+
+drop table if exists tab_1109433;
+create table tab_1109433(c1 int,c2 varchar,c3 text,c4 date) ;
+
+insert into tab_1109433 values(generate_series(0, 60),generate_series(1, 30),generate_series(1, 10),date'1999-01-01'+generate_series(1, 60));
+
+insert into tab_1109433 values(generate_series(1, 50),generate_series(0, 30),generate_series(2, 10),date'2000-01-01'+generate_series(1, 50));
+
+insert into tab_1109433 values(generate_series(2, 30),generate_series(2, 30),generate_series(0, 10),date'2001-01-01'+generate_series(1, 50));
+
+insert into tab_1109433 values(generate_series(2, 30),generate_series(2, 30),generate_series(1, 10),date'2002-01-01'+generate_series(1, 50));
+
+insert into tab_1109433 values(generate_series(1, 60),null,null,null);
+
+create index on tab_1109433(c2,c3);
+
+analyze tab_1109433;
+
+drop table if exists tab_1109433_1;
+create table tab_1109433_1(c1 int,c2 varchar2(20),c3 varchar2(20),c4 int,c5 date);
+insert into tab_1109433_1 values(generate_series(1, 50),'li','adjani',10,'2001-02-02');
+insert into tab_1109433_1 values(generate_series(2, 50),'li','adjani',20,'2001-01-12');
+insert into tab_1109433_1 values(generate_series(3, 50),'li','adjani',50,'2000-01-01');
+
+drop table if exists tab_1109433_2;
+create table tab_1109433_2(c1 int,c2 varchar2(20),c3 varchar2(20),c4 int,c5 date);
+insert into tab_1109433_2 values(1,'li','adjani',10,'2001-02-02');
+insert into tab_1109433_2 values(2,'li','adjani',20,'2001-01-12');
+insert into tab_1109433_2 values(3,'li','adjani',50,'2000-01-01');
+insert into tab_1109433_2 values(10,'li','adj',10,'2001-02-02');
+insert into tab_1109433_2 values(20,'li','adj',20,'2001-01-12');
+insert into tab_1109433_2 values(30,'li','adj',50,'2000-01-01');
+
+drop table if exists tab_1109433_3;
+create table tab_1109433_3(c1 int,c2 varchar2(20),c3 varchar2(20),c4 int,c5 date);
+insert into tab_1109433_3 values(1,'li','adjani',10,'2001-02-02');
+insert into tab_1109433_3 values(2,'li','adjani',20,'2001-01-12');
+insert into tab_1109433_3 values(3,'li','adjani',50,'2000-01-01');
+insert into tab_1109433_3 values(11,'li','ani',11,'2001-01-02');
+insert into tab_1109433_3 values(12,'li','ani',12,'2001-01-12');
+insert into tab_1109433_3 values(13,'li','ani',15,'2000-01-01');
+
+prepare tab_1109433_pbe as SELECT /*+ choose_adaptive_gplan */ T.c2
+,count(case when POSITION(T.c3 IN '1,2') > 0 and T.c2 = $1 then 1 end) AS LG_PERSON_NUM
+,count(case when POSITION(T.c3 IN '1,2') > 0 and T.c2 = $2 then 1 end) AS LG_ORG_NUM
+,count(case when POSITION(T.c3 IN '1,2') > 0 then 1 end) AS LG_NUM
+,count(case when T.c3 = '4' and T.c2 = $1 then 1 end) AS VTM_PERSON_NUM
+,count(case when T.c3 = '4' and T.c2 = $2 then 1 end) AS VTM_ORG_NUM
+,count(case when T.c3 = '4' then 1 end) AS VTM_NUM
+,count(case when T.c3 = $1 and T.c2 = $1 then 1 end) AS REMOTE_PERSON_NUM
+,count(case when T.c3 = $1 and T.c2 = $2 then 1 end) AS REMOTE_ORG_NUM
+,count(case when T.c3 = $1 then 1 end) AS REMOTE_NUM
+,count(case when POSITION(T.c3 IN '1,2') > 0 and T.c2 = $1 and B.c1 = $1 then 1 end) AS LG_REJECT_PERSON_NUM
+,count(case when POSITION(T.c3 IN '1,2') > 0 and T.c2 = $2 and B.c1 = $1 then 1 end) AS LG_REJECT_ORG_NUM
+,count(case when POSITION(T.c3 IN '1,2') > 0 and B.c1 = $1 then 1 end) AS LG_REJECT_NUM
+,count(case when T.c3 = $1 and B.c1 = $1 then 1 end) AS REMOTE_REJECT_NUM
+,count(case when T.c3 = '4' and B.c1 = $1 then 1 end) AS VTM_REJECT_NUM
+FROM tab_1109433 T left JOIN tab_1109433_1 B
+ON T.c1 = B.c1
+WHERE 1 = 1
+AND T.c2 = $4
+AND T.c4 >= TO_DATE($3)
+AND T.c4 < TO_DATE('20220922') + 1
+GROUP BY T.c2
+order by 1,2,3,4,5,6,7,8;
+
+execute tab_1109433_pbe(0,1,'19900401',13);
+execute tab_1109433_pbe(1,1,'19910401',14);
+
+explain (costs off) execute tab_1109433_pbe(0,1,'19900401',13);
+explain (costs off) execute tab_1109433_pbe(1,1,'19910401',14);
+
+deallocate tab_1109433_pbe;
+drop table tab_1109433;
+drop table tab_1109433_1;
+drop table tab_1109433_2;
+drop table tab_1109433_3;
