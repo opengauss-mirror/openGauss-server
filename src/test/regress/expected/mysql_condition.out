@@ -1742,6 +1742,58 @@ ERROR:  table "t1" does not exist
 CONTEXT:  SQL statement "drop table t1"
 PL/pgSQL function bug6900_9074(integer) line 20 at SQL statement
 drop procedure bug6900_9074;
+CREATE TABLE t1(c1 TEXT NOT NULL); 
+CREATE OR REPLACE PROCEDURE p_1145188()
+AS
+BEGIN
+DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+BEGIN
+-- Here the current DA is nonempty because no prior statements
+-- executing within the handler have cleared it
+GET CURRENT DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET CURRENT DIAGNOSTICS CONDITION 1 @luser = MYSQL_ERRNO, @msg = MESSAGE_TEXT;
+RAISE NOTICE 'current DA before mapped insert , error = % , msg = %', @errno, @msg;
+GET STACKED DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET STACKED DIAGNOSTICS CONDITION 1 @errno1 = MYSQL_ERRNO, @mingshigang2 = MESSAGE_TEXT;
+RAISE NOTICE 'stacked DA before mapped insert , error = % , msg = %', @errno1, @msg1;
+
+INSERT INTO t1 (c1) VALUES(0),(1),(2);
+GET CURRENT DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET CURRENT DIAGNOSTICS CONDITION 1 @luser = MYSQL_ERRNO, @msg = MESSAGE_TEXT;
+RAISE NOTICE 'current DA before mapped insert , error = % , msg = %', @errno, @msg;
+GET STACKED DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET STACKED DIAGNOSTICS CONDITION 1 @errno1 = MYSQL_ERRNO, @mingshigang2 = MESSAGE_TEXT;
+RAISE NOTICE 'stacked DA before mapped insert , error = % , msg = %', @errno1, @msg1;
+END;
+
+GET CURRENT DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+RAISE NOTICE 'current DA before mapped insert , num = % , errcount = %', @num, @errcount;
+
+INSERT INTO t1 (c1) VALUES(NULL);
+
+GET CURRENT DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+RAISE NOTICE 'current DA before mapped insert , num = % , errcount = %', @num, @errcount;
+GET STACKED DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+
+END;
+/
+call p_1145188();
+NOTICE:  current DA before mapped insert , num = 0 , errcount = -1
+NOTICE:  NUMBER=1,ROW_COUNT=-1
+NOTICE:  current DA before mapped insert , error = 23502 , msg = NUMBER=1,ROW_COUNT=-1
+NOTICE:  NUMBER=1,ROW_COUNT=-1
+NOTICE:  stacked DA before mapped insert , error = 23502 , msg = Unhandled user-defined warning condition
+NOTICE:  NUMBER=0,ROW_COUNT=3
+NOTICE:  current DA before mapped insert , error = 23502 , msg = NUMBER=0,ROW_COUNT=3
+NOTICE:  NUMBER=1,ROW_COUNT=-1
+NOTICE:  stacked DA before mapped insert , error = 23502 , msg = Unhandled user-defined warning condition
+NOTICE:  current DA before mapped insert , num = 1 , errcount = -1
+ERROR:  GET STACKED DIAGNOSTICS cannot be used outside an exception handler
+CONTEXT:  PL/pgSQL function p_1145188() line 33 at GET DIAGNOSTICS
 \c regression
 -- test access to exception data
 create function zero_divide() returns int as $$

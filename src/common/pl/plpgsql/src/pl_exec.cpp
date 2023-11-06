@@ -2694,6 +2694,9 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
 
 static bool exception_matches_conditions(ErrorData* edata, PLpgSQL_condition* cond)
 {
+    if (DB_IS_CMPT(B_FORMAT) && edata->sqlerrcode == ERRCODE_STACKED_DIAGNOSTICS_ACCESSED_WITHOUT_ACTIVE_HANDLER)
+        return false;
+
     for (; cond != NULL; cond = cond->next) {
         int sqlerrstate = cond->sqlerrstate;
         char *condname = cond->condname;
