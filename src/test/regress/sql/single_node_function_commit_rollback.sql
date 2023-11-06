@@ -1064,3 +1064,25 @@ drop function PROCEDURE_TRI_009_2;
 drop function PROCEDURE_TRI_009_1;
 drop table PROCEDURE_DDL_TAB_009_1;
 drop table PROCEDURE_DDL_TAB_009_2;
+
+
+
+create table tt_1141480(a1 text unique);
+insert into tt_1141480 values('d'),('g');
+create table tab_1141480(a1 text REFERENCES tt_1141480(a1));
+
+create or replace function testfunc_exception_assert(a1 text)returns void as $$
+BEGIN
+	begin
+		insert into tab_1141480 values(a1);
+	EXCEPTION
+		WHEN OTHERS THEN
+			raise notice 'error';
+	end;
+END; $$ language plpgsql;
+
+select testfunc_exception_assert('c');
+
+drop function testfunc_exception_assert;
+drop table tab_1141480;
+drop table tt_1141480;
