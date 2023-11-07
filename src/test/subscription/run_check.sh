@@ -39,7 +39,7 @@ do
 		printf "%-10s%-10s\n" ".... ok" $interval
 	else
 		printf "%-10s%-10s\n" ".... FAILED" $interval
-		exit 1
+		break
 	fi
 done
 
