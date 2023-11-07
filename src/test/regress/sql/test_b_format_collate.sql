@@ -579,6 +579,25 @@ select count(*) from test_utf8mb4_bin group by c2, c3;
 select distinct c2 from test_utf8mb4_bin;
 select distinct c3 from test_utf8mb4_bin;
 
+-- test alter table convert to
+SET b_format_behavior_compat_options = 'enable_multi_charset';
+drop table if exists test_convert_to;
+create table test_convert_to(a text, b char(10))collate utf8mb4_general_ci;
+insert into test_convert_to values('abcd'),('中文');
+select pg_get_tabledef('test_convert_to');
+
+alter table test_convert_to convert to charset utf8mb4 collate utf8mb4_bin;
+select pg_get_tabledef('test_convert_to');
+
+alter table test_convert_to convert to charset gbk collate gbk_bin;
+select pg_get_tabledef('test_convert_to');
+select * from test_convert_to;
+
+alter table test_convert_to convert to charset default;
+select pg_get_tabledef('test_convert_to');
+select * from test_convert_to;
+
+
 create database b_ascii encoding = 0;
 \c b_ascii
 set client_encoding = utf8;
