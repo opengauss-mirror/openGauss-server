@@ -8751,7 +8751,7 @@ static void sqlcmd_alter_prep_convert_charset(AlteredTableInfo* tab, Relation re
         Form_pg_attribute attTup = (Form_pg_attribute)GETSTRUCT(tuple);
         int attnum = attTup->attnum;
         if (attnum <= 0 || attTup->attisdropped || !type_is_collatable(attTup->atttypid) ||
-            get_charset_by_collation(attTup->attcollation) == cc->charset)
+            attTup->attcollation == targetcollid)
             continue;
 
         transform = (Node*)makeVar(1, attnum, attTup->atttypid, attTup->atttypmod, attTup->attcollation, 0);
