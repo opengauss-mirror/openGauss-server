@@ -56,6 +56,7 @@ function wait_for_subscription_sync(){
 }
 
 function wait_for_catchup(){
+	$(exec_sql $1 $2 "checkpoint")
 	target_lsn=$(exec_sql $1 $2 "SELECT pg_current_xlog_location()")
 	max_attempts=20
 	attempt=0
