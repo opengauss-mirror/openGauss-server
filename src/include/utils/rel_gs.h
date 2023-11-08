@@ -314,6 +314,10 @@ static inline int8 get_indexsplit_from_reloptions(bytea *reloptions, Oid amoid)
 #define RelationGetCUDescRelId(r) ((r)->rd_rel->relcudescrelid)
 #define RelationGetDeltaRelId(r) ((r)->rd_rel->reldeltarelid)
 
+#define IS_BTREE(r) ((r)->rd_rel->relam == BTREE_AM_OID || \
+    (r)->rd_rel->relam == CBTREE_AM_OID || \
+    (r)->rd_rel->relam == UBTREE_AM_OID)
+
 /*
  * @Description: get columnar relation's compress level.
  * @IN rel: columnar heap relation

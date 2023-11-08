@@ -30,6 +30,7 @@
 #include "commands/tablespace.h"
 #include "replication/slot.h"
 #include "replication/origin.h"
+#include "replication/ddlmessage.h"
 #ifdef PGXC
 #include "pgxc/barrier.h"
 #endif

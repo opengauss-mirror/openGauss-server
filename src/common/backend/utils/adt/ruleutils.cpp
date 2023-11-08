@@ -43,6 +43,7 @@
 #include "catalog/pg_partition.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_rewrite.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -246,9 +247,9 @@ static void decompile_column_index_array(Datum column_index_array, Oid relId, St
 static char* pg_get_ruledef_worker(Oid ruleoid, int prettyFlags);
 static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *excludeOps, bool attrsOnly, bool showTblSpc,
     int prettyFlags, bool dumpSchemaOnly = false, bool showPartitionLocal = true, bool showSubpartitionLocal = true);
-static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
+void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
     bool dumpSchemaOnly, bool showPartitionLocal, bool showSubpartitionLocal);
-static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int prettyFlags);
+static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int prettyFlags, bool with_option=false);
 static text* pg_get_expr_worker(text* expr, Oid relid, const char* relname, int prettyFlags);
 static int print_function_arguments(StringInfo buf, HeapTuple proctup, bool print_table_args, bool print_defaults);
 static void print_function_ora_arguments(StringInfo buf, HeapTuple proctup);
@@ -317,7 +318,7 @@ static void get_from_clause_coldeflist(
     List* names, List* types, List* typmods, List* collations, deparse_context* context);
 static void get_tablesample_def(TableSampleClause* tablesample, deparse_context* context);
 static void GetTimecapsuleDef(const TimeCapsuleClause* timeCapsule, deparse_context* context);
-static void get_opclass_name(Oid opclass, Oid actual_datatype, StringInfo buf);
+void get_opclass_name(Oid opclass, Oid actual_datatype, StringInfo buf);
 static Node* processIndirection(Node* node, deparse_context* context, bool printit);
 static void printSubscripts(ArrayRef* aref, deparse_context* context);
 static char* get_relation_name(Oid relid);
@@ -326,7 +327,6 @@ static char* generate_function_name(
     Oid funcid, int nargs, List* argnames, Oid* argtypes, bool was_variadic, bool* use_variadic_p);
 static char* generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 static text* string_to_text(char* str);
-static char* flatten_reloptions(Oid relid);
 static Oid SearchSysTable(const char* query);
 static void replace_cl_types_in_argtypes(Oid func_id, int numargs, Oid* argtypes, bool *is_client_logic);
 
@@ -339,6 +339,8 @@ static void AppendListPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
 static void AppendHashPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tableinfo, int partkeynum,
     Oid *iPartboundary, SubpartitionInfo *subpartinfo);
 static void AppendTablespaceInfo(const char *spcname, StringInfo buf, tableInfo tableinfo);
+static inline bool IsTableVisible(Oid tableoid);
+static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoid, tableInfo tableinfo);
 
 /* from pgxcship */
 Var* get_var_from_node(Node* node, bool (*func)(Oid) = func_oid_check_reject);
@@ -988,6 +990,75 @@ void GetPartitionExprKeySrc(StringInfo buf, Datum* datum, char* relname, Oid tab
     pfree_ext(partkeystr);
 }
 
+char *pg_get_partkeydef_string(Relation relation)
+{
+    OverrideSearchPath *tmp_search_path = NULL;
+    StringInfoData buf;
+    StringInfoData query;
+    tableInfo tableinfo;
+
+    Form_pg_class classForm = NULL;
+    Oid tableoid = RelationGetRelid(relation);
+    if (IsTempTable(tableoid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Can not get temporary tables partition defination.")));
+    }
+
+    initStringInfo(&buf);
+    initStringInfo(&query);
+    classForm = relation->rd_rel;
+    tableinfo.relkind = classForm->relkind;
+
+    if (tableinfo.relkind != RELKIND_RELATION) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Not a ordinary table or foreign table.")));
+    }    
+
+    tableinfo.relpersistence = classForm->relpersistence;
+    tableinfo.tablespace = classForm->reltablespace;
+    tableinfo.hasPartialClusterKey = classForm->relhasclusterkey;
+    tableinfo.hasindex = classForm->relhasindex;
+    tableinfo.relcmpr = classForm->relcmprs;
+    tableinfo.relrowmovement = classForm->relrowmovement;
+    tableinfo.parttype = classForm->parttype;
+    tableinfo.spcid = classForm->relnamespace;
+    tableinfo.relname = pstrdup(NameStr(classForm->relname));
+    tableinfo.autoinc_attnum = 0;
+    tableinfo.autoinc_consoid = 0;
+    tableinfo.autoinc_seqoid = 0;
+
+    tmp_search_path = GetOverrideSearchPath(CurrentMemoryContext);
+    tmp_search_path->schemas = NIL;
+    tmp_search_path->addCatalog = true;
+    tmp_search_path->addTemp = true;
+    PushOverrideSearchPath(tmp_search_path);
+
+    /*
+     * Connect to SPI manager
+     */
+    SPI_STACK_LOG("connect", NULL, NULL);
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+            errmsg("SPI_connect failed")));
+
+    PushActiveSnapshot(GetTransactionSnapshot());
+    get_table_partitiondef(&query, &buf, tableoid, tableinfo);
+    PopActiveSnapshot();
+
+    /*
+     * Disconnect from SPI manager
+     */
+    SPI_STACK_LOG("finish", NULL, NULL);
+    if (SPI_finish() != SPI_OK_FINISH)
+        ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE),
+            errmsg("SPI_finish failed")));
+
+    PopOverrideSearchPath();
+    pfree_ext(query.data);
+    pfree_ext(tableinfo.relname);
+    return buf.data;
+}
+
 /*
  * @Description: get partition table defination
  * @in query - append query for SPI_execute.
@@ -1237,7 +1308,7 @@ static void AppendSubPartitionDetail(StringInfo buf, tableInfo tableinfo, Subpar
         "array_to_string(p.boundaries, ',') as partbound, "
         "array_to_string(p.boundaries, ''',''') as partboundstr, "
         "t.spcname AS reltblspc "
-        "FROM pg_partition p LEFT JOIN pg_tablespace t "
+        "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
         "ON p.reltablespace = t.oid "
         "WHERE p.parentid = %u AND p.parttype = '%c' AND p.partstrategy = '%c' "
         "ORDER BY p.boundaries[1]::%s ASC",
@@ -1313,7 +1384,7 @@ static void AppendRangeIntervalPartitionInfo(StringInfo buf, Oid tableoid, table
     appendStringInfo(query,
         "p.oid AS partoid, "
         "t.spcname AS reltblspc "
-        "FROM pg_partition p LEFT JOIN pg_tablespace t "
+        "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
         "ON p.reltablespace = t.oid "
         "WHERE p.parentid = %u AND p.parttype = '%c' "
         "AND p.partstrategy = '%c' ORDER BY ",
@@ -1396,7 +1467,7 @@ static void AppendListPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
             "array_to_string(p.boundaries, ''',''') as partboundstr, "
             "p.oid AS partoid, "
             "t.spcname AS reltblspc "
-            "FROM pg_partition p LEFT JOIN pg_tablespace t "
+            "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
             "ON p.reltablespace = t.oid "
             "WHERE p.parentid = %u AND p.parttype = '%c' "
             "AND p.partstrategy = '%c' ORDER BY p.boundaries[1]::%s ASC",
@@ -1433,13 +1504,13 @@ static void AppendListPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
             "pg_catalog.unnest(keys_array)::text AS key_value FROM ( "
             "SELECT oid, relname, reltablespace, bound_id,key_bounds::cstring[] AS keys_array FROM ( "
             "SELECT oid, relname, reltablespace, pg_catalog.unnest(boundaries) AS key_bounds, "
-            "pg_catalog.generate_subscripts(boundaries, 1) AS bound_id FROM pg_partition "
+            "pg_catalog.generate_subscripts(boundaries, 1) AS bound_id FROM pg_catalog.pg_partition "
             "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c')))) "
             "GROUP BY oid, relname, reltablespace, bound_id) "
             "GROUP BY oid, relname, reltablespace "
-            "UNION ALL SELECT oid, relname, reltablespace, 'DEFAULT' AS bound_def FROM pg_partition "
+            "UNION ALL SELECT oid, relname, reltablespace, 'DEFAULT' AS bound_def FROM pg_catalog.pg_partition "
             "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c' AND boundaries[1] IS NULL) p "
-            "LEFT JOIN pg_tablespace t ON p.reltablespace = t.oid "
+            "LEFT JOIN pg_catalog.pg_tablespace t ON p.reltablespace = t.oid "
             "ORDER BY p.bound_def ASC",
             tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST,
             tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST);
@@ -1503,7 +1574,7 @@ static void AppendHashPartitionInfo(StringInfo buf, Oid tableoid, tableInfo tabl
         "p.boundaries[1] AS partboundary, "
         "p.oid AS partoid, "
         "t.spcname AS reltblspc "
-        "FROM pg_partition p LEFT JOIN pg_tablespace t "
+        "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
         "ON p.reltablespace = t.oid "
         "WHERE p.parentid = %u AND p.parttype = '%c' "
         "AND p.partstrategy = '%c' ORDER BY ",
@@ -3369,7 +3440,7 @@ static void GetIndexdefForIntervalPartTabDumpSchemaOnly(Oid indexrelid, RangePar
     appendStringInfo(buf, ") ");
 }
 
-static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
+void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
                                        bool dumpSchemaOnly, bool showPartitionLocal, bool showSubpartitionLocal)
 {
     Oid relid = idxrec->indrelid;
@@ -3752,7 +3823,12 @@ char* pg_get_constraintdef_string(Oid constraintId)
     return pg_get_constraintdef_worker(constraintId, true, 0);
 }
 
-static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int prettyFlags)
+char* pg_get_constraintdef_part_string(Oid constraintId)
+{
+    return pg_get_constraintdef_worker(constraintId, false, 0, true);
+}
+
+static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int prettyFlags, bool with_option)
 {
     HeapTuple tup;
     Form_pg_constraint conForm;
@@ -3998,7 +4074,7 @@ static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int
 
             indexId = get_constraint_index(constraintId);
             /* XXX why do we only print these bits if fullCommand? */
-            if (fullCommand && OidIsValid(indexId)) {
+            if ((fullCommand || with_option) && OidIsValid(indexId)) {
                 char* options = flatten_reloptions(indexId);
                 Oid tblspc;
 
@@ -12060,7 +12136,7 @@ static void get_from_clause_coldeflist(
  * actual_datatype.  (If you don't want this behavior, just pass
  * InvalidOid for actual_datatype.)
  */
-static void get_opclass_name(Oid opclass, Oid actual_datatype, StringInfo buf)
+void get_opclass_name(Oid opclass, Oid actual_datatype, StringInfo buf)
 {
     HeapTuple ht_opc;
     Form_pg_opclass opcrec;
@@ -12564,7 +12640,7 @@ static text* string_to_text(char* str)
 /*
  * Generate a C string representing a relation's reloptions, or NULL if none.
  */
-static char* flatten_reloptions(Oid relid)
+char* flatten_reloptions(Oid relid)
 {
     char* result = NULL;
     HeapTuple tuple;

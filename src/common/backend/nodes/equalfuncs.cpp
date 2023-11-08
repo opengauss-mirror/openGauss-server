@@ -1898,6 +1898,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
     COMPARE_SCALAR_FIELD(canCreateTempSeq);
     COMPARE_SCALAR_FIELD(is_large);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(is_autoinc);
 
     return true;
 }
@@ -1908,6 +1909,7 @@ static bool _equalAlterSeqStmt(const AlterSeqStmt* a, const AlterSeqStmt* b)
     COMPARE_NODE_FIELD(options);
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_SCALAR_FIELD(is_large);
+    COMPARE_SCALAR_FIELD(is_autoinc);
 
     return true;
 }

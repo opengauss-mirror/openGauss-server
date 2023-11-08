@@ -425,6 +425,9 @@ static List *ExtractSubPartitionIdf(IndexStmt* stmt, List *subPartitionOidList, 
                 errmsg("Cannot match subpartitions when create subpartition indexes.")));
     }
 
+    /* the element stmt->partClause point has been freed */
+    stmt->partClause = (Node*)partitionIndexdef;
+
     /* Count sum of subpartitions */
     foreach(lc1, backupIdxdef) {
         RangePartitionindexDefState *def = (RangePartitionindexDefState*)lfirst(lc1);
@@ -2084,7 +2087,8 @@ static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const Li
                 HeapTuple tuple;
                 Value* colValue = (Value*)linitial(ielem->collation);
                 char* colName = colValue->val.str;
-                Oid colId = CollationGetCollid(colName);
+                /* ielem->collation is a Value list with schema */
+                Oid colId = get_collation_oid(ielem->collation, true);
                 Oid attColId = InvalidOid;
 
                 if (0 == colId) {

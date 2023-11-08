@@ -814,10 +814,10 @@ static void gsaudit_ProcessUtility_hook(processutility_context* processutility_c
         !is_audit_policy_exist_load_policy_info()) {
         if (next_ProcessUtility_hook) {
             next_ProcessUtility_hook(processutility_cxt, dest, sentToRemote, completionTag,
-                context, false);
+                context, isCTAS);
         } else {
             standard_ProcessUtility(processutility_cxt, dest, sentToRemote, completionTag,
-                context, false);
+                context, isCTAS);
         }
         return;
     }

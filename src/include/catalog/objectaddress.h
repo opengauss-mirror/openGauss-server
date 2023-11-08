@@ -23,6 +23,25 @@ typedef enum TrDropMode {
     RB_DROP_MODE_PHYSICAL = 2,
 } TrDropMode;
 
+typedef struct {
+    Oid class_oid;               /* oid of catalog */
+    Oid oid_index_oid;           /* oid of index on system oid column */
+    int oid_catcache_id;         /* id of catcache on system oid column	*/
+    int         name_catcache_id;   /* id of catcache on (name,namespace), or
+                                     * (name) if the object does not live in a
+                                     * namespace */
+    AttrNumber  attnum_name;    /* attnum of name field */
+    AttrNumber  attnum_namespace;   /* attnum of namespace field */
+    AttrNumber  attnum_owner;   /* attnum of owner field */
+    AttrNumber  attnum_acl;     /* attnum of acl field */
+    ObjectType  objtype;        /* OBJECT_* of this object type */
+    bool        is_nsp_name_unique; /* can the nsp/name combination (or name
+                                     * alone, if there's no namespace) be
+                                     * considered a unique identifier for an
+                                     * object of this class? */
+    
+} ObjectPropertyType;
+
 #define TrDropModeIsAlreadySet(obj) ((obj)->rbDropMode != RB_DROP_MODE_INVALID)
 #define TrObjIsEqual(objA, objB) ((objA)->classId == (objB)->classId && (objA)->objectId == (objB)->objectId)
 #define TrObjIsEqualEx(_classId, _objectId, objB) ((_classId) == (objB)->classId && (_objectId) == (objB)->objectId)
@@ -90,6 +109,7 @@ extern char *getObjectTypeDescription(const ObjectAddress *object);
 extern bool is_objectclass_supported(Oid class_id);
 extern HeapTuple       get_catalog_object_by_oid(Relation catalog,
                          Oid objectId);
+extern HeapTuple get_catalog_object_by_oid(Relation catalog, AttrNumber oidcol, Oid objectId);
 extern char *getObjectIdentity(const ObjectAddress *address);
 extern int read_objtype_from_string(const char *objtype);
 extern char *getObjectIdentityParts(const ObjectAddress *address,

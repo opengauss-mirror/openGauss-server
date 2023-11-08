@@ -205,7 +205,7 @@ static void deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel
     /*
      * Keep track of objects for event triggers, if necessary.
      */
-    if (trackDroppedObjectsNeeded()) {
+    if (trackDroppedObjectsNeeded() && !(flags & PERFORM_DELETION_INTERNAL)) {
         for (i = 0; i < targetObjects->numrefs; i++) {
             const ObjectAddress *thisobj = &targetObjects->refs[i];
             const ObjectAddressExtra *extra = &targetObjects->extras[i];

@@ -2326,7 +2326,8 @@ void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListIn
                 true,
 #endif /* PGXC */
                 NULL,
-                is_top_level ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
+                //is_top_level ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
+                PROCESS_UTILITY_SUBCOMMAND,
                 isCTAS);
         }
 
@@ -5141,9 +5142,15 @@ ProcessUtilitySlow(Node *parse_tree,
     ObjectAddress address;
     ObjectAddress secondaryObject = InvalidObjectAddress;
 
+    if (T_CreateStmt == nodeTag(parse_tree) && isCTAS) {
+        isCompleteQuery = true;
+    } else if (T_AlterTableStmt == nodeTag(parse_tree) && ((AlterTableStmt*)parse_tree)->fromCreate) {
+        isCompleteQuery = false;
+    }
+
     /* All event trigger calls are done only when isCompleteQuery is true */
     needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
- 
+
     /* PG_TRY block is to ensure we call EventTriggerEndCompleteQuery */
     PG_TRY();
     {

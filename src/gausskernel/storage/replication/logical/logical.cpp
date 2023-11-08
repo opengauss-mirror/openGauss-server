@@ -46,7 +46,7 @@
 #include "replication/snapbuild.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
-
+#include "replication/ddlmessage.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 
@@ -84,6 +84,10 @@ static void parallel_change_cb_wrapper(ParallelReorderBuffer *cache, ReorderBuff
 
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
 static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin);
+static void ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+                            XLogRecPtr message_lsn, const char *prefix,
+                            Oid relid, DeparsedCommandType cmdtype,
+                            Size message_size, const char *message);
 
 /* Checkout aurgments whether coming from ALTER SYSTEM SET*/
 bool QuoteCheckOut(char* newval)
@@ -180,6 +184,7 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
     ctx->reorder->begin = begin_cb_wrapper;
     ctx->reorder->apply_change = change_cb_wrapper;
     ctx->reorder->commit = commit_cb_wrapper;
+    ctx->reorder->ddl = ddl_cb_wrapper;
 
     ctx->out = makeStringInfo();
     ctx->prepare_write = prepare_write;
@@ -1028,6 +1033,42 @@ bool filter_by_origin_cb_wrapper(LogicalDecodingContext *ctx, RepOriginId origin
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 
     return ret;
+}
+
+static void 
+ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+                        XLogRecPtr message_lsn, const char *prefix,
+                        Oid relid, DeparsedCommandType cmdtype,
+                        Size message_size, const char *message)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext*)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    if (ctx->callbacks.ddl_cb == NULL)
+        return;
+    
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "ddl";
+    state.report_location = message_lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *)&state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
+    ctx->write_location = message_lsn;
+
+    /* do the actual work: call callback */
+    ctx->callbacks.ddl_cb(ctx, txn, message_lsn, prefix, relid, cmdtype, message_size, message);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
 /*

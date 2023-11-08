@@ -32,6 +32,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_publication.h"
 #include "commands/dbcommands.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
@@ -3408,6 +3409,28 @@ Datum locktag_decode(PG_FUNCTION_ARGS)
 
     text* result = cstring_to_text(tag);
     pfree_ext(tag);
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum pubddl_decode(PG_FUNCTION_ARGS)
+{
+    int64 pubddl = DatumGetInt64(PG_GETARG_DATUM(0));
+    StringInfoData tmpbuf;
+    initStringInfo(&tmpbuf);
+    if (pubddl == PUBDDL_NONE) {
+        appendStringInfo(&tmpbuf, "%s", "none");
+    } else if (pubddl == PUBDDL_ALL) {
+        appendStringInfo(&tmpbuf, "%s", "all");
+    } else {
+        bool first = true;
+        if (ENABLE_PUBDDL_TYPE(pubddl, PUBDDL_TABLE)) {
+            appendStringInfo(&tmpbuf, "%s", "table");
+            first = false;
+        }
+    }
+    text *result = cstring_to_text(tmpbuf.data);
+    
+    FreeStringInfo(&tmpbuf);
     PG_RETURN_TEXT_P(result);
 }
 

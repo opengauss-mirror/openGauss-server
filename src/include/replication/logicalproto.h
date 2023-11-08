@@ -53,6 +53,7 @@ typedef struct LogicalRepTupleData {
 #define LOGICALREP_COLUMN_UNCHANGED    'u'
 #define LOGICALREP_COLUMN_TEXT        't'
 #define LOGICALREP_COLUMN_BINARY    'b' /* added in PG14 */
+#define LOGICAL_REP_MSG_DDL   'L'
 
 typedef uint32 LogicalRepRelId;
 
@@ -108,5 +109,8 @@ extern void logicalrep_write_typ(StringInfo out, Oid typoid);
 extern void logicalrep_read_typ(StringInfo out, LogicalRepTyp *ltyp);
 extern void logicalrep_write_conninfo(StringInfo out, char* conninfo);
 extern void logicalrep_read_conninfo(StringInfo in, char** conninfo);
+extern void logicalrep_write_ddl(StringInfo out, XLogRecPtr lsn,
+                                const char *prefix, Size sz, const char *message);
+extern char *logicalrep_read_ddl(StringInfo in, XLogRecPtr *lsn, const char **prefix, Size *sz);
 
 #endif /* LOGICALREP_PROTO_H */

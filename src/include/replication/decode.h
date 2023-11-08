@@ -14,6 +14,13 @@
 #ifndef DECODE_H
 #define DECODE_H
 
+typedef struct XLogRecordBuffer {
+    XLogRecPtr origptr;
+    XLogRecPtr endptr;
+    XLogReaderState *record;
+    char *record_data;
+} XLogRecordBuffer;
+
 #include "access/xlogreader.h"
 #include "replication/reorderbuffer.h"
 #include "replication/logical.h"
@@ -33,7 +40,7 @@ void UpdateUndoBody(Size* addLenPtr, char* data, uint8 flag, uint32* toastLen);
 char *UpdateOldTupleCalc(bool isInplaceUpdate, XLogReaderState *r, char **tupleOld, Size *tuplelenOld,
     uint32* toastLen);
 void DecodeUHeapToastTuple(const char * toastData, Size len, ReorderBufferTupleBuf *tuple);
-
+extern void logicalddl_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 extern void ParallelDecodeWorkerMain(void* point);
 extern void LogicalReadWorkerMain(void* point);
 #endif

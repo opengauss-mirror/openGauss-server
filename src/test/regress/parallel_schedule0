@@ -1031,6 +1031,7 @@ test: reindex_concurrently_partition_parallel
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication
 test: subscription
+test: replication_ddl_publication
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable

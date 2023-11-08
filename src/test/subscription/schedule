@@ -15,3 +15,5 @@ skiplsn
 disable
 pub_subconflict
 bugs
+ddl_replication
+dump
