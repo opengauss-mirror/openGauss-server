@@ -201,47 +201,56 @@ bool PLGlobalPackageRuntimeCache::Add(uint64 sessionId, SessionPackageRuntime* r
 
     uint32 hashCode = DirectFunctionCall1(hashint8, Int64GetDatumFast(sessionId));
     int partitionIndex = getPartition(hashCode);
-    GPRCHashCtl hashTblCtl = hashArray[partitionIndex];
+    GPRCHashCtl &hashTblCtl = hashArray[partitionIndex];
 
     (void)LWLockAcquire(GetMainLWLockByIndex(hashTblCtl.lockId), LW_EXCLUSIVE);
     MemoryContext oldcontext = MemoryContextSwitchTo(hashTblCtl.context);
 
-    bool found = false;
-    GPRCValue *entry = (GPRCValue*)hash_search_with_hash_value(
-        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, &found);
-    if (found) {
-        /* should not happen */
-        if (sessionId != entry->sessionId) {
-            MemoryContextSwitchTo(oldcontext);
-            LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
-            ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
-                errmsg("session id not match when remove PLGlobalPackageRuntimeCache"),
-                errdetail("romove PLGlobalPackageRuntimeCache failed, current session id does not match")));
-        }
+    volatile bool found = false;
+    GPRCValue *entry = NULL;
+    PG_TRY();
+    {
+        entry = (GPRCValue*)hash_search_with_hash_value(
+            hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_ENTER, (bool*)&found);
+        if (found) {
+            /* should not happen */
+            if (sessionId != entry->sessionId) {
+                ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
+                    errmsg("session id not match when remove PLGlobalPackageRuntimeCache"),
+                    errdetail("romove PLGlobalPackageRuntimeCache failed, current session id does not match")));
+            }
 
-        if (entry->sessPkgRuntime != NULL) {
-            ereport(DEBUG3, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
-                errmsg("PLGlobalPackageRuntimeCache: remove context(%p) when add, context(%s), parent(%s), shared(%d)",
-                    entry->sessPkgRuntime->context, entry->sessPkgRuntime->context->name,
-                    entry->sessPkgRuntime->context->parent->name, entry->sessPkgRuntime->context->is_shared)));
-            MemoryContextDelete(entry->sessPkgRuntime->context);
+            if (entry->sessPkgRuntime != NULL) {
+                ereport(DEBUG3, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
+                    errmsg("PLGlobalPackageRuntimeCache: remove context(%p) when add, context(%s), parent(%s), shared(%d)",
+                        entry->sessPkgRuntime->context, entry->sessPkgRuntime->context->name,
+                        entry->sessPkgRuntime->context->parent->name, entry->sessPkgRuntime->context->is_shared)));
+                MemoryContextDelete(entry->sessPkgRuntime->context);
+            }
+            entry->sessPkgRuntime = NULL;
+        } else if (entry == NULL) {
+            ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                errmsg("palloc hash element GPRCValue failed"),
+                errdetail("failed to add hash element for PLGlobalPackageRuntimeCache"),
+                errcause("out of memory"),
+                erraction("set more memory")));
         }
-        entry->sessPkgRuntime = NULL;
-        hash_search_with_hash_value(
-            hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, &found);
+        entry->sessPkgRuntime = CopySessionPackageRuntime(runtime, true);
+        entry->sessionId = sessionId;
     }
-
-    entry = (GPRCValue*)hash_search_with_hash_value(
-        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_ENTER, &found);
-    if (entry == NULL) {
-        ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-            errmsg("palloc hash element GPRCValue failed"),
-            errdetail("failed to add hash element for PLGlobalPackageRuntimeCache"),
-            errcause("out of memory"),
-            erraction("set more memory")));
+    PG_CATCH();
+    {
+        /* if found and sessionId != entry->sessionId should not remove */
+        if ((found == false && entry != NULL) ||
+                (found && entry != NULL && sessionId == entry->sessionId)) {
+            hash_search_with_hash_value(
+                hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, (bool*)&found);
+        }
+        MemoryContextSwitchTo(oldcontext);
+        LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
+        PG_RE_THROW();
     }
-    entry->sessPkgRuntime = CopySessionPackageRuntime(runtime, true);
-    entry->sessionId = sessionId;
+    PG_END_TRY();
 
     MemoryContextSwitchTo(oldcontext);
     LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
@@ -252,13 +261,13 @@ SessionPackageRuntime* PLGlobalPackageRuntimeCache::Fetch(uint64 sessionId)
 {
     uint32 hashCode = DirectFunctionCall1(hashint8, Int64GetDatumFast(sessionId));
     int partitionIndex = getPartition(hashCode);
-    GPRCHashCtl hashTblCtl = hashArray[partitionIndex];
+    GPRCHashCtl &hashTblCtl = hashArray[partitionIndex];
     (void)LWLockAcquire(GetMainLWLockByIndex(hashTblCtl.lockId), LW_EXCLUSIVE);
     MemoryContext oldcontext = MemoryContextSwitchTo(hashTblCtl.context);
 
-    bool found = false;
+    volatile bool found = false;
     GPRCValue *entry = (GPRCValue*)hash_search_with_hash_value(
-        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, &found);
+        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, (bool*)&found);
     if (!found) {
         MemoryContextSwitchTo(oldcontext);
         LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
@@ -266,7 +275,19 @@ SessionPackageRuntime* PLGlobalPackageRuntimeCache::Fetch(uint64 sessionId)
     }
 
     MemoryContextSwitchTo(oldcontext);
-    SessionPackageRuntime *sessPkgRuntime = CopySessionPackageRuntime(entry->sessPkgRuntime, false);
+
+    SessionPackageRuntime *sessPkgRuntime = NULL;
+    PG_TRY();
+    {
+        sessPkgRuntime = CopySessionPackageRuntime(entry->sessPkgRuntime, false);
+    }
+    PG_CATCH();
+    {
+        LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
     return sessPkgRuntime;
 }
@@ -275,13 +296,13 @@ bool PLGlobalPackageRuntimeCache::Remove(uint64 sessionId)
 {
     uint32 hashCode = DirectFunctionCall1(hashint8, Int64GetDatumFast(sessionId));
     int partitionIndex = getPartition(hashCode);
-    GPRCHashCtl hashTblCtl = hashArray[partitionIndex];
+    GPRCHashCtl &hashTblCtl = hashArray[partitionIndex];
     (void)LWLockAcquire(GetMainLWLockByIndex(hashTblCtl.lockId), LW_EXCLUSIVE);
     MemoryContext oldcontext = MemoryContextSwitchTo(hashTblCtl.context);
 
-    bool found = false;
+    volatile bool found = false;
     GPRCValue *entry = (GPRCValue*)hash_search_with_hash_value(
-        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, &found);
+        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, (bool*)&found);
     if (found) {
         if (sessionId != entry->sessionId) {
             /* should not happen */
@@ -294,7 +315,7 @@ bool PLGlobalPackageRuntimeCache::Remove(uint64 sessionId)
         MemoryContextDelete(entry->sessPkgRuntime->context);
         entry->sessPkgRuntime = NULL;
         hash_search_with_hash_value(
-            hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, &found);
+            hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, (bool*)&found);
         MemoryContextSwitchTo(oldcontext);
         LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
         return true;
