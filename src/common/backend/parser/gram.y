@@ -11843,7 +11843,7 @@ CreateTrigStmt:
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-							 	errmsg("syntax error.")));
+							 	errmsg("or replace is not supported here."), parser_errposition(@2)));
 					}
 					if ($3 != NULL)
 					{
@@ -11915,8 +11915,7 @@ CreateTrigStmt:
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("syntax error.")));
-					}
+							 	errmsg("or replace is not supported here."), parser_errposition(@2)));					}
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 					{
 						ereport(errstate,
@@ -11959,7 +11958,7 @@ CreateTrigStmt:
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("syntax error.")));
+							 	errmsg("or replace is not supported here."), parser_errposition(@2)));
 					}
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 					{
