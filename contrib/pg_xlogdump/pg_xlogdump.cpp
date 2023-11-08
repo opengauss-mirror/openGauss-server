@@ -1003,8 +1003,14 @@ int main(int argc, char** argv)
         }
     }
 
-    if (!dumpprivate.enable_dss && dumpprivate.inpath != NULL && dumpprivate.inpath[0] == '+') {
-        dumpprivate.enable_dss = true;
+    if (!dumpprivate.enable_dss) {
+        if (dumpprivate.inpath != NULL && dumpprivate.inpath[0] == '+') {
+            dumpprivate.enable_dss = true;
+        } else {
+            if (dumpprivate.inpath == NULL && argv[optind] != NULL and argv[optind][0] == '+') {
+                dumpprivate.enable_dss = true;
+            }
+        }
     }
 
     if (dumpprivate.enable_dss && dumpprivate.socketpath == NULL) {
