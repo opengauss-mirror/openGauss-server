@@ -525,7 +525,8 @@ void PLSQLStmtTrackStack::reset_current_info()
  */
 void PLSQLStmtTrackStack::push()
 {
-    if (IsInitdb || (IS_UNIQUE_SQL_TRACK_TOP && !u_sess->unique_sql_cxt.is_open_cursor)) {
+    if (IsInitdb || (IS_UNIQUE_SQL_TRACK_TOP && !u_sess->unique_sql_cxt.is_open_cursor) || 
+        CURRENT_STMT_METRIC_HANDLE == NULL) {
         return;
     }
 
@@ -547,7 +548,8 @@ void PLSQLStmtTrackStack::push()
  */
 void PLSQLStmtTrackStack::pop()
 {
-    if (IsInitdb || (IS_UNIQUE_SQL_TRACK_TOP && !u_sess->unique_sql_cxt.is_open_cursor)) {
+    if (IsInitdb || (IS_UNIQUE_SQL_TRACK_TOP && !u_sess->unique_sql_cxt.is_open_cursor) || 
+        CURRENT_STMT_METRIC_HANDLE == NULL) {
         return;
     }
     u_sess->unique_sql_cxt.unique_sql_id = old_unique_sql_id;
