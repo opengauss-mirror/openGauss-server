@@ -447,6 +447,12 @@ typedef struct FormatCallStack {
     }                                                         \
     while (0)
 
+#define PG_TRY_RETURN(ret)                                      \
+    t_thrd.log_cxt.PG_exception_stack = save_exception_stack;   \
+    t_thrd.log_cxt.error_context_stack = save_context_stack;    \
+    gstrace_tryblock_exit(false, oldTryCounter);                \
+    return ret;
+
 // ADIO means async direct io
 #ifndef ENABLE_LITE_MODE
 #define ADIO_RUN() if (g_instance.attr.attr_storage.enable_adio_function) {

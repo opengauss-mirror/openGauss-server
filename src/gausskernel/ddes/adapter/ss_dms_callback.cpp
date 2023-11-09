@@ -269,7 +269,7 @@ static int CBGetTxnStatus(void *db_handle, unsigned long long xid, unsigned char
                 *result = (unsigned char)TransactionIdDidCommit(xid);
                 break;
             default:
-                return DMS_ERROR;
+                PG_TRY_RETURN(DMS_ERROR);
         }
     }
     PG_CATCH();

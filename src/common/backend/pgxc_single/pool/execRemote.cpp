@@ -11493,7 +11493,7 @@ static PGXCNodeAllHandles* make_cp_conn(ComputePoolConfig** configs, int cnum, i
         {
             handles = try_make_cp_conn(configs[i]->cpip, configs[i], srvtype, dbname);
 
-            return handles;
+            PG_TRY_RETURN(handles);
         }
         PG_CATCH();
         {
