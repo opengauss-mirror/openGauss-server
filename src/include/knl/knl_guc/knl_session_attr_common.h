@@ -93,6 +93,7 @@ typedef struct knl_session_attr_common {
     int backend_flush_after;
     int Log_RotationAge;
     int Log_RotationSize;
+    int LogMaxSize;
     int max_function_args;
     int max_user_defined_exception;
     int tcp_keepalives_idle;

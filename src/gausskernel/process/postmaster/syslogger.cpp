@@ -42,12 +42,16 @@
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pg_shmem.h"
+#include "storage/smgr/fd.h"
 #include "utils/guc.h"
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
 
 #define PROFILE_LOG_ROTATE_SIZE ((long)20 * 1024 * 1024L)
+#define LOG_SIZE_INIT (1024L * INT_MAX + 1)
+#define LOG_MAX_SIZE (u_sess->attr.attr_common.LogMaxSize * 1024L)
+#define NEED_ELIMINATE_LOG(total) (total > LOG_MAX_SIZE && LOG_MAX_SIZE > 0)
 
 /*
  * We really want line-buffered mode for logfile output, but Windows does
@@ -101,6 +105,13 @@ typedef struct {
     StringInfoData data; /* accumulated data, as a StringInfo */
 } save_buffer;
 
+typedef int (*cmp_func)(const void*, const void*);
+typedef struct {
+    int64 fileSize;
+    time_t mTime;
+    char fileName[FLEXIBLE_ARRAY_MEMBER];
+} LogInfo;
+
 /* These must be exported for EXEC_BACKEND case ... annoying */
 #ifndef WIN32
 
@@ -153,6 +164,11 @@ static void LogCtlProcessInput(LogControlData* logctl, const char* msg, int len)
 static void PLogCtlInit(void);
 static void slow_query_logfile_rotate(bool time_based_rotation, int size_rotation_for);
 static void asp_logfile_rotate(bool time_based_rotation, int size_rotation_for);
+static void RemoveOldestLog(const char* path, int64* totalSize, int64 curSize);
+static int LogInfoCmpByModifyTime(const void* v1, const void* v2);
+static void MakeSortedLogInfoList(List* list, cmp_func cmp);
+static inline int64 GetUpdateSize(FILE* fh, const char* filename);
+static inline void CheckTotalLogSize(FILE* fh, bool hasCsvFormat, char* currentLogDir, int64* totalSize);
 
 /*
  * Main entry point for syslogger process
@@ -305,6 +321,13 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
     currentLogDir = pstrdup(u_sess->attr.attr_common.Log_directory);
     currentLogFilename = pstrdup(u_sess->attr.attr_common.Log_filename);
     currentLogRotationAge = u_sess->attr.attr_common.Log_RotationAge;
+
+    /* 
+     * Set it to 1 more than the maximum possible LOG_MAX_SIZE to ensure that the initial value can stably trigger
+     * the RemoveOldestLog. In the RemoveOldestLog, the size of the latest log folder is obtained by traversing 
+     * the log file.
+     */
+    t_thrd.logger.total_syslogs_size = LOG_SIZE_INIT;
     /* set next planned rotation time */
     set_next_rotation_time();
 
@@ -338,6 +361,9 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
             if (strcmp(u_sess->attr.attr_common.Log_directory, currentLogDir) != 0) {
                 pfree(currentLogDir);
                 currentLogDir = pstrdup(u_sess->attr.attr_common.Log_directory);
+
+                /* reinitialize the log size and total size */
+                t_thrd.logger.total_syslogs_size = LOG_SIZE_INIT;
                 t_thrd.logger.rotation_requested = true;
                 /* not affect pLogCtl's Log_directory */
                 /*
@@ -428,6 +454,18 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
                 ftell(t_thrd.logger.asplogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) {
                 t_thrd.logger.rotation_requested = true;
                 size_rotation_for |= LOG_DESTINATION_ASPLOG;
+            }
+        }
+
+        if (!t_thrd.logger.rotation_requested && LOG_MAX_SIZE > 0) {
+            if (t_thrd.logger.syslogFile != NULL && ftell(t_thrd.logger.syslogFile) >= LOG_MAX_SIZE) {
+                t_thrd.logger.rotation_requested = true;
+                size_rotation_for |= LOG_DESTINATION_STDERR;
+            } else {
+                CheckTotalLogSize(t_thrd.logger.syslogFile,
+                                    true,
+                                    currentLogDir,
+                                    &t_thrd.logger.total_syslogs_size);
             }
         }
 
@@ -1181,6 +1219,8 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for, bool
     pg_time_t fntime;
     FILE* fh = NULL;
     bool is_ow_oldlog = false;
+    int64 update_syslog_size = 0;
+    int64 update_csvlog_size = 0;
 
     t_thrd.logger.rotation_requested = false;
 
@@ -1211,14 +1251,29 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for, bool
         if (u_sess->attr.attr_common.Log_truncate_on_rotation && time_based_rotation &&
             t_thrd.logger.last_file_name != NULL) {
             if (strcmp(filename, t_thrd.logger.last_file_name) != 0) {
+                /* 
+                 * This indicates that the log is switched to a new file for overwriting.
+                 * Therefore, the size of the file being written must be added to the total size.
+                 * If the file to be overwritten is an existing file, the size of the existing
+                 * file is subtracted from the total size.
+                 */
+                update_syslog_size += GetUpdateSize(t_thrd.logger.syslogFile, filename);
                 fh = logfile_open(filename, "w", true);
             } else {
                 fclose(t_thrd.logger.syslogFile);
                 fh = logfile_open(filename, "w", true);
                 is_ow_oldlog = true;
             }
-        } else
+        } else {
+            /*
+             * This indicates that logs are written in append mode. At least, the writing of the current log file
+             * is complete. Therefore, you need to add the size of the current log file. The file that is being written
+             * becomes a new log file that  is being written. Therefore, the size of the file that is being written
+             * needs to be subtracted.
+             */
+            update_syslog_size += GetUpdateSize(t_thrd.logger.syslogFile, filename);
             fh = logfile_open(filename, "a", true);
+        }
  
         if (fh == NULL) {
             /*
@@ -1257,14 +1312,17 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for, bool
         if (u_sess->attr.attr_common.Log_truncate_on_rotation && time_based_rotation &&
             t_thrd.logger.last_csv_file_name != NULL) {
             if (strcmp(csvfilename, t_thrd.logger.last_csv_file_name) != 0) {
+                update_csvlog_size += GetUpdateSize(t_thrd.logger.csvlogFile, csvfilename);
                 fh = logfile_open(csvfilename, "w", true);
             } else {
                 fclose(t_thrd.logger.csvlogFile);
                 fh = logfile_open(csvfilename, "w", true);
                 is_ow_oldlog = true;
             }
-        } else
+        } else {
+            update_csvlog_size += GetUpdateSize(t_thrd.logger.csvlogFile, csvfilename);
             fh = logfile_open(csvfilename, "a", true);
+        }
 
         if (fh == NULL) {
             /*
@@ -1301,6 +1359,7 @@ static void logfile_rotate(bool time_based_rotation, int size_rotation_for, bool
     if (csvfilename != NULL)
         pfree(csvfilename);
 
+    t_thrd.logger.total_syslogs_size += (update_syslog_size + update_csvlog_size);
     set_next_rotation_time();
 }
 
@@ -2114,4 +2173,157 @@ void init_instr_log_directory(bool include_nodename, const char* logid)
     } else {
         pfree(logdir);
     }
+}
+
+static int LogInfoCmpByModifyTime(const void* v1, const void* v2)
+{
+    const LogInfo* l1 = *(LogInfo**)v1;
+    const LogInfo* l2 = *(LogInfo**)v2;
+    return l1->mTime - l2->mTime;
+}
+
+static void MakeSortedLogInfoList(List* list, cmp_func cmp)
+{
+    int len = list_length(list);
+    if (0 == len || 1 == len) {
+        return; /* empty or single list */
+    }
+
+    void** ptr_array = (void**)palloc(len * sizeof(LogInfo));
+    ListCell* cell = NULL;
+
+    /* contruct a temp list to sort */
+    int idx = 0;
+    foreach (cell, list) {
+        ptr_array[idx++] = (void*)lfirst(cell);
+    }
+
+    /* do sorting */
+    qsort(ptr_array, len, sizeof(void*), cmp);
+
+    /* write back to make this list sorted */
+    idx = 0;
+    foreach (cell, list) {
+        lfirst(cell) = ptr_array[idx++];
+    }
+
+    /* free this temp array */
+    pfree_ext(ptr_array);
+}
+
+static void RemoveOldestLog(const char* path, int64* totalSize, int64 curSize)
+{
+    char pathname[MAXPGPATH] = {'\0'};
+    DIR* dirDesc = NULL;
+    struct dirent* dirEntry = NULL;
+    errno_t rc = EOK;
+    List* logInfoList = NIL;
+    int64 totalSizeBak = *totalSize;
+    *totalSize = 0;
+    bool isInterrupt = false;
+
+    dirDesc = AllocateDir(path);
+    if (dirDesc == NULL) {
+        ereport(ERROR, (errmsg("can not open directory %s", path)));
+    }
+
+    while ((dirEntry = ReadDir(dirDesc, path)) != NULL) {
+        if (InterruptPending) {
+            isInterrupt = true;
+            *totalSize = totalSizeBak;
+            FreeDir(dirDesc);
+            CHECK_FOR_INTERRUPTS();
+            break;
+        }
+        struct stat fst;
+        if (unlikely(strcmp(dirEntry->d_name, ".") == 0 || strcmp(dirEntry->d_name, "..") == 0)) {
+            continue;
+        }
+        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, dirEntry->d_name);
+        securec_check_ss(rc, "\0", "\0");
+        if (unlikely(stat(pathname, &fst) < 0)) {
+            FreeDir(dirDesc);
+            ereport(ERROR,
+                    (errcode_for_file_access(),
+                        errmsg("could not %s file \"%s\"", errno == ENOENT ? "find" : "stat", pathname)));
+        }
+        /* just check the file */
+        if (S_ISDIR(fst.st_mode)) {
+            continue;
+        }
+
+        if ((t_thrd.logger.last_file_name != NULL && strcmp(pathname, t_thrd.logger.last_file_name) == 0) ||
+            (t_thrd.logger.last_csv_file_name != NULL && strcmp(pathname, t_thrd.logger.last_csv_file_name) == 0)) {
+            continue;
+        }
+
+        /*
+         * The feature of flexible arrays is used here to facilitate memory release of the logInfoList at the end
+         */
+        Size dirLen = strlen(dirEntry->d_name);
+        LogInfo* logInfo = (LogInfo*)palloc(sizeof(LogInfo) + dirLen + 1);
+        logInfo->mTime = fst.st_mtime;
+        rc = snprintf_s(logInfo->fileName, dirLen + 1, dirLen, "%s", dirEntry->d_name);
+        securec_check_ss(rc, "\0", "\0");
+        logInfo->fileSize = fst.st_size;
+
+        /* Get the newest totalSize */
+        *totalSize += fst.st_size;
+        logInfoList = lappend(logInfoList, logInfo);
+    }
+    if (!isInterrupt) {
+        FreeDir(dirDesc);
+    } else {
+        list_free_deep(logInfoList);
+        return;
+    }
+
+    /* 
+     * Perform a secondary judgment on the total number of logs. If the latest log space size does not meet
+     * the conditions for deleting logs, there is no need to delete them, which means there is no need to sort
+     * the log files in chronological order
+     */
+    if (NEED_ELIMINATE_LOG(*totalSize + curSize)) {
+        MakeSortedLogInfoList(logInfoList, LogInfoCmpByModifyTime);
+    }
+
+    ListCell* cell = NULL;
+    foreach (cell, logInfoList) {
+        if (!NEED_ELIMINATE_LOG(*totalSize + curSize)) {
+            break;
+        }
+        LogInfo* logInfo = (LogInfo*)lfirst(cell);
+        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, logInfo->fileName);
+        securec_check_ss(rc, "\0", "\0");
+        if (remove(pathname) < 0) {
+            ereport(ERROR, (errmsg("remove log file \"%s\" failed.", pathname)));
+        } else {
+            *totalSize -= logInfo->fileSize;
+        }
+    }
+    list_free_deep(logInfoList);
+}
+
+static inline void CheckTotalLogSize(FILE* fh, bool hasCsvFormat, char* currentLogDir, int64* totalSize)
+{
+    if (fh == NULL) {
+        return;
+    }
+
+    int64 curSysLogSize = ftell(fh);
+    int64 curCsvLogSize = (hasCsvFormat && t_thrd.logger.csvlogFile != NULL) ? ftell(t_thrd.logger.csvlogFile) : 0;
+    if (NEED_ELIMINATE_LOG(*totalSize + curSysLogSize + curCsvLogSize)) {
+        RemoveOldestLog(currentLogDir, totalSize, curSysLogSize + curCsvLogSize);
+    }
+}
+
+static inline int64 GetUpdateSize(FILE* fh, const char* filename)
+{
+    int64 result = 0;
+    result += (fh == NULL) ? 0 : ftell(fh);
+    struct stat fst;
+    if (stat(filename, &fst) >= 0) {
+        result -= fst.st_size;
+    }
+    return result;
 }

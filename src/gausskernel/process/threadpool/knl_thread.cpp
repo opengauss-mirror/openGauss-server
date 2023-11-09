@@ -678,6 +678,7 @@ static void knl_t_logger_init(knl_t_logger_context* logger)
     logger->last_asp_file_name = NULL;
     logger->got_SIGHUP = false;
     logger->rotation_requested = false;
+    logger->total_syslogs_size = 0;
 }
 
 static void knl_t_bulkload_init(knl_t_bulkload_context* bulk_cxt)
