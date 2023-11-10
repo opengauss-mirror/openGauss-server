@@ -222,7 +222,7 @@ static void ginHeapTupleBulkInsert(GinBuildState *buildstate, OffsetNumber attnu
 {
     Datum *entries = NULL;
     GinNullCategory *categories = NULL;
-    int32 nentries;
+    int32 nentries = 0;
     MemoryContext oldCtx;
 
     oldCtx = MemoryContextSwitchTo(buildstate->funcCtx);
