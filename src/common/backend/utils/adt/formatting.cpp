@@ -5295,8 +5295,7 @@ static NUMCacheEntry* NUM_cache_search(const char* str)
 static void NUM_cache_remove(NUMCacheEntry* ent)
 {
     if (ent == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The input NUMCacheEntry is invalid, which is Null.")));
+        return;
     }
 #ifdef DEBUG_TO_FROM_CHAR
     elog(DEBUG_elog_output, "REMOVING ENTRY (%s)", ent->str);
