@@ -664,6 +664,11 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
             if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
                 xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
                 retry = 0;
+            } else if (SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN){
+                // directly exit when ondemand_realtime_build_status = BUILD_TO_DISABLED, do not send endMark to dispatcher.
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
+                retry = 0;
+                RedoInterruptCallBack();
             }
 
             if (retry <= 3) {

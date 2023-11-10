@@ -9295,8 +9295,11 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("[On-demand]: Ondemand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
             SSOndemandRecoveryExitNormal = false;
-        } else if (SS_DORADO_CLUSTER || SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) {
+        } else if (SS_DORADO_CLUSTER) {
             src_id = SSGetPrimaryInstId();
+        } else if (SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) {
+            src_id = SSGetPrimaryInstId();
+            OnDemandBackupControlFile(t_thrd.shemem_ptr_cxt.ControlFile);
         } else {
             if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 src_id = SSGetPrimaryInstId();

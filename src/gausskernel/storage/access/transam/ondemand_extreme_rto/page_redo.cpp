@@ -142,6 +142,7 @@ void AddRecordReadBlocks(void *rec, uint32 readblocks);
 static void AddTrxnHashmap(void *item);
 static void AddSegHashmap(void *item);
 static void PageManagerPruneIfRealtimeBuildFailover();
+static void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg);
 
 RefOperate recordRefOperate = {
     AddRefRecord,
@@ -2081,7 +2082,6 @@ bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("redo item hash table corrupted, there has invalid hashtable.")));
     }
-
     unsigned int new_hash = XlogTrackTableHashCode(&redoItemTag);
     *lock = XlogTrackMappingPartitionLock(new_hash);
     (void)LWLockAcquire(*lock, LW_SHARED);
@@ -2747,6 +2747,9 @@ void XLogReadPageWorkerMain()
 
     g_recordbuffer = &g_dispatcher->rtoXlogBufState;
     GetRecoveryLatch();
+    if (ENABLE_ONDEMAND_REALTIME_BUILD) {
+        on_shmem_exit(RealtimeBuildReleaseRecoveryLatch, 0);
+    }
     /* init readstate */
     InitXLogRecordReadBuffer(&xlogreader);
 
@@ -2786,7 +2789,6 @@ void XLogReadPageWorkerMain()
     if (workState != WORKER_STATE_EXITING && workState != WORKER_STATE_EXIT) {
         pg_atomic_write_u32(&(g_recordbuffer->readWorkerState), WORKER_STATE_EXITING);
     }
-
     if (!ReadPageWorkerStop()) {
         /* notify exit */
         PushToWorkerLsn();
@@ -3894,6 +3896,16 @@ void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat)
     stat->ondemandRecoveryStatus = g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status;
     stat->realtimeBuildStatus = g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status;
     stat->recoveryPauseStatus = g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status;
+}
+
+void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg) {
+    if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN && 
+        SS_STANDBY_PROMOTING) {
+        volatile Latch* latch = &t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch;
+        if (latch->owner_pid == t_thrd.proc_cxt.MyProcPid && latch->is_shared) {
+            DisownLatch(latch);
+        }
+    }
 }
 
 }  // namespace ondemand_extreme_rto
