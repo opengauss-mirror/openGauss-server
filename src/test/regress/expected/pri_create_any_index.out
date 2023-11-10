@@ -84,3 +84,23 @@ DROP TABLE pri_index_schema.tmp_tbl;
 DROP SCHEMA pri_index_schema cascade;
 DROP USER test_create_any_index_role_test cascade;
 DROP USER test_create_any_index_role cascade;
+-- test gin index
+create database gin_db;
+\c gin_db
+CREATE OPERATOR CLASS gin_int_ops2 DEFAULT FOR TYPE integer USING gin AS
+	  OPERATOR        1   <,
+	  OPERATOR        2   <=,
+	  OPERATOR        3   =,
+	  OPERATOR        4   >=,
+	  OPERATOR        5   >,
+	  FUNCTION        1   int4lt(integer, integer),
+	  FUNCTION        2   int4ne(integer, integer),
+	  FUNCTION        3   int4eq(integer, integer),
+	  FUNCTION        4   int4ge(integer, integer),
+	  FUNCTION        5   int4gt(integer, integer);
+create table t2(v1 int,v2 int);
+insert into t2 values(1,2);
+insert into t2 values(1,2);
+CREATE INDEX idx_t2_content_gin ON t2 USING GIN (v1);
+\c postgres
+drop database gin_db;
