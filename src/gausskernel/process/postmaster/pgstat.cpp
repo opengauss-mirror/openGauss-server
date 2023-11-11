@@ -4723,6 +4723,12 @@ const char* pgstat_get_wait_dms(WaitEventDMS w)
         case WAIT_EVENT_DLS_REQ_TABLE:
             event_name = "DlsReqTable";
             break;
+        case WAIT_EVENT_DLS_REQ_PART_X:
+            event_name = "DlsReqPartX";
+            break;
+        case WAIT_EVENT_DLS_REQ_PART_S:
+            event_name = "DlsReqPartS";
+            break;
         case WAIT_EVENT_DLS_WAIT_TXN:
             event_name = "DlsWaitTxn";
             break;
@@ -4755,6 +4761,30 @@ const char* pgstat_get_wait_dms(WaitEventDMS w)
             break;
         case WAIT_EVENT_LATCH_S_REMOTE:
             event_name = "LatchSRemote";
+            break;
+        case WAIT_EVENT_ONDEMAND_REDO:
+            event_name = "OndemandRedo";
+            break;
+        case WAIT_EVENT_PAGE_STATUS_INFO:
+            event_name = "PageStatusInfo";
+            break;
+        case WAIT_EVENT_OPENGAUSS_SEND_XMIN:
+            event_name = "OpenGaussSendXmin";
+            break;
+        case WAIT_EVENT_DCS_REQ_CREATE_XA_RES:
+            event_name = "DcsReqCreateXaRes";
+            break;
+        case WAIT_EVENT_DCS_REQ_DELETE_XA_RES:
+            event_name = "DcsReqDeleteXaRes";
+            break;
+        case WAIT_EVENT_DCS_REQ_XA_OWNER_ID:
+            event_name = "DcsReqXaOwnerId";
+            break;
+        case WAIT_EVENT_DCS_REQ_XA_IN_USE:
+            event_name = "DcsReqXaInUse";
+            break;
+        case WAIT_EVENT_DCS_REQ_END_XA:
+            event_name = "DcsReqEndXa";
             break;
         default:
             event_name = "unknown wait event";
