@@ -3198,10 +3198,6 @@ void XLogWaitFlush(XLogRecPtr recptr)
         return;
     }
 
-    if (SS_REPLICATION_STANDBY_CLUSTER) {
-        return;
-    }
-
     volatile XLogRecPtr flushTo = gs_compare_and_swap_u64(&g_instance.wal_cxt.flushResult, 0, 0);
 
     while (XLByteLT(flushTo, recptr)) {

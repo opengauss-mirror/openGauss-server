@@ -33,7 +33,7 @@
 const uint32 SS_DORADO_CTL_INFO_SIZE = 512;
 
 #define SS_REPLICATION_DORADO_CLUSTER \
-        (ENABLE_DSS && g_instance.attr.attr_storage.ss_enable_dorado)
+        (ENABLE_DMS && ENABLE_DSS && g_instance.attr.attr_storage.ss_enable_dorado)
 
 /* Primary Cluster in SS replication */
 #define SS_REPLICATION_PRIMARY_CLUSTER \
