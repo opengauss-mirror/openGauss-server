@@ -269,4 +269,7 @@ void ScanBucketsInsertIndex(Relation rel, const List* idxRelList, const List* id
 extern void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const List* indexRelList,
                               const List* indexInfoList);
 void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oid tmpPartOid);
+#ifdef USE_SPQ
+extern Datum spq_get_root_ctid(HeapTuple tuple, Buffer buffer, ExprContext *econtext);
+#endif
 #endif   /* INDEX_H */

@@ -20718,6 +20718,10 @@ static const char* getAttrName(int attrnum, TableInfo* tblInfo)
         case UidAttributeNumber:
             return "gs_tuple_uid";
 #endif
+#ifdef USE_SPQ
+        case RootSelfItemPointerAttributeNumber:
+            return "_root_ctid";
+#endif
         default:
             break;
     }

@@ -27,6 +27,10 @@
 #define PSORT_RESERVE_COLUMN	"tid"
 #define CHCHK_PSORT_RESERVE_COLUMN(attname)		(strcmp(PSORT_RESERVE_COLUMN, (attname)) == 0)
 
+#ifdef USE_SPQ
+extern HeapTuple heaptuple_from_pg_attribute(Relation pg_attribute_rel, Form_pg_attribute new_attribute);
+#endif
+
 typedef struct RawColumnDefault {
     AttrNumber attnum;         /* attribute to attach default to */
     Node      *raw_default;    /* default value (untransformed parse tree) */

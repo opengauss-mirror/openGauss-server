@@ -969,6 +969,13 @@ SPIPlanPtr SPI_prepare(const char *src, int nargs, Oid *argtypes, parse_query_fu
     return SPI_prepare_cursor(src, nargs, argtypes, 0, parser);
 }
 
+#ifdef USE_SPQ
+SPIPlanPtr SPI_prepare_spq(const char *src, int nargs, Oid *argtypes, parse_query_func parser)
+{
+    return SPI_prepare_cursor(src, nargs, argtypes, CURSOR_OPT_SPQ_OK | CURSOR_OPT_SPQ_FORCE, parser);
+}
+#endif
+
 SPIPlanPtr SPI_prepare_cursor(const char *src, int nargs, Oid *argtypes, int cursorOptions, parse_query_func parser)
 {
     _SPI_plan plan;
