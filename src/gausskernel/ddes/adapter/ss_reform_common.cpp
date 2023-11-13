@@ -432,3 +432,12 @@ void SSStandbySetLibpqswConninfo()
 
     return;
 }
+
+void SSDoradoRefreshMode(ClusterRunMode doradoMode)
+{
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+    g_instance.dms_cxt.SSReformerControl.clusterRunMode = doradoMode;
+    SSUpdateReformerCtrl();
+    LWLockRelease(ControlFileLock);
+    ereport(LOG, (errmsg("zatest: SSDoradoRefreshMode change control file cluster run mode to: %d", g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
+}
