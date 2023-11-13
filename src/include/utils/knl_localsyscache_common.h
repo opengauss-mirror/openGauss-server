@@ -44,32 +44,66 @@ typedef struct LocalRelationEntry : LocalBaseEntry {
     Relation rel;
 } LocalRelationEntry;
 
+/* Saving with an array, slow query efficiency, adding a layer of hash */
+#define IBE_HASH_SIZE       0x80 /* 128 */
+#define IBE_HASH_MASK       0x7F
+static inline uint32 IBE_hash(uint32 value)
+{
+    Assert((IBE_HASH_SIZE - 1) == IBE_HASH_MASK);
+    return value & IBE_HASH_MASK;
+}
 struct InvalidBaseEntry {
-    int count;
-    int size;
-    uint32 *invalid_values;
+    int count[IBE_HASH_SIZE];
+    int size[IBE_HASH_SIZE];
+    uint32 *invalid_values[IBE_HASH_SIZE];
     bool is_reset;
+    bool has_value;
     InvalidBaseEntry()
     {
-        count = 0;
-        size = 0;
-        invalid_values = NULL;
+        for (int i = 0; i < IBE_HASH_SIZE; i++) {
+            count[i] = 0;
+            size[i] = 0;
+            invalid_values[i] = NULL;
+        }
         is_reset = false;
+        has_value = false;
     }
     /* base interface */
     void Init()
     {
-        count = 0;
-        size = 32;
-        invalid_values = (uint32 *)palloc0(size * sizeof(uint32));
+        /*
+         * The memory context LocalSysCacheTopMemoryContext where the object is
+         * located is different from the memory context LocalSysCacheShareMemoryContext
+         * when init() is called, and LocalSysCacheShareMemoryContext belongs to
+         * LocalSysCacheTopMemoryContext.
+         * When the thread pool is enabled, when thread binds to a session to exit,
+         * CleanUpSession() will be called to reset LocalSysCacheShareMemoryContext.
+         *
+         * Now, if a session exits in a transaction, CleanUpSession() will be
+         * directly called in the current thread to reset LocalSysCacheShareMemoryContext;
+         * After unbinding, the thread immediately binds a session to exit.
+         * At this point, CleanUpSession() will be called again. Before resetting
+         * LocalSysCacheShareMemoryContext in LocalSysDBCacheReSet(),
+         * InvalidBaseEntry::ResetInitFlag() will be called. If the memory allocated
+         * in Init() is accessed in ResetInitFlag(), "heap-use-after-free" will appear.
+         */
+        for (int i = 0; i < IBE_HASH_SIZE; i++) {
+            count[i] = 0;
+            size[i] = 32;
+            invalid_values[i] = (uint32 *)palloc0(size[i] * sizeof(uint32));
+        }
+        has_value = false;
     }
     void ResetInitFlag()
     {
         /* we dont clean invalid_values and size variable if rebuild lsc
          * for catcache, they will be reinited when rebuild catbucket
          * for rel/part, they will never be reinited */
-        count = 0;
+        for (int i = 0; i < IBE_HASH_SIZE; i++) {
+            count[i] = 0;
+        }
         is_reset = false;
+        has_value = false;
     }
 
     void InsertInvalidValue(uint32 value)
@@ -77,18 +111,24 @@ struct InvalidBaseEntry {
         if (ExistDefValue(value)) {
             return;
         }
-        if (count == size) {
-            size = size * 2;
-            invalid_values = (uint32 *)repalloc(invalid_values, size * sizeof(uint32));
+        uint32 hash = IBE_hash(value);
+        if (count[hash] == size[hash]) {
+            size[hash] = size[hash] * 2;
+            invalid_values[hash] = (uint32 *)repalloc(invalid_values[hash], size[hash] * sizeof(uint32));
         }
-        invalid_values[count] = value;
-        count++;
+        invalid_values[hash][count[hash]] = value;
+        count[hash]++;
+        has_value = true;
     }
 
     bool ExistValue(uint32 value)
     {
-        for (int i = 0; i < count; i++) {
-            if (invalid_values[i] == value) {
+        uint32 hash = IBE_hash(value);
+        Assert(hash >= 0);
+        Assert(hash < IBE_HASH_SIZE);
+        uint32 *dest = invalid_values[hash];
+        for (int i = 0; i < count[hash]; i++) {
+            if (dest[i] == value) {
                 return true;
             }
         }
@@ -131,10 +171,19 @@ struct InvalidBaseEntry {
 
     bool ExistList()
     {
-        if (is_reset || count > 0) {
+        if (is_reset || has_value) {
             return true;
         }
         return false;
+    }
+
+    void CopyFrom(InvalidBaseEntry* from)
+    {
+        for (int i = 0; i < IBE_HASH_SIZE; i++) {
+            for (int j = 0; j < from->count[i]; j++) {
+                InsertInvalidDefValue(from->invalid_values[i][j]);
+            }
+        }
     }
 };
 

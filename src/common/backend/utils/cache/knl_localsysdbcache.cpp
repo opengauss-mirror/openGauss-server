@@ -1164,23 +1164,17 @@ void StreamTxnContextRestoreInvalidMsg(void *stc)
     LocalSysDBCache *lsc_dbcache = ((StreamTxnContext *)stc)->lsc_dbcache;
     InvalidBaseEntry *src_part = &lsc_dbcache->partdefcache.invalid_entries;
     InvalidBaseEntry *dst_part = &t_thrd.lsc_cxt.lsc->partdefcache.invalid_entries;
-    for (int i = 0; i < src_part->count; i++) {
-        dst_part->InsertInvalidDefValue(src_part->invalid_values[i]);
-    }
+    dst_part->CopyFrom(src_part);
 
     InvalidBaseEntry *src_rel = &lsc_dbcache->tabdefcache.invalid_entries;
     InvalidBaseEntry *dst_rel = &t_thrd.lsc_cxt.lsc->tabdefcache.invalid_entries;
-    for (int i = 0; i < src_rel->count; i++) {
-        dst_rel->InsertInvalidDefValue(src_rel->invalid_values[i]);
-    }
+    dst_rel->CopyFrom(src_rel);
 
     for (int i = 0; i < SysCacheSize; i++) {
         InvalidBaseEntry *src_tup = &lsc_dbcache->systabcache.local_systupcaches[i]->invalid_entries;
         InvalidBaseEntry *dst_tup = &t_thrd.lsc_cxt.lsc->systabcache.local_systupcaches[i]->invalid_entries;
-        for (int i = 0; i < src_tup->count; i++) {
-            dst_tup->InsertInvalidDefValue(src_tup->invalid_values[i]);
-            dst_tup->is_reset |= src_tup->is_reset;
-        }
+        dst_tup->CopyFrom(src_tup);
+        dst_tup->is_reset |= src_tup->is_reset;
     }
 }
 
