@@ -662,6 +662,11 @@ static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* 
     pstate->p_lateral_active = r->lateral;
 
     /*
+     * For age.
+     */
+    pstate->p_lateral_active = true;
+
+    /*
      * Transform the raw expression.
      */
     last_srf = pstate->p_last_srf;
@@ -699,10 +704,13 @@ static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* 
                 parser_errposition(pstate, locate_windowfunc(funcexpr))));
     }
 
+    /* mark the RTE as LATERAL */
+    bool isLateral = r->lateral || contain_vars_of_level((Node *) funcexpr, 0);
+
     /*
      * OK, build an RTE for the function.
      */
-    rte = addRangeTableEntryForFunction(pstate, funcname, funcexpr, r, r->lateral, true);
+    rte = addRangeTableEntryForFunction(pstate, funcname, funcexpr, r, isLateral, true);
 
     /*
      * If a coldeflist was supplied, ensure it defines a legal set of names

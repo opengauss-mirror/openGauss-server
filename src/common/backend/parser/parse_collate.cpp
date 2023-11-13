@@ -559,6 +559,13 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             Query* qtree = (Query*)node;
             TargetEntry* tent = NULL;
 
+            /*
+             * For age.
+             */
+            if (qtree->targetList == NIL) {
+                return false;
+            }
+
             tent = (TargetEntry*)linitial(qtree->targetList);
             AssertEreport(IsA(tent, TargetEntry), MOD_OPT, "not the target entry");
             AssertEreport((!tent->resjunk), MOD_OPT, "the target entry is junk");

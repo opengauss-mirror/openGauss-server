@@ -2557,6 +2557,7 @@ static bool _equalAStar(const A_Star* a, const A_Star* b)
 
 static bool _equalAIndices(const A_Indices* a, const A_Indices* b)
 {
+    COMPARE_SCALAR_FIELD(is_slice);
     COMPARE_NODE_FIELD(lidx);
     COMPARE_NODE_FIELD(uidx);
 

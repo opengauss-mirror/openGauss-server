@@ -394,6 +394,7 @@ typedef struct A_Indices {
     NodeTag type;
     Node *lidx; /* NULL if it's a single subscript */
     Node *uidx;
+    bool is_slice; /* for age */
 } A_Indices;
 
 /*

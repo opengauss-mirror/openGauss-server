@@ -65,6 +65,10 @@ static void InternalAggIsSupported(const char *aggName)
         "st_asgeobuf",
         "st_asflatgeobuf"
 #endif
+        ,
+        "age_collect",
+        "age_percentilecont",
+        "age_percentiledisc"
     };
 
     uint len = lengthof(supportList);

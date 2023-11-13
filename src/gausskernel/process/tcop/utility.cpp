@@ -3609,7 +3609,7 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                 }
                 TransformLoadDataToCopy(stmt);
                 break;
-            }        
+            } 
 #ifdef PGXC
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("LOAD statement is not yet supported.")));
 #endif /* PGXC */
