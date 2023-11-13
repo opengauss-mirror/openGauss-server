@@ -1920,7 +1920,7 @@ static int CBCacheMsg(void *db_handle, char* msg)
     return GS_SUCCESS;
 }
 
-static int CBMarkNeedFlush(void *db_handle, char *pageid)
+static int CBMarkNeedFlush(void *db_handle, char *pageid, unsigned char *is_edp)
 {
     bool valid = false;
     BufferDesc *buf_desc = NULL;
@@ -1945,6 +1945,12 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid)
             errmsg("[SS] CBMarkNeedFlush, buf_desc not valid")));
         return DMS_ERROR;
     }
+
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (buf_ctrl->is_edp) {
+        ereport(PANIC, (errmsg("[SS] CBMarkNeedFlush, do not allow edp exist, please check")));
+    }
+    *is_edp = false;
 
     ereport(LOG, (errmsg("[SS] CBMarkNeedFlush found buf: %u/%u/%u/%d %d-%u",
         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
