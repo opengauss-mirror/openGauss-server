@@ -742,7 +742,7 @@ create or replace package trigger_test as
 end trigger_test;
 /
 create or replace package body trigger_test as
-  function tri_insert_func() return trigger as 
+    function tri_insert_func() return trigger as 
     begin
         insert into test_trigger_des_tbl values(new.id1, new.id2, new.id3);
         return new;
