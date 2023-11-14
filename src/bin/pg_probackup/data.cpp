@@ -1732,8 +1732,8 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
                                     XLogRecPtr stop_lsn, PageState *page_st,
                                     uint32 checksum_version)
 {
-    // if page is new page , skip validate
-    if (PageIsNew(page) && PageIsEmpty(page))
+    /* if mode is DSS, skip page validate */
+    if (IsDssMode())
     {
         return PAGE_IS_VALID;
     }
