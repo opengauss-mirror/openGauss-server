@@ -24,7 +24,9 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
-ERROR:  syntax error.
+ERROR:  or replace is not supported here.
+LINE 1: create or replace trigger animal_trigger1
+               ^
 \c db_mysql
 create table t (id int);
 create table t1 (id int);
@@ -78,7 +80,9 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
-ERROR:  syntax error.
+ERROR:  or replace is not supported here.
+LINE 1: create or replace trigger animal_trigger1
+               ^
 --different type trigger follows|precedes
 create trigger animal_trigger2
 before insert on animals
