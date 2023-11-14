@@ -956,64 +956,68 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             AssertEreport(IsA(field1, String), MOD_OPT, "");
             relname = strVal(field1);
 
-            /* Locate the referenced RTE */
-            if (hasplus) {
-                rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, NULL);
-            } else {
-                rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, &levels_up);
-            }
-
-            /* check if it's sequence function call, like: sequence1.nextval */
-            if (rte == NULL && IsSequenceFuncCall(NULL, field1, field2)) {
-                return transformSequenceFuncCall(pstate, NULL, field1, field2, cref->location);
-
-            } else if (rte == NULL) {
-                crerr = CRERR_NO_RTE;
-                break;
-            }
-
-            /* Whole-row reference? */
-            if (IsA(field2, A_Star)) {
-                if (OrientedIsCOLorPAX(rte) || RelIsSpecifiedFTbl(rte, HDFS) || RelIsSpecifiedFTbl(rte, OBS)) {
-                    Node* row_expr = convertStarToCRef(rte, NULL, NULL, relname, cref->location);
-                    node = transformExprRecurse(pstate, row_expr);
+            ParseState* old_pstate = pstate;
+            do {
+                /* Locate the referenced RTE */
+                if (hasplus) {
+                    rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, NULL);
                 } else {
-                    node = transformWholeRowRef(pstate, rte, cref->location);
-                }
-                break;
-            }
-
-            AssertEreport(IsA(field2, String), MOD_OPT, "");
-            colname = strVal(field2);
-
-            if (rte->rtekind == RTE_SUBQUERY && rte->swSubExist) {
-                cref = fixSWNameSubLevel(rte, relname, &colname);
-            }
-
-            if (pstate->p_hasStartWith || rte->swConverted) {
-                Node *expr = transformStartWithColumnRef(pstate, cref, &colname);
-
-                /* function case, return directly */
-                if (expr != NULL) {
-                    return expr;
+                    rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, &levels_up);
                 }
 
-                if (strstr(colname, "@")) {
-                    ListCell *lc = NULL;
+                /* check if it's sequence function call, like: sequence1.nextval */
+                if (rte == NULL && IsSequenceFuncCall(NULL, field1, field2)) {
+                    return transformSequenceFuncCall(pstate, NULL, field1, field2, cref->location);
 
-                    foreach(lc, pstate->p_rtable) {
-                        RangeTblEntry *tbl = (RangeTblEntry *)lfirst(lc);
+                } else if (rte == NULL) {
+                    crerr = CRERR_NO_RTE;
+                    break;
+                }
 
-                        if (tbl->relname != NULL &&
-                            strcmp(tbl->relname, "tmp_reuslt") == 0) {
-                            rte = tbl;
-                            break;
+                /* Whole-row reference? */
+                if (IsA(field2, A_Star)) {
+                    if (OrientedIsCOLorPAX(rte) || RelIsSpecifiedFTbl(rte, HDFS) || RelIsSpecifiedFTbl(rte, OBS)) {
+                        Node* row_expr = convertStarToCRef(rte, NULL, NULL, relname, cref->location);
+                        node = transformExprRecurse(pstate, row_expr);
+                    } else {
+                        node = transformWholeRowRef(pstate, rte, cref->location);
+                    }
+                    break;
+                }
+
+                AssertEreport(IsA(field2, String), MOD_OPT, "");
+                colname = strVal(field2);
+
+                if (rte->rtekind == RTE_SUBQUERY && rte->swSubExist) {
+                    cref = fixSWNameSubLevel(rte, relname, &colname);
+                }
+
+                if (pstate->p_hasStartWith || rte->swConverted) {
+                    Node *expr = transformStartWithColumnRef(pstate, cref, &colname);
+
+                    /* function case, return directly */
+                    if (expr != NULL) {
+                        return expr;
+                    }
+
+                    if (strstr(colname, "@")) {
+                        ListCell *lc = NULL;
+
+                        foreach(lc, pstate->p_rtable) {
+                            RangeTblEntry *tbl = (RangeTblEntry *)lfirst(lc);
+
+                            if (tbl->relname != NULL &&
+                                strcmp(tbl->relname, "tmp_reuslt") == 0) {
+                                rte = tbl;
+                                break;
+                            }
                         }
                     }
                 }
-            }
 
-            node = ParseColumnRef(pstate, rte, colname, cref);
+                node = ParseColumnRef(old_pstate, rte, colname, cref);
+            } while (NULL == node && NULL != (pstate = pstate->parentParseState) && DB_IS_CMPT(A_FORMAT));
+            pstate = old_pstate;
             break;
         }
         case 3: {
@@ -1026,37 +1030,41 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             AssertEreport(IsA(field2, String), MOD_OPT, "");
             relname = strVal(field2);
 
-            /* Locate the referenced RTE */
-            if (hasplus) {
-                rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, NULL);
-            } else {
-                rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, &levels_up);
-            }
-
-            /* check if it's sequence function call, like: nsp.sequence.nextval */
-            if (rte == NULL && IsSequenceFuncCall(field1, field2, field3)) {
-                return transformSequenceFuncCall(pstate, field1, field2, field3, cref->location);
-
-            } else if (rte == NULL) {
-                crerr = CRERR_NO_RTE;
-                break;
-            }
-
-            /* Whole-row reference? */
-            if (IsA(field3, A_Star)) {
-                if (OrientedIsCOLorPAX(rte) || RelIsSpecifiedFTbl(rte, HDFS) || RelIsSpecifiedFTbl(rte, OBS)) {
-                    Node* row_expr = convertStarToCRef(rte, NULL, nspname, relname, cref->location);
-                    node = transformExprRecurse(pstate, row_expr);
+            ParseState* old_pstate = pstate;
+            do {
+                /* Locate the referenced RTE */
+                if (hasplus) {
+                    rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, NULL);
                 } else {
-                    node = transformWholeRowRef(pstate, rte, cref->location);
+                    rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, &levels_up);
                 }
-                break;
-            }
 
-            AssertEreport(IsA(field3, String), MOD_OPT, "");
-            colname = strVal(field3);
+                /* check if it's sequence function call, like: nsp.sequence.nextval */
+                if (rte == NULL && IsSequenceFuncCall(field1, field2, field3)) {
+                    return transformSequenceFuncCall(pstate, field1, field2, field3, cref->location);
 
-            node = ParseColumnRef(pstate, rte, colname, cref);
+                } else if (rte == NULL) {
+                    crerr = CRERR_NO_RTE;
+                    break;
+                }
+
+                /* Whole-row reference? */
+                if (IsA(field3, A_Star)) {
+                    if (OrientedIsCOLorPAX(rte) || RelIsSpecifiedFTbl(rte, HDFS) || RelIsSpecifiedFTbl(rte, OBS)) {
+                        Node* row_expr = convertStarToCRef(rte, NULL, nspname, relname, cref->location);
+                        node = transformExprRecurse(pstate, row_expr);
+                    } else {
+                        node = transformWholeRowRef(pstate, rte, cref->location);
+                    }
+                    break;
+                }
+
+                AssertEreport(IsA(field3, String), MOD_OPT, "");
+                colname = strVal(field3);
+
+                node = ParseColumnRef(old_pstate, rte, colname, cref);
+            } while (NULL == node && NULL != (pstate = pstate->parentParseState) && DB_IS_CMPT(A_FORMAT));
+            pstate = old_pstate;
             break;
         }
         case 4: {
@@ -1081,37 +1089,41 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
                 break;
             }
 
-            /* Locate the referenced RTE */
-            if (hasplus) {
-                rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, NULL);
-            } else {
-                rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, &levels_up);
-            }
-
-            /* check if it's sequence function call, like: nsp.sequence.nextval */
-            if (rte == NULL && IsSequenceFuncCall(field2, field3, field4)) {
-                return transformSequenceFuncCall(pstate, field2, field3, field4, cref->location);
-
-            } else if (rte == NULL) {
-                crerr = CRERR_NO_RTE;
-                break;
-            }
-
-            /* Whole-row reference? */
-            if (IsA(field4, A_Star)) {
-                if (OrientedIsCOLorPAX(rte) || RelIsSpecifiedFTbl(rte, HDFS) || RelIsSpecifiedFTbl(rte, OBS)) {
-                    Node* row_expr = convertStarToCRef(rte, catname, nspname, relname, cref->location);
-                    node = transformExprRecurse(pstate, row_expr);
+            ParseState* old_pstate = pstate;
+            do {
+                /* Locate the referenced RTE */
+                if (hasplus) {
+                    rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, NULL);
                 } else {
-                    node = transformWholeRowRef(pstate, rte, cref->location);
+                    rte = refnameRangeTblEntry(pstate, nspname, relname, cref->location, &levels_up);
                 }
-                break;
-            }
 
-            AssertEreport(IsA(field4, String), MOD_OPT, "");
-            colname = strVal(field4);
+                /* check if it's sequence function call, like: nsp.sequence.nextval */
+                if (rte == NULL && IsSequenceFuncCall(field2, field3, field4)) {
+                    return transformSequenceFuncCall(pstate, field2, field3, field4, cref->location);
 
-            node = ParseColumnRef(pstate, rte, colname, cref);
+                } else if (rte == NULL) {
+                    crerr = CRERR_NO_RTE;
+                    break;
+                }
+
+                /* Whole-row reference? */
+                if (IsA(field4, A_Star)) {
+                    if (OrientedIsCOLorPAX(rte) || RelIsSpecifiedFTbl(rte, HDFS) || RelIsSpecifiedFTbl(rte, OBS)) {
+                        Node* row_expr = convertStarToCRef(rte, catname, nspname, relname, cref->location);
+                        node = transformExprRecurse(pstate, row_expr);
+                    } else {
+                        node = transformWholeRowRef(pstate, rte, cref->location);
+                    }
+                    break;
+                }
+
+                AssertEreport(IsA(field4, String), MOD_OPT, "");
+                colname = strVal(field4);
+
+                node = ParseColumnRef(old_pstate, rte, colname, cref);
+            } while (NULL == node && NULL != (pstate = pstate->parentParseState) && DB_IS_CMPT(A_FORMAT));
+            pstate = old_pstate;
             break;
         }
         default:
