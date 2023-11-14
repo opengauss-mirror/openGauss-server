@@ -143,6 +143,12 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
     wal_cxt->totalXlogIterBytes = 0;
     wal_cxt->totalXlogIterTimes = 0;
     wal_cxt->xlogFlushStats = NULL;
+    wal_cxt->walSenderStats = (WalSenderStats*)palloc0(sizeof(WalSenderStats));
+    SpinLockInit(&wal_cxt->walSenderStats->mutex);
+    wal_cxt->walReceiverStats = (WalReceiverStats*)palloc0(sizeof(WalReceiverStats));
+    SpinLockInit(&wal_cxt->walReceiverStats->mutex);
+    wal_cxt->walRecvWriterStats = (WalRecvWriterStats*)palloc0(sizeof(WalRecvWriterStats));
+    SpinLockInit(&wal_cxt->walRecvWriterStats->mutex);
 }
 
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)

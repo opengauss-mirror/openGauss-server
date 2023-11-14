@@ -132,6 +132,8 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
     int byteswritten;
     int nRetCode = 0;
     Size write_bytes = nbytes;
+    instr_time startTime;
+    instr_time endTime;
 
     while (nbytes > 0) {
         int segbytes;
@@ -173,6 +175,7 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
             recvFile = XLogFileInit(recvSegNo, &use_existent, true);
             recvFileTLI = t_thrd.xlog_cxt.ThisTimeLineID;
             recvOff = 0;
+            g_instance.wal_cxt.walRecvWriterStats->currentXlogSegno = recvSegNo;
         }
 
         /* Calculate the start offset of the received logs */
@@ -194,8 +197,23 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
 
         /* OK to write the logs */
         errno = 0;
-
+        INSTR_TIME_SET_CURRENT(startTime);
         byteswritten = write(recvFile, buf, segbytes);
+        INSTR_TIME_SET_CURRENT(endTime);
+
+        if (g_instance.wal_cxt.walRecvWriterStats->isEnableStat) {
+            INSTR_TIME_SUBTRACT(endTime, startTime);
+            PgStat_Counter elapsedTime = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(endTime);
+            SpinLockAcquire(&g_instance.wal_cxt.walRecvWriterStats->mutex);
+            volatile bool recheck = g_instance.wal_cxt.walRecvWriterStats->isEnableStat;
+            if (recheck) {
+                g_instance.wal_cxt.walRecvWriterStats->totalWriteTime += elapsedTime;
+                g_instance.wal_cxt.walRecvWriterStats->totalWriteBytes += byteswritten;
+                g_instance.wal_cxt.walRecvWriterStats->writeTimes++;
+            }
+            SpinLockRelease(&g_instance.wal_cxt.walRecvWriterStats->mutex);
+        }
+
         if (byteswritten <= 0) {
             /* if write didn't set errno, assume no disk space */
             if (errno == 0)
@@ -220,7 +238,22 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
         nbytes -= byteswritten;
         buf += byteswritten;
 
+        INSTR_TIME_SET_CURRENT(startTime);
         issue_xlog_fsync(recvFile, recvSegNo);
+        INSTR_TIME_SET_CURRENT(endTime);
+
+        if (g_instance.wal_cxt.walRecvWriterStats->isEnableStat) {
+            INSTR_TIME_SUBTRACT(endTime, startTime);
+            PgStat_Counter elapsedTime = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(endTime);
+            SpinLockAcquire(&g_instance.wal_cxt.walRecvWriterStats->mutex);
+            volatile bool recheck = g_instance.wal_cxt.walRecvWriterStats->isEnableStat;
+            if (recheck) {
+                g_instance.wal_cxt.walRecvWriterStats->totalSyncBytes += byteswritten;
+                g_instance.wal_cxt.walRecvWriterStats->totalSyncTime += elapsedTime;
+                g_instance.wal_cxt.walRecvWriterStats->syncTimes++;
+            }
+            SpinLockRelease(&g_instance.wal_cxt.walRecvWriterStats->mutex);
+        }
 
         t_thrd.walrcvwriter_cxt.walStreamWrite = recptr;
 

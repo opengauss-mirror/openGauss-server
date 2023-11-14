@@ -982,6 +982,45 @@ typedef struct WALFlushWaitLockPadded WALFlushWaitLockPadded;
 typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
 typedef struct WALInitSegLockPadded WALInitSegLockPadded;
 typedef struct XlogFlushStats XlogFlushStatistics;
+
+typedef struct WalSenderStat {
+    uint64 sendTimes;
+    TimestampTz firstSendTime;
+    TimestampTz lastSendTime;
+    struct WalSnd* walsnd;
+} WalSenderStat;
+
+typedef struct WalSenderStats {
+    bool isEnableStat;
+    TimestampTz lastResetTime;
+    slock_t mutex;
+	WalSenderStat** stats;
+} WalSenderStats;
+
+typedef struct WalReceiverStats {
+    volatile bool isEnableStat;
+    uint64 bufferFullTimes;
+    uint64 wakeWriterTimes;
+    TimestampTz firstWakeTime;
+    TimestampTz lastWakeTime;
+    TimestampTz lastResetTime;
+    void* walRcvCtlBlock;
+    slock_t mutex;
+} WalReceiverStats;
+
+typedef struct WalRecvWriterStats {
+    volatile bool isEnableStat;
+    uint64 totalWriteBytes;
+    uint64 writeTimes;
+    uint64 totalWriteTime;
+    uint64 totalSyncBytes;
+    uint64 syncTimes;
+    uint64 totalSyncTime;
+    uint64 currentXlogSegno;
+    TimestampTz lastResetTime;
+    slock_t mutex;
+} WalRecvWriterStats;
+
 typedef struct knl_g_conn_context {
     volatile int CurConnCount;
     volatile int CurCMAConnCount;  /* Connection count of cm_agent after initialize, using for connection limit */
@@ -1015,6 +1054,9 @@ typedef struct knl_g_wal_context {
     uint64 totalXlogIterBytes;
     uint64 totalXlogIterTimes;
     XlogFlushStatistics* xlogFlushStats;
+    WalSenderStats* walSenderStats;
+    WalReceiverStats* walReceiverStats;
+    WalRecvWriterStats* walRecvWriterStats;
 } knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {

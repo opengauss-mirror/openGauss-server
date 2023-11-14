@@ -303,6 +303,24 @@ static void XLogSendLSN(void)
         sizeof(PrimaryKeepaliveMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(PrimaryKeepaliveMessage) + 1);
+
+    if (g_instance.wal_cxt.walSenderStats->isEnableStat) {
+        SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+        /* use volatile pointer to prevent code rearrangement */
+        volatile bool recheck = g_instance.wal_cxt.walSenderStats->isEnableStat;
+        if (recheck) {
+            TimestampTz curtime = GetCurrentTimestamp();
+            WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+            WalSenderStat* stat = g_instance.wal_cxt.walSenderStats->stats[walsnd->index];
+            if (stat->firstSendTime == 0) {
+                stat->firstSendTime = curtime;
+            }
+            stat->lastSendTime = curtime;
+            stat->sendTimes++;
+        }
+        SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
+    }
+
     /* Flush the keepalive message to standby immediately. */
     if (pq_flush_if_writable() != 0)
         WalSndShutdown();
@@ -4559,6 +4577,19 @@ static void InitWalSnd(void)
             walsnd->lastFlushChangeTime = 0;
             walsnd->lastApplyChangeTime = 0;
             SpinLockRelease(&walsnd->mutex);
+
+            SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+            if (g_instance.wal_cxt.walSenderStats->stats == nullptr) {
+                MemoryContext oldContext = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+                g_instance.wal_cxt.walSenderStats->stats = (WalSenderStat**)palloc0(
+                                        sizeof(WalSenderStat*) * g_instance.attr.attr_storage.max_wal_senders);
+                (void)MemoryContextSwitchTo(oldContext);
+            }
+            WalSenderStat* stat = (WalSenderStat*)palloc0(sizeof(WalSenderStat));
+            stat->walsnd = (WalSnd*)walsnd;
+            g_instance.wal_cxt.walSenderStats->stats[walsnd->index] = stat;
+            SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
+
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);
             t_thrd.walsender_cxt.MyWalSnd = (WalSnd *)walsnd;
@@ -4579,6 +4610,10 @@ static void InitWalSnd(void)
 static void WalSndReset(WalSnd *walsnd)
 {
     errno_t rc = 0;
+
+    SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+    pfree_ext(g_instance.wal_cxt.walSenderStats->stats[walsnd->index]);
+    SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->pid = 0;
@@ -5319,6 +5354,22 @@ static void XLogSendPhysical(void)
         SpinLockAcquire(&walsnd->mutex);
         walsnd->sentPtr = t_thrd.walsender_cxt.sentPtr;
         SpinLockRelease(&walsnd->mutex);
+
+        if (g_instance.wal_cxt.walSenderStats->isEnableStat) {
+            SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+            /* use volatile pointer to prevent code rearrangement */
+            volatile bool recheck = g_instance.wal_cxt.walSenderStats->isEnableStat;
+            if (recheck) {
+                TimestampTz curtime = GetCurrentTimestamp();
+                WalSenderStat* stat = g_instance.wal_cxt.walSenderStats->stats[walsnd->index];
+                if (stat->firstSendTime == 0) {
+                    stat->firstSendTime = curtime;
+                }
+                stat->lastSendTime = curtime;
+                stat->sendTimes++;
+            }
+            SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
+        }
     }
 
     /* Report progress of XLOG streaming in PS display */
