@@ -896,6 +896,21 @@ PL/pgSQL function f1(integer) line 2 at PERFORM
  
 (1 row)
 
+-- create package which has func with end name
+create or replace package trigger_test as
+    function tri_insert_func() return trigger;
+end trigger_test;
+/
+create or replace package body trigger_test as
+  function tri_insert_func() return trigger as
+        begin
+                insert into test_trigger_des_tbl values(new.id1, new.id2, new.id3);
+                return new;
+        end tri_insert_func;
+end trigger_test;
+/
+DROP PACKAGE trigger_test;
+NOTICE:  drop cascades to function pkg_user2.tri_insert_func()
 \c regression
 drop database db;
 drop user pkg_user1;

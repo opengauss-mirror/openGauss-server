@@ -16300,6 +16300,15 @@ pkg_body_subprogram: {
                             }
                             continue;
                         }
+                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && pre_tok == ';' && tok == IDENT && in_procedure)
+                        {
+                            block_level = block_level - 1;
+                            if (block_level == 0)
+                            {
+                                in_procedure = false;
+                            }
+                            continue;
+                        }
 						if (tok == LOOP || tok == IF_P || tok == CASE || tok == WHILE_P || tok == REPEAT)
 						{
 							continue;
@@ -16923,6 +16932,11 @@ subprogram_body: 	{
 							&& tok != WHILE_P
 							&& tok != REPEAT)
 						{
+							if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';')
+							{
+								proc_e = yylloc;
+								break;
+							}
 							tok = END_P;
 							continue;
 						}
