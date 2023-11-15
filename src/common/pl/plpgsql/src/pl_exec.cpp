@@ -5951,6 +5951,11 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
             estate->retval = exec_eval_expr(estate, stmt->expr, &(estate->retisnull), &(estate->rettype));
             plpgsql_set_outparam_value(estate, stmt->expr);
             if (estate->rettype == REFCURSOROID) {
+                if (estate->cursor_return_data == NULL) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_DATATYPE_MISMATCH), errmodule(MOD_PLSQL),
+                        errmsg("return type is inconsistent, declared return type is not sys_refcursor.")));
+                }
                 CopyCursorInfoData(estate->cursor_return_data, &estate->eval_econtext->cursor_data);
             }
         }

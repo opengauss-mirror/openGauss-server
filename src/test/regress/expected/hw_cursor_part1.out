@@ -1029,9 +1029,41 @@ FETCH BACKWARD FROM sc;
 (1 row)
 
 END;
+ -- test return REFCURSOR
+CREATE FUNCTION function0() 
+RETURNS INT LANGUAGE PLPGSQL 
+AS $$ 
+DECLARE 
+    variable3 REFCURSOR = 1;
+BEGIN 
+    RETURN variable3; 
+END; 
+$$;
+ -- expect an error
+SELECT function0();
+ERROR:  return type is inconsistent, declared return type is not sys_refcursor.
+CONTEXT:  PL/pgSQL function function0() line 5 at RETURN
+referenced column: function0
+DROP FUNCTION function0; 
+CREATE FUNCTION function0() 
+RETURNS REFCURSOR LANGUAGE PLPGSQL 
+AS $$ 
+DECLARE 
+    variable3 REFCURSOR = 1;
+BEGIN 
+    RETURN variable3; 
+END; 
+$$;
+ -- expect no error
+select function0();
+ function0 
+-----------
+ 1
+(1 row)
+
  -- clean up
 DROP SCHEMA hw_cursor_part1 CASCADE;
-NOTICE:  drop cascades to 21 other objects
+NOTICE:  drop cascades to 22 other objects
 DETAIL:  drop cascades to table company
 drop cascades to table tbl
 drop cascades to function sp_testsp()
@@ -1053,5 +1085,6 @@ drop cascades to function i_inout(refcursor)
 drop cascades to table t1_refcursor
 drop cascades to function p3_refcursor()
 drop cascades to function p3(integer)
+drop cascades to function function0()
 \c regression;
 drop database IF EXISTS pl_test_cursor_part1;
