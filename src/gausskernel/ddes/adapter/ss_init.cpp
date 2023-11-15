@@ -558,8 +558,10 @@ void StartupWaitReform()
 {
     while (g_instance.dms_cxt.SSReformInfo.in_reform) {
         if (dms_reform_failed() || dms_reform_last_failed()) {
-            ereport(LOG, (errmsg("[SS reform] reform failed, startup no need wait.")));
-            break;
+            if (g_instance.dms_cxt.SSReformInfo.in_reform) {
+                ereport(LOG, (errmsg("[SS reform] reform failed, startup no need wait.")));
+                break;
+            }
         }
         pg_usleep(5000L);
     }

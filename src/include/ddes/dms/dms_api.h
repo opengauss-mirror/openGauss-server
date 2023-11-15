@@ -701,8 +701,8 @@ typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned cha
 typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
     unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
-typedef int(*dms_need_flush)(void *db_handle, char *pageid);
-typedef int(*dms_edp_to_owner)(void *db_handle, char *pageid);
+typedef int(*dms_need_flush)(void *db_handle, char *pageid, unsigned char *is_edp);
+typedef int(*dms_edp_to_owner)(void *db_handle, char *pageid, unsigned char *is_edp);
 typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
@@ -813,7 +813,7 @@ typedef unsigned short (*dms_get_sid_by_rmid)(void *db_handle, unsigned short rm
 typedef void (*dms_get_txn_dlock_by_rmid)(void *db_handle, unsigned short rmid, char *dlock, unsigned int dlock_len);
 typedef void (*dms_get_rowid_by_rmid)(void *db_handle, unsigned short rmid, char rowid[DMS_ROWID_SIZE]);
 typedef void (*dms_get_sql_from_session)(void *db_handle, unsigned short sid, char *sql_str, unsigned int sql_str_len);
-typedef void (*dms_get_itl_lock_by_xid)(void *db_handle, char xid[DMS_XID_SIZE], char *ilock, unsigned int ilock_len);
+typedef int (*dms_get_itl_lock_by_xid)(void *db_handle, char xid[DMS_XID_SIZE], char *ilock, unsigned int ilock_len);
 typedef void (*dms_check_tlock_status)(void *db_handle, unsigned int type, unsigned short sid,
     unsigned long long tableid, unsigned int *in_use);
 typedef void (*dms_get_tlock_msg_by_tid)(void *db_handle, unsigned long long table_id, unsigned int type, char *rsp,
@@ -1064,7 +1064,7 @@ typedef enum en_dms_info_id {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           107
+#define DMS_LOCAL_VERSION           110
 #ifdef __cplusplus
 }
 #endif
