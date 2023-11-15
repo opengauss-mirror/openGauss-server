@@ -64,3 +64,9 @@ drop table test_roundrobin;
 
 --insert into pg_auth_history
 insert into pg_auth_history values(10, '2015-110-10 08:00:00.57603+08', 'sha256232f8630ce6af1095f6db3ed4c05a48747038936d42176e1103594d43c7d1adc4aca54361a23e51c6cd9371ccc95776450219376e45bcca01e27a7f06bf8088a8b1a9e280cdcc315c8134879818442bc3e92064a70e27b2ea83fcf6990a607d0');
+
+-- insert upsert
+drop table if exists t_grammer;
+create table t_grammer(c1 INT PRIMARY KEY, c2 int, C3 INT[3]);
+insert into t_grammer values(12,2) on duplicate key update c2=2,c3[1]=3;
+select * from t_grammer;

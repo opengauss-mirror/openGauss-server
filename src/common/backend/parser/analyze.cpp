@@ -1626,19 +1626,21 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
     for (int ni = 0; ni < len; ++ni) {
         ResTarget* res = (ResTarget*)lfirst(target);
         char* name = nullptr;
-        if (list_length(res->indirection) > 0) {
-            name = ((Value*)llast(res->indirection))->val.str;
+        if (list_length(res->indirection) > 0 && IsA(linitial(res->indirection), String)) {
+            name = strVal(linitial(res->indirection));
         } else {
             name = res->name;
         }
 
-        for (int ci = 0; ci < colNum; ++ci) {
-            if (attr[ci].attisdropped) {
-                continue;
-            }
-            if (strcmp(name, attr[ci].attname.data) == 0) {
-                rstate->usExplicitAttrNos[ni] = ci + 1;
-                break;
+        if (name != NULL) {
+            for (int ci = 0; ci < colNum; ++ci) {
+                if (attr[ci].attisdropped) {
+                    continue;
+                }
+                if (strcmp(name, attr[ci].attname.data) == 0) {
+                    rstate->usExplicitAttrNos[ni] = ci + 1;
+                    break;
+                }
             }
         }
 
