@@ -984,6 +984,8 @@ typedef struct knl_u_plancache_context {
      * The keys for this hash table are the arguments to PREPARE and EXECUTE
      * (statement names); the entries are PreparedStatement structs.
      */
+    pthread_mutex_t pstmt_htbl_lock;
+
     HTAB* prepared_queries;
 
     HTAB* stmt_lightproxy_htab; /* mapping statement name and lightproxy obj, only for gpc */

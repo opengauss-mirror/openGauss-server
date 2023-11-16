@@ -1,0 +1,11 @@
+drop table if exists table_test_prepared_statement1;
+NOTICE:  table "table_test_prepared_statement1" does not exist, skipping
+create table table_test_prepared_statement1 (a int);
+prepare stmt1_in_session1 as insert into table_test_prepared_statement1 values (1);
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop table table_test_prepared_statement1;
