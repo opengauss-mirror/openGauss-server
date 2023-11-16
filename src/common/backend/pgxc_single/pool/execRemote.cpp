@@ -694,6 +694,7 @@ static void adps_array_append(SpqScanAdpReqs *array, SpqAdpScanReqState *state)
         array->req_states = (SpqAdpScanReqState **)palloc(size * 2);
         errno_t rc = memcpy_s(array->req_states, size * 2, temp, size);
         securec_check(rc, "\0", "\0");
+        array->max *= 2;
         pfree(temp);
     }
     array->req_states[array->size - 1] = state;
@@ -1357,12 +1358,12 @@ PGXCNodeHandle* InitSPQMultinodeExecutor(Oid nodeoid, char* nodename)
     result->remote_node_type = VDATANODE;
     return result;
 }
-void spq_release_conn(RemoteQueryState* planstate) 
+void spq_release_conn(RemoteQueryState* planstate)
 {
     if (planstate == NULL) {
         return;
     }
-     for (int i = 0; i < planstate->node_count ; i++) {
+    for (int i = 0; i < planstate->node_count ; i++) {
         if (planstate->nodeCons != NULL && planstate->nodeCons[i] != NULL) {
             PGXCNodeClose(planstate->nodeCons[i]);
             planstate->nodeCons[i] = NULL;
@@ -1380,14 +1381,13 @@ void spq_release_conn(RemoteQueryState* planstate)
     pfree_ext(planstate->nodeCons);
     planstate->spq_connections_info = NULL;
     planstate->nodeCons = NULL;
-
 }
 PGXCNodeHandle** spq_get_exec_connections(
     RemoteQueryState* planstate, ExecNodes* exec_nodes, RemoteQueryExecType exec_type)
 {
     int dn_conn_count;
     PlannedStmt* planstmt = planstate->ss.ps.state->es_plannedstmt;
- 
+
     /* Set datanode list and DN number */
     /* Set Coordinator list and Coordinator number */
     // QD count
@@ -1396,7 +1396,7 @@ PGXCNodeHandle** spq_get_exec_connections(
     planstate->spq_connections_info = (PGXCNodeHandle **)palloc(dn_conn_count * sizeof(PGXCNodeHandle *));
     planstate->nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dn_conn_count);
     planstate->node_count = dn_conn_count;
- 
+
     Oid *dnNode = (Oid *)palloc0(sizeof(Oid) * dn_conn_count);
     PGconn **nodeCons = planstate->nodeCons;
     char **connectionStrs = (char **)palloc0(sizeof(char *) * dn_conn_count);
@@ -1435,10 +1435,8 @@ PGXCNodeHandle** spq_get_exec_connections(
  
     PQconnectdbParallel(connectionStrs, dn_conn_count, nodeCons, dnNode);
 
-
     //ListCell *node_list_item = NULL;
     for (int i = 0; i < dn_conn_count; i++) {
-        
         if (nodeCons[i] && (CONNECTION_OK == nodeCons[i]->status)) {
             pgxc_node_init(connections[i], nodeCons[i]->sock);
         } else {

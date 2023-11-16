@@ -386,6 +386,10 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     /* Copy the plan's saved query string into the portal's memory */
     query_string = MemoryContextStrdup(PortalGetHeapMemory(portal), entry->plansource->query_string);
 
+    if (!intoClause) {
+        psrc->cursor_options |= CURSOR_OPT_SPQ_OK;
+    }
+
     /* Replan if needed, and increment plan refcount for portal */
     if (ENABLE_CACHEDPLAN_MGR) {
         cplan = GetWiseCachedPlan(psrc, paramLI, false);
@@ -1358,6 +1362,10 @@ void ExplainExecuteQuery(
     }
 
     u_sess->attr.attr_sql.explain_allow_multinode = true;
+
+    if (!into) {
+        psrc->cursor_options |= CURSOR_OPT_SPQ_OK;
+    }
 
     if (ENABLE_CACHEDPLAN_MGR) {
         cplan = GetWiseCachedPlan(psrc, paramLI, true);

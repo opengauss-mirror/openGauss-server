@@ -2111,7 +2111,6 @@ typedef struct Query {
 #ifdef USE_SPQ
     void* intoPolicy;
     ParentStmtType parentStmtType;
-    bool is_support_spq;
 #endif
 } Query;
 

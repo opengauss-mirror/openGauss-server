@@ -531,6 +531,8 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     bool use_tenant = false;
     List* parse_hint_warning = NIL;
 
+    if (cursorOptions & CURSOR_OPT_SPQ_OK)
+        cursorOptions &= ~CURSOR_OPT_SPQ_OK;
     //if it is pgxc plan for tsstore delete sql.errport
     if((!u_sess->attr.attr_sql.enable_stream_operator || !u_sess->opt_cxt.is_stream) && IS_PGXC_COORDINATOR) {
         checkTsstoreQuery(parse);
