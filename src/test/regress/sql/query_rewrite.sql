@@ -187,5 +187,12 @@ explain  (verbose, costs off) select * from t2 where t2.c1 in (select t1.c1 from
 drop table if exists t1;
 drop table if exists t2;
 
+CREATE TABLE table1 ( column63 INT , column44 INT ) ;
+SELECT 1 FROM ( SELECT 1 FROM table1 WHERE NOT EXISTS ( SELECT 1 WHERE column63 = column44 ) ) AS alias1 ;
+insert into table1 values(2,3);
+insert into table1 values(4,4);
+SELECT 1 FROM ( SELECT 1 FROM table1 WHERE NOT EXISTS ( SELECT 1 WHERE column63 = column44 ) ) AS alias1 ;
+drop table table1;
+
 drop schema query_rewrite cascade;
 reset current_schema;
