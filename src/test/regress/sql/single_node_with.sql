@@ -930,3 +930,8 @@ WITH t AS (
 )
 VALUES(FALSE);
 DROP RULE y_rule ON y;
+
+-- the table where the field of the subquery's 'order-by' clause is located is in the outer query's 'from' clause
+CREATE TABLE table0 ( column3 INT ) ;
+WITH t1 AS ( SELECT 1 , 1 column10 ) SELECT ( SELECT 1 FROM table0 ORDER BY column10 NULLS FIRST ) FROM t1;
+drop table table0;
