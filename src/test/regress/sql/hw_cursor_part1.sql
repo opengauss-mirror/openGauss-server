@@ -834,6 +834,32 @@ MOVE FORWARD 10 IN sc;
 FETCH BACKWARD FROM sc;
 END;
 
+ -- test return REFCURSOR
+CREATE FUNCTION function0() 
+RETURNS INT LANGUAGE PLPGSQL 
+AS $$ 
+DECLARE 
+    variable3 REFCURSOR = 1;
+BEGIN 
+    RETURN variable3; 
+END; 
+$$;
+ -- expect an error
+SELECT function0();
+
+DROP FUNCTION function0; 
+CREATE FUNCTION function0() 
+RETURNS REFCURSOR LANGUAGE PLPGSQL 
+AS $$ 
+DECLARE 
+    variable3 REFCURSOR = 1;
+BEGIN 
+    RETURN variable3; 
+END; 
+$$;
+ -- expect no error
+select function0();
+
  -- clean up
 DROP SCHEMA hw_cursor_part1 CASCADE;
 \c regression;
