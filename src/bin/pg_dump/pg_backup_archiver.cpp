@@ -298,21 +298,96 @@ void SetArchiveRestoreOptions(Archive* AHX, RestoreOptions* ropt)
     }
 }
 
+static char* try_remove_nsname_in_drop_stmt(RestoreOptions* ropt, const char *stmt, int len)
+{
+    char* dropStmt = NULL;
+    if (ropt->targetV1 || ropt->targetV5) {
+        char *result = (char *)pg_malloc(len);
+        errno_t tnRet = 0;
+        tnRet = memset_s(result, len, 0, len);
+        securec_check_c(tnRet, "\0", "\0");
+        take_down_nsname_in_drop_stmt(stmt, result, len);
+        dropStmt = gs_strdup(result);
+        free(result);
+    } else {
+        dropStmt = gs_strdup(stmt);
+    }
+    return dropStmt;
+}
+
 static void out_drop_stmt(ArchiveHandle* AH, const TocEntry* te)
 {
     RestoreOptions* ropt = AH->ropt;
-
-    if (ropt->targetV1 || ropt->targetV5) {
-        char *result = (char *)pg_malloc(strlen(te->dropStmt) + PATCH_LEN);
-        errno_t tnRet = 0;
-        tnRet = memset_s(result, strlen(te->dropStmt) + PATCH_LEN, 0, strlen(te->dropStmt) + PATCH_LEN);
-        securec_check_c(tnRet, "\0", "\0");
-        take_down_nsname_in_drop_stmt(te->dropStmt, result, strlen(te->dropStmt) + PATCH_LEN);
-        
-        ahprintf(AH, "%s", result);
-        free(result);
-    } else {
-        ahprintf(AH, "%s", te->dropStmt);
+    char* dropStmt = NULL;
+    char* dropStmtOrig = NULL;
+    errno_t	rc = EOK;
+    if (*te->dropStmt != '\0')
+    {
+        dropStmt = try_remove_nsname_in_drop_stmt(ropt, te->dropStmt, strlen(te->dropStmt) + PATCH_LEN);
+        dropStmtOrig = dropStmt;
+        if (strstr(te->dropStmt, "IF EXISTS") != NULL ||
+            strncmp(te->dropStmt, "--", 2) == 0) {
+            /* if it's just a comment (as happends for the public schema) or  
+             * already contains if-exists clause, then just use the original 
+             */
+            ahprintf(AH, "%s", dropStmt);
+        }
+        else {
+            PQExpBuffer ftStmt = createPQExpBuffer();
+            /*
+            * Need to inject IF EXISTS clause after ALTER
+            * TABLE part in ALTER TABLE .. DROP statement
+            */
+            if (strncmp(dropStmt, "ALTER TABLE", 11) == 0) {
+                appendPQExpBuffer(ftStmt,
+                                    "ALTER TABLE IF EXISTS");
+                dropStmt = dropStmt + 11;
+            }
+            /*
+            * Cases that should be emitted unchanged:
+            * ALTER TABLE..ALTER COLUMN..DROP DEFAULT
+            * DATABASE PROPERTIES as well
+            * CREATE OR REPLACE VIEW as a means of quasi-dropping an ON SELECT rule
+            */
+            if (strcmp(te->desc, "DEFAULT") == 0 ||
+                strcmp(te->desc, "DATABASE PROPERTIES") == 0 ||
+                strncmp(dropStmt, "CREATE OR REPLACE VIEW", 22) == 0) {
+                appendPQExpBufferStr(ftStmt, dropStmt);
+            }
+            /**
+             * For other object types, extract the first part of the DROP 
+             * which includes the object type.  Most of the time this matches
+             * te->desc, so search for that; however for the different kinds of CONSTRAINTs,
+             * search for hardcoded "DROP CONSTRAINT" instead.
+             */
+            else {
+                char buffer[PATCH_LEN];
+                char *mark;
+                if (strcmp(te->desc, "CONSTRAINT") == 0 ||
+                    strcmp(te->desc, "CHECK CONSTRAINT") == 0 ||
+                    strcmp(te->desc, "FK CONSTRAINT") == 0) {
+                    rc = strcpy_s(buffer, PATCH_LEN, "DROP CONSTRAINT");
+                    securec_check(rc, "\0", "\0");
+                } else {
+                    rc = snprintf_s(buffer, sizeof(buffer), sizeof(buffer) -1, "DROP %s", te->desc);
+                    securec_check(rc, "\0", "\0");
+                }
+                mark = strstr(dropStmt, buffer);
+                if (mark) {
+                    *mark = '\0';
+                    appendPQExpBuffer(ftStmt, "%s%s IF EXISTS%s",
+                                        dropStmt, buffer,
+                                        mark + strlen(buffer));
+                }
+                else {
+                    /* could not find where to insert IF EXISTS in statement and emit unmodified command */
+                    appendPQExpBufferStr(ftStmt, dropStmt);
+                }
+            }
+            ahprintf(AH, "%s", ftStmt->data);
+            destroyPQExpBuffer(ftStmt);
+            free(dropStmtOrig);
+        }
     }
 }
 /* Public */
