@@ -28,6 +28,12 @@
 extern "C" {
 #endif
 
+#define DMS_LOCAL_MAJOR_VER_WEIGHT  1000000
+#define DMS_LOCAL_MINOR_VER_WEIGHT  1000
+#define DMS_LOCAL_MAJOR_VERSION     0
+#define DMS_LOCAL_MINOR_VERSION     0
+#define DMS_LOCAL_VERSION           113
+
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
 #ifdef OPENGAUSS
@@ -87,6 +93,7 @@ typedef enum en_dms_dr_type {
     DMS_DR_TYPE_SEQVAL = 25,
     DMS_DR_TYPE_SHARED_INNODE = 26,
     DMS_DR_TYPE_PROC_ENTRY = 27,
+    DMS_DR_TYPE_PART_TABLE,
     DMS_DR_TYPE_MAX,
 } dms_dr_type_t;
 
@@ -221,6 +228,7 @@ typedef enum st_dms_cr_status_t {
     DMS_CR_STATUS_OTHER_NODE_INVISIBLE_TXN, /* other node invisible transaction */
     DMS_CR_STATUS_PENDING_TXN,              /* prepared transaction */
     DMS_CR_STATUS_ALL_VISIBLE,
+    DMS_CR_STATUS_DB_NOT_READY,             /* db is not ready for tx */
 } dms_cr_status_t;
 
 typedef struct st_dms_cr_assist_t {
@@ -799,6 +807,7 @@ typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_i
 typedef void (*dms_reset_user)(void *db_handle, unsigned long long list_in);
 typedef int (*dms_drc_xa_res_rebuild)(void *db_handle, unsigned char thread_index, unsigned char parall_num);
 typedef void (*dms_reform_shrink_xa_rms)(unsigned char undo_seg_id);
+typedef void (*dms_ckpt_unblock_rcy_local)(void *db_handle, unsigned long long list_in);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
@@ -845,6 +854,7 @@ typedef int (*dms_end_xa)(void *db_handle, void *knl_xa_xid, unsigned long long 
     unsigned char is_commit);
 typedef unsigned char (*dms_xa_inuse)(void *db_handle, void *knl_xa_xid);
 typedef int (*dms_get_part_changed)(void *db_handle, char* resid);
+typedef void (*dms_edpp_func_t)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef struct st_dms_callback {
     // used in reform
     dms_get_list_stable get_list_stable;
@@ -877,6 +887,7 @@ typedef struct st_dms_callback {
     dms_reset_user reset_user;
     dms_drc_xa_res_rebuild dms_reform_rebuild_xa_res;
     dms_reform_shrink_xa_rms dms_shrink_xa_rms;
+    dms_ckpt_unblock_rcy_local ckpt_unblock_rcy_local;
 
     // used in reform for opengauss
     dms_thread_init_t dms_thread_init;
@@ -989,6 +1000,8 @@ typedef struct st_dms_callback {
     dms_end_xa end_xa;
     dms_xa_inuse xa_inuse;
     dms_get_part_changed get_part_changed;
+
+    dms_edpp_func_t cache_page;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1060,11 +1073,6 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
 
-#define DMS_LOCAL_MAJOR_VER_WEIGHT  1000000
-#define DMS_LOCAL_MINOR_VER_WEIGHT  1000
-#define DMS_LOCAL_MAJOR_VERSION     0
-#define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           110
 #ifdef __cplusplus
 }
 #endif
