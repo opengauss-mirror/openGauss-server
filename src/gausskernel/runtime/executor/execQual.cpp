@@ -3540,32 +3540,25 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
     cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
 
     if (func->funcformat == COERCE_EXPLICIT_CAST || func->funcformat == COERCE_IMPLICIT_CAST) {
-        target_type = func->funcresulttype;
-        source_type = fcache->fcinfo_data.argTypes[0];
 
         HeapTuple proc_tuple = SearchSysCache(PROCOID, ObjectIdGetDatum(func->funcid), 0, 0, 0);
         if (HeapTupleIsValid(proc_tuple)) {
             Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tuple);
             source_type = proc_struct->proargtypes.values[0];
             ReleaseSysCache(proc_tuple);
-        }
-        HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
-                                                ObjectIdGetDatum(target_type));
-
-        if (HeapTupleIsValid(cast_tuple)) {
-            Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
-            int castowner_Anum = Anum_pg_cast_castowner;
-            if (castowner_Anum <= (int)HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
-                bool isnull = true;
-                Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
-                if (!isnull) {
-                    u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
-                } else {
-                    u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
-                }
+            target_type = func->funcresulttype;
+            HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
+                                                   ObjectIdGetDatum(target_type));
+            if (HeapTupleIsValid(cast_tuple)) {
+               bool isnull = false;
+               Datum datum = SysCacheGetAttr(CASTSOURCETARGET, cast_tuple, Anum_pg_cast_castowner, &isnull);
+               if (!isnull) {
+                   u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
+               } else {
+                   u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
+               }
+               ReleaseSysCache(cast_tuple);
             }
-            heap_close(cast_rel, AccessShareLock);
-            ReleaseSysCache(cast_tuple);
         }
     }
 

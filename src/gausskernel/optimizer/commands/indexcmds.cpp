@@ -5411,7 +5411,7 @@ static void CheckIndexParamsNumber(IndexStmt* stmt) {
 
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
 {
-    if (!PartExprKeyIsNull(rel, NULL)) {
+    if (!PartExprKeyIsNull(rel)) {
         return false;
     }
     int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
