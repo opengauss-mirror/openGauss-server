@@ -89,7 +89,7 @@ typedef struct ss_recovery_info {
     char recovery_xlog_dir[MAXPGPATH];
     int recovery_inst_id;
     volatile SSGlobalClusterState cluster_ondemand_status;
-    int instid_list[DMS_MAX_INSTANCE];
+    char xlog_list[DMS_MAX_INSTANCE][MAXPGPATH];;
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
     bool ready_to_startup;              // when DB start (except failover), the flag will set true
