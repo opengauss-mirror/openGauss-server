@@ -722,7 +722,7 @@ static void ExplainOneQuery(
     AFTER_EXPLAIN_APPLY_SET_HINT();
     PG_TRY();
     {
-        plan = pg_plan_query(query, 0, params, true);
+        plan = pg_plan_query(query, CURSOR_OPT_SPQ_OK, params, true);
     }
     PG_CATCH();
     {

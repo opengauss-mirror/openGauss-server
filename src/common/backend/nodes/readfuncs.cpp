@@ -1655,13 +1655,6 @@ static Query* _readQuery(void)
     IF_EXIST(indexhintList) {
         READ_NODE_FIELD(indexhintList);
     }
-#ifdef USE_SPQ
-    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
-        IF_EXIST(is_support_spq) {
-            READ_BOOL_FIELD(is_support_spq);
-        }
-    }
-#endif
 
     READ_DONE();
 }

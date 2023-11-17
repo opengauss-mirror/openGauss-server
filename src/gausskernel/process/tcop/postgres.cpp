@@ -2830,7 +2830,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             }
         }
 
-        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+        plantree_list = pg_plan_queries(querytree_list, CURSOR_OPT_SPQ_OK, NULL);
 
         /* sqladvisor collect query */
         collectSimpleQuery(query_string, isCollect);
@@ -5037,6 +5037,7 @@ static void exec_bind_message(StringInfo input_message)
 
     pq_getmsgend(input_message);
 
+    psrc->cursor_options |= CURSOR_OPT_SPQ_OK;
     /*
      * Obtain a plan from the CachedPlanSource.  Any cruft from (re)planning
      * will be generated in t_thrd.mem_cxt.msg_mem_cxt.  The plan refcount will be

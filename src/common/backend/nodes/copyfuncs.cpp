@@ -4879,11 +4879,6 @@ static Query* _copyQuery(const Query* from)
         COPY_SCALAR_FIELD(isReplace);
     }
     COPY_NODE_FIELD(indexhintList);
-#ifdef USE_SPQ
-    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
-        COPY_SCALAR_FIELD(is_support_spq);
-    }
-#endif
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 

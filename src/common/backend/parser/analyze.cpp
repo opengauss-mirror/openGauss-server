@@ -2776,9 +2776,6 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     ListCell* l = NULL;
 
     qry->commandType = CMD_SELECT;
-#ifdef USE_SPQ
-    qry->is_support_spq = true;
-#endif
 
     if (stmt->startWithClause != NULL) {
         pstate->p_addStartInfo = true;

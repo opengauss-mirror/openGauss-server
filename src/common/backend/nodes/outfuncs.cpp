@@ -4870,11 +4870,6 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= INDEX_HINT_VERSION_NUM) {
         WRITE_NODE_FIELD(indexhintList);
     }
-#ifdef USE_SPQ
-    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
-        WRITE_BOOL_FIELD(is_support_spq);
-    }
-#endif
 }
 
 static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)

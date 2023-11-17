@@ -2711,7 +2711,7 @@ namespace spqdxl {
     class CDXLTokens;
     class CParseHandlerFactory;
 }
- 
+
 namespace spqos {
     class CMemoryPool;
     class CMemoryPoolManager;
@@ -2720,17 +2720,16 @@ namespace spqos {
     class CCacheFactory;
     class CMessageRepository;
 }
- 
+
 namespace spqmd {
     class IMDCacheObject;
 }
- 
+
 namespace spqopt {
     class CMDKey;
     class CXformFactory;
 }
- 
- 
+
 typedef struct knl_u_spq_context {
     /* dxl information */
     spqdxl::CDXLMemoryManager* dxl_memory_manager;
