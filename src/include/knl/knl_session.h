@@ -2761,6 +2761,7 @@ typedef struct knl_u_spq_context {
     MemoryContext s_tupSerMemCtxt;
     int32 spq_max_tuple_chunk_size;
     bool spq_opt_initialized;
+    List *remoteQuerys;
 } knl_u_spq_context;
 #endif
 

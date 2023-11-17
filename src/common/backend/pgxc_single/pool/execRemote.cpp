@@ -243,7 +243,7 @@ void setSocketError(const char* msg, const char* node_name)
 #define CONN_SCTP_ERR_7 "1059   Wait poll unknow error"
 
 #ifdef USE_SPQ
- 
+void spq_finishQcThread(void);
 void CopyDataRowTupleToSlot(RemoteQueryState* combiner, TupleTableSlot* slot);
 static void HandleCopyOutComplete(RemoteQueryState* combiner);
 static void HandleCommandComplete(
@@ -1014,94 +1014,98 @@ static void ExecInitPlanState(PlanState* plan_state, EState* estate, RemoteQuery
 bool adp_disconnect_walker(Node* plan, void* cxt)
 {
     if (plan == nullptr) return false;
-    if (!IsA(plan, SpqSeqScan)) {
-        return plan_tree_walker(plan, (MethodWalker)adp_disconnect_walker, cxt);
+    if (IsA(plan, SpqSeqScan)) {
+        QCConnKey key = {
+            .query_id = u_sess->debug_query_id,
+            .plan_node_id = ((Plan*)plan)->plan_node_id,
+            .node_id = 0,
+            .type = SPQ_QC_CONNECTION,
+        };
+        bool found = false;
+        pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_REMOVE, &found);
+        pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
     }
-    QCConnKey key = {
-        .query_id = u_sess->debug_query_id,
-        .plan_node_id = ((Plan*)plan)->plan_node_id,
-        .node_id = 0,
-        .type = SPQ_QC_CONNECTION,
-    };
-    bool found = false;
-    pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
-    hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_REMOVE, &found);
-    pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
-    return false;
+    return plan_tree_walker(plan, (MethodWalker)adp_disconnect_walker, cxt);
 }
 
-void disconnect_qc_conn(void* plan)
+void disconnect_qc_conn(PlannedStmt* planstmt)
 {
-    if (!plan) return;
+    if (!planstmt) return;
     MethodPlanWalkerContext cxt;
-    adp_disconnect_walker((Node*)plan, &cxt);
+    cxt.base.init_plans = NIL;
+    cxt.base.traverse_flag = NULL;
+    exec_init_plan_tree_base(&cxt.base, planstmt);
+    adp_disconnect_walker((Node*)planstmt->planTree, &cxt);
 }
 
 bool build_connections(Node* plan, void* cxt)
 {
     if (plan == nullptr) return false;
-    if (!IsA(plan, SpqSeqScan)) {
-        return plan_tree_walker(plan, (MethodWalker)build_connections, cxt);
+    if (IsA(plan, SpqSeqScan)) {
+        int error;
+        errno_t rc = EOK;
+
+        RemoteQueryState *node = t_thrd.spq_ctx.qc_ctx->scanState;
+        PlannedStmt *planstmt = node->ss.ps.state->es_plannedstmt;
+        int num_nodes = planstmt->num_nodes;
+        NodeDefinition *nodesDef = planstmt->nodesDefinition;
+        libcommaddrinfo **addressArray = (libcommaddrinfo **)palloc(sizeof(libcommaddrinfo *) * num_nodes);
+
+        for (int i = 0; i < num_nodes; ++i) {
+            int nodeNameLen = strlen(nodesDef[i].nodename.data);
+            int nodehostLen = strlen(nodesDef[i].nodehost.data);
+            addressArray[i] = (libcomm_addrinfo *)palloc0(sizeof(libcomm_addrinfo));
+            addressArray[i]->host = (char *)palloc0(NAMEDATALEN);
+            addressArray[i]->ctrl_port = nodesDef[i].nodectlport;
+            addressArray[i]->listen_port = nodesDef[i].nodesctpport;
+            addressArray[i]->nodeIdx = nodesDef[i].nodeid;
+            rc = strncpy_s(addressArray[i]->host, NAMEDATALEN, nodesDef[i].nodehost.data, nodehostLen + 1);
+            securec_check(rc, "\0", "\0");
+            rc = strncpy_s(addressArray[i]->nodename, NAMEDATALEN, nodesDef[i].nodename.data, nodeNameLen + 1);
+            securec_check(rc, "\0", "\0");
+            /* set flag for parallel send mode */
+            addressArray[i]->parallel_send_mode = false;
+
+            addressArray[i]->streamKey.queryId = node->queryId;
+            addressArray[i]->streamKey.planNodeId = ((Plan*)plan)->plan_node_id;
+            addressArray[i]->streamKey.producerSmpId = -1;
+            addressArray[i]->streamKey.consumerSmpId = -1;
+        }
+
+        error = gs_connect(addressArray, num_nodes, -1);
+
+        if (error != 0) {
+            ereport(ERROR, (errmsg("connect failed, code : %d", error)));
+        }
+
+        for (int i = 0; i < num_nodes; ++i) {
+            QCConnEntry* entry = (QCConnEntry*)palloc(sizeof(QCConnEntry));
+            entry->key = {
+                .query_id = node->queryId,
+                .plan_node_id = ((Plan*)plan)->plan_node_id,
+                .node_id = addressArray[i]->gs_sock.idx,
+                .type = SPQ_QE_CONNECTION,
+            };
+            entry->scannedPageNum = 0;
+            entry->forward = addressArray[i]->gs_sock;
+            entry->backward.idx = 0;
+            entry->internal_node_id = i;
+            t_thrd.spq_ctx.qc_ctx->connects = lappend(t_thrd.spq_ctx.qc_ctx->connects, (void*)entry);
+            pfree(addressArray[i]);
+        }
+        pfree(addressArray);
     }
-    int error;
-    errno_t rc = EOK;
-
-    RemoteQueryState *node = t_thrd.spq_ctx.qc_ctx->scanState;
-    PlannedStmt *planstmt = node->ss.ps.state->es_plannedstmt;
-    int num_nodes = planstmt->num_nodes;
-    NodeDefinition *nodesDef = planstmt->nodesDefinition;
-    libcommaddrinfo **addressArray = (libcommaddrinfo **)palloc(sizeof(libcommaddrinfo *) * num_nodes);
-
-    for (int i = 0; i < num_nodes; ++i) {
-        int nodeNameLen = strlen(nodesDef[i].nodename.data);
-        int nodehostLen = strlen(nodesDef[i].nodehost.data);
-        addressArray[i] = (libcomm_addrinfo *)palloc0(sizeof(libcomm_addrinfo));
-        addressArray[i]->host = (char *)palloc0(NAMEDATALEN);
-        addressArray[i]->ctrl_port = nodesDef[i].nodectlport;
-        addressArray[i]->listen_port = nodesDef[i].nodesctpport;
-        addressArray[i]->nodeIdx = nodesDef[i].nodeid;
-        rc = strncpy_s(addressArray[i]->host, NAMEDATALEN, nodesDef[i].nodehost.data, nodehostLen + 1);
-        securec_check(rc, "\0", "\0");
-        rc = strncpy_s(addressArray[i]->nodename, NAMEDATALEN, nodesDef[i].nodename.data, nodeNameLen + 1);
-        securec_check(rc, "\0", "\0");
-        /* set flag for parallel send mode */
-        addressArray[i]->parallel_send_mode = false;
-
-        addressArray[i]->streamKey.queryId = node->queryId;
-        addressArray[i]->streamKey.planNodeId = ((Plan*)plan)->plan_node_id;
-        addressArray[i]->streamKey.producerSmpId = -1;
-        addressArray[i]->streamKey.consumerSmpId = -1;
-    }
-
-    error = gs_connect(addressArray, num_nodes, -1);
-
-    if (error != 0) {
-        ereport(ERROR, (errmsg("connect failed, code : %d", error)));
-    }
-
-    for (int i = 0; i < num_nodes; ++i) {
-        QCConnEntry* entry = (QCConnEntry*)palloc(sizeof(QCConnEntry));
-        entry->key = {
-            .query_id = node->queryId,
-            .plan_node_id = ((Plan*)plan)->plan_node_id,
-            .node_id = addressArray[i]->gs_sock.idx,
-            .type = SPQ_QE_CONNECTION,
-        };
-        entry->scannedPageNum = 0;
-        entry->forward = addressArray[i]->gs_sock;
-        entry->backward.idx = 0;
-        entry->internal_node_id = i;
-        t_thrd.spq_ctx.qc_ctx->connects = lappend(t_thrd.spq_ctx.qc_ctx->connects, (void*)entry);
-        pfree(addressArray[i]);
-    }
-    pfree(addressArray);
-    return false;
+    return plan_tree_walker(plan, (MethodWalker)build_connections, cxt);
 }
 
 void spq_adps_initconns()
 {
-    MethodPlanWalkerContext cxt;
     RemoteQueryState *node = t_thrd.spq_ctx.qc_ctx->scanState;
+    MethodPlanWalkerContext cxt;
+    cxt.base.init_plans = NIL;
+    cxt.base.traverse_flag = NULL;
+    exec_init_plan_tree_base(&cxt.base, node->ss.ps.state->es_plannedstmt);
     build_connections((Node*)node->ss.ps.plan->lefttree, (void*)&cxt);
 }
 
@@ -1172,7 +1176,7 @@ void spq_adps_coordinator_thread_main()
             pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
         }
     }
-
+    spq_finishQcThread();
     ereport(LOG, (errmsg("spq thread destroyed")));
     t_thrd.spq_ctx.qc_ctx->is_exited = true;
 }
@@ -1381,6 +1385,8 @@ void spq_release_conn(RemoteQueryState* planstate)
     pfree_ext(planstate->nodeCons);
     planstate->spq_connections_info = NULL;
     planstate->nodeCons = NULL;
+
+    u_sess->spq_cxt.remoteQuerys = list_delete_ptr(u_sess->spq_cxt.remoteQuerys, planstate);
 }
 PGXCNodeHandle** spq_get_exec_connections(
     RemoteQueryState* planstate, ExecNodes* exec_nodes, RemoteQueryExecType exec_type)
@@ -1458,6 +1464,34 @@ PGXCNodeHandle** spq_get_exec_connections(
     spq_release(NULL);
     return connections;
 }
+
+void spq_cancel_query(void)
+{
+    if (u_sess->spq_cxt.remoteQuerys == NULL)
+        return;
+    char errbuf[256];
+    ListCell *cell;
+
+    spq_destroyQcThread();
+    foreach (cell, u_sess->spq_cxt.remoteQuerys) {
+        RemoteQueryState* combiner = (RemoteQueryState *)lfirst(cell);
+        for (int i = 0; i < combiner->node_count; ++i) {
+            PGconn *pgconn = combiner->nodeCons[i];
+            PGcancel *cancel = PQgetCancel(pgconn);
+            bool bRet = PQcancel_timeout(cancel, errbuf, sizeof(errbuf), u_sess->attr.attr_network.PoolerCancelTimeout);
+            if (!bRet) {
+                ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
+                             errmsg("spq cancel connection timeout, nodeid %d: %s", i, errbuf)));
+            }
+            PQfreeCancel(cancel);
+        }
+    }
+    while (list_length(u_sess->spq_cxt.remoteQuerys) > 0) {
+        RemoteQueryState *combiner = (RemoteQueryState *)lfirst(list_head(u_sess->spq_cxt.remoteQuerys));
+        spq_release_conn(combiner);
+    }
+}
+
 void spq_do_query(RemoteQueryState* node)
 {
     RemoteQuery* step = (RemoteQuery*)node->ss.ps.plan;
@@ -1485,6 +1519,7 @@ void spq_do_query(RemoteQueryState* node)
     spq_startQcThread(node);
 
     connections = spq_get_exec_connections(node, step->exec_nodes, step->exec_type);
+    u_sess->spq_cxt.remoteQuerys = lappend(u_sess->spq_cxt.remoteQuerys, node);
  
     Assert(node->spq_connections_info != NULL);
     Assert(connections != NULL);
@@ -1515,8 +1550,8 @@ void spq_do_query(RemoteQueryState* node)
     //}
  
 #ifdef STREAMPLAN
-	char *compressedPlan = NULL;
-	int cLen = 0;
+    char *compressedPlan = NULL;
+    int cLen = 0;
  
     if (step->is_simple) {
  
@@ -1691,7 +1726,6 @@ void ExecEndSpqRemoteQuery(RemoteQueryState* node, bool pre_end)
         RowStoreReset(node->row_store);
     }
 
-    spq_finishQcThread();
     spq_destroyQcThread();
 
     /* Pack all un-completed connections together and recorrect node->conn_count */
@@ -8870,6 +8904,8 @@ bool PreAbort_Remote(bool PerfectRollback)
     // If has any communacation failure when cancel, we just drop the connection.
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !PerfectRollback)
         cancel_query_without_read();
+    else if (IS_SPQ_COORDINATOR && !IsConnFromCoord() && !PerfectRollback)
+        spq_cancel_query();
 
     if (!t_thrd.xact_cxt.XactLocalNodeCanAbort)
         return false;

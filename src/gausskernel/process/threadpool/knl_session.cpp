@@ -1414,6 +1414,7 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->spq_max_tuple_chunk_size = 0;
     spq_cxt->s_tupSerMemCtxt = NULL;
     spq_cxt->spq_opt_initialized = false;
+    spq_cxt->remoteQuerys = NIL;
 }
 #endif
 
