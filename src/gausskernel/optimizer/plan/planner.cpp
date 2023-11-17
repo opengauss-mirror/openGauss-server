@@ -1269,6 +1269,24 @@ static inline bool contain_system_column(Node *var_list)
     return result;
 }
 
+static inline bool contain_placeholdervar(Node *var_list)
+{
+    List* vars = pull_var_clause(var_list, PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+    ListCell* lc = NULL;
+    bool result = false;
+
+    foreach (lc, vars) {
+        Node* var = (Node*)lfirst(lc);
+        if (IsA(var, PlaceHolderVar)) {
+            result = true;
+            break;
+        }
+    }
+
+    list_free_ext(vars);
+    return result;
+}
+
 /* --------------------
  * subquery_planner
  *	  Invokes the planner on a subquery.  We recurse to here for each
@@ -1828,6 +1846,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             bool support_rewrite = true;
             do {
                 if (contain_system_column((Node*)root->parse->targetList)) {
+                    support_rewrite = false;
+                    break;
+                }
+                if (root->parse->jointree != NULL && contain_placeholdervar(root->parse->jointree->quals)) {
                     support_rewrite = false;
                     break;
                 }
