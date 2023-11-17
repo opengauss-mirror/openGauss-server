@@ -119,10 +119,12 @@ static void InitHashTable(int size)
 static HTAB* get_name_hash_table_type() 
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (a_nameHash != NULL && DB_IS_CMPT(A_FORMAT) && CUR_THR_IS_WORKER()) {
-        return a_nameHash;
-    } else if (b_nameHash != NULL && DB_IS_CMPT(B_FORMAT) && CUR_THR_IS_WORKER()) {
-        return b_nameHash;
+    if (CUR_THR_IS_WORKER() && IsNormalProcessingMode()) {
+        if (a_nameHash != NULL && DB_IS_CMPT(A_FORMAT)) {
+            return a_nameHash;
+        } else if (b_nameHash != NULL && DB_IS_CMPT(B_FORMAT)) {
+            return b_nameHash;
+        }
     }
 #endif
     return nameHash;
@@ -131,10 +133,12 @@ static HTAB* get_name_hash_table_type()
 static HTAB* get_oid_hash_table_type()
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (a_oidHash != NULL && DB_IS_CMPT(A_FORMAT) && CUR_THR_IS_WORKER()) {
-        return a_oidHash;
-    } else if (b_oidHash != NULL && DB_IS_CMPT(B_FORMAT) && CUR_THR_IS_WORKER()) {
-        return b_oidHash;
+    if (CUR_THR_IS_WORKER() && IsNormalProcessingMode()) {
+        if (a_oidHash != NULL && DB_IS_CMPT(A_FORMAT)) {
+            return a_oidHash;
+        } else if (b_oidHash != NULL && DB_IS_CMPT(B_FORMAT)) {
+            return b_oidHash;
+        }
     }
 #endif
     return oidHash;
