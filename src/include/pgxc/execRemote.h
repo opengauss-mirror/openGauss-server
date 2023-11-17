@@ -147,7 +147,7 @@ typedef struct SpqAdpScanPagesRes {
     BlockNumber page_end; /* where to end */
 } SpqAdpScanPagesRes;
 
-void disconnect_qc_conn(void* plan);
+void disconnect_qc_conn(PlannedStmt* plan);
 #endif
 
 static inline char* GetIndexNameForStat(Oid indid, char* relname)

@@ -8973,7 +8973,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 exec_simple_plan(planstmt);
 
                 if (planstmt->enable_adaptive_scan) {
-                    disconnect_qc_conn((void*)planstmt->planTree);
+                    disconnect_qc_conn(planstmt);
                 }
                 MemoryContextSwitchTo(old_cxt);
 
