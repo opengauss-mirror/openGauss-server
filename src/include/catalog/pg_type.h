@@ -856,6 +856,11 @@ DESCR("undefined objects as PLSQL compilation time");
 #define  TYPCATEGORY_TABLEOF_INTEGER  'F' /* table of type, index by integer */
 #define  TYPCATEGORY_SET		'H' 	/* for set type */
 
+#define  TYPALIGN_CHAR			'c' /* char alignment (i.e. unaligned) */
+#define  TYPALIGN_SHORT			's' /* short alignment (typically 2 bytes) */
+#define  TYPALIGN_INT			'i' /* int alignment (typically 4 bytes) */
+#define  TYPALIGN_DOUBLE		'd' /* double alignment (often 8 bytes) */
+
 /* Is a type OID a polymorphic pseudotype?	(Beware of multiple evaluation) */
 #define IsPolymorphicType(typid)  \
 	((typid) == ANYELEMENTOID || \
