@@ -66,6 +66,8 @@ static void scanURL(dms_profile_t* profile, char* ipportstr, int index)
             errmsg("invalid ip string: %s", ipstr)));
     }
     profile->inst_net_addr[index].port = (uint16)pg_strtoint32(portstr);
+    profile->inst_net_addr[index].inst_id = index;
+    profile->inst_net_addr[index].need_connect = true;
 
     ret = strcpy_s(g_instance.dms_cxt.dmsInstAddr[index], DMS_MAX_IP_LEN, ipstr);
     securec_check(ret, "", "");

@@ -474,9 +474,12 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 #define NUM_DMS_PARALLEL_CALLBACK_PROC (g_instance.attr.attr_storage.dms_attr.parallel_thread_num <= 1 ? 0 : \
                                         g_instance.attr.attr_storage.dms_attr.parallel_thread_num)
 #define NUM_DMS_RDMA_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.work_thread_count * 2)
+#define NUM_DMS_PRIO_CNT 4
+#define NUM_DMS_RECV_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.channel_count * \
+    (g_instance.attr.attr_storage.dms_attr.inst_count - 1) * NUM_DMS_PRIO_CNT)
 #define NUM_DMS_CALLBACK_PROCS \
         (g_instance.attr.attr_storage.dms_attr.enable_dms ? \
-        (g_instance.attr.attr_storage.dms_attr.channel_count * g_instance.attr.attr_storage.dms_attr.inst_count + \
+        (NUM_DMS_RECV_THREAD_CNT + \
         ((!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "TCP"))? \
         g_instance.attr.attr_storage.dms_attr.work_thread_count :      \
         NUM_DMS_RDMA_THREAD_CNT) + \
