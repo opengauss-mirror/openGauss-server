@@ -5219,23 +5219,29 @@ static void CleanupBackupHistory(void)
 * we will read xlog in path where last read success
 */
 XLogRecord *SSXLogReadRecordErgodic(XLogReaderState *state, XLogRecPtr RecPtr, 
-            char **errormsg, char* dssdata, int* idList) {
-    char xlogPath[MAXPGPATH];
+            char **errormsg) {
     XLogRecord *record = NULL;
     errno_t errorno = 0;
 
     for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
-        if (idList[i] == -1) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
             break;
         }
-        errorno = snprintf_s(xlogPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", dssdata, "pg_xlog", idList[i]);
-        securec_check_ss(errorno, "", "");
-        record = XLogReadRecord(state, RecPtr, errormsg, true, xlogPath);
+        char *curPath = g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i];
+        record = XLogReadRecord(state, RecPtr, errormsg, true, curPath);
         if (record != NULL) {
             /* read success, exchange index */
-            int buf = idList[i];
-            idList[i] = idList[0];
-            idList[0] = buf;
+            if (i != 0) {
+                /* read success, exchange index */
+                char exPath[MAXPGPATH];
+                errorno = snprintf_s(exPath, MAXPGPATH, MAXPGPATH - 1, curPath);
+                securec_check_ss(errorno, "", "");
+                errorno = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, MAXPGPATH - 1,
+                    g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0]);
+                securec_check_ss(errorno, "", "");
+                errorno = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0], MAXPGPATH, MAXPGPATH - 1, exPath);
+                securec_check_ss(errorno, "", "");
+            }
             break;
         } else {
             if (t_thrd.xlog_cxt.readFile >= 0) {
@@ -5277,8 +5283,7 @@ static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, in
     for (;;) {
         char *errormsg = NULL;
         if (SS_REPLICATION_DORADO_CLUSTER) {
-            record = SSXLogReadRecordErgodic(xlogreader, RecPtr, &errormsg, 
-                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, g_instance.dms_cxt.SSRecoveryInfo.instid_list);
+            record = SSXLogReadRecordErgodic(xlogreader, RecPtr, &errormsg);
         } else {
             record = XLogReadRecord(xlogreader, RecPtr, &errormsg);
         }
@@ -9218,7 +9223,7 @@ void StartupXLOG(void)
     if (ENABLE_DMS && ENABLE_DSS) {
         SSGetRecoveryXlogPath();
         if (SS_REPLICATION_DORADO_CLUSTER) {
-            SSDoradoGetInstidList();
+            SSDoradoGetXlogPathList();
         }
         xlogreader = SSXLogReaderAllocate(&SSXLogPageRead, &readprivate, ALIGNOF_BUFFER);
         close_readFile_if_open();

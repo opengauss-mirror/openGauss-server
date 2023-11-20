@@ -43,7 +43,7 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
     int readLen);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSGetRecoveryXlogPath();
-void SSDoradoGetInstidList();
+void SSDoradoGetXlogPathList();
 void SSUpdateReformerCtrl();
 void SSReadControlFile(int id, bool updateDmsCtx = false);
 void SSClearSegCache();

@@ -220,13 +220,15 @@ void SSGetRecoveryXlogPath()
     securec_check_ss(rc, "", "");
 }
 
-void SSDoradoGetInstidList()
+void SSDoradoGetXlogPathList()
 {
+    errno_t rc = EOK;
     for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
-        g_instance.dms_cxt.SSRecoveryInfo.instid_list[i] = -1;
+        rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, '\0', MAXPGPATH);
+        securec_check_c(rc, "\0", "\0");
     }
     struct dirent *entry;
-    errno_t rc = EOK;
+    
     DIR* dssdir = opendir(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
     if (dssdir == NULL) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("Error opening dssdir %s", 
@@ -240,7 +242,9 @@ void SSDoradoGetInstidList()
             if (strlen(entry->d_name) > len) {
                 rc = memmove_s(entry->d_name, MAX_PATH, entry->d_name + len, strlen(entry->d_name) - len + 1);
                 securec_check_c(rc, "\0", "\0");
-                g_instance.dms_cxt.SSRecoveryInfo.instid_list[index++] = atoi(entry->d_name);
+                rc = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index++], MAXPGPATH, MAXPGPATH - 1,
+                    "%s/%s%d", g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, "pg_xlog", atoi(entry->d_name));
+                securec_check_ss(rc, "", "");
             }
         } else {
             continue;
@@ -439,5 +443,6 @@ void SSDoradoRefreshMode(ClusterRunMode doradoMode)
     g_instance.dms_cxt.SSReformerControl.clusterRunMode = doradoMode;
     SSUpdateReformerCtrl();
     LWLockRelease(ControlFileLock);
-    ereport(LOG, (errmsg("zatest: SSDoradoRefreshMode change control file cluster run mode to: %d", g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
+    ereport(LOG, (errmsg("SSDoradoRefreshMode change control file cluster run mode to: %d",
+        g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
 }
