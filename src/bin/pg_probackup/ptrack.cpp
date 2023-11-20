@@ -15,6 +15,7 @@
 #endif
 #include "catalog/pg_tablespace.h"
 #include "common/fe_memutils.h"
+#include "storage/file/fio_device.h"
 /*
  * Macro needed to parse ptrack.
  * NOTE Keep those values synchronized with definitions in ptrack.h
@@ -234,6 +235,7 @@ make_pagemap_from_ptrack(parray *files,
         pgFile *file = (pgFile *) parray_get(files, file_i);
         page_map_entry **res_map = NULL;
         page_map_entry *map = NULL;
+        uint64 offset = 0;
 
         /*
          * For now nondata files are not entitled to have pagemap
@@ -248,16 +250,28 @@ make_pagemap_from_ptrack(parray *files,
             continue;
 
         if (filemaps) {
-            dummy_map->path = file->rel_path;
+            int rc = 0;
+            char tmp_path[MAXPGPATH] = {0};
+            // dummy_map->path = file->rel_path;
             if (file->compressed_file) {
                 /* rel_path in filemaps is just oid without suffix of '_compress' */
-                uint64 offset = strlen(file->rel_path) - strlen("_compress");
+                offset = strlen(file->rel_path) - strlen("_compress");
                 file->rel_path[offset] = '\0';
-                res_map = (page_map_entry **)parray_bsearch(filemaps, dummy_map, pgFileMapComparePath);
-                file->rel_path[offset] = '_';
-            } else {
-                res_map = (page_map_entry **)parray_bsearch(filemaps, dummy_map, pgFileMapComparePath);
             }
+
+            /* When enable dss, if the file is in VGNAME, the path needs to be an absolute path */
+            if (is_dss_type(file->type)) {
+                rc = sprintf_s(tmp_path, sizeof(tmp_path), "%s/%s",
+                    instance_config.dss.vgdata, file->rel_path);
+                securec_check_ss_c(rc, "\0", "\0");
+                dummy_map->path = pgut_strdup(tmp_path);
+            } else {
+                dummy_map->path = file->rel_path;
+            }
+            res_map = (page_map_entry **)parray_bsearch(filemaps, dummy_map, pgFileMapComparePath);
+
+            if (file->compressed_file)
+                file->rel_path[offset] = '_';
             map = (res_map) ? *res_map : NULL;
         }
 

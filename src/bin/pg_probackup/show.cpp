@@ -471,6 +471,12 @@ print_backup_json_object(PQExpBuffer buf, pgBackup *backup)
         appendPQExpBuffer(buf, INT64_FORMAT, backup->pgdata_bytes);
     }
 
+    if (backup->uncompressed_bytes >= 0)
+    {
+        json_add_key(buf, "dssdata-bytes", json_level);
+        appendPQExpBuffer(buf, INT64_FORMAT, backup->dssdata_bytes);
+    }
+
     if (backup->external_dir_str)
         json_add_value(buf, "external-dirs", backup->external_dir_str,
                         json_level, true);

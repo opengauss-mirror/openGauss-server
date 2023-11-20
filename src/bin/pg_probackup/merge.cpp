@@ -27,6 +27,7 @@ typedef struct
 
     const char	*full_database_dir;
     const char	*full_external_prefix;
+    const char  *full_dss_dir;
 
     //  size_t  in_place_merge_bytes;
     bool    compression_match;
@@ -55,15 +56,15 @@ get_external_index(const char *key, const parray *list);
 
 static void
 merge_data_file(parray *parent_chain, pgBackup *full_backup,
-                                pgBackup *dest_backup, pgFile *dest_file,
-                                pgFile *tmp_file, const char *to_root, bool use_bitmap,
-                                bool is_retry);
+                                pgBackup *dest_backup, pgFile *dest_file, 
+                                pgFile *tmp_file, const char *full_database_dir, const char *full_dss_dir,
+                                bool use_bitmap, bool is_retry);
 
 static void
 merge_non_data_file(parray *parent_chain, pgBackup *full_backup,
                                         pgBackup *dest_backup, pgFile *dest_file,
                                         pgFile *tmp_file, const char *full_database_dir,
-                                        const char *full_external_prefix);
+                                        const char *full_dss_dir, const char *full_external_prefix);
 static pgBackup* find_dest_backup(parray *backups, time_t backup_id);
 static pgBackup *check_dest_backup(parray *backups,
                                    pgBackup *full_backup);
@@ -74,6 +75,7 @@ static void get_backup_files(pgBackup *dest_backup,
                              pgBackup *full_backup,
                              char *full_external_prefix,
                              char *full_database_dir,
+                             char *full_dss_dir,
                              parray *dest_externals,
                              parray *full_externals,
                              parray *parent_chain);
@@ -81,6 +83,7 @@ static void threads_handle(pgBackup *dest_backup,
                            pgBackup *full_backup,
                            char *full_external_prefix,
                            char *full_database_dir,
+                           char *full_dss_dir,
                            pthread_t *threads,
                            merge_files_arg *threads_args,
                            parray *parent_chain,
@@ -91,6 +94,7 @@ static void threads_handle(pgBackup *dest_backup,
 static void del_full_backup_files(pgBackup *dest_backup,
                                   pgBackup *full_backup,
                                   const char *full_database_dir,
+                                  const char *full_dss_dir,
                                   parray *full_externals);
 static void merge_rename(pgBackup *dest_backup,
                          pgBackup *full_backup,
@@ -106,7 +110,7 @@ static void forward_compatibility_check(parray *parent_chain);
  * Implementation of MERGE command.
  *
  * - Find target and its parent full backup
- * - Merge data files of target, parent and and intermediate backups
+ * - Merge data files of target, parent and intermediate backups
  * - Remove unnecessary files, which doesn't exist in the target backup anymore
  */
 void
@@ -513,6 +517,7 @@ merge_chain(parray *parent_chain, pgBackup *full_backup, pgBackup *dest_backup)
     int     i;
     char        full_external_prefix[MAXPGPATH];
     char        full_database_dir[MAXPGPATH];
+    char        full_dss_dir[MAXPGPATH];
     parray      *full_externals = NULL,
                     *dest_externals = NULL;
 
@@ -616,13 +621,13 @@ merge_chain(parray *parent_chain, pgBackup *full_backup, pgBackup *dest_backup)
     validate_parent_chain(parent_chain, dest_backup);
 
     get_backup_files(dest_backup, full_backup, full_external_prefix, full_database_dir,
-                     dest_externals, full_externals, parent_chain);
+                     full_dss_dir, dest_externals, full_externals, parent_chain);
 
     threads_handle(dest_backup, full_backup, full_external_prefix, full_database_dir,
-                   threads, threads_args, parent_chain, compression_match,
+                   full_dss_dir, threads, threads_args, parent_chain, compression_match,
                    program_version_match, is_retry, result_filelist);
 
-    del_full_backup_files(dest_backup, full_backup, full_database_dir, full_externals);
+    del_full_backup_files(dest_backup, full_backup, full_database_dir, full_dss_dir, full_externals);
 
     merge_delete:
     for (i = parray_num(parent_chain) - 2; i >= 0; i--)
@@ -697,6 +702,7 @@ static void get_backup_files(pgBackup *dest_backup,
                              pgBackup *full_backup,
                              char *full_external_prefix,
                              char *full_database_dir,
+                             char *full_dss_dir,
                              parray *dest_externals,
                              parray *full_externals,
                              parray *parent_chain)
@@ -728,12 +734,17 @@ static void get_backup_files(pgBackup *dest_backup,
 
     /* Construct path to database dir: /backup_dir/instance_name/FULL/database */
     join_path_components(full_database_dir, full_backup->root_dir, DATABASE_DIR);
+    /* Construct path to vgname dir: /backup_dir/instance_name/FULL/dssdata */
+    join_path_components(full_dss_dir, full_backup->root_dir, DSSDATA_DIR);
     /* Construct path to external dir: /backup_dir/instance_name/FULL/external */
     join_path_components(full_external_prefix, full_backup->root_dir, EXTERNAL_DIR);
 
-    /* Create directories */
+    /* Create directories in database_dir*/
     create_data_directories(dest_backup->files, full_database_dir,
-    dest_backup->root_dir, false, false, FIO_BACKUP_HOST);
+                    dest_backup->root_dir, false, false, FIO_BACKUP_HOST, false);
+    /* Create directories in dssdata_dir */
+    create_data_directories(dest_backup->files, full_dss_dir,
+                    dest_backup->root_dir, false, false, FIO_BACKUP_HOST, false);
 
     /* External directories stuff */
     if (dest_backup->external_dir_str)
@@ -752,6 +763,7 @@ static void threads_handle(pgBackup *dest_backup,
                            pgBackup *full_backup,
                            char *full_external_prefix,
                            char *full_database_dir,
+                           char *full_dss_dir,
                            pthread_t *threads,
                            merge_files_arg *threads_args,
                            parray *parent_chain,
@@ -806,6 +818,7 @@ static void threads_handle(pgBackup *dest_backup,
         arg->dest_backup = dest_backup;
         arg->full_backup = full_backup;
         arg->full_database_dir = full_database_dir;
+        arg->full_dss_dir = full_dss_dir;
         arg->full_external_prefix = full_external_prefix;
 
         arg->compression_match = compression_match;
@@ -926,6 +939,7 @@ static void threads_handle(pgBackup *dest_backup,
 static void del_full_backup_files(pgBackup *dest_backup,
                                   pgBackup *full_backup,
                                   const char *full_database_dir,
+                                  const char *full_dss_dir,
                                   parray *full_externals)
 {
     /* Delete FULL backup files, that do not exists in destination backup
@@ -950,7 +964,10 @@ static void del_full_backup_files(pgBackup *dest_backup,
             char    full_file_path[MAXPGPATH];
 
             /* We need full path, file object has relative path */
-            join_path_components(full_file_path, full_database_dir, full_file->rel_path);
+            if (is_dss_type(full_file->type))
+                join_path_components(full_file_path, full_dss_dir, full_file->rel_path);
+            else
+                join_path_components(full_file_path, full_database_dir, full_file->rel_path);
 
             pgFileDelete(full_file->mode, full_file_path);
             elog(VERBOSE, "Deleted \"%s\"", full_file_path);
@@ -1094,6 +1111,7 @@ merge_files(void *arg)
         tmp_file->is_cfs = dest_file->is_cfs;
         tmp_file->external_dir_num = dest_file->external_dir_num;
         tmp_file->dbOid = dest_file->dbOid;
+        tmp_file->type = dest_file->type;
 
         /* Directories were created before */
         if (S_ISDIR(dest_file->mode))
@@ -1127,6 +1145,7 @@ merge_files(void *arg)
                                         arguments->dest_backup,
                                         dest_file, tmp_file,
                                         arguments->full_database_dir,
+                                        arguments->full_dss_dir,
                                         arguments->use_bitmap,
                                         arguments->is_retry);
         else
@@ -1135,6 +1154,7 @@ merge_files(void *arg)
                                                 arguments->dest_backup,
                                                 dest_file, tmp_file,
                                                 arguments->full_database_dir,
+                                                arguments->full_dss_dir,
                                                 arguments->full_external_prefix);
 
         done:
@@ -1281,6 +1301,7 @@ static void do_in_place_merge(merge_files_arg *arguments,
             //TODO: report in_place merge bytes.
             parray_append(arguments->merge_filelist, tmp_file);
             *iscontinue = true;
+            return;
         }
     }
 
@@ -1368,7 +1389,8 @@ reorder_external_dirs(pgBackup *to_backup, parray *to_external,
 void
 merge_data_file(parray *parent_chain, pgBackup *full_backup,
                                 pgBackup *dest_backup, pgFile *dest_file, pgFile *tmp_file,
-                                const char *full_database_dir, bool use_bitmap, bool is_retry)
+                                const char *full_database_dir, const char *full_dss_dir,
+                                bool use_bitmap, bool is_retry)
 {
     FILE   *out = NULL;
     char   *buffer = (char *)pgut_malloc(STDIO_BUFSIZE);
@@ -1383,7 +1405,10 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
     */
 
     /* set fullpath of destination file and temp files */
-    join_path_components(to_fullpath, full_database_dir, tmp_file->rel_path);
+    if (is_dss_type(tmp_file->type))
+        join_path_components(to_fullpath, full_dss_dir, tmp_file->rel_path);
+    else
+        join_path_components(to_fullpath, full_database_dir, tmp_file->rel_path);
     nRet = snprintf_s(to_fullpath_tmp1, MAXPGPATH, MAXPGPATH - 1, "%s_tmp1", to_fullpath);
     securec_check_ss_c(nRet, "\0", "\0");
     nRet = snprintf_s(to_fullpath_tmp2, MAXPGPATH, MAXPGPATH - 1, "%s_tmp2", to_fullpath);
@@ -1463,7 +1488,8 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
 void
 merge_non_data_file(parray *parent_chain, pgBackup *full_backup,
                                         pgBackup *dest_backup, pgFile *dest_file, pgFile *tmp_file,
-                                        const char *full_database_dir, const char *to_external_prefix)
+                                        const char *full_database_dir, const char *full_dss_dir,
+                                        const char *to_external_prefix)
 {
     size_t  i = 0;
     char    to_fullpath[MAXPGPATH];
@@ -1481,8 +1507,14 @@ merge_non_data_file(parray *parent_chain, pgBackup *full_backup,
             dest_file->external_dir_num);
         join_path_components(to_fullpath, temp, dest_file->rel_path);
     }
+    else if (is_dss_type(dest_file->type))
+    {
+        join_path_components(to_fullpath, full_dss_dir, dest_file->rel_path);
+    }
     else
+    {
         join_path_components(to_fullpath, full_database_dir, dest_file->rel_path);
+    }
 
     nRet = snprintf_s(to_fullpath_tmp, MAXPGPATH, MAXPGPATH - 1, "%s_tmp", to_fullpath);
     securec_check_ss_c(nRet, "\0", "\0");
@@ -1536,6 +1568,12 @@ merge_non_data_file(parray *parent_chain, pgBackup *full_backup,
         makeExternalDirPathByNum(temp, external_prefix, dest_file->external_dir_num);
 
         join_path_components(from_fullpath, temp, from_file->rel_path);
+    }
+    else if (is_dss_type(from_file->type))
+    {
+        char backup_dss_dir[MAXPGPATH];
+        join_path_components(backup_dss_dir, from_backup->root_dir, DSSDATA_DIR);
+        join_path_components(from_fullpath, backup_dss_dir, from_file->rel_path);
     }
     else
     {

@@ -263,7 +263,7 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
         pfree(threads_args);
 }
 
-static void start_stream_wal(const char *database_path, PGconn *backup_conn)
+static void start_stream_wal(const char *database_path, const char *dssdata_path, PGconn *backup_conn)
 {
     static char dst_backup_path[MAXPGPATH];
 
@@ -271,7 +271,15 @@ static void start_stream_wal(const char *database_path, PGconn *backup_conn)
     stream_stop_timeout = checkpoint_timeout(backup_conn);
     stream_stop_timeout = stream_stop_timeout + stream_stop_timeout * 0.1;
 
-    join_path_components(dst_backup_path, database_path, PG_XLOG_DIR);
+    if (IsDssMode()) {
+        error_t rc;
+        rc = snprintf_s(dst_backup_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", dssdata_path,
+            PG_XLOG_DIR, instance_config.dss.instance_id);
+        securec_check_ss_c(rc, "\0", "\0");
+    } else {
+        join_path_components(dst_backup_path, database_path, PG_XLOG_DIR);
+    }
+
     fio_mkdir(dst_backup_path, DIR_PERMISSION, FIO_BACKUP_HOST);
 
     stream_thread_arg.basedir = dst_backup_path;
@@ -390,16 +398,13 @@ static void get_prev_backup_info(parray **backup_list, pgBackup **prev_back, par
     *prev_back = prev_backup;
 }
 
-static void calc_pgdata_bytes()
+static void calc_data_bytes()
 {    
     int i;
-    char    pretty_bytes[20];
+    char    pretty_dssdata_bytes[20];
+    char    pretty_pgdata_bytes[20];
 
-    if (parray_num(backup_files_list) < 100)
-        elog(ERROR, "PGDATA is almost empty. Either it was concurrently deleted or "
-            "gs_probackup do not possess sufficient permissions to list PGDATA content");
-
-    /* Calculate pgdata_bytes */
+    /* Calculate pgdata_bytes and dssdata_bytes */
     for (i = 0; i < (int)parray_num(backup_files_list); i++)
     {
         pgFile  *file = (pgFile *) parray_get(backup_files_list, i);
@@ -407,17 +412,25 @@ static void calc_pgdata_bytes()
         if (file->external_dir_num != 0)
             continue;
 
-        if (S_ISDIR(file->mode))
-        {
-            current.pgdata_bytes += 4096;
-            continue;
+        if (S_ISDIR(file->mode)) {
+            if (is_dss_type(file->type))
+                current.dssdata_bytes += 4096;
+            else
+                current.pgdata_bytes += 4096;
+        } else {
+            if (is_dss_type(file->type))
+                current.dssdata_bytes += file->size;
+            else
+                current.pgdata_bytes += file->size;
         }
-
-        current.pgdata_bytes += file->size;
     }
 
-    pretty_size(current.pgdata_bytes, pretty_bytes, lengthof(pretty_bytes));
-    elog(INFO, "PGDATA size: %s", pretty_bytes);
+    pretty_size(current.pgdata_bytes, pretty_pgdata_bytes, lengthof(pretty_pgdata_bytes));
+    elog(INFO, "PGDATA size: %s", pretty_pgdata_bytes);
+    if (IsDssMode()) {
+        pretty_size(current.dssdata_bytes, pretty_dssdata_bytes, lengthof(pretty_dssdata_bytes));
+        elog(INFO, "DSSDATA size: %s", pretty_dssdata_bytes);
+    }
 }
 
 static void add_xlog_files_into_backup_list(const char *database_path, const char *dssdata_path,
@@ -432,28 +445,11 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
     /* Scan backup PG_XLOG_DIR */
     xlog_files_list = parray_new();
 
-    /* link dssdata's pg_xlog to database's pg_xlog */
-    if (enable_dss) {
-        char database_xlog[MAXPGPATH];
-        char dssdata_xlog[MAXPGPATH];
+    if (IsDssMode()) {
         errno_t rc;
 
-        rc = snprintf_s(dssdata_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", dssdata_path, PG_XLOG_DIR, instance_id);
+        rc = snprintf_s(pg_xlog_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d", dssdata_path, PG_XLOG_DIR, instance_id);
         securec_check_ss_c(rc, "\0", "\0");
-        join_path_components(database_xlog, database_path, PG_XLOG_DIR);
-
-        /* dssdata_xlog is already exist, destory it and recreate */
-        if (rmdir(dssdata_xlog) != 0) {
-            elog(ERROR, "can not remove xlog dir \"%s\" : %s", dssdata_xlog, strerror(errno));
-        }
-
-        if (symlink(database_xlog, dssdata_xlog) < 0) {
-            elog(ERROR, "can not link dss xlog dir \"%s\" to database xlog dir \"%s\": %s", dssdata_xlog, database_xlog,
-                strerror(errno));
-        }
-
-        rc = strcpy_s(pg_xlog_path, MAXPGPATH, dssdata_xlog);
-        securec_check_c(rc, "\0", "\0");
         parent_path = dssdata_path;
     } else {
         join_path_components(pg_xlog_path, database_path, PG_XLOG_DIR);
@@ -683,7 +679,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     /* start stream replication */
     if (stream_wal)
     {
-        start_stream_wal(database_path, backup_conn);
+        start_stream_wal(database_path, dssdata_path, backup_conn);
     }
 
     /* initialize backup list */
@@ -736,11 +732,17 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
      */
 
     if (parray_num(backup_files_list) < 100)
-        elog(ERROR, "PGDATA is almost empty. Either it was concurrently deleted or "
-            "gs_probackup do not possess sufficient permissions to list PGDATA content");
+    {
+        if (IsDssMode())
+            elog(ERROR, "VGNAME is almost empty. Either it was concurrently deleted or "
+                "gs_probackup do not possess sufficient permissions to list VGNAME content");
+        else
+            elog(ERROR, "PGDATA is almost empty. Either it was concurrently deleted or "
+                "gs_probackup do not possess sufficient permissions to list PGDATA content");
+    }
 
-    /* Calculate pgdata_bytes */
-    calc_pgdata_bytes();
+    /* Calculate pgdata_bytes and dssdata_bytes */
+    calc_data_bytes();
     /*
      * Sort pathname ascending. It is necessary to create intermediate
      * directories sequentially.
@@ -942,9 +944,6 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
     if (!instance_config.pgdata)
         elog(ERROR, "required parameter not specified: PGDATA "
             "(-D, --pgdata)");
-
-    if (IsDssMode() && current.backup_mode != BACKUP_MODE_FULL)
-        elog(ERROR, "only support full backup when enable dss.");
 
     /* Update backup status and other metainfo. */
     current.status = BACKUP_STATUS_RUNNING;
@@ -1434,8 +1433,22 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
      */
     if (in_stream_dir)
     {
-        pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir),
-                                        DATABASE_DIR, PG_XLOG_DIR);
+        if (IsDssMode())
+        {
+            errno_t rc;
+            char dss_xlog[MAXPGPATH];
+
+            rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, "%s%d",
+                    PG_XLOG_DIR, instance_config.dss.instance_id);
+            securec_check_ss_c(rc, "\0", "\0");
+            pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir),
+                DSSDATA_DIR, dss_xlog);
+        }
+        else
+        {
+            pgBackupGetPath2(&current, pg_wal_dir, lengthof(pg_wal_dir),
+                DATABASE_DIR, PG_XLOG_DIR);
+        }
         join_path_components(wal_segment_path, pg_wal_dir, wal_segment);
         wal_segment_dir = pg_wal_dir;
     }
@@ -1558,9 +1571,21 @@ static void get_valid_stop_lsn(pgBackup *backup, bool *stop_lsn_exists, XLogRecP
 
     if (stream_wal)
     {
-        pgBackupGetPath2(backup, stream_xlog_path,
-                lengthof(stream_xlog_path),
+        if (IsDssMode())
+        {
+            errno_t rc;
+            char dss_xlog[MAXPGPATH];
+            rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, "%s%d", PG_XLOG_DIR,
+                instance_config.dss.instance_id);
+            securec_check_ss_c(rc, "\0", "\0");
+            pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
+                DSSDATA_DIR, dss_xlog);
+        }
+        else
+        {
+            pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
                 DATABASE_DIR, PG_XLOG_DIR);
+        }
         xlog_path = stream_xlog_path;
     }
     else
@@ -1961,7 +1986,7 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
     if (backup != NULL)
     {
         char    *xlog_path,
-                        stream_xlog_path[MAXPGPATH];
+        stream_xlog_path[MAXPGPATH];
 
         /*
          * Wait for stop_lsn to be archived or streamed.
@@ -1983,9 +2008,22 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
             if (stream_thread_arg.ret == 1)
                 elog(ERROR, "WAL streaming failed");
 
-            pgBackupGetPath2(backup, stream_xlog_path,
-                             lengthof(stream_xlog_path),
-                             DATABASE_DIR, PG_XLOG_DIR);
+            if (IsDssMode())
+            {
+                errno_t rc;
+                char dss_xlog[MAXPGPATH];
+
+                rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, "%s%d",
+                    PG_XLOG_DIR, instance_config.dss.instance_id);
+                securec_check_ss_c(rc, "\0", "\0");
+                pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
+                    DSSDATA_DIR, dss_xlog);
+            }
+            else
+            {
+                pgBackupGetPath2(backup, stream_xlog_path, lengthof(stream_xlog_path),
+                    DATABASE_DIR, PG_XLOG_DIR);
+            }
             xlog_path = stream_xlog_path;
         }
         else
