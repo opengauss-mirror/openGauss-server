@@ -2631,7 +2631,7 @@ static void executePopenCommandsParallel(const char* cmd, int idx, bool is_local
     int nRet = 0;
     size_t len_fcmd = 0;
     char* nodename = NULL;
-    /* the temp directory that storage gs_guc result information */
+    /* the temp directory that stores gs_guc result information */
     char gausshome[MAXPGPATH] = {0};
 
     curr_cxt = &g_parallel_command_cxt[idx];
@@ -2934,7 +2934,7 @@ int execute_guc_command_in_remote_node(int idx, char* command)
     size_t len_fcmd = strlen(command) + strlen(nodename) + NAMEDATALEN + MAXPGPATH;
     int nRet = 0;
     uint32 ret = 0;
-    /* the temp directory that storage gs_guc result information */
+    /* the temp directory that stores gs_guc result information */
     char gausshome[MAXPGPATH] = {0};
     char sshlogpathdir[MAXPGPATH] = {0};
     char result_file[MAXPGPATH] = {0};

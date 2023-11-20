@@ -2175,7 +2175,7 @@ void do_check_parameter_name_type()
     int j = 0;
     int name_len = 0;
 
-    /* parameter must startwith alpha, 0-9 or '_' */
+    /* parameter can only contain alpha, 0-9 or '_' */
     for (i = 0; i < config_param_number; i++) {
         name_len = strnlen(config_param[i], MAX_PARAM_LEN);
         if ((*(config_param[i] + 0)) == '_' || *(config_param[i] + name_len - 1) == '_')
@@ -2191,7 +2191,7 @@ void do_check_parameter_name_type()
         for (j = 0; j < (int)strnlen(config_param[i], MAX_PARAM_LEN); j++) {
             if ((!isalpha((unsigned char)(*(config_param[i] + j)))) &&
                 (!isdigit((unsigned char)(*(config_param[i] + j))))) {
-                /* parameter must startwith alpha, 0-9 or '_' */
+                /* parameter can only contain alpha, 0-9 or '_' */
                 if ((*(config_param[i] + j)) != '_') {
                     write_stderr(
                         _("The parameter(%s)exists illegal character:%c\n"), config_param[i], *(config_param[i] + j));
