@@ -9,6 +9,29 @@ select * from gs_walwriter_flush_position();
 select * from gs_walwriter_flush_stat(1);
 select * from gs_walwriter_flush_stat(2);
 
+-- wal sender
+select * from gs_stat_walsender();  -- default get
+select * from gs_stat_walsender(1); -- enable
+select * from gs_stat_walsender(2); -- get
+select * from gs_stat_walsender(0); -- reset
+select * from gs_stat_walsender(null); -- reset
+select * from gs_stat_walsender(-1); -- disable
+select * from gs_stat_walsender(3); -- error
+-- wal receiver
+select * from gs_stat_walreceiver();
+select * from gs_stat_walreceiver(1);
+select * from gs_stat_walreceiver(2);
+select * from gs_stat_walreceiver(0);
+select * from gs_stat_walreceiver(-1);
+select * from gs_stat_walreceiver(4); -- error
+-- wal recvwriter
+select * from gs_stat_walrecvwriter();
+select * from gs_stat_walrecvwriter(1);
+select * from gs_stat_walrecvwriter(2);
+select * from gs_stat_walrecvwriter(0);
+select * from gs_stat_walrecvwriter(-1);
+select * from gs_stat_walreceiver(5); -- error
+
 DROP TABLE IF EXISTS test_ustore;
 DROP INDEX IF EXISTS test_ustore_idx;
 DROP INDEX IF EXISTS test_ustore_idx2;

@@ -36,6 +36,108 @@ select * from gs_walwriter_flush_stat(2);
 --?.*
 (1 row)
 
+-- wal sender
+select * from gs_stat_walsender();  -- default get
+ is_enable_stat | channel | cur_time | send_times | first_send_time | last_send_time | last_reset_time | avg_send_interval | since_last_send_interval 
+----------------+---------+----------+------------+-----------------+----------------+-----------------+-------------------+--------------------------
+(0 rows)
+
+select * from gs_stat_walsender(1); -- enable
+ is_enable_stat | channel | cur_time | send_times | first_send_time | last_send_time | last_reset_time | avg_send_interval | since_last_send_interval 
+----------------+---------+----------+------------+-----------------+----------------+-----------------+-------------------+--------------------------
+(0 rows)
+
+select * from gs_stat_walsender(2); -- get
+ is_enable_stat | channel | cur_time | send_times | first_send_time | last_send_time | last_reset_time | avg_send_interval | since_last_send_interval 
+----------------+---------+----------+------------+-----------------+----------------+-----------------+-------------------+--------------------------
+(0 rows)
+
+select * from gs_stat_walsender(0); -- reset
+ is_enable_stat | channel | cur_time | send_times | first_send_time | last_send_time | last_reset_time | avg_send_interval | since_last_send_interval 
+----------------+---------+----------+------------+-----------------+----------------+-----------------+-------------------+--------------------------
+(0 rows)
+
+select * from gs_stat_walsender(null); -- reset
+ is_enable_stat | channel | cur_time | send_times | first_send_time | last_send_time | last_reset_time | avg_send_interval | since_last_send_interval 
+----------------+---------+----------+------------+-----------------+----------------+-----------------+-------------------+--------------------------
+(0 rows)
+
+select * from gs_stat_walsender(-1); -- disable
+ is_enable_stat | channel | cur_time | send_times | first_send_time | last_send_time | last_reset_time | avg_send_interval | since_last_send_interval 
+----------------+---------+----------+------------+-----------------+----------------+-----------------+-------------------+--------------------------
+(0 rows)
+
+select * from gs_stat_walsender(3); -- error
+ERROR:  illegal value "3" for parameter "operation".
+HINT:  -1: disable, 0: reset, 1: enable, 2: get
+-- wal receiver
+select * from gs_stat_walreceiver();
+--? is_enable_stat | buffer_current_size | buffer_full_times | wake_writer_times | avg_wake_interval | since_last_wake_interval | first_wake_time | last_wake_time | last_reset_time |.*
+--?.*
+--? f              |                   0 |                 0 |                 0 |                   |                          |                 |                |                 |.*
+(1 row)
+
+select * from gs_stat_walreceiver(1);
+--? is_enable_stat | buffer_current_size | buffer_full_times | wake_writer_times | avg_wake_interval | since_last_wake_interval | first_wake_time | last_wake_time | last_reset_time |.*
+--?.*
+--? t              |                   0 |                 0 |                 0 |                   |                          |                 |                |                 |.*
+(1 row)
+
+select * from gs_stat_walreceiver(2);
+--? is_enable_stat | buffer_current_size | buffer_full_times | wake_writer_times | avg_wake_interval | since_last_wake_interval | first_wake_time | last_wake_time | last_reset_time |.*
+--?.*
+--? t              |                   0 |                 0 |                 0 |                   |                          |                 |                |                 |.*
+(1 row)
+
+select * from gs_stat_walreceiver(0);
+--? is_enable_stat | buffer_current_size | buffer_full_times | wake_writer_times | avg_wake_interval | since_last_wake_interval | first_wake_time | last_wake_time |.*
+--?.*
+--? t              |                   0 |                 0 |                 0 |                   |                          |                 |                |.*
+(1 row)
+
+select * from gs_stat_walreceiver(-1);
+--? is_enable_stat | buffer_current_size | buffer_full_times | wake_writer_times | avg_wake_interval | since_last_wake_interval | first_wake_time | last_wake_time |.*
+--?.*
+--? f              |                   0 |                 0 |                 0 |                   |                          |                 |                |.*
+(1 row)
+
+select * from gs_stat_walreceiver(4); -- error
+ERROR:  illegal value "4" for parameter "operation".
+HINT:  -1: disable, 0: reset, 1: enable, 2: get
+-- wal recvwriter
+select * from gs_stat_walrecvwriter();
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | newest_xlog_segno | last_reset_time |.*
+--?.*
+--? f              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |                  0 |                 2 |                 |.*
+(1 row)
+
+select * from gs_stat_walrecvwriter(1);
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | newest_xlog_segno | last_reset_time |.*
+--?.*
+--? t              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |                  0 |                 2 |                 |.*
+(1 row)
+
+select * from gs_stat_walrecvwriter(2);
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | newest_xlog_segno | last_reset_time |.*
+--?.*
+--? t              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |                  0 |                 2 |                 |.*
+(1 row)
+
+select * from gs_stat_walrecvwriter(0);
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes |.*
+--?.*
+--? t              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |.*
+(1 row)
+
+select * from gs_stat_walrecvwriter(-1);
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes |.*
+--?.*
+--? f              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |.*
+(1 row)
+
+select * from gs_stat_walreceiver(5); -- error
+ERROR:  illegal value "5" for parameter "operation".
+HINT:  -1: disable, 0: reset, 1: enable, 2: get
 DROP TABLE IF EXISTS test_ustore;
 --?.*
 DROP INDEX IF EXISTS test_ustore_idx;

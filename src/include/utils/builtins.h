@@ -1799,6 +1799,11 @@ extern Datum gs_stat_wal_entrytable(PG_FUNCTION_ARGS);
 extern Datum gs_walwriter_flush_position(PG_FUNCTION_ARGS);
 extern Datum gs_walwriter_flush_stat(PG_FUNCTION_ARGS);
 
+/* wal sender, receiver, recvwriter stat */
+extern Datum gs_stat_walsender(PG_FUNCTION_ARGS);
+extern Datum gs_stat_walreceiver(PG_FUNCTION_ARGS);
+extern Datum gs_stat_walrecvwriter(PG_FUNCTION_ARGS);
+
 /* Ledger */
 extern Datum get_dn_hist_relhash(PG_FUNCTION_ARGS);
 extern Datum ledger_hist_check(PG_FUNCTION_ARGS);

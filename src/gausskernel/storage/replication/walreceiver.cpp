@@ -251,6 +251,20 @@ static void DisableWalRcvImmediateExit(void)
 
 void wakeupWalRcvWriter()
 {
+    if (g_instance.wal_cxt.walReceiverStats->isEnableStat) {
+        SpinLockAcquire(&g_instance.wal_cxt.walReceiverStats->mutex);
+        volatile bool recheck = g_instance.wal_cxt.walReceiverStats->isEnableStat;
+        if (recheck) {
+            g_instance.wal_cxt.walReceiverStats->wakeWriterTimes++;
+            TimestampTz time = GetCurrentTimestamp();
+            if (g_instance.wal_cxt.walReceiverStats->firstWakeTime == 0) {
+                g_instance.wal_cxt.walReceiverStats->firstWakeTime = time;
+            }
+            g_instance.wal_cxt.walReceiverStats->lastWakeTime = time;
+        }
+        SpinLockRelease(&g_instance.wal_cxt.walReceiverStats->mutex);
+    }
+
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
@@ -277,6 +291,7 @@ static void walRcvCtlBlockInit()
     securec_check_c(rc, "\0", "\0");
 
     t_thrd.walreceiver_cxt.walRcvCtlBlock = (WalRcvCtlBlock *)buf;
+    g_instance.wal_cxt.walReceiverStats->walRcvCtlBlock = t_thrd.walreceiver_cxt.walRcvCtlBlock;
     if (BBOX_BLACKLIST_WALREC_CTL_BLOCK) {
         bbox_blacklist_add(WALRECIVER_CTL_BLOCK, t_thrd.walreceiver_cxt.walRcvCtlBlock, len);
     }
@@ -289,7 +304,7 @@ static void walRcvCtlBlockFini()
     if (BBOX_BLACKLIST_WALREC_CTL_BLOCK) {
         bbox_blacklist_remove(WALRECIVER_CTL_BLOCK, t_thrd.walreceiver_cxt.walRcvCtlBlock);
     }
-
+    g_instance.wal_cxt.walReceiverStats->walRcvCtlBlock = nullptr;
     pfree(t_thrd.walreceiver_cxt.walRcvCtlBlock);
     t_thrd.walreceiver_cxt.walRcvCtlBlock = NULL;
 }
@@ -1401,6 +1416,7 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
     char *walrecvbuf = NULL;
     XLogRecPtr startptr;
     int recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+    bool isSameFull = false;
 
     while (nbytes > 0) {
         int segbytes;
@@ -1438,6 +1454,10 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
         }
 
         if (endPoint == walfreeoffset) {
+            if (g_instance.wal_cxt.walReceiverStats->isEnableStat && !isSameFull) {
+                g_instance.wal_cxt.walReceiverStats->bufferFullTimes++;
+                isSameFull = true;
+            }
             if (WalRcvWriterInProgress()) {
                 wakeupWalRcvWriter();
                 /* Process any requests or signals received recently */
@@ -1450,6 +1470,7 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
             continue;
         }
 
+        isSameFull = false;
         segbytes = (walfreeoffset + (int)nbytes > endPoint) ? endPoint - walfreeoffset : nbytes;
 
         /* Need to seek in the buffer? */
