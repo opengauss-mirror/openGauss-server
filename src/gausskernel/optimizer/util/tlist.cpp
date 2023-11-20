@@ -1539,4 +1539,29 @@ Index maxSortGroupRef(List *targetlist, bool include_orderedagg)
  
     return context.maxsgr;
 }
+
+/*
+ * get_sortgroupref_tle_spq
+ *             Find the targetlist entry matching the given SortGroupRef index,
+ *             and return it.
+ */
+TargetEntry* get_sortgroupref_tle_spq(Index sortref, List* targetList, bool report_error)
+{
+    ListCell* l = NULL;
+
+    foreach (l, targetList) {
+        TargetEntry* tle = (TargetEntry*)lfirst(l);
+
+        if (IS_SPQ_COORDINATOR && tle->resno == sortref && tle->ressortgroupref == 0) {
+            return tle;
+        }
+    }
+
+    if (report_error)
+        ereport(ERROR,
+                (errmodule(MOD_OPT),
+                 errcode(ERRCODE_GROUPING_ERROR),
+                 errmsg("ORDER/GROUP BY expression not found in targetlist")));
+    return NULL;
+}
 #endif

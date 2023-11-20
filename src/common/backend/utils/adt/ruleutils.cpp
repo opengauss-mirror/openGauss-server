@@ -276,6 +276,9 @@ static void get_basic_select_query(Query* query, deparse_context* context, Tuple
 static void get_target_list(Query* query, List* targetList, deparse_context* context, TupleDesc resultDesc);
 static void get_setop_query(Node* setOp, Query* query, deparse_context* context, TupleDesc resultDesc);
 static Node* get_rule_sortgroupclause(Index ref, List* tlist, bool force_colno, deparse_context* context);
+#ifdef USE_SPQ
+static Node* get_rule_sortgroupclause_spq(Index ref, bool force_colno, deparse_context* context);
+#endif
 static void get_rule_groupingset(GroupingSet* gset, List* targetlist, deparse_context* context);
 static void get_rule_orderby(List* orderList, List* targetList, bool force_colno, deparse_context* context);
 static void get_rule_windowclause(Query* query, deparse_context* context);
@@ -6784,6 +6787,59 @@ static Node* get_rule_sortgroupclause(Index ref, List* tlist, bool force_colno, 
 
     return expr;
 }
+#ifdef USE_SPQ
+/*
+ * Display a sort/group clause.
+ *
+ * Also returns the expression tree, so caller need not find it again.
+ */
+
+static Node* get_rule_sortgroupclause_spq(Index ref, bool force_colno, deparse_context* context)
+{
+    StringInfo buf = context->buf;
+    TargetEntry* tle = NULL;
+    Node* expr = NULL;
+    List* tlist;
+
+    deparse_namespace* dpns_spq = (deparse_namespace*)linitial(context->namespaces);
+    PlanState* ps = dpns_spq->planstate;
+    WindowAgg* node = NULL;
+    node = (WindowAgg*)ps->plan;
+    tlist = node->plan.lefttree->targetlist;
+
+    if (tlist == NULL){
+        return expr;
+    }
+
+    tle = get_sortgroupref_tle_spq(ref, tlist);
+    expr = (Node*)tle->expr;
+
+    deparse_namespace* dpns = NULL;
+    deparse_namespace save_dpns;
+
+    dpns = (deparse_namespace*)list_nth(context->namespaces, ((Var*)expr)->varlevelsup);
+    push_child_plan(dpns, dpns->outer_planstate, &save_dpns);
+
+
+    /*
+     * Use column-number form if requested by caller.  Otherwise, if
+     * expression is a constant, force it to be dumped with an explicit cast
+     * as decoration --- this is because a simple integer constant is
+     * ambiguous (and will be misinterpreted by findTargetlistEntry()) if we
+     * dump it without any decoration.	Otherwise, just dump the expression
+     * normally.
+     */
+    if (force_colno || context->sortgroup_colno) {
+        Assert(!tle->resjunk);
+        appendStringInfo(buf, "%d", tle->resno);
+    } else if (expr && IsA(expr, Var))
+        get_rule_expr(expr, context, true);
+
+    pop_child_plan(dpns, &save_dpns);
+
+    return expr;
+}
+#endif
 
 /*
  * @Description: Display a GroupingSet.
@@ -6860,7 +6916,15 @@ static void get_rule_orderby(List* orderList, List* targetList, bool force_colno
         TypeCacheEntry* typentry = NULL;
 
         appendStringInfoString(buf, sep);
-        sortexpr = get_rule_sortgroupclause(srt->tleSortGroupRef, targetList, force_colno, context);
+#ifdef USE_SPQ
+        if (IS_SPQ_COORDINATOR && (list_length(context->windowClause) > 0) &&
+            lfirst(list_head(context->windowClause)) != NULL &&
+            ((WindowClause *)lfirst(list_head(context->windowClause)))->reOrderSPQ) {
+            sortexpr = get_rule_sortgroupclause_spq(srt->tleSortGroupRef, force_colno, context);
+        } else
+#endif
+            sortexpr = get_rule_sortgroupclause(srt->tleSortGroupRef, targetList, force_colno, context);
+
         sortcoltype = exprType(sortexpr);
         /* See whether operator is default < or > for datatype */
         typentry = lookup_type_cache(sortcoltype, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
@@ -6942,7 +7006,12 @@ static void get_rule_windowspec(WindowClause* wc, List* targetList, deparse_cont
             SortGroupClause* grp = (SortGroupClause*)lfirst(l);
 
             appendStringInfoString(buf, sep);
-            get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
+#ifdef USE_SPQ
+            if (IS_SPQ_COORDINATOR && wc->rePartitionSPQ) {
+                get_rule_sortgroupclause_spq(grp->tleSortGroupRef, false, context);
+            } else
+#endif
+                get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
             sep = ", ";
         }
         needspace = true;
@@ -7041,7 +7110,13 @@ static void get_rule_windowspec_listagg(WindowClause* wc, List* targetList, depa
             SortGroupClause* grp = (SortGroupClause*)lfirst(l);
 
             appendStringInfoString(buf, sep);
-            get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
+#ifdef USE_SPQ
+            if (IS_SPQ_COORDINATOR && wc->rePartitionSPQ) {
+                get_rule_sortgroupclause_spq(grp->tleSortGroupRef, false, context);
+            } else
+#endif
+                get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
+
             sep = ", ";
         }
         needspace = true;
@@ -10701,23 +10776,38 @@ static bool construct_partitionClause(WindowAgg* node, WindowClause* wc)
          * ressortgroupref refers to windowagg's tlist
          * partColIdx      refers to subplan's tlist
          */
-        ListCell *lc = NULL;
-        foreach(lc, node->plan.targetlist) {
-            TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
-            if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
-                _equalSimpleVar(tle->expr, window_agg_te->expr)) {
-                if (window_agg_te->ressortgroupref > 0) {
-                    partcl->tleSortGroupRef = window_agg_te->ressortgroupref;
-                    /* found it */
-                    break;
+#ifdef USE_SPQ
+        wc->rePartitionSPQ = false;
+        if (IS_SPQ_COORDINATOR) {
+            if (IsA(tle->expr, Var)) {
+                Var* tle_expr = (Var*)tle->expr;
+                partcl->tleSortGroupRef = tle_expr->varattno;
+                wc->rePartitionSPQ = true;
+            } else {
+                list_free_ext(partitionClause);
+                return false;
+            }
+        } else
+#endif
+        {
+            ListCell *lc = NULL;
+            foreach(lc, node->plan.targetlist) {
+                TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
+                if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
+                    _equalSimpleVar(tle->expr, window_agg_te->expr)) {
+                    if (window_agg_te->ressortgroupref > 0) {
+                        partcl->tleSortGroupRef = window_agg_te->ressortgroupref;
+                        /* found it */
+                        break;
+                    }
                 }
             }
-        }
 
-        if (lc == NULL) {
-            /* not found */
-            list_free_ext(partitionClause);
-            return false;
+            if (lc == NULL) {
+                /* not found */
+                list_free_ext(partitionClause);
+                return false;
+            }
         }
 
         partcl->eqop = node->partOperators[i];
@@ -10764,26 +10854,41 @@ static void construct_windowClause(deparse_context* context)
             }
 
             /*
-             * ressortgroupref refers to windowagg's tlist
-             * partColIdx      refers to subplan's tlist
-             */
-            ListCell *lc = NULL;
-            foreach(lc, node->plan.targetlist) {
-                TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
-                if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
-                    _equalSimpleVar(tle->expr, window_agg_te->expr)) {
-                    if (window_agg_te->ressortgroupref > 0) {
-                       sortcl->tleSortGroupRef = window_agg_te->ressortgroupref;
-                       /* found it */
-                       break;
+            * ressortgroupref refers to windowagg's tlist
+            * partColIdx      refers to subplan's tlist
+            */
+#ifdef USE_SPQ
+            wc->reOrderSPQ = false;
+            if (IS_SPQ_COORDINATOR) {
+                if (IsA(tle->expr, Var)) {
+                    Var* tle_expr = (Var*)tle->expr;
+                    sortcl->tleSortGroupRef = tle_expr->varattno;
+                    wc->reOrderSPQ = true;
+                } else {
+                    list_free_ext(orderClause);
+                    return;
+                }
+            } else
+#endif
+            {
+                ListCell *lc = NULL;
+                foreach(lc, node->plan.targetlist) {
+                    TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
+                    if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
+                        _equalSimpleVar(tle->expr, window_agg_te->expr)) {
+                        if (window_agg_te->ressortgroupref > 0) {
+                        sortcl->tleSortGroupRef = window_agg_te->ressortgroupref;
+                        /* found it */
+                        break;
+                        }
                     }
                 }
-            }
 
-            if (lc == NULL) {
-                list_free_ext(orderClause);
-                /* not found */
-                return;
+                if (lc == NULL) {
+                    list_free_ext(orderClause);
+                    /* not found */
+                    return;
+                }
             }
 
             sortcl->sortop = node->ordOperators[i];

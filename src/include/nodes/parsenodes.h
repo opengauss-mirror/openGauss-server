@@ -496,6 +496,10 @@ typedef struct WindowClause {
     Node* endOffset;       /* expression for ending bound, if any */
     Index winref;          /* ID referenced by window functions */
     bool copiedOrder;      /* did we copy orderClause from refname? */
+#ifdef USE_SPQ
+    bool rePartitionSPQ;   /* did we reassign the tleSortGroupRef when constructing partition Clause */
+    bool reOrderSPQ;       /* did we reassign the tleSortGroupRef when constructing order Clause */
+#endif
 } WindowClause;
 
 /*

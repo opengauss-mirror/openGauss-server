@@ -71,6 +71,7 @@ extern bool split_pathtarget_at_srfs(PlannerInfo *root, PathTarget *target, Path
 extern List* tlist_members(Node* node, List* targetlist);
 extern void get_sortgroupclauses_tles(List *clauses, List *targetList, List **tles, List **sortops, List **eqops);
 extern Index maxSortGroupRef(List *targetlist, bool include_orderedagg);
+extern TargetEntry* get_sortgroupref_tle_spq(Index sortref, List* targetList, bool report_error = true);
 #endif
 
 #endif /* TLIST_H */
