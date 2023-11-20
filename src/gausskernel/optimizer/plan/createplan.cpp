@@ -387,8 +387,11 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
                     Assert(IsA(best_path, ResultPath));
                     plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
                 }
-            } else {
+            } else if (IsA(best_path, ResultPath)) {
                 plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
+            } else {
+                Assert(IsA(best_path, Path));
+                plan = create_scan_plan(root, best_path);
             }
             break;
         case T_ProjectSet:
