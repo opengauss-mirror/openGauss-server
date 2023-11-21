@@ -631,6 +631,7 @@ Oid createdb(const CreatedbStmt* stmt)
     fparms.dest_dboid = dboid;
     PG_ENSURE_ERROR_CLEANUP(createdb_failure_callback, PointerGetDatum(&fparms));
     {
+        bool hasCopied = false;
         /*
          * Iterate through all tablespaces of the template database, and copy
          * each one to the new database.
@@ -669,6 +670,8 @@ Oid createdb(const CreatedbStmt* stmt)
              * We don't need to copy subdirectories
              */
             (void)copydir(srcpath, dstpath, false, ERROR);
+            
+            hasCopied = true;
 
             /* Record the filesystem change in XLOG */
             {
@@ -685,6 +688,33 @@ Oid createdb(const CreatedbStmt* stmt)
                 (void)XLogInsert(RM_DBASE_ID, XLOG_DBASE_CREATE | XLR_SPECIAL_REL_UPDATE);
             }
         }
+
+        /* Handling situation that the default tablespace has been deleted */
+        if (!hasCopied && OidIsValid(dst_deftablespace)) {
+            struct stat st;
+            char* srcpath = GetDatabasePath(src_dboid, src_deftablespace);
+
+            if (stat(srcpath, &st) < 0 || !S_ISDIR(st.st_mode) || directory_is_empty(srcpath)) {
+                pfree_ext(srcpath);
+            } else {
+                char* dstpath = GetDatabasePath(dboid, dst_deftablespace);
+                (void)copydir(srcpath, dstpath, false, ERROR);
+                
+                /* Record the filesystem change in XLOG */
+                xl_dbase_create_rec xlrec;
+                xlrec.db_id = dboid;
+                xlrec.tablespace_id = dst_deftablespace;
+                xlrec.src_db_id = src_dboid;
+                xlrec.src_tablespace_id = dst_deftablespace;
+                XLogBeginInsert();
+                XLogRegisterData((char*)&xlrec, sizeof(xl_dbase_create_rec));
+                (void)XLogInsert(RM_DBASE_ID, XLOG_DBASE_CREATE | XLR_SPECIAL_REL_UPDATE);
+
+                pfree_ext(srcpath);
+                pfree_ext(dstpath);
+            }
+        }
+
         tableam_scan_end(scan);
         heap_close(rel, AccessShareLock);
 
