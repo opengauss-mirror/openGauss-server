@@ -453,6 +453,9 @@ typedef struct knl_u_parser_context {
     void* stmt;
 
     bool has_hintwarning;
+    bool in_userset;
+    bool has_set_uservar;
+    bool has_equal_uservar;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {

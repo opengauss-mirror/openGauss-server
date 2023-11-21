@@ -8342,6 +8342,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->pcache_cxt.gpc_in_try_store = false;
         u_sess->plsql_cxt.have_error = false;
         u_sess->parser_cxt.isPerform = false;
+        u_sess->parser_cxt.in_userset = false;
+        u_sess->parser_cxt.has_set_uservar = false;
+        u_sess->parser_cxt.has_equal_uservar = false;
         u_sess->parser_cxt.stmt = NULL;
         OpFusion::tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
         /* init pbe execute status when long jump */

@@ -990,6 +990,12 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
      */
     MemoryContext oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
 
+    if (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)) {
+        if (nodeTag(planstate) == T_SeqScanState) {
+            scan_handler_tbl_restrpos(castNode(SeqScanState, planstate)->ss_currentScanDesc);
+        }
+    }
+
     /*
      * Run the plan.  (If it needs to be rescanned, the first ExecProcNode
      * call will take care of that.)
@@ -1049,9 +1055,15 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
             int paramid = lfirst_int(l);
             ParamExecData* prm = &(econtext->ecxt_param_exec_vals[paramid]);
 
-            prm->execPlan = NULL;
-            prm->value = tableam_tops_tuple_getattr(node->curTuple, i, tdesc, &(prm->isnull));
-            i++;
+            if (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT)) {
+                prm->value = tableam_tops_tuple_getattr(node->curTuple, i, tdesc, &(prm->isnull));
+                i++;
+                return;
+            } else {
+                prm->execPlan = NULL;
+                prm->value = tableam_tops_tuple_getattr(node->curTuple, i, tdesc, &(prm->isnull));
+                i++;
+            }
         }
     }
 
