@@ -6690,7 +6690,23 @@ static void get_setop_query(Node* setOp, Query* query, deparse_context* context,
             if (context->qrw_phase)
                 get_setop_query(subquery->setOperations, subquery, context, resultDesc);
             else
-                Assert(false);
+                get_query_def(subquery,
+                    buf,
+                    context->namespaces,
+                    resultDesc,
+                    context->prettyFlags,
+                    context->wrapColumn,
+                    context->indentLevel
+#ifdef PGXC
+                    ,
+                    context->finalise_aggs,
+                    context->sortgroup_colno,
+                    context->parser_arg
+#endif /* PGXC */
+                    ,
+                    context->qrw_phase,
+                    context->viewdef,
+                    context->is_fqs);
         }
 
         if (need_paren)
