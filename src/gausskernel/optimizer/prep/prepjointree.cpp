@@ -3587,6 +3587,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
                                 varno, varattno, exprType(node), exprTypmod(node), exprCollation(node), 0);
                         } else {
                             oldvar = (Node*)copyObject(retnode);
+                            oldvar = eval_const_expressions(root, oldvar);
                         }
                     } break;
                     default:
