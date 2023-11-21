@@ -498,7 +498,7 @@ prepare_page(ConnectionArgs *conn_arg,
         /* read the block */
         int offset = blknum * BLCKSZ;
         int fileStartOff = offset - (offset % DSS_BLCKSZ);
-        if (IsDssMode() && file->size - fileStartOff >= DSS_BLCKSZ)
+        if (current.backup_mode == BACKUP_MODE_FULL && IsDssMode() && file->size - fileStartOff >= DSS_BLCKSZ)
         {
             int preReadOff = offset % DSS_BLCKSZ;
             if (offset / DSS_BLCKSZ == preReadBuf->num)
@@ -570,7 +570,7 @@ prepare_page(ConnectionArgs *conn_arg,
                  blknum, from_fullpath, read_len, BLCKSZ);
         }
         else
-        {       
+        {
             /* We have BLCKSZ of raw data, validate it */
             rc = validate_one_page(page, absolute_blknum,
                 InvalidXLogRecPtr, page_st,
@@ -739,7 +739,7 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
     * NOTE This is a normal situation, if the file size has changed
     * since the moment we computed it.
     */
-    file->n_blocks = file->size/BLCKSZ;
+    file->n_blocks = file->size / BLCKSZ;
 
     /*
     * Skip unchanged file only if it exists in previous backup.
@@ -1305,7 +1305,7 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
         /* If page is compressed and restore is in remote mode, send compressed
         * page to the remote side.
         */
-        if (IsDssMode() && targetSize >= DSS_BLCKSZ)
+        if (!map && IsDssMode() && targetSize >= DSS_BLCKSZ)
         {
             if (is_compressed)
             {
@@ -1601,11 +1601,31 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     /* open backup file for write  */
     out = fopen(to_fullpath, PG_BINARY_W);
     if (out == NULL)
-        elog(ERROR, "Cannot open destination file \"%s\": %s",
-            to_fullpath, strerror(errno));
+    {
+        if (file->external_dir_num)
+        {
+            char    parent[MAXPGPATH];
+            errno_t rc = 0;
+
+            rc = strncpy_s(parent, MAXPGPATH, to_fullpath, MAXPGPATH - 1);
+            securec_check_c(rc, "", "");
+            get_parent_directory(parent);
+
+            dir_create_dir(parent, DIR_PERMISSION);
+            out = fopen(to_fullpath, PG_BINARY_W);
+            if (out == NULL)
+                elog(ERROR, "Cannot open destination file \"%s\": %s",
+                    to_fullpath, strerror(errno));
+        }
+        else
+        {
+            elog(ERROR, "Cannot open destination file \"%s\": %s",
+                to_fullpath, strerror(errno));
+        }
+    }
 
     /* update file permission */
-    if (!is_dss_file(from_fullpath))
+    if (!is_dss_type(file->type))
     {
         if (chmod(to_fullpath, file->mode) == -1)
             elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,

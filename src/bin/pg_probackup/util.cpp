@@ -551,7 +551,6 @@ bool
 is_ss_xlog(const char *ss_dir)
 {
     char ss_xlog[MAXPGPATH] = {0};
-    char ss_doublewrite[MAXPGPATH] = {0};
     char ss_notify[MAXPGPATH] = {0};
     char ss_snapshots[MAXPGPATH] = {0};
     int rc = EOK;
@@ -588,6 +587,12 @@ ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog)
     securec_check_ss_c(rc, "\0", "\0");
 
     dir_create_dir(path, DIR_PERMISSION);
+
+    /* if xlog link is already exist, destroy it and recreate */
+    if (unlink(link_path) != 0) {
+        elog(ERROR, "can not remove xlog dir \"%s\" : %s", link_path, strerror(errno));
+    }
+    
     if (symlink(path, link_path) < 0) {
         elog(ERROR, "can not link dss xlog dir \"%s\" to dss xlog dir \"%s\": %s", link_path, path,
             strerror(errno));

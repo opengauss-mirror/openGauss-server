@@ -255,7 +255,8 @@ extern void create_data_directories(parray *dest_files,
                                         const char *backup_dir,
                                         bool extract_tablespaces,
                                         bool incremental,
-                                        fio_location location);
+                                        fio_location location,
+                                        bool is_restore);
 
 extern void read_tablespace_map(parray *files, const char *backup_dir);
 extern void opt_tablespace_map(ConfigOption *opt, const char *arg);
@@ -390,6 +391,7 @@ extern void get_redo(const char *pgdata_path, RedoParams *redo);
 extern void parse_vgname_args(const char* args);
 extern bool is_ss_xlog(const char *ss_dir);
 extern void ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog);
+extern bool ss_create_if_pg_replication(pgFile *dir, const char *vgdata, const char *vglog);
 extern bool ss_create_if_doublewrite(pgFile* dir, const char* vgdata, int instance_id);
 extern bool ss_create_if_pg_replication(pgFile* dir, const char* vgdata, const char* vglog);
 extern char* xstrdup(const char* s);

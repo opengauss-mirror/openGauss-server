@@ -89,6 +89,8 @@ extern void pgfnames_cleanup(char** filenames);
         (isalpha((unsigned char)((filename)[0])) && (filename)[1] == ':' && IS_DIR_SEP((filename)[2])))
 #endif
 
+#define ss_is_absolute_path(filename) (((filename)[0] == '+') ? true : false)
+
 /* Portable locale initialization (in exec.c) */
 extern void set_pglocale_pgservice(const char* argv0, const char* app);
 
