@@ -1364,6 +1364,7 @@ typedef struct knl_t_logger_context {
     List* buffer_lists[NBUFFER_LISTS];
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t rotation_requested;
+    int64 total_syslogs_size;
 } knl_t_logger_context;
 
 /*****************************************************************************
