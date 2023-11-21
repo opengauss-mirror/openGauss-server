@@ -582,6 +582,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
             CreateMvCommand(stmt, queryString);
         }
 #endif
+        StoreViewQuery(viewOid, viewParse, stmt->replace);
      } else {
         /*
          * Create the view relation
@@ -590,7 +591,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
          * aborted.
          */
         viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options, stmt->relkind);
-
+        StoreViewQuery(viewOid, viewParse, stmt->replace);
         /*
          * The relation we have just created is not visible to any other commands
          * running with the same transaction & command id. So, increment the
@@ -598,8 +599,6 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
          */
         CommandCounterIncrement();
     }
-
-    StoreViewQuery(viewOid, viewParse, stmt->replace);
 
     return viewOid;
 }
