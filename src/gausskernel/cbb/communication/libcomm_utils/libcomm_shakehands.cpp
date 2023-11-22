@@ -199,7 +199,7 @@ static int gs_r_build_reply_connection(FCMSG_T* fcmsgr, int local_version)
                 .idx = node_idx,
                 .sid = streamid,
                 .ver = remote_version,
-                .type = GSOCK_DAUL_CHANNEL,
+                .type = GSOCK_CONSUMER,
             };
             gs_s_build_reply_conntion(&libcomm_addrinfo, local_version);
         } else {

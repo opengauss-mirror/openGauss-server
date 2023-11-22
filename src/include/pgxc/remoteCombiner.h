@@ -174,6 +174,7 @@ typedef struct RemoteQueryState {
     uint64 queryId;
     PGXCNodeHandle** spq_connections_info;
     pg_conn **nodeCons;
+    spq_qc_ctx* qc_ctx;
 #endif
 } RemoteQueryState;
 
