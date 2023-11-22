@@ -230,5 +230,6 @@ select * from ttt3;
      |   11 |   22 |   33
 (2 rows)
 
+CREATE TABLE table2 AS WITH RECURSIVE table1 ( pivot0 ) AS ( ( SELECT 1 UNION SELECT 1 LIMIT 1 ) UNION SELECT pivot0 + 1 FROM table1 WHERE pivot0 < 1 ) SELECT 1 ;
 \c postgres
 drop database b_createas;
