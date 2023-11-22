@@ -610,6 +610,13 @@ ss_create_if_pg_replication(pgFile* dir, const char* vgdata, const char* vglog)
         rc = sprintf_s(link_path, sizeof(link_path), "%s/%s", vgdata, dir->rel_path);
         securec_check_ss_c(rc, "\0", "\0");
         dir_create_dir(path, DIR_PERMISSION);
+
+        /* if link is already exist, destroy it and recreate */
+        if (unlink(link_path) != 0) {
+            elog(ERROR, "can not remove pg_replication dir \"%s\" : %s", link_path,
+                strerror(errno));
+        }
+
         if (symlink(path, link_path) < 0) {
             elog(ERROR, "can not link dss  dir \"%s\" to dss  dir \"%s\": %s", link_path, path,
                 strerror(errno));
