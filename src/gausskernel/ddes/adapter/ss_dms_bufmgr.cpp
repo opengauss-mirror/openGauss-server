@@ -213,7 +213,7 @@ RETRY:
     return rdStatus;
 }
 
-void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
+void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk, bool release_check)
 {
     /*
      * prerequisite is that the page that initialized to zero in memory should be flush to disk
@@ -245,7 +245,8 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
         XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
         /* maybe some pages are not protected by WAL-Logged */
-        if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
+        bool check_failed = release_check ? (lsn_on_disk != lsn_on_mem) : (lsn_on_disk > lsn_on_mem);
+        if ((lsn_on_mem != InvalidXLogRecPtr) && check_failed) {
             RelFileNode rnode = buf_desc->tag.rnode;
             int elevel = WARNING;
             if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY) {

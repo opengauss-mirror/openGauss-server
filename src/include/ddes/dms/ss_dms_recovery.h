@@ -63,6 +63,7 @@ typedef struct st_reform_info {
     bool in_reform;
     dms_role_t dms_role;
     SSReformType reform_type;
+    unsigned long long bitmap_nodes;
 } ss_reform_info_t;
 
 typedef enum st_failover_ckpt_status {

@@ -3368,6 +3368,10 @@ typedef struct knl_t_ondemand_xlog_copy_context {
     uint32 openLogOff;
 } knl_t_ondemand_xlog_copy_context;
 
+typedef struct knl_t_dms_auxiliary_context {
+    volatile sig_atomic_t shutdown_requested;
+} knl_t_dms_auxiliary_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -3518,6 +3522,7 @@ typedef struct knl_thrd_context {
     knl_t_dms_context dms_cxt;
     knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
+    knl_t_dms_auxiliary_context dms_aux_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

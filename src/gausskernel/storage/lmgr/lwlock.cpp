@@ -197,7 +197,8 @@ static const char *BuiltinTrancheNames[] = {
     "ReplicationOriginLock",
     "AuditIndextblLock",
     "PCABufferContentLock",
-    "XlogTrackPartLock"
+    "XlogTrackPartLock",
+    "SSSnapshotXminCachePartLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -652,6 +653,10 @@ static void InitializeLWLocks(int numLocks)
 
     for (id = 0; id < NUM_XLOG_TRACK_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_XLOG_TRACK_PARTITION);
+    }
+
+    for (id = 0; id < NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_SS_SNAPSHOT_XMIN_PARTITION);
     }
 
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);

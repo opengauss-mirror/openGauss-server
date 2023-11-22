@@ -548,6 +548,7 @@ typedef enum {
     TsCompactionAuxiliaryProcess,
     XlogCopyBackendProcess,
     BarrierPreParseBackendProcess,
+    DmsAuxiliaryProcess,
     NUM_SINGLE_AUX_PROC, /* Sentry for auxiliary type with single thread. */
 
     /*

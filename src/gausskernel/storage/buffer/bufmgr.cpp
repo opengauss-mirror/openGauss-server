@@ -2982,6 +2982,11 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
                 * need to improve.
                 */
                 if (DmsReleaseOwner(old_tag, buf->buf_id)) {
+#ifdef USE_ASSERT_CHECKING
+                    if (SS_PRIMARY_MODE) {
+                        SmgrNetPageCheckDiskLSN(buf, RBM_NORMAL, NULL, true);
+                    }
+#endif
                     ClearReadHint(buf->buf_id, true);
                     break;
                 }
