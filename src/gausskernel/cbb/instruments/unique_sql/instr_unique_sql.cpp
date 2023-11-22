@@ -1972,7 +1972,9 @@ void SetUniqueSQLIdInBatchBindExecute(CachedPlanSource* cplan, const ParamListIn
         SetLocalUniqueSQLId(cplan->query_list);
     } else {
         for (int i = 0; i < batch_count; i++) {
-            pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
+            if (CURRENT_STMT_METRIC_HANDLE != nullptr) {
+                pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
+            }
             SetParamsFromParams(params_set[i]);
             SetLocalUniqueSQLId(cplan->query_list);
         }
