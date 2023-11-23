@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           120
+#define DMS_LOCAL_VERSION           121
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -676,33 +676,9 @@ typedef struct st_stat_buf_info {
 /*
 * used by openGauss server to get DRC information
 */
-typedef struct st_stat_drc_info {
+typedef struct st_dv_drc_buf_info {
     stat_buf_info_t         buf_info[DMS_MAX_INSTANCES];           /* save buffer related information */
     dms_context_t           dms_ctx;
-    unsigned char           master_id;
-    unsigned long long      copy_insts;         /* bitmap for owners, for S mode, more than one owner may exist */
-    unsigned char           claimed_owner;      /* owner */
-    unsigned char           lock_mode;          /* current DRC lock mode */
-    unsigned char           last_edp;           /* the newest edp instance id */
-    unsigned char           type;               /* page or lock */
-    unsigned char           in_recovery;        /* in recovery or not */
-    unsigned char           copy_promote;       /* copy promote to owner, can not release, may need flush */
-    unsigned short          part_id;            /* which partition id that current page belongs to */
-    unsigned long long      edp_map;            /* indicate which instance has current page's EDP(Earlier Dirty Page) */
-    unsigned long long      lsn;                /* the newest edp LSN of current page in the cluster */
-    unsigned short          len;                /* the length of data below */
-    unsigned char           recovery_skip;      /* DRC is accessed in recovery and skip because drc has owner */
-    unsigned char           recycling;
-    char                    data[DMS_RESID_SIZE];            /* user defined resource(page) identifier */
-} stat_drc_info_t;
-
-typedef enum en_broadcast_scope {
-    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
-    DMS_BROADCAST_ONLINE_LIST = 1,
-    DMS_BROADCAST_TYPE_COUNT,
-} dms_broadcast_scope_e;
-
-typedef struct st_dv_drc_buf_info {
     char                    data[DMS_MAX_NAME_LEN];            /* user defined resource(page) identifier */
     unsigned char           master_id;
     unsigned long long      copy_insts;         /* bitmap for owners, for S mode, more than one owner may exist */
@@ -719,10 +695,16 @@ typedef struct st_dv_drc_buf_info {
     unsigned char           recovery_skip;      /* DRC is accessed in recovery and skip because drc has owner */
     unsigned char           recycling;
     unsigned char           converting_req_info_inst_id;
-    unsigned char           converting_req_info_curr_mode;
-    unsigned char           converting_req_info_req_mode;
+    unsigned char           converting_req_info_curr_mod;
+    unsigned char           converting_req_info_req_mod;
     unsigned char           is_valid;
 } dv_drc_buf_info;
+
+typedef enum en_broadcast_scope {
+    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
+    DMS_BROADCAST_ONLINE_LIST = 1,
+    DMS_BROADCAST_TYPE_COUNT,
+} dms_broadcast_scope_e;
 
 typedef struct st_dms_reform_start_context {
     dms_role_t role;
@@ -1109,6 +1091,9 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
 
+/*
+* used by openGauss server to get dms cmd information
+*/
 typedef struct st_wait_cmd_stat_result {
     char name[DMS_MAX_NAME_LEN];
     char p1[DMS_MAX_NAME_LEN];
