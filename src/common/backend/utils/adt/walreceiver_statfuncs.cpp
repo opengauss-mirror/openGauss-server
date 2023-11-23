@@ -83,7 +83,7 @@ Datum gs_stat_walreceiver(PG_FUNCTION_ARGS)
 *     avg_sync_time uint64
 *     avg_sync_bytes uint64
 *     current_xlog_segno uint64
-*     newest_xlog_segno uint64
+*     inited_xlog_segno uint64
 *     last_reset_time timestamptz
 *     cur_time timestamptz
  */
@@ -318,7 +318,7 @@ static void BuildRecvWriterStatsTupleValues(TupleDesc tupleDesc, Tuplestorestate
 
     /* current_xlog_segno */
     values[colIdx++] = UInt64GetDatum(currentXlogSegno);
-    /* newest_xlog_segno */
+    /* inited_xlog_segno */
     values[colIdx++] = UInt64GetDatum(GetNewestXLOGSegNo(t_thrd.proc_cxt.DataDir));
     /* last_reset_time */
     isnulls[colIdx] = (lastResetTime == 0);

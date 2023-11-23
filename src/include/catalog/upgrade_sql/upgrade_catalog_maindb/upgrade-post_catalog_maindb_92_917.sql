@@ -50,7 +50,7 @@ CREATE FUNCTION pg_catalog.gs_stat_walrecvwriter(
     out avg_sync_time       xid,
     out avg_sync_bytes      xid,
     out current_xlog_segno  xid,
-    out newest_xlog_segno   xid,
+    out inited_xlog_segno   xid,
     out last_reset_time     timestamptz,
     out cur_time            timestamptz
 )
