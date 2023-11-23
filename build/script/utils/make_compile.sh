@@ -212,6 +212,12 @@ function install_gaussdb()
     make install -sj >> "$LOG_FILE" 2>&1
     echo "End make install MPPDB" >> "$LOG_FILE" 2>&1
 
+    ASSESSMENT_DIR=$ROOT_DIR/contrib/assessment
+    if [ -d $ASSESSMENT_DIR ]; then
+        cd $ASSESSMENT_DIR
+        make install >> "$LOG_FILE" 2>&1
+        echo "End make install assessment" >> "$LOG_FILE" 2>&1
+    fi
 
     cd "$ROOT_DIR"
     if [ "${make_check}" = 'on' ]; then
