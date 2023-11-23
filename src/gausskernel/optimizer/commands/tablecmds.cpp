@@ -21639,6 +21639,14 @@ void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid, Oid nspOid, Object
 
     Assert(objsMoved != NULL);
 
+    if (enable_plpgsql_gsdependency_guc() &&
+        gsplsql_is_object_depend(rel->rd_rel->reltype, GSDEPEND_OBJECT_TYPE_TYPE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                errmsg("The set schema operator of %s is not allowed, "
+                        "because it is referenced by another object.", NameStr(rel->rd_rel->relname))));
+    }
+
     /* OK, modify the pg_class row and pg_depend entry */
     classRel = heap_open(RelationRelationId, RowExclusiveLock);
 

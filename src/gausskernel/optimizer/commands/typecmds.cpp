@@ -3688,6 +3688,13 @@ Oid AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses* objsMoved)
                 errmsg("cannot alter array type %s", format_type_be(typeOid)),
                 errhint("You can alter type %s, which will alter the array type as well.", format_type_be(elemOid))));
 
+    if (enable_plpgsql_gsdependency_guc() &&
+        gsplsql_is_object_depend(typeOid, GSDEPEND_OBJECT_TYPE_TYPE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                errmsg("The set schema operator of %s is not allowed, because it is referenced by the other object.",
+                    get_typename(typeOid))));
+    }
     /* and do the work */
     return AlterTypeNamespaceInternal(typeOid, nspOid, false, true, objsMoved);
 }

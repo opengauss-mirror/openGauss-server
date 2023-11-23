@@ -203,6 +203,60 @@ call pkg.proc1((1,'zhang','M',1,2,3));
 alter package pkg compile;
 call pkg.proc1((1,'zhang','M',1,2,3));
 
+-- test 6
+drop type if exists r1;
+drop table if exists stu;
+create table stu(sno int, name varchar, sex varchar, cno int);
+create type r1 as (a int, c stu%RowType);
+create schema plpgsql_recompile_new;
+
+create or replace procedure test_proc(p_in r1)
+is
+declare
+v1 stu%RowType;
+begin        
+RAISE INFO 'call p_in: %', p_in;
+end;
+/
+call test_proc((1,(1,'zhang','M',1)));
+
+-- rename report error
+ALTER TYPE r1 RENAME to r1_rename;
+ALTER TYPE r1 RENAME ATTRIBUTE a TO new_a;
+ALTER TABLE stu RENAME  TO stu_rename;
+ALTER TABLE stu RENAME COLUMN cno TO new_cno;
+ALTER PROCEDURE test_proc(r1) RENAME TO test_proc_rename;
+ALTER SCHEMA plpgsql_recompile RENAME TO plpgsql_recompile_rename;
+call test_proc((1.0,(1,'zhang','M',1)));
+
+-- set schema report error
+ALTER TYPE r1 SET SCHEMA plpgsql_recompile_new;
+ALTER TABLE stu SET SCHEMA plpgsql_recompile_new;
+ALTER PROCEDURE test_proc(r1) SET SCHEMA plpgsql_recompile_new;
+call test_proc((1.0,(1,'zhang','M',1)));
+
+-- drop and recreate
+drop type r1;
+drop table stu;
+drop procedure test_proc;
+
+create table stu(sno int, name varchar, sex varchar, cno int);
+create type r1 as (a int, c stu%RowType);
+create or replace procedure test_proc(p_in r1)
+is
+declare
+v1 stu%RowType;
+begin        
+RAISE INFO 'call p_in: %', p_in;
+end;
+/
+call test_proc((1,(1,'zhang','M',1)));
+
+drop type r1;
+drop table stu;
+drop procedure test_proc;
+
 -- clean
+drop schema plpgsql_recompile_new cascade;
 drop schema plpgsql_recompile cascade;
 reset behavior_compat_options;

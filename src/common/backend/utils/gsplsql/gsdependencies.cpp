@@ -72,6 +72,65 @@ static inline Oid gsplsql_parse_pkg_var_and_attrs4(GsDependObjDesc* obj, List* v
 static inline Oid gsplsql_parse_pkg_var_and_attrs3(GsDependObjDesc* obj, ListCell* var_name, ListCell** attr_list);
 static inline Oid gsplsql_parse_pkg_var_obj2(GsDependObjDesc* obj, ListCell* var_name);
 
+static bool gsplsql_exist_func_object_in_dependencies_obj(char* nsp_name, char* pkg_name,
+    const char* old_func_head_name, const char* old_func_name);
+static bool gsplsql_exist_func_object_in_dependencies(char* nsp_name, char* pkg_name, const char* old_func_head_name);
+
+bool gsplsql_exists_func_obj(Oid nsp_oid, Oid pkg_oid, const char* old_func_head_name, const char* old_func_name)
+{
+    char* nsp_name = get_namespace_name(nsp_oid);
+    char* pkg_name = pstrdup("null");
+    if (OidIsValid(pkg_oid)) {
+        pfree_ext(pkg_name);
+        pkg_name = GetPackageName(pkg_oid);
+    }
+    bool exists_func = gsplsql_exist_func_object_in_dependencies_obj(nsp_name, pkg_name, old_func_head_name, old_func_name) ||
+                       gsplsql_exist_func_object_in_dependencies(nsp_name, pkg_name, old_func_head_name);
+    pfree_ext(pkg_name);
+    pfree_ext(nsp_name);
+    return exists_func;
+}
+
+bool gsplsql_exists_schema_name(const char* schema_name)
+{
+    bool has_schema = false;
+    Assert(schema_name != NULL);
+    // check gs_dependencies_obj
+    int key_num = 0;
+    ScanKeyData key[1];
+    ScanKeyInit(&key[key_num++], Anum_gs_dependencies_obj_schemaname, BTEqualStrategyNumber,
+        F_NAMEEQ, NameGetDatum(schema_name));
+    bool is_null = false;
+    HeapTuple tuple;
+    Relation obj_rel = heap_open(DependenciesObjRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(obj_rel, DependenciesObjNameIndexId, true, SnapshotSelf, key_num, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        has_schema = true;
+        break;
+    }
+    systable_endscan(scan);
+    heap_close(obj_rel, AccessShareLock);
+    if (has_schema) {
+        return has_schema;
+    }
+    // check gs_dependencies
+    int key_num_dep = 0;
+    ScanKeyData key_dep[1];
+    ScanKeyInit(&key_dep[key_num_dep++], Anum_gs_dependencies_schemaname, BTEqualStrategyNumber,
+        F_NAMEEQ, NameGetDatum(schema_name));
+    HeapTuple tuple_dep;
+    Relation dep_rel = heap_open(DependenciesRelationId, AccessShareLock);
+    SysScanDesc scan_dep = systable_beginscan(dep_rel, DependenciesNameIndexId, true, SnapshotSelf,
+                                              key_num_dep, key_dep);
+    while (HeapTupleIsValid(tuple_dep = systable_getnext(scan_dep))) {
+        has_schema = true;
+        break;
+    }
+    systable_endscan(scan_dep);
+    heap_close(dep_rel, AccessShareLock);
+    return has_schema;
+}
+
 void gsplsql_init_gs_depend_obj_desc(GsDependObjDesc* object)
 {
     object->schemaName = NULL;
@@ -1482,4 +1541,79 @@ static DependenciesDatum *gsplsql_make_var_depend_datum(const PLpgSQL_datum *dat
         *namespace_oid = var->pkg->namespaceOid;
     }
     return (DependenciesDatum*)var_node;
+}
+
+static bool gsplsql_exist_func_object_in_dependencies_obj(char* nsp_name, char* pkg_name,
+    const char* old_func_head_name, const char* old_func_name)
+{
+    int keyNum = 0;
+    Assert(nsp_name != NULL && pkg_name != NULL);
+    ScanKeyData key[2];
+    ScanKeyInit(&key[keyNum++], Anum_gs_dependencies_obj_schemaname, BTEqualStrategyNumber,
+        F_NAMEEQ, NameGetDatum(nsp_name));
+    ScanKeyInit(&key[keyNum++], Anum_gs_dependencies_obj_packagename, BTEqualStrategyNumber,
+        F_NAMEEQ, NameGetDatum(pkg_name));
+    bool is_null = false;
+    HeapTuple tuple;
+    Relation obj_rel = heap_open(DependenciesObjRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(obj_rel, DependenciesObjNameIndexId, true, SnapshotSelf, keyNum, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        Datum name_datum = heap_getattr(tuple, Anum_gs_dependencies_obj_name,
+                                        RelationGetDescr(obj_rel), &is_null);
+        Assert(name_datum != 0);
+        char* obj_name = TextDatumGetCString(name_datum);
+        if (strcmp(old_func_head_name, obj_name) == 0 || strcmp(old_func_name, obj_name) == 0) {
+            Datum type_datum = heap_getattr(tuple, Anum_gs_dependencies_obj_type,
+                                            RelationGetDescr(obj_rel), &is_null);
+            int type = DatumGetInt32(type_datum);
+            if (type == GSDEPEND_OBJECT_TYPE_FUNCTION ||
+                type == GSDEPEND_OBJECT_TYPE_PROCHEAD || type == GSDEPEND_OBJECT_TYPE_UNDEFIND) {
+                pfree_ext(obj_name);
+                systable_endscan(scan);
+                heap_close(obj_rel, AccessShareLock);
+                return true;
+            }
+        }
+        pfree_ext(obj_name);
+    }
+    systable_endscan(scan);
+    heap_close(obj_rel, AccessShareLock);
+    return false;
+}
+
+static bool gsplsql_exist_func_object_in_dependencies(char* nsp_name, char* pkg_name, const char* old_func_head_name)
+{
+    int keyNum = 0;
+    Assert(nsp_name != NULL && pkg_name != NULL);
+    ScanKeyData key[2];
+    ScanKeyInit(&key[keyNum++], Anum_gs_dependencies_schemaname, BTEqualStrategyNumber,
+        F_NAMEEQ, NameGetDatum(nsp_name));
+    ScanKeyInit(&key[keyNum++], Anum_gs_dependencies_packagename, BTEqualStrategyNumber,
+        F_NAMEEQ, NameGetDatum(pkg_name));
+    bool is_null = false;
+    HeapTuple tuple;
+    Relation dep_rel = heap_open(DependenciesRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(dep_rel, DependenciesNameIndexId, true, SnapshotSelf, keyNum, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        Datum name_datum = heap_getattr(tuple, Anum_gs_dependencies_objectname,
+                                   RelationGetDescr(dep_rel), &is_null);
+        Assert(name_datum != 0);
+        char* obj_name = TextDatumGetCString(name_datum);
+        if (strcmp(old_func_head_name, obj_name) == 0) {
+            Datum refobj_pos_datum = heap_getattr(tuple, Anum_gs_dependencies_refobjpos,
+                                                  RelationGetDescr(dep_rel), &is_null);
+            int refobj_pos = DatumGetInt32(refobj_pos_datum);
+            if (refobj_pos == GSDEPEND_REFOBJ_POS_IN_PROCHEAD ||
+                refobj_pos == GSDEPEND_REFOBJ_POS_IN_PROCBODY) {
+                pfree_ext(obj_name);
+                systable_endscan(scan);
+                heap_close(dep_rel, AccessShareLock);
+                return true;
+            }
+        }
+        pfree_ext(obj_name);
+    }
+    systable_endscan(scan);
+    heap_close(dep_rel, AccessShareLock);
+    return false;
 }

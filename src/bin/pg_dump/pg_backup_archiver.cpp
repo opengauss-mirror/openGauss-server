@@ -321,8 +321,7 @@ static void out_drop_stmt(ArchiveHandle* AH, const TocEntry* te)
     char* dropStmt = NULL;
     char* dropStmtOrig = NULL;
     errno_t	rc = EOK;
-    if (*te->dropStmt != '\0')
-    {
+    if (*te->dropStmt != '\0') {
         dropStmt = try_remove_nsname_in_drop_stmt(ropt, te->dropStmt, strlen(te->dropStmt) + PATCH_LEN);
         dropStmtOrig = dropStmt;
         if (strstr(te->dropStmt, "IF EXISTS") != NULL ||
@@ -386,8 +385,8 @@ static void out_drop_stmt(ArchiveHandle* AH, const TocEntry* te)
             }
             ahprintf(AH, "%s", ftStmt->data);
             destroyPQExpBuffer(ftStmt);
-            free(dropStmtOrig);
         }
+        free(dropStmtOrig);
     }
 }
 /* Public */
