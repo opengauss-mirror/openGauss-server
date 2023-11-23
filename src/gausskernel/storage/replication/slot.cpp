@@ -1103,8 +1103,10 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
     }
     LWLockRelease(ReplicationSlotControlLock);
 
-    XLogSetReplicationSlotMinimumLSN(min_required);
-    XLogSetReplicationSlotMaximumLSN(max_required);
+    if(InvalidXLogRecPtr != min_required)
+        XLogSetReplicationSlotMinimumLSN(min_required);
+    if(InvalidXLogRecPtr != max_required)
+        XLogSetReplicationSlotMaximumLSN(max_required);
     qsort(standby_slots_list, g_instance.attr.attr_storage.max_replication_slots, sizeof(XLogRecPtr), cmp_slot_lsn);
     if (repl_slt_state != NULL) {
         repl_slt_state->min_required = min_required;

@@ -1573,6 +1573,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9031 | gs_set_obs_delete_location
  9032 | gs_get_global_barrier_status
  9033 | gs_get_local_barrier_status
+ 9040 | gs_xlog_keepers
  9034 | gs_get_global_barriers_status
  9035 | gs_set_obs_delete_location_with_slotname
  9037 | gs_set_standby_cluster_target_barrier_id

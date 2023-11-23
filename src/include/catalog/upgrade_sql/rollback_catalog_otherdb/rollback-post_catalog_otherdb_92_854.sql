@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_xlog_keepers(out keeptype pg_catalog.text, out keepsegment pg_catalog.text, out describe pg_catalog.text);
