@@ -819,7 +819,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     libcomm_addrinfo->gs_sock.idx = node_idx;
     libcomm_addrinfo->gs_sock.sid = streamid;
     libcomm_addrinfo->gs_sock.ver = version;
-    libcomm_addrinfo->gs_sock.type = (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) ? GSOCK_DAUL_CHANNEL : GSOCK_PRODUCER;
+    libcomm_addrinfo->gs_sock.type = (IS_PGXC_COORDINATOR) ? GSOCK_DAUL_CHANNEL : GSOCK_PRODUCER;
 
     COMM_DEBUG_LOG("(s|send connect)\tConnect finish for node[%d]:%s.",
         node_idx,

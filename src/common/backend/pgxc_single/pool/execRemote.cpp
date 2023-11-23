@@ -243,6 +243,13 @@ void setSocketError(const char* msg, const char* node_name)
 #define CONN_SCTP_ERR_7 "1059   Wait poll unknow error"
 
 #ifdef USE_SPQ
+
+typedef struct SpqConnectWalkerContext {
+    MethodPlanWalkerContext cxt;
+    uint64 queryId;
+    spq_qc_ctx *qc_ctx;
+} SpqConnectWalkerContext;
+
 void spq_finishQcThread(void);
 void CopyDataRowTupleToSlot(RemoteQueryState* combiner, TupleTableSlot* slot);
 static void HandleCopyOutComplete(RemoteQueryState* combiner);
@@ -1022,7 +1029,13 @@ bool adp_disconnect_walker(Node* plan, void* cxt)
             .type = SPQ_QC_CONNECTION,
         };
         bool found = false;
+        QCConnEntry *entry;
         pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        entry = (QCConnEntry *)hash_search(g_instance.spq_cxt.adp_connects, (void *)&key, HASH_FIND, &found);
+        if (found) {
+            ereport(LOG, (errmsg("disconnect from queryid: %lu, nodeid: %d", key.query_id, key.plan_node_id)));
+            gs_close_gsocket(&entry->backward);
+        }
         hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_REMOVE, &found);
         pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
     }
@@ -1046,8 +1059,8 @@ bool build_connections(Node* plan, void* cxt)
         int error;
         errno_t rc = EOK;
 
-        RemoteQueryState *node = t_thrd.spq_ctx.qc_ctx->scanState;
-        PlannedStmt *planstmt = node->ss.ps.state->es_plannedstmt;
+        SpqConnectWalkerContext* walkerCxt = (SpqConnectWalkerContext*)cxt;
+        PlannedStmt* planstmt = (PlannedStmt*)walkerCxt->cxt.base.node;
         int num_nodes = planstmt->num_nodes;
         NodeDefinition *nodesDef = planstmt->nodesDefinition;
         libcommaddrinfo **addressArray = (libcommaddrinfo **)palloc(sizeof(libcommaddrinfo *) * num_nodes);
@@ -1067,7 +1080,7 @@ bool build_connections(Node* plan, void* cxt)
             /* set flag for parallel send mode */
             addressArray[i]->parallel_send_mode = false;
 
-            addressArray[i]->streamKey.queryId = node->queryId;
+            addressArray[i]->streamKey.queryId = walkerCxt->queryId;
             addressArray[i]->streamKey.planNodeId = ((Plan*)plan)->plan_node_id;
             addressArray[i]->streamKey.producerSmpId = -1;
             addressArray[i]->streamKey.consumerSmpId = -1;
@@ -1082,7 +1095,7 @@ bool build_connections(Node* plan, void* cxt)
         for (int i = 0; i < num_nodes; ++i) {
             QCConnEntry* entry = (QCConnEntry*)palloc(sizeof(QCConnEntry));
             entry->key = {
-                .query_id = node->queryId,
+                .query_id = walkerCxt->queryId,
                 .plan_node_id = ((Plan*)plan)->plan_node_id,
                 .node_id = addressArray[i]->gs_sock.idx,
                 .type = SPQ_QE_CONNECTION,
@@ -1091,7 +1104,7 @@ bool build_connections(Node* plan, void* cxt)
             entry->forward = addressArray[i]->gs_sock;
             entry->backward.idx = 0;
             entry->internal_node_id = i;
-            t_thrd.spq_ctx.qc_ctx->connects = lappend(t_thrd.spq_ctx.qc_ctx->connects, (void*)entry);
+            walkerCxt->qc_ctx->connects = lappend(walkerCxt->qc_ctx->connects, (void*)entry);
             pfree(addressArray[i]);
         }
         pfree(addressArray);
@@ -1099,13 +1112,14 @@ bool build_connections(Node* plan, void* cxt)
     return plan_tree_walker(plan, (MethodWalker)build_connections, cxt);
 }
 
-void spq_adps_initconns()
+void spq_adps_initconns(RemoteQueryState *node)
 {
-    RemoteQueryState *node = t_thrd.spq_ctx.qc_ctx->scanState;
-    MethodPlanWalkerContext cxt;
-    cxt.base.init_plans = NIL;
-    cxt.base.traverse_flag = NULL;
-    exec_init_plan_tree_base(&cxt.base, node->ss.ps.state->es_plannedstmt);
+    SpqConnectWalkerContext cxt;
+    cxt.cxt.base.init_plans = NIL;
+    cxt.cxt.base.traverse_flag = NULL;
+    exec_init_plan_tree_base(&cxt.cxt.base, node->ss.ps.state->es_plannedstmt);
+    cxt.queryId = node->queryId;
+    cxt.qc_ctx = node->qc_ctx;
     build_connections((Node*)node->ss.ps.plan->lefttree, (void*)&cxt);
 }
 
@@ -1153,6 +1167,7 @@ void spq_adps_consumer()
             rc = gs_send(&entry->forward, (char *)&res, sizeof(SpqAdpScanPagesRes), -1, true);
             if (rc <= 0) {
                 ereport(ERROR, (errmsg("spq adps thread send data failed")));
+                return;
             }
             if (res.success) {
                 entry->scannedPageNum += res.page_end - res.page_start + 1;
@@ -1181,30 +1196,31 @@ void spq_adps_coordinator_thread_main()
     t_thrd.spq_ctx.qc_ctx->is_exited = true;
 }
 
-void spq_createAdaptiveThread()
+spq_qc_ctx* spq_createAdaptiveThread()
 {
     if (!u_sess->attr.attr_spq.spq_enable_adaptive_scan) {
-        return;
+        return nullptr;
     }
 
-    t_thrd.spq_ctx.adaptive_scan_setup = true;
-    t_thrd.spq_ctx.qc_ctx->scanState = NULL;
-    t_thrd.spq_ctx.qc_ctx->connects = NULL;
-    t_thrd.spq_ctx.qc_ctx->is_done = false;
-    t_thrd.spq_ctx.qc_ctx->is_exited = false;
-    t_thrd.spq_ctx.qc_ctx->pq_wait_cv = PTHREAD_COND_INITIALIZER;
-    if (pthread_mutex_init(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex, NULL)) {
+    spq_qc_ctx* qc_ctx = (spq_qc_ctx*)palloc(sizeof(spq_qc_ctx));
+    qc_ctx->scanState = NULL;
+    qc_ctx->connects = NULL;
+    qc_ctx->is_done = false;
+    qc_ctx->is_exited = false;
+    qc_ctx->pq_wait_cv = PTHREAD_COND_INITIALIZER;
+    if (pthread_mutex_init(&qc_ctx->spq_pq_mutex, NULL)) {
         elog(ERROR, "spq_pq_mutex init failed");
     }
 
-    ThreadId threadId = initialize_util_thread(SPQ_COORDINATOR, (void *)t_thrd.spq_ctx.qc_ctx);
+    ThreadId threadId = initialize_util_thread(SPQ_COORDINATOR, (void *)qc_ctx);
     if (threadId == 0) {
-        pthread_cond_destroy(&t_thrd.spq_ctx.qc_ctx->pq_wait_cv);
-        pthread_mutex_destroy(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+        pthread_cond_destroy(&qc_ctx->pq_wait_cv);
+        pthread_mutex_destroy(&qc_ctx->spq_pq_mutex);
         ereport(FATAL, (errmsg("Cannot create coordinating thread.")));
     } else {
         ereport(LOG, (errmsg("Create Adaptive thread successfully, threadId:%lu.", threadId)));
     }
+    return qc_ctx;
 }
 
 void spq_startQcThread(RemoteQueryState *node)
@@ -1213,33 +1229,34 @@ void spq_startQcThread(RemoteQueryState *node)
     if (!u_sess->attr.attr_spq.spq_enable_adaptive_scan) {
         return;
     }
-    pthread_mutex_lock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+    spq_qc_ctx* qc_ctx = node->qc_ctx;
+    if (qc_ctx == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&qc_ctx->spq_pq_mutex);
 
-    t_thrd.spq_ctx.qc_ctx->num_nodes = node->ss.ps.state->es_plannedstmt->num_nodes;
-    t_thrd.spq_ctx.qc_ctx->scanState = node;
-    t_thrd.spq_ctx.qc_ctx->seq_paging_array.size = 0;
-    t_thrd.spq_ctx.qc_ctx->seq_paging_array.max = PREALLOC_PAGE_ARRAY_SIZE;
-    t_thrd.spq_ctx.qc_ctx->seq_paging_array.req_states =
+    qc_ctx->num_nodes = node->ss.ps.state->es_plannedstmt->num_nodes;
+    qc_ctx->scanState = node;
+    qc_ctx->seq_paging_array.size = 0;
+    qc_ctx->seq_paging_array.max = PREALLOC_PAGE_ARRAY_SIZE;
+    qc_ctx->seq_paging_array.req_states =
         (SpqAdpScanReqState **)palloc(PREALLOC_PAGE_ARRAY_SIZE * sizeof(SpqAdpScanReqState *));
-    spq_adps_initconns();
+    spq_adps_initconns(node);
 
-    pthread_cond_signal(&t_thrd.spq_ctx.qc_ctx->pq_wait_cv);
-    pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+    pthread_cond_signal(&qc_ctx->pq_wait_cv);
+    pthread_mutex_unlock(&qc_ctx->spq_pq_mutex);
     ereport(DEBUG1, (errmsg("starting adaptive scan thread.")));
 }
 
 void spq_finishQcThread(void)
 {
-    if (!u_sess->attr.attr_spq.spq_enable_adaptive_scan) {
-        return;
-    }
     pthread_mutex_lock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
     t_thrd.spq_ctx.qc_ctx->scanState = nullptr;
     /* free connections */
     if (t_thrd.spq_ctx.qc_ctx->connects != nullptr) {
         ListCell *cell;
-        foreach(cell, t_thrd.spq_ctx.qc_ctx->connects) {
-            QCConnEntry* entry = (QCConnEntry*)lfirst(cell);
+        foreach (cell, t_thrd.spq_ctx.qc_ctx->connects) {
+            QCConnEntry *entry = (QCConnEntry *)lfirst(cell);
             gs_close_gsocket(&entry->forward);
             gs_close_gsocket(&entry->backward);
             elog(DEBUG1, "adaptive scan end, query_id: %lu, plan_node_id: %u, node_id: %u, scanned page: %d",
@@ -1252,26 +1269,29 @@ void spq_finishQcThread(void)
     elog(DEBUG5, "pq_thread: stopping the background adaptive thread");
 }
 
-void spq_destroyQcThread(void)
+void spq_destroyQcThread(RemoteQueryState* node)
 {
-    if (!u_sess->attr.attr_spq.spq_enable_adaptive_scan || !t_thrd.spq_ctx.qc_ctx ||
-        (t_thrd.spq_ctx.qc_ctx && t_thrd.spq_ctx.qc_ctx->is_exited)) {
+    if (!u_sess->attr.attr_spq.spq_enable_adaptive_scan) {
+        return;
+    }
+    spq_qc_ctx* qc_ctx = node->qc_ctx;
+    if (qc_ctx == NULL) {
         return;
     }
 
-    pthread_mutex_lock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
-    t_thrd.spq_ctx.qc_ctx->is_done = true;
-    pthread_cond_signal(&t_thrd.spq_ctx.qc_ctx->pq_wait_cv);
-    pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+    pthread_mutex_lock(&qc_ctx->spq_pq_mutex);
+    qc_ctx->is_done = true;
+    pthread_cond_signal(&qc_ctx->pq_wait_cv);
+    pthread_mutex_unlock(&qc_ctx->spq_pq_mutex);
 
-    while (!t_thrd.spq_ctx.qc_ctx->is_exited) {
-        pthread_mutex_lock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
-        pthread_cond_signal(&t_thrd.spq_ctx.qc_ctx->pq_wait_cv);
-        pthread_mutex_unlock(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+    while (!qc_ctx->is_exited) {
+        pthread_mutex_lock(&qc_ctx->spq_pq_mutex);
+        pthread_cond_signal(&qc_ctx->pq_wait_cv);
+        pthread_mutex_unlock(&qc_ctx->spq_pq_mutex);
         pg_usleep(1);
     }
-    pthread_cond_destroy(&t_thrd.spq_ctx.qc_ctx->pq_wait_cv);
-    pthread_mutex_destroy(&t_thrd.spq_ctx.qc_ctx->spq_pq_mutex);
+    pthread_cond_destroy(&qc_ctx->pq_wait_cv);
+    pthread_mutex_destroy(&qc_ctx->spq_pq_mutex);
     ereport(DEBUG3, (errmsg("destory adaptive scan thread")));
 }
 
@@ -1283,9 +1303,9 @@ RemoteQueryState* ExecInitSpqRemoteQuery(RemoteQuery* node, EState* estate, int 
     Assert(innerPlan(node) == NULL);
     //Assert(node->is_simple == false);
 
-    spq_createAdaptiveThread();
     spqRemoteState = CreateResponseCombiner(0, node->combine_type);
     spqRemoteState->position = node->position;
+    spqRemoteState->qc_ctx = spq_createAdaptiveThread();
  
     ExecInitPlanState(&spqRemoteState->ss.ps, estate, node, spqRemoteState);
  
@@ -1367,7 +1387,7 @@ void spq_release_conn(RemoteQueryState* planstate)
     if (planstate == NULL) {
         return;
     }
-    for (int i = 0; i < planstate->node_count ; i++) {
+    for (int i = 0; i < planstate->node_count; i++) {
         if (planstate->nodeCons != NULL && planstate->nodeCons[i] != NULL) {
             PGXCNodeClose(planstate->nodeCons[i]);
             planstate->nodeCons[i] = NULL;
@@ -1385,7 +1405,6 @@ void spq_release_conn(RemoteQueryState* planstate)
     pfree_ext(planstate->nodeCons);
     planstate->spq_connections_info = NULL;
     planstate->nodeCons = NULL;
-
     u_sess->spq_cxt.remoteQuerys = list_delete_ptr(u_sess->spq_cxt.remoteQuerys, planstate);
 }
 PGXCNodeHandle** spq_get_exec_connections(
@@ -1417,7 +1436,7 @@ PGXCNodeHandle** spq_get_exec_connections(
             pfree_ext(connections);
             connections = NULL;
             spq_release_conn(planstate);
-            spq_destroyQcThread();
+            spq_destroyQcThread(planstate);
             ereport(ERROR, (errmsg("PQconnectdbParallel error: %s", err_msg)));
         }
         return;  
@@ -1471,8 +1490,6 @@ void spq_cancel_query(void)
         return;
     char errbuf[256];
     ListCell *cell;
-
-    spq_destroyQcThread();
     foreach (cell, u_sess->spq_cxt.remoteQuerys) {
         RemoteQueryState* combiner = (RemoteQueryState *)lfirst(cell);
         for (int i = 0; i < combiner->node_count; ++i) {
@@ -1488,6 +1505,7 @@ void spq_cancel_query(void)
     }
     while (list_length(u_sess->spq_cxt.remoteQuerys) > 0) {
         RemoteQueryState *combiner = (RemoteQueryState *)lfirst(list_head(u_sess->spq_cxt.remoteQuerys));
+        spq_destroyQcThread(combiner);
         spq_release_conn(combiner);
     }
 }
@@ -1726,7 +1744,7 @@ void ExecEndSpqRemoteQuery(RemoteQueryState* node, bool pre_end)
         RowStoreReset(node->row_store);
     }
 
-    spq_destroyQcThread();
+    spq_destroyQcThread(node);
 
     /* Pack all un-completed connections together and recorrect node->conn_count */
     if (node->conn_count > 0 && remote_query->sort != NULL) {
