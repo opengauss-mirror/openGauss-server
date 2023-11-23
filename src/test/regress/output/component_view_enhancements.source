@@ -106,19 +106,19 @@ ERROR:  illegal value "4" for parameter "operation".
 HINT:  -1: disable, 0: reset, 1: enable, 2: get
 -- wal recvwriter
 select * from gs_stat_walrecvwriter();
---? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | newest_xlog_segno | last_reset_time |.*
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | inited_xlog_segno | last_reset_time |.*
 --?.*
 --? f              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |                  0 |                 2 |                 |.*
 (1 row)
 
 select * from gs_stat_walrecvwriter(1);
---? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | newest_xlog_segno | last_reset_time |.*
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | inited_xlog_segno | last_reset_time |.*
 --?.*
 --? t              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |                  0 |                 2 |                 |.*
 (1 row)
 
 select * from gs_stat_walrecvwriter(2);
---? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | newest_xlog_segno | last_reset_time |.*
+--? is_enable_stat | total_write_bytes | write_times | total_write_time | avg_write_time | avg_write_bytes | total_sync_bytes | sync_times | total_sync_time | avg_sync_time | avg_sync_bytes | current_xlog_segno | inited_xlog_segno | last_reset_time |.*
 --?.*
 --? t              |                 0 |           0 |                0 |                |                 |                0 |          0 |               0 |               |                |                  0 |                 2 |                 |.*
 (1 row)
