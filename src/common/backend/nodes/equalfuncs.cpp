@@ -3043,6 +3043,7 @@ static bool _equalStartWithClause(const StartWithClause * a, const StartWithClau
 static bool _equalUpsertClause(const UpsertClause* a, const UpsertClause* b)
 {
    COMPARE_NODE_FIELD(targetList);
+   COMPARE_NODE_FIELD(aliasName);
    COMPARE_LOCATION_FIELD(location);
    COMPARE_NODE_FIELD(whereClause);
 
