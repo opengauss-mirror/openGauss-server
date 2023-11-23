@@ -3900,6 +3900,7 @@ static UpsertClause* _copyUpsertClause(const UpsertClause* from)
     UpsertClause* newnode = makeNode(UpsertClause);
 
     COPY_NODE_FIELD(targetList);
+    COPY_NODE_FIELD(aliasName);
     COPY_LOCATION_FIELD(location);
     COPY_NODE_FIELD(whereClause);
 
