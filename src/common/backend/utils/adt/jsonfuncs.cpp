@@ -33,6 +33,17 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
+#include "utils/array.h"
+
+/* Operations available for setPath */
+#define JB_PATH_CREATE                  0x0001
+#define JB_PATH_DELETE                  0x0002
+#define JB_PATH_REPLACE                 0x0004
+#define JB_PATH_INSERT_BEFORE           0x0008
+#define JB_PATH_INSERT_AFTER            0x0010
+#define JB_PATH_CREATE_OR_INSERT        (JB_PATH_INSERT_BEFORE | JB_PATH_INSERT_AFTER | JB_PATH_CREATE)
+#define JB_PATH_FILL_GAPS               0x0020
+#define JB_PATH_CONSISTENT_POSITION     0x0040
 
 /* semantic action functions for json_object_keys */
 static void okeys_object_field_start(void *state, char *fname, bool isnull);
@@ -104,6 +115,15 @@ static void populate_recordset_array_element_start(void *state, bool isnull);
 static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have_record_arg);
 /* Worker that takes care of common setup for us */
 static JsonbValue *findJsonbValueFromSuperHeaderLen(JsonbSuperHeader sheader, uint32 flags, char *key,  uint32 keylen);
+
+/* functions supporting jsonb_delete, jsonb_set and jsonb_concat */
+static void addJsonbToParseState(JsonbParseState **pstate, Jsonb *jb);
+static JsonbValue *setPath(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len,
+                            JsonbParseState **st, int level, Jsonb *newval, int op_type);
+static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len, JsonbParseState **st,
+                            int level, Jsonb *newval, uint32 npairs, int op_type);
+static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len, JsonbParseState **st,
+                            int level, Jsonb *newval, uint32 nelems, int op_type);
 
 /* search type classification for json_get* functions */
 typedef enum {
@@ -2679,4 +2699,635 @@ static JsonbValue *findJsonbValueFromSuperHeaderLen(JsonbSuperHeader sheader, ui
     k.string.len = keylen;
 
     return findJsonbValueFromSuperHeader(sheader, flags, NULL, &k);
+}
+
+static void
+push_null_elements(JsonbParseState **ps, int num)
+{
+	JsonbValue	null;
+
+	null.type = jbvNull;
+
+	while (num-- > 0)
+		pushJsonbValue(ps, WJB_ELEM, &null);
+}
+
+static void
+addJsonbToParseState(JsonbParseState **jbps, Jsonb *jb)
+{
+    JsonbIterator *it;
+    JsonbValue    *o = &(*jbps)->contVal;
+    int           type;
+    JsonbValue    v;
+
+    it = JsonbIteratorInit(VARDATA(jb));
+
+    Assert(o->type == jbvArray || o->type == jbvObject);
+
+    if(JB_ROOT_IS_SCALAR(jb)) {
+        (void) JsonbIteratorNext(&it, &v, false);
+        (void) JsonbIteratorNext(&it, &v, false);
+
+        switch(o->type)
+        {
+            case jbvArray:
+                (void)pushJsonbValue(jbps, WJB_ELEM, &v);
+                break;
+            case jbvObject:
+                (void)pushJsonbValue(jbps, WJB_VALUE, &v);
+                break;
+            default:
+                elog(ERROR, "unexpected parent oe nested structure.");
+        }
+    } else {
+        while((type == JsonbIteratorNext(&it, &v, false)) != WJB_DONE) {
+            if (type = WJB_ELEM || type == WJB_KEY || type == WJB_VALUE) {
+                (void)pushJsonbValue(jbps, type, &v);
+            } else {
+                (void)pushJsonbValue(jbps, type, NULL);
+            }
+        }
+    }
+}
+
+/*
+ * Do most of the heavy work for jsonb_set/jsonb_insert
+ *
+ * If JB_PATH_DELETE bit is set in op_type, the element is to be removed.
+ *
+ * If any bit mentioned in JB_PATH_CREATE_OR_INSERT is set in op_type,
+ * we create the new value if the key or array index does not exist.
+ *
+ * Bits JB_PATH_INSERT_BEFORE and JB_PATH_INSERT_AFTER in op_type
+ * behave as JB_PATH_CREATE if new value is inserted in JsonbObject.
+ *
+ * If JB_PATH_FILL_GAPS bit is set, this will change an assignment logic in
+ * case if target is an array. The assignment index will not be restricted by
+ * number of elements in the array, and if there are any empty slots between
+ * last element of the array and a new one they will be filled with nulls. If
+ * the index is negative, it still will be considered an index from the end
+ * of the array. Of a part of the path is not present and this part is more
+ * than just one last element, this flag will instruct to create the whole
+ * chain of corresponding objects and insert the value.
+ *
+ * JB_PATH_CONSISTENT_POSITION for an array indicates that the caller wants to
+ * keep values with fixed indices. Indices for existing elements could be
+ * changed (shifted forward) in case if the array is prepended with a new value
+ * and a negative index out of the range, so this behavior will be prevented
+ * and return an error.
+ *
+ * All path elements before the last must already exist
+ * whatever bits in op_type are set, or nothing is done.
+ */
+static JsonbValue* setPath(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len,
+                            JsonbParseState **st, int level, Jsonb *newval, int op_type)
+{
+    JsonbValue  v;
+    int r;
+    JsonbValue *res;
+
+    check_stack_depth();
+
+    if (path_nulls[level])
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                errmsg("path element at position %d is null", level + 1)));
+
+    r = JsonbIteratorNext(it, &v, false);
+
+    switch (r) {
+        case WJB_BEGIN_ARRAY:
+
+            /*
+            * If instructed complain about attempts to replace within a raw
+            * scalar value. This happens even when current level is equal to
+            * path_len, because the last path key should also correspond to
+            * an object or an array, not raw scalar.
+            */
+            if ((op_type & JB_PATH_FILL_GAPS) && (level <= path_len - 1) && v.array.rawScalar)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("cannot replace existing key"),
+                        errdetail("The path assumes key is a composite object, "
+                                "but it is a scalar value.")));
+
+            (void) pushJsonbValue(st, r, NULL);
+            setPathArray(it, path_elems, path_nulls, path_len, st, level, newval, v.array.nElems, op_type);
+            r = JsonbIteratorNext(it, &v, false);
+            Assert(r == WJB_END_ARRAY);
+            res = pushJsonbValue(st, r, NULL);
+            break;
+        case WJB_BEGIN_OBJECT:
+            (void) pushJsonbValue(st, r, NULL);
+            setPathObject(it, path_elems, path_nulls, path_len, st, level, newval, v.object.nPairs, op_type);
+            r = JsonbIteratorNext(it, &v, true);
+            Assert(r == WJB_END_OBJECT);
+            res = pushJsonbValue(st, r, NULL);
+            break;
+        case WJB_ELEM:
+        case WJB_VALUE:
+
+            /*
+            * If instructed complain about attempts to replace within a
+            * scalar value. This happens even when current level is equal to
+            * path_len, because the last path key should also correspond to
+            * an object or an array, not an element or value.
+            */
+            if ((op_type & JB_PATH_FILL_GAPS) && (level <= path_len - 1))
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("cannot replace existing key"),
+                        errdetail("The path assumes key is a composite object, but it is a scalar value.")));
+
+            res = pushJsonbValue(st, r, &v);
+            break;
+        default:
+            elog(ERROR, "unrecognized iterator result: %d", (int) r);
+            res = NULL;			/* keep compiler quiet */
+            break;
+    }
+
+    return res;
+}
+
+/*
+ * Object walker for setPath
+ */
+static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
+                            int path_len, JsonbParseState **st, int level, Jsonb *newval, uint32 npairs, int op_type)
+{
+    text       *pathelem = NULL;
+    int	        i;
+    JsonbValue  k, v;
+    bool        done = false;
+
+    if (level >= path_len || path_nulls[level]) {
+        done = true;
+    } else {
+        /* The path Datum could be toasted, in which case we must detoast it */
+        pathelem = DatumGetTextPP(path_elems[level]);
+    }
+
+    /* empty object is a special case for create */
+    if ((npairs == 0) && (op_type & JB_PATH_CREATE_OR_INSERT) && (level == path_len - 1)) {
+        JsonbValue	newkey;
+
+        newkey.type = jbvString;
+        newkey.string.val = VARDATA_ANY(pathelem);
+        newkey.string.len = VARSIZE_ANY_EXHDR(pathelem);
+
+        (void) pushJsonbValue(st, WJB_KEY, &newkey);
+        addJsonbToParseState(st, newval);
+    }
+
+    for (i = 0; i < npairs; i++) {
+        int r = JsonbIteratorNext(it, &k, true);
+
+        Assert(r == WJB_KEY);
+
+        if (!done && k.string.len == VARSIZE_ANY_EXHDR(pathelem) &&
+            memcmp(k.string.val, VARDATA_ANY(pathelem), k.string.len) == 0) {
+            done = true;
+
+            if (level == path_len - 1) {
+                /*
+                * called from jsonb_insert(), it forbids redefining an
+                * existing value
+                */
+                if (op_type & (JB_PATH_INSERT_BEFORE | JB_PATH_INSERT_AFTER))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("cannot replace existing key"),
+                            errhint("Try using the function jsonb_set "
+                                    "to replace key value.")));
+
+                r = JsonbIteratorNext(it, &v, true);	/* skip value */
+                if (!(op_type & JB_PATH_DELETE)) {
+                    (void) pushJsonbValue(st, WJB_KEY, &k);
+                    addJsonbToParseState(st, newval);
+                }
+            } else {
+                (void) pushJsonbValue(st, r, &k);
+                setPath(it, path_elems, path_nulls, path_len,
+                        st, level + 1, newval, op_type);
+            }
+        } else {
+            if ((op_type & JB_PATH_CREATE_OR_INSERT) && !done && level == path_len - 1 && i == npairs - 1) {
+                JsonbValue	newkey;
+
+                newkey.type = jbvString;
+                newkey.string.val = VARDATA_ANY(pathelem);
+                newkey.string.len = VARSIZE_ANY_EXHDR(pathelem);
+
+                (void) pushJsonbValue(st, WJB_KEY, &newkey);
+                addJsonbToParseState(st, newval);
+            }
+
+            (void) pushJsonbValue(st, r, &k);
+            r = JsonbIteratorNext(it, &v, false);
+            (void) pushJsonbValue(st, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+            if (r == WJB_BEGIN_ARRAY || r == WJB_BEGIN_OBJECT) {
+                int			walking_level = 1;
+
+                while (walking_level != 0) {
+                    r = JsonbIteratorNext(it, &v, false);
+
+                    if (r == WJB_BEGIN_ARRAY || r == WJB_BEGIN_OBJECT)
+                        ++walking_level;
+                    if (r == WJB_END_ARRAY || r == WJB_END_OBJECT)
+                        --walking_level;
+
+                    (void) pushJsonbValue(st, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+                }
+            }
+        }
+    }
+}
+
+/*
+* Array walker for setPath
+*/
+static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
+            int path_len, JsonbParseState **st, int level, Jsonb *newval, uint32 nelems, int op_type)
+{
+    JsonbValue  v;
+    int         idx,
+                i;
+    bool        done = false;
+
+    /* pick correct index */
+    if (level < path_len && !path_nulls[level]) {
+        char	   *c = TextDatumGetCString(path_elems[level]);
+        char	   *badp;
+        long	    val;
+
+        errno = 0;
+        val = strtol(c, &badp, 10);
+        if (errno != 0 || badp == c || badp[0] != '\0' || val > INT_MAX ||
+                val < INT_MIN) 
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                    errmsg("path element at position %d is not an integer: \"%s\"",
+                            level + 1, c)));
+        idx = val;
+    } else
+        idx = nelems;
+
+    if (idx < 0) {
+        if (-idx > nelems) {
+            /*
+            * If asked to keep elements position consistent, it's not allowed
+            * to prepend the array.
+            */
+            if (op_type & JB_PATH_CONSISTENT_POSITION)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("path element at position %d is out of range: %d",
+                                level + 1, idx)));
+            else
+                idx = INT_MIN;
+        } else
+            idx = nelems + idx;
+    }
+
+    /*
+    * Filling the gaps means there are no limits on the positive index are
+    * imposed, we can set any element. Otherwise limit the index by nelems.
+    */
+    if (!(op_type & JB_PATH_FILL_GAPS)) {
+        if (idx > 0 && idx > nelems)
+            idx = nelems;
+    }
+
+    /*
+    * if we're creating, and idx == INT_MIN, we prepend the new value to the
+    * array also if the array is empty - in which case we don't really care
+    * what the idx value is
+    */
+    if ((idx == INT_MIN || nelems == 0) && (level == path_len - 1) && (op_type & JB_PATH_CREATE_OR_INSERT)) {
+        Assert(newval != NULL);
+        addJsonbToParseState(st, newval);
+        done = true;
+    }
+
+    /* iterate over the array elements */
+    for (i = 0; i < nelems; i++) {
+        int r;
+
+        if (i == idx && level < path_len) {
+            done = true;
+
+            if (level == path_len - 1) {
+                r = JsonbIteratorNext(it, &v, true);	/* skip */
+
+                if (op_type & (JB_PATH_INSERT_BEFORE | JB_PATH_CREATE))
+                    addJsonbToParseState(st, newval);
+
+                /*
+                * We should keep current value only in case of
+                * JB_PATH_INSERT_BEFORE or JB_PATH_INSERT_AFTER because
+                * otherwise it should be deleted or replaced
+                */
+                if (op_type & (JB_PATH_INSERT_AFTER | JB_PATH_INSERT_BEFORE))
+                    (void) pushJsonbValue(st, r, &v);
+
+                if (op_type & (JB_PATH_INSERT_AFTER | JB_PATH_REPLACE))
+                    addJsonbToParseState(st, newval);
+            } else
+                (void) setPath(it, path_elems, path_nulls, path_len, st, level + 1, newval, op_type);
+        } else {
+            r = JsonbIteratorNext(it, &v, false);
+
+            (void) pushJsonbValue(st, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+
+            if (r == WJB_BEGIN_ARRAY || r == WJB_BEGIN_OBJECT) {
+                int walking_level = 1;
+
+                while (walking_level != 0) {
+                    r = JsonbIteratorNext(it, &v, false);
+
+                    if (r == WJB_BEGIN_ARRAY || r == WJB_BEGIN_OBJECT)
+                        ++walking_level;
+                    if (r == WJB_END_ARRAY || r == WJB_END_OBJECT)
+                        --walking_level;
+
+                    (void) pushJsonbValue(st, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+                }
+            }
+        }
+    }
+
+    if ((op_type & JB_PATH_CREATE_OR_INSERT) && !done && level == path_len - 1) {
+        /*
+        * If asked to fill the gaps, idx could be bigger than nelems, so
+        * prepend the new element with nulls if that's the case.
+        */
+        if (op_type & JB_PATH_FILL_GAPS && idx > nelems)
+            push_null_elements(st, idx - nelems);
+
+        addJsonbToParseState(st, newval);
+        done = true;
+    }
+}
+
+/*
+* SQL function jsonb_insert(jsonb, text[], jsonb, boolean)
+*/
+Datum jsonb_insert(PG_FUNCTION_ARGS)
+{
+    Jsonb      *in = PG_GETARG_JSONB(0);
+    ArrayType  *path = PG_GETARG_ARRAYTYPE_P(1);
+    Jsonb      *newjsonb = PG_GETARG_JSONB(2);
+    bool        after = PG_GETARG_BOOL(3);
+    JsonbValue *res = NULL;
+    Datum      *path_elems;
+    bool       *path_nulls;
+    int	        path_len;
+    JsonbIterator *it;
+    JsonbParseState *st = NULL;
+
+    if (ARR_NDIM(path) > 1)
+        ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("wrong number of array subscripts")));
+
+    if (JB_ROOT_IS_SCALAR(in))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("cannot set path in scalar")));
+
+    deconstruct_array(path, TEXTOID, -1, false, 'i', &path_elems, &path_nulls, &path_len);
+
+    if (path_len == 0)
+        PG_RETURN_JSONB(in);
+
+    it = JsonbIteratorInit(VARDATA(in));
+
+    res = setPath(&it, path_elems, path_nulls, path_len, &st, 0, newjsonb,
+                after ? JB_PATH_INSERT_AFTER : JB_PATH_INSERT_BEFORE);
+
+    Assert(res != NULL);
+
+    PG_RETURN_JSONB(JsonbValueToJsonb(res));
+}
+
+/*
+* SQL function jsonb_delete (jsonb, text)
+*
+* return a copy of the jsonb with the indicated item
+* removed.
+*/
+Datum jsonb_delete(PG_FUNCTION_ARGS)
+{
+    Jsonb      *in = PG_GETARG_JSONB(0);
+    text       *key = PG_GETARG_TEXT_PP(1);
+    char       *keyptr = VARDATA_ANY(key);
+    int	        keylen = VARSIZE_ANY_EXHDR(key);
+    JsonbParseState *state = NULL;
+    JsonbIterator *it;
+    JsonbValue	v, *res = NULL;
+    bool        skipNested = false;
+    int         r;
+
+    if (JB_ROOT_IS_SCALAR(in))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("cannot delete from scalar")));
+
+    if (JB_ROOT_COUNT(in) == 0)
+        PG_RETURN_JSONB(in);
+
+    it = JsonbIteratorInit(VARDATA(in));
+
+    while ((r = JsonbIteratorNext(&it, &v, skipNested)) != WJB_DONE) {
+        skipNested = true;
+
+        if ((r == WJB_ELEM || r == WJB_KEY) && (v.type == jbvString && keylen == v.string.len &&
+            memcmp(keyptr, v.string.val, keylen) == 0)) {
+            /* skip corresponding value as well */
+            if (r == WJB_KEY)
+                (void) JsonbIteratorNext(&it, &v, true);
+
+            continue;
+        }
+
+        res = pushJsonbValue(&state, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+    }
+
+    Assert(res != NULL);
+
+    PG_RETURN_JSONB(JsonbValueToJsonb(res));
+}
+
+/*
+* SQL function jsonb_delete (jsonb, variadic text[])
+*
+* return a copy of the jsonb with the indicated items
+* removed.
+*/
+Datum jsonb_delete_array(PG_FUNCTION_ARGS)
+{
+    Jsonb      *in = PG_GETARG_JSONB(0);
+    ArrayType  *keys = PG_GETARG_ARRAYTYPE_P(1);
+    Datum      *keys_elems;
+    bool       *keys_nulls;
+    int	        keys_len;
+    JsonbParseState *state = NULL;
+    JsonbIterator *it;
+    JsonbValue  v, *res = NULL;
+    bool        skipNested = false;
+    int         r;
+
+    if (ARR_NDIM(keys) > 1)
+        ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("wrong number of array subscripts")));
+
+    if (JB_ROOT_IS_SCALAR(in))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("cannot delete from scalar")));
+
+    if (JB_ROOT_COUNT(in) == 0)
+        PG_RETURN_JSONB(in);
+
+    deconstruct_array(keys, TEXTOID, -1, false, 'i', &keys_elems, &keys_nulls, &keys_len);
+
+    if (keys_len == 0)
+        PG_RETURN_JSONB(in);
+
+    it = JsonbIteratorInit(VARDATA(in));
+
+    while ((r = JsonbIteratorNext(&it, &v, skipNested)) != WJB_DONE) {
+        skipNested = true;
+
+        if ((r == WJB_ELEM || r == WJB_KEY) && v.type == jbvString) {
+            int			i;
+            bool		found = false;
+
+            for (i = 0; i < keys_len; i++) {
+                char	   *keyptr;
+                int			keylen;
+
+                if (keys_nulls[i])
+                    continue;
+
+                /* We rely on the array elements not being toasted */
+                keyptr = VARDATA_ANY(keys_elems[i]);
+                keylen = VARSIZE_ANY_EXHDR(keys_elems[i]);
+                if (keylen == v.string.len &&
+                    memcmp(keyptr, v.string.val, keylen) == 0)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                /* skip corresponding value as well */
+                if (r == WJB_KEY)
+                    (void) JsonbIteratorNext(&it, &v, true);
+
+                continue;
+            }
+        }
+
+        res = pushJsonbValue(&state, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+    }
+
+    Assert(res != NULL);
+
+    PG_RETURN_JSONB(JsonbValueToJsonb(res));
+}
+
+/*
+* SQL function jsonb_delete (jsonb, int)
+*
+* return a copy of the jsonb with the indicated item
+* removed. Negative int means count back from the
+* end of the items.
+*/
+Datum jsonb_delete_idx(PG_FUNCTION_ARGS)
+{
+    Jsonb *in = PG_GETARG_JSONB(0);
+    int	idx = PG_GETARG_INT32(1);
+    JsonbParseState *state = NULL;
+    JsonbIterator *it;
+    uint32      i = 0,
+                n;
+    JsonbValue  v,
+            *res = NULL;
+    int         r;
+
+    if (JB_ROOT_IS_SCALAR(in))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("cannot delete from scalar")));
+
+    if (JB_ROOT_IS_OBJECT(in))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("cannot delete from object using integer index")));
+
+    if (JB_ROOT_COUNT(in) == 0)
+        PG_RETURN_JSONB(in);
+
+    it = JsonbIteratorInit(VARDATA(in));
+
+    r = JsonbIteratorNext(&it, &v, false);
+    Assert(r == WJB_BEGIN_ARRAY);
+    n = v.array.nElems;
+
+    if (idx < 0) {
+        if (-idx > n)
+            idx = n;
+        else
+            idx = n + idx;
+    }
+
+    if (idx >= n)
+        PG_RETURN_JSONB(in);
+
+    pushJsonbValue(&state, r, NULL);
+
+    while ((r = JsonbIteratorNext(&it, &v, true)) != WJB_DONE)
+    {
+        if (r == WJB_ELEM) {
+            if (i++ == idx)
+                continue;
+        }
+
+        res = pushJsonbValue(&state, r, r < WJB_BEGIN_ARRAY ? &v : NULL);
+    }
+
+    Assert(res != NULL);
+
+    PG_RETURN_JSONB(JsonbValueToJsonb(res));
+}
+
+/*
+* SQL function jsonb_set(jsonb, text[], jsonb, boolean)
+*/
+Datum jsonb_set(PG_FUNCTION_ARGS)
+{
+    Jsonb	   *in = PG_GETARG_JSONB(0);
+    ArrayType  *path = PG_GETARG_ARRAYTYPE_P(1);
+    Jsonb	   *newjsonb = PG_GETARG_JSONB(2);
+    bool		create = PG_GETARG_BOOL(3);
+    JsonbValue *res = NULL;
+    Datum	   *path_elems;
+    bool	   *path_nulls;
+    int			path_len;
+    JsonbIterator *it;
+    JsonbParseState *st = NULL;
+
+    if (ARR_NDIM(path) > 1)
+        ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("wrong number of array subscripts")));
+
+    if (JB_ROOT_IS_SCALAR(in))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("cannot set path in scalar")));
+
+    if (JB_ROOT_COUNT(in) == 0 && !create)
+        PG_RETURN_JSONB(in);
+
+    deconstruct_array(path, TEXTOID, -1, false, 'i', &path_elems, &path_nulls, &path_len);
+
+    if (path_len == 0)
+        PG_RETURN_JSONB(in);
+
+    it = JsonbIteratorInit(VARDATA(in));
+
+    res = setPath(&it, path_elems, path_nulls, path_len, &st, 0, newjsonb, create ? JB_PATH_CREATE : JB_PATH_REPLACE);
+
+    Assert(res != NULL);
+
+    PG_RETURN_JSONB(JsonbValueToJsonb(res));
 }
