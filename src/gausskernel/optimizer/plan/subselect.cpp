@@ -1925,12 +1925,6 @@ static void inline_cte(PlannerInfo *root, CommonTableExpr *cte)
 
     (void) inline_cte_walker((Node*)root->parse, &context);
 
-    /*
-     * We would expect the reference number to be zero after inline, however, the 
-     * reference count of cte are not accurate for re-entry issues at parsing stage
-     * Until fixed, we only check for non-negative refcnt result.
-     */
-    Assert(context.refcount >= 0);
     /* Mark this CTE as inlined */
     cte->cterefcount = -1;
 }

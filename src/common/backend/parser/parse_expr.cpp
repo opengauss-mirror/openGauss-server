@@ -1393,6 +1393,7 @@ static Node* transformAExprOp(ParseState* pstate, A_Expr* a)
 
 static Node* transformAExprAnd(ParseState* pstate, A_Expr* a)
 {
+    a->rexpr = (Node *)copyObject(a->rexpr);
     Node* lexpr = transformExprRecurse(pstate, a->lexpr);
     Node* rexpr = transformExprRecurse(pstate, a->rexpr);
 
