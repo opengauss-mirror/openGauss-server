@@ -1542,51 +1542,7 @@ static void construct_restore_cmd(FILE *fp, pgRecoveryTarget *rt,
                                   bool restore_command_provided,
                                   bool target_immediate)
 {
-    char    restore_command_guc[16384];
-    errno_t rc = 0;
-
     fio_fprintf(fp, "\n## recovery settings\n");
-    /* If restore_command is provided, use it. Otherwise construct it from scratch. */
-    if (restore_command_provided)
-    {
-        rc = sprintf_s(restore_command_guc, sizeof(restore_command_guc), "%s",
-                    instance_config.restore_command);
-        securec_check_ss_c(rc, "\0", "\0");
-    }
-    else
-    {
-        /* default cmdline, ok for local restore */
-        rc = sprintf_s(restore_command_guc, sizeof(restore_command_guc),
-                "%s archive-get -B %s --instance %s "
-                "--wal-file-path=%%p --wal-file-name=%%f",
-                PROGRAM_FULL_PATH ? PROGRAM_FULL_PATH : PROGRAM_NAME,
-                backup_path, instance_name);
-        securec_check_ss_c(rc, "\0", "\0");
-        /* append --remote-* parameters provided via --archive-* settings */
-        if (instance_config.archive.host)
-        {
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), " --remote-host=");
-            securec_check_c(rc, "\0", "\0");
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), instance_config.archive.host);
-            securec_check_c(rc, "\0", "\0");
-        }
-
-        if (instance_config.archive.port)
-        {
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), " --remote-port=");
-            securec_check_c(rc, "\0", "\0");
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), instance_config.archive.port);
-            securec_check_c(rc, "\0", "\0");
-        }
-
-        if (instance_config.archive.user)
-        {
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), " --remote-user=");
-            securec_check_c(rc, "\0", "\0");
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), instance_config.archive.user);
-            securec_check_c(rc, "\0", "\0");
-        }
-    }
 
     /*
      * We've already checked that only one of the four following mutually
@@ -1625,6 +1581,11 @@ static void construct_restore_cmd(FILE *fp, pgRecoveryTarget *rt,
 #if PG_VERSION_NUM >= 120000
         fio_fprintf(fp, "recovery_target_timeline = 'current'\n");
 #endif
+    }
+    if (instance_config.archive.host) {
+        elog(LOG, "archive host specified, input restore command manually.");
+    } else {
+        fprintf(fp, "restore_command = 'cp %s/%%f %%p'\n", arclog_path);
     }
 }
 

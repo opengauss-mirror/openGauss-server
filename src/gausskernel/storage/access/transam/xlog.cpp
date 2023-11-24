@@ -381,7 +381,6 @@ static void UpdateLastRemovedPtr(const char *filename);
 static void ValidateXLOGDirectoryStructure(void);
 static void CleanupBackupHistory(void);
 static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, int emode, bool fetching_ckpt);
-void CheckRecoveryConsistency(void);
 static bool existsTimeLineHistory(TimeLineID probeTLI);
 static TimeLineID findNewestTimeLine(TimeLineID startTLI);
 STATIC void WriteControlFile(void);
@@ -16500,6 +16499,8 @@ static bool read_backup_label(XLogRecPtr *checkPointLoc, bool *backupEndRequired
      */
     if (fscanf_s(lfp, "BACKUP METHOD: %19s\n", backuptype, sizeof(backuptype)) == 1) {
         if (strcmp(backuptype, "streamed") == 0) {
+            *backupEndRequired = true;
+        } else if (strcmp(backuptype, "pg_start_backup") == 0) {
             *backupEndRequired = true;
         }
     }
