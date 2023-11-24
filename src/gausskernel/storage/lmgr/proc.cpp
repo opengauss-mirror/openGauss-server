@@ -2615,7 +2615,7 @@ bool enable_session_sig_alarm(int delayms)
     struct itimerval timeval;
     errno_t rc = EOK;
 
-    /* Session timer only work when connect form app, not work for inner conncection. */
+    /* Session timer only work when connect from app, not work for inner conncection. */
     if (!IsConnFromApp() || IS_THREAD_POOL_STREAM) {
         return true;
     }
@@ -2662,7 +2662,7 @@ bool enable_idle_in_transaction_session_sig_alarm(int delayms)
     struct itimerval timeval;
     errno_t rc = EOK;
 
-    /* Session timer only work when connect form app, not work for inner conncection. */
+    /* Session timer only work when connect from app, not work for inner conncection. */
     if (!IsConnFromApp() || IS_THREAD_POOL_STREAM) {
         return true;
     }
