@@ -49,6 +49,10 @@ select left(alias8.w_zip ,alias8.w_id) as alias10,true alias11,dense_rank() over
 
 drop table fulltest;
 drop table fulltest2;
+CREATE TABLE fj_table0 ( column32 INT , column36 INT ) ;
+SELECT 1 FROM fj_table0 LEFT JOIN ( SELECT 1 column29 FROM fj_table0 FULL JOIN fj_table0 AS alias0 ON FALSE ) AS alias1 ON TRUE WHERE column29 = 1 ;
+explain (costs off) SELECT 1 FROM fj_table0 LEFT JOIN ( SELECT 1 column29 FROM fj_table0 FULL JOIN fj_table0 AS alias0 ON FALSE ) AS alias1 ON TRUE WHERE column29 = 1 ;
+drop table fj_table0;
 
 -- contain system column, don't rewrite full join
 explain (costs off) select t1.oid from pg_class t1 full join pg_constraint t2 on t1.relname = t2.conname;
