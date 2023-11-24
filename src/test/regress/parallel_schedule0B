@@ -328,6 +328,7 @@ test: hw_pct_type_and_rowtype
 #test: create_basetype
 #test: tabletype
 #test with recursive
+test: with_002
 test: recursive_ref_recursive
 #test: recursive_prepare
 #test: recursive_cte
