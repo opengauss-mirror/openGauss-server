@@ -843,7 +843,7 @@ Oid CreateTableSpace(CreateTableSpaceStmt* stmt)
             errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("tablespaces are not supported on this platform")));
 #endif /* HAVE_SYMLINK */
-   return tablespaceoid; 
+    return tablespaceoid;
 }
 
 /*

@@ -173,6 +173,7 @@ enable_jemalloc_debug	= @enable_jemalloc_debug@
 enable_privategauss             = @enable_privategauss@
 enable_multiple_nodes		= @enable_multiple_nodes@
 enable_lite_mode		= @enable_lite_mode@
+enable_finance_mode		= @enable_finance_mode@
 enable_mot			= @enable_mot@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@

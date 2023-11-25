@@ -752,6 +752,7 @@ enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
+enable_finance_mode
 enable_mot
 enable_memory_check
 enable_mysql_fdw
@@ -837,6 +838,7 @@ enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
+enable_finance_mode
 enable_mot
 enable_memory_check
 enable_mysql_fdw
@@ -2876,47 +2878,6 @@ _ACEOF
 
 fi
 
-# Check whether --enable-mot was given.
-if test "${enable_mot+set}" = set; then
-  enableval=$enable_mot;
-  case $enableval in
-    yes)
-      if test "$enable_multiple_nodes" = yes; then
-
-        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
-            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
-          { (exit 1); exit 1; }; }
-
-      fi
-      ;;
-    no)
-      :
-      ;;
-    *)
-      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
-$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
-   { (exit 1); exit 1; }; }
-      ;;
-  esac
-
-else
-  enable_mot=no
-
-fi
-
-if test "$enable_multiple_nodes" = yes; then
-
-  enable_mot=no
-fi
-
-if test "$enable_mot" = yes; then
-
-cat >>confdefs.h <<\_ACEOF
-#define ENABLE_MOT 1
-_ACEOF
-
-fi
-
 #
 # '-memory-check'-like feature can be enabled
 #
@@ -3231,6 +3192,94 @@ _ACEOF
 
 fi
 
+#
+# --enable-finance-mode enables
+#
+
+# Check whether --enable-finance-mode was given.
+if test "${enable_finance_mode+set}" = set; then
+  enableval=$enable_finance_mode;
+  case $enableval in
+    yes)
+      if test "$enable_lite_nodes" = yes; then
+        { { $as_echo "$as_me:$LINENO: error: --enable-finance-mode option is not supported with --enable-lite-nodes option" >&5
+            $as_echo "$as_me: error: --enable-finance-mode option is not supported with --enable-lite-nodes option" >&2;}
+              { (exit 1); exit 1; }; }
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-finance-mode option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-finance-mode option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_finance_mode=no
+
+fi
+
+if test "$enable_lite_nodes" = yes; then
+
+  enable_finance_mode=no
+fi
+
+if test "$enable_finance_mode" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_FINANCE_MODE 1
+_ACEOF
+
+fi
+
+# Check whether --enable-mot was given.
+if test "${enable_mot+set}" = set; then
+  enableval=$enable_mot;
+  case $enableval in
+    yes)
+      if test "$enable_multiple_nodes" = yes; then
+
+        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
+            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
+          { (exit 1); exit 1; }; }
+
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_mot=no
+
+fi
+
+if test "$enable_multiple_nodes" = yes; then
+
+  enable_mot=no
+fi
+
+if test "$enable_finance_mode" = yes; then
+
+  enable_mot=no
+fi
+
+if test "$enable_mot" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_MOT 1
+_ACEOF
+
+fi
 
 #
 # --with-openeuler-os enable

@@ -920,6 +920,10 @@
  *  * (--enable-lite-mode) */
 #cmakedefine ENABLE_LITE_MODE
 
+/* Define to 1 if you want to generate gauss product as finance mode.
+ *  * (--enable-lite-mode) */
+#cmakedefine ENABLE_FINANCE_MODE
+
 /* Define to 1 if you want to use mot
  * --enable-mot */
 #cmakedefine ENABLE_MOT
