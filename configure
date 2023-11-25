@@ -2878,6 +2878,47 @@ _ACEOF
 
 fi
 
+# Check whether --enable-mot was given.
+if test "${enable_mot+set}" = set; then
+  enableval=$enable_mot;
+  case $enableval in
+    yes)
+      if test "$enable_multiple_nodes" = yes; then
+
+        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
+            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
+          { (exit 1); exit 1; }; }
+
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_mot=no
+
+fi
+
+if test "$enable_multiple_nodes" = yes; then
+
+  enable_mot=no
+fi
+
+if test "$enable_mot" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_MOT 1
+_ACEOF
+
+fi
+
 #
 # '-memory-check'-like feature can be enabled
 #
@@ -3231,52 +3272,6 @@ if test "$enable_finance_mode" = yes; then
 
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_FINANCE_MODE 1
-_ACEOF
-
-fi
-
-# Check whether --enable-mot was given.
-if test "${enable_mot+set}" = set; then
-  enableval=$enable_mot;
-  case $enableval in
-    yes)
-      if test "$enable_multiple_nodes" = yes; then
-
-        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
-            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
-          { (exit 1); exit 1; }; }
-
-      fi
-      ;;
-    no)
-      :
-      ;;
-    *)
-      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
-$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
-   { (exit 1); exit 1; }; }
-      ;;
-  esac
-
-else
-  enable_mot=no
-
-fi
-
-if test "$enable_multiple_nodes" = yes; then
-
-  enable_mot=no
-fi
-
-if test "$enable_finance_mode" = yes; then
-
-  enable_mot=no
-fi
-
-if test "$enable_mot" = yes; then
-
-cat >>confdefs.h <<\_ACEOF
-#define ENABLE_MOT 1
 _ACEOF
 
 fi
