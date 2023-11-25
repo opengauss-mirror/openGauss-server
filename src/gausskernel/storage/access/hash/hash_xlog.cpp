@@ -348,9 +348,10 @@ static void hash_xlog_move_page_contents(XLogReaderState *record)
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        (void) XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf);
-
-        PageSetLSN(bucketbuf.pageinfo.page, lsn);
+        if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
+            PageSetLSN(bucketbuf.pageinfo.page, lsn);
+            MarkBufferDirty(writebuf.buf);
+        }
 
         action = XLogReadBufferForRedo(record, 1, &writebuf);
     }
@@ -428,9 +429,10 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        (void) XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf);
-
-        PageSetLSN(bucketbuf.pageinfo.page, lsn);
+        if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
+            PageSetLSN(bucketbuf.pageinfo.page, lsn);
+            MarkBufferDirty(writebuf.buf);
+        }
 
         action = XLogReadBufferForRedo(record, 1, &writebuf);
     }
