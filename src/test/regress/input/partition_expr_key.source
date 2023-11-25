@@ -10,6 +10,7 @@ create table testlistpart(a int, b int) partition by list(int4mul(a,2)) (partiti
 create table testhashpart(a int, b int) partition by hash(int4mul(a,2)) (partition p0 ,partition p1);
 create table testrangepart(a int, b int) partition by range(a,b*2) (partition p0 values less than(100,1000),partition p1 values less than(200,2000));
 create table testrangepart(a int, b int) partition by range(a*2,b) (partition p0 values less than(100,1000),partition p1 values less than(200,2000));
+CREATE TABLE test_error_table0 ( column62 INT ) PARTITION BY HASH ( NOT TRUE ) ;
 CREATE TABLE testrangepart(a date) PARTITION BY RANGE (a*2) INTERVAL ('1 month')
 (
 	PARTITION p0 VALUES LESS THAN ('2020-03-01'),
