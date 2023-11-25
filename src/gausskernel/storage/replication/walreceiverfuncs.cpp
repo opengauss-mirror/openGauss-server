@@ -298,6 +298,7 @@ void WalRcvShmemInit(void)
         t_thrd.walreceiverfuncs_cxt.WalRcv->dummyStandbyConnectFailed = false;
         t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage = false;
         t_thrd.walreceiverfuncs_cxt.WalRcv->shareStorageTerm = 1;
+        t_thrd.walreceiverfuncs_cxt.WalRcv->flagAlreadyNotifyCatchup = false;
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->mutex);
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->exitLock);
     }
@@ -790,6 +791,9 @@ bool WalRcvAllReplayIsDone()
 
 bool WalRcvIsDone()
 {
+    if (g_instance.attr.attr_storage.enable_uwal)
+        return true;
+
     if (g_instance.attr.attr_storage.enable_mix_replication)
         return DataQueueIsEmpty(t_thrd.dataqueue_cxt.DataWriterQueue);
     else

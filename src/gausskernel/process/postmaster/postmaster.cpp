@@ -266,6 +266,7 @@
 #include "ddes/dms/ss_switchover.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_auxiliary.h"
+#include "storage/gs_uwal/gs_uwal.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -3095,6 +3096,27 @@ int PostmasterMain(int argc, char* argv[])
             /* need to initialize before STARTUP */
             DMSInit();
             g_instance.pid_cxt.DmsAuxiliaryPID = initialize_util_thread(DMS_AUXILIARY_THREAD);
+        }
+    }
+
+    /* init uwal */
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        int ret = GsUwalInit(t_thrd.postmaster_cxt.HaShmData->current_mode);
+        if (ret != 0) {
+            ereport(PANIC, (errmsg("uwal init failed, ret: %d", ret)));
+        }
+        ereport(LOG, (errmsg("uwal init success.")));
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
+            t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE) {
+            ret = GsUwalPrimaryInitNotify();
+            if (ret != 0) {
+                ereport(PANIC, (errmsg("uwal primary init notify failed, ret: %d", ret)));
+            }
+        } else if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+            ret = GsUwalStandbyInitNotify();
+            if (ret != 0) {
+                ereport(PANIC, (errmsg("uwal standby init notify failed, ret: %d", ret)));
+            }
         }
     }
 

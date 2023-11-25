@@ -865,8 +865,10 @@ void walrcvWriterMain(void)
             ProcessConfigFile(PGC_SIGHUP);
         }
 
-        while (!t_thrd.walrcvwriter_cxt.shutdownRequested && WalDataRcvWrite() > 0)
-            ;
+        if (!g_instance.attr.attr_storage.enable_uwal) {
+            while (!t_thrd.walrcvwriter_cxt.shutdownRequested && WalDataRcvWrite() > 0)
+                ;
+        }    
 
         if (t_thrd.walrcvwriter_cxt.shutdownRequested) {
             ereport(LOG, (errmsg("walrcvwriter thread shut down")));

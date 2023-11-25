@@ -548,4 +548,9 @@ extern const char* show_nodegroup_mode(void);
 
 extern THR_LOCAL GucContext currentGucContext;
 
+typedef enum {
+    TCP = 0,
+    RDMA = 1,
+} uwal_connect_type;
+
 #endif /* GUC_H */

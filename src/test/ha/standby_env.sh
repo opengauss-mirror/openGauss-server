@@ -36,6 +36,8 @@ passwd="Gauss@123"
 
 dn1_primary_port=`expr $g_base_port \+ 3`
 dn1_standby_port=`expr $g_base_port \+ 6`
+primary_port=`expr $g_base_port \+ 3`
+standby1_port=`expr $g_base_port \+ 6`
 standby2_port=`expr $g_base_port \+ 9`
 standby3_port=`expr $g_base_port \+ 12`
 standby4_port=`expr $g_base_port \+ 15`
@@ -44,6 +46,7 @@ dn_temp_port=`expr $g_base_port \+ 21`
 
 primary_data_dir="$data_dir/datanode1"
 standby_data_dir="$data_dir/datanode1_standby"
+standby1_data_dir="$data_dir/datanode1_standby"
 standby2_data_dir="$data_dir/datanode2_standby"
 standby3_data_dir="$data_dir/datanode3_standby"
 standby4_data_dir="$data_dir/datanode4_standby"

@@ -172,6 +172,7 @@
 #include "utils/guc_memory.h"
 #include "utils/guc_network.h"
 #include "utils/guc_resource.h"
+#include "utils/guc_uwal.h"
 #include "utils/mem_snapshot.h"
 #include "nodes/parsenodes_common.h"
 #include "mb/pg_wchar.h"

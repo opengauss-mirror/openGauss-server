@@ -27,10 +27,12 @@
 /bin/pg_basebackup/pg_receivexlog
 /bin/pg_basebackup/pg_recvlogical
 /bin/pg_basebackup/xlogreader.cpp
+/bin/pg_basebackup/gs_uwal_adaptor.cpp
 /bin/pg_config/pg_config
 /bin/pg_controldata/pg_controldata
 /bin/pg_ctl/gs_ctl
 /bin/pg_ctl/xlogreader.cpp
+/bin/pg_ctl/gs_uwal_adaptor.cpp
 /bin/pg_ctl/xlogreader_common.cpp
 /bin/pg_dump/gs_dump
 /bin/pg_dump/gs_dumpall
@@ -45,6 +47,7 @@
 /bin/pg_probackup/streamutil.cpp
 /bin/pg_probackup/streamutil.h
 /bin/pg_probackup/xlogreader.cpp
+/bin/pg_probackup/gs_uwal_adaptor.cpp
 /bin/pg_resetxlog/pg_resetxlog
 /bin/pg_upgrade/pg_format_cu
 /bin/pgxc_clean/gs_clean

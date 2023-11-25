@@ -33,6 +33,7 @@ set(TGT_transam_INC
     ${PROJECT_SRC_DIR}/gausskernel/cbb/communication
     ${PROJECT_SRC_DIR}/include/iprange
     ${PROJECT_SRC_DIR}/include/libcomm
+    ${PROJECT_SRC_DIR}/include/storage/gs_uwal
     ${PROJECT_SRC_DIR}/include
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LIBCGROUP_INCLUDE_PATH}

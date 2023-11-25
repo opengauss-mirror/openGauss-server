@@ -28,21 +28,26 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/replorigindesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/replorigindesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/smgr/cfs/cfs_mddesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/cfs_mddesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/gs_uwal/gs_uwal_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/gs_uwal_adaptor.cpp
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_xlogdump_SRC)
 SET(TGT_xlogdump_INC
-    ${TGT_pq_INC} ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SRC_DIR}/lib/gstrace
+    ${TGT_pq_INC} ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SRC_DIR}/lib/gstrace ${PROJECT_SRC_DIR}/include/storage/gs_uwal
 )
 SET(xlogdump_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND)
 SET(xlogdump_COMPILE_OPTIONS ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${CHECK_OPTIONS} ${BIN_SECURE_OPTIONS} ${OPTIMIZE_OPTIONS})
 SET(xlogdump_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 SET(xlogdump_LINK_LIBS libpgcommon.a -lpgport -lcrypt -ldl -lm -ledit -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
+
+list(APPEND xlogdump_LINK_DIRS ${LIBUWAL_LINK_DIRS})
+list(APPEND xlogdump_LINK_OPTIONS ${LIBUWAL_LINK_OPTIONS})
+
 add_bintarget(pg_xlogdump TGT_xlogdump_SRC TGT_xlogdump_INC "${xlogdump_DEF_OPTIONS}" "${xlogdump_COMPILE_OPTIONS}" "${xlogdump_LINK_OPTIONS}" "${xlogdump_LINK_LIBS}")
 add_dependencies(pg_xlogdump pgport_static pgcommon_static)
 target_link_directories(pg_xlogdump PUBLIC
     ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${SECURE_LIB_PATH}
-    ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
+    ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${CMAKE_BINARY_DIR}/lib ${xlogdump_LINK_DIRS}
 )
 
 install(TARGETS pg_xlogdump RUNTIME DESTINATION bin)

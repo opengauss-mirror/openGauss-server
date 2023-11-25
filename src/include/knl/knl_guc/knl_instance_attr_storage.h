@@ -225,6 +225,25 @@ typedef struct knl_instance_attr_storage {
     int parallel_recovery_timeout;
     int parallel_recovery_batch;
     bool ss_enable_dorado;
+    
+    bool enable_uwal;
+    int uwal_batch_io_size;
+    char* uwal_ip;
+    int uwal_port;
+    int uwal_nodeid;
+    char* uwal_protocol;
+
+    int64 uwal_disk_size;
+    int64 uwal_disk_block_size;
+    char* uwal_devices_path;
+    char* uwal_log_path;
+
+    int uwal_rpc_worker_thread_num;
+    int uwal_rpc_timeout;
+    bool uwal_rpc_rndv_switch;
+    bool uwal_rpc_compression_switch;
+    bool uwal_rpc_flowcontrol_switch;
+    int uwal_rpc_flowcontrol_value;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

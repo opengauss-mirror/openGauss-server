@@ -8,7 +8,8 @@ OBJS = pg_xlogdump.o compat.o xlogreader.o xlogreader_common.o rmgrdesc.o \
 	$(top_builddir)/src/gausskernel/storage/smgr/cfs/cfs_mddesc.o \
 	$(top_builddir)/src/lib/pgcommon/libpgcommon.a \
 	$(RMGRDESCOBJS) $(WIN32RES) \
-	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
+	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o \
+	$(top_builddir)/src/gausskernel/storage/gs_uwal/gs_uwal_adaptor.o
 
 RMGRDESCSOURCES = $(notdir $(wildcard $(top_srcdir)/src/gausskernel/storage/access/rmgrdesc/*desc.cpp))
 RMGRDESCOBJS = $(patsubst %.cpp,%.o,$(RMGRDESCSOURCES))

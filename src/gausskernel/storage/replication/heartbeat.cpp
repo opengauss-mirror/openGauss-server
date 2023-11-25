@@ -58,7 +58,7 @@ static int server_loop(void)
     }
 
     if (create_client_and_server(epollfd)) {
-        goto OUT;
+        goto OUTLOOP;
     }
 
     for (;;) {
@@ -100,7 +100,7 @@ static int server_loop(void)
         }
     }
 
-OUT:
+OUTLOOP:
     g_instance.heartbeat_cxt.heartbeat_running = false;
     destroy_client_and_server();
     (void)close(epollfd);

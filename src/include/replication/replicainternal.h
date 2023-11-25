@@ -150,9 +150,12 @@ typedef struct replconninfo {
     char localhost[IP_LEN];
     int localport;
     int localheartbeatport;
+    int remotenodeid;
     char remotehost[IP_LEN];
     int remoteport;
     int remoteheartbeatport;
+    char remoteuwalhost[IP_LEN];
+    int remoteuwalport;
     bool isCascade;
     bool isCrossRegion;
 #ifdef ENABLE_LITE_MODE
