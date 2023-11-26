@@ -5648,9 +5648,6 @@ static int CopyFromCompressAndInsertBatch(PageCompress* pcState, EState* estate,
 //
 bool IsTypeAcceptEmptyStr(Oid typeOid)
 {
-    if (type_is_set(typeOid)) {
-        return true;
-    }
     switch (typeOid) {
         case VARCHAROID:
         case NVARCHAR2OID:
