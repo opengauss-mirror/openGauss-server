@@ -3384,5 +3384,9 @@ ALTER TABLE test1.name1 RENAME TO test2.name1;
 ALTER TABLE test1.name1 RENAME TO test2.name2;
 ALTER TABLE test2.name1 RENAME TO test2.name2;
 
+CREATE TABLE t_after_first ( c4 INT , c5 INT ) ;
+INSERT INTO t_after_first VALUES ( 1 , 2 ) , ( 3 , 4 ) ;
+ALTER TABLE t_after_first ADD COLUMN c11 VARCHAR ( 2 ) , ADD COLUMN c22 VARCHAR ( 2 ) AFTER c11 , ADD COLUMN c57 INT FIRST;
+select * from t_after_first;
 \c postgres
 drop database test_first_after_B;
