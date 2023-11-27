@@ -2032,7 +2032,7 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
      * rels to delete (note that this routine is not responsible for actually
      * deleting 'em).  We cannot have any child XIDs, either.
      */
-    if (!TransactionIdIsValid(xid)) {
+    if (!TransactionIdIsValid(xid) || SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
         /* Reset XactLastRecEnd until the next transaction writes something */
         if (!isSubXact)
             t_thrd.xlog_cxt.XactLastRecEnd = 0;
