@@ -3445,7 +3445,7 @@ static void autovacuum_local_vac_analyze(autovac_table* tab, BufferAccessStrateg
     autovac_report_activity(tab);
     WaitStatePhase oldPhase = pgstat_report_waitstatus_phase(PHASE_AUTOVACUUM);
     DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
-    vacuum(&vacstmt, tab->at_relid, false, bstrategy, true);
+    vacuum(&vacstmt, tab->at_relid, u_sess->attr.attr_storage.handle_toast_in_autovac, bstrategy, true);
     tab->at_gpivacuumed = vacstmt.gpi_vacuumed;
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: %s", tab->at_relname);
     pgstat_report_waitstatus_phase(oldPhase);

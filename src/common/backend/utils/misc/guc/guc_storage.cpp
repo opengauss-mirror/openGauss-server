@@ -1049,6 +1049,17 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"handle_toast_in_autovac",
+            PGC_SIGHUP,
+            NODE_ALL,
+            AUTOVACUUM,
+            gettext_noop("Set whether toast needs to be processed in autovacuum."),
+            NULL},
+            &u_sess->attr.attr_storage.handle_toast_in_autovac,
+            false,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
