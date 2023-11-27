@@ -447,7 +447,7 @@ static void set_node_ref_subplan(Plan* plan, PlannedStmt* planned_stmt, PlannedS
  * Serialized the plan tree to string
  */
 void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str,
-                    int num_stream, int num_gather, bool push_subplan, uint64 queryId)
+                     RemoteQuery* step, bool push_subplan, uint64 queryId)
 {
     PlannedStmt* ShipPlannedStmt = NULL;
     ShipPlannedStmt = makeNode(PlannedStmt);
@@ -506,9 +506,9 @@ void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str
     ShipPlannedStmt->relationOids = planned_stmt->relationOids;
     ShipPlannedStmt->invalItems = planned_stmt->invalItems;
     ShipPlannedStmt->nParamExec = planned_stmt->nParamExec;
-    ShipPlannedStmt->num_streams = num_stream;
-    ShipPlannedStmt->gather_count = num_gather;
-    ShipPlannedStmt->num_nodes = planned_stmt->num_nodes;
+    ShipPlannedStmt->num_streams = step->num_stream;
+    ShipPlannedStmt->gather_count = step->num_gather;
+    ShipPlannedStmt->num_nodes = step->nodeCount;
     ShipPlannedStmt->nodesDefinition = planned_stmt->nodesDefinition;
     /* We don't send instrument option to datanode for un-stream plan.
      * For un-stream plan, we can not finalize node id and parent node id for result plan.

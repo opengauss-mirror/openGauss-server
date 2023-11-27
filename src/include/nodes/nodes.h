@@ -63,6 +63,9 @@ typedef enum NodeTag {
     T_SeqScan,
 #ifdef USE_SPQ
     T_SpqSeqScan,
+    T_SpqIndexScan,
+    T_SpqIndexOnlyScan,
+    T_SpqBitmapHeapScan,
 #endif
     T_IndexScan,
     T_IndexOnlyScan,
@@ -124,8 +127,6 @@ typedef enum NodeTag {
 #endif
 #ifdef USE_SPQ
     T_Sequence,
-    T_DynamicSeqScan,
-    T_DynamicBitmapHeapScan,
     T_Motion,
     T_ShareInputScan,
     T_SplitUpdate,

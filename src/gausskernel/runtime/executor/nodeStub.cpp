@@ -164,13 +164,20 @@ void ExecEndNodeStubScan(PlanState* node)
             }
             break;
         }
+        case T_SpqIndexScan:
 #endif
         case T_IndexScan:
             ExecEndIndexScan((IndexScanState*)node);
             break;
+#ifdef USE_SPQ
+        case T_SpqIndexOnlyScan:
+#endif
         case T_IndexOnlyScan:
             ExecEndIndexOnlyScan((IndexOnlyScanState*)node);
             break;
+#ifdef USE_SPQ
+        case T_SpqBitmapHeapScan:
+#endif
         case T_BitmapIndexScan:
             ExecEndBitmapIndexScan((BitmapIndexScanState*)node);
             break;

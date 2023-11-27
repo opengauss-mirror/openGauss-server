@@ -85,6 +85,6 @@ extern void StreamPlanWalker(PlannedStmt *pstmt, Plan *plan, bool *need);
 extern void mark_distribute_setop_remotequery(PlannerInfo* root, Node* node, Plan* plan, List* subPlans);
 #ifdef USE_SPQ
 extern void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str,
-                                int num_stream, int num_gather, bool push_subplan, uint64 queryId);
+                                RemoteQuery* step, bool push_subplan, uint64 queryId);
 #endif
 #endif /* STREAM_UTIL_H */

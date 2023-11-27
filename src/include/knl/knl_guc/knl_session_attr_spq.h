@@ -162,6 +162,7 @@ typedef struct knl_session_attr_spq {
     bool spq_optimizer_force_expanded_distinct_aggs;
     bool spq_optimizer_force_agg_skew_avoidance;
     bool spq_optimizer_penalize_skew;
+    bool spq_enable_left_index_nestloop_join;
     bool spq_optimizer_prune_computed_columns;
     bool spq_optimizer_push_requirements_from_consumer_to_producer;
     bool spq_optimizer_enforce_subplans;
@@ -186,7 +187,8 @@ typedef struct knl_session_attr_spq {
     bool spq_debug_cancel_print;
     bool spq_print_direct_dispatch_info;
     bool spq_log_dispatch_stats;
- 
+    bool spq_debug_slice_print;
+
     int spq_scan_unit_size;
     int spq_scan_unit_bit;
     char *gauss_cluster_map;

@@ -295,6 +295,9 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             if (p2walker((Node*)((ExtensiblePlan*)node)->extensible_exprs, context))
                 return true;
             break;
+#ifdef USE_SPQ
+        case T_SpqIndexScan:
+#endif
         case T_IndexScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;
@@ -302,7 +305,9 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
                 return true;
             /* Other fields are lists of basic items, nothing to walk. */
             break;
-
+#ifdef USE_SPQ
+        case T_SpqIndexOnlyScan:
+#endif
         case T_IndexOnlyScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;
@@ -336,6 +341,9 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             break;
 
         case T_CStoreIndexHeapScan:
+#ifdef USE_SPQ
+        case T_SpqBitmapHeapScan:
+#endif
         case T_BitmapHeapScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;

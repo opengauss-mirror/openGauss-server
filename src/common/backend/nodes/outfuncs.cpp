@@ -707,6 +707,11 @@ static void _outPlanInfo(StringInfo str, Plan* node)
             WRITE_FLOAT_FIELD(pred_max_memory, "%ld");
         }
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        WRITE_BOOL_FIELD(spq_scan_partial);
+    }
+#endif
 }
 
 static void _outPruningResult(StringInfo str, PruningResult* node)
@@ -773,6 +778,72 @@ static void _outScanInfo(StringInfo str, Scan* node)
     if (t_thrd.proc->workingVersionNum >= 92753) {
         WRITE_BOOL_FIELD(partition_iterator_elimination);
     }
+}
+
+template <typename T>
+static void _outCommonIndexScanPart(StringInfo str, T* node)
+{
+    _outScanInfo(str, (Scan*)node);
+    WRITE_OID_FIELD(indexid);
+#ifdef STREAMPLAN
+    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
+        appendStringInfo(str, " :indexname ");
+        _outToken(str, get_rel_name(node->indexid));
+        appendStringInfo(str, " :indexnamespace ");
+        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
+    }
+#endif  // STREAMPLAN
+    WRITE_NODE_FIELD(indexqual);
+    WRITE_NODE_FIELD(indexqualorig);
+    WRITE_NODE_FIELD(indexorderby);
+    WRITE_NODE_FIELD(indexorderbyorig);
+    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
+}
+
+static void _outIndexScanInfo(StringInfo str, IndexScan* node)
+{
+    _outCommonIndexScanPart<IndexScan>(str, node);
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_ustore);
+    }
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
+        WRITE_BOOL_FIELD(is_partial);
+    }
+}
+
+static void _outIndexOnlyScanInfo(StringInfo str, IndexOnlyScan* node)
+{
+    _outScanInfo(str, (Scan*)node);
+
+    WRITE_OID_FIELD(indexid);
+    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
+        /*
+         * For inherit table, the relname will be different
+         */
+        appendStringInfo(str, " :indexname ");
+        _outToken(str, get_rel_name(node->indexid));
+        appendStringInfo(str, " :indexnamespace ");
+        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
+    }
+    WRITE_NODE_FIELD(indexqual);
+    WRITE_NODE_FIELD(indexorderby);
+    WRITE_NODE_FIELD(indextlist);
+    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
+        WRITE_BOOL_FIELD(is_partial);
+    }
+}
+
+static void _outBitmapHeapScanInfo(StringInfo str, BitmapHeapScan* node)
+{
+    _outScanInfo(str, (Scan*)node);
+    WRITE_NODE_FIELD(bitmapqualorig);
 }
 
 /*
@@ -1085,79 +1156,11 @@ static void _outSeqScan(StringInfo str, SeqScan* node)
 
     _outScanInfo(str, (Scan*)node);
 }
-#ifdef USE_SPQ
-static void _outSpqSeqScan(StringInfo str, SpqSeqScan* node)
-{
-    WRITE_NODE_TYPE("SPQSEQSCAN");
- 
-    _outScanInfo(str, (Scan*)node);
-    WRITE_BOOL_FIELD(isFullTableScan);
-    WRITE_BOOL_FIELD(isAdaptiveScan);
-    WRITE_BOOL_FIELD(isDirectRead);
-}
- 
-static void _outAssertOp(StringInfo str, const AssertOp *node)
-{
-    WRITE_NODE_TYPE("ASSERTOP");
-    _outPlanInfo(str, (Plan *) node);
-    WRITE_INT_FIELD(errcode);
-    WRITE_NODE_FIELD(errmessage);
-}
- 
-static void _outShareInputScan(StringInfo str, const ShareInputScan *node)
-{
-    WRITE_NODE_TYPE("SHAREINPUTSCAN");
- 
-    WRITE_BOOL_FIELD(cross_slice);
-    WRITE_INT_FIELD(share_id);
-    WRITE_INT_FIELD(producer_slice_id);
-    WRITE_INT_FIELD(this_slice_id);
-    WRITE_INT_FIELD(nconsumers);
- 
-    _outPlanInfo(str, (Plan *) node);
-}
- 
-static void _outSequence(StringInfo str, const Sequence *node)
-{
-    WRITE_NODE_TYPE("SEQUENCE");
-    _outPlanInfo(str, (Plan *)node);
-    WRITE_NODE_FIELD(subplans);
-}
-#endif
-
-template <typename T>
-static void _outCommonIndexScanPart(StringInfo str, T* node)
-{
-    _outScanInfo(str, (Scan*)node);
-    WRITE_OID_FIELD(indexid);
-#ifdef STREAMPLAN
-    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
-        appendStringInfo(str, " :indexname ");
-        _outToken(str, get_rel_name(node->indexid));
-        appendStringInfo(str, " :indexnamespace ");
-        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
-    }
-#endif  // STREAMPLAN
-    WRITE_NODE_FIELD(indexqual);
-    WRITE_NODE_FIELD(indexqualorig);
-    WRITE_NODE_FIELD(indexorderby);
-    WRITE_NODE_FIELD(indexorderbyorig);
-    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-}
 
 static void _outIndexScan(StringInfo str, IndexScan* node)
 {
     WRITE_NODE_TYPE("INDEXSCAN");
-    _outCommonIndexScanPart<IndexScan>(str, node);
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
-        WRITE_BOOL_FIELD(is_ustore);
-    }
-    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        if (u_sess->opt_cxt.out_plan_stat) {
-            WRITE_FLOAT_FIELD(selectivity, "%.4f");
-        }
-        WRITE_BOOL_FIELD(is_partial);
-    }
+    _outIndexScanInfo(str, node);
 }
 
 static void _outCStoreIndexScan(StringInfo str, CStoreIndexScan* node)
@@ -1386,29 +1389,7 @@ static void _outExecNodes(StringInfo str, ExecNodes* node)
 static void _outIndexOnlyScan(StringInfo str, IndexOnlyScan* node)
 {
     WRITE_NODE_TYPE("INDEXONLYSCAN");
-
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_OID_FIELD(indexid);
-    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
-        /*
-         * For inherit table, the relname will be different
-         */
-        appendStringInfo(str, " :indexname ");
-        _outToken(str, get_rel_name(node->indexid));
-        appendStringInfo(str, " :indexnamespace ");
-        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
-    }
-    WRITE_NODE_FIELD(indexqual);
-    WRITE_NODE_FIELD(indexorderby);
-    WRITE_NODE_FIELD(indextlist);
-    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        if (u_sess->opt_cxt.out_plan_stat) {
-            WRITE_FLOAT_FIELD(selectivity, "%.4f");
-        }
-        WRITE_BOOL_FIELD(is_partial);
-    }
+    _outIndexOnlyScanInfo(str, node);
 }
 
 static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
@@ -1443,10 +1424,66 @@ static void _outBitmapHeapScan(StringInfo str, BitmapHeapScan* node)
 {
     WRITE_NODE_TYPE("BITMAPHEAPSCAN");
 
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_NODE_FIELD(bitmapqualorig);
+    _outBitmapHeapScanInfo(str, node);
 }
+
+#ifdef USE_SPQ
+static void _outSpqSeqScan(StringInfo str, SpqSeqScan* node)
+{
+    WRITE_NODE_TYPE("SPQSEQSCAN");
+
+    _outScanInfo(str, (Scan*)node);
+    WRITE_BOOL_FIELD(isFullTableScan);
+    WRITE_BOOL_FIELD(isAdaptiveScan);
+    WRITE_BOOL_FIELD(isDirectRead);
+}
+
+static void _outAssertOp(StringInfo str, const AssertOp *node)
+{
+    WRITE_NODE_TYPE("ASSERTOP");
+    _outPlanInfo(str, (Plan *) node);
+    WRITE_INT_FIELD(errcode);
+    WRITE_NODE_FIELD(errmessage);
+}
+
+static void _outShareInputScan(StringInfo str, const ShareInputScan *node)
+{
+    WRITE_NODE_TYPE("SHAREINPUTSCAN");
+
+    WRITE_BOOL_FIELD(cross_slice);
+    WRITE_INT_FIELD(share_id);
+    WRITE_INT_FIELD(producer_slice_id);
+    WRITE_INT_FIELD(this_slice_id);
+    WRITE_INT_FIELD(nconsumers);
+
+    _outPlanInfo(str, (Plan *) node);
+}
+
+static void _outSequence(StringInfo str, const Sequence *node)
+{
+    WRITE_NODE_TYPE("SEQUENCE");
+    _outPlanInfo(str, (Plan *)node);
+    WRITE_NODE_FIELD(subplans);
+}
+
+static void _outSpqIndexScan(StringInfo str, SpqIndexScan* node)
+{
+    WRITE_NODE_TYPE("SPQINDEXSCAN");
+    _outIndexScanInfo(str, &node->scan);
+}
+
+static void _outSpqIndexOnlyScan(StringInfo str, SpqIndexOnlyScan* node)
+{
+    WRITE_NODE_TYPE("SPQINDEXONLYSCAN");
+    _outIndexOnlyScanInfo(str, &node->scan);
+}
+
+static void _outSpqBitmapHeapScan(StringInfo str, SpqBitmapHeapScan* node)
+{
+    WRITE_NODE_TYPE("SPQBITMAPHEAPSCAN");
+    _outBitmapHeapScanInfo(str, &node->scan);
+}
+#endif
 
 static void _outCStoreIndexCtidScan(StringInfo str, CStoreIndexCtidScan* node)
 {
@@ -6259,6 +6296,15 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Sequence:
                 _outSequence(str, (Sequence*)obj);
+                break;
+            case T_SpqIndexScan:
+                _outSpqIndexScan(str, (SpqIndexScan*)obj);
+                break;
+            case T_SpqIndexOnlyScan:
+                _outSpqIndexOnlyScan(str, (SpqIndexOnlyScan*)obj);
+                break;
+            case T_SpqBitmapHeapScan:
+                _outSpqBitmapHeapScan(str, (SpqBitmapHeapScan*)obj);
                 break;
 #endif
 #ifdef PGXC

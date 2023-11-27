@@ -188,6 +188,19 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(current_id);
     COPY_SCALAR_FIELD(enable_adaptive_scan);
     COPY_SCALAR_FIELD(is_spq_optmized);
+    COPY_SCALAR_FIELD(numSlices);
+    if (from->numSlices > 0) {
+        newnode->slices = (PlanSlice*)palloc0(from->numSlices * sizeof(PlanSlice));
+        for (int i = 0; i < from->numSlices; i++) {
+            COPY_SCALAR_FIELD(slices[i].sliceIndex);
+            COPY_SCALAR_FIELD(slices[i].parentIndex);
+            COPY_SCALAR_FIELD(slices[i].gangType);
+            COPY_SCALAR_FIELD(slices[i].numsegments);
+            COPY_SCALAR_FIELD(slices[i].worker_idx);
+            COPY_SCALAR_FIELD(slices[i].directDispatch.isDirectDispatch);
+            COPY_NODE_FIELD(slices[i].directDispatch.contentIds);
+        }
+    }
 #endif
     /*
      * Not copy ng_queryMem to avoid memory leak in CachedPlan context,
@@ -282,7 +295,9 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(pred_total_time);
     COPY_SCALAR_FIELD(pred_max_memory);
     CopyNdpPlan(from, newnode);
-
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(spq_scan_partial);
+#endif
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 }
 
@@ -694,27 +709,6 @@ static SeqScan* _copySeqScan(const SeqScan* from)
 
     return newnode;
 }
-
-#ifdef USE_SPQ
-/*
- * _copySpqSeqScan
- */
-static SpqSeqScan* _copySpqSeqScan(const SpqSeqScan* from)
-{
-    SpqSeqScan* newnode = makeNode(SpqSeqScan);
-
-    /*
-     * copy node superclass fields
-     */
-    CopyScanFields((const Scan*)from, &newnode->scan);
-
-    newnode->isFullTableScan = from->isFullTableScan;
-    newnode->isAdaptiveScan = from->isAdaptiveScan;
-    newnode->isDirectRead = from->isDirectRead;
-
-    return newnode;
-}
-#endif
 
 /*
  * _copyIndexScan
@@ -2336,6 +2330,10 @@ static RemoteQuery* _copyRemoteQuery(const RemoteQuery* from)
     newnode->isCustomPlan = from->isCustomPlan;
     newnode->isFQS = from->isFQS;
     COPY_NODE_FIELD(relationOids);
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(streamID);
+    COPY_SCALAR_FIELD(nodeCount);
+#endif
     return newnode;
 }
 
@@ -7446,6 +7444,40 @@ static AutoIncrement *_copyAutoIncrement(const AutoIncrement *from)
     return newnode;
 }
 #ifdef USE_SPQ
+static SpqSeqScan* _copySpqSeqScan(const SpqSeqScan* from)
+{
+    SpqSeqScan* newnode = makeNode(SpqSeqScan);
+
+    CopyScanFields((const Scan*)from, &newnode->scan);
+
+    newnode->isFullTableScan = from->isFullTableScan;
+    newnode->isAdaptiveScan = from->isAdaptiveScan;
+    newnode->isDirectRead = from->isDirectRead;
+
+    return newnode;
+}
+
+static SpqIndexScan* _copySpqIndexScan(const SpqIndexScan* from)
+{
+    SpqIndexScan* newnode = (SpqIndexScan *)_copyIndexScan((IndexScan *)from);
+    newnode->scan.scan.plan.type = T_SpqIndexScan;
+    return newnode;
+}
+
+static SpqIndexOnlyScan* _copySpqIndexOnlyScan(const SpqIndexOnlyScan* from)
+{
+    SpqIndexOnlyScan* newnode = (SpqIndexOnlyScan *)_copyIndexOnlyScan((IndexOnlyScan *)from);
+    newnode->scan.scan.plan.type = T_SpqIndexOnlyScan;
+    return newnode;
+}
+
+static SpqBitmapHeapScan* _copySpqBitmapHeapScan(const SpqBitmapHeapScan* from)
+{
+    SpqBitmapHeapScan* newnode = (SpqBitmapHeapScan*)_copyBitmapHeapScan((BitmapHeapScan *)from);
+    newnode->scan.scan.plan.type = T_SpqBitmapHeapScan;
+    return newnode;
+}
+
 static Motion* _copyMotion(const Motion *from)
 {
     Motion *newnode = makeNode(Motion);
@@ -7724,6 +7756,14 @@ void* copyObject(const void* from)
             break;
         case T_Result:
             retval = _copyResult((Result*)from);
+            break;
+        case T_SpqIndexScan:
+            retval = _copySpqIndexScan((SpqIndexScan*)from);
+            break;
+        case T_SpqIndexOnlyScan:
+            retval = _copySpqIndexOnlyScan((SpqIndexOnlyScan*)from);
+        case T_SpqBitmapHeapScan:
+            retval = _copySpqBitmapHeapScan((SpqBitmapHeapScan*)from);
             break;
 #endif
         case T_IndexScan:

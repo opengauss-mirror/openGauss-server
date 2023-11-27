@@ -1880,6 +1880,24 @@ static void ExplainNodePartition(const Plan* plan, ExplainState* es)
                 flag = 1;
             }
             break;
+        case T_SpqIndexScan:
+            if (((SpqIndexScan*)plan->lefttree)->scan.scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_SpqIndexOnlyScan:
+            if (((SpqIndexOnlyScan*)plan->lefttree)->scan.scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_SpqBitmapHeapScan:
+            if (((SpqBitmapHeapScan*)plan->lefttree)->scan.scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
 #endif
         case T_IndexScan:
             if (((IndexScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
@@ -1947,6 +1965,9 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
         case T_SeqScan:
 #ifdef USE_SPQ
         case T_SpqSeqScan:
+        case T_SpqIndexScan:
+        case T_SpqIndexOnlyScan:
+        case T_SpqBitmapHeapScan:
 #endif
         case T_IndexScan:
         case T_IndexOnlyScan:
@@ -2129,6 +2150,7 @@ static void ExplainNode(
         case T_SeqScan:
 #ifdef USE_SPQ
         case T_SpqSeqScan:
+        case T_SpqBitmapHeapScan:
 #endif
         case T_CStoreScan:
 #ifdef ENABLE_MULTIPLE_NODES
@@ -2193,6 +2215,9 @@ static void ExplainNode(
                 ExplainScanTarget((Scan*)plan, es);
             break;
 #endif
+#ifdef USE_SPQ
+        case T_SpqIndexScan:
+#endif
         case T_IndexScan: {
             IndexScan* indexscan = (IndexScan*)plan;
 
@@ -2202,6 +2227,9 @@ static void ExplainNode(
             pt_index_name = explain_get_index_name(indexscan->indexid);
             pt_index_owner = get_namespace_name(get_rel_namespace(indexscan->indexid));
         } break;
+#ifdef USE_SPQ
+        case T_SpqIndexOnlyScan:
+#endif
         case T_IndexOnlyScan: {
             IndexOnlyScan* indexonlyscan = (IndexOnlyScan*)plan;
 
@@ -2612,6 +2640,9 @@ static void ExplainNode(
 
     /* quals, sort keys, etc */
     switch (nodeTag(plan)) {
+#ifdef USE_SPQ
+        case T_SpqIndexScan:
+#endif
         case T_IndexScan:
             show_scan_qual(((IndexScan*)plan)->indexqualorig, "Index Cond", planstate, ancestors, es);
             if (((IndexScan*)plan)->indexqualorig)
@@ -2621,6 +2652,9 @@ static void ExplainNode(
             if (plan->qual)
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
             break;
+#ifdef USE_SPQ
+        case T_SpqIndexOnlyScan:
+#endif
         case T_IndexOnlyScan:
             show_scan_qual(((IndexOnlyScan*)plan)->indexqual, "Index Cond", planstate, ancestors, es);
             if (((IndexOnlyScan*)plan)->indexqual)
@@ -2726,6 +2760,9 @@ static void ExplainNode(
         case T_ModifyTable:
             show_modifytable_info((ModifyTableState*)planstate, es);
             break;
+#endif
+#ifdef USE_SPQ
+        case T_SpqBitmapHeapScan:
 #endif
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:
@@ -3141,6 +3178,8 @@ static void ExplainNode(
 #endif   /* ENABLE_MULTIPLE_NODES */
 #ifdef USE_SPQ
         case T_SpqSeqScan:
+        case T_SpqIndexScan:
+        case T_SpqIndexOnlyScan:
 #endif
         case T_IndexScan:
         case T_IndexOnlyScan:

@@ -304,6 +304,10 @@ void ExecAssignScanProjectionInfo(ScanState* node)
     /* Vars in an index-only scan's tlist should be INDEX_VAR */
     if (IsA(scan, IndexOnlyScan))
         var_no = INDEX_VAR;
+#ifdef USE_SPQ
+    else if (IsA(scan, SpqIndexOnlyScan))
+        var_no = INDEX_VAR;
+#endif
     else
         var_no = scan->scanrelid;
 

@@ -1889,6 +1889,10 @@ TableScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int 
 
     initscan(scan, key, false);
 
+#ifdef USE_SPQ
+    scan->spq_scan = NULL;
+#endif
+
     return (TableScanDesc)scan;
 }
 

@@ -1416,11 +1416,10 @@ PGXCNodeHandle** spq_get_exec_connections(
     /* Set datanode list and DN number */
     /* Set Coordinator list and Coordinator number */
     // QD count
-    dn_conn_count = planstmt->num_nodes;
+    dn_conn_count = planstate->node_count;
     PGXCNodeHandle** connections = (PGXCNodeHandle **)palloc(dn_conn_count * sizeof(PGXCNodeHandle *));
     planstate->spq_connections_info = (PGXCNodeHandle **)palloc(dn_conn_count * sizeof(PGXCNodeHandle *));
     planstate->nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dn_conn_count);
-    planstate->node_count = dn_conn_count;
 
     Oid *dnNode = (Oid *)palloc0(sizeof(Oid) * dn_conn_count);
     PGconn **nodeCons = planstate->nodeCons;
@@ -1533,6 +1532,7 @@ void spq_do_query(RemoteQueryState* node)
     planstmt->spq_session_id = u_sess->debug_query_id;
     planstmt->current_id = step->streamID;
     node->queryId = generate_unique_id64(&gt_queryId);
+    node->node_count = step->nodeCount;
 
     spq_startQcThread(node);
 
@@ -1586,7 +1586,7 @@ void spq_do_query(RemoteQueryState* node)
             const_cast<char*>(t_thrd.postgres_cxt.debug_query_string ? t_thrd.postgres_cxt.debug_query_string : "");
         /* Flag 'Z' to indicate it's serialized plan */
         /* todo: SerializePlan DISTRIBUTED_FEATURE_NOT_SUPPORTED */
-        SpqSerializePlan(step->scan.plan.lefttree, planstmt, &str_remoteplan, step->num_stream, step->num_gather, true, node->queryId);
+        SpqSerializePlan(step->scan.plan.lefttree, planstmt, &str_remoteplan, step, true, node->queryId);
         node->serializedPlan = str_remoteplan.data;
  
 		/* Compress the 'Z' plan here. */

@@ -331,6 +331,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 splan->tablesample = (TableSampleClause*)fix_scan_expr(root, (Node*)splan->tablesample, rtoffset);
             }
         } break;
+#ifdef USE_SPQ
+        case T_SpqIndexScan:
+#endif
         case T_IndexScan: {
             IndexScan* splan = (IndexScan*)plan;
 
@@ -345,6 +348,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             splan->indexorderby = fix_scan_list(root, splan->indexorderby, rtoffset);
             splan->indexorderbyorig = fix_scan_list(root, splan->indexorderbyorig, rtoffset);
         } break;
+#ifdef USE_SPQ
+        case T_SpqIndexOnlyScan:
+#endif
         case T_IndexOnlyScan: {
             IndexOnlyScan* splan = (IndexOnlyScan*)plan;
             if (splan->scan.plan.distributed_keys != NIL) {
@@ -369,6 +375,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             splan->baserelcstorequal = fix_scan_list(root, splan->baserelcstorequal, rtoffset);
             splan->indextlist = fix_scan_list(root, splan->indextlist, rtoffset);
         } break;
+#ifdef USE_SPQ
+        case T_SpqBitmapHeapScan:
+#endif
         case T_BitmapIndexScan: {
             BitmapIndexScan* splan = (BitmapIndexScan*)plan;
 

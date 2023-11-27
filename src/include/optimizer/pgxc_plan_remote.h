@@ -146,6 +146,7 @@ typedef struct {
     List* relationOids; /* contain OIDs of relations the plan depends on */
 #ifdef USE_SPQ
     int streamID; /* required by AMS  */
+    int nodeCount;
 #endif
 } RemoteQuery;
 
