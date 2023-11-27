@@ -493,3 +493,16 @@ void SSDoradoUpdateHAmode()
             t_thrd.postmaster_cxt.HaShmData->current_mode)));
     }
 }
+
+bool SSPerformingStandbyScenario()
+{
+    if (SS_IN_REFORM) {
+        if (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS &&
+            ((uint64)(0x1 << SS_PRIMARY_ID) & g_instance.dms_cxt.SSReformInfo.bitmap_reconnect) == 0) {
+            return true;
+        } else if (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_FULL_CLEAN) {
+            return true;
+        }
+    }
+    return false;
+}

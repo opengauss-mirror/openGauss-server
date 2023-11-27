@@ -955,7 +955,7 @@ long SSGetBufSleepTime(int retry_times)
 bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
 {
     bool get_lock = false;
-    int wait_tickets = 2000;
+    int wait_tickets = 1000;
     int cur_tickets = 0;
 
     do {
@@ -972,7 +972,7 @@ bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
     } while (true);
 
     if (!get_lock) {
-        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:2s",
+        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:1s",
             lock, mode))));
     }
     return get_lock;

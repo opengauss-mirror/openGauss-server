@@ -61,11 +61,6 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         if (dms_request_opengauss_txn_snapshot(&dms_ctx, &dms_snapshot) == DMS_SUCCESS) {
             break;
         }
-
-        if (SS_IN_REFORM) {
-            ereport(DEBUG1, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
-            return NULL;
-        }
         pg_usleep(USECS_PER_SEC);
 
     } while (true);
@@ -95,11 +90,6 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
 
 Snapshot SSGetSnapshotData(Snapshot snapshot)
 {
-    if (SS_IN_REFORM) {
-        ereport(DEBUG1, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
-        return NULL;
-    }
-
     /* For cm agent, it only query the system status using the parameter in memory. So don't need MVCC */
     if (u_sess->libpq_cxt.IsConnFromCmAgent) {
         snapshot = SnapshotNow;
@@ -288,7 +278,8 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
         dms_txn_info.snapshotxmin = InvalidTransactionId;
     }
 
-    if (SS_IN_REFORM && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
+    if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
+        (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
         ereport(ERROR, (errmsg("SSTransactionIdGetCommitSeqNo failed during reform, xid=%lu.", transactionId)));
     }
 
@@ -309,7 +300,7 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
             }
             break;
         } else {
-            if (SS_IN_REFORM &&
+            if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(ERROR, (errmsg("SSTransactionIdGetCommitSeqNo failed during reform, xid=%lu.", transactionId)));
             }
@@ -394,7 +385,7 @@ void SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
                         transactionId, did_commit)));
                 break;
             } else {
-                if (SS_IN_REFORM &&
+                if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                     (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                     ereport(ERROR, (errmsg("SSTransactionIdDidCommit failed during reform, xid=%lu.", transactionId)));
                 }
@@ -428,7 +419,7 @@ void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
                 transactionId, *in_progress)));
             break;
         } else {
-            if (SS_IN_REFORM &&
+            if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(ERROR, (errmsg("SSTransactionIdIsInProgress failed during reform, xid=%lu.", transactionId)));
             }
@@ -453,7 +444,7 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
             ereport(DEBUG1, (errmsg("SS get update xid success, multixact xid=%lu, uxid=%lu.", xmax, update_xid)));
             break;
         } else {
-            if (SS_IN_REFORM &&
+            if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
                 ereport(ERROR, (errmsg("SSMultiXactIdGetUpdateXid failed during reform, xid=%lu.", xmax)));
             }
@@ -964,4 +955,25 @@ void SSStandbyUpdateRedirectInfo()
 
     redirect_manager->ss_standby_sxid = dms_sw_info.sxid;
     redirect_manager->ss_standby_scid = dms_sw_info.scid;
+}
+
+bool SSCanFetchLocalSnapshotTxnRelatedInfo()
+{
+    if (SS_NORMAL_PRIMARY) {
+        return true;
+    } else if (SS_PERFORMING_SWITCHOVER) {
+        if (SS_REFORM_REFORMER && g_instance.dms_cxt.SSClusterState < NODESTATE_PROMOTE_APPROVE) {
+            return true;
+        }
+    } else if (SS_REFORM_REFORMER && SSPerformingStandbyScenario()) {
+        return true;
+    } else if (SS_REFORM_REFORMER && SS_ONDEMAND_BUILD_DONE) {
+        ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
+        SpinLockAcquire(&xmin_info->snapshot_available_lock);
+        bool snap_available = xmin_info->snapshot_available;
+        SpinLockRelease(&xmin_info->snapshot_available_lock);
+        return snap_available;
+    }
+    
+    return false;
 }

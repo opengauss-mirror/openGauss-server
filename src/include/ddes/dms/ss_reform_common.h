@@ -53,3 +53,4 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
 void SSStandbySetLibpqswConninfo();
 void SSDoradoRefreshMode();
 void SSDoradoUpdateHAmode();
+bool SSPerformingStandbyScenario();

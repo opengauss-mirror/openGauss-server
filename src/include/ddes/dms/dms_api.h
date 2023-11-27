@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           119
+#define DMS_LOCAL_VERSION           120
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -48,6 +48,7 @@ extern "C" {
 #define DMS_INDEX_PROFILE_SIZE  96
 #define DMS_MAX_IP_LEN          64
 #define DMS_MAX_INSTANCES       64
+#define DMS_MAX_NAME_LEN        64
 
 #define DMS_VERSION_MAX_LEN     256
 #define DMS_OCK_LOG_PATH_LEN    256
@@ -582,6 +583,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_DCS_REQ_XA_IN_USE,
     DMS_EVT_DCS_REQ_END_XA,
 
+// add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
 } dms_wait_event_t;
 
@@ -700,6 +702,35 @@ typedef enum en_broadcast_scope {
     DMS_BROADCAST_TYPE_COUNT,
 } dms_broadcast_scope_e;
 
+typedef struct st_dv_drc_buf_info {
+    char                    data[DMS_MAX_NAME_LEN];            /* user defined resource(page) identifier */
+    unsigned char           master_id;
+    unsigned long long      copy_insts;         /* bitmap for owners, for S mode, more than one owner may exist */
+    unsigned char           claimed_owner;      /* owner */
+    unsigned char           lock_mode;          /* current DRC lock mode */
+    unsigned char           last_edp;           /* the newest edp instance id */
+    unsigned char           type;               /* page or lock */
+    unsigned char           in_recovery;        /* in recovery or not */
+    unsigned char           copy_promote;       /* copy promote to owner, can not release, may need flush */
+    unsigned short          part_id;            /* which partition id that current page belongs to */
+    unsigned long long      edp_map;            /* indicate which instance has current page's EDP(Earlier Dirty Page) */
+    unsigned long long      lsn;                /* the newest edp LSN of current page in the cluster */
+    unsigned short          len;                /* the length of data below */
+    unsigned char           recovery_skip;      /* DRC is accessed in recovery and skip because drc has owner */
+    unsigned char           recycling;
+    unsigned char           converting_req_info_inst_id;
+    unsigned char           converting_req_info_curr_mode;
+    unsigned char           converting_req_info_req_mode;
+    unsigned char           is_valid;
+} dv_drc_buf_info;
+
+typedef struct st_dms_reform_start_context {
+    dms_role_t role;
+    dms_reform_type_t reform_type;
+    unsigned long long bitmap_participated;
+    unsigned long long bitmap_reconnect;
+} dms_reform_start_context_t;
+
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
     unsigned long long list_in, unsigned int save_ctrl);
@@ -721,8 +752,7 @@ typedef int(*dms_df_recovery)(void *db_handle, unsigned long long list_in, void 
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
-typedef void(*dms_reform_start_notify)(void *db_handle, dms_role_t role, unsigned char reform_type,
-    unsigned long long bitmap_nodes);
+typedef void(*dms_reform_start_notify)(void *db_handle, dms_reform_start_context_t *rs_ctx);
 typedef int(*dms_undo_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_load)(void *db_handle, unsigned char inst_id);
@@ -1060,6 +1090,7 @@ typedef struct st_dms_profile {
     unsigned char scrlock_server_bind_core_end;
     unsigned char parallel_thread_num;
     unsigned int max_wait_time;
+    char gsdb_home[DMS_LOG_PATH_LEN];
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -1077,6 +1108,30 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_CURRENT = 0,
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
+
+typedef struct st_wait_cmd_stat_result {
+    char name[DMS_MAX_NAME_LEN];
+    char p1[DMS_MAX_NAME_LEN];
+    char wait_class[DMS_MAX_NAME_LEN];
+    unsigned long long wait_count;
+    unsigned long long wait_time;
+    unsigned char is_valid;
+} wait_cmd_stat_result_t;
+
+typedef struct st_drc_local_lock_res_result {
+    char               lock_id[DMS_MAX_NAME_LEN];
+    unsigned char      is_owner;
+    unsigned char      is_locked;
+    unsigned short     count;
+    unsigned char      releasing;
+    unsigned short     shared_count;
+    unsigned short     stat;
+    unsigned short     sid;
+    unsigned short     rmid;
+    unsigned short     rmid_sum;
+    unsigned char      lock_mode;
+    unsigned char      is_valid;
+} drc_local_lock_res_result_t;
 
 #ifdef __cplusplus
 }

@@ -7832,7 +7832,7 @@ TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uin
 {
     if (ENABLE_DMS) {
         /* fetch TXN info locally if either reformer, original primary, or normal primary */
-        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        bool local_fetch = SSCanFetchLocalSnapshotTxnRelatedInfo();
         if (!local_fetch) {
             return SSMultiXactIdGetUpdateXid(xmax, t_infomask, t_infomask2);
         }

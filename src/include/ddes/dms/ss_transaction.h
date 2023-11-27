@@ -124,5 +124,6 @@ void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, Commi
 int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len);
 int SSReloadReformCtrlPage(uint32 len);
 void SSRequestAllStandbyReloadReformCtrlPage();
+bool SSCanFetchLocalSnapshotTxnRelatedInfo();
 
 #endif
