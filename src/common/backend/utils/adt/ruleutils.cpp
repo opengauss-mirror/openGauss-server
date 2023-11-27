@@ -6915,6 +6915,24 @@ static void get_rule_groupingset(GroupingSet* gset, List* targetlist, deparse_co
     appendStringInfoString(buf, ")");
 }
 
+static void get_rule_separator(Const* con, StringInfo buf)
+{
+    Oid typoutput;
+    char* extval = NULL;
+    bool typIsVarlena = false;
+    
+    appendStringInfoString(buf, "\'");
+    if (u_sess->exec_cxt.under_auto_explain) {
+        appendStringInfoString(buf, "***");
+    } else if (!con->constisnull) {
+        getTypeOutputInfo(con->consttype, &typoutput, &typIsVarlena);
+        extval = OidOutputFunctionCall(typoutput, con->constvalue);
+        appendStringInfoString(buf, extval);
+        pfree_ext(extval);
+    }
+    appendStringInfoChar(buf, '\'');
+}
+
 /*
  * Display an ORDER BY list.
  */
@@ -10754,18 +10772,9 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
         }
 
         if (pg_strcasecmp(funcname, "group_concat") == 0) {
-            Oid typoutput;
-            char* extval = NULL;
-            bool typIsVarlena = false;
-            /* parse back the first argument as separator */
-            TargetEntry* tle = (TargetEntry*)lfirst(list_head(aggref->args));
-            getTypeOutputInfo(((Const*)tle->expr)->consttype, &typoutput, &typIsVarlena);
-            extval = OidOutputFunctionCall(typoutput, ((Const*)tle->expr)->constvalue);
-
-            appendStringInfoString(buf, " SEPARATOR '");
-            appendStringInfoString(buf, extval);
-            appendStringInfoChar(buf, '\'');
-            pfree_ext(extval);
+            appendStringInfoString(buf, " SEPARATOR ");
+            Const* con = (Const*)(((TargetEntry*)lfirst(list_head(aggref->args)))->expr);
+            get_rule_separator(con, buf);
         }
     }
 
