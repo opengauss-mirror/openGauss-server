@@ -1214,6 +1214,7 @@ bool libpqsw_connect(char* conninfo, const char *dbName, const char* userName)
     get_sw_cxt()->streamConn = PQconnectdb(conninfoRepl);
     if (PQstatus(get_sw_cxt()->streamConn) != CONNECTION_OK) {
         libpqsw_info("Connecting to remote server :%s ...failed!", conninfoRepl);
+        libpqsw_disconnect(true);
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_TIMED_OUT),
                 errmsg("standbywrite could not connect to the remote server,the connection info :%s : %s",

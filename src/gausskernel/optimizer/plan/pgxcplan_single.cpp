@@ -221,6 +221,12 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
         ecxt = MemoryContextSwitchTo(current_context);
         edata = CopyErrorData();
 
+        if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE) {
+            LWLockReleaseAll();
+            AbortBufferIO();
+            UnlockBuffers();
+        }
+
         /*
          * refuse to recreate  plan if
          * 1. no query copy: query have been polluted by rewrite

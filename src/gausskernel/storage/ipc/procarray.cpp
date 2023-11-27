@@ -2072,6 +2072,9 @@ RETRY:
                 snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
             } else {
                 result = SSGetSnapshotData(snapshot);
+                if (result == NULL) {
+                    ereport(ERROR, (errmsg("failed to request snapshot as current node is in reform!")));
+                }
             }
         } else {
             result = GetLocalSnapshotData(snapshot);
