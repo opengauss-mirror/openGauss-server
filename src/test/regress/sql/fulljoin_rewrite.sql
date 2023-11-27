@@ -42,6 +42,16 @@ drop table fulljoin_test3;
 
 drop table fulljoin_test4;
 
+CREATE TABLE IF NOT EXISTS fj_t0(c0 int4range , c1 REAL PRIMARY KEY, CHECK(((upper_inf(fj_t0.c0))OR((((reverse(')<'))LIKE(md5(')]/fK')))) IS TRUE))), UNIQUE(c1));
+CREATE UNLOGGED TABLE IF NOT EXISTS fj_t1(LIKE fj_t0);
+CREATE TABLE IF NOT EXISTS fj_t2(LIKE fj_t0);
+CREATE UNLOGGED TABLE fj_t3(LIKE fj_t1);
+SELECT 1 FROM (SELECT  1  FROM fj_t3 LEFT OUTER JOIN (SELECT  (((upper(fj_t0.c0))+(length('1')))) FROM fj_t0)  ON (TRUE)  FULL OUTER JOIN (SELECT 1 FROM fj_t1 ) AS sub1 ON 1 FULL OUTER JOIN (SELECT 1 FROM fj_t2) AS sub2 ON 1) as res;
+drop table fj_t3;
+drop table fj_t2;
+drop table fj_t1;
+drop table fj_t0;
+
 create table fulltest(col int4 primary key ,w_col numeric(6,2));
 create table fulltest2(w_id int4 primary key,w_ytd numeric(6,2),w_zip bpchar(27));
 explain (verbose, costs off) select left(alias8.w_zip ,alias8.w_id) as alias10,true alias11,dense_rank() over(order by 1) alias12 from fulltest alias7 full join fulltest2 as alias8  on alias7.col!=alias8.w_ytd group by alias7.col,alias7.w_col ,alias8.w_id;
