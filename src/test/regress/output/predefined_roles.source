@@ -298,20 +298,12 @@ SELECT pg_logical_slot_peek_binary_changes('privs_test_slot', NULL, NULL, 'force
 (0 rows)
 
 SELECT pg_drop_replication_slot('privs_test_slot');
-WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
-CONTEXT:  referenced column: pg_drop_replication_slot
-WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
-CONTEXT:  referenced column: pg_drop_replication_slot
  pg_drop_replication_slot 
 --------------------------
  
 (1 row)
 
 SELECT pg_drop_replication_slot('privs_test_physlot');
-WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
-CONTEXT:  referenced column: pg_drop_replication_slot
-WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
-CONTEXT:  referenced column: pg_drop_replication_slot
  pg_drop_replication_slot 
 --------------------------
  

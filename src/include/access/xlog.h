@@ -657,6 +657,39 @@ struct XlogFlushStats{
     TimestampTz lastRestTime;
 };
 
+typedef enum WalKeeper {
+    WALKEEPER_BASECHECK = 0,
+    WALKEEPER_SEGMENT_KEEP,
+    WALKEEPER_SLOTS,
+    WALKEEPER_BASEBACKUP,
+    WALKEEPER_BUILD,
+    WALKEEPER_INVALIDSEND,
+    WALKEEPER_DUMMYSTANDBY,
+    WALKEEPER_INVALIDSLOT,
+    WALKEEPER_CBM,
+    WALKEEPER_CHECKPOINT,
+    WALKEEPER_ARCHIVE,
+    WALKEEPER_RESISTARCHIVE,
+    WALKEEPER_COODRECYCLE,
+    WALKEEPER_MAX
+} WalKeeper;
+
+typedef struct WalKeeperDesc {
+    WalKeeper   keeper_id;
+    char        *keeper_name;
+    char        *keeper_desc;
+}WalKeeperDesc;
+
+typedef struct XlogKeeper {
+    XLogSegNo   segno;
+    bool        valid;
+} XlogKeeper;
+
+typedef struct WalKeeperPriv {
+    int             loop;
+    XlogKeeper      *keeper;
+}WalKeeperPriv;
+
 extern XLogSegNo GetNewestXLOGSegNo(const char* workingPath);
 /*
  * Hint bit for whether xlog contains CSN info, which is stored in xl_term.
@@ -965,4 +998,5 @@ extern void InitUndoCountThreshold();
 
 /* for recovery */
 void SSWriteInstanceControlFile(int fd, const char* buffer, int id, off_t size);
+extern XlogKeeper* generate_xlog_keepers(void);
 #endif /* XLOG_H */
