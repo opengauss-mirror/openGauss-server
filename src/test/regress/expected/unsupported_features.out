@@ -177,3 +177,15 @@ drop cascades to table uschema2_ix.associate
 drop cascades to table uschema2_ix.associate_benefit_expense
 drop cascades to table uschema2_ix.associate_position
 drop cascades to table uschema2_ix.position_type
+create schema create_resource;
+set current_schema='create_resource';
+create table tab(a text);
+create resource label name;
+ERROR:  syntax error at or near ";"
+LINE 1: create resource label name;
+                                  ^
+alter resource label name add column(tab.a);
+ERROR:  name no such label found
+drop table tab;
+reset current_schema;
+drop schema create_resource CASCADE;
