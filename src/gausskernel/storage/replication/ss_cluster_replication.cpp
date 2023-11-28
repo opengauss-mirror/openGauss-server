@@ -45,13 +45,13 @@ void WriteSSDoradoCtlInfoFile()
 
     ctlInfo->systemIdentifier = GetSystemIdentifier();
 
-    pg_crc32c crc = CalShareStorageCtlInfoCrc(ctlInfo);
-    ctlInfo->crc = crc;
-
     char buffer[SS_DORADO_CTL_INFO_SIZE] __attribute__((__aligned__(ALIGNOF_BUFFER)));
-
     errorno = memcpy_s(buffer, SS_DORADO_CTL_INFO_SIZE, ctlInfo, SS_DORADO_CTL_INFO_SIZE);
     securec_check_c(errorno, "\0", "\0");
+
+    ctlInfo = (ShareStorageXLogCtl*)buffer;
+    pg_crc32c crc = CalShareStorageCtlInfoCrc(ctlInfo);
+    ctlInfo->crc = crc;
 
     if (write(fd, buffer, SS_DORADO_CTL_INFO_SIZE) != SS_DORADO_CTL_INFO_SIZE) {
         ereport(PANIC,
@@ -94,17 +94,21 @@ void ReadSSDoradoCtlInfoFile()
     ShareStorageXLogCtl *ctlInfo = (ShareStorageXLogCtl*)buffer;
     if ((ctlInfo->magic != SHARE_STORAGE_CTL_MAGIC) || (ctlInfo->checkNumber != SHARE_STORAGE_CTL_CHCK_NUMBER)) {
         (void)close(fd);
-        ereport(FATAL, (errmsg("[ReadSSDoradoCtlInfo]SS replication ctl_info maybe damaged.")));
+        ereport(WARNING, (errmsg("[ReadSSDoradoCtlInfo]SS replication ctl_info maybe damaged.")));
+        return;
     }
 
     pg_crc32c crc = CalShareStorageCtlInfoCrc(ctlInfo);
     if (!EQ_CRC32C(crc, ctlInfo->crc)) {
         (void)close(fd);
-        ereport(FATAL, (errmsg("[ReadSSDoradoCtlInfo]SS replication ctl_info crc check failed.")));
+        ereport(WARNING, (errmsg("[ReadSSDoradoCtlInfo]SS replication ctl_info crc check failed.")));
+        return;
+    } else {
+        /* if crc success, update g_instance.xlog_cxt.ssReplicationXLogCtl, else next try again */
+        errno_t errorno = memcpy_s(g_instance.xlog_cxt.ssReplicationXLogCtl, SS_DORADO_CTL_INFO_SIZE, buffer, SS_DORADO_CTL_INFO_SIZE);
+        securec_check_c(errorno, "\0", "\0");
     }
 
-    errno_t errorno = memcpy_s(g_instance.xlog_cxt.ssReplicationXLogCtl, SS_DORADO_CTL_INFO_SIZE, buffer, SS_DORADO_CTL_INFO_SIZE);
-    securec_check_c(errorno, "\0", "\0");
     if (close(fd)) {
         ereport(PANIC,
                 (errcode_for_file_access(), errmsg("[ReadSSDoradoCtlInfo]could not close SS dorado control file \"%s\".",
@@ -138,7 +142,7 @@ void InitSSDoradoCtlInfoFile()
 
     ereport(LOG, (errcode_for_file_access(), errmsg("[InitSSDoradoCtlInfoFile] Create SS dorado ctl info succ.")));
 
-    InitSSDoradoCtlInfo(ctlInfo, 0);
+    InitSSDoradoCtlInfo(ctlInfo, GetSystemIdentifier());
     ctlInfo->crc = CalShareStorageCtlInfoCrc(ctlInfo);
 
     Assert(sizeof(ShareStorageXLogCtl) > SS_DORADO_CTL_INFO_SIZE);
@@ -153,6 +157,7 @@ void InitSSDoradoCtlInfoFile()
         ereport(PANIC,
                 (errcode_for_file_access(), errmsg("could not fsync SS dorado control file \"%s\".", SS_DORADO_CTRL_FILE)));
     }
+
     if (close(fd)) {
         ereport(PANIC,
                 (errcode_for_file_access(), errmsg("could not close SS dorado control file \"%s\".", SS_DORADO_CTRL_FILE)));
@@ -173,27 +178,9 @@ void UpdateSSDoradoCtlInfoAndSync()
         return;
     }
 
-    ReadSSDoradoCtlInfoFile();
     ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
     ctlInfo->insertHead = t_thrd.xlog_cxt.LogwrtResult->Write;
     WriteSSDoradoCtlInfoFile();
-}
-
-bool CheckSSCtlInfoConsistency(XLogRecPtr localEnd)
-{
-    if (!SS_REPLICATION_DORADO_CLUSTER) {
-        return true;
-    }
-
-    ReadSSDoradoCtlInfoFile();
-    ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
-
-    if (ctlInfo->systemIdentifier != GetSystemIdentifier()) {
-        ereport(FATAL, (errmsg("database system version is different between shared storage %lu and local %lu",
-                            ctlInfo->systemIdentifier, GetSystemIdentifier())));
-    }
-
-    return true;
 }
 
 void InitSSDoradoCtlInfo(ShareStorageXLogCtl *ctlInfo, uint64 sysidentifier)

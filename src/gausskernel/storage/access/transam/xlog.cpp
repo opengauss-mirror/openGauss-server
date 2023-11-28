@@ -7088,17 +7088,6 @@ void BootStrapXLOG(void)
                              ctlInfo->version, ctlInfo->insertHead, ctlInfo->insertTail)));
     }
 
-    if (SS_REPLICATION_DORADO_CLUSTER) {
-        ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
-        InitSSDoradoCtlInfo(ctlInfo, sysidentifier);
-        ctlInfo->insertHead = MAXALIGN((recptr - (char *)page));
-        ctlInfo->crc = CalShareStorageCtlInfoCrc(ctlInfo);
-        WriteSSDoradoCtlInfoFile();
-        ereport(LOG, (errcode_for_file_access(),
-                      errmsg("update ss dorado ctl info: len:%u, version:%u, start:%lu", ctlInfo->length,
-                             ctlInfo->version, ctlInfo->insertHead)));
-    }
-
 #ifndef ENABLE_MULTIPLE_NODES
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         ret = memset_s(t_thrd.shemem_ptr_cxt.dcfData, sizeof(DCFData), 0, sizeof(DCFData));
@@ -9968,8 +9957,6 @@ void StartupXLOG(void)
 
     if (SS_PRIMARY_MODE || SS_REPLICATION_MAIN_STANBY_NODE) {
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
-        g_instance.dms_cxt.SSReformerControl.clusterRunMode =
-            (ClusterRunMode)g_instance.attr.attr_common.cluster_run_mode;
         SSUpdateReformerCtrl();
         LWLockRelease(ControlFileLock);
     }
@@ -10632,11 +10619,6 @@ void StartupXLOG(void)
         GetWritePermissionSharedStorage();
         CheckShareStorageCtlInfo(EndOfLog);   
     }
-
-    if (SS_REPLICATION_PRIMARY_NODE) {
-        CheckSSDoradoCtlInfo(EndOfLog);
-    }
-    
    
     /*
      * Complain if we did not roll forward far enough to render the backup
