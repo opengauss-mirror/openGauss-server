@@ -37,11 +37,11 @@ const uint32 SS_DORADO_CTL_INFO_SIZE = 512;
 
 /* Primary Cluster in SS replication */
 #define SS_REPLICATION_PRIMARY_CLUSTER \
-        (SS_REPLICATION_DORADO_CLUSTER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY))
+        (SS_REPLICATION_DORADO_CLUSTER && (g_instance.dms_cxt.SSReformerControl.clusterRunMode == RUN_MODE_PRIMARY))
 
 /* Standby Cluster in SS replication */
 #define SS_REPLICATION_STANDBY_CLUSTER \
-        (SS_REPLICATION_DORADO_CLUSTER && (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY))
+        (SS_REPLICATION_DORADO_CLUSTER && (g_instance.dms_cxt.SSReformerControl.clusterRunMode == RUN_MODE_STANDBY))
 
 /* Primary node in SS replication, means primary node in main cluster. */
 #define SS_REPLICATION_PRIMARY_NODE \
@@ -67,7 +67,6 @@ const uint32 SS_DORADO_CTL_INFO_SIZE = 512;
 void SSClusterDoradoStorageInit();
 void InitSSDoradoCtlInfo(ShareStorageXLogCtl *ctlInfo, uint64 sysidentifier);
 void UpdateSSDoradoCtlInfoAndSync();
-void WriteSSDoradoCtlInfoFile();
 void ReadSSDoradoCtlInfoFile();
 void CheckSSDoradoCtlInfo(XLogRecPtr localEnd);
 #endif // INCLUDE_REPLICATION_SS_CLUSTER_REPLICATION_H_

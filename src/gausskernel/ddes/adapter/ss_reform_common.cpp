@@ -437,12 +437,25 @@ void SSStandbySetLibpqswConninfo()
     return;
 }
 
-void SSDoradoRefreshMode(ClusterRunMode doradoMode)
+void SSDoradoRefreshMode()
 {
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
-    g_instance.dms_cxt.SSReformerControl.clusterRunMode = doradoMode;
     SSUpdateReformerCtrl();
     LWLockRelease(ControlFileLock);
     ereport(LOG, (errmsg("SSDoradoRefreshMode change control file cluster run mode to: %d",
         g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
+}
+
+void SSDoradoUpdateHAmode() 
+{
+    SSReadControlFile(REFORM_CTRL_PAGE);
+    if (SS_REFORM_REFORMER) {
+        if (SS_REPLICATION_PRIMARY_CLUSTER) {
+            t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
+        } else if (SS_REPLICATION_STANDBY_CLUSTER) {
+            t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
+        }
+        ereport(LOG, (errmsg("SSDoradoUpdateHAmode change control file cluster run mode to: %d",
+            t_thrd.postmaster_cxt.HaShmData->current_mode)));
+    }
 }

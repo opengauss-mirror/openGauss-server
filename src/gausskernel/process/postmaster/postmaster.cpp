@@ -1824,6 +1824,7 @@ int PostmasterMain(int argc, char* argv[])
     char* userDoption = NULL;
     int use_pooler_port = -1;
     int i;
+    ClusterRunMode ss_dorado_mode = RUN_MODE_PRIMARY;
     OptParseContext optCtxt;
     errno_t rc = 0;
     Port port;
@@ -2110,15 +2111,14 @@ int PostmasterMain(int argc, char* argv[])
             case 'z':
                 if (0 == strncmp(optCtxt.optarg, "cluster_primary", strlen("cluster_primary")) &&
                     '\0' == optCtxt.optarg[strlen("cluster_primary")]) {
-                    g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_PRIMARY;
+                    ss_dorado_mode = RUN_MODE_PRIMARY;
                 } else if (0 == strncmp(optCtxt.optarg, "cluster_standby", strlen("cluster_standby")) &&
                            '\0' == optCtxt.optarg[strlen("cluster_standby")]) {
-                    g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_STANDBY;
+                    ss_dorado_mode = RUN_MODE_STANDBY;
                 } else {
                     ereport(FATAL, (errmsg("the options of -z is not recognized")));
                 }
-                ereport(LOG, (errmsg("Set dorado cluster run mode %d", g_instance.attr.attr_common.cluster_run_mode)));
-                g_instance.dms_cxt.SSReformerControl.clusterRunMode = (ClusterRunMode)g_instance.attr.attr_common.cluster_run_mode;
+                ereport(LOG, (errmsg("Set dorado cluster run mode %d", ss_dorado_mode)));
                 break;
             case 'c':
             case '-': {
@@ -3041,6 +3041,11 @@ int PostmasterMain(int argc, char* argv[])
     if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
         /* load primary id and reform stable list from control file */
         SSReadControlFile(REFORM_CTRL_PAGE);
+        if (SS_REPLICATION_DORADO_CLUSTER) {
+            /* fresh ss dorado cluster run mode */
+            g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
+            SSDoradoRefreshMode();
+        }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
         ereport(LOG, (errmsg("[SS reform] node%d starts, found cluster PRIMARY:%d",
             g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
@@ -10067,13 +10072,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
          */
         if (SS_REPLICATION_DORADO_CLUSTER) {
             SSReadControlFile(REFORM_CTRL_PAGE);
-            g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
         }
         if (SS_REPLICATION_MAIN_STANBY_NODE) {
             ereport(LOG,
                 (errmsg("Failover between two dorado cluster start, change current run mode to primary_cluster")));
-            g_instance.attr.attr_common.cluster_run_mode = RUN_MODE_PRIMARY;
-            SSDoradoRefreshMode((ClusterRunMode)g_instance.attr.attr_common.cluster_run_mode);
+            g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
+            SSDoradoRefreshMode();
             t_thrd.xlog_cxt.server_mode = PRIMARY_MODE;
             SetHaShmemData();
         }
@@ -10236,8 +10240,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
         if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
-            /* update cluster_run_mode in case failover has been performed between two dorado cluster. */
-            g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
             SSDoSwitchover();
         } else {
             ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
@@ -10296,7 +10298,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -10458,8 +10460,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && 
-            g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -10481,8 +10482,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP)) {
-        ereport(LOG,(errmsg("dms failover, update cluster run mode to: %d", g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
-	    g_instance.attr.attr_common.cluster_run_mode = g_instance.dms_cxt.SSReformerControl.clusterRunMode;
         SShandle_promote_signal();
     }
 
