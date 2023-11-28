@@ -127,6 +127,43 @@ static int GsBaseBackup(int argc, char** argv);
 
 static const char* get_tablespace_mapping(const char* dir);
 
+/*
+ * Replace the actual password with *'s.
+ */
+void replace_password(int argc, char** argv, const char* optionName)
+{
+    int count = 0;
+    char* pchPass = NULL;
+    char* pchTemp = NULL;
+    
+    // Check if password option is specified in command line
+    for (count = 0; count < argc; count++) {
+        // Password can be specified by optionName
+        if (strncmp(optionName, argv[count], strlen(optionName)) == 0) {
+            pchTemp = strchr(argv[count], '=');
+            if (pchTemp != NULL) {
+                pchPass = pchTemp + 1;
+            } else if ((NULL != strstr(argv[count], optionName)) && (strlen(argv[count]) > strlen(optionName))) {
+                pchPass = argv[count] + strlen(optionName);
+            } else {
+                pchPass = argv[(int)(count + 1)];
+            }
+
+            // Replace first char of password with * and rest clear it
+            if (strlen(pchPass) > 0) {
+                *pchPass = '*';
+                pchPass = pchPass + 1;
+                while ('\0' != *pchPass) {
+                    *pchPass = '\0';
+                    pchPass++;
+                }
+            }
+
+            break;
+        }
+    }
+}
+
 static void TablespaceValueCheck(TablespaceListCell* cell, const char* arg)
 {
     if (!*cell->old_dir || !*cell->new_dir) {
@@ -236,33 +273,33 @@ static void usage(void)
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]...\n"), progname);
     printf(_("\nOptions controlling the output:\n"));
-    printf(_("  -D, --pgdata=DIRECTORY receive base backup into directory\n"));
-    printf(_("  -F, --format=p|t       output format (plain (default), tar)\n"));
+    printf(_("  -D, --pgdata=DIRECTORY           receive base backup into directory\n"));
+    printf(_("  -F, --format=p|t                 output format (plain (default), tar)\n"));
     printf(_("  -T, --tablespace-mapping=OLDDIR=NEWDIR\n"
-             "                         relocate tablespace in OLDDIR to NEWDIR\n"));
-    printf(_("  -x, --xlog             include required WAL files in backup (fetch mode)\n"));
+             "                                   relocate tablespace in OLDDIR to NEWDIR\n"));
+    printf(_("  -x, --xlog                       include required WAL files in backup (fetch mode)\n"));
     printf(_("  -X, --xlog-method=fetch|stream\n"
-             "                         include required WAL files with specified method\n"));
-    printf(_("  -z, --gzip             compress tar output\n"));
-    printf(_("  -Z, --compress=0-9     compress tar output with given compression level\n"));
+             "                                   include required WAL files with specified method\n"));
+    printf(_("  -z, --gzip                       compress tar output\n"));
+    printf(_("  -Z, --compress=0-9               compress tar output with given compression level\n"));
     printf(_("\nGeneral options:\n"));
     printf(_("  -c, --checkpoint=fast|spread\n"
-             "                         set fast or spread checkpointing\n"));
-    printf(_("  -l, --label=LABEL      set backup label\n"));
-    printf(_("  -P, --progress         show progress information\n"));
-    printf(_("  -v, --verbose          output verbose messages\n"));
-    printf(_("  -V, --version          output version information, then exit\n"));
-    printf(_("  -?, --help             show this help, then exit\n"));
+             "                                   set fast or spread checkpointing\n"));
+    printf(_("  -l, --label=LABEL                set backup label\n"));
+    printf(_("  -P, --progress                   show progress information\n"));
+    printf(_("  -v, --verbose                    output verbose messages\n"));
+    printf(_("  -V, --version                    output version information, then exit\n"));
+    printf(_("  -?, --help                       show this help, then exit\n"));
     printf(_("\nConnection options:\n"));
-    printf(_("  -h, --host=HOSTNAME    database server host or socket directory\n"));
-    printf(_("  -p, --port=PORT        database server port number\n"));
+    printf(_("  -h, --host=HOSTNAME              database server host or socket directory\n"));
+    printf(_("  -p, --port=PORT                  database server port number\n"));
     printf(_("  -s, --status-interval=INTERVAL\n"
-             "                         time between status packets sent to server (in seconds)\n"));
+             "                                   time between status packets sent to server (in seconds)\n"));
     printf(_("  -t, --rw-timeout=RW_TIMEOUT\n"
-             "                         read-write timeout during idle connection.(in seconds)\n"));
-    printf(_("  -U, --username=NAME    connect as specified database user\n"));
-    printf(_("  -w, --no-password      never prompt for password\n"));
-    printf(_("  -W, --password         force password prompt (should happen automatically)\n"));
+             "                                   read-write timeout during idle connection.(in seconds)\n"));
+    printf(_("  -U, --username=NAME              connect as specified database user\n"));
+    printf(_("  -w, --no-password                never prompt for password\n"));
+    printf(_("  -W, --password=password          the password of specified database user\n"));
 
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf(_("\nReport bugs to GaussDB support.\n"));
@@ -1934,7 +1971,7 @@ static int GsBaseBackup(int argc, char** argv)
                                            {"port", required_argument, NULL, 'p'},
                                            {"username", required_argument, NULL, 'U'},
                                            {"no-password", no_argument, NULL, 'w'},
-                                           {"password", no_argument, NULL, 'W'},
+                                           {"password", required_argument, NULL, 'W'},
                                            {"status-interval", required_argument, NULL, 's'},
                                            {"rw-timeout", required_argument, NULL, 't'},
                                            {"verbose", no_argument, NULL, 'v'},
@@ -1955,7 +1992,7 @@ static int GsBaseBackup(int argc, char** argv)
         }
     }
 
-    char optstring[] = "D:l:c:h:p:U:s:X:F:T:Z:t:wWvPxz";
+    char optstring[] = "D:l:c:h:p:U:s:X:F:T:Z:t:wW:vPxz";
     /* check if a required_argument option has a void argument */
     int i;
     for (i = 0; i < argc; i++) {
@@ -1995,7 +2032,7 @@ static int GsBaseBackup(int argc, char** argv)
         }
     }
 
-    while ((c = getopt_long(argc, argv, "D:l:c:h:p:U:s:X:F:T:Z:t:wWvPxz", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, optstring, long_options, &option_index)) != -1) {
         switch (c) {
             case 'D': {
                 GS_FREE(basedir);
@@ -2106,7 +2143,12 @@ static int GsBaseBackup(int argc, char** argv)
                 dbgetpassword = -1;
                 break;
             case 'W':
-                dbgetpassword = 1;
+                dbpassword = strdup(optarg);
+                if (NULL == dbpassword) {
+                    fprintf(stderr, _("%s: out of memory\n"), progname);
+                    exit(1);
+                }
+                replace_password(argc, argv, "-W");
                 break;
             case 's':
                 if ((atoi(optarg)) < 0 || (atoi(optarg) * 1000) > PG_INT32_MAX) {

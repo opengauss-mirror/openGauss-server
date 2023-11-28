@@ -10,6 +10,7 @@ extern char* dbport;
 extern char* dbname;
 extern int   rwtimeout;
 extern int dbgetpassword;
+extern char* dbpassword;
 extern char* replication_slot;
 extern int standby_message_timeout;
 
