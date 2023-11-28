@@ -1122,6 +1122,9 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     }
 
     group_len = list_length(stby_list);
+    if (group_len == 0) {
+        return;
+    }
 
     receive_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * group_len);
     write_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * group_len);
