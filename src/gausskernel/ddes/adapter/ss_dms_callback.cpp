@@ -1844,7 +1844,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     } else {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
     }
-    INSTR_TIME_SET_CURRENT(reform_info->reform_start_time);
+    reform_info->reform_start_time = GetCurrentTimestamp();
 
     reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
@@ -1901,7 +1901,7 @@ static int CBReformDoneNotify(void *db_handle)
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     g_instance.dms_cxt.SSReformInfo.new_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmsg("[SS reform] new cluster node bitmap: %lld", g_instance.dms_cxt.SSReformInfo.new_bitmap)));
-    INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.reform_end_time);
+    g_instance.dms_cxt.SSReformInfo.reform_end_time = GetCurrentTimestamp();
     g_instance.dms_cxt.SSReformInfo.reform_success = true;
     ereport(LOG,
             (errmodule(MOD_DMS),

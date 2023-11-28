@@ -10296,7 +10296,7 @@ void StartupXLOG(void)
             update_stop_barrier();
 #endif
             INSTR_TIME_SET_CURRENT(rec_startTime);
-            INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.redo_start_time);
+            g_instance.dms_cxt.SSReformInfo.redo_start_time = GetCurrentTimestamp();
             t_thrd.xlog_cxt.RedoStartLSN = t_thrd.xlog_cxt.ReadRecPtr;
             g_instance.comm_cxt.predo_cxt.redoPf.redo_start_ptr = t_thrd.xlog_cxt.RedoStartLSN;
             knl_g_set_redo_finish_status(0);
@@ -10493,7 +10493,7 @@ void StartupXLOG(void)
                                  (uint32)t_thrd.xlog_cxt.EndRecPtr)));
 
             INSTR_TIME_SET_CURRENT(rec_endTime);
-            INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.redo_end_time);
+            g_instance.dms_cxt.SSReformInfo.redo_end_time = GetCurrentTimestamp();
             INSTR_TIME_SUBTRACT(rec_endTime, rec_startTime);
             redoTotalBytes = t_thrd.xlog_cxt.EndRecPtr - redoStartPtr;
             g_instance.dms_cxt.SSReformInfo.redo_total_bytes = redoTotalBytes;

@@ -14937,37 +14937,17 @@ TupleDesc create_query_node_reform_info_tupdesc()
     TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "reform_node_id", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "reform_type", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)3, "reform_start_time", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)4, "reform_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "reform_start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "reform_end_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "is_reform_success", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)10, "action", TEXTOID, -1, 0);
     BlessTupleDesc(tupdesc);
     return tupdesc;
 }
-
-/*
-* @Description : Convert timeval to string
-* @in          : time
-* @out         : buffer
-*/
-void timeval_to_string(timeval time, char* buffer, int buf_size)
-{
-    if (buffer == NULL || buf_size == 0 || time.tv_sec == 0) {
-        return;
-    }
-    time_t format_time = time.tv_sec;
-    struct tm *p_time = localtime(&format_time);
-    
-    char tmp_buf[32] = {0};
-    strftime(tmp_buf, sizeof(tmp_buf), "%Y-%m-%d %H:%M:%S", p_time);
-    errno_t rc = sprintf_s(buffer, buf_size - 1, "%s.%ld ", tmp_buf, time.tv_usec / 1000);
-    securec_check_ss(rc, "\0", "\0");
-}
-
 
 typedef struct {
     uint64 changed_inst_list;
@@ -15019,6 +14999,7 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
 #define MAX_BUF_SIZE 256
         char tmp_buf[MAX_BUF_SIZE] = {0};
         Datum values[10];
+        bool nulls[10] = {false};
         values[0] = UInt16GetDatum(i);
         if (i == (uint64)SS_MY_INST_ID) {
             switch (reform_info.reform_type) {
@@ -15035,41 +15016,34 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
                     values[1] = CStringGetTextDatum("NULL");
             }
 
-            timeval_to_string(reform_info.reform_start_time, tmp_buf, MAX_BUF_SIZE);
-            values[2] = CStringGetTextDatum(tmp_buf);
-
-            timeval_to_string(reform_info.reform_end_time, tmp_buf, MAX_BUF_SIZE);
-            values[3] = CStringGetTextDatum(tmp_buf);
+            values[2] = TimestampTzGetDatum(reform_info.reform_start_time);
+            values[3] = TimestampTzGetDatum(reform_info.reform_end_time);
             values[4] = BoolGetDatum(reform_info.reform_success);
 
             if (reform_info.reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
-                timeval_to_string(reform_info.redo_start_time, tmp_buf, MAX_BUF_SIZE);
-                values[5] = CStringGetTextDatum(tmp_buf);
-
-                timeval_to_string(reform_info.redo_end_time, tmp_buf, MAX_BUF_SIZE);
-                values[6] = CStringGetTextDatum(tmp_buf);
-
+                values[5] = TimestampTzGetDatum(reform_info.redo_start_time);
+                if (reform_info.redo_start_time > reform_info.redo_end_time) {
+                    nulls[6] = true;
+                } else {
+                    values[6] = TimestampTzGetDatum(reform_info.redo_end_time);
+                }
                 values[7] = UInt64GetDatum(reform_info.redo_total_bytes);
-
-                timeval_to_string(reform_info.construct_hashmap, tmp_buf, MAX_BUF_SIZE);
-                values[8] = CStringGetTextDatum(tmp_buf);
+                values[8] = TimestampTzGetDatum(reform_info.construct_hashmap);
             } else {
-                sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
-                values[5] = CStringGetTextDatum(tmp_buf);
-                values[6] = CStringGetTextDatum(tmp_buf);
                 values[7] = UInt64GetDatum(-1);
-                values[8] = CStringGetTextDatum(tmp_buf);
+                nulls[5] = true;
+                nulls[6] = true;
+                nulls[8] = true;
             }
         } else {
             values[1] = CStringGetTextDatum("-");
-            sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
-            values[2] = CStringGetTextDatum(tmp_buf);
-            values[3] = CStringGetTextDatum(tmp_buf);
             values[4] = BoolGetDatum(reform_info.reform_success);
-            values[5] = CStringGetTextDatum(tmp_buf);
-            values[6] = CStringGetTextDatum(tmp_buf);
             values[7] = UInt64GetDatum(-1);
-            values[8] = CStringGetTextDatum(tmp_buf);
+            nulls[2] = true;
+            nulls[3] = true;
+            nulls[5] = true;
+            nulls[6] = true;
+            nulls[8] = true;
         }
 
         if (iterate->changed_inst_list & (1 << i)) {
@@ -15083,7 +15057,7 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
         }
         
         values[9] = CStringGetTextDatum(tmp_buf);
-        bool nulls[10] = {false};
+        
         HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         if (tuple != NULL) {
             iterate->iterate_idx++;
