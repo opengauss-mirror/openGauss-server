@@ -200,7 +200,7 @@ void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
                     pfree_ext(parentdir);
 
                     /* Create database directory */
-                    if (mkdir(parentdir, S_IRWXU) < 0 && !FILE_ALREADY_EXIST(errno))
+                    if (mkdir(dir, S_IRWXU) < 0 && !FILE_ALREADY_EXIST(errno))
                         ereport(
                             ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", dir)));
                 }
