@@ -14747,10 +14747,13 @@ Datum dss_io_stat(PG_FUNCTION_ARGS)
     if (duration > MAX_DURATION_TIME) {
         ereport(ERROR, (errmsg("The duration is too long, and it must be less than 60s.")));
     }
+    if (duration <= 0) {
+        ereport(ERROR, (errmsg("The duration must be greater than zero.")));
+    }
     init_dss_io_stat();
     unsigned long long read_bytes = 0;
     unsigned long long write_bytes = 0;
-    int io_count = 0;
+    unsigned int io_count = 0;
     get_dss_io_stat(duration, &read_bytes, &write_bytes, &io_count);
     // tuple header
     int i = 1;
@@ -14765,7 +14768,7 @@ Datum dss_io_stat(PG_FUNCTION_ARGS)
     i = 0;
     values[i++] = UInt64GetDatum(read_bytes);
     values[i++] = UInt64GetDatum(write_bytes);
-    values[i] = Int32GetDatum(io_count);
+    values[i] =  UInt32GetDatum(io_count);
     
     HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
     result = HeapTupleGetDatum(heap_tuple);

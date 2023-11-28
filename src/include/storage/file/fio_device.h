@@ -96,9 +96,9 @@ static inline int close_dev(int fd)
 }
 
 typedef struct g_dss_io_stat {
-    int read_bytes;
+    unsigned long long read_bytes;
     unsigned long long write_bytes;
-    unsigned long long read_write_count;
+    unsigned int read_write_count;
     bool is_ready_for_stat;
     pthread_mutex_t lock;
     g_dss_io_stat() {
@@ -132,7 +132,7 @@ static inline void init_dss_io_stat()
 * kB_write: total write kilobyte during the time
 * io_count: total read and write count
 */
-static inline void get_dss_io_stat(int duration, unsigned long long *kB_read, unsigned long long *kB_write, int *io_count)
+static inline void get_dss_io_stat(int duration, unsigned long long *kB_read, unsigned long long *kB_write, unsigned int *io_count)
 {
     sleep(duration);
     if (kB_read) {
