@@ -1662,6 +1662,9 @@ typedef struct PgBackendStatus {
     syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
     void* statement_cxt;                /* statement context of full sql */
     knl_u_trace_context trace_cxt;      /* request trace id */
+
+    HTAB* my_prepared_queries;
+    pthread_mutex_t* my_pstmt_htbl_lock;
 } PgBackendStatus;
 
 typedef struct PgBackendStatusNode {

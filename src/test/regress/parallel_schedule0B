@@ -75,6 +75,9 @@ test: temp__2
 test: vec_prepare_001 vec_prepare_002
 test: vec_prepare_003
 
+#test function pg_prepared_statement(sessionid)
+test: function_pg_prepared_statement1 function_pg_prepared_statement2
+
 #test sort optimize
 test: sort_optimize_row sort_optimize_column sort_optimize_001
 #test early free

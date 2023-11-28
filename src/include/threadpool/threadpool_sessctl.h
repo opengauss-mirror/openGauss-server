@@ -74,6 +74,7 @@ public:
     int FindCtrlIdxBySessId(uint64 id);
     TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
     bool IsActiveListEmpty();
+    void GetSessionPreparedStatements(Tuplestorestate* tupStore, TupleDesc tupDesc, uint64 sessionid);
     void releaseLockIfNecessary();
     inline int GetActiveSessionCount()
     {

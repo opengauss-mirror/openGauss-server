@@ -30,6 +30,7 @@
 #include "access/xact.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
+#include "commands/prepare.h"
 #include "commands/user.h"
 #include "gssignal/gs_signal.h"
 #include "lib/dllist.h"
@@ -902,4 +903,49 @@ bool ThreadPoolSessControl::IsActiveListEmpty()
     bool res = (m_activelist.dll_len == 0);
     alock.unLock();
     return res;
+}
+
+void ThreadPoolSessControl::GetSessionPreparedStatements(Tuplestorestate* tupStore, TupleDesc tupDesc, uint64 sessionId)
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    knl_sess_control* ctrl = NULL;
+    knl_session_context* session = NULL;
+
+    PG_TRY();
+    {
+        HOLD_INTERRUPTS();
+        alock.lock();
+
+        Dlelem* elem = DLGetHead(&m_activelist);
+        while (elem != NULL) {
+            ctrl = (knl_sess_control*)DLE_VAL(elem);
+            session = ctrl->sess;
+                       
+            if ((session->session_id == sessionId || sessionId == 0) &&
+                (session->misc_cxt.CurrentUserName != NULL)) {
+                char userName[NAMEDATALEN];
+                errno_t rc = memset_s(userName, NAMEDATALEN, '\0', sizeof(userName));
+                securec_check(rc, "\0", "\0");
+                rc = strcpy_s(userName, NAMEDATALEN, session->misc_cxt.CurrentUserName);
+                securec_check(rc, "\0", "\0");
+                HTAB* htbl = session->pcache_cxt.prepared_queries;
+                if (htbl) {
+                    (void)syscalllockAcquire(&session->pcache_cxt.pstmt_htbl_lock);
+                    GetPreparedStatements(htbl, tupStore, tupDesc, session->session_id, userName);
+                    (void)syscalllockRelease(&session->pcache_cxt.pstmt_htbl_lock);
+                }
+            }
+            
+            elem = DLGetSucc(elem);
+        }
+        alock.unLock();
+        RESUME_INTERRUPTS();
+    }
+    PG_CATCH();
+    {
+        (void)syscalllockRelease(&session->pcache_cxt.pstmt_htbl_lock);
+        alock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }

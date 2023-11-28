@@ -69,6 +69,8 @@ extern void PlanTreeWalker(
     Plan* plan, void (*walker)(Plan*, void*, const char*), void* context, const char* queryString);
 
 extern DatanodeStatement* light_set_datanode_queries(const char* stmt_name);
+extern void GetPreparedStatements(HTAB* htbl, Tuplestorestate* tupStore, TupleDesc tupDesc, uint64 sessionId, char* userName);
+extern void GetThreadPreparedStatements(Tuplestorestate* tupStore, TupleDesc tupDesc, uint64 sessionId);
 extern bool quickPlanner(List* querytree_list, Node* parsetree, const char*queryString, CommandDest dest, char* completionTag);
 #ifdef ENABLE_MOT
 extern void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query);
