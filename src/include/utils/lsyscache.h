@@ -288,6 +288,7 @@ extern void spq_free_attstatsslot(AttStatsSlot *sslot);
 extern char * get_type_name(Oid typid);
 extern int32 get_trigger_type(Oid triggerid);
 extern HeapTuple get_att_stats(Oid relid, AttrNumber attrnum);
+extern bool spq_relation_not_partitioned(Oid relid);
 #endif
 
 #define type_is_array(typid) (get_element_type(typid) != InvalidOid)

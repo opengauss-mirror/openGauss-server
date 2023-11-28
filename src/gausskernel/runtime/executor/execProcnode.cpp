@@ -165,6 +165,9 @@
 #include "executor/node/nodeAssertOp.h"
 #include "executor/node/nodeShareInputScan.h"
 #include "executor/node/nodeSequence.h"
+#include "executor/node/nodeSpqIndexscan.h"
+#include "executor/node/nodeSpqIndexonlyscan.h"
+#include "executor/node/nodeSpqBitmapHeapscan.h"
 #endif
 #define NODENAMELEN 64
 static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
@@ -287,7 +290,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             if (init_spqscan_hook) {
                 return (PlanState*)init_spqscan_hook((SpqSeqScan*)node, estate, eflags);
             } else {
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("spqscan hook init_spqscan_hook uninited.")));
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqscan hook init_spqscan_hook uninited.")));
             }
 	    case T_AssertOp:
  		    return (PlanState *) ExecInitAssertOp((AssertOp *) node, estate, eflags);
@@ -295,6 +299,27 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState *)ExecInitShareInputScan((ShareInputScan *)node, estate, eflags);
         case T_Sequence:
             return (PlanState *)ExecInitSequence((Sequence *)node, estate, eflags);
+        case T_SpqIndexScan:
+            if (init_indexscan_hook) {
+                return (PlanState*)init_indexscan_hook((SpqIndexScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqindexscan hook init_spqindexscan_hook uninited.")));
+            }
+        case T_SpqIndexOnlyScan:
+            if (init_indexonlyscan_hook) {
+                return (PlanState*)init_indexonlyscan_hook((SpqIndexOnlyScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqindexonlyscan hook init_spqindexonlyscan_hook uninited.")));
+            }
+        case T_SpqBitmapHeapScan:
+            if (init_bitmapheapscan_hook) {
+                return (PlanState*)init_bitmapheapscan_hook((SpqBitmapHeapScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqbitmapheapscan hook init_spqbitmapheapscan_hook uninited.")));
+            }
 #endif
         case T_IndexScan:
             return (PlanState*)ExecInitIndexScan((IndexScan*)node, estate, eflags);

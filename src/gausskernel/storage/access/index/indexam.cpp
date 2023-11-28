@@ -286,7 +286,9 @@ IndexScanDesc index_beginscan_bitmap(Relation index_relation, Snapshot snapshot,
      * up by RelationGetIndexScan.
      */
     scan->xs_snapshot = snapshot;
-
+#ifdef USE_SPQ
+    scan->spq_scan = NULL;
+#endif
     return scan;
 }
 
@@ -318,6 +320,9 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
         scan = (IndexScanDesc)DatumGetPointer(
             FunctionCall3(procedure, PointerGetDatum(index_relation), Int32GetDatum(nkeys), Int32GetDatum(norderbys)));
     }
+#ifdef USE_SPQ
+    scan->spq_scan = NULL;
+#endif
 
     return scan;
 }
@@ -487,7 +492,9 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
     GET_SCAN_PROCEDURE(amgettuple);
 
     Assert(TransactionIdIsValid(u_sess->utils_cxt.RecentGlobalXmin));
-
+#ifdef USE_SPQ
+rescan:
+#endif
     /*
      * The AM's amgettuple proc finds the next index entry matching the scan
      * keys, and puts the TID into scan->xs_ctup.t_self.  It should also set
@@ -515,7 +522,13 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
         }
         return NULL;
     }
-
+#ifdef USE_SPQ
+    if (IS_SPQ_EXECUTOR && scan->spq_scan != NULL) {
+        BlockNumber unitno = SPQSCAN_BlockNum2UnitNum(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self));
+        if ((unitno % scan->spq_scan->slice_num) != scan->spq_scan->instance_id)
+            goto rescan;
+    }
+#endif
     pgstat_count_index_tuples(scan->indexRelation, 1);
 
     /* Return the TID of the tuple we found. */

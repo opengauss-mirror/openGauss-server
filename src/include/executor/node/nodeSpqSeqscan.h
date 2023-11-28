@@ -1,12 +1,12 @@
 /* -------------------------------------------------------------------------
-*
-* nodeSpqSeqscan.h
-*
-* Portions Copyright (c) 2023 Huawei Technologies Co.,Ltd.
-*
-* src/include/executor/node/nodeSpqSeqscan.h
-*
-* -------------------------------------------------------------------------
+ *
+ * nodeSpqSeqscan.h
+ *
+ * Portions Copyright (c) 2023 Huawei Technologies Co.,Ltd.
+ *
+ * src/include/executor/node/nodeSpqSeqscan.h
+ *
+ * -------------------------------------------------------------------------
  */
 #ifdef USE_SPQ
 #ifndef NODESPQSEQSCAN_H

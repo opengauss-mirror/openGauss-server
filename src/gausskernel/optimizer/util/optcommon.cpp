@@ -156,6 +156,27 @@ void GetPlanNodePlainText(
         case T_Sequence:
             *pname = *sname = *pt_operation = "Sequence";
             break;
+        case T_SpqIndexScan:
+            *pt_operation = "INDEX";
+            if (((IndexScan*)plan)->scan.isPartTbl)
+                *pname = *sname = *pt_options = "Partitioned Index Scan";
+            else
+                *pname = *sname = *pt_options = "Spq Index Scan";
+            break;
+        case T_SpqIndexOnlyScan:
+            *pt_operation = "INDEX";
+            if (((IndexOnlyScan*)plan)->scan.isPartTbl)
+                *pname = *sname = *pt_options = "Partitioned Index Only Scan";
+            else
+                *pname = *sname = *pt_options = "Spq Index Only Scan";
+            break;
+        case T_SpqBitmapHeapScan:
+            *pt_operation = "TABLE ACCESS";
+            if (((Scan*)plan)->isPartTbl)
+                *pname = *sname = *pt_options = "Partitioned Bitmap Heap Scan";
+            else
+                *pname = *sname = *pt_options = "Spq Bitmap Heap Scan";
+            break;
 #endif
         case T_CStoreScan:
             *pt_operation = "TABLE ACCESS";

@@ -6452,6 +6452,17 @@ void spq_free_attstatsslot(AttStatsSlot *sslot)
     if (sslot->numbers_arr)
         pfree(sslot->numbers_arr);
 }
+
+bool spq_relation_not_partitioned(Oid relid)
+{
+    HeapTuple tuple;
+    tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(relid));
+    if (HeapTupleIsValid(tuple)) {
+        ReleaseSysCache(tuple);
+        return false;
+    } else
+        return true;
+}
 #endif
 
 Oid get_array_internal_depend_type_oid(Oid arrTypOid)

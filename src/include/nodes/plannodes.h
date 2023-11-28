@@ -199,6 +199,9 @@ typedef struct PlannedStmt {
     int current_id;
     bool enable_adaptive_scan;
     bool is_spq_optmized;
+    int	numSlices;
+    struct PlanSlice *slices;
+    int *subplan_sliceIds;
 #endif
 } PlannedStmt;
 
@@ -372,6 +375,9 @@ typedef struct Plan {
      *     -> SeqScan->ndp_pushdown_condition save ndp condition
      * */
     Node* ndp_pushdown_condition;
+#ifdef USE_SPQ
+    bool spq_scan_partial;
+#endif
 } Plan;
 
 typedef struct NdpScanCondition { // for each scan node
@@ -1595,7 +1601,66 @@ typedef struct Result {
     AttrNumber *hashFilterColIdx;
     Oid *hashFilterFuncs;
 } Result;
- 
+
+typedef struct SpqIndexScan {
+    IndexScan scan;
+} SpqIndexScan;
+
+typedef struct SpqIndexOnlyScan {
+    IndexOnlyScan scan;
+} SpqIndexOnlyScan;
+
+typedef struct SpqBitmapHeapScan {
+    BitmapHeapScan scan;
+} SpqBitmapHeapScan;
+
+typedef struct DirectDispatchInfo {
+    /**
+     * if true then this Slice requires an n-gang but the gang can be targeted to
+     *   fewer segments than the entire cluster.
+     *
+     * When true, directDispatchContentId and directDispathCount will combine to indicate
+     *   the content ids that need segments.
+     */
+    bool isDirectDispatch;
+    List *contentIds;
+
+    /* only used while planning, in createplan.c */
+    bool haveProcessedAnyCalculations;
+} DirectDispatchInfo;
+
+typedef enum GangType {
+    /* a root slice executed by the qDisp */
+    GANGTYPE_UNALLOCATED,
+    /* a 1-gang with read access to the entry db */
+    GANGTYPE_ENTRYDB_READER,
+    /* a 1-gang to read the segment dbs */
+    GANGTYPE_SINGLETON_READER,
+    /* a 1-gang or N-gang to read the segment dbs */
+    GANGTYPE_PRIMARY_READER,
+    /* the N-gang that can update the segment dbs */
+    GANGTYPE_PRIMARY_WRITER
+} GangType;
+
+/*
+ * PlanSlice represents one query slice, to be executed by a separate gang
+ * of executor processes.
+ */
+typedef struct PlanSlice {
+    int sliceIndex;
+    int parentIndex;
+
+    GangType gangType;
+
+    /* # of segments in the gang, for PRIMARY_READER/WRITER slices */
+    int numsegments;
+    /* segment to execute on, for SINGLETON_READER slices */
+    int worker_idx;
+
+    /* direct dispatch information, for PRIMARY_READER/WRITER slices */
+    DirectDispatchInfo directDispatch;
+} PlanSlice;
+
 /* -------------------------
  *              motion node structs
  * -------------------------

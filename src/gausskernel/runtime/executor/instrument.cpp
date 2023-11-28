@@ -1033,6 +1033,27 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             pname = "Sequence";
             plan_type = UTILITY_OP;
             break;
+        case T_SpqIndexScan:
+            if (((IndexScan*)plan)->scan.isPartTbl)
+                pname = "Partitioned Index Scan";
+            else
+                pname = "Spq Index Scan";
+            plan_type = IO_OP;
+            break;
+        case T_SpqIndexOnlyScan:
+            if (((IndexOnlyScan*)plan)->scan.isPartTbl)
+                pname = "Partitioned Index Only Scan";
+            else
+                pname = "Spq Index Only Scan";
+            plan_type = IO_OP;
+            break;
+        case T_SpqBitmapHeapScan:
+            if (((Scan*)plan)->isPartTbl)
+                pname = "Partitioned Bitmap Heap Scan";
+            else
+                pname = "Spq Bitmap Heap Scan";
+            plan_type = IO_OP;
+            break;
 #endif
         case T_SeqScan:
             if (!((Scan*)plan)->tablesample) {

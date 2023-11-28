@@ -3436,6 +3436,11 @@ static Plan* _readPlan(Plan* local_node)
         READ_FLOAT_FIELD(pred_total_time);
         READ_LONG_FIELD(pred_max_memory);
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        READ_BOOL_FIELD(spq_scan_partial);
+    }
+#endif
     READ_DONE();
 }
 
@@ -4767,6 +4772,37 @@ static SpqSeqScan* _readSpqSeqScan(void)
  
     READ_END();
 }
+
+static SpqIndexScan* _readSpqIndexScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqIndexScan);
+    READ_TEMP_LOCALS();
+
+    _readIndexScan(&local_node->scan);
+
+    READ_END();
+}
+
+static SpqIndexOnlyScan* _readSpqIndexOnlyScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqIndexOnlyScan);
+    READ_TEMP_LOCALS();
+
+    _readIndexOnlyScan(&local_node->scan);
+
+    READ_END();
+}
+
+static SpqBitmapHeapScan* _readSpqBitmapHeapScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqBitmapHeapScan);
+    READ_TEMP_LOCALS();
+
+    _readBitmapHeapScan(&local_node->scan);
+
+    READ_END();
+}
+
 /*
  * _readAssertOp
  */
@@ -6475,6 +6511,12 @@ Node* parseNodeString(void)
         return_value = _readShareInputScan();
     } else if (MATCH("SEQUENCE", 8)) {
         return_value = _readSequence();
+    } else if (MATCH("SPQINDEXSCAN", 12)) {
+        return_value = _readSpqIndexScan();
+    } else if (MATCH("SPQINDEXONLYSCAN", 16)) {
+        return_value = _readSpqIndexOnlyScan();
+    } else if (MATCH("SPQBITMAPHEAPSCAN", 17)) {
+        return_value = _readSpqBitmapHeapScan();
 #endif
     } else if (MATCH("BITMAPHEAPSCAN", 14)) {
         return_value = _readBitmapHeapScan(NULL);

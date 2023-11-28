@@ -47,6 +47,18 @@ typedef struct ParallelHeapScanDescData {
     bool isplain;                    /* is plain table or not */
 } ParallelHeapScanDescData;
 
+#ifdef USE_SPQ
+typedef struct SPQScanDescData {
+    int instance_id; /* local segment index for current spq workers */
+    int slice_num; /* local segment total count for current spq workers */
+} SPQScanDescData;
+
+typedef SPQScanDescData* SPQScanDesc;
+
+#define SPQSCAN_UNIT_BIT (u_sess->attr.attr_spq.spq_scan_unit_bit)
+#define SPQSCAN_BlockNum2UnitNum(blockno) ((blockno) >>  SPQSCAN_UNIT_BIT)
+#endif
+
 typedef struct HeapScanDescData {
     TableScanDescData rs_base;  /* AM independent part of the descriptor */
 
@@ -69,6 +81,10 @@ typedef struct HeapScanDescData {
     ParallelHeapScanDesc rs_parallel; /* parallel scan information */
 
     HeapTupleData* rs_ctupBatch;
+
+#ifdef USE_SPQ
+    SPQScanDesc spq_scan;
+#endif
 
     /* this must be the end of this sturcture */
     HeapTupleHeaderData rs_ctbuf_hdr;
@@ -146,6 +162,9 @@ typedef struct IndexScanDescData {
 
     /* state data for traversing HOT chains in index_getnext */
     bool xs_continue_hot; /* T if must keep walking HOT chain */
+#ifdef USE_SPQ
+    SPQScanDesc spq_scan;
+#endif
     IndexFetchTableData *xs_heapfetch;
     /* put decompressed heap tuple data into xs_ctbuf_hdr be careful! when malloc memory  should give extra mem for
      *xs_ctbuf_hdr. t_bits which is varlength arr
