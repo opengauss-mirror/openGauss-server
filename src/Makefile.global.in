@@ -924,6 +924,11 @@ ETCD_BIN_PATH = $(ETCD_HOME)/bin
 LIBNANOMSG_INCLUDE_PATH = $(LIBNANOMSG_HOME)/include
 LIBNANOMSG_LIB_PATH = $(LIBNANOMSG_HOME)/lib
 
+
+TOOLSDIR = $(top_srcdir)/src/tools
+GEN_KEYWORDLIST = $(PERL) -I $(TOOLSDIR) $(TOOLSDIR)/gen_keywordlist.pl
+GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
+
 #############################################################################
 # curl component
 #############################################################################
@@ -1120,7 +1125,10 @@ submake-pagecompression:
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression
+submake-kwlist:
+	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
+
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression submake-kwlist
 
 
 ##########################################################################
