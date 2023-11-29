@@ -1428,6 +1428,7 @@ typedef struct knl_instance_context {
     List* needCheckConflictSubIds;
     pthread_mutex_t subIdsLock;
 #endif
+    uint32 noNeedWaitForCatchup;
     pg_atomic_uint32 extensionNum;
     knl_g_audit_context audit_cxt;
     knl_g_abo_context abo_cxt;
