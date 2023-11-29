@@ -2587,8 +2587,21 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
         Assert(query->commandType == CMD_SELECT);
         Assert(query->utilityStmt == NULL);
 
-        /* plan the query */
-        plan = planner(query, 0, NULL);
+        bool old_smp_enabled = u_sess->opt_cxt.smp_enabled;
+        u_sess->opt_cxt.smp_enabled = false;
+
+        PG_TRY();
+        {
+            /* plan the query */
+            plan = planner(query, 0, NULL);
+        }
+        PG_CATCH();
+        {
+            u_sess->opt_cxt.smp_enabled = old_smp_enabled;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+        u_sess->opt_cxt.smp_enabled = old_smp_enabled;
 
         /*
          * Use a snapshot with an updated command ID to ensure this query sees

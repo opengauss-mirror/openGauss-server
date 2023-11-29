@@ -148,4 +148,8 @@ select * from test3 order by 1;
  2
 (2 rows)
 
+set query_dop=1004;
+copy (select * from test3 order by 1 limit 1) to stdout header csv;
+c
+1
 drop table test3;
