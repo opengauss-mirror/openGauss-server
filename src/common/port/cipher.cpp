@@ -365,6 +365,11 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
     } else if (mode == GDS_MODE) {
         global_rand_file = &g_rand_file_content[GDS_SSL_TYPE];
         global_cipher_file = &g_cipher_file_content[GDS_SSL_TYPE];
+#ifdef USE_TASSL
+    } else if (mode == SERVER_ENC_MODE || mode == CLIENT_ENC_MODE) {
+        global_rand_file = &g_rand_file_content[GSQL_SSL_ENC_TYPE];
+        global_cipher_file = &g_cipher_file_content[GSQL_SSL_ENC_TYPE];
+#endif
     } else {
         global_rand_file = &g_rand_file_content[GSQL_SSL_TYPE];
         global_cipher_file = &g_cipher_file_content[GSQL_SSL_TYPE];
@@ -464,7 +469,10 @@ static bool WriteContentToFile(const char* filename, const void* content, size_t
 /* Judge if the KeyMode is legal */
 static bool isModeExists(KeyMode mode)
 {
-    if (mode != SERVER_MODE && mode != CLIENT_MODE && mode != HADR_MODE &&
+    if (mode != SERVER_MODE && mode != CLIENT_MODE && mode != HADR_MODE && 
+#ifdef USE_TASSL 
+        mode != SERVER_ENC_MODE && mode != CLIENT_ENC_MODE && 
+#endif
         mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE &&
         mode != USER_MAPPING_MODE && mode != SUBSCRIPTION_MODE) {
 #ifndef ENABLE_LLT
@@ -815,6 +823,13 @@ void decode_cipher_files(
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", datadir, RAN_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
+#ifdef USE_TASSL
+    } else if (mode == SERVER_ENC_MODE) {
+        ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/server_enc%s", datadir, CIPHER_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/server_enc%s", datadir, RAN_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+#endif
     } else if (mode == OBS_MODE) {
         ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/obsserver%s", datadir, CIPHER_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
@@ -857,6 +872,20 @@ void decode_cipher_files(
             ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s", datadir, user_name, RAN_KEY_FILE);
             securec_check_ss_c(ret, "\0", "\0");
         }
+#ifdef USE_TASSL
+    } else if (mode == CLIENT_ENC_MODE) {
+        if (user_name == NULL) {
+            ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/client_enc%s", datadir, CIPHER_KEY_FILE);
+            securec_check_ss_c(ret, "\0", "\0");
+            ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/client_enc%s", datadir, RAN_KEY_FILE);
+            securec_check_ss_c(ret, "\0", "\0");
+        } else {
+            ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/%s_enc%s", datadir, user_name, CIPHER_KEY_FILE);
+            securec_check_ss_c(ret, "\0", "\0");
+            ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/%s_enc%s", datadir, user_name, RAN_KEY_FILE);
+            securec_check_ss_c(ret, "\0", "\0");
+        }
+#endif
     }
 
     /* firstly we get key from memory, and then try to read from file. */

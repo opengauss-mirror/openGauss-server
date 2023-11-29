@@ -53,7 +53,7 @@ else
 fi
 
 show_package=false
-gcc_version="7.3.0"
+gcc_version="10.3.1"
 
 ##add platform architecture information
 cpus_num=$(grep -w processor /proc/cpuinfo|wc -l)
@@ -269,9 +269,9 @@ done
 
 read_mpp_version
 
-if [ "$gcc_version" = "7.3.0" ]; then
+if [ "$gcc_version" == "7.3.0" ]; then
     gcc_version=${gcc_version:0:3}
-elif [ "$gcc_version" = "10.3.0" ] || [ "$gcc_version" = "10.3.1" ]; then
+elif [ "$gcc_version" == "10.3.0" ] || [ "$gcc_version" == "10.3.1" ]; then
     gcc_version=${gcc_version:0:4}
 else
     echo "Unknown gcc version $gcc_version"
@@ -445,6 +445,9 @@ function install_gaussdb()
     export THIRD_BIN_PATH="${binarylibs_path}"
     export PREFIX_HOME="${BUILD_DIR}"
     export ENABLE_LITE_MODE=ON
+    export ENABLE_FINANCE_MODE=ON
+
+    export WITH_TASSL="${build_with_tassl}"
 
     if [ "$version_mode"x == "release"x ]; then
     	CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON"

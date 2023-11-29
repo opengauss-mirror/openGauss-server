@@ -1386,7 +1386,22 @@ create table gs_wlm_session_query_info_all
     pl_compilation_time  bigint,
     net_send_time        bigint,
     data_io_time         bigint,
-    is_slow_query        bigint
+    is_slow_query        bigint,
+    srt1_q               bigint,
+    srt2_simple_query    bigint,
+    srt3_analyze_rewrite bigint,
+    srt4_plan_query      bigint,
+    srt5_light_query     bigint,
+    srt6_p               bigint,
+    srt7_b               bigint,
+    srt8_e               bigint,
+    srt9_d               bigint,
+    srt10_s              bigint,
+    srt11_c              bigint,
+    srt12_u              bigint,
+    srt13_before_query   bigint,
+    srt14_after_query    bigint,
+    rtt_unknown          bigint
 );
 
 CREATE VIEW gs_wlm_session_info_all AS
@@ -2199,18 +2214,18 @@ LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 CREATE CAST (INTERVAL AS VARCHAR2) WITH FUNCTION pg_catalog.TO_VARCHAR2(INTERVAL) AS IMPLICIT;
 
 /* char,varchar2 to interval */
-CREATE OR REPLACE FUNCTION pg_catalog.TO_INTERVAL(BPCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTERVAL(BPCHAR, int)
 RETURNS INTERVAL
-AS $$  select pg_catalog.interval_in(pg_catalog.bpcharout($1), 0::Oid, -1) $$
+AS $$  select pg_catalog.interval_in(pg_catalog.bpcharout($1), 0::Oid, $2) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION pg_catalog.TO_INTERVAL(VARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTERVAL(VARCHAR2, int)
 RETURNS INTERVAL
-AS $$  select pg_catalog.interval_in(pg_catalog.varcharout($1), 0::Oid, -1) $$
+AS $$  select pg_catalog.interval_in(pg_catalog.varcharout($1), 0::Oid, $2) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (BPCHAR AS INTERVAL) WITH FUNCTION pg_catalog.TO_INTERVAL(BPCHAR) AS IMPLICIT;
-CREATE CAST (VARCHAR2 AS INTERVAL) WITH FUNCTION pg_catalog.TO_INTERVAL(VARCHAR2) AS IMPLICIT;
+CREATE CAST (BPCHAR AS INTERVAL) WITH FUNCTION pg_catalog.TO_INTERVAL(BPCHAR, int) AS IMPLICIT;
+CREATE CAST (VARCHAR2 AS INTERVAL) WITH FUNCTION pg_catalog.TO_INTERVAL(VARCHAR2, int) AS IMPLICIT;
 
 /* raw to varchar2 */
 CREATE CAST (RAW AS VARCHAR2) WITH FUNCTION pg_catalog.rawtohex(RAW) AS IMPLICIT;
@@ -3487,7 +3502,24 @@ CREATE unlogged table statement_history(
     details bytea,
     is_slow_sql bool,
     trace_id text,
-    advise text
+    advise text,
+    net_send_time bigint,
+    srt1_q bigint,
+    srt2_simple_query bigint,
+    srt3_analyze_rewrite bigint,
+    srt4_plan_query bigint,
+    srt5_light_query bigint,
+    srt6_p bigint,
+    srt7_b bigint,
+    srt8_e bigint,
+    srt9_d bigint,
+    srt10_s bigint,
+    srt11_c bigint,
+    srt12_u bigint,
+    srt13_before_query bigint,
+    srt14_after_query bigint,
+    rtt_unknown bigint,
+    parent_query_id bigint
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);

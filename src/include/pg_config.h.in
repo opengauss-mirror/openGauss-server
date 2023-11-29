@@ -67,6 +67,9 @@
 /* Define to 1 if you want to generate gauss product as lite mode. (--enable-lite-mode) */
 #undef ENABLE_LITE_MODE
 
+/* Define to 1 if you want to generate gauss product as finance mode. (--enable-finance-mode) */
+#undef ENABLE_FINANCE_MODE
+
 /* Define to 1 if you want MOT support. (--enable-mot).
    Supported only in single_node mode, not supported with (--enable-multiple-nodes) */
 #undef ENABLE_MOT
@@ -866,6 +869,9 @@
 
 /* Define to build with (Open)SSL support. (--with-openssl) */
 #undef USE_SSL
+
+/* Define to build with TASSL support. (--with-tassl) */
+#undef USE_TASSL
 
 /* Define to select SysV-style semaphores. */
 #undef USE_SYSV_SEMAPHORES

@@ -20,4 +20,25 @@ select * from pg_stat_get_backend_client_port(1);
 create table t1(a int, b int, c int);
 select pg_table_size('t1');
 
+--test bug for track function
+CREATE OR REPLACE FUNCTION test_func(a INT) RETURNS INT AS $$
+BEGIN
+    RETURN 10;
+END;
+$$ LANGUAGE plpgsql;
+
+\c
+set search_path to hw_function_p_3;
+SET track_functions = 'all';
+
+BEGIN;
+SELECT pg_stat_get_mem_mbytes_reserved(10);
+SELECT test_func(10);
+COMMIT;
+SELECT test_func(10);
+SELECT test_func(10);
+reset track_functions;
+drop function test_func;
+
+--drop data
 drop schema hw_function_p_3 cascade;

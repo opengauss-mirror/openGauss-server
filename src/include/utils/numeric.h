@@ -352,6 +352,7 @@ extern bool numericvar_to_int64(const NumericVar* var, int64* result, bool can_i
 extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
 extern char *numeric_normalize(Numeric num);
+extern double numeric_to_double_no_overflow(Numeric num);
 
 bool numeric_agg_trans_initvalisnull(Oid transfn_oid, bool initvalisnull);
 void numeric_transfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype);

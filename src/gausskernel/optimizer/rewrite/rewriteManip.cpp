@@ -688,6 +688,9 @@ static Relids adjust_relid_set(Relids relids, int oldrelid, int newrelid)
 typedef struct {
     int delta_sublevels_up;
     int min_sublevels_up;
+#ifdef USE_SPQ
+    bool ignore_min_sublevels_up;
+#endif
 } IncrementVarSublevelsUp_context;
 
 static bool IncrementVarSublevelsUp_walker(Node* node, IncrementVarSublevelsUp_context* context)
@@ -1396,3 +1399,21 @@ Node* ReplaceVarsFromTargetList(Node* node, int target_varno, int sublevels_up, 
     return replace_rte_variables(
         node, target_varno, sublevels_up, ReplaceVarsFromTargetList_callback, (void*)&context, outer_hasSubLinks);
 }
+
+#ifdef USE_SPQ
+void SpqIncrementVarSublevelsUpInTransformGroupedWindows(Node *node, int delta_sublevels_up, int min_sublevels_up)
+{
+    IncrementVarSublevelsUp_context context;
+ 
+    context.delta_sublevels_up = delta_sublevels_up;
+    context.min_sublevels_up = min_sublevels_up;
+    context.ignore_min_sublevels_up = false;
+ 
+    /*
+     * Must be prepared to start with a Query or a bare expression tree; if
+     * it's a Query, we don't want to increment sublevels_up.
+     */
+    (void)query_or_expression_tree_walker
+        (node, (bool (*)())IncrementVarSublevelsUp_walker, (void *)&context, QTW_EXAMINE_RTES);
+}
+#endif

@@ -166,7 +166,7 @@ void InitBufferPool(void)
             BufferDesc *buf = GetBufferDescriptor(i);
             CLEAR_BUFFERTAG(buf->tag);
 
-            pg_atomic_init_u32(&buf->state, 0);
+            pg_atomic_init_u64(&buf->state, 0);
             buf->wait_backend_pid = 0;
 
             buf->extra = &extra[i];

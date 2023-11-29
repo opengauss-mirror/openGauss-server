@@ -25,6 +25,19 @@
 #include "securec_check.h"
 #include "tool_common.h"
 
+SSInstanceConfig ss_instance_config = {
+    .dss = {
+        .enable_dss = false,
+        .instance_id = 0,
+        .primaryInstId = -1,
+        .interNodeNum = 0,
+        .vgname = NULL,
+        .vglog = NULL,
+        .vgdata = NULL,
+        .socketpath = NULL,
+    },
+};
+
 datadir_t g_datadir;  /* need init when used in first time */
 
 static void initFileDataPathStruct(datadir_t *dataDir);
@@ -137,6 +150,9 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
     rc = snprintf_s(dataDir->controlBakPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control.backup", dataDir->dss_data);
     securec_check_ss_c(rc, "", "");
 
+    rc = snprintf_s(dataDir->controlInfoPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replication/pg_ss_ctl_info", dataDir->dss_data);
+    securec_check_ss_c(rc, "", "");
+
     // DSS file directory (instance owner)
     rc = snprintf_s(dataDir->clogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_clog%d", dataDir->dss_data,
         dataDir->instance_id);
@@ -198,4 +214,20 @@ static void initDSSDataPathStruct(datadir_t *dataDir)
     rc = snprintf_s(dataDir->dwDir.dwBatchUpgradeFilePath, MAXPGPATH, MAXPGPATH - 1,
         "%s/pg_doublewrite%d/dw_batch_upgrade_files", dataDir->dss_data, dataDir->instance_id);
     securec_check_ss_c(rc, "", "");
+}
+
+char *getSocketpathFromEnv()
+{
+    char* env_value = NULL;
+    env_value = getenv("DSS_HOME");
+    if ((env_value == NULL) || (env_value[0] == '\0')) {
+        return NULL;
+    }
+
+    char *file = (char*)malloc(MAXPGPATH);
+    errno_t rc = EOK;
+    rc = snprintf_s(file, MAXPGPATH, MAXPGPATH - 1, "UDS:%s/.dss_unix_d_socket", env_value);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    return file;
 }

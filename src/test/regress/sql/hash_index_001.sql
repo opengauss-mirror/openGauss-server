@@ -176,3 +176,28 @@ insert into hash_table_7 select random()*100, 'XXX', 'XXX' from generate_series(
 create index hash_t7_id1 on hash_table_7 using hash(id) with (fillfactor = 30);
 explain (costs off) select * from hash_table_7 where id = 80;
 select count(*) from hash_table_7;
+
+-- create hash index on segment table, update/delete
+drop table if exists hash_table_8;
+create table hash_table_8(id int, name varchar, sex varchar default 'male') with(segment = on);
+create index hash_tb8_id1 on hash_table_8 using hash(id);
+insert into hash_table_8 select generate_series(1, 1000), 'xxx', 'xxx';
+select count(*) from hash_table_8;
+update hash_table_8 set sex = tmp.sex from (values (10, 'xxx', 'female'), (20, 'xxx', 'female'), (30, 'xxx', 'female')) as tmp (id, name, sex) where hash_table_8.id = tmp.id;
+select * from hash_table_8 where sex = 'female';
+delete from hash_table_8 where sex = 'female';
+select * from hash_table_8 where sex = 'female';
+drop index hash_tb8_id1;
+drop table hash_table_8;
+
+-- create hash index on segment table, delete/vacuum
+drop table if exists hash_table_9;
+create table hash_table_9(id int, name varchar, sec varchar default 'male') with (segment = on);
+create index hash_tb9_id1 on hash_table_9 using hash(id);
+insert into hash_table_9 select generate_series(1, 1000), 'XXX', 'XXX';
+insert into hash_table_9 select generate_series(1, 200), 'AAA', 'AAA';
+select count(*) from hash_table_9 where name = 'AAA';
+delete from hash_table_9 where name = 'AAA';
+select * from hash_table_9 where name = 'AAA';
+drop index hash_tb9_id1;
+drop table hash_table_9;

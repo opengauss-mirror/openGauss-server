@@ -65,6 +65,10 @@ static void printLocalBroadCastBatch(VectorBatch *batch, DestReceiver *self);
 static void printRedistributeBatch(VectorBatch *batch, DestReceiver *self);
 static void printLocalRedistributeBatch(VectorBatch *batch, DestReceiver *self);
 static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
+#ifdef USE_SPQ
+static void printRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
+#endif
 static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
 static void finalizeLocalStream(DestReceiver *self);
 
@@ -116,7 +120,14 @@ DestReceiver *createStreamDestReceiver(CommandDest dest)
         case DestTupleHybrid:
             self->pub.receiveSlot = printHybridTuple;
             break;
-
+#ifdef USE_SPQ
+        case DestTupleRoundRobin:
+            self->pub.receiveSlot = printRoundRobinTuple;
+            break;
+        case DestBatchRoundRobin:
+            self->pub.sendBatch = printRoundRobinBatch;
+            break;
+#endif
         case DestBatchBroadCast:
             self->pub.sendBatch = printBroadCastBatchCompress;
             break;
@@ -233,6 +244,20 @@ static void printLocalRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self)
     rec->arg->localRoundRobinStream(tuple);
 }
 
+#ifdef USE_SPQ
+/*
+ * @Description: Send a tuple by roundrobin
+ *
+ * @param[IN] tuple: tuple to send.
+ * @param[IN] dest: dest receiver.
+ * @return void
+ */
+static void printRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self)
+{
+    streamReceiver *rec = (streamReceiver *)self;
+    rec->arg->roundRobinStream(tuple, self);
+}
+#endif
 /*
  * @Description: Send a tuple in hybrid ways, some data with special values
  *               shoule be sent in special way.
@@ -312,6 +337,20 @@ static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self)
     rec->arg->localRoundRobinStream(batch);
 }
 
+/*
+ * @Description: Send a batch by roundrobin
+ *
+ * @param[IN] batch: batch to send.
+ * @param[IN] dest: dest receiver.
+ * @return void
+ */
+#ifdef USE_SPQ
+static void printRoundRobinBatch(VectorBatch *batch, DestReceiver *self)
+{
+    streamReceiver *rec = (streamReceiver *)self;
+    rec->arg->roundRobinStream(batch);
+}
+#endif
 /*
  * @Description: Send a batch in hybrid ways, some data with special values
  *               shoule be sent in special way.
@@ -599,7 +638,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
-        if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
+        if ((IsConnFromCoord() || IS_SPQ_EXECUTOR) && atttypid >= FirstBootstrapObjectId) {
             char *typenameVar = "";
             typenameVar = get_typename_with_namespace(atttypid);
             pq_writestring(buf, typenameVar);
@@ -650,7 +689,7 @@ static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *t
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
-        if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
+        if ((IsConnFromCoord() || IS_SPQ_EXECUTOR) && atttypid >= FirstBootstrapObjectId) {
             char *typenameVar = "";
             typenameVar = get_typename_with_namespace(atttypid);
             pq_sendstring(buf, typenameVar);
@@ -768,9 +807,14 @@ static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int 
         if (format == 0) {
             getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
             fmgr_info(thisState->typoutput, &thisState->finfo);
+            thisState->encoding = get_valid_charset_by_collation(typeinfo->attrs[i].attcollation);
+            construct_conversion_fmgr_info(
+                thisState->encoding, u_sess->mb_cxt.ClientEncoding->encoding, (void*)&thisState->convert_finfo);
         } else if (format == 1) {
             getTypeBinaryOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typsend, &thisState->typisvarlena);
             fmgr_info(thisState->typsend, &thisState->finfo);
+            thisState->encoding = PG_INVALID_ENCODING; // just initialize, should not be used
+            thisState->convert_finfo.fn_oid = InvalidOid;
         } else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", format)));
         }
@@ -805,6 +849,9 @@ static void printtup_prepare_info_for_stream(DR_printtup *myState, TupleDesc typ
         thisState->format = 0;
         getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
         fmgr_info(thisState->typoutput, &thisState->finfo);
+        thisState->encoding = get_valid_charset_by_collation(typeinfo->attrs[i].attcollation);
+        construct_conversion_fmgr_info(
+            thisState->encoding, u_sess->mb_cxt.ClientEncoding->encoding, (void*)&thisState->convert_finfo);
     }
 }
 
@@ -1106,7 +1153,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
              * attr had been converted to CSTRING type previously by using anyarray_out.
              * just send over the DataRow message as we received it.
              */
-            pq_sendcountedtext_printtup(buf, (char *)attr, strlen((char *)attr));
+            pq_sendcountedtext_printtup(buf, (char *)attr, strlen((char *)attr), thisState->encoding, (void*)&thisState->convert_finfo);
         } else {
             if (thisState->format == 0) {
                 /* Text output */
@@ -1190,7 +1237,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = false;
 #endif
-                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr));
+                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr), thisState->encoding, (void*)&thisState->convert_finfo);
                 if (need_free) {
                     pfree(outputstr);
                 }
@@ -1479,7 +1526,7 @@ inline void AddCheckInfo(StringInfo buf)
     bool is_check_added = false;
 
     /* add check info  for datanode and coordinator */
-    if (IsConnFromCoord()) {
+    if (IS_SPQ_EXECUTOR || IsConnFromCoord()) {
 #ifdef USE_ASSERT_CHECKING
         initStringInfo(&buf_check);
         AddCheckMessage(&buf_check, buf, false);

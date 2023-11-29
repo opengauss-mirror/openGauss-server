@@ -87,6 +87,7 @@
 #include "replication/parallel_decode.h"
 #include "replication/parallel_decode_worker.h"
 #include "replication/parallel_reorderbuffer.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
@@ -96,6 +97,7 @@
 #include "storage/lmgr.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "storage/file/fio_device.h"
+#include "storage/gs_uwal/gs_uwal.h"
 #include "tcop/tcopprot.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -135,8 +137,8 @@ static int g_appname_extra_len = 3; /* [+]+\0 */
 #define AmWalSenderToStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_STANDBY)
 
 #define USE_PHYSICAL_XLOG_SEND \
-    (AM_WAL_HADR_SENDER || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
-#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && !IS_SHARED_STORAGE_MODE)
+    (AM_WAL_HADR_SENDER || !SS_REPLICATION_DORADO_CLUSTER || !IS_SHARED_STORAGE_MODE || (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY))
+#define USE_SYNC_REP_FLUSH_PTR (AM_WAL_HADR_SENDER && (!IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER))
 
 /* Statistics for log control */
 static const int MICROSECONDS_PER_SECONDS = 1000000;
@@ -174,7 +176,9 @@ static void InitWalSnd(void);
 static void WalSndHandshake(void);
 static void WalSndKill(int code, Datum arg);
 static void XLogSendPhysical(void);
+static void XLogSendUwalLSN(void);
 static void XLogSendLogical(void);
+static void XLogSendUwalStatus(void);
 static void IdentifySystem(void);
 static void IdentifyVersion(void);
 static void IdentifyConsistence(IdentifyConsistenceCmd *cmd);
@@ -186,6 +190,7 @@ static void StartLogicalReplication(StartReplicationCmd *cmd);
 static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd);
 static void ProcessStandbyMessage(void);
 static void ProcessStandbyReplyMessage(void);
+static void ProcessUwalCatchupEndMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessStandbySwitchRequestMessage(void);
 static void ProcessRepliesIfAny(void);
@@ -242,7 +247,6 @@ static void WalSndHadrSwitchoverRequest();
 static void ProcessHadrSwitchoverMessage();
 static void ProcessHadrReplyMessage();
 static int WalSndTimeout();
-
 
 char *DataDir = ".";
 
@@ -302,6 +306,24 @@ static void XLogSendLSN(void)
         sizeof(PrimaryKeepaliveMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(PrimaryKeepaliveMessage) + 1);
+
+    if (g_instance.wal_cxt.walSenderStats->isEnableStat) {
+        SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+        /* use volatile pointer to prevent code rearrangement */
+        volatile bool recheck = g_instance.wal_cxt.walSenderStats->isEnableStat;
+        if (recheck) {
+            TimestampTz curtime = GetCurrentTimestamp();
+            WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+            WalSenderStat* stat = g_instance.wal_cxt.walSenderStats->stats[walsnd->index];
+            if (stat->firstSendTime == 0) {
+                stat->firstSendTime = curtime;
+            }
+            stat->lastSendTime = curtime;
+            stat->sendTimes++;
+        }
+        SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
+    }
+
     /* Flush the keepalive message to standby immediately. */
     if (pq_flush_if_writable() != 0)
         WalSndShutdown();
@@ -378,6 +400,13 @@ int WalSenderMain(void)
                                                                  ALLOCSET_DEFAULT_MINSIZE,
                                                                  ALLOCSET_DEFAULT_INITSIZE,
                                                                  ALLOCSET_DEFAULT_MAXSIZE);
+
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    if (AM_WAL_DB_SENDER) {
+        LoadSqlPlugin();
+    }
+#endif
+
     (void)MemoryContextSwitchTo(walsnd_context);
 
     /* Set up resource owner */
@@ -396,6 +425,10 @@ int WalSenderMain(void)
 
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Can't start replication during reform or on DMS standby mode!")));
+    }
 
     /*
      * Use the recovery target timeline ID during recovery
@@ -472,7 +505,11 @@ int WalSenderMain(void)
         return WalSndLoop(XLogSendLogical);
     else {
         if (USE_PHYSICAL_XLOG_SEND) {
-            return WalSndLoop(XLogSendPhysical);
+            if (!g_instance.attr.attr_storage.enable_uwal) {
+                return WalSndLoop(XLogSendPhysical);
+            } else {
+                return WalSndLoop(XLogSendUwalStatus);
+            }
         } else {
             return WalSndLoop(XLogSendLSN);
         }
@@ -2503,6 +2540,11 @@ static void ProcessStandbyMessage(void)
             SendPostmasterSignal(PMSIGNAL_SWITCHOVER_TIMEOUT);
             break;
 
+        case 'w':
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                ProcessUwalCatchupEndMessage();
+            }
+            break;
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
@@ -2640,7 +2682,7 @@ static void LogCtrlDoActualSleep(volatile WalSnd *walsnd, bool forceUpdate)
                 u_sess->attr.attr_storage.hadr_recovery_point_target > 0) {
                 LogCtrlExecuteSleeping(walsnd, forceUpdate, logical_slot_sleep_flag);
             } else {
-                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE) {
+                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
                     pg_usleep(g_logical_slot_sleep_time);
                 }
             }
@@ -2648,7 +2690,7 @@ static void LogCtrlDoActualSleep(volatile WalSnd *walsnd, bool forceUpdate)
             if (u_sess->attr.attr_storage.target_rto > 0) {
                 LogCtrlExecuteSleeping(walsnd, forceUpdate, logical_slot_sleep_flag);
             } else {
-                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE) {
+                if (logical_slot_sleep_flag && !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
                     pg_usleep(g_logical_slot_sleep_time);
                 }
             }
@@ -2679,7 +2721,7 @@ static void LogCtrlExecuteSleeping(volatile WalSnd *walsnd, bool forceUpdate, bo
     }
     LogCtrlSleep();
     if (logicalSlotSleepFlag && g_logical_slot_sleep_time > t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time &&
-        !IS_SHARED_STORAGE_MODE) {
+        !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
         pg_usleep(g_logical_slot_sleep_time - t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time);
     }
 }
@@ -2910,19 +2952,31 @@ static void ProcessStandbyReplyMessage(void)
         ProcessTargetRtoRpoChanged();
     }
 
-    if (!AM_WAL_STANDBY_SENDER) {
+    if (!AM_WAL_STANDBY_SENDER && !g_instance.attr.attr_storage.enable_uwal) {
         SyncRepReleaseWaiters();
     }
 
     /*
      * Advance our local xmin horizon when the client confirmed a flush.
+     * 1. When starting ss dorado replication, we need to know replayPtr that standby has already replayed,
+     * because primary xlog will cover standby xlog by Dorado synchronous replication.
+     * 2. Otherwise, we only need to confirm that standby xlog has been flushed successfully.
      */
-    AdvanceReplicationSlot(reply.flush);
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        AdvanceReplicationSlot(reply.apply);
+    } else {
+        AdvanceReplicationSlot(reply.flush);
+    }
 
     if (AM_WAL_STANDBY_SENDER) {
         sndFlush = GetFlushRecPtr();
         WalSndRefreshPercentCountStartLsn(sndFlush, reply.flush);
     }
+}
+
+static void ProcessUwalCatchupEndMessage(void) {
+    WalSndSetState(WALSNDSTATE_UWALCATCHUP_END);
+    ereport(LOG, (errmsg("master is state [WALSNDSTATE_UWALCATCHUP_END]")));
 }
 
 /* compute new replication slot xmin horizon if needed */
@@ -2933,6 +2987,9 @@ static void PhysicalReplicationSlotNewXmin(TransactionId feedbackXmin)
 
     SpinLockAcquire(&slot->mutex);
     t_thrd.pgxact->xmin = InvalidTransactionId;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     /*
      * For physical replication we don't need the the interlock provided
      * by xmin and effective_xmin since the consequences of a missed increase
@@ -3155,7 +3212,7 @@ static void LogCtrlCountSleepLimit(void)
 static void LogCtrlSleep(void)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    if (IS_SHARED_STORAGE_MODE) {
+    if (IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
         if (walsnd->log_ctrl.sleep_time > MICROSECONDS_PER_SECONDS) {
             walsnd->log_ctrl.sleep_time = MICROSECONDS_PER_SECONDS;
         }
@@ -3546,7 +3603,11 @@ static void LogCtrlCalculateCurrentRPO(StandbyReplyMessage *reply)
     if (AM_WAL_HADR_CN_SENDER) {
         flushPtr = GetFlushRecPtr();
     } else if (AM_WAL_SHARE_STORE_SENDER) {
-        flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
+        if (SS_REPLICATION_DORADO_CLUSTER) {
+            flushPtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        } else {
+            flushPtr = g_instance.xlog_cxt.shareStorageXLogCtl->insertHead;
+        } 
     } else {
         got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
         if (got_recptr != true) {
@@ -4151,7 +4212,41 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP) {
                 ereport(DEBUG1, (errmsg("standby \"%s\" has now caught up with primary",
                                         u_sess->attr.attr_common.application_name)));
+                if (g_instance.attr.attr_storage.enable_uwal) {
+                    if (t_thrd.walsender_cxt.MyWalSnd->replSender) {
+                        ereport(LOG, (errmsg("the walsender is for a normal replication")));
+
+                        WalSndSetState(WALSNDSTATE_UWALCATCHUP);
+                        ereport(LOG, (errmsg("primary is state [WALSNDSTATE_UWALCATCHUP]")));
+
+                        WalSndKeepalive(false);
+                        WalSndSetState(WALSNDSTATE_UWALCATCHUP_MSGSENT);
+
+                        ereport(LOG, (errmsg("primary send keepalive to tell standby uwal catchup start, and start "
+                                             "walsender notify")));
+                        if (GsUwalWalSenderNotify() != 0) {
+                            ereport(FATAL, (errmsg("uwal primary notify failed.")));
+                            proc_exit(1);
+                        }
+                        ereport(LOG, (errmsg("walsender notify success")));
+                        ereport(LOG, (errmsg("the walsender for a new standby %s comming notify sucessed",
+                                             u_sess->attr.attr_common.application_name)));
+                    } else {
+                        ereport(LOG, (errmsg("the walsender is for a building")));
+                        WalSndSetState(WALSNDSTATE_UWALCATCHUP_END);
+                    }
+                } else {
+                    WalSndSetState(WALSNDSTATE_STREAMING);
+                    ereport(LOG, (errmsg("master is state [WALSNDSTATE_STREAMING]")));
+                    /* Refresh new state tp peer */
+                    WalSndKeepalive(true);
+                }
+            }
+
+            if (g_instance.attr.attr_storage.enable_uwal &&
+                t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP_END) {
                 WalSndSetState(WALSNDSTATE_STREAMING);
+                ereport(LOG, (errmsg("master is state [WALSNDSTATE_STREAMING]")));
                 /* Refresh new state to peer */
                 WalSndKeepalive(true);
             }
@@ -4184,7 +4279,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                         XLByteEQ(t_thrd.walsender_cxt.sentPtr, t_thrd.walsender_cxt.MyWalSnd->flush))
                         t_thrd.walsender_cxt.walsender_shutdown_requested = true;
                 }
-                if (IS_SHARED_STORAGE_MODE) {
+                if (IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
                     t_thrd.walsender_cxt.walsender_shutdown_requested = true;
                 }
             }
@@ -4240,7 +4335,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
             WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
                               sleeptime);
-            if (!AM_WAL_STANDBY_SENDER) {
+            if (!AM_WAL_STANDBY_SENDER && !g_instance.attr.attr_storage.enable_uwal) {
                 SyncRepReleaseWaiters();
             }
             t_thrd.int_cxt.ImmediateInterruptOK = false;
@@ -4264,7 +4359,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
         if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
             /* In distributed streaming dr cluster, shutdown walsender of main standby when term is changed */
-            if (IS_DISASTER_RECOVER_MODE && walsnd->isTermChanged) {
+            if (IS_MULTI_DISASTER_RECOVER_MODE && walsnd->isTermChanged) {
                 ereport(LOG, (errmsg("Shutdown walsender of main standby due to the term change.")));
                 SpinLockAcquire(&walsnd->mutex);
                 walsnd->isTermChanged = false;
@@ -4532,7 +4627,22 @@ static void InitWalSnd(void)
             walsnd->lastWriteChangeTime = 0;
             walsnd->lastFlushChangeTime = 0;
             walsnd->lastApplyChangeTime = 0;
+            rc = strncpy_s((char *)&walsnd->remote_application_name, NAMEDATALEN, u_sess->proc_cxt.applicationName, NAMEDATALEN - 1);
+            securec_check_c(rc, "\0", "\0");
             SpinLockRelease(&walsnd->mutex);
+
+            SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+            if (g_instance.wal_cxt.walSenderStats->stats == nullptr) {
+                MemoryContext oldContext = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+                g_instance.wal_cxt.walSenderStats->stats = (WalSenderStat**)palloc0(
+                                        sizeof(WalSenderStat*) * g_instance.attr.attr_storage.max_wal_senders);
+                (void)MemoryContextSwitchTo(oldContext);
+            }
+            WalSenderStat* stat = (WalSenderStat*)palloc0(sizeof(WalSenderStat));
+            stat->walsnd = (WalSnd*)walsnd;
+            g_instance.wal_cxt.walSenderStats->stats[walsnd->index] = stat;
+            SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
+
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);
             t_thrd.walsender_cxt.MyWalSnd = (WalSnd *)walsnd;
@@ -4553,6 +4663,10 @@ static void InitWalSnd(void)
 static void WalSndReset(WalSnd *walsnd)
 {
     errno_t rc = 0;
+
+    SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+    pfree_ext(g_instance.wal_cxt.walSenderStats->stats[walsnd->index]);
+    SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->pid = 0;
@@ -4606,6 +4720,13 @@ static void WalSndKill(int code, Datum arg)
 
     /* Mark WalSnd struct no longer in use. */
     WalSndReset(walsnd);
+
+    if (g_instance.attr.attr_storage.enable_uwal && walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
+        ereport(LOG, (errmsg("wal sender has been killed , start walsender notify")));
+        if (GsUwalWalSenderNotify(true) != 0) {
+            ereport(FATAL, (errmsg("uwal primary notify for WalSndKill() failed.")));
+        }
+    }
 
     /*
      * Here one standby is going down, then check if it was synchronous
@@ -5293,6 +5414,22 @@ static void XLogSendPhysical(void)
         SpinLockAcquire(&walsnd->mutex);
         walsnd->sentPtr = t_thrd.walsender_cxt.sentPtr;
         SpinLockRelease(&walsnd->mutex);
+
+        if (g_instance.wal_cxt.walSenderStats->isEnableStat) {
+            SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
+            /* use volatile pointer to prevent code rearrangement */
+            volatile bool recheck = g_instance.wal_cxt.walSenderStats->isEnableStat;
+            if (recheck) {
+                TimestampTz curtime = GetCurrentTimestamp();
+                WalSenderStat* stat = g_instance.wal_cxt.walSenderStats->stats[walsnd->index];
+                if (stat->firstSendTime == 0) {
+                    stat->firstSendTime = curtime;
+                }
+                stat->lastSendTime = curtime;
+                stat->sendTimes++;
+            }
+            SpinLockRelease(&g_instance.wal_cxt.walSenderStats->mutex);
+        }
     }
 
     /* Report progress of XLOG streaming in PS display */
@@ -5308,6 +5445,68 @@ static void XLogSendPhysical(void)
     }
 
     return;
+}
+
+static void XLogSendUwalLSN(void)
+{
+    PrimaryKeepaliveMessage keepalive_message;
+    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    errno_t errorno = EOK;
+
+    /* Update sentPtr */
+    {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        walsnd->log_ctrl.prev_send_time = GetCurrentTimestamp();
+
+        SpinLockAcquire(&walsnd->mutex);
+        XLogRecPtr sentPtr_new = walsnd->sentPtr;
+        SpinLockRelease(&walsnd->mutex);
+
+        if (t_thrd.walsender_cxt.sentPtr == sentPtr_new) {
+            return;
+        }
+        t_thrd.walsender_cxt.sentPtr = sentPtr_new;
+    }
+
+    /* Construct a new message */
+    SpinLockAcquire(&hashmdata->mutex);
+    keepalive_message.peer_role = hashmdata->current_mode;
+    SpinLockRelease(&hashmdata->mutex);
+    keepalive_message.peer_state = get_local_dbstate();
+    keepalive_message.walEnd = t_thrd.walsender_cxt.sentPtr;
+    WalSndSetState(WALSNDSTATE_STREAMING);
+    
+    keepalive_message.sendTime = GetCurrentTimestamp();
+    keepalive_message.replyRequested = false;
+    keepalive_message.catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP);
+    ereport(DEBUG2, (errmsg("sending wal replication keepalive")));
+    t_thrd.walsender_cxt.walSndCaughtUp = true;
+    t_thrd.walsender_cxt.catchup_threshold = 0;
+    /* Prepend with the message type and send it. */
+    t_thrd.walsender_cxt.output_xlog_message[0] = 'k';
+    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
+                       sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &keepalive_message,
+                       sizeof(PrimaryKeepaliveMessage));
+    securec_check(errorno, "\0", "\0");
+    (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(PrimaryKeepaliveMessage) + 1);
+    
+    /* Flush the keepalive message to standby immediately. */
+    if (pq_flush_if_writable() != 0)
+        WalSndShutdown();
+}
+
+static void XLogSendUwalStatus(void)
+{
+    if (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
+        return XLogSendPhysical();
+    } else if (t_thrd.walsender_cxt.MyWalSnd->state < WALSNDSTATE_UWALCATCHUP) {
+        return XLogSendPhysical();
+    } else if (t_thrd.walsender_cxt.MyWalSnd->state < WALSNDSTATE_STREAMING) {
+        return;
+    } else {
+        return XLogSendUwalLSN();
+    }
 }
 
 void XLogCompression(int* compressedSize, XLogRecPtr startPtr, Size nbytes)
@@ -5823,6 +6022,9 @@ static const char *WalSndGetStateString(WalSndState state)
         case WALSNDSTATE_BACKUP:
             return "Backup";
         case WALSNDSTATE_CATCHUP:
+        case WALSNDSTATE_UWALCATCHUP:
+        case WALSNDSTATE_UWALCATCHUP_MSGSENT:
+        case WALSNDSTATE_UWALCATCHUP_END:
             return "Catchup";
         case WALSNDSTATE_STREAMING:
             return "Streaming";
@@ -6262,6 +6464,15 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             AlignFreeShareStorageCtl(ctlInfo);
         }
 
+        if (SS_REPLICATION_DORADO_CLUSTER && !AM_WAL_HADR_SENDER) {
+            ReadSSDoradoCtlInfoFile();
+            ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
+            sentRecPtr = ctlInfo->insertHead;
+            sndWrite = ctlInfo->insertHead;
+            sndFlush = ctlInfo->insertHead;
+            sndReplay = ctlInfo->insertHead;
+        }
+
         /*
          * if the walsener's pid has changed,we consider is is not a sync standby
          */
@@ -6486,6 +6697,15 @@ static void WalSndKeepalive(bool requestReply)
     keepalive_message.sendTime = GetCurrentTimestamp();
     keepalive_message.replyRequested = requestReply;
     keepalive_message.catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP);
+
+    /* if the standby is belong 'ANY 0' / not belong any domain, tell it exec catchup */ 
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        keepalive_message.uwal_catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP);
+        uint8 syncrep_method;
+        unsigned num_sync;
+        bool find = FindSyncRepConfig(t_thrd.walsender_cxt.MyWalSnd->remote_application_name, NULL, &syncrep_method, &num_sync);
+        keepalive_message.need_catchup = ((find && syncrep_method == SYNC_REP_QUORUM && num_sync == 0) || !find);
+    }
 
     ereport(((requestReply && AM_WAL_DB_SENDER) ? LOG : DEBUG2), (errmsg("sending wal replication keepalive")));
 
@@ -7145,13 +7365,15 @@ void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd)
 ArchiveXlogMessage* get_archive_task_from_list() 
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    SpinLockAcquire(&walsnd->mutex_archive_task_list);
     volatile unsigned int *archive_task_count = &walsnd->archive_task_count;
     if (*archive_task_count == 0) {
+        SpinLockRelease(&walsnd->mutex_archive_task_list);
         return NULL;
     }
     ArchiveXlogMessage *result = NULL;
     int idx = -1;
-    SpinLockAcquire(&walsnd->mutex_archive_task_list);
+
     idx = lfirst_int(list_head(walsnd->archive_task_list));
     result = &g_instance.archive_obs_cxt.archive_status[idx].archive_task;
     walsnd->archive_task_list = list_delete_first(walsnd->archive_task_list);

@@ -1,15 +1,18 @@
 -- test normal db
-create database group_concat_test1 dbcompatibility 'A';;
+create database group_concat_test1 dbcompatibility 'A';
 \c group_concat_test1
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
 select id, group_concat(v separator ';') from t group by id order by id asc;
-create database group_concat_test2 dbcompatibility 'C';;
+CREATE TABLE agg_t1 ( c53 INT , c47 INT );
+CREATE TABLE agg_t2 ( c17 INT , c52 INT );
+SELECT 1 FROM agg_t1 CROSS JOIN agg_t2 GROUP BY c52 HAVING + GROUP_CONCAT( 1 ORDER BY 1 SEPARATOR '' ) ;
+create database group_concat_test2 dbcompatibility 'C';
 \c group_concat_test2
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
 select id, group_concat(v separator ';') from t group by id order by id asc;
-create database group_concat_test3 dbcompatibility 'PG';;
+create database group_concat_test3 dbcompatibility 'PG';
 \c group_concat_test3
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');

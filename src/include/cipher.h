@@ -80,6 +80,10 @@ typedef enum {
     UNKNOWN_KEY_MODE,
     SERVER_MODE,
     CLIENT_MODE,
+#ifdef USE_TASSL
+    SERVER_ENC_MODE,
+    CLIENT_ENC_MODE,
+#endif
     HADR_MODE,
     OBS_MODE,
     SOURCE_MODE,
@@ -104,6 +108,9 @@ typedef enum {
     OBS_CLOUD_TYPE = 0,     /* on cloud obs cipher for encrypt and decrypt ak/sk */
     INITDB_NOCLOUDOBS_TYPE, /* non-cloud obs use the cipher same as initdb */
     GSQL_SSL_TYPE,          /* gsql ssl connection cipher */
+#ifdef USE_TASSL
+    GSQL_SSL_ENC_TYPE,
+#endif
     GDS_SSL_TYPE,           /* gds ssl connection cipher */
     CIPHER_TYPE_MAX         /* The max number of types should be at the end */
 } CipherType;

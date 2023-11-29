@@ -79,5 +79,10 @@ extern Datum jsonb_array_elements_text(PG_FUNCTION_ARGS);
 extern Datum jsonb_array_elements(PG_FUNCTION_ARGS);
 extern Datum jsonb_populate_record(PG_FUNCTION_ARGS);
 extern Datum jsonb_populate_recordset(PG_FUNCTION_ARGS);
+extern Datum jsonb_insert(PG_FUNCTION_ARGS);
+extern Datum jsonb_set(PG_FUNCTION_ARGS);
+extern Datum jsonb_delete(PG_FUNCTION_ARGS);
+extern Datum jsonb_delete_idx(PG_FUNCTION_ARGS);
+extern Datum jsonb_delete_array(PG_FUNCTION_ARGS);
 
 #endif   /* JSON_H */

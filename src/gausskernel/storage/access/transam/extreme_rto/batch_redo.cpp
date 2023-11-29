@@ -44,25 +44,6 @@
 #include "access/xlogproc.h"
 
 namespace extreme_rto {
-static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, RelFileNode *rnode, BlockNumber *blknum,
-                                        ForkNumber *forknum)
-{
-    XLogBlockParse *blockparse = &(recordBlockState->blockparse);
-
-    if (rnode != NULL) {
-        rnode->dbNode = blockparse->blockhead.dbNode;
-        rnode->relNode = blockparse->blockhead.relNode;
-        rnode->spcNode = blockparse->blockhead.spcNode;
-        rnode->bucketNode = blockparse->blockhead.bucketNode;
-        rnode->opt = blockparse->blockhead.opt;
-    }
-    if (blknum != NULL) {
-        *blknum = blockparse->blockhead.blkno;
-    }
-    if (forknum != NULL) {
-        *forknum = blockparse->blockhead.forknum;
-    }
-}
 
 void PRInitRedoItemEntry(RedoItemHashEntry *redoItemHashEntry)
 {

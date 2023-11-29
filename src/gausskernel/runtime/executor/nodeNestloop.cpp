@@ -224,9 +224,15 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
             ENL1_printf("no inner tuple, need new outer tuple");
 
             node->nl_NeedNewOuter = true;
+#ifdef USE_SPQ
+            node->nl_innerSideScanned = true;
+            if (!node->nl_MatchedOuter && (node->js.jointype == JOIN_LEFT || node->js.jointype == JOIN_ANTI ||
+                                              node->js.jointype == JOIN_LEFT_ANTI_FULL || node->js.jointype == JOIN_LASJ_NOTIN)) {
+#else
 
             if (!node->nl_MatchedOuter && (node->js.jointype == JOIN_LEFT || node->js.jointype == JOIN_ANTI ||
                                               node->js.jointype == JOIN_LEFT_ANTI_FULL)) {
+#endif
                 /*
                  * We are doing an outer join and there were no join matches
                  * for this outer tuple.  Generate a fake join tuple with
@@ -263,6 +269,18 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
             continue;
         }
 
+#ifdef USE_SPQ
+        if ((node->js.jointype == JOIN_LASJ_NOTIN) && (!node->nl_innerSideScanned) &&
+            (node->nl_InnerJoinKeys && IsJoinExprNull(node->nl_InnerJoinKeys, econtext))) {
+            /*
+             * If LASJ_NOTIN and a null was found on the inner side, all tuples
+             * We'll read no more from either inner or outer subtree. To keep our
+             * in outer sider will be treated as "not in" tuples in inner side.
+             */
+            ENL1_printf("found null tuple on the inner side, clean out");
+            return NULL;
+        }
+#endif
         /*
          * at this point we have a new pair of inner and outer tuples so we
          * test the inner and outer tuples to see if they satisfy the node's
@@ -277,7 +295,12 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
             node->nl_MatchedOuter = true;
 
             /* In an antijoin, we never return a matched tuple */
+#ifdef USE_SPQ
+            if (node->js.jointype == JOIN_ANTI || node->js.jointype == JOIN_LEFT_ANTI_FULL ||
+                node->js.jointype == JOIN_LASJ_NOTIN) {
+#else
             if (node->js.jointype == JOIN_ANTI || node->js.jointype == JOIN_LEFT_ANTI_FULL) {
+#endif
                 node->nl_NeedNewOuter = true;
                 continue; /* return to top of loop */
             }
@@ -323,6 +346,110 @@ static TupleTableSlot* ExecNestLoop(PlanState* state)
     }
 }
 
+#ifdef USE_SPQ
+/* ----------------------------------------------------------------
+ * ExtractFuncExprArgs
+ *
+ * Extract the arguments of a FuncExpr or an OpExpr and append them into two
+ * given lists:
+ *   - lclauses for the left side of the expression,
+ *   - rclauses for the right side
+ *
+ * This function is only used for LASJ. Once we find a NULL from inner side, we
+ * can skip the join and just return an empty set as result. This is only true
+ * if the equality operator is strict, that is, if a tuple from inner side is
+ * NULL then the equality operator returns NULL.
+ *
+ * If the number of arguments is not two, we just return leaving lclauses and
+ * rclauses remaining NULL. In this case, the LASJ join would be actually
+ * performed.
+ * ----------------------------------------------------------------
+ */
+static void ExtractFuncExprArgs(Expr *clause, List **lclauses, List **rclauses)
+{
+    if (IsA(clause, OpExpr)) {
+        OpExpr *opexpr = (OpExpr *)clause;
+ 
+        if (list_length(opexpr->args) != 2)
+            return;
+ 
+        if (!op_strict(opexpr->opno))
+            return;
+ 
+        *lclauses = lappend(*lclauses, linitial(opexpr->args));
+        *rclauses = lappend(*rclauses, lsecond(opexpr->args));
+    } else if (IsA(clause, FuncExpr)) {
+        FuncExpr *fexpr = (FuncExpr *)clause;
+ 
+        if (list_length(fexpr->args) != 2)
+            return;
+ 
+        if (!func_strict(fexpr->funcid))
+            return;
+ 
+        *lclauses = lappend(*lclauses, linitial(fexpr->args));
+        *rclauses = lappend(*rclauses, lsecond(fexpr->args));
+    } else
+        elog(ERROR, "unexpected join qual in JOIN_LASJ_NOTIN join");
+}
+ 
+/* ----------------------------------------------------------------
+ * SplitJoinQualExpr
+ *
+ * Deconstruct the join clauses into outer and inner argument values, so
+ * that we can evaluate those subexpressions separately. Note: for constant
+ * expression we don't need to split (MPP-21294). However, if constant expressions
+ * have peer splittable expressions we *do* split those.
+ *
+ * This is used for NOTIN joins, as we need to look for NULLs on both
+ * inner and outer side.
+ *
+ * XXX: This would be more appropriate in the planner.
+ * ----------------------------------------------------------------
+ */
+static void SplitJoinQualExpr(List *joinqual, List **inner_join_keys_p, List **outer_join_keys_p)
+{
+    List *lclauses = NIL;
+    List *rclauses = NIL;
+    ListCell *lc;
+ 
+    foreach(lc, joinqual) {
+        Expr *expr = (Expr *)lfirst(lc);
+ 
+        switch (expr->type) {
+            case T_FuncExpr:
+            case T_OpExpr:
+                ExtractFuncExprArgs(expr, &lclauses, &rclauses);
+                break;
+ 
+            case T_BoolExpr:
+            {
+                BoolExpr *bexpr = (BoolExpr *)expr;
+                ListCell *argslc;
+ 
+                foreach(argslc, bexpr->args) {
+                    ExtractFuncExprArgs((Expr *)lfirst(argslc), &lclauses, &rclauses);
+                }
+            }
+            break;
+ 
+            case T_Const:
+            /*
+             * Constant expressions do not need to be splitted into left and
+             * right as they don't need to be considered for NULL value special
+             * cases
+             */
+                break;
+ 
+            default:
+                elog(ERROR, "unexpected expression type in NestLoopJoin qual");
+        }
+    }
+ 
+    *inner_join_keys_p = rclauses;
+    *outer_join_keys_p = lclauses;
+}
+#endif
 /* ----------------------------------------------------------------
  *		ExecInitNestLoop
  * ----------------------------------------------------------------
@@ -341,6 +468,9 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
     nlstate->js.ps.plan = (Plan*)node;
     nlstate->js.ps.state = estate;
     nlstate->nl_MaterialAll = node->materialAll;
+#ifdef USE_SPQ
+    nlstate->prefetch_inner = node->join.prefetch_inner;
+#endif
     nlstate->js.ps.ExecProcNode = ExecNestLoop;
 
     /*
@@ -362,7 +492,42 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
         nlstate->js.ps.targetlist = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.targetlist, (PlanState*)nlstate);
         nlstate->js.ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->join.plan.qual, (PlanState*)nlstate);
         nlstate->js.jointype = node->join.jointype;
+#ifdef USE_SPQ
+    if (node->join.jointype == JOIN_LASJ_NOTIN) {
+        List *inner_join_keys;
+        List *outer_join_keys;
+        ListCell *lc;
+ 
+        /* not initialized yet */
+        Assert(nlstate->nl_InnerJoinKeys == nullptr);
+        Assert(nlstate->nl_OuterJoinKeys == nullptr);
+ 
+        SplitJoinQualExpr(node->join.joinqual,
+                          &inner_join_keys,
+                          &outer_join_keys);
+        foreach(lc, inner_join_keys) {
+            Expr *expr = (Expr *)lfirst(lc);
+            ExprState *exprstate;
+ 
+            exprstate = ExecInitExpr(expr, (PlanState *)nlstate);
+ 
+            nlstate->nl_InnerJoinKeys = lappend(nlstate->nl_InnerJoinKeys, exprstate);
+        }
+        foreach(lc, outer_join_keys) {
+            Expr *expr = (Expr *)lfirst(lc);
+            ExprState *exprstate;
+ 
+            exprstate = ExecInitExpr(expr, (PlanState *)nlstate);
+ 
+            nlstate->nl_OuterJoinKeys = lappend(nlstate->nl_OuterJoinKeys, exprstate);
+        }
+        nlstate->js.joinqual = (List*)ExecInitExpr((Expr*)node->join.joinqual, (PlanState*)nlstate);
+    } else {
         nlstate->js.joinqual = (List*)ExecInitExprByRecursion((Expr*)node->join.joinqual, (PlanState*)nlstate);
+    }
+#else
+        nlstate->js.joinqual = (List*)ExecInitExprByRecursion((Expr*)node->join.joinqual, (PlanState*)nlstate);
+#endif
     }
     Assert(node->join.nulleqqual == NIL);
 
@@ -396,6 +561,9 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
         case JOIN_LEFT:
         case JOIN_ANTI:
         case JOIN_LEFT_ANTI_FULL:
+#ifdef USE_SPQ
+        case JOIN_LASJ_NOTIN:
+#endif
             nlstate->nl_NullInnerTupleSlot = ExecInitNullTupleSlot(estate, ExecGetResultType(innerPlanState(nlstate)));
             break;
         default:
@@ -486,4 +654,7 @@ void ExecReScanNestLoop(NestLoopState* node)
     node->js.ps.ps_vec_TupFromTlist = false;
     node->nl_NeedNewOuter = true;
     node->nl_MatchedOuter = false;
+#ifdef USE_SPQ
+    node->nl_innerSideScanned = false;
+#endif
 }

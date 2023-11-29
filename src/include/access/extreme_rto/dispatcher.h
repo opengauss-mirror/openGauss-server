@@ -182,6 +182,7 @@ extern THR_LOCAL RecordBufferState *g_recordbuffer;
 
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
+const static uint64 STOP_WORKERS_WAIT_COUNT = 0x13FFFFFFFF;
 extern RedoItem g_redoEndMark;
 extern RedoItem g_terminateMark;
 extern uint32 g_readManagerTriggerFlag;

@@ -66,7 +66,7 @@ static inline void ReleaseNodeVMBuffer(IndexOnlyScanState* node)
  *		ExecGPIGetNextPartRelation
  * ----------------------------------------------------------------
  */
-bool ExecGPIGetNextPartRelation(IndexOnlyScanState* node, IndexScanDesc indexScan)
+inline bool ExecGPIGetNextPartRelation(IndexOnlyScanState* node, IndexScanDesc indexScan)
 {
     if (IndexScanNeedSwitchPartRel(indexScan)) {
         /* Release VM buffer pin, if any. */
@@ -334,7 +334,7 @@ static bool IndexOnlyRecheck(IndexOnlyScanState* node, TupleTableSlot* slot)
  *		ExecIndexOnlyScan(node)
  * ----------------------------------------------------------------
  */
-static TupleTableSlot* ExecIndexOnlyScan(PlanState* state)
+static inline TupleTableSlot* ExecIndexOnlyScan(PlanState* state)
 {
     IndexOnlyScanState* node = castNode(IndexOnlyScanState, state);
     /*

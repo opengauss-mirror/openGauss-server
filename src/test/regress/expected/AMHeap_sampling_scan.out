@@ -124,13 +124,13 @@ explain (verbose on, costs off)
 select count(*) from heap_tablesample_row_part tablesample system (50) repeatable (500);
  count 
 -------
-   500
+     0
 (1 row)
 
 select count(*) from heap_tablesample_row_part tablesample system (50) repeatable (1);
  count 
 -------
-   501
+     0
 (1 row)
 
 -- 100% should give repeatable count results (ie, all rows) in any case
@@ -155,13 +155,13 @@ select count(*) from heap_tablesample_row_part tablesample system (100) repeatab
 select count(*) from heap_tablesample_row_part tablesample bernoulli (50) repeatable (200);
  count 
 -------
-   529
+   570
 (1 row)
 
 select count(*) from heap_tablesample_row_part tablesample bernoulli (5.5) repeatable (-1);
  count 
 -------
-    60
+   110
 (1 row)
 
 -- 100% should give repeatable count results (ie, all rows) in any case

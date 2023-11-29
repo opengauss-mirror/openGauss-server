@@ -24,7 +24,9 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "access/hio.h"
+#include "access/multi_redo_api.h"
 #include "access/nbtree.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
@@ -506,10 +508,21 @@ void _bt_checkbuffer_valid(Relation rel, Buffer buf)
     }
 }
 
+void exrto_dump_btree_info(Relation rel, BlockNumber blkno, BlockNumber par_blkno)
+{
+    if (RelationIsUstoreIndex(rel)) {
+        extreme_rto_standby_read::dump_error_all_info(rel->rd_node, 0, blkno);
+        extreme_rto_standby_read::dump_error_all_info(rel->rd_node, 0, par_blkno);
+    } else {
+        extreme_rto_standby_read::dump_error_all_info(rel->rd_node, 0, blkno);
+        extreme_rto_standby_read::dump_error_all_info(rel->rd_node, 0, par_blkno);
+    }
+}
+
 /*
  *	_bt_checkpage() -- Verify that a freshly-read page looks sane.
  */
-void _bt_checkpage(Relation rel, Buffer buf)
+void _bt_checkpage(Relation rel, Buffer buf, BlockNumber par_blkno)
 {
     Page page = BufferGetPage(buf);
     /*
@@ -518,11 +531,16 @@ void _bt_checkpage(Relation rel, Buffer buf)
      * page header or is all-zero.	We have to defend against the all-zero
      * case, however.
      */
-    if (PageIsNew(page))
-        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("index \"%s\" contains unexpected zero page at block %u", RelationGetRelationName(rel),
-                               BufferGetBlockNumber(buf)),
-                        errhint("Please REINDEX it.")));
+    if (PageIsNew(page)) {
+        PageHeader phdr = (PageHeader)page;
+        exrto_dump_btree_info(rel, BufferGetBlockNumber(buf), par_blkno);
+        ereport(ERROR,
+                (errcode(ERRCODE_INDEX_CORRUPTED),
+                 errmsg("index \"%s\" oid: %u contains unexpected zero page at block %u, pd_upper %d pd_lower %d",
+                        RelationGetRelationName(rel), rel->rd_id, BufferGetBlockNumber(buf), phdr->pd_upper,
+                        phdr->pd_lower),
+                 errhint("Please REINDEX it.")));
+    }
 
     /*
      * Additionally check that the special area looks sane.
@@ -713,7 +731,7 @@ loop:
  * is when the target page is the same one already in the buffer.
  */
 FORCE_INLINE
-Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access)
+Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access, BlockNumber par_blkno)
 {
     Buffer buf;
 
@@ -723,7 +741,7 @@ Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access
     buf = ReleaseAndReadBuffer(obuf, rel, blkno);
     _bt_checkbuffer_valid(rel, buf);
     LockBuffer(buf, access);
-    _bt_checkpage(rel, buf);
+    _bt_checkpage(rel, buf, par_blkno);
     return buf;
 }
 

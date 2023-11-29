@@ -43,6 +43,12 @@ hacheck_multi_single_mot: all
 hacheck_multi_single_shared_storage: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single_shared_storage.sh 2 $(PART)
 
+hacheck_single_standby_read: all
+	export prefix=$(prefix) && sh $(CURDIR)/run_ha_single_standby_read.sh
+
+hacheck_multi_uwal: all
+	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_uwal.sh 2
+
 ##
 ## Clean up
 ##

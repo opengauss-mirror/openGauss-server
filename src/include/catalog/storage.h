@@ -27,8 +27,8 @@ extern void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ow
     Relation rel = NULL);
 extern void RelationDropStorage(Relation rel, bool isDfsTruncate = false);
 extern void RelationPreserveStorage(RelFileNode rnode, bool atCommit);
-extern void RelationTruncate(Relation rel, BlockNumber nblocks);
-extern void PartitionTruncate(Relation parent, Partition  part, BlockNumber nblocks);
+extern void RelationTruncate(Relation rel, BlockNumber nblocks, TransactionId latest_removed_xid = InvalidTransactionId);
+extern void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks, TransactionId latest_removed_xid = InvalidTransactionId);
 extern void PartitionDropStorage(Relation rel, Partition part);
 extern void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid);
 extern void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ AttrNumber attrnum, _in_ BackendId backend,

@@ -115,6 +115,9 @@ typedef struct StreamState {
     int64* spill_size;
     void* sortstate;      /* merge sort for stream */
     bool receive_message; /* The stream consumer has receive message from then producer */
+#ifdef USE_SPQ
+    bool skip_direct_distribute_result;
+#endif
 } StreamState;
 
 extern StreamState* ExecInitStream(Stream* node, EState* estate, int eflags);

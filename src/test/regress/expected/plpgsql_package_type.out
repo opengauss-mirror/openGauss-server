@@ -1403,8 +1403,6 @@ va t1;
 procedure p1(vb pck2.va%type);
 end pck2;
 /
-ERROR:  not support ref table of variable as procedure argument type
-CONTEXT:  compilation of PL/pgSQL package near line 3
 create or replace package pck2 as
 type t1 is table of int index by varchar2;
 va t1;
@@ -1478,6 +1476,8 @@ ERROR:  package plpgsql_packagetype1.p_test1 does not exist
 -- clean up --
 drop schema if exists plpgsql_packagetype2 cascade;
 drop schema if exists plpgsql_packagetype1 cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 4 other objects
+--?.*
+drop cascades to function plpgsql_packagetype1.p1(integer[])
 --?.*
 drop cascades to function plpgsql_packagetype1.p1()

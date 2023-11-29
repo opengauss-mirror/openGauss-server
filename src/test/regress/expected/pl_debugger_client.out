@@ -75,7 +75,7 @@ begin
     insert into tmp_holder select breakpointno || ':' || lineno || ':' || query || ':' || enable from dbe_pldebugger.info_breakpoints();
 end;
 $$;
-WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 0)"
 PL/pgSQL function inline_code_block line 6 at SQL statement
 WARNING:  the given line number does not name a valid breakpoint. Please use dbe_pldebugger.info_code for valid breakpoint candidates
@@ -87,7 +87,7 @@ PL/pgSQL function inline_code_block line 9 at SQL statement
 WARNING:  the given line number already contains a valid breakpoint. Please se dbe_pldebugger.info_breakpoints for detail.
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 15)"
 PL/pgSQL function inline_code_block line 11 at SQL statement
-WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 50)"
 PL/pgSQL function inline_code_block line 19 at SQL statement
 select * from tmp_holder;
@@ -662,52 +662,10 @@ select * from tmp_holder;
 (6 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
-  funcname  | lineno |     query     
-------------+--------+---------------
- test_debug |     15 |     cnt := 0;
-(1 row)
-
-select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |           value            | package_name | isconst 
------------+-----------+----------------------------+--------------+---------
- x         | int4      | 1                          |              | f
- sql_stmt  | varchar   | <UNKNOWN>                  |              | f
- test.a    | int4      | 0                          |              | f
- test.b    | varchar   | <UNKNOWN>                  |              | f
- test.c    | timestamp | Sat Jan 01 00:00:00 2000   |              | f
- r         | Row       | [ (null), (null), (null),] |              | f
- rec       | Rec       | <UNKNOWN>                  |              | f
- b_tmp     | text      | <UNKNOWN>                  |              | f
- cnt       | int4      | 0                          |              | f
- a_tmp     | int4      | 0                          |              | f
- cur       | refcursor | {name:                    +|              | f
-           |           | is_open:        f         +|              | 
-           |           | found:  f                 +|              | 
-           |           | not_found:      f         +|              | 
-           |           | row_count:      0}         |              | 
- n_tmp     | numeric   | <UNKNOWN>                  |              | f
- t_tmp     | tsquery   | <UNKNOWN>                  |              | f
- criterion | int4      | 0                          |              | f
- cur_arg   | refcursor | {name:                    +|              | f
-           |           | is_open:        f         +|              | 
-           |           | found:  f                 +|              | 
-           |           | not_found:      f         +|              | 
-           |           | row_count:      0}         |              | 
- index_1   | int4      | 0                          |              | f
-(16 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
   funcname  | lineno |                     query                      
 ------------+--------+------------------------------------------------
  test_debug |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
 (1 row)
-
-select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
- frameno |  funcname   | lineno |                     query                      
----------+-------------+--------+------------------------------------------------
-       0 | test_debug  |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
-       1 | test_debug4 |      7 |             call test_debug(a);
-(2 rows)
 
 select * from dbe_pldebugger.info_locals();
   varname  |  vartype  |                         value                          | package_name | isconst 
@@ -860,12 +818,6 @@ begin
 end;
 $$;
 select funcname, lineno, query from dbe_pldebugger.finish();
-  funcname  | lineno |     query     
-------------+--------+---------------
- test_debug |     15 |     cnt := 0;
-(1 row)
-
-select funcname, lineno, query from dbe_pldebugger.finish();
   funcname  | lineno |                     query                      
 ------------+--------+------------------------------------------------
  test_debug |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
@@ -957,20 +909,6 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 (2 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
-       funcname       | lineno |              query              
-----------------------+--------+---------------------------------
- test_debug_recursive |      3 |     return query select ct, pr;
-(1 row)
-
-select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
- frameno |       funcname       | lineno |                                     query                                     
----------+----------------------+--------+-------------------------------------------------------------------------------
-       0 | test_debug_recursive |      3 |     return query select ct, pr;
-       1 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
-       2 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
-(3 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
        funcname       | lineno |                                     query                                     
 ----------------------+--------+-------------------------------------------------------------------------------
  test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
@@ -985,15 +923,15 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 (3 rows)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
-       funcname       | lineno |              query              
-----------------------+--------+---------------------------------
- test_debug_recursive |      3 |     return query select ct, pr;
+       funcname       | lineno |                                     query                                     
+----------------------+--------+-------------------------------------------------------------------------------
+ test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
 (1 row)
 
 select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
-       0 | test_debug_recursive |      3 |     return query select ct, pr;
+       0 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        1 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        2 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        3 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
@@ -1509,4 +1447,133 @@ SELECT * FROM DBE_PLDEBUGGER.continue();
 ---------+-----------+--------+----------------------
 --?.*
 (1 row)
+
+--test anonymous
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+delete from tmp_holder;
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+                                                      attach                                                      
+------------------------------------------------------------------------------------------------------------------
+ (0,"""anonymous block""",6,"    select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';")
+(1 row)
+
+select dbe_pldebugger.info_code(0);
+                                         info_code                                          
+--------------------------------------------------------------------------------------------
+ (6,"    select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';",t)
+ (7,"    perform * from pg_proc where oid = funcoid;",t)
+ (8,"    k = test_increment(3);",t)
+ (9,"    insert into test_anonymous values(k, 'test');",t)
+ (10,"    k = abs(-k);",t)
+ (11,"    insert into test_anonymous values(k, 'test2');",t)
+ (,,f)
+(7 rows)
+
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 0); -- negative
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 6); -- headerline
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 6); -- already
+WARNING:  the given line number already contains a valid breakpoint. Please se dbe_pldebugger.info_breakpoints for detail.
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 8); -- ok
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(0, 13); -- negative
+WARNING:  lineno must be within the range of [1, MaxLineNumber]. Please use dbe_pldebugger.info_code for valid breakpoint candidates
+insert into tmp_holder select * from dbe_pldebugger.disable_breakpoint(1); -- ok
+insert into tmp_holder select * from dbe_pldebugger.enable_breakpoint(1); -- ok
+insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(0);  -- ok
+select funcname, lineno, query from dbe_pldebugger.next();
+     funcname      | lineno |                        query                        
+-------------------+--------+-----------------------------------------------------
+ "anonymous block" |      7 |         perform * from pg_proc where oid = funcoid;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.continue();
+     funcname      | lineno |           query            
+-------------------+--------+----------------------------
+ "anonymous block" |      8 |     k = test_increment(3);
+(1 row)
+
+insert into tmp_holder select * from dbe_pldebugger.add_breakpoint((select oid from pg_proc where proname='test_increment'), 6); -- ok
+select funcname, lineno, query from dbe_pldebugger.continue();
+    funcname    | lineno |      query      
+----------------+--------+-----------------
+ test_increment |      6 |     y := y * 2;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.step();
+    funcname    | lineno |     query     
+----------------+--------+---------------
+ test_increment |      7 |     RETURN y;
+(1 row)
+
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
+ frameno |     funcname      | lineno |           query            
+---------+-------------------+--------+----------------------------
+       0 | test_increment    |      7 |     RETURN y;
+       1 | "anonymous block" |      8 |     k = test_increment(3);
+(2 rows)
+
+select * from dbe_pldebugger.info_locals();
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ x       | int4    | 4     |              | f
+ y       | int4    | 0     |              | f
+(2 rows)
+
+select funcname, lineno, query from dbe_pldebugger.finish();
+     funcname      | lineno |                       query                       
+-------------------+--------+---------------------------------------------------
+ "anonymous block" |      9 |     insert into test_anonymous values(k, 'test');
+(1 row)
+
+select * from dbe_pldebugger.print_var('k');
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ k       | int4    | 0     |              | f
+(1 row)
+
+select * from dbe_pldebugger.continue();
+ funcoid |     funcname      | lineno |        query         
+---------+-------------------+--------+----------------------
+       0 | "anonymous block" |      0 | [EXECUTION FINISHED]
+(1 row)
+
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from dbe_pldebugger.continue();
+ERROR:  must attach a execute func before execute dbe_pldebugger.continue
+DETAIL:  execute func not attached before execute dbe_pldebugger.continue
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+                                                      attach                                                      
+------------------------------------------------------------------------------------------------------------------
+ (0,"""anonymous block""",6,"    select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';")
+(1 row)
+
+select * from dbe_pldebugger.continue();
+ funcoid |     funcname      | lineno |        query         
+---------+-------------------+--------+----------------------
+       0 | "anonymous block" |      0 | [EXECUTION FINISHED]
+(1 row)
+
+select * from tmp_holder;
+ res  
+------
+ -1
+ 0
+ -1
+ 1
+ -1
+ true
+ true
+ true
+ 2
+(9 rows)
 

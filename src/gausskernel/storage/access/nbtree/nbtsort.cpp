@@ -245,6 +245,16 @@ void _bt_leafbuild(BTSpool *btspool, BTSpool *btspool2)
     _bt_load(&wstate, btspool, btspool2);
 }
 
+#ifdef USE_SPQ
+/*
+ * Read tuples and load them into btree
+ */
+void spq_load(BTWriteState wstate)
+{
+    _bt_load(&wstate, NULL, NULL);
+}
+#endif
+
 /*
  * Internal routines.
  *
@@ -947,6 +957,17 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 
         pfree(dstate);
     } else {
+#ifdef USE_SPQ
+        if (enable_spq_btbuild(wstate->index)) {
+            while ((itup = spq_consume(wstate->spqleader)) != NULL) {
+                /* When we see first tuple, create first index page */
+                if (state == NULL)
+                    state = _bt_pagestate(wstate, 0);
+
+                _bt_buildadd(wstate, state, itup, 0);
+            }
+        } else {
+#endif
         /* merge is unnecessary */
         while ((itup = tuplesort_getindextuple(btspool->sortstate, true)) != NULL) {
             /* When we see first tuple, create first index page */
@@ -955,6 +976,9 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 
             _bt_buildadd(wstate, state, itup, 0);
         }
+#ifdef USE_SPQ
+        }
+#endif
     }
 
     /* Close down final pages and write the metapage */

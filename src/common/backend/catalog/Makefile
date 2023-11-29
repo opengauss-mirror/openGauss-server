@@ -24,7 +24,8 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
        pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
-       gs_db_privilege.o pg_publication.o pg_subscription.o gs_utf8_collation.o
+       gs_db_privilege.o pg_publication.o pg_subscription.o gs_utf8_collation.o gs_collation.o gs_gbk_collation.o\
+       gs_gb18030_collation.o
 
 BKIFILES = postgres.bki postgres.description postgres.shdescription
 
@@ -37,7 +38,7 @@ all: $(BKIFILES) schemapg.h
 # indexing.h had better be last, and toasting.h just before it.
 
 POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
-	gs_package.h pg_proc.h pg_type.h pg_attribute.h pg_class.h pg_partition.h\
+	pg_proc.h pg_type.h pg_attribute.h pg_class.h pg_partition.h\
 	pg_attrdef.h pg_constraint.h pg_inherits.h pg_index.h pg_operator.data \
 	pg_opfamily.h pg_opclass.h pg_am.h pg_amop.data pg_amproc.h \
 	pg_language.h pg_largeobject_metadata.h pg_largeobject.h pg_aggregate.h \
@@ -58,7 +59,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_job.h gs_asp.h pg_job_proc.h pg_extension_data_source.h pg_statistic_ext.h pg_object.h  pg_synonym.h \
 	toasting.h indexing.h gs_obsscaninfo.h pg_directory.h pg_hashbucket.h gs_global_chain.h gs_global_config.h\
 	pg_streaming_stream.h pg_streaming_cont_query.h pg_streaming_reaper_status.h gs_matview.h\
-	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h gs_model.h\
+	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h gs_dependencies.h gs_dependencies_obj.h gs_package.h gs_model.h\
 	pg_recyclebin.h pg_snapshot.h gs_job_argument.h gs_job_attribute.h pg_uid.h gs_db_privilege.h\
 	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h gs_sql_patch.h\
 	pg_subscription_rel.h \

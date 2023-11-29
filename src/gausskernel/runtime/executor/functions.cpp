@@ -589,6 +589,7 @@ static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
     ListCell* lc = NULL;
     Datum tmp;
     bool is_null = false;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
     /*
      * Create memory context that holds all the SQLFunctionCache data.	It
@@ -704,6 +705,7 @@ static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
     foreach (lc, raw_parsetree_list) {
         Node* parsetree = (Node*)lfirst(lc);
         List* queryTree_sublist = NIL;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
 
         queryTree_sublist =
             pg_analyze_and_rewrite_params(parsetree, fcache->src, (ParserSetupHook)sql_fn_parser_setup, fcache->pinfo);
@@ -751,6 +753,7 @@ static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
     /* Mark fcache with time of creation to show it's valid */
     fcache->lxid = t_thrd.proc->lxid;
     fcache->subxid = GetCurrentSubTransactionId();
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     ReleaseSysCache(procedure_tuple);
 
@@ -1052,6 +1055,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     bool old_running_in_fmgr = t_thrd.codegen_cxt.g_runningInFmgr;
     t_thrd.codegen_cxt.g_runningInFmgr = true;
     bool need_snapshot = !ActiveSnapshotSet();
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
 #ifdef ENABLE_MULTIPLE_NODES
     bool outer_is_stream = false;
@@ -1211,6 +1215,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
             pushed_snapshot = true;
         }
 
+        t_thrd.postgres_cxt.cur_command_tag = es->qd->operation == CMD_SELECT ? T_SelectStmt : T_CreateStmt;
         completed = postquel_getnext(es, fcache);
         /*
          * If we ran the command to completion, we can shut it down now. Any
@@ -1411,6 +1416,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     u_sess->opt_cxt.query_dop = outerDop;
 #endif
     t_thrd.codegen_cxt.g_runningInFmgr = old_running_in_fmgr;
+    t_thrd.postgres_cxt.cur_command_tag  = old_node_tag;
     return result;
 }
 

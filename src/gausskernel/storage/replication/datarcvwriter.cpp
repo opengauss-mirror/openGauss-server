@@ -955,7 +955,7 @@ retry:
             } else if (rllen < 0) {
                 pfree(dbpath);
                 dbpath = NULL;
-                ereport(ERROR, (errcode_for_file_access(), errmsg("invalid tablespace link %s: %m", tbpath)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("invalid tablespace link %s: %s", tbpath, TRANSLATE_ERRNO)));
             } else if (rllen >= (int)sizeof(linkpath)) {
                 pfree(dbpath);
                 dbpath = NULL;
@@ -965,7 +965,7 @@ retry:
                 linkpath[rllen] = '\0';
                 if (stat(linkpath, &st) < 0 || !S_ISDIR(st.st_mode))
                     ereport(PANIC, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                                    errmsg("invalid tablespace directory %s: %m", tbpath)));
+                                    errmsg("invalid tablespace directory %s: %s", tbpath, TRANSLATE_ERRNO)));
                 goto invalid_handle;
             }
 #else
@@ -1081,7 +1081,7 @@ static void DummyStandbyDataRcvWrite(char *buf, uint32 nbytes)
             errno = ENOSPC;
         }
         ereport(PANIC, (errcode_for_file_access(),
-                        errmsg("could not write to data file %s buffer len %u, length %u: %m", path, nbytes, nbytes)));
+                        errmsg("could not write to data file %s buffer len %u, length %u: %s", path, nbytes, nbytes, TRANSLATE_ERRNO)));
     }
 
     errno = 0;

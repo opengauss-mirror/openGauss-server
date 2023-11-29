@@ -1996,7 +1996,10 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				Oid argtype = exprType((Node*)pkey->arg);
 				if (argtype == BYTEAOID || argtype == RAWOID || argtype == BLOBOID) {
                 	scratch.opcode = EEOP_PREFIX_BTYEA;
+					scratch.d.prefix_key.encoding = PG_INVALID_ENCODING;
             	} else {
+					Oid collation = exprCollation((Node*)pkey->arg);
+                	scratch.d.prefix_key.encoding = get_valid_charset_by_collation(collation);
                 	scratch.opcode = EEOP_PREFIX_TEXT;
             	}
 				ExecInitExprRec(pkey->arg, state, resv, resnull, node);

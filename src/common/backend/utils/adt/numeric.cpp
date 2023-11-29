@@ -216,7 +216,6 @@ static char* get_str_from_var_sci(NumericVar* var, int rscale);
 static void apply_typmod(NumericVar* var, int32 typmod);
 
 static int32 numericvar_to_int32(const NumericVar* var, bool can_ignore = false);
-static double numeric_to_double_no_overflow(Numeric num);
 static double numericvar_to_double_no_overflow(NumericVar* var);
 
 static Datum numeric_abbrev_convert(Datum original_datum, SortSupport ssup);
@@ -5397,7 +5396,7 @@ void int64_to_numericvar(int64 val, NumericVar* var)
 /*
  * Convert numeric to float8; if out of range, return +/- HUGE_VAL
  */
-static double numeric_to_double_no_overflow(Numeric num)
+double numeric_to_double_no_overflow(Numeric num)
 {
     char* tmp = NULL;
     double val;
@@ -7948,6 +7947,45 @@ Datum numeric_interval(PG_FUNCTION_ARGS)
 
     result = CHECK_RETNULL_CALL3(
         interval_in, collation, CStringGetDatum(str.data), ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
+    pfree_ext(str.data);
+    CHECK_RETNULL_RETURN_DATUM(result);
+}
+
+/* Convert numeric to interval by typmod */
+Datum numeric_to_interval(PG_FUNCTION_ARGS)
+{
+    Datum num = PG_GETARG_DATUM(0);
+    int32 typmod = PG_GETARG_INT32(1);
+    Oid collation = PG_GET_COLLATION();
+    Datum result;
+    StringInfoData str;
+    errno_t errorno = 0;
+    int str_len;
+    char* buf = NULL;
+    char* cp = NULL;
+
+    CHECK_RETNULL_INIT();
+
+    initStringInfo(&str);
+    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out_with_zero, collation, num)));
+    cp = str.data;
+
+    if (*cp == '.' || (*cp == '-' && *(cp + 1) == '.')) {
+        str_len = str.len + 2;
+        buf = (char*)palloc0(str_len);
+        if (*cp == '.') {
+            errorno = snprintf_s(buf, str_len, str_len - 1, "0.%s", cp + 1);
+        } else {
+            errorno = snprintf_s(buf, str_len, str_len - 1, "-0.%s", cp + 2);
+        }
+        securec_check_ss(errorno, "\0", "\0");
+        resetStringInfo(&str);
+        appendStringInfoString(&str, buf);
+        pfree_ext(buf);
+    }
+
+    result = CHECK_RETNULL_CALL3(
+        interval_in, collation, CStringGetDatum(str.data), ObjectIdGetDatum(InvalidOid), Int32GetDatum(typmod));
     pfree_ext(str.data);
     CHECK_RETNULL_RETURN_DATUM(result);
 }

@@ -315,7 +315,7 @@ extern Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query);
 extern bool pgxc_node_receive(const int conn_count, PGXCNodeHandle** connections,
                               struct timeval* timeout, bool ignoreTimeoutWarning = false);
 extern bool datanode_receive_from_physic_conn(
-const int conn_count, PGXCNodeHandle** connections, struct timeval* timeout, bool ignoreTimeoutWarning = false);
+const int conn_count, PGXCNodeHandle** connections, struct timeval* timeout);
 extern bool datanode_receive_from_logic_conn(
 const int conn_count, PGXCNodeHandle** connections, StreamNetCtl* ctl, int time_out);
 extern bool pgxc_node_validate(PGXCNodeHandle *conn);

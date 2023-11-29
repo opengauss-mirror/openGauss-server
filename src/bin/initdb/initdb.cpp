@@ -173,6 +173,7 @@ static char* xlog_dir = "";
 static bool security = false;
 static char* dbcompatibility = "";
 static char* new_xlog_file_path = "";
+static bool ss_enable_dorado = false;
 
 #ifdef PGXC
 /* Name of the PGXC node initialized */
@@ -1592,7 +1593,17 @@ static void setup_config(void)
         securec_check_c(nRet, "\0", "\0");
         conflines = replace_token(conflines, "#ss_enable_dss = off", repltok);
 
+        nRet = strcpy_s(repltok, sizeof(repltok), "enable_segment = on");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#enable_segment = off", repltok);
+
         conflines = ss_addnodeparmater(conflines);
+    }
+
+    if (ss_enable_dorado) {
+        nRet = strcpy_s(repltok, sizeof(repltok), "ss_enable_dorado = on");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#ss_enable_dorado = off", repltok);
     }
 
     nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
@@ -3587,7 +3598,8 @@ static bool check_locale_encoding(const char* locale_encoding, int user_enc)
 #ifdef WIN32
             user_enc == PG_UTF8 ||
 #endif
-            user_enc == PG_SQL_ASCII)) {
+            user_enc == PG_SQL_ASCII ||
+            (user_enc == PG_GB18030_2022 && locale_enc == PG_GB18030))) {
         write_stderr(_("%s: encoding mismatch\n"), progname);
         write_stderr(_("The encoding you selected (%s) and the encoding that the\n"
                        "selected locale uses (%s) do not match.  This would lead to\n"
@@ -3976,6 +3988,7 @@ int main(int argc, char* argv[])
         {"socketpath", required_argument, NULL, 16},
         {"enable-dss", no_argument, NULL, 17},
         {"dms_url", required_argument, NULL, 18},
+        {"enable-ss-dorado", no_argument, NULL, 19},
         {NULL, 0, NULL, 0}};
 
     int c, i, ret;
@@ -4290,6 +4303,10 @@ int main(int argc, char* argv[])
                 FREE_NOT_STATIC_ZERO_STRING(ss_nodedatainfo);
                 check_input_spec_char(optarg);
                 ss_nodedatainfo = xstrdup(optarg);
+                break;
+            case 19:
+                ss_enable_dorado = true;
+                printf(_("Enable ss dorado replication.\n"));
                 break;
 #endif
             default:
@@ -4663,7 +4680,7 @@ int main(int argc, char* argv[])
 
     // dss device init
     if (dss_device_init(socketpath, enable_dss) != DSS_SUCCESS) {
-        write_stderr(_("failed to init dss device.\n"));
+        write_stderr(_("failed to init dss device, check logs under $DSS_HOME for more information.\n"));
         exit_nicely();
     }
 
@@ -4787,7 +4804,7 @@ int main(int argc, char* argv[])
     if (ss_issharedstorage) {
         int ret = ss_check_shareddir(vgdata, ss_nodeid, &ss_need_mkclusterdir);
         if (ret != 0) {
-            write_stderr("ERROR: %s: shared storage initdb failed because of the following error:\n");
+            write_stderr("ERROR: %s: shared storage initdb failed because of the following error:\n", progname);
             if (ret & ERROR_INSTANCEDIR_EXISTS) {
                 write_stderr(_("ERROR: [*]shared storage files of instance %d in the directory \"%s\" already exists\n"), ss_nodeid, vgdata);
                 write_stderr(_("If you want to create a new shared storage instance, either remove shared storage "
@@ -4915,7 +4932,8 @@ int main(int argc, char* argv[])
     }
     
     if (enable_dss && ss_issharedstorage) {
-        ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir);
+        ss_need_mkspecialdir = !ss_check_specialdir(vgdata);
+        ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir, ss_need_mkspecialdir);
     } else {
         /* Create required subdirectories */
         printf(_("creating subdirectories ... in ordinary occasion"));

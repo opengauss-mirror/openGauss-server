@@ -27,6 +27,7 @@
 #include "fmgr/fmgr_core.h"
 #include "lib/stringinfo.h"
 #include "access/tupdesc.h"
+#include "nodes/primnodes.h"
 
 #ifndef FRONTEND_PARSER
 
@@ -168,6 +169,7 @@ typedef struct FunctionCallInfoData {
     RefcusorInfoData refcursor_data;
     UDFInfoType udfInfo;
     StartWithFuncEvalInfo  swinfo;
+    CoercionContext ccontext;
 
     FunctionCallInfoData()
     {
@@ -182,6 +184,7 @@ typedef struct FunctionCallInfoData {
         nargs = 0;
         isnull = false;
         can_ignore = false;
+        ccontext = COERCION_UNKNOWN;
     }
 } FunctionCallInfoData;
 
@@ -565,7 +568,7 @@ typedef struct {
 } CFunInfo;
 
 /* Special cases for convenient invocation of datatype I/O functions. */
-extern Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore = false);
+extern Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore = false, Oid collation = InvalidOid);
 extern Datum InputFunctionCallForDateType(
     FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, char* date_time_fmt);
 extern Datum OidInputFunctionCall(Oid functionId, char* str, Oid typioparam, int32 typmod, bool can_ignore = false);
@@ -575,6 +578,7 @@ extern Datum ReceiveFunctionCall(FmgrInfo* flinfo, fmStringInfo buf, Oid typiopa
 extern Datum OidReceiveFunctionCall(Oid functionId, fmStringInfo buf, Oid typioparam, int32 typmod);
 extern bytea* SendFunctionCall(FmgrInfo* flinfo, Datum val);
 extern bytea* OidSendFunctionCall(Oid functionId, Datum val);
+extern Datum OidInputFunctionCallColl(Oid functionId, char* str, Oid typioparam, int32 typmod, Oid collation);
 
 /*
  * Routines in fmgr.c

@@ -79,7 +79,9 @@
 #include "access/tupconvert.h"
 #include "executor/node/nodeCtescan.h"
 #include "rewrite/rewriteHandler.h"
-
+#ifdef USE_SPQ
+#include "access/sysattr.h"
+#endif
 /*
  * Use computed-goto-based opcode dispatch when computed gotos are available.
  * But use a separate symbol so that it's easy to adjust locally in this file
@@ -304,6 +306,8 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
     bool is_have_huge_clob = false;
 	bool needResetErrMsg = op->d.func.needResetErrMsg;
+    int func_encoding = PG_INVALID_ENCODING;
+    int db_encoding = PG_INVALID_ENCODING;
 
 	if(!u_sess->SPI_cxt.is_allow_commit_rollback){
 		if(fcinfo->context){
@@ -330,6 +334,11 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
         fcinfo->swinfo.sw_econtext = (Node *)econtext;
         fcinfo->swinfo.sw_exprstate = (Node *)linitial(op->d.func.args);
         fcinfo->swinfo.sw_is_flt_frame = true;
+    }
+
+    if (DB_IS_CMPT(B_FORMAT)) {
+        func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+        db_encoding = GetDatabaseEncoding();
     }
 
     i = 0;
@@ -407,7 +416,13 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
     if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
         StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
         u_sess->instr_cxt.global_instr = NULL;
-        *op->resvalue = op->d.func.fn_addr(fcinfo);
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+        }
         u_sess->instr_cxt.global_instr = save_global_instr;
     } else {
         if (fcinfo->argTypes[0] == CLOBOID && fcinfo->argTypes[1] == CLOBOID && fcinfo->flinfo->fn_addr == textcat) {
@@ -420,8 +435,14 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
                 struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[1]));
                 fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
             }
-        }    
-        *op->resvalue = op->d.func.fn_addr(fcinfo);
+        }
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            *op->resvalue = op->d.func.fn_addr(fcinfo);
+        }
     }
 	*op->resnull = fcinfo->isnull;
 
@@ -710,9 +731,19 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			Assert(innerslot->tts_tuple != NULL);
 			Assert(innerslot->tts_tuple != &(innerslot->tts_minhdr));
 
+#ifdef USE_SPQ
+            if (attnum == RootSelfItemPointerAttributeNumber) {
+                Assert(innerslot->tts_tuple);
+                *op->resnull = false;
+                d = spq_get_root_ctid((HeapTuple)innerslot->tts_tuple, innerslot->tts_buffer, econtext);
+                *op->resvalue = d;
+            } else
+#endif
+            {
 			/* heap_getsysattr has sufficient defenses against bad attnums */
 			d = tableam_tslot_getattr(innerslot, attnum, op->resnull);
 			*op->resvalue = d;
+            }
 
 			EEO_NEXT();
 		}
@@ -725,10 +756,19 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			/* these asserts must match defenses in slot_getattr */
 			Assert(outerslot->tts_tuple != NULL);
 			Assert(outerslot->tts_tuple != &(outerslot->tts_minhdr));
-
-			/* heap_getsysattr has sufficient defenses against bad attnums */
-			d = tableam_tslot_getattr(outerslot, attnum, op->resnull);
-			*op->resvalue = d;
+#ifdef USE_SPQ
+            if (attnum == RootSelfItemPointerAttributeNumber) {
+                Assert(outerslot->tts_tuple);
+                *op->resnull = false;
+                d = spq_get_root_ctid((HeapTuple)outerslot->tts_tuple, outerslot->tts_buffer, econtext);
+                *op->resvalue = d;
+            } else
+#endif
+            {
+            /* heap_getsysattr has sufficient defenses against bad attnums */
+            d = tableam_tslot_getattr(outerslot, attnum, op->resnull);
+            *op->resvalue = d;
+            }
 
 			EEO_NEXT();
 		}
@@ -741,10 +781,19 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			/* these asserts must match defenses in slot_getattr */
 			Assert(scanslot->tts_tuple != NULL);
 			Assert(scanslot->tts_tuple != &(scanslot->tts_minhdr));
-
-			/* heap_getsysattr has sufficient defenses against bad attnums */
-			d = tableam_tslot_getattr(scanslot, attnum, op->resnull);
-			*op->resvalue = d;
+#ifdef USE_SPQ
+            if (attnum == RootSelfItemPointerAttributeNumber) {
+                Assert(scanslot->tts_tuple);
+                *op->resnull = false;
+                d = spq_get_root_ctid((HeapTuple)scanslot->tts_tuple, scanslot->tts_buffer, econtext);
+                *op->resvalue = d;
+            } else
+#endif
+            {
+            /* heap_getsysattr has sufficient defenses against bad attnums */
+            d = tableam_tslot_getattr(scanslot, attnum, op->resnull);
+            *op->resvalue = d;
+            }
 
 			EEO_NEXT();
 
@@ -871,12 +920,26 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
             FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
             Datum d;
 
+            int func_encoding = PG_INVALID_ENCODING;
+            int db_encoding = PG_INVALID_ENCODING;
+
+            if (DB_IS_CMPT(B_FORMAT)) {
+                func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+                db_encoding = GetDatabaseEncoding();
+            }
+
             if (econtext) {
                 fcinfo->can_ignore = econtext->can_ignore;
             }
 
             fcinfo->isnull = false;
-            d = op->d.func.fn_addr(fcinfo);
+            if (func_encoding != db_encoding) {
+                DB_ENCODING_SWITCH_TO(func_encoding);
+                d = op->d.func.fn_addr(fcinfo);
+                DB_ENCODING_SWITCH_BACK(db_encoding);
+            } else {
+                d = op->d.func.fn_addr(fcinfo);
+            }
             *op->resvalue = d;
             *op->resnull = fcinfo->isnull;
 
@@ -888,6 +951,14 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
             FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
             int nargs = op->d.func.nargs;
             Datum d;
+
+            int func_encoding = PG_INVALID_ENCODING;
+            int db_encoding = PG_INVALID_ENCODING;
+
+            if (DB_IS_CMPT(B_FORMAT)) {
+                func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+                db_encoding = GetDatabaseEncoding();
+            }
 
             if (econtext) {
                 fcinfo->can_ignore = econtext->can_ignore;
@@ -901,7 +972,13 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
                 }
             }
             fcinfo->isnull = false;
-            d = op->d.func.fn_addr(fcinfo);
+            if (func_encoding != db_encoding) {
+                DB_ENCODING_SWITCH_TO(func_encoding);
+                d = op->d.func.fn_addr(fcinfo);
+                DB_ENCODING_SWITCH_BACK(db_encoding);
+            } else {
+                d = op->d.func.fn_addr(fcinfo);
+            }
             *op->resvalue = d;
             *op->resnull = fcinfo->isnull;
 
@@ -2095,7 +2172,8 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
                 *op->resvalue = (Datum)0;
                 *op->resnull = true;
             } else {
-                *op->resvalue = PointerGetDatum(text_substring(*op->resvalue, 1, op->d.prefix_key.pkey->length, false));
+                *op->resvalue = PointerGetDatum(text_substring_with_encoding(
+                    *op->resvalue, 1, op->d.prefix_key.pkey->length, false, op->d.prefix_key.encoding));
                 *op->resnull = false;
             }
 

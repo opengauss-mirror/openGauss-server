@@ -2590,11 +2590,8 @@ bool has_not_null_constraint(ParseState* pstate,TargetEntry* tle)
         HeapTuple atttuple =
             SearchSysCacheCopy2(ATTNUM, ObjectIdGetDatum(reloid), Int16GetDatum(attno));
         if (!HeapTupleIsValid(atttuple)) {
-            Assert(0);
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for attribute %u of relation %hd", reloid, attno)));
-        }
+            return false;
+	}
         Form_pg_attribute attStruct = (Form_pg_attribute)GETSTRUCT(atttuple);
         bool attHasNotNull = attStruct->attnotnull;
         heap_freetuple_ext(atttuple);

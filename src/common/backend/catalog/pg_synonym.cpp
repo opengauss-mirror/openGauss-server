@@ -585,7 +585,7 @@ void GetSynonymAndSchemaName(Oid synOid, char** synName_p, char** synSchema_p)
     HeapTuple synTuple = SearchSysCache1(SYNOID, ObjectIdGetDatum(synOid));
     if (HeapTupleIsValid(synTuple)) {
         Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(synTuple);
-        *synName_p = NameStr(synForm->synname);
+        *synName_p = pstrdup(NameStr(synForm->synname));
         *synSchema_p = get_namespace_name(synForm->synnamespace);
 
         ReleaseSysCache(synTuple);

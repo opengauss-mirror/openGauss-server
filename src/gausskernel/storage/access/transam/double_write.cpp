@@ -354,7 +354,7 @@ int64 dw_seek_file(int fd, int64 offset, int32 origin)
     int64 seek_offset = lseek64(fd, (off64_t)offset, origin);
     if (seek_offset == -1) {
         ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
-            errmsg("Seek dw file error, seek offset is %ld, origin is %d, error: %m", offset, origin)));
+            errmsg("Seek dw file error, seek offset is %ld, origin is %d, error: %s", offset, origin, TRANSLATE_ERRNO)));
     }
     return seek_offset;
 }
@@ -2102,7 +2102,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     XLogRecPtr page_lsn = InvalidXLogRecPtr;
     Block block;
     uint16 page_num;
-    uint32 buf_state;
+    uint64 buf_state;
     errno_t rc;
     *is_skipped = true;
 

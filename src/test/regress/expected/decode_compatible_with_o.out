@@ -4972,9 +4972,9 @@ select decode(c_reltime, c_nvarchar2, 'Conversion successfully!', 'Conversion fa
 (1 row)
 
 select decode(c_interval, c_text, 'Conversion successfully!', 'Conversion failed!') from tb_test;
-        case        
---------------------
- Conversion failed!
+           case           
+--------------------------
+ Conversion successfully!
 (1 row)
 
 select decode(c_reltime, c_text, 'Conversion successfully!', 'Conversion failed!') from tb_test;
@@ -5008,9 +5008,9 @@ select decode(c_nvarchar2, c_interval, 'Conversion successfully!', 'Conversion f
 (1 row)
 
 select decode(c_text, c_interval, 'Conversion successfully!', 'Conversion failed!') from tb_test;
-        case        
---------------------
- Conversion failed!
+           case           
+--------------------------
+ Conversion successfully!
 (1 row)
 
 select decode(c_reltime, c_interval, 'Conversion successfully!', 'Conversion failed!') from tb_test;

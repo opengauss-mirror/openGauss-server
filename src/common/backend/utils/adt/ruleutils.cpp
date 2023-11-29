@@ -276,6 +276,9 @@ static void get_basic_select_query(Query* query, deparse_context* context, Tuple
 static void get_target_list(Query* query, List* targetList, deparse_context* context, TupleDesc resultDesc);
 static void get_setop_query(Node* setOp, Query* query, deparse_context* context, TupleDesc resultDesc);
 static Node* get_rule_sortgroupclause(Index ref, List* tlist, bool force_colno, deparse_context* context);
+#ifdef USE_SPQ
+static Node* get_rule_sortgroupclause_spq(Index ref, bool force_colno, deparse_context* context);
+#endif
 static void get_rule_groupingset(GroupingSet* gset, List* targetlist, deparse_context* context);
 static void get_rule_orderby(List* orderList, List* targetList, bool force_colno, deparse_context* context);
 static void get_rule_windowclause(Query* query, deparse_context* context);
@@ -3193,9 +3196,11 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
     }
 
     if (tgfbody != NULL) {
-        char* tgordername = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgordername, tgrel->rd_att, &isnull));
-        char* tgorder = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgorder, tgrel->rd_att, &isnull));
-        if (tgorder != NULL)
+        bool isordernull = false;
+        bool isordernamenull = false;
+        char* tgordername = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgordername, tgrel->rd_att, &isordernamenull));
+        char* tgorder = DatumGetCString(fastgetattr(ht_trig, Anum_pg_trigger_tgorder, tgrel->rd_att, &isordernull));
+        if (!isordernull && !isordernamenull)
             appendStringInfo(&buf, "%s %s ", tgorder, tgordername);
 
         appendStringInfo(&buf, "%s;", tgfbody);
@@ -4564,7 +4569,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     int oldlen;
     char* p = NULL;
     bool isOraFunc = false;
-    NameData* pkgname = NULL;
+    char* pkgname = NULL;
     initStringInfo(&buf);
 
     /* Look up the function */
@@ -4610,7 +4615,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     if (proIsProcedure) {
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(",
-                                quote_qualified_identifier(nsp, pkgname->data, name));
+                                quote_qualified_identifier(nsp, pkgname, name));
         } else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s PROCEDURE %s(", 
                                 GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
@@ -4622,7 +4627,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     } else {
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
-                                quote_qualified_identifier(nsp, pkgname->data, name));
+                                quote_qualified_identifier(nsp, pkgname, name));
         }  else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
             appendStringInfo(&buf, "CREATE DEFINER = %s FUNCTION %s(", 
                                 GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
@@ -5204,6 +5209,10 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
      */
     if (IsA(ps, AppendState))
         dpns->outer_planstate = ((AppendState*)ps)->appendplans[0];
+#ifdef USE_SPQ
+    else if (IsA(ps, SequenceState))
+        dpns->outer_planstate = ((SequenceState *) ps)->subplans[1];
+#endif
     else if (IsA(ps, VecAppendState))
         dpns->outer_planstate = ((VecAppendState*)ps)->appendplans[0];
     else if (IsA(ps, MergeAppendState))
@@ -5231,6 +5240,10 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
      */
     if (IsA(ps, SubqueryScanState))
         dpns->inner_planstate = ((SubqueryScanState*)ps)->subplan;
+#ifdef USE_SPQ
+    else if (IsA(ps, SequenceState))
+        dpns->inner_planstate = ((SequenceState *) ps)->subplans[0];
+#endif
     else if (IsA(ps, VecSubqueryScanState))
         dpns->inner_planstate = ((VecSubqueryScanState*)ps)->subplan;
     else if (IsA(ps, CteScanState))
@@ -5276,6 +5289,10 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
     /* index_tlist is set only if it's an IndexOnlyScan */
     if (IsA(ps->plan, IndexOnlyScan))
         dpns->index_tlist = ((IndexOnlyScan*)ps->plan)->indextlist;
+#ifdef USE_SPQ
+    else if IsA(ps->plan, SpqIndexOnlyScan)
+        dpns->index_tlist = ((IndexOnlyScan*)ps->plan)->indextlist;
+#endif
     else if (IsA(ps->plan, ForeignScan))
         dpns->index_tlist = ((ForeignScan *)ps->plan)->fdw_scan_tlist;
     else if (IsA(ps->plan, ExtensiblePlan))
@@ -6677,7 +6694,23 @@ static void get_setop_query(Node* setOp, Query* query, deparse_context* context,
             if (context->qrw_phase)
                 get_setop_query(subquery->setOperations, subquery, context, resultDesc);
             else
-                Assert(false);
+                get_query_def(subquery,
+                    buf,
+                    context->namespaces,
+                    resultDesc,
+                    context->prettyFlags,
+                    context->wrapColumn,
+                    context->indentLevel
+#ifdef PGXC
+                    ,
+                    context->finalise_aggs,
+                    context->sortgroup_colno,
+                    context->parser_arg
+#endif /* PGXC */
+                    ,
+                    context->qrw_phase,
+                    context->viewdef,
+                    context->is_fqs);
         }
 
         if (need_paren)
@@ -6774,6 +6807,59 @@ static Node* get_rule_sortgroupclause(Index ref, List* tlist, bool force_colno, 
 
     return expr;
 }
+#ifdef USE_SPQ
+/*
+ * Display a sort/group clause.
+ *
+ * Also returns the expression tree, so caller need not find it again.
+ */
+
+static Node* get_rule_sortgroupclause_spq(Index ref, bool force_colno, deparse_context* context)
+{
+    StringInfo buf = context->buf;
+    TargetEntry* tle = NULL;
+    Node* expr = NULL;
+    List* tlist;
+
+    deparse_namespace* dpns_spq = (deparse_namespace*)linitial(context->namespaces);
+    PlanState* ps = dpns_spq->planstate;
+    WindowAgg* node = NULL;
+    node = (WindowAgg*)ps->plan;
+    tlist = node->plan.lefttree->targetlist;
+
+    if (tlist == NULL){
+        return expr;
+    }
+
+    tle = get_sortgroupref_tle_spq(ref, tlist);
+    expr = (Node*)tle->expr;
+
+    deparse_namespace* dpns = NULL;
+    deparse_namespace save_dpns;
+
+    dpns = (deparse_namespace*)list_nth(context->namespaces, ((Var*)expr)->varlevelsup);
+    push_child_plan(dpns, dpns->outer_planstate, &save_dpns);
+
+
+    /*
+     * Use column-number form if requested by caller.  Otherwise, if
+     * expression is a constant, force it to be dumped with an explicit cast
+     * as decoration --- this is because a simple integer constant is
+     * ambiguous (and will be misinterpreted by findTargetlistEntry()) if we
+     * dump it without any decoration.	Otherwise, just dump the expression
+     * normally.
+     */
+    if (force_colno || context->sortgroup_colno) {
+        Assert(!tle->resjunk);
+        appendStringInfo(buf, "%d", tle->resno);
+    } else if (expr && IsA(expr, Var))
+        get_rule_expr(expr, context, true);
+
+    pop_child_plan(dpns, &save_dpns);
+
+    return expr;
+}
+#endif
 
 /*
  * @Description: Display a GroupingSet.
@@ -6833,6 +6919,24 @@ static void get_rule_groupingset(GroupingSet* gset, List* targetlist, deparse_co
     appendStringInfoString(buf, ")");
 }
 
+static void get_rule_separator(Const* con, StringInfo buf)
+{
+    Oid typoutput;
+    char* extval = NULL;
+    bool typIsVarlena = false;
+    
+    appendStringInfoString(buf, "\'");
+    if (u_sess->exec_cxt.under_auto_explain) {
+        appendStringInfoString(buf, "***");
+    } else if (!con->constisnull) {
+        getTypeOutputInfo(con->consttype, &typoutput, &typIsVarlena);
+        extval = OidOutputFunctionCall(typoutput, con->constvalue);
+        appendStringInfoString(buf, extval);
+        pfree_ext(extval);
+    }
+    appendStringInfoChar(buf, '\'');
+}
+
 /*
  * Display an ORDER BY list.
  */
@@ -6850,7 +6954,15 @@ static void get_rule_orderby(List* orderList, List* targetList, bool force_colno
         TypeCacheEntry* typentry = NULL;
 
         appendStringInfoString(buf, sep);
-        sortexpr = get_rule_sortgroupclause(srt->tleSortGroupRef, targetList, force_colno, context);
+#ifdef USE_SPQ
+        if (IS_SPQ_COORDINATOR && (list_length(context->windowClause) > 0) &&
+            lfirst(list_head(context->windowClause)) != NULL &&
+            ((WindowClause *)lfirst(list_head(context->windowClause)))->reOrderSPQ) {
+            sortexpr = get_rule_sortgroupclause_spq(srt->tleSortGroupRef, force_colno, context);
+        } else
+#endif
+            sortexpr = get_rule_sortgroupclause(srt->tleSortGroupRef, targetList, force_colno, context);
+
         sortcoltype = exprType(sortexpr);
         /* See whether operator is default < or > for datatype */
         typentry = lookup_type_cache(sortcoltype, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
@@ -6932,7 +7044,12 @@ static void get_rule_windowspec(WindowClause* wc, List* targetList, deparse_cont
             SortGroupClause* grp = (SortGroupClause*)lfirst(l);
 
             appendStringInfoString(buf, sep);
-            get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
+#ifdef USE_SPQ
+            if (IS_SPQ_COORDINATOR && wc->rePartitionSPQ) {
+                get_rule_sortgroupclause_spq(grp->tleSortGroupRef, false, context);
+            } else
+#endif
+                get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
             sep = ", ";
         }
         needspace = true;
@@ -7031,7 +7148,13 @@ static void get_rule_windowspec_listagg(WindowClause* wc, List* targetList, depa
             SortGroupClause* grp = (SortGroupClause*)lfirst(l);
 
             appendStringInfoString(buf, sep);
-            get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
+#ifdef USE_SPQ
+            if (IS_SPQ_COORDINATOR && wc->rePartitionSPQ) {
+                get_rule_sortgroupclause_spq(grp->tleSortGroupRef, false, context);
+            } else
+#endif
+                get_rule_sortgroupclause(grp->tleSortGroupRef, targetList, false, context);
+
             sep = ", ";
         }
         needspace = true;
@@ -10591,7 +10714,7 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
         aggform = (Form_pg_aggregate)GETSTRUCT(aggTuple);
 
         if (OidIsValid(aggform->aggfinalfn)) {
-            appendStringInfo(buf, "%s(", generate_function_name(aggform->aggfinalfn, 0, NULL, NULL, NULL, NULL));
+            appendStringInfo(buf, "%s(", generate_function_name(aggform->aggfinalfn, 0, NULL, NULL, false, NULL));
             added_finalfn = true;
         }
         ReleaseSysCache(aggTuple);
@@ -10653,18 +10776,9 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
         }
 
         if (pg_strcasecmp(funcname, "group_concat") == 0) {
-            Oid typoutput;
-            char* extval = NULL;
-            bool typIsVarlena = false;
-            /* parse back the first argument as separator */
-            TargetEntry* tle = (TargetEntry*)lfirst(list_head(aggref->args));
-            getTypeOutputInfo(((Const*)tle->expr)->consttype, &typoutput, &typIsVarlena);
-            extval = OidOutputFunctionCall(typoutput, ((Const*)tle->expr)->constvalue);
-
-            appendStringInfoString(buf, " SEPARATOR '");
-            appendStringInfoString(buf, extval);
-            appendStringInfoChar(buf, '\'');
-            pfree_ext(extval);
+            appendStringInfoString(buf, " SEPARATOR ");
+            Const* con = (Const*)(((TargetEntry*)lfirst(list_head(aggref->args)))->expr);
+            get_rule_separator(con, buf);
         }
     }
 
@@ -10691,23 +10805,38 @@ static bool construct_partitionClause(WindowAgg* node, WindowClause* wc)
          * ressortgroupref refers to windowagg's tlist
          * partColIdx      refers to subplan's tlist
          */
-        ListCell *lc = NULL;
-        foreach(lc, node->plan.targetlist) {
-            TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
-            if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
-                _equalSimpleVar(tle->expr, window_agg_te->expr)) {
-                if (window_agg_te->ressortgroupref > 0) {
-                    partcl->tleSortGroupRef = window_agg_te->ressortgroupref;
-                    /* found it */
-                    break;
+#ifdef USE_SPQ
+        wc->rePartitionSPQ = false;
+        if (IS_SPQ_COORDINATOR) {
+            if (IsA(tle->expr, Var)) {
+                Var* tle_expr = (Var*)tle->expr;
+                partcl->tleSortGroupRef = tle_expr->varattno;
+                wc->rePartitionSPQ = true;
+            } else {
+                list_free_ext(partitionClause);
+                return false;
+            }
+        } else
+#endif
+        {
+            ListCell *lc = NULL;
+            foreach(lc, node->plan.targetlist) {
+                TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
+                if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
+                    _equalSimpleVar(tle->expr, window_agg_te->expr)) {
+                    if (window_agg_te->ressortgroupref > 0) {
+                        partcl->tleSortGroupRef = window_agg_te->ressortgroupref;
+                        /* found it */
+                        break;
+                    }
                 }
             }
-        }
 
-        if (lc == NULL) {
-            /* not found */
-            list_free_ext(partitionClause);
-            return false;
+            if (lc == NULL) {
+                /* not found */
+                list_free_ext(partitionClause);
+                return false;
+            }
         }
 
         partcl->eqop = node->partOperators[i];
@@ -10754,26 +10883,41 @@ static void construct_windowClause(deparse_context* context)
             }
 
             /*
-             * ressortgroupref refers to windowagg's tlist
-             * partColIdx      refers to subplan's tlist
-             */
-            ListCell *lc = NULL;
-            foreach(lc, node->plan.targetlist) {
-                TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
-                if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
-                    _equalSimpleVar(tle->expr, window_agg_te->expr)) {
-                    if (window_agg_te->ressortgroupref > 0) {
-                       sortcl->tleSortGroupRef = window_agg_te->ressortgroupref;
-                       /* found it */
-                       break;
+            * ressortgroupref refers to windowagg's tlist
+            * partColIdx      refers to subplan's tlist
+            */
+#ifdef USE_SPQ
+            wc->reOrderSPQ = false;
+            if (IS_SPQ_COORDINATOR) {
+                if (IsA(tle->expr, Var)) {
+                    Var* tle_expr = (Var*)tle->expr;
+                    sortcl->tleSortGroupRef = tle_expr->varattno;
+                    wc->reOrderSPQ = true;
+                } else {
+                    list_free_ext(orderClause);
+                    return;
+                }
+            } else
+#endif
+            {
+                ListCell *lc = NULL;
+                foreach(lc, node->plan.targetlist) {
+                    TargetEntry *window_agg_te = (TargetEntry *)lfirst(lc);
+                    if (IsA(tle->expr, Var) && IsA(window_agg_te->expr, Var) &&
+                        _equalSimpleVar(tle->expr, window_agg_te->expr)) {
+                        if (window_agg_te->ressortgroupref > 0) {
+                        sortcl->tleSortGroupRef = window_agg_te->ressortgroupref;
+                        /* found it */
+                        break;
+                        }
                     }
                 }
-            }
 
-            if (lc == NULL) {
-                list_free_ext(orderClause);
-                /* not found */
-                return;
+                if (lc == NULL) {
+                    list_free_ext(orderClause);
+                    /* not found */
+                    return;
+                }
             }
 
             sortcl->sortop = node->ordOperators[i];
@@ -10921,6 +11065,7 @@ static void get_const_expr(Const* constval, deparse_context* context, int showty
     char* extval = NULL;
     bool isfloat = false;
     bool needlabel = false;
+    bool skip_collation = false;
 
     if (constval->constisnull || constval->ismaxvalue) {
         /*
@@ -11048,7 +11193,16 @@ static void get_const_expr(Const* constval, deparse_context* context, int showty
             break;
 
         default:
-            simple_quote_literal(buf, extval);
+            int src_encoding = get_valid_charset_by_collation(constval->constcollid);
+            char* converted_str = (src_encoding != GetDatabaseEncoding()) ?
+                pg_any_to_server(extval, strlen(extval), src_encoding) : extval;
+            skip_collation = (src_encoding != GetCharsetConnection() || GetCollationConnection() == constval->constcollid);
+            if (converted_str != extval) {
+                simple_quote_literal(buf, converted_str);
+                pfree_ext(converted_str);
+            } else {
+                simple_quote_literal(buf, extval);
+            }
             break;
     }
 
@@ -11086,6 +11240,9 @@ static void get_const_expr(Const* constval, deparse_context* context, int showty
     if (needlabel || showtype > 0)
         appendStringInfo(buf, "::%s", format_type_with_typemod(constval->consttype, constval->consttypmod));
 
+    if (skip_collation) {
+        return;
+    }
     get_const_collation(constval, context);
 }
 
@@ -12209,7 +12366,7 @@ static char* generate_function_name(
     int p_nvargs;
     Oid* p_true_typeids = NULL;
     Oid p_vatype;
-    NameData* pkgname = NULL;
+    char* pkgname = NULL;
     Datum pkgOiddatum;
     Oid pkgOid = InvalidOid;
     bool isnull = true;
@@ -12265,7 +12422,7 @@ static char* generate_function_name(
     else
         nspname = get_namespace_name(procform->pronamespace);
     if (OidIsValid(pkgOid)) {
-        result = quote_qualified_identifier(nspname, pkgname->data, proname);
+        result = quote_qualified_identifier(nspname, pkgname, proname);
     } else {
         result = quote_qualified_identifier(nspname, proname);
     }

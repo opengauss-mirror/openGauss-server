@@ -135,7 +135,7 @@ typedef struct pgssEntry {
  * Global shared state
  */
 typedef struct pgssSharedState {
-    LWLockId lock;           /* protects hashtable search/modification */
+    LWLock* lock;           /* protects hashtable search/modification */
     int query_size;          /* max query length in bytes */
     double cur_median_usage; /* current median usage in hashtable */
 } pgssSharedState;

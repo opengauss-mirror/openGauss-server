@@ -61,6 +61,9 @@
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
+#ifdef USE_SPQ
+#include "catalog/pg_inherits_fn.h"
+#endif
 
 #define ESTIMATE_PARTITION_NUMBER 10
 #define ESTIMATE_PARTITION_NUMBER_THRESHOLD 5
@@ -1786,7 +1789,8 @@ static bool InstrAsPatternMatch(Oid* operatorid, List** args)
 Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* args, Oid inputcollid, int varRelid)
 {
     float8 result;
-
+    int tmp_encoding = PG_INVALID_ENCODING;
+    int db_encoding = PG_INVALID_ENCODING;
     bool useInstrOpt = false;
     if (ENABLE_SQL_BETA_FEATURE(SEL_EXPR_INSTR)) {
         useInstrOpt = InstrAsPatternMatch(&operatorid, &args);
@@ -1807,6 +1811,28 @@ Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* arg
                                                      Int32GetDatum(varRelid)));
     }
 
+    if (DB_IS_CMPT(B_FORMAT)) {
+        tmp_encoding = get_valid_charset_by_collation(inputcollid);
+        db_encoding = GetDatabaseEncoding();
+    }
+
+    if (tmp_encoding != db_encoding) {
+        DB_ENCODING_SWITCH_TO(tmp_encoding);
+        result = DatumGetFloat8(OidFunctionCall4Coll(oprrest,
+            inputcollid,
+            PointerGetDatum(root),
+            ObjectIdGetDatum(operatorid),
+            PointerGetDatum(args),
+            Int32GetDatum(varRelid)));
+        DB_ENCODING_SWITCH_BACK(db_encoding);
+    } else {
+        result = DatumGetFloat8(OidFunctionCall4Coll(oprrest,
+            inputcollid,
+            PointerGetDatum(root),
+            ObjectIdGetDatum(operatorid),
+            PointerGetDatum(args),
+            Int32GetDatum(varRelid)));
+    }
 
     if (useInstrOpt) {
         list_free_ext(args);
@@ -2058,3 +2084,41 @@ PlannerInfo *get_cte_root(PlannerInfo *root, int levelsup, char *ctename)
     }
     return cteroot;
 }
+
+#ifdef USE_SPQ
+double spq_estimate_partitioned_numtuples(Relation rel)
+{
+    List *inheritors;
+    ListCell *lc;
+    double totaltuples;
+ 
+    if (rel->rd_rel->reltuples > 0)
+        return rel->rd_rel->reltuples;
+ 
+    inheritors = find_all_inheritors(RelationGetRelid(rel), AccessShareLock, NULL);
+    totaltuples = 0;
+    foreach (lc, inheritors) {
+        Oid childid = lfirst_oid(lc);
+        Relation childrel;
+        double childtuples;
+ 
+        if (childid != RelationGetRelid(rel))
+            childrel = try_table_open(childid, NoLock);
+        else
+            childrel = rel;
+ 
+        childtuples = childrel->rd_rel->reltuples;
+ 
+        if (childtuples == 0 && rel_is_external_table(RelationGetRelid(childrel))) {
+#define DEFAULT_EXTERNAL_TABLE_TUPLES 1000000
+            childtuples = DEFAULT_EXTERNAL_TABLE_TUPLES;
+        }
+        totaltuples += childtuples;
+ 
+        if (childrel != rel)
+            heap_close(childrel, NoLock);
+    }
+    return totaltuples;
+}
+ 
+#endif

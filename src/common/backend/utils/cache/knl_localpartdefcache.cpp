@@ -77,6 +77,9 @@ Partition LocalPartDefCache::SearchPartitionFromGlobalCopy(Oid part_oid)
     if (unlikely(!IsPrimaryRecoveryFinished())) {
         return NULL;
     }
+    if (unlikely(u_sess->attr.attr_common.IsInplaceUpgrade)) {
+        return NULL;
+    }
     uint32 hash_value = oid_hash((void *)&(part_oid), sizeof(Oid));
     ResourceOwnerEnlargeGlobalBaseEntry(LOCAL_SYSDB_RESOWNER);
     GlobalPartitionEntry *global = (GlobalPartitionEntry *)m_global_partdefcache->SearchReadOnly(part_oid, hash_value);
@@ -262,8 +265,7 @@ void LocalPartDefCache::InvalidateAll(void)
             if (PartitionHasReferenceCountZero(part)) {
                 /* Delete this entry immediately */
                 PartitionClearPartition(part, false);
-                elt = DLGetHead(&bucket_entry->cc_bucket);
-            } else if (!list_member_ptr(rebuildList, part)) {
+            } else {
                 rebuildList = lappend(rebuildList, part);
             }
         }
@@ -345,7 +347,6 @@ void LocalPartDefCache::AtEOXact_PartitionCache(bool isCommit)
                     part->pd_createSubid = InvalidSubTransactionId;
                 } else {
                     PartitionClearPartition(part, false);
-                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 }
             }
@@ -390,7 +391,6 @@ void LocalPartDefCache::AtEOSubXact_PartitionCache(bool isCommit, SubTransaction
                     part->pd_createSubid = parentSubid;
                 else {
                     PartitionClearPartition(part, false);
-                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 }
             }

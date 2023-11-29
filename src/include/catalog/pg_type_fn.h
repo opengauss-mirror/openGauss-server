@@ -52,7 +52,8 @@ extern ObjectAddress TypeCreate(Oid newTypeOid,
                       int32 typeMod,
                       int32 typNDims,
                       bool typeNotNull,
-                      Oid typeCollation);
+                      Oid typeCollation,
+                      TypeDependExtend* dependExtend = NULL);
 
 extern void GenerateTypeDependencies(Oid typeNamespace,
                                      Oid typeObjectId,
@@ -71,7 +72,9 @@ extern void GenerateTypeDependencies(Oid typeNamespace,
                                      Oid baseType,
                                      Oid typeCollation,
                                      Node *defaultExpr,
-                                     bool rebuild);
+                                     bool rebuild,
+                                     const char* typname = NULL,
+                                     TypeDependExtend* dependExtend = NULL);
 
 extern void RenameTypeInternal(Oid typeOid, 
                                const char *newTypeName,
@@ -82,6 +85,12 @@ extern char *makeArrayTypeName(const char *typname, Oid typeNamespace);
 extern bool moveArrayTypeName(Oid typeOid, 
                               const char *typname,
                               Oid typeNamespace);
-
+extern void InstanceTypeNameDependExtend(TypeDependExtend** dependExtend);
+extern void ReleaseTypeNameDependExtend(TypeDependExtend** dependExtend);
+extern char* MakeTypeNamesStrForTypeOid(Oid typOid, bool* dependUndefined = NULL, StringInfo concatName = NULL);
+extern void MakeTypeNamesStrForTypeOid(StringInfo concatName, Oid typOid,
+                                       char** schemaName = NULL, char** pkgName = NULL, char** name = NULL);
+extern Oid GetTypePackageOid(Oid typoid);
+extern Oid TypeNameGetOid(const char* schemaName, const char* packageName, const char* typeName);
 #endif   /* PG_TYPE_FN_H */
 

@@ -385,7 +385,7 @@ set enable_bitmapscan = off;
 explain select * from heap_range_order_by_tbl A INNER JOIN heap_range_order_by_tbl B ON (A.GID = B.GID) ORDER BY A.GID;
                                                                    QUERY PLAN                                                                   
 ------------------------------------------------------------------------------------------------------------------------------------------------
- Merge Join  (cost=505.89..547.91 rows=2563 width=168)
+ Merge Join  (cost=505.88..547.91 rows=2563 width=168)
    Merge Cond: (a.gid = b.gid)
    ->  Sort  (cost=252.94..254.73 rows=716 width=84)
          Sort Key: a.gid
@@ -404,7 +404,7 @@ explain select * from heap_range_order_by_tbl A INNER JOIN heap_range_order_by_t
 explain select * from heap_range_order_by_tbl A INNER JOIN heap_range_order_by_tbl B ON (A.GID = B.GID) ORDER BY A.GID DESC;
                                                                        QUERY PLAN                                                                        
 ---------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge Join  (cost=505.89..547.91 rows=2563 width=168)
+ Merge Join  (cost=505.88..547.91 rows=2563 width=168)
    Merge Cond: (a.gid = b.gid)
    ->  Sort  (cost=252.94..254.73 rows=716 width=84)
          Sort Key: a.gid DESC
@@ -514,7 +514,7 @@ SET ENABLE_MATERIAL = ON;
 SET ENABLE_MERGEJOIN = ON;
 SET ENABLE_NESTLOOP = OFF;
 SET ENABLE_HASHJOIN = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
+EXPLAIN (COSTS OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
  Sort
@@ -568,7 +568,7 @@ SET ENABLE_MATERIAL = ON;
 SET ENABLE_MERGEJOIN = ON;
 SET ENABLE_NESTLOOP = OFF;
 SET ENABLE_HASHJOIN = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
+EXPLAIN (COSTS OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Sort

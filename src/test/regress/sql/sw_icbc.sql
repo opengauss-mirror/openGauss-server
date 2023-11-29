@@ -96,6 +96,8 @@ explain (costs off) select id, (select id from t2 start with t2.id = t1.id conne
 --not support pseudo column in order siblings by
 explain (costs off) select *, level from t1 start with id = 1 connect by prior id = pid order siblings by 4;
 explain (costs off) select *, connect_by_root id from t1 start with id = 1 connect by prior id = pid order siblings by 4;
+explain (costs off) select *, sys_connect_by_path(name, '/') from t1 start with id = 1 connect by prior id = pid order siblings by 4;
+explain (costs off) select *, sys_connect_by_path(name, '/') from t1 start with id = 1 connect by prior id = pid order siblings by sys_connect_by_path(name, '/');
 
 --unsupport case
 select prior id cc from t1 start with id = 1 connect by prior id = pid;

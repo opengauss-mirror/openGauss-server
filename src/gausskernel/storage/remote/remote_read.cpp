@@ -30,6 +30,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/remote_read.h"
+#include "service/remote_read_client.h"
 #include <arpa/inet.h>
 
 /*
@@ -102,6 +103,62 @@ void GetPrimaryServiceAddress(char *address, size_t address_len)
     SpinLockRelease(&walrcv->mutex);
 }
 
+
+static void FormatAddressByReplConn(replconninfo* replconninfo, char* remoteAddress, int addressLen)
+{
+    int rc = snprintf_s(remoteAddress, addressLen, (addressLen - 1), "%s@%d",
+                        replconninfo->remotehost,
+                        replconninfo->remoteport);
+    securec_check_ss(rc, "", "");
+}
+
+/**
+ * in startup, walsnder is not ready. we need to get remote address from replConnArray
+ * @param firstAddress first address
+ * @param secondAddress second address
+ * @param addressLen address length
+ */
+static void GetRemoteReadAddressFromReplconn(char* firstAddress, char* secondAddress, size_t addressLen)
+{
+    XLogRecPtr fastest_replay = InvalidXLogRecPtr;
+    XLogRecPtr second_fastest_replay = InvalidXLogRecPtr;
+    int fastest = 0;
+    int second_fastest = 0;
+    for (int i = 0; i < MAX_REPLNODE_NUM; i++) {
+        if (t_thrd.postmaster_cxt.ReplConnArray[i]) {
+            char remoteAddress[MAXPGPATH];
+            FormatAddressByReplConn(t_thrd.postmaster_cxt.ReplConnArray[i], remoteAddress, MAXPGPATH);
+            XLogRecPtr insertXLogRecPtr = RemoteGetXlogReplayPtr(remoteAddress);
+            if (XLByteLT(second_fastest_replay, insertXLogRecPtr)) {
+                if (XLByteLT(fastest_replay, insertXLogRecPtr)) {
+                    /* walsnd_replay is larger than fastest_replay */
+                    second_fastest = fastest;
+                    second_fastest_replay = fastest_replay;
+
+                    fastest = i;
+                    fastest_replay = insertXLogRecPtr;
+                } else {
+                    /* walsnd_replay is in the range (second_fastest_replay, fastest_replay] */
+                    second_fastest = i;
+                    second_fastest_replay = insertXLogRecPtr;
+                }
+            }
+        }
+    }
+
+    /* find fastest replay standby */
+    if (!XLogRecPtrIsInvalid(fastest_replay)) {
+        FormatAddressByReplConn(t_thrd.postmaster_cxt.ReplConnArray[fastest], firstAddress, MAXPGPATH);
+
+    }
+
+    /* find second fastest replay standby */
+    if (!XLogRecPtrIsInvalid(second_fastest_replay)) {
+        FormatAddressByReplConn(t_thrd.postmaster_cxt.ReplConnArray[second_fastest], secondAddress, MAXPGPATH);
+    }
+
+}
+
 /*
  * @Description: get remote address
  * @IN/OUT first_address: first address
@@ -134,18 +191,13 @@ void GetRemoteReadAddress(char* firstAddress, char* secondAddress, size_t addres
         }
     } else if (IS_DN_MULTI_STANDYS_MODE()) {
         if (serverMode == PRIMARY_MODE) {
-            GetFastestReplayStandByServiceAddress(firstAddress, secondAddress, addressLen);
-            if (firstAddress[0] != '\0') {
-                GetIPAndPort(firstAddress, ip, port, MAX_IPADDR_LEN);
-                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s@%s", ip, port);
-                securec_check_ss(rc, "", "");
-            }
-
-            if (secondAddress[0] != '\0') {
-                GetIPAndPort(secondAddress, ip, port, MAX_IPADDR_LEN);
-                rc = snprintf_s(secondAddress, addressLen, (addressLen - 1), "%s@%s", ip, port);
-                securec_check_ss(rc, "", "");
-            }
+            /* address format: ip@port */
+            if (RecoveryInProgress()) {
+                /* during recovery, walsnder is not valid so we cant get standby info from walsnder */
+                GetRemoteReadAddressFromReplconn(firstAddress, secondAddress, addressLen);
+            } else {
+                GetFastestReplayStandByServiceAddress(firstAddress, secondAddress, addressLen);
+            }  
         } else if (serverMode == STANDBY_MODE) {
             GetPrimaryServiceAddress(firstAddress, addressLen);
             if (firstAddress[0] != '\0') {

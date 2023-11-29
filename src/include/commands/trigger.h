@@ -146,7 +146,7 @@ extern TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, 
 #ifdef PGXC
     HeapTupleHeader datanode_tuphead,
 #endif
-    ItemPointer tupleid, TupleTableSlot* slot);
+    ItemPointer tupleid, TupleTableSlot* slot, TM_Result* result = NULL, TM_FailureData* tmfd = NULL);
 extern void ExecARUpdateTriggers(EState* estate, ResultRelInfo* relinfo, Oid oldPartitionOid, int2 bucketid, Oid newPartitionOid,
     ItemPointer tupleid, HeapTuple newtuple,
 #ifdef PGXC
@@ -201,6 +201,7 @@ extern void InvalidRelcacheForTriggerFunction(Oid funcoid, Oid returnType);
 extern void ResetTrigShipFlag();
 
 extern HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot);
+    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot, TM_Result* result = NULL,
+    TM_FailureData* tmfd = NULL);
 
 #endif /* TRIGGER_H */

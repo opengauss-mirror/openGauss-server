@@ -41,17 +41,22 @@
 #define IS_PAUSE_BY_TARGET_BARRIER 0x00000001
 #define IS_CANCEL_LOG_CTRL 0x00000010
 
+#define IS_DISASTER_RECOVER_MODE \
+    (static_cast<ClusterRunMode>(g_instance.attr.attr_common.stream_cluster_run_mode) == RUN_MODE_STANDBY)
+
 #ifdef ENABLE_MULTIPLE_NODES
 #define AM_HADR_CN_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
             t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && IS_PGXC_COORDINATOR)
+
+#define IS_MULTI_DISASTER_RECOVER_MODE \
+    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
+    g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
+#else
+#define IS_MULTI_DISASTER_RECOVER_MODE false
 #endif
 
 #define AM_HADR_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
             t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby)
-
-#define IS_DISASTER_RECOVER_MODE \
-    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
-    g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
 
 #define IS_CN_DISASTER_RECOVER_MODE \
     (IS_PGXC_COORDINATOR && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
@@ -104,6 +109,14 @@ typedef struct WalRcvCtlBlock {
 
     char walReceiverBuffer[FLEXIBLE_ARRAY_MEMBER];
 } WalRcvCtlBlock;
+
+typedef struct UwalrcvWriterState {
+    XLogRecPtr startPtr;
+    XLogRecPtr flushPtr;
+    XLogRecPtr truncatePtr;	
+    uint64_t startTimeLine;
+    slock_t mutex;
+} UwalrcvWriterState;
 
 typedef enum { 
     REPCONNTARGET_DEFAULT, 
@@ -214,6 +227,7 @@ typedef struct WalRcvData {
 
     Latch* walrcvWriterLatch;
     WalRcvCtlBlock* walRcvCtlBlock;
+    UwalrcvWriterState* uwalRcvState;
     slock_t mutex; /* locks shared variables shown above */
     slock_t exitLock;
     char recoveryTargetBarrierId[MAX_BARRIER_ID_LENGTH];
@@ -232,6 +246,8 @@ typedef struct WalRcvData {
     struct ArchiveSlotConfig *archive_slot;
     uint32 rcvDoneFromShareStorage;
     uint32 shareStorageTerm;
+    bool needCatchup;
+    bool flagAlreadyNotifyCatchup;
 } WalRcvData;
 
 typedef struct WalReceiverFunc {

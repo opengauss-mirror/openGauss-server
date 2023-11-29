@@ -98,6 +98,8 @@ function make_gaussdb_kernel()
     export PREFIX_HOME="${BUILD_DIR}"
     export DEBUG_TYPE=${version_mode}
 
+    export WITH_TASSL="${build_with_tassl}"
+
     echo "Begin make install gaussdb server" >> "$LOG_FILE" 2>&1
 
     export GAUSSHOME=${BUILD_DIR}

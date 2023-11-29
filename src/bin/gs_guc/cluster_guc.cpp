@@ -2631,7 +2631,7 @@ static void executePopenCommandsParallel(const char* cmd, int idx, bool is_local
     int nRet = 0;
     size_t len_fcmd = 0;
     char* nodename = NULL;
-    /* the temp directory that storage gs_guc result information */
+    /* the temp directory that stores gs_guc result information */
     char gausshome[MAXPGPATH] = {0};
 
     curr_cxt = &g_parallel_command_cxt[idx];
@@ -2934,7 +2934,7 @@ int execute_guc_command_in_remote_node(int idx, char* command)
     size_t len_fcmd = strlen(command) + strlen(nodename) + NAMEDATALEN + MAXPGPATH;
     int nRet = 0;
     uint32 ret = 0;
-    /* the temp directory that storage gs_guc result information */
+    /* the temp directory that stores gs_guc result information */
     char gausshome[MAXPGPATH] = {0};
     char sshlogpathdir[MAXPGPATH] = {0};
     char result_file[MAXPGPATH] = {0};
@@ -3602,6 +3602,53 @@ bool check_cn_dn_parameter_is_valid()
                 all_valid = false;
                 (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect."
                                 "not work on this mode.\n",
+                    config_param[para_num]);
+            }
+#endif
+#ifdef ENABLE_FINANCE_MODE
+            /* enable_ustore does not working on finance mode */
+            char* enableUstore = "enable_ustore";
+            len = strlen(tmp) > strlen(enableUstore) ? strlen(tmp) : strlen(enableUstore);
+            if (0 == strncmp(tmp, enableUstore, len)) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. "
+                                   "not work on finance mode.\n",
+                    config_param[para_num]);
+            }
+            /* enable_tde does not working on finance mode */
+            char* enableTde = "enable_tde";
+            len = (strlen(tmp) > strlen(enableTde)) ? strlen(tmp) : strlen(enableTde);
+            if (strncmp(tmp, enableTde, len) == 0) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. "
+                                "not work on finance mode.\n",
+                    config_param[para_num]);
+            }
+            /* query_dop does not working on finance mode */
+            char* queryDop = "query_dop";
+            len = (strlen(tmp) > strlen(queryDop)) ? strlen(tmp) : strlen(queryDop);
+            if (strncmp(tmp, queryDop, len) == 0) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. "
+                                "not work on finance mode.\n",
+                    config_param[para_num]);
+            }
+            /* enable_dcf does not working on finance mode */
+            char* enableDcf = "enable_dcf";
+            len = (strlen(tmp) > strlen(enableDcf)) ? strlen(tmp) : strlen(enableDcf);
+            if (strncmp(tmp, enableDcf, len) == 0) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. "
+                                "not work on finance mode.\n",
+                    config_param[para_num]);
+            }
+            /* try_vector_engine_strategy does not working on finance mode */
+            char* vectorEngineStrategy = "try_vector_engine_strategy";
+            len = (strlen(tmp) > strlen(vectorEngineStrategy)) ? strlen(tmp) : strlen(vectorEngineStrategy);
+            if (strncmp(tmp, vectorEngineStrategy, len) == 0) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. "
+                                "not work on finance mode.\n",
                     config_param[para_num]);
             }
 #endif

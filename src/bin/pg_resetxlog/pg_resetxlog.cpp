@@ -98,6 +98,17 @@ static inline bool is_negative_num(char *str)
     return *s == '-' ? true : false;
 }
 
+static void checkDssInput()
+{
+    if (!dss.enable_dss && dss.vgname != NULL) {
+        dss.enable_dss = true;
+    }
+
+    if (dss.enable_dss && dss.socketpath == NULL) {
+        dss.socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char* argv[])
 {
     int c;
@@ -267,6 +278,8 @@ int main(int argc, char* argv[])
                 exit(1);
         }
     }
+
+    checkDssInput();
 
     /* the data directory is not necessary in dss mode */
     if (optind >= argc) {
@@ -490,7 +503,8 @@ static void SetGlobalDssParam(void)
     securec_check_c(rc, "\0", "\0");
     XLogSegmentSize = DSS_XLOG_SEG_SIZE;
     /* Check dss connect */
-    if (!dss_exist_dir(g_datadir.dss_data)) {
+    struct stat st;
+    if (stat(g_datadir.dss_data, &st) != 0 || !S_ISDIR(st.st_mode)) {
         fprintf(stderr, _("Could not connect dssserver, vgname: \"%s\", socketpath: \"%s\", \n"
             "please check that whether the dssserver is manually started and retry later.\n"),
             dss.vgname, dss.socketpath);

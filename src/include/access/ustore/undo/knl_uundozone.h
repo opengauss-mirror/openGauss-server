@@ -119,6 +119,10 @@ public:
     {
         return MAKE_UNDO_PTR(zid_, recycleTSlotPtr_);
     }
+    inline UndoSlotPtr get_recycle_tslot_ptr_exrto(void)
+    {
+        return MAKE_UNDO_PTR(zid_, recycle_tslot_ptr_exrto);
+    }
     inline UndoSlotPtr GetFrozenSlotPtr(void)
     {
         return frozenSlotPtr_;
@@ -126,6 +130,10 @@ public:
     inline TransactionId GetRecycleXid(void)
     {
         return recycleXid_;
+    }
+    inline TransactionId get_recycle_xid_exrto(void)
+    {
+        return recycle_xid_exrto;
     }
     inline TransactionId GetFrozenXid(void)
     {
@@ -156,10 +164,18 @@ public:
     {
         discardURecPtr_ = UNDO_PTR_GET_OFFSET(discard);
     }
+    inline void set_discard_urec_ptr_exrto(UndoRecPtr discard)
+    {
+        discard_urec_ptr_exrto = UNDO_PTR_GET_OFFSET(discard);
+    }
     inline void SetForceDiscardURecPtr(UndoRecPtr discard)
     {
         forceDiscardURecPtr_ = UNDO_PTR_GET_OFFSET(discard);
-    }   
+    }
+    inline void set_force_discard_urec_ptr_exrto(UndoRecPtr discard)
+    {
+        force_discard_urec_ptr_exrto = UNDO_PTR_GET_OFFSET(discard);
+    }
     inline void SetAttachPid(ThreadId attachPid)
     {
         attachPid_ = attachPid;
@@ -176,6 +192,10 @@ public:
     {
         recycleTSlotPtr_ = UNDO_PTR_GET_OFFSET(recycle);
     }
+    inline void set_recycle_tslot_ptr_exrto(UndoSlotPtr recycle)
+    {
+        recycle_tslot_ptr_exrto = UNDO_PTR_GET_OFFSET(recycle);
+    }
     inline void SetLSN(XLogRecPtr lsn)
     {
         lsn_ = lsn;
@@ -188,6 +208,10 @@ public:
     {
         recycleXid_ = recycleXid;
     }
+    inline void set_recycle_xid_exrto(TransactionId recycle_xid)
+    {
+        recycle_xid_exrto = recycle_xid;
+    }
     inline void SetFrozenXid(TransactionId frozenXid)
     {
         frozenXid_ = frozenXid;
@@ -199,6 +223,10 @@ public:
     inline bool Used(void)
     {
         return insertURecPtr_ != forceDiscardURecPtr_;
+    }
+    inline bool Used_exrto(void)
+    {
+        return insertURecPtr_ != force_discard_urec_ptr_exrto;
     }
     /* Lock and unlock undozone. */
     void InitLock(void)
@@ -281,7 +309,7 @@ public:
     }
     bool CheckNeedSwitch(UndoRecordSize size);
     UndoRecordState CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle, TransactionId *lastXid);
-    bool CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp);
+    bool CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto = false);
 
     UndoRecPtr AllocateSpace(uint64 size);
     void ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRecycleSize);
@@ -300,6 +328,10 @@ public:
 
     /* Recovery undospace info from persistent file. */
     static void RecoveryUndoZone(int fd);
+    UndoRecordState check_record_valid_exrto(UndoLogOffset offset, bool check_force_recycle,
+        TransactionId *last_xid) const;
+    uint64 release_residual_record_space();
+    uint64 release_residual_slot_space();
 
 private:
     static const uint32 UNDO_ZONE_ATTACHED = 1;
@@ -316,6 +348,13 @@ private:
     TransactionId recycleXid_;
     TransactionId frozenXid_;
     ThreadId attachPid_;
+
+    /* for extreme RTO read. */
+    UndoSlotOffset recycle_tslot_ptr_exrto;
+    UndoLogOffset discard_urec_ptr_exrto;
+    UndoLogOffset force_discard_urec_ptr_exrto;
+    TransactionId recycle_xid_exrto;
+
     /* Need Lock undo zone before alloc, preventing from checkpoint. */
     LWLock *lock_;
     /* Lsn for undo zone meta. */
@@ -339,5 +378,7 @@ void AllocateZonesBeforXid();
 void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence);
 void InitUndoSpace(UndoZone *uzone, UndoSpaceType type);
 bool VerifyUndoZone(UndoZone *uzone);
+void exrto_recycle_residual_undo_file(char *FuncName);
+
 } // namespace undo
 #endif // __KNL_UUNDOZONE_H__

@@ -154,3 +154,236 @@ select length(rtrim('123   '));
 (1 row)
 
 set behavior_compat_options = '';
+set behavior_compat_options = 'char_coerce_compat';
+create table tbl_111 (id int);
+insert into tbl_111 values(1);
+select count(*) from tbl_111 where cast(' ' as char(5)) = cast(' ' as varchar(5));
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where cast('abc ' as char(10)) = cast('abc ' as varchar(10));
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where cast(' ' as char(5)) != cast(' ' as varchar(5));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from tbl_111 where cast('abc ' as char(10)) != cast('abc ' as varchar(10));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from tbl_111 where cast(' ' as char(5)) > cast(' ' as varchar(5));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from tbl_111 where cast('abc ' as char(10)) > cast('abc ' as varchar(10));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from tbl_111 where cast(' ' as char(5)) >= cast(' ' as varchar(5));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from tbl_111 where cast('abc ' as char(10)) >= cast('abc ' as varchar(10));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from tbl_111 where cast(' ' as char(5)) < cast(' ' as varchar(5));
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where cast('abc ' as char(10)) < cast('abc ' as varchar(10));
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where cast(' ' as char(5)) <= cast(' ' as varchar(5));
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where cast('abc ' as char(10)) <= cast('abc ' as varchar(10));
+ count 
+-------
+     0
+(1 row)
+
+drop table tbl_111;
+create table tbl_111 (a char(5), b varchar(5));
+insert into tbl_111 values (' ', ' ');
+insert into tbl_111 values ('abc ', 'abc ');
+select count(*) from tbl_111 where a = b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a != b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a > b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a >= b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a < b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a <= b;
+ count 
+-------
+     0
+(1 row)
+
+set try_vector_engine_strategy='force';
+select count(*) from tbl_111 where a = b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a != b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a > b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a >= b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a < b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a <= b;
+ count 
+-------
+     0
+(1 row)
+
+set try_vector_engine_strategy='off';
+drop table tbl_111;
+create table tbl_111 (a char(5), b varchar(5)) with (orientation = column);
+insert into tbl_111 values (' ', ' ');
+insert into tbl_111 values ('abc ', 'abc ');
+select count(*) from tbl_111 where a = b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a != b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a > b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a >= b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a < b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a <= b;
+ count 
+-------
+     0
+(1 row)
+
+set enable_codegen to true;
+set codegen_cost_threshold to 0;
+select count(*) from tbl_111 where a = b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a != b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a > b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a >= b;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from tbl_111 where a < b;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from tbl_111 where a <= b;
+ count 
+-------
+     0
+(1 row)
+
+drop table tbl_111;
+set behavior_compat_options = '';

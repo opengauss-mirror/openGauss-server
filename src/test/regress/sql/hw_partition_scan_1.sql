@@ -50,14 +50,14 @@ SET enable_material = OFF;
 SET enable_nestloop = OFF;
 SET enable_hashjoin = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 30 ORDER BY SN;
@@ -78,14 +78,14 @@ SET enable_material = OFF;
 SET enable_nestloop = OFF;
 SET enable_hashjoin = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 30 ORDER BY SN;
@@ -106,14 +106,14 @@ SET enable_material = OFF;
 SET enable_nestloop = OFF;
 SET enable_hashjoin = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 30 ORDER BY SN;
@@ -134,14 +134,14 @@ SET enable_material = OFF;
 SET enable_nestloop = OFF;
 SET enable_hashjoin = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN; --one psrtition: the first
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN; --more than one partitions
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 30 ORDER BY SN; --one psrtition: the last
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE SN > 40 ORDER BY SN; -- no partition
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 ORDER BY SN; -- all partitions
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 10 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 20 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE SN < 30 ORDER BY SN;
@@ -162,8 +162,8 @@ SET enable_material = OFF;
 SET enable_nestloop = OFF;
 SET enable_hashjoin = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE CTID = '(2,1)' ORDER BY SN;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT SN FROM partition_scan_stu_info1 WHERE CTID = '(2,2)' ORDER BY SN;
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE CTID = '(2,1)' ORDER BY SN;
+EXPLAIN (COSTS OFF) SELECT SN FROM partition_scan_stu_info1 WHERE CTID = '(2,2)' ORDER BY SN;
 SELECT CTID , * FROM partition_scan_stu_info1 ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE CTID = '(2,1)' ORDER BY SN;
 SELECT SN FROM partition_scan_stu_info1 WHERE CTID = '(2,2)' ORDER BY SN;
@@ -186,19 +186,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -231,19 +231,19 @@ SET enable_hashjoin = ON;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -274,19 +274,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -317,19 +317,19 @@ SET enable_nestloop = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -360,19 +360,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -403,19 +403,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -448,19 +448,19 @@ SET enable_hashjoin = OFF;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -491,19 +491,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -534,19 +534,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -577,19 +577,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -620,19 +620,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -665,19 +665,19 @@ SET enable_hashjoin = OFF;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -708,19 +708,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -751,19 +751,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -794,19 +794,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -837,19 +837,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -882,19 +882,19 @@ SET enable_hashjoin = ON;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -906,9 +906,9 @@ SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partit
 -- rsult of FULL join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- result of no partition to join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40;
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
@@ -929,19 +929,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -953,9 +953,9 @@ SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partit
 -- rsult of FULL join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- result of no partition to join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40;
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
@@ -976,19 +976,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1000,9 +1000,9 @@ SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partit
 -- rsult of FULL join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- result of no partition to join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40;
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
@@ -1023,19 +1023,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1066,19 +1066,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1143,19 +1143,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1188,19 +1188,19 @@ SET enable_hashjoin = ON;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1212,9 +1212,9 @@ SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partit
 -- rsult of FULL join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- result of no partition to join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40;
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
@@ -1235,19 +1235,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1278,19 +1278,19 @@ SET enable_nestloop = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1302,9 +1302,9 @@ SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partit
 -- rsult of FULL join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- result of no partition to join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40;
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
@@ -1325,19 +1325,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1368,19 +1368,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1413,19 +1413,19 @@ SET enable_hashjoin = OFF;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1456,19 +1456,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1499,19 +1499,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1542,19 +1542,19 @@ SET enable_mergejoin = OFF;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1585,19 +1585,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1630,19 +1630,19 @@ SET enable_hashjoin = OFF;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1673,19 +1673,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1716,19 +1716,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1759,19 +1759,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = OFF;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1802,19 +1802,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1847,19 +1847,19 @@ SET enable_hashjoin = ON;
 --
 ---- explain cross join
 --
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1890,19 +1890,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1933,19 +1933,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -1976,19 +1976,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -2019,19 +2019,19 @@ SET enable_mergejoin = ON;
 SET enable_hashjoin = ON;
 
 -- explain cross join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2;
 -- explain inner join 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 INNER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain left outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain right outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 RIGHT OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain full outer join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 FULL OUTER JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) ORDER BY partition_scan_stu_info1.SN, partition_scan_stu_info1.NAME, partition_scan_stu_info1.NAME;
 -- explain for no partition to join
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info1.SN > 40; 
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40;
+EXPLAIN (COSTS OFF) SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 LEFT JOIN partition_scan_stu_info2 ON (partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) WHERE partition_scan_stu_info2.SN > 40 AND partition_scan_stu_info1.SN > 40;
 -- rsult of cross join
 SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partition_scan_stu_info1 CROSS JOIN partition_scan_stu_info2 order by 1, 2;
 -- rsult of inner joi
@@ -2051,7 +2051,7 @@ SELECT partition_scan_stu_info1.NAME, partition_scan_stu_info2.PHONE FROM partit
 ---- test WITH_QUERY & EXIST & IN
 --
 -- EXPLAIN WITH_QUERY CASE: JOIN +  EXISTS PARTITION 
-EXPLAIN (COSTS OFF, NODES OFF) WITH STU_INFO2_VIEW AS (SELECT * FROM partition_scan_stu_info2 WHERE SN < 40 ORDER BY SN )
+EXPLAIN (COSTS OFF) WITH STU_INFO2_VIEW AS (SELECT * FROM partition_scan_stu_info2 WHERE SN < 40 ORDER BY SN )
 SELECT STU_INFO2_VIEW.SN, partition_scan_stu_info1.NAME, STU_INFO2_VIEW.PHONE
 FROM STU_INFO2_VIEW LEFT JOIN partition_scan_stu_info1
 ON (partition_scan_stu_info1.SN < STU_INFO2_VIEW.SN);
@@ -2064,7 +2064,7 @@ ON (partition_scan_stu_info1.SN < STU_INFO2_VIEW.SN)
 ORDER BY 1, 2, 3;
 
 -- EXPLAIN WITH_QUERY CASE: JOIN +  NON PARTITION 
-EXPLAIN (COSTS OFF, NODES OFF) WITH STU_INFO2_VIEW AS (SELECT * FROM partition_scan_stu_info2 WHERE SN > 40 ORDER BY SN )
+EXPLAIN (COSTS OFF) WITH STU_INFO2_VIEW AS (SELECT * FROM partition_scan_stu_info2 WHERE SN > 40 ORDER BY SN )
 SELECT STU_INFO2_VIEW.SN, partition_scan_stu_info1.NAME, STU_INFO2_VIEW.PHONE
 FROM STU_INFO2_VIEW LEFT JOIN partition_scan_stu_info1
 ON (partition_scan_stu_info1.SN < STU_INFO2_VIEW.SN);
@@ -2076,31 +2076,31 @@ FROM STU_INFO2_VIEW LEFT JOIN partition_scan_stu_info1
 ON (partition_scan_stu_info1.SN < STU_INFO2_VIEW.SN);
 
 -- EXPLAIN EXIST
-EXPLAIN (COSTS OFF, NODES OFF) SELECT * FROM partition_scan_stu_info1 WHERE EXISTS (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
+EXPLAIN (COSTS OFF) SELECT * FROM partition_scan_stu_info1 WHERE EXISTS (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
 
 -- RESULT OF EXIST
 SELECT * FROM partition_scan_stu_info1 WHERE EXISTS (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) order by 1;
 
 -- EXPLAIN NOT EXIST
-EXPLAIN (COSTS OFF, NODES OFF) SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2);
+EXPLAIN (COSTS OFF) SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2);
 
 -- RESULT OF NOT EXIST
 SELECT * FROM partition_scan_stu_info1 WHERE NOT EXISTS (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
 
 -- EXPLAIN IN
-EXPLAIN (COSTS OFF, NODES OFF) SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
+EXPLAIN (COSTS OFF) SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
 
 -- RESULT OF IN
 SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN) order by 1;
 
 -- EXPLAIN NOT IN
-EXPLAIN (COSTS OFF, NODES OFF) SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN NOT IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
+EXPLAIN (COSTS OFF) SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN NOT IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
 
 -- RESULT OF NOT IN
 SELECT * FROM partition_scan_stu_info1 WHERE partition_scan_stu_info1.SN NOT IN (SELECT partition_scan_stu_info2.SN FROM partition_scan_stu_info2 WHERE partition_scan_stu_info1.SN = partition_scan_stu_info2.SN);
 
 -- EXPLAIN WITH_QUERY CASE: EXISTS PARTITION 
-EXPLAIN (COSTS OFF, NODES OFF) WITH STU_INFO2_VIEW AS (SELECT SN FROM partition_scan_stu_info2 WHERE SN < 40 ORDER BY SN )
+EXPLAIN (COSTS OFF) WITH STU_INFO2_VIEW AS (SELECT SN FROM partition_scan_stu_info2 WHERE SN < 40 ORDER BY SN )
 DELETE FROM partition_scan_stu_info1 USING partition_scan_stu_info2 
 WHERE partition_scan_stu_info1.SN < partition_scan_stu_info2.SN AND partition_scan_stu_info2.SN IN (SELECT SN FROM STU_INFO2_VIEW) 
 RETURNING partition_scan_stu_info1.NAME;
@@ -2114,7 +2114,7 @@ RETURNING partition_scan_stu_info1.NAME )
 select * from delete_partition_scan_stu_info1_NAME order by 1;
 
 -- EXPLAIN WITH_QUERY CASE: NONE PARTITION 
-EXPLAIN (COSTS OFF, NODES OFF) WITH STU_INFO2_VIEW AS (SELECT SN FROM partition_scan_stu_info2 WHERE SN > 40 ORDER BY SN )
+EXPLAIN (COSTS OFF) WITH STU_INFO2_VIEW AS (SELECT SN FROM partition_scan_stu_info2 WHERE SN > 40 ORDER BY SN )
 DELETE FROM partition_scan_stu_info1 USING partition_scan_stu_info2 
 WHERE partition_scan_stu_info1.SN < partition_scan_stu_info2.SN AND partition_scan_stu_info2.SN IN (SELECT SN FROM STU_INFO2_VIEW) 
 RETURNING partition_scan_stu_info1.NAME;

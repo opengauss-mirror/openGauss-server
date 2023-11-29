@@ -55,4 +55,8 @@ extern bool HasStoredGeneratedColumns(const PlannerInfo *root, Index rti);
 
 extern PlannerInfo *get_cte_root(PlannerInfo *root, int levelsup, char *ctename);
 
+#ifdef USE_SPQ
+extern double spq_estimate_partitioned_numtuples(Relation rel);
+#endif
+
 #endif /* PLANCAT_H */

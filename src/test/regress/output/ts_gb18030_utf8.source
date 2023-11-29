@@ -1,0 +1,1142 @@
+create database gb18030_2022 encoding='gb18030-2022' LC_COLLATE='zh_CN.GB18030' LC_CTYPE ='zh_CN.GB18030' TEMPLATE=template0;
+\c gb18030_2022
+ 
+show server_encoding;
+ server_encoding 
+-----------------
+ GB18030_2022
+(1 row)
+
+set client_encoding = 'UTF8';
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+--1. 编码映射关系发生改变的字符：
+-- 查看未发生变化的字符串：
+select convert_to('中国', 'GB18030-2022');
+ convert_to 
+------------
+ \xd6d0b9fa
+(1 row)
+
+ 
+--插入了涉及GB18030-2000升级GB18030-2022后GB18030与UTF-8转换关系变更的19个字符。
+create table tb_test(id int, content text);
+ 
+insert into tb_test (id , content)
+select 1, convert_from('\xA8BC', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 2, convert_from('\xA6D9', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 3, convert_from('\xA6DA', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 4, convert_from('\xA6DB', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 5, convert_from('\xA6DC', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 6, convert_from('\xA6DD', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 7, convert_from('\xA6DE', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 8, convert_from('\xA6DF', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 9, convert_from('\xA6EC', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 10, convert_from('\xA6ED', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 11, convert_from('\xA6F3', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 12, convert_from('\xFE59', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 13, convert_from('\xFE61', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 14, convert_from('\xFE66', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 15, convert_from('\xFE67', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 16, convert_from('\xFE6D', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 17, convert_from('\xFE7E', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 18, convert_from('\xFE90', 'GB18030-2022');
+ 
+insert into tb_test (id , content)
+select 19, convert_from('\xFEA0', 'GB18030-2022');
+ 
+insert into tb_test (id , content) select 20, convert_from('\x8135F437', 'GB18030-2022');
+insert into tb_test (id , content) select 21, convert_from('\x84318236', 'GB18030-2022');
+insert into tb_test (id , content) select 22, convert_from('\x84318238', 'GB18030-2022');
+insert into tb_test (id , content) select 23, convert_from('\x84318237', 'GB18030-2022');
+insert into tb_test (id , content) select 24, convert_from('\x84318239', 'GB18030-2022');
+insert into tb_test (id , content) select 25, convert_from('\x84318330', 'GB18030-2022');
+insert into tb_test (id , content) select 26, convert_from('\x84318331', 'GB18030-2022');
+insert into tb_test (id , content) select 27, convert_from('\x84318332', 'GB18030-2022');
+insert into tb_test (id , content) select 28, convert_from('\x84318333', 'GB18030-2022');
+insert into tb_test (id , content) select 29, convert_from('\x84318334', 'GB18030-2022');
+insert into tb_test (id , content) select 30, convert_from('\x84318335', 'GB18030-2022');
+insert into tb_test (id , content) select 31, convert_from('\x82359037', 'GB18030-2022');
+insert into tb_test (id , content) select 32, convert_from('\x82359038', 'GB18030-2022');
+insert into tb_test (id , content) select 33, convert_from('\x82359039', 'GB18030-2022');
+insert into tb_test (id , content) select 34, convert_from('\x82359130', 'GB18030-2022');
+insert into tb_test (id , content) select 35, convert_from('\x82359131', 'GB18030-2022');
+insert into tb_test (id , content) select 36, convert_from('\x82359132', 'GB18030-2022');
+insert into tb_test (id , content) select 37, convert_from('\x82359133', 'GB18030-2022');
+insert into tb_test (id , content) select 38, convert_from('\x82359134', 'GB18030-2022');
+ 
+--显示这19个字符
+select * from tb_test order by id;
+ id | content 
+----+---------
+  1 | ḿ
+  2 | ︐
+  3 | ︒
+  4 | ︑
+  5 | ︓
+  6 | ︔
+  7 | ︕
+  8 | ︖
+  9 | ︗
+ 10 | ︘
+ 11 | ︙
+ 12 | 龴
+ 13 | 龵
+ 14 | 龶
+ 15 | 龷
+ 16 | 龸
+ 17 | 龹
+ 18 | 龺
+ 19 | 龻
+ 20 | 
+ 21 | 
+ 22 | 
+ 23 | 
+ 24 | 
+ 25 | 
+ 26 | 
+ 27 | 
+ 28 | 
+ 29 | 
+ 30 | 
+ 31 | 
+ 32 | 
+ 33 | 
+ 34 | 
+ 35 | 
+ 36 | 
+ 37 | 
+ 38 | 
+(38 rows)
+
+--查看GB18030-2022编码
+select convert_to(content, 'GB18030-2022') from tb_test order by id;
+ convert_to 
+------------
+ \xa8bc
+ \xa6d9
+ \xa6da
+ \xa6db
+ \xa6dc
+ \xa6dd
+ \xa6de
+ \xa6df
+ \xa6ec
+ \xa6ed
+ \xa6f3
+ \xfe59
+ \xfe61
+ \xfe66
+ \xfe67
+ \xfe6d
+ \xfe7e
+ \xfe90
+ \xfea0
+ \x8135f437
+ \x84318236
+ \x84318238
+ \x84318237
+ \x84318239
+ \x84318330
+ \x84318331
+ \x84318332
+ \x84318333
+ \x84318334
+ \x84318335
+ \x82359037
+ \x82359038
+ \x82359039
+ \x82359130
+ \x82359131
+ \x82359132
+ \x82359133
+ \x82359134
+(38 rows)
+
+--查看GB18030-2000编码
+select convert_to(content, 'GB18030') from tb_test order by id;
+ convert_to 
+------------
+ \xa8bc
+ \xa6d9
+ \xa6da
+ \xa6db
+ \xa6dc
+ \xa6dd
+ \xa6de
+ \xa6df
+ \xa6ec
+ \xa6ed
+ \xa6f3
+ \xfe59
+ \xfe61
+ \xfe66
+ \xfe67
+ \xfe6d
+ \xfe7e
+ \xfe90
+ \xfea0
+ \x8135f437
+ \x84318236
+ \x84318238
+ \x84318237
+ \x84318239
+ \x84318330
+ \x84318331
+ \x84318332
+ \x84318333
+ \x84318334
+ \x84318335
+ \x82359037
+ \x82359038
+ \x82359039
+ \x82359130
+ \x82359131
+ \x82359132
+ \x82359133
+ \x82359134
+(38 rows)
+
+--转换为UTF-8编码，UTF-8是Unicode的计算机编码形式，想显示为Unicode编码还需进一步转换，数据库中不支持此功能。
+select convert_to(content, 'utf8') from tb_test order by id;
+ convert_to 
+------------
+ \xe1b8bf
+ \xefb890
+ \xefb892
+ \xefb891
+ \xefb893
+ \xefb894
+ \xefb895
+ \xefb896
+ \xefb897
+ \xefb898
+ \xefb899
+ \xe9beb4
+ \xe9beb5
+ \xe9beb6
+ \xe9beb7
+ \xe9beb8
+ \xe9beb9
+ \xe9beba
+ \xe9bebb
+ \xee9f87
+ \xee9e8d
+ \xee9e8e
+ \xee9e8f
+ \xee9e90
+ \xee9e91
+ \xee9e92
+ \xee9e93
+ \xee9e94
+ \xee9e95
+ \xee9e96
+ \xeea09e
+ \xeea0a6
+ \xeea0ab
+ \xeea0ac
+ \xeea0b2
+ \xeea183
+ \xeea194
+ \xeea1a4
+(38 rows)
+
+ 
+ 
+--2. 新增字符举例
+--CBJ统一汉字扩充B
+select convert_from('\x95328236', 'GB18030-2022');
+ convert_from 
+--------------
+ 𠀀
+(1 row)
+
+select convert_from('\x9835F336', 'GB18030-2022');
+ convert_from 
+--------------
+ 𪛖
+(1 row)
+
+--CJK统一汉字
+select convert_from('\x82358F33', 'GB18030-2022');
+ convert_from 
+--------------
+ 龦
+(1 row)
+
+select convert_from('\x82359636', 'GB18030-2022');
+ convert_from 
+--------------
+ 鿯
+(1 row)
+
+--CJK统一汉子扩充C
+select convert_from('\x9835F738', 'GB18030-2022');
+ convert_from 
+--------------
+ 𪜀
+(1 row)
+
+select convert_from('\x98399E36', 'GB18030-2022');
+ convert_from 
+--------------
+ 𫜴
+(1 row)
+
+--CJK统一汉子扩充D
+select convert_from('\x98399F38', 'GB18030-2022');
+ convert_from 
+--------------
+ 𫝀
+(1 row)
+
+select convert_from('\x9839B539', 'GB18030-2022');
+ convert_from 
+--------------
+ 𫠝
+(1 row)
+
+--CJK统一汉子扩充E
+select convert_from('\x9839B632', 'GB18030-2022');
+ convert_from 
+--------------
+ 𫠠
+(1 row)
+
+select convert_from('\x9933FE33', 'GB18030-2022');
+ convert_from 
+--------------
+ 𬺡
+(1 row)
+
+--CJK统一汉子扩充F
+select convert_from('\x99348138', 'GB18030-2022');
+ convert_from 
+--------------
+ 𬺰
+(1 row)
+
+select convert_from('\x9939F730', 'GB18030-2022');
+ convert_from 
+--------------
+ 𮯠
+(1 row)
+
+--康熙部首
+select convert_from('\x81398B32', 'GB18030-2022');
+ convert_from 
+--------------
+ ⼀
+(1 row)
+
+select convert_from('\x8139A035', 'GB18030-2022');
+ convert_from 
+--------------
+ ⿕
+(1 row)
+
+--西双版纳新傣文字符
+select convert_from('\x8134F932', 'GB18030-2022');
+ convert_from 
+--------------
+ ᦀ
+(1 row)
+
+select convert_from('\x81358437', 'GB18030-2022');
+ convert_from 
+--------------
+ ᧟
+(1 row)
+
+--西双版纳老傣文字符
+select convert_from('\x81358B32', 'GB18030-2022');
+ convert_from 
+--------------
+ ᨠ
+(1 row)
+
+select convert_from('\x81359933', 'GB18030-2022');
+ convert_from 
+--------------
+ ᪭
+(1 row)
+
+--傈僳文字符
+select convert_from('\x82369535', 'GB18030-2022');
+ convert_from 
+--------------
+ ꓐ
+(1 row)
+
+select convert_from('\x82369A32', 'GB18030-2022');
+ convert_from 
+--------------
+ ꓿
+(1 row)
+
+--蒙古文BIRGA符号
+select convert_from('\x9034C538', 'GB18030-2022');
+ convert_from 
+--------------
+ 𑙠
+(1 row)
+
+select convert_from('\x9034C730', 'GB18030-2022');
+ convert_from 
+--------------
+ 𑙬
+(1 row)
+
+--滇东北苗文字符
+select convert_from('\x9232C636', 'GB18030-2022');
+ convert_from 
+--------------
+ 𖼀
+(1 row)
+
+select convert_from('\x9232D625', 'GB18030-2022');
+ convert_from 
+--------------
+ 𖾏
+(1 row)
+
+ 
+--插入了涉及2000升级到2022新增的字符举例
+create table in_test(id int, content text);
+ 
+--CBJ统一汉字扩充B
+insert into in_test (id , content)
+select 1,convert_from('\x95328236', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 2,convert_from('\x9835F336', 'GB18030-2022');
+ 
+--CJK统一汉字
+insert into in_test (id , content)
+select 3,convert_from('\x82358F33', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 4,convert_from('\x82359636', 'GB18030-2022');
+ 
+--CJK统一汉子扩充C
+insert into in_test (id , content)
+select 5,convert_from('\x9835F738', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 6,convert_from('\x98399E36', 'GB18030-2022');
+ 
+--CJK统一汉子扩充D
+insert into in_test (id , content)
+select 7,convert_from('\x98399F38', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 8,convert_from('\x9839B539', 'GB18030-2022');
+ 
+--CJK统一汉子扩充E
+insert into in_test (id , content)
+select 9,convert_from('\x9839B632', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 10,convert_from('\x9933FE33', 'GB18030-2022');
+ 
+--CJK统一汉子扩充F
+insert into in_test (id , content)
+select 11,convert_from('\x99348138', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 12,convert_from('\x9939F730', 'GB18030-2022');
+ 
+--康熙部首
+insert into in_test (id , content)
+select 13,convert_from('\x81398B32', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 14,convert_from('\x8139A035', 'GB18030-2022');
+ 
+--西双版纳新傣文字符
+insert into in_test (id , content)
+select 15,convert_from('\x8134F932', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 16,convert_from('\x81358437', 'GB18030-2022');
+ 
+--西双版纳老傣文字符
+insert into in_test (id , content)
+select 17,convert_from('\x81358B32', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 18,convert_from('\x81359933', 'GB18030-2022');
+ 
+--傈僳文字符
+insert into in_test (id , content)
+select 19,convert_from('\x82369535', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 20,convert_from('\x82369A32', 'GB18030-2022');
+ 
+--蒙古文BIRGA符号
+insert into in_test (id , content)
+select 21,convert_from('\x9034C538', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 22,convert_from('\x9034C730', 'GB18030-2022');
+ 
+--滇东北苗文字符
+insert into in_test (id , content)
+select 23,convert_from('\x9232C636', 'GB18030-2022');
+ 
+insert into in_test (id , content)
+select 24,convert_from('\x9232D625', 'GB18030-2022');
+ 
+--显示这24个字符
+select * from in_test order by id;
+ id | content 
+----+---------
+  1 | 𠀀
+  2 | 𪛖
+  3 | 龦
+  4 | 鿯
+  5 | 𪜀
+  6 | 𫜴
+  7 | 𫝀
+  8 | 𫠝
+  9 | 𫠠
+ 10 | 𬺡
+ 11 | 𬺰
+ 12 | 𮯠
+ 13 | ⼀
+ 14 | ⿕
+ 15 | ᦀ
+ 16 | ᧟
+ 17 | ᨠ
+ 18 | ᪭
+ 19 | ꓐ
+ 20 | ꓿
+ 21 | 𑙠
+ 22 | 𑙬
+ 23 | 𖼀
+ 24 | 𖾏
+(24 rows)
+
+--查看GB18030-2022编码
+select convert_to(content, 'GB18030-2022') from in_test order by id;
+ convert_to 
+------------
+ \x95328236
+ \x9835f336
+ \x82358f33
+ \x82359636
+ \x9835f738
+ \x98399e36
+ \x98399f38
+ \x9839b539
+ \x9839b632
+ \x9933fe33
+ \x99348138
+ \x9939f730
+ \x81398b32
+ \x8139a035
+ \x8134f932
+ \x81358437
+ \x81358b32
+ \x81359933
+ \x82369535
+ \x82369a32
+ \x9034c538
+ \x9034c730
+ \x9232c636
+ \x9232d625
+(24 rows)
+
+--转换为UTF-8编码，UTF-8是Unicode的计算机编码形式，想显示为Unicode编码还需进一步转换，数据库中不支持此功能。
+select convert_to(content, 'utf8') from in_test order by id;
+ convert_to 
+------------
+ \xf0a08080
+ \xf0aa9b96
+ \xe9bea6
+ \xe9bfaf
+ \xf0aa9c80
+ \xf0ab9cb4
+ \xf0ab9d80
+ \xf0aba09d
+ \xf0aba0a0
+ \xf0acbaa1
+ \xf0acbab0
+ \xf0aeafa0
+ \xe2bc80
+ \xe2bf95
+ \xe1a680
+ \xe1a79f
+ \xe1a8a0
+ \xe1aaad
+ \xea9390
+ \xea93bf
+ \xf09199a0
+ \xf09199ac
+ \xf096bc80
+ \xf096be8f
+(24 rows)
+
+ 
+drop table in_test;
+drop table tb_test;
+ 
+--3. 正常的增删改查语句测试
+create table 表1(id int, 人名 name);
+ 
+insert into 表1(id, 人名) values(1, '小明！');
+select * from 表1;
+ id |  人名  
+----+--------
+  1 | 小明！
+(1 row)
+
+ 
+alter table 表1 drop 人名;
+select * from 表1;
+ id 
+----
+  1
+(1 row)
+
+ 
+alter table 表1 add 学校 text;
+insert into 表1(id , 学校) select 2, convert_to('@华为大学￥', 'GB18030-2022');
+select * from 表1;
+ id |           学校           
+----+--------------------------
+  1 | 
+  2 | \x40bbaaceaab4f3d1a7a3a4
+(2 rows)
+
+ 
+drop table 表1;
+ 
+--4. 不存在映射关系时
+select convert('\xFD308130', 'GB18030-2022', 'UTF8');
+ERROR:  character with byte sequence 0xfd 0x30 0x81 0x30 in encoding "GB18030_2022" has no equivalent in encoding "UTF8"
+CONTEXT:  referenced column: convert
+select convert('\xFE39FE39', 'GB18030-2022', 'UTF8');
+ERROR:  character with byte sequence 0xfe 0x39 0xfe 0x39 in encoding "GB18030_2022" has no equivalent in encoding "UTF8"
+CONTEXT:  referenced column: convert
+ 
+--5. 测试gb18030_2022数据库中的字符串相关
+-- E021-03 character string literals
+SELECT 'first line'
+' - next line'
+	' - third line'
+	AS "Three lines to one";
+         Three lines to one          
+-------------------------------------
+ first line - next line - third line
+(1 row)
+
+ 
+-- illegal string continuation syntax
+SELECT 'first line'
+' - next line' /* this comment is not allowed here */
+' - third line'
+	AS "Illegal comment within continuation";
+ERROR:  syntax error at or near "' - third line'"
+LINE 3: ' - third line'
+        ^
+ 
+-- Unicode escapes
+SET standard_conforming_strings TO on;
+ 
+SELECT U&'d\0061t\+000061' AS U&"d\0061t\+000061";
+ data 
+------
+ data
+(1 row)
+
+SELECT U&'d!0061t\+000061' UESCAPE '!' AS U&"d*0061t\+000061" UESCAPE '*';
+ dat\+000061 
+-------------
+ dat\+000061
+(1 row)
+
+ 
+-- bytea
+SET bytea_output TO hex;
+SELECT E'\\xDeAdBeEf'::bytea;
+   bytea    
+------------
+ \xdeadbeef
+(1 row)
+
+SELECT E'\\x De Ad Be Ef '::bytea;
+   bytea    
+------------
+ \xdeadbeef
+(1 row)
+
+SELECT E'\\xDeAdBeE'::bytea;
+ERROR:  invalid hexadecimal data: odd number of digits
+LINE 1: SELECT E'\\xDeAdBeE'::bytea;
+               ^
+CONTEXT:  referenced column: bytea
+SELECT E'\\xDeAdBeEx'::bytea;
+ERROR:  invalid hexadecimal digit: "x"
+LINE 1: SELECT E'\\xDeAdBeEx'::bytea;
+               ^
+CONTEXT:  referenced column: bytea
+SELECT E'\\xDe00BeEf'::bytea;
+   bytea    
+------------
+ \xde00beef
+(1 row)
+
+SELECT E'DeAdBeEf'::bytea;
+       bytea        
+--------------------
+ \x4465416442654566
+(1 row)
+
+SELECT E'De\\000dBeEf'::bytea;
+       bytea        
+--------------------
+ \x4465006442654566
+(1 row)
+
+SELECT E'De\123dBeEf'::bytea;
+       bytea        
+--------------------
+ \x4465536442654566
+(1 row)
+
+SELECT E'De\\123dBeEf'::bytea;
+       bytea        
+--------------------
+ \x4465536442654566
+(1 row)
+
+SELECT E'De\\678dBeEf'::bytea;
+ERROR:  invalid input syntax for type bytea
+LINE 1: SELECT E'De\\678dBeEf'::bytea;
+               ^
+CONTEXT:  referenced column: bytea
+ 
+SET bytea_output TO escape;
+SELECT E'\\xDeAdBeEf'::bytea;
+      bytea       
+------------------
+ \336\255\276\357
+(1 row)
+
+SELECT E'\\x De Ad Be Ef '::bytea;
+      bytea       
+------------------
+ \336\255\276\357
+(1 row)
+
+SELECT E'\\xDe00BeEf'::bytea;
+      bytea       
+------------------
+ \336\000\276\357
+(1 row)
+
+SELECT E'DeAdBeEf'::bytea;
+  bytea   
+----------
+ DeAdBeEf
+(1 row)
+
+SELECT E'De\\000dBeEf'::bytea;
+    bytea    
+-------------
+ De\000dBeEf
+(1 row)
+
+SELECT E'De\\123dBeEf'::bytea;
+  bytea   
+----------
+ DeSdBeEf
+(1 row)
+
+ 
+SET bytea_output TO hex;
+ 
+SELECT CAST(name 'namefield' AS text) AS "text(name)";
+ text(name) 
+------------
+ namefield
+(1 row)
+
+ 
+-- E021-09 trim function
+SELECT TRIM(BOTH FROM '  bunch o blanks  ') = 'bunch o blanks' AS "bunch o blanks";
+ bunch o blanks 
+----------------
+ t
+(1 row)
+
+ 
+-- E021-06 substring expression
+SELECT SUBSTRING('1234567890' FROM 3) = '34567890' AS "34567890";
+ 34567890 
+----------
+ t
+(1 row)
+
+ 
+-- PostgreSQL extension to allow using back reference in replace string;
+SELECT regexp_replace('1112223333', E'(\\d{3})(\\d{3})(\\d{4})', E'(\\1) \\2-\\3');
+ regexp_replace 
+----------------
+ (111) 222-3333
+(1 row)
+
+ 
+-- set so we can tell NULL from empty string
+\pset null '\\N'
+ 
+-- return all matches from regexp
+SELECT regexp_matches('foobarbequebaz', $re$(bar)(beque)$re$);
+ regexp_matches 
+----------------
+ {bar,beque}
+(1 row)
+
+ 
+-- split string on regexp
+SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumped over the lazy dog', $re$\s+$re$) AS foo;
+  foo   | length 
+--------+--------
+ the    |      3
+ quick  |      5
+ brown  |      5
+ fox    |      3
+ jumped |      6
+ over   |      4
+ the    |      3
+ lazy   |      4
+ dog    |      3
+(9 rows)
+
+SELECT regexp_split_to_array('the quick brown fox jumped over the lazy dog', $re$\s+$re$);
+             regexp_split_to_array              
+------------------------------------------------
+ {the,quick,brown,fox,jumped,over,the,lazy,dog}
+(1 row)
+
+ 
+-- change NULL-display back
+\pset null ''
+ 
+-- E021-11 position expression
+SELECT POSITION('4' IN '1234567890') = '4' AS "4";
+ 4 
+---
+ t
+(1 row)
+
+ 
+SELECT POSITION('5' IN '1234567890') = '5' AS "5";
+ 5 
+---
+ t
+(1 row)
+
+ 
+-- T312 character overlay function
+SELECT OVERLAY('abcdef' PLACING '45' FROM 4) AS "abc45f";
+ abc45f 
+--------
+ abc45f
+(1 row)
+
+ 
+-- E061-04 like predicate
+SELECT 'hawkeye' LIKE 'h%' AS "true";
+ true 
+------
+ t
+(1 row)
+
+SELECT 'hawkeye' NOT LIKE 'h%' AS "false";
+ false 
+-------
+ f
+(1 row)
+
+ 
+-- unused escape character
+SELECT 'hawkeye' LIKE 'h%' ESCAPE '#' AS "true";
+ true 
+------
+ t
+(1 row)
+
+SELECT 'hawkeye' NOT LIKE 'h%' ESCAPE '#' AS "false";
+ false 
+-------
+ f
+(1 row)
+
+ 
+--
+-- test ILIKE (case-insensitive LIKE)
+-- Be sure to form every test as an ILIKE/NOT ILIKE pair.
+--
+ 
+SELECT 'hawkeye' ILIKE 'h%' AS "true";
+ true 
+------
+ t
+(1 row)
+
+SELECT 'hawkeye' NOT ILIKE 'h%' AS "false";
+ false 
+-------
+ f
+(1 row)
+
+ 
+--6. 使用字符串相关函数
+--重复字符串
+select repeat('中国', 3);
+    repeat    
+--------------
+ 中国中国中国
+(1 row)
+
+ 
+--返回字符串的前n个字符
+select left('中国！number1', 7);
+    left    
+------------
+ 中国！numb
+(1 row)
+
+ 
+--返回长度
+select length('中国！number1');
+ length 
+--------
+     10
+(1 row)
+
+ 
+--反转字符串
+select reverse('中国！number1');
+    reverse    
+---------------
+ 1rebmun！国中
+(1 row)
+
+ 
+--md5算法加密
+select md5('中国！number1');
+               md5                
+----------------------------------
+ 764c69059680eb8f52946f9f4936737a
+(1 row)
+
+ 
+-- test strpos
+SELECT strpos('abcdef', 'cd') AS "pos_3";
+ pos_3 
+-------
+     3
+(1 row)
+
+SELECT strpos('abcdef', 'xy') AS "pos_0";
+ pos_0 
+-------
+     0
+(1 row)
+
+ 
+SELECT replace('yabadabadoo', 'ba', '123') AS "ya123da123doo";
+ ya123da123doo 
+---------------
+ ya123da123doo
+(1 row)
+
+ 
+select split_part('joeuser@mydatabase','@',3) AS "empty string";
+ empty string 
+--------------
+ 
+(1 row)
+
+ 
+select to_hex(256::bigint*256::bigint*256::bigint*256::bigint - 1) AS "ffffffff";
+ ffffffff 
+----------
+ ffffffff
+(1 row)
+
+ 
+--返回字符串中第一个字符的十进制表示形式
+select ascii('xyz');
+ ascii 
+-------
+   120
+(1 row)
+
+select ascii('中xyz');
+ERROR:  requested character too large
+CONTEXT:  referenced column: ascii
+select ascii('ḿxyz');
+ERROR:  requested character too large
+CONTEXT:  referenced column: ascii
+ 
+-- 7. 检查GB18030-2022与GB18030的关系
+select convert('中国', 'GB18030', 'GB18030-2022');
+  convert   
+------------
+ \xd6d0b9fa
+(1 row)
+
+ 
+select convert('中国', 'GB18030-2022', 'GB18030');
+  convert   
+------------
+ \xd6d0b9fa
+(1 row)
+
+ 
+select convert('\xA8BC', 'GB18030-2022', 'UTF8');
+ convert  
+----------
+ \xe1b8bf
+(1 row)
+
+ 
+select convert('\xA8BC', 'GB18030', 'UTF8');
+ convert  
+----------
+ \xee9f87
+(1 row)
+
+ 
+\c regression
+clean connection to all force for database gb18030_2022;
+drop database gb18030_2022;
+ 
+-- 8. 在UTF8环境下检测GB18030-2022与UTF8的转换
+select convert('中国&华为*GaussDB', 'UTF8', 'GB18030-2022');
+               convert                
+--------------------------------------
+ \xd6d0b9fa26bbaaceaa2a47617573734442
+(1 row)
+
+ 
+select convert('ḿ', 'UTF8', 'GB18030-2022');
+ convert 
+---------
+ \xa8bc
+(1 row)
+
+ 
+-- 9. 测试create database时encoding与本地设置不匹配
+create database gb18030_2022 encoding='gb18030-2022' LC_COLLATE='en_US.utf-8' LC_CTYPE ='en_US.utf-8' TEMPLATE=template0;
+ERROR:  encoding "GB18030_2022" does not match locale "en_US.utf-8"
+DETAIL:  The chosen LC_CTYPE setting requires encoding "UTF8".
+ 
+--10. 测试initdb
+\! rm -f @abs_bindir@/test_initdb.log
+\! mkdir -p @testtablespace@/test2
+\! mkdir -p @testtablespace@/test2/pg_location
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test2 --nodename coorn2 -U test_initdb -w test@123 --locale=zh_CN.gb18030 -E GB18030_2022 >> @abs_bindir@/test_initdb2.log 2>&1
+\! cat @abs_bindir@/test_initdb2.log | grep ok
+ok
+creating subdirectories ... in ordinary occasionok
+creating configuration files ... ok
+ok
+initializing pg_authid ... ok
+setting password ... ok
+initializing dependencies ... ok
+loading PL/pgSQL server-side language ... ok
+creating system views ... ok
+creating performance views ... ok
+loading system objects' descriptions ... ok
+creating collations ... ok
+creating conversions ... ok
+creating dictionaries ... ok
+setting privileges on built-in objects ... ok
+initialize global configure for bucketmap length ... ok
+creating information schema ... ok
+loading foreign-data wrapper for distfs access ... ok
+loading foreign-data wrapper for log access ... ok
+loading hstore extension ... ok
+loading security plugin ... ok
+update system tables ... ok
+creating snapshots catalog ... ok
+vacuuming database template1 ... ok
+copying template1 to template0 ... ok
+copying template1 to postgres ... ok
+freezing database template0 ... ok
+freezing database template1 ... ok
+freezing database postgres ... ok
+\! rm -f @abs_bindir@/test_initdb2.log
+\! rm -rf @testtablespace@/test2
+ 
+--11. 测试升级回滚
+select oid, * from pg_conversion where conname like '%gb18030%' order by conname;
+  oid  |       conname        | connamespace | conowner | conforencoding | contoencoding |       conproc        | condefault 
+-------+----------------------+--------------+----------+----------------+---------------+----------------------+------------
+--? .* | gb18030_2022_to_utf8 |           11 |       10 |             37 |             7 | gb18030_2022_to_utf8 | t
+--? .* | gb18030_to_utf8      |           11 |       10 |             36 |             7 | gb18030_to_utf8      | t
+--? .* | utf8_to_gb18030      |           11 |       10 |              7 |            36 | utf8_to_gb18030      | t
+--? .* | utf8_to_gb18030_2022 |           11 |       10 |              7 |            37 | utf8_to_gb18030_2022 | t
+(4 rows)
+
+ 
+select oid, * from pg_proc where proname like '%gb18030%' order by proname;
+  oid  |       proname        | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype |    proargtypes     | proallargtypes | proargmodes | proargnames | proargdefaults |        prosrc        |          probin          | proconfig | proacl | prodefaultargpos | fencedmode | proshippable | propackage | prokind | proargsrc | propackageid | proisprivate | proargtypesext | prodefaultargposext |    allargtypes     | allargtypesext 
+-------+----------------------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+--------------------+----------------+-------------+-------------+----------------+----------------------+--------------------------+-----------+--------+------------------+------------+--------------+------------+---------+-----------+--------------+--------------+----------------+---------------------+--------------------+----------------
+--? .* | gb18030_2022_to_utf8 |           11 |       10 |      13 |       1 |       0 |           0 | -            | f        | f           | f         | f            | t           | f         | v           |        5 |               0 |       2278 | 23 23 2275 2281 23 |                |             |             |                | gb18030_2022_to_utf8 | $libdir/utf8_and_gb18030 |           |        |                  | f          | f            | f          | f       |           |            0 | f            |                |                     | 23 23 2275 2281 23 | 
+--? .* | gb18030_to_utf8      |           11 |       10 |      13 |       1 |       0 |           0 | -            | f        | f           | f         | f            | t           | f         | v           |        5 |               0 |       2278 | 23 23 2275 2281 23 |                |             |             |                | gb18030_to_utf8      | $libdir/utf8_and_gb18030 |           |        |                  | f          | f            | f          | f       |           |            0 | f            |                |                     | 23 23 2275 2281 23 | 
+--? .* | utf8_to_gb18030      |           11 |       10 |      13 |       1 |       0 |           0 | -            | f        | f           | f         | f            | t           | f         | v           |        5 |               0 |       2278 | 23 23 2275 2281 23 |                |             |             |                | utf8_to_gb18030      | $libdir/utf8_and_gb18030 |           |        |                  | f          | f            | f          | f       |           |            0 | f            |                |                     | 23 23 2275 2281 23 | 
+--? .* | utf8_to_gb18030_2022 |           11 |       10 |      13 |       1 |       0 |           0 | -            | f        | f           | f         | f            | t           | f         | v           |        5 |               0 |       2278 | 23 23 2275 2281 23 |                |             |             |                | utf8_to_gb18030_2022 | $libdir/utf8_and_gb18030 |           |        |                  | f          | f            | f          | f       |           |            0 | f            |                |                     | 23 23 2275 2281 23 | 
+(4 rows)
+
+ 
+--12. 看护client_encoding不能设置为GB18030_2022
+set client_encoding = GB18030_2022;
+ERROR:  invalid value for parameter "client_encoding": "gb18030_2022"
+ 
+ALTER SESSION SET NAMES 'GB18030_2022';
+ERROR:  invalid value for parameter "client_encoding": "GB18030_2022"

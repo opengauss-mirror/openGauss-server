@@ -1,0 +1,31 @@
+drop table if exists table_test_prepared_statement2;
+NOTICE:  table "table_test_prepared_statement2" does not exist, skipping
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create table table_test_prepared_statement2 (a int);
+prepare stmt2_in_session2 as insert into table_test_prepared_statement2 values (2);
+select name, statement, parameter_types, from_sql from pg_prepared_statement(
+ (
+    select sessionid
+    from pg_stat_activity
+    where application_name='gsql' and query like 'select pg_sleep%' 
+    limit 1
+ )
+) order by prepare_time;
+       name        |                                      statement                                      | parameter_types | from_sql 
+-------------------+-------------------------------------------------------------------------------------+-----------------+----------
+ stmt1_in_session1 | prepare stmt1_in_session1 as insert into table_test_prepared_statement1 values (1); | {}              | t
+(1 row)
+
+select name, statement, parameter_types, from_sql  from pg_prepared_statement(0) order by prepare_time;
+       name        |                                      statement                                      | parameter_types | from_sql 
+-------------------+-------------------------------------------------------------------------------------+-----------------+----------
+ stmt1_in_session1 | prepare stmt1_in_session1 as insert into table_test_prepared_statement1 values (1); | {}              | t
+ stmt2_in_session2 | prepare stmt2_in_session2 as insert into table_test_prepared_statement2 values (2); | {}              | t
+(2 rows)
+
+drop table table_test_prepared_statement2;

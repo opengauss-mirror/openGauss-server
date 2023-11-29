@@ -26,6 +26,7 @@
 #include "common/fe_memutils.h"
 #include "common/build_query/build_query.h"
 #include "replication/replicainternal.h"
+#include "storage/file/fio_device.h"
 
 #include <memory>
 #define BLOCKSIZE (8 * 1024)

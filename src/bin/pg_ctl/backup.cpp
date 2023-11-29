@@ -143,7 +143,7 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 static bool UpdatePaxosIndexFile(unsigned long long paxosIndex);
 static bool DeleteAlreadyDropedFile(const char* path, bool is_table_space);
 static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int fileNode);
-
+static void BeginGetXlogbyStream(char* xlogstart, uint32 timeline, char* sysidentifier, char* xlog_location, uint term, PGresult* res);
 /*
  * tblspaceDirectory is used for saving the table space directory created by
  * full-build. tblspaceNum is the count of table space. The table space directory
@@ -775,6 +775,8 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
     struct stat st;
     int nRet = 0;
     bool forbid_write = false;
+    char pg_control_file[MAXPGPATH] = {0};
+    errno_t errorno = EOK;
 
     if (!GetCurrentPath(current_path, res, rownum)) {
         return false;
@@ -791,6 +793,12 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
         return false;
     }
     PQclear(res);
+
+    if (ss_instance_config.dss.enable_dss) {
+        errorno = snprintf_s(pg_control_file, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control",
+                             ss_instance_config.dss.vgname);
+        securec_check_ss_c(errorno, "\0", "\0");
+    }
 
     while (1) {
         int r;
@@ -859,7 +867,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
-            if (current_len_left < 0 || current_len_left > INT_MAX - 511) {
+            if (current_len_left > INT_MAX - 511) {
                 pg_log(PG_WARNING, _("current_len_left is invalid\n"));
                 DisconnectConnection();
                 FREE_AND_RESET(copybuf);
@@ -1013,22 +1021,29 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 continue;
             }
             
-            /* pg_control will be written into a specified postion of main stanby corresponding to */
-            if (instance_config.dss.enable_dss && strcmp(filename, "+data/pg_control") == 0) {
+            /* pg_control will be written into pages of each interconnect nodes in stanby cluster corresponding to */
+            if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                int main_standby_id = instance_config.dss.instance_id;
-                off_t seekpos = (off_t)BLCKSZ * main_standby_id;
-                fseek(file, seekpos, SEEK_SET);
-            }
-
-            if (forbid_write == false) {
-                if (fwrite(copybuf, r, 1, file) != 1) {
+                int node;
+                for (node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
+                    off_t seekpos = (off_t)BLCKSZ * node;
+                    fseek(file, seekpos, SEEK_SET);
+                    if (fwrite(copybuf, r, 1, file) != 1) {
+                        pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                        DisconnectConnection();
+                        FREE_AND_RESET(copybuf);
+                        return false;
+                    }
+                }
+            } else {
+                if (!forbid_write && fwrite(copybuf, r, 1, file) != 1) {
                     pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
                     DisconnectConnection();
                     FREE_AND_RESET(copybuf);
                     return false;
                 }
             }
+
             totaldone += r;
             if (showprogress && build_mode != COPY_SECURE_FILES_BUILD) {
                 progress_report(rownum, filename, false);
@@ -1180,7 +1195,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
-    char *dssdir = instance_config.dss.vgdata; 
+    char *dssdir = ss_instance_config.dss.vgname; 
 
     pqsignal(SIGCHLD, BuildReaper); /* handle child termination */
     /* concat file and path */
@@ -1227,7 +1242,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
         delete_datadir(dirname);
 
         /* delete data/ and pg_tblspc/ in dss, but keep .config */
-        if (instance_config.dss.enable_dss) {
+        if (ss_instance_config.dss.enable_dss) {
             delete_datadir(dssdir);
         }
         show_full_build_process("clear old target dir success");
@@ -1529,31 +1544,14 @@ static bool BaseBackup(const char* dirname, uint32 term)
         return false;
     }
 
-    show_full_build_process("begin get xlog by xlogstream");
-
     /*
-     * If we're streaming WAL, start the streaming session before we start
-     * receiving the actual data chunks.
-     */
-    if (streamwal) {
-        if (verbose) {
-            pg_log(PG_WARNING, _("starting background WAL receiver\n"));
-        }
-        show_full_build_process("starting walreceiver");
-        bool startSuccess = StartLogStreamer(xlogstart, timeline, sysidentifier, (const char*)xlog_location, term);
-        if (!startSuccess) {
-            pg_log(PG_WARNING, _("start log streamer failed \n"));
-            pg_free(sysidentifier);
-            sysidentifier = NULL;
-            DisconnectConnection();
-            PQclear(res);
-            return false;
-        }
+    * in order to avoid sharing the same dssserver session,
+    * we will not start logstreaming here
+    */
+    if (!ss_instance_config.dss.enable_dss) {
+        BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 
-    /* free sysidentifier after use */
-    pg_free(sysidentifier);
-    sysidentifier = NULL;
     show_full_build_process("begin receive tar files");
 
     /*
@@ -1674,6 +1672,10 @@ static bool BaseBackup(const char* dirname, uint32 term)
     }
 #endif
 
+    if (ss_instance_config.dss.enable_dss) {
+        BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
+    }
+
     if (bgchild > 0) {
 #ifndef WIN32
         int status;
@@ -1762,7 +1764,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     /* fsync all data come from source */
     if (!no_need_fsync) {
         show_full_build_process("starting fsync all files come from source.");
-        if (instance_config.dss.enable_dss) {
+        if (ss_instance_config.dss.enable_dss) {
             (void) fsync_pgdata(dssdir);
         } else {
             (void) fsync_pgdata(basedir);
@@ -1775,7 +1777,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     if (g_is_obsmode) {
         backupDWFileSuccess = backup_dw_file(basedir);
     } else {
-        if (instance_config.dss.enable_dss) {
+        if (ss_instance_config.dss.enable_dss) {
             backupDWFileSuccess = ss_backup_dw_file(dssdir);
         } else {
             backupDWFileSuccess = backup_dw_file(dirname);
@@ -1802,7 +1804,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
         return false;
     }
     
-    if (instance_config.dss.enable_dss) {
+    if (ss_instance_config.dss.enable_dss) {
         nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dssdir);
     } else {
         nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dirname);
@@ -2383,7 +2385,7 @@ static bool ss_backup_dw_file(const char* target_dir)
 
     /* Delete the dw file, if it exists. */
     rc = snprintf_s(dw_path, PATH_MAX, PATH_MAX - 1, "%s/pg_doublewrite%d", target_dir,
-                    instance_config.dss.instance_id);
+                    ss_instance_config.dss.instance_id);
     securec_check_ss_c(rc, "\0", "\0");
 
     /* check whether directory is exits or not, if not exit then mkdir it */
@@ -2519,10 +2521,10 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH])
     struct stat stbuf;
     int nRet = 0;
 
-    if (instance_config.dss.enable_dss) {
-        char *dssdir = instance_config.dss.vgdata;
+    if (ss_instance_config.dss.enable_dss) {
+        char *dssdir = ss_instance_config.dss.vgname;
         nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir,
-            instance_config.dss.instance_id);
+            ss_instance_config.dss.instance_id);
     } else {
         nRet = snprintf_s(xlog_location, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", basedir);
     }
@@ -2738,8 +2740,8 @@ bool RenameTblspcDir(char *dataDir)
         return true;
     }
     
-    if (instance_config.dss.enable_dss) {
-        char *dssdir = instance_config.dss.vgdata;
+    if (ss_instance_config.dss.enable_dss) {
+        char *dssdir = ss_instance_config.dss.vgname;
         rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dssdir, "pg_tblspc");
     } else {
         rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dataDir, "pg_tblspc");
@@ -2780,4 +2782,33 @@ bool RenameTblspcDir(char *dataDir)
     pg_log(PG_WARNING, _("rename table space dir success.\n"));
 
     return true;
+}
+
+static void BeginGetXlogbyStream(char* xlogstart, uint32 timeline, char* sysidentifier, char* xlog_location, uint term, PGresult* res)
+{
+    show_full_build_process("begin get xlog by xlogstream");
+    /*
+    * If we're streaming WAL, start the streaming session before we start
+    * receiving the actual data chunks.
+    */
+    if (streamwal) {
+        if (verbose) {
+            pg_log(PG_WARNING, _("starting background WAL receiver\n"));
+        }
+        show_full_build_process("starting walreceiver");
+        bool startSuccess = StartLogStreamer(xlogstart, timeline, sysidentifier, (const char*)xlog_location, term);
+        if (!startSuccess) {
+            pg_log(PG_WARNING, _("start log streamer failed \n"));
+            pg_free(sysidentifier);
+            sysidentifier = NULL;
+            DisconnectConnection();
+            PQclear(res);
+            pg_log(PG_WARNING, _("build failed \n"));
+            exit(1);
+        }
+    }
+
+    /* free sysidentifier after use */
+    pg_free(sysidentifier);
+    sysidentifier = NULL;
 }

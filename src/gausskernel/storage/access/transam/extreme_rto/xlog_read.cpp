@@ -29,6 +29,7 @@
 #include "replication/walreceiver.h"
 #include "replication/dcf_replication.h"
 #include "replication/shared_storage_walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/ipc.h"
 
 namespace extreme_rto {
@@ -553,8 +554,26 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
             if (ENABLE_DMS && ENABLE_DSS) {
-                readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
-                    xlogreader->readBuf, readTLI, NULL);
+                if (SS_REPLICATION_DORADO_CLUSTER) {
+                    for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
+                        if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
+                            break;
+                        }
+                        readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
+                            xlogreader->readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i]);
+                        
+                        if(readLen > 0) {
+                            break;
+                        }
+                        if(t_thrd.xlog_cxt.readFile >= 0) {
+                            close(t_thrd.xlog_cxt.readFile);
+                            t_thrd.xlog_cxt.readFile = -1;
+                        }
+                    }
+                } else {
+                    readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
+                        xlogreader->readBuf, readTLI, NULL);
+                }
             } else {
                 readLen = ParallelXLogPageReadFile(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
             }
@@ -959,9 +978,15 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
             latestRecordCrc = record->xl_crc;
             latestRecordLen = record->xl_tot_len;
             ADD_ABNORMAL_POSITION(9);
+            if (SS_REPLICATION_DORADO_CLUSTER) {
+                t_thrd.xlog_cxt.ssXlogReadFailedTimes = 0;
+            }
             /* Great, got a record */
             return record;
         } else {
+            if (SS_REPLICATION_DORADO_CLUSTER) {
+                t_thrd.xlog_cxt.ssXlogReadFailedTimes++;
+            }
             /* No valid record available from this source */
             t_thrd.xlog_cxt.failedSources |= t_thrd.xlog_cxt.readSource;
 

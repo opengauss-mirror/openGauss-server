@@ -214,6 +214,18 @@ struct PGPROC {
      */
     TransactionId procArrayGroupMemberXid;
 
+    int procArrayGroupSubXactNXids;
+
+    TransactionId* procArrayGroupSubXactXids;
+
+    /*
+     * lastestXid amoung subtransaction's xid and it's committed children's,
+     * which can be detemined whether the group member is a subtransaction or
+     * transaction. procArrayGroupSubXactLatestXid != 0 only when the group 
+     * memeber is subtransaction.
+     */
+    TransactionId procArrayGroupSubXactLatestXid;
+
     /* Support for group snapshot getting. */
     bool snapshotGroupMember;
     /* next ProcArray group member waiting for snapshot getting */
@@ -231,6 +243,9 @@ struct PGPROC {
 
     /* commit sequence number send down */
     CommitSeqNo commitCSN;
+
+    XLogRecPtr exrto_read_lsn; /* calculate recycle lsn for read on standby in extreme rto */
+    TimestampTz exrto_gen_snap_time;
 
     /* Support for group transaction status update. */
     bool clogGroupMember;                   /* true, if member of clog group */
@@ -260,6 +275,9 @@ struct PGPROC {
     uint64 snap_refcnt_bitmap;
 #endif
 
+    XLogRecPtr exrto_min; /* calculate recycle lsn for read on standby in extreme rto */
+
+    bool exrto_reload_cache;
     LWLock* subxidsLock;
     struct XidCache subxids; /* cache for subtransaction XIDs */
 
@@ -452,7 +470,7 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 
 #define NUM_DMS_REFORM_CALLLBACK_PROCS (5)
 #define NUM_DMS_LSNR_CALLBACK_PROC (1)
-#define NUM_DMS_SMON_CALLBACK_PROC (1)
+#define NUM_DMS_SMON_CALLBACK_PROC (2) // smon + smon_recycle
 #define NUM_DMS_PARALLEL_CALLBACK_PROC (g_instance.attr.attr_storage.dms_attr.parallel_thread_num <= 1 ? 0 : \
                                         g_instance.attr.attr_storage.dms_attr.parallel_thread_num)
 #define NUM_DMS_RDMA_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.work_thread_count * 2)
@@ -547,17 +565,6 @@ void CancelBlockedRedistWorker(LOCK* lock, LOCKMODE lockmode);
 
 extern void BecomeLockGroupLeader(void);
 extern void BecomeLockGroupMember(PGPROC *leader);
-
-static inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
-{
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-    return xid < cutoff;
-}
-static inline bool TransactionIdOlderThanFrozenXid(TransactionId xid)
-{
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
-    return xid < cutoff;
-}
 
 extern int GetThreadPoolStreamProcNum(void);
 

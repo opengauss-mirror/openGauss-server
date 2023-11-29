@@ -66,6 +66,8 @@ static void debug_server_disable_breakpoint(DebugInfo* debug);
 static void debug_server_info_breakpoint(DebugInfo* debug);
 static void debug_server_backtrace();
 static void debug_server_set_variable(DebugInfo* debug, PLpgSQL_execstate* estate);
+static void debug_server_info_code(DebugInfo* debug);
+static char* debug_server_add_breakpoint_invalid(DebugInfo* debug, bool* valid, int lineno, int* newIndex, char* query, char* maskquery);
 
 /* close each debug function's resource if necessary */
 void PlDebugerCleanUp(int code, Datum arg)
@@ -138,8 +140,6 @@ static void init_debug_server(PLpgSQL_function* func, int socketId, int debugSta
 
 void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
 {
-    if (func->fn_oid == InvalidOid)
-        return;
     bool found = false;
     bool need_continue_into = u_sess->plsql_cxt.cur_debug_server != NULL &&
         ActiveBPInFunction(u_sess->plsql_cxt.cur_debug_server, func->fn_oid);
@@ -190,7 +190,7 @@ void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
             /* maintain session's debug server is on base turn on function */
             u_sess->plsql_cxt.cur_debug_server = func->debug;
         }
-        func->debug->stop_next_stmt = true;
+        func->debug->stop_next_stmt = (need_continue_into && !is_stepinto) ? false : true;
     }
 }
 
@@ -339,6 +339,9 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
         case DEBUG_SET_VARIABLE_HEADER:
             debug_server_set_variable(debug, estate);
             break;
+        case DEBUG_INFOCODE_HEADER:
+            debug_server_info_code(debug);
+            break;
         default:
             ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
                             (errmsg("received unknown plsql debug client msg: %c", *firstChar))));
@@ -379,12 +382,16 @@ void server_send_end_msg(DebugInfo* debug)
         initStringInfo(&str);
         Oid funcoid = debug->func->fn_oid;
         Oid pkgoid = debug->func->pkg_oid;
-        char* funcname = get_func_name(debug->func->fn_oid);
+        char* funcname = NULL;
+        if (OidIsValid(funcoid)) {
+            funcname = get_func_name(funcoid);
+        } else {
+            funcname = pstrdup("anonymous block");
+        }
         char* pkgname = NULL;
         Assert(funcname != NULL);
         if (pkgoid != InvalidOid) {
-            NameData* pkgName = GetPackageName(pkgoid);
-            pkgname = NameStr(*pkgName);
+            pkgname = GetPackageName(pkgoid);
         }
         char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
         appendStringInfo(&str, "%u:%s:%d:%s", funcoid, pkgfuncname, 0, "[EXECUTION FINISHED]");
@@ -481,8 +488,8 @@ PLDebug_variable* get_debug_variable_var(PLpgSQL_var* node, const char* target)
         var->value = OidOutputFunctionCall(form->typoutput, node->value);
     }
     if (node->ispkg && node->pkg != NULL) {
-        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
-        var->pkgname = AssignStr(NameStr(*pkgName));
+        char* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(pkgName);
     } else {
         var->pkgname = pstrdup("");
     }
@@ -543,8 +550,8 @@ PLDebug_variable* get_debug_variable_row(PLpgSQL_row* node, PLpgSQL_execstate* e
         pfree(buf);
     }
     if (node->ispkg && node->pkg != NULL) {
-        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
-        var->pkgname = AssignStr(NameStr(*pkgName));
+        char* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(pkgName);
     } else {
         var->pkgname = pstrdup("");
     }
@@ -577,8 +584,8 @@ PLDebug_variable* get_debug_variable_rec(PLpgSQL_rec* node, const char* target)
         pfree(buf);
     }
     if (node->ispkg && node->pkg != NULL) {
-        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
-        var->pkgname = AssignStr(NameStr(*pkgName));
+        char* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(pkgName);
     } else {
         var->pkgname = pstrdup("");
     }
@@ -735,11 +742,11 @@ void clean_up_debug_client(bool hasError)
         DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
         /* clean comm idx*/
         if (client->comm_idx < PG_MAX_DEBUG_CONN && client->comm_idx >= 0) {
+            uint64 clientSessionId = ENABLE_THREAD_POOL ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
             PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[client->comm_idx];
             AutoMutexLock debuglock(&debug_comm->mutex);
             debuglock.lock();
-            if (debug_comm->hasClient() &&
-                (debug_comm->clientId == u_sess->session_id || debug_comm->clientId == t_thrd.proc_cxt.MyProcPid)) {
+            if (debug_comm->hasClient() && debug_comm->clientId == clientSessionId) {
                 /* only wake up server for error when it's not recevied server error */
                 if (hasError && debug_comm->IsServerWaited && !debug_comm->hasServerErrorOccured) {
                     debug_comm->hasClientErrorOccured = true;
@@ -877,7 +884,12 @@ static bool send_cur_info(DebugInfo* debug, PLpgSQL_execstate* estate, bool stop
 static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* debug)
 {
     Oid funcoid = debug->func->fn_oid;
-    char* funcname = get_func_name(funcoid);
+    char* funcname = NULL;
+    if (OidIsValid(funcoid)) {
+        funcname = get_func_name(funcoid);
+    } else {
+        funcname = pstrdup("anonymous block");
+    }
     Oid pkgoid = debug->func->pkg_oid;
     Assert(funcname != NULL);
     int lineno = estate->err_stmt->lineno;
@@ -886,8 +898,7 @@ static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* d
     char* pkgname = NULL;
 
     if (pkgoid != InvalidOid) {
-        NameData* pkgName = GetPackageName(pkgoid);
-        pkgname = NameStr(*pkgName);
+        pkgname = GetPackageName(pkgoid);
     }
 
     char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
@@ -1023,8 +1034,12 @@ static void debug_server_add_breakpoint(DebugInfo* debug)
     }
 
     int newIndex = -1;
+    bool valid = true;
+    if (funcOid == InvalidOid) {
+        query = debug_server_add_breakpoint_invalid(debug, &valid, lineno, &newIndex, query, maskquery);
+    }
 
-    if (!IsBreakPointExisted(debug, funcOid, lineno, false)) {
+    if (valid && !IsBreakPointExisted(debug, funcOid, lineno, false)) {
         PLDebug_breakPoint* bp = (PLDebug_breakPoint*)makeNode(PLDebug_breakPoint);
         bp->bpIndex = list_length(debug->bp_list);
         bp->funcoid = funcOid;
@@ -1042,6 +1057,42 @@ static void debug_server_add_breakpoint(DebugInfo* debug)
     initStringInfo(&str);
     appendStringInfo(&str, "%d", newIndex);
     debug_server_send_msg(debug, str.data, str.len);
+}
+
+static char* debug_server_add_breakpoint_invalid(DebugInfo* debug, bool* valid, int lineno, int* newIndex, char* query, char* maskquery)
+{
+    /* step 1: check whether exceed the max line number, return -2 if exceed */
+    List* debug_body = debug->func->action->body;
+    uint32 maxline = ((PLpgSQL_stmt*)lfirst((list_head(debug_body))))->lineno + debug_body->length - 2;
+    *valid = (lineno < 1 || (uint32)lineno > maxline) ? false : true;
+    *newIndex = *valid ? -1 : ADD_BP_ERR_OUT_OF_RANGE;
+    /* step 2: valid breakpoint or not, return -3 if not valid */
+    if (!*valid) {
+        return "NULL";
+    }
+    List* breakables = collect_breakable_line(debug->func);
+    *valid = list_member_int(breakables, lineno);
+    *newIndex = *valid ? -1 : ADD_BP_ERR_INVALID_BP_POS;
+    list_free(breakables);
+    /*step 3: get query*/
+    if (!*valid) {
+        return "NULL";
+    }
+    ListCell *cell = NULL;
+    foreach(cell, debug_body) {
+        PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)lfirst(cell);
+        if (stmt->lineno == lineno) {
+            query = pstrdup(get_stmt_query(stmt));
+            maskquery = (query == NULL) ? NULL : maskPassword(query);
+            if (maskquery != NULL && maskquery != query) {
+                pfree_ext(query);
+                query = maskquery;
+            }
+            break;
+        }
+    }
+    return query;
+    /* not found? should not happen*/
 }
 
 static void debug_server_delete_breakpoint(DebugInfo* debug)
@@ -1149,12 +1200,16 @@ PLDebug_frame* get_frame(DebugInfo* debug)
                 erraction("Contact Huawei Engineer.")));
     }
     PLDebug_frame* frame = (PLDebug_frame*)makeNode(PLDebug_frame);
-    char* funcname = get_func_name(debug->func->fn_oid);
+    char* funcname = NULL;
     char* pkgname = NULL;
     Oid pkgoid = debug->func->pkg_oid;
+    if (OidIsValid(debug->func->fn_oid)) {
+        funcname = get_func_name(debug->func->fn_oid);
+    } else {
+        funcname = pstrdup("anonymous block");
+    }
     if (pkgoid != InvalidOid) {
-        NameData* pkgName = GetPackageName(pkgoid);
-        pkgname = NameStr(*pkgName);
+        pkgname = GetPackageName(pkgoid);
     }
     frame->frameno = debug->debugStackIdx;
     frame->funcname = quote_qualified_identifier(pkgname, funcname);
@@ -1309,7 +1364,7 @@ static void debug_server_set_variable(DebugInfo* debug, PLpgSQL_execstate* estat
             ReleaseCurrentSubTransaction();
             func_context = MemoryContextSwitchTo(debug->debug_cxt);
             t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
-            return;
+            PG_TRY_RETURN();
         }
         exec_assign_expr(estate, targetDatum, expr);
         /* Commit the inner transaction and return to the outer context */
@@ -1779,4 +1834,55 @@ void ReportInvalidMsg(const char* buf)
             errdetail("Received: %s", buf),
             errcause("Debugger send false messages."),
             erraction("Contact Huawei Engineer.")));
+}
+
+static void debug_server_info_code(DebugInfo* debug)
+{
+    List* infoCode = NIL;
+    DebugInfo* top = u_sess->plsql_cxt.cur_debug_server;
+    while (top != NULL)
+    {
+        if (!OidIsValid(top->func->fn_oid))
+        {
+            break;
+        }
+        top = top->inner_called_debugger;
+    }
+    if (top == NULL) {
+        ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errmsg("There is no anonymous block in debugging")));
+    }
+    
+    List* debug_body = top->func->action->body;
+    List* breakables = collect_breakable_line(debug->func);
+    ListCell *cell = NULL;
+
+    foreach(cell, debug_body) {
+        PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)lfirst(cell);
+        PLDebug_codeline* code = (PLDebug_codeline*)makeNode(PLDebug_codeline);;
+        code->lineno = stmt->lineno;
+        code->code = pstrdup(get_stmt_query(stmt));
+        code->canBreak = list_member_int(breakables, stmt->lineno);
+        infoCode = lappend(infoCode, code);
+    }
+    char* buf = nodeToString(infoCode);
+    int len = strlen(buf);
+    debug_server_send_msg(debug, buf, len);
+    list_free(breakables);
+
+    cell = list_head(infoCode);
+    while (cell != NULL) {
+        ListCell* tmp = cell;
+        char* tmp_code = ((PLDebug_codeline*)lfirst(tmp))->code;
+        cell = lnext(cell);
+        if (tmp_code != NULL) {
+            pfree(tmp_code);
+        }
+        pfree(lfirst(tmp));
+        pfree(tmp);
+    }
+    if (infoCode != NULL) {
+        pfree(infoCode);
+    }
+
+    pfree(buf);
 }

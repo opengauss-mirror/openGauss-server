@@ -37,6 +37,7 @@
 #include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_matview.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
@@ -174,7 +175,8 @@
 #include "fmgr.h"
 #include "pgstat.h"
 #include "postmaster/rbcleaner.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
+#include "catalog/gs_dependencies_fn.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/ts_relcache.h"
 #include "tsdb/common/ts_tablecmds.h"
@@ -779,6 +781,9 @@ static void ATAlterCheckModifiyColumnRepeatedly(const AlterTableCmd* cmd, const 
 static int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber attnum, Datum* value, bool* is_null);
 static void SetRelAutoIncrement(Relation rel, TupleDesc desc, int128 autoinc);
 static Node* RecookAutoincAttrDefault(Relation rel, int attrno, Oid targettype, int targettypmod);
+static void check_unsupported_charset_for_column(Oid collation, const char* col_name);
+static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
+                                                Oid nspOid, ObjectAddresses* objsMoved, char* newrelname);
 
 inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 {
@@ -1110,6 +1115,14 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
                             errdetail("Valid string are \"column\", \"row\".")));
                 }
 #endif   /* ENABLE_MULTIPLE_NODES */
+#ifdef ENABLE_FINANCE_MODE
+                if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_OPTION),
+                                errmsg("Invalid string for  \"ORIENTATION\" option"),
+                                errdetail("ORIENTATION=COLUNMN is incorrect, not work on finance mode.")));
+                }
+#endif
             }
             if (pg_strcasecmp(defGetString(def), ORIENTATION_COLUMN) == 0 && isCUFormat != NULL) {
                 *isCUFormat = true;
@@ -1924,6 +1937,15 @@ static void CheckPartitionKeyForCreateTable(PartitionState *partTableState, List
     else if (partTableState->partitionStrategy == PART_STRATEGY_LIST)
         CompareListValue(pos, descriptor->attrs, partTableState->partitionList, partkeyIsFunc);
 
+    /* charset of partkey columns cannot be different from server_encoding */
+    if (DB_IS_CMPT(B_FORMAT)) {
+        foreach_cell (cell, pos) {
+            int attidx = lfirst_int(cell);
+            check_unsupported_charset_for_column(
+                descriptor->attrs[attidx].attcollation, NameStr(descriptor->attrs[attidx].attname));
+        }
+    }
+
     list_free_ext(pos);
 }
 
@@ -2054,6 +2076,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     bool relhasuids = false;
     Oid nspdefcoll = InvalidOid;
     Oid rel_coll_oid = InvalidOid;
+    List* depend_extend = NIL;
 
     /*
      * isalter is true, change the owner of the objects as the owner of the
@@ -2590,6 +2613,14 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     } else
         ofTypeId = InvalidOid;
 
+    if (enable_plpgsql_gsdependency()) {
+        ListCell* cell = NULL;
+        foreach(cell, schema) {
+            ColumnDef* col_def = (ColumnDef*)lfirst(cell);
+            depend_extend = lappend(depend_extend, col_def->typname->dependExtend);
+        }
+    }
+
     /*
      * Look up inheritance ancestors and generate relation schema, including
      * inherited attributes.
@@ -2614,6 +2645,15 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     /* Must specify at least one column when creating a table. */
     if (descriptor->natts == 0 && relkind != RELKIND_COMPOSITE_TYPE) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("must have at least one column")));
+    }
+
+    /* check column charset */
+    if (DB_IS_CMPT(B_FORMAT) &&
+        (0 == pg_strcasecmp(storeChar, ORIENTATION_COLUMN) || 0 == pg_strcasecmp(storeChar, ORIENTATION_TIMESERIES))) {
+        for (int attidx = 0; attidx < descriptor->natts; attidx++) {
+            check_unsupported_charset_for_column(
+                descriptor->attrs[attidx].attcollation, NameStr(descriptor->attrs[attidx].attname));
+        }
     }
 
     if (stmt->partTableState) {
@@ -2900,7 +2940,8 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         ceLst,
         storage_type,
         AccessShareLock,
-        typaddress);
+        typaddress,
+        depend_extend);
     if (bucketinfo != NULL) {
         pfree_ext(bucketinfo->bucketcol);
         pfree_ext(bucketinfo->bucketlist);
@@ -3044,7 +3085,11 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     relation_close(rel, NoLock);
     list_free_ext(rawDefaults);
     list_free_ext(ceLst);
-
+    if (enable_plpgsql_gsdependency_guc() && relkind != RELKIND_TOASTVALUE) {
+        if (CompileWhich() == PLPGSQL_COMPILE_NULL) {
+            (void)gsplsql_build_ref_type_dependency(get_rel_type_id(relationId));
+        }
+    }
     return address;
 }
 
@@ -3645,6 +3690,13 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
         }
 
         delrel = try_relation_open(relOid, NoLock);
+        /*Not allow to drop mlog*/
+        if (relkind == RELKIND_RELATION && delrel != NULL && ISMLOG(delrel->rd_rel->relname.data)) {
+            /*If we can find a base table, it is mlog.*/
+            if (get_matview_mlog_baserelid(relOid)!= InvalidOid)
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Use 'Drop table' to drop mlog table %s is not allowed.",delrel->rd_rel->relname.data)));
+        }
         /*
          * Open up drop table command for table being redistributed right now.
          *
@@ -5952,7 +6004,33 @@ ObjectAddress renameatt(RenameStmt* stmt)
     }
 
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
-
+    if (enable_plpgsql_gsdependency_guc()) {
+        Oid type_oid = get_rel_type_id(relid);
+        if (OidIsValid(type_oid)) {
+            GsDependObjDesc obj;
+            gsplsql_get_depend_obj_by_typ_id(&obj, type_oid, InvalidOid);
+            HeapTuple obj_tup = gsplsql_search_object(&obj, false);
+            if (HeapTupleIsValid(obj_tup)) {
+                heap_freetuple(obj_tup);
+                pfree_ext(obj.schemaName);
+                pfree_ext(obj.packageName);
+                pfree_ext(obj.name);
+                ereport(ERROR,
+                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                     errmsg("cannot rename attribute of the type because it is dependent on another object.")));
+            }
+            obj.refPosType = GSDEPEND_REFOBJ_POS_IN_TYPE;
+            bool exist_dep = gsplsql_exist_dependency(&obj);
+            pfree_ext(obj.schemaName);
+            pfree_ext(obj.packageName);
+            pfree_ext(obj.name);
+            if (exist_dep) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                     errmsg("cannot rename attribute of the type because it is dependent on another object."))); 
+            }
+        }
+    }
     // Check relations's internal mask
     Relation rel = relation_open(relid, AccessShareLock);
     if ((((uint32)RelationGetInternalMask(rel)) & INTERNAL_MASK_DALTER))
@@ -6533,7 +6611,19 @@ ObjectAddress RenameRelation(RenameStmt* stmt)
                 errdetail("%s table doesn't support this ALTER yet.", ISMLOG(relname) ? "mlog" : "matviewmap"))));
         }
         ReleaseSysCache(tuple);
-
+        if (enable_plpgsql_gsdependency_guc()) {
+            bool exist_dep = false;
+            char rel_kind = get_rel_relkind(relid);
+            if (RELKIND_RELATION == rel_kind) {
+                exist_dep = gsplsql_is_object_depend(get_rel_type_id(relid), GSDEPEND_OBJECT_TYPE_TYPE);
+            }
+            if (exist_dep) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                     errmsg("The rename operator on %s is not allowed, "
+                            "because it is dependent on another object.", stmt->relation->relname)));
+            }
+        }
         TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
         /* If table has history table, we need rename corresponding history table */
         if (is_ledger_usertable(relid)) {
@@ -6558,7 +6648,7 @@ ObjectAddress RenameRelation(RenameStmt* stmt)
 #endif
 
         /* Do the work */
-        RenameRelationInternal(relid, stmt->newname);
+        RenameRelationInternal(relid, stmt->newname, stmt->newschema);
         /*
          * Record the changecsn of the table that defines the index
          */
@@ -6583,19 +6673,48 @@ ObjectAddress RenameRelation(RenameStmt* stmt)
  *			  the sequence name should probably be removed from the
  *			  sequence, AFAIK there's no need for it to be there.
  */
-void RenameRelationInternal(Oid myrelid, const char* newrelname)
+void RenameRelationInternal(Oid myrelid, const char* newrelname, char* newschema)
 {
     Relation targetrelation;
     Relation relrelation; /* for RELATION relation */
     HeapTuple reltup;
     Form_pg_class relform;
     Oid namespaceId;
+    Oid oldNspOid = InvalidOid;
+    bool needChangeNsp = false;
+    ObjectAddresses* objsMoved = NULL;
+    ObjectAddress thisobj;
+    bool is_present = false;
+
+    thisobj.classId = RelationRelationId;
+    thisobj.objectId = myrelid;
+    thisobj.objectSubId = 0;
 
     /*
      * Grab an exclusive lock on the target table, index, sequence or view,
      * which we will NOT release until end of transaction.
      */
     targetrelation = relation_open(myrelid, AccessExclusiveLock);
+
+    if (newschema != NULL) {
+        if (targetrelation->rd_mlogoid != InvalidOid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    (errmsg("Un-support feature"),
+                        errdetail("table owning matview doesn't support this ALTER yet."))));
+        }
+
+        if (targetrelation->rd_rel->relkind == RELKIND_MATVIEW) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("ALTER MATERIALIZED VIEW is not yet supported.")));
+        }
+
+        /* Permission check */
+        if (!pg_class_ownercheck(RelationGetRelid(targetrelation), GetUserId())) {
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, RelationGetRelationName(targetrelation));
+        }
+    }
 
     if (RelationIsSubPartitioned(targetrelation)) {
         ereport(
@@ -6628,6 +6747,24 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
 
     relform = (Form_pg_class)GETSTRUCT(reltup);
 
+
+    oldNspOid = namespaceId;
+    if (newschema != NULL) {
+        /* Get and lock schema OID and check its permissions. */
+        RangeVar* newrv = makeRangeVar(newschema, (char*)newrelname, -1);
+        Oid newNspOid = RangeVarGetAndCheckCreationNamespace(newrv, NoLock, NULL, '\0');
+
+        needChangeNsp = (newNspOid != namespaceId);
+        if (needChangeNsp) {
+            /* common checks on switching namespaces */
+            CheckSetNamespace(namespaceId, newNspOid, RelationRelationId, myrelid);
+            ledger_check_switch_schema(namespaceId, newNspOid);
+            objsMoved = new_object_addresses();
+            namespaceId = newNspOid;
+            is_present = object_address_present(&thisobj, objsMoved);
+        }
+    }
+
     /*
      * Check relation name to ensure that it doesn't conflict with existing synonym.
      */
@@ -6637,8 +6774,17 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
                     get_namespace_name(namespaceId))));
     }
 
-    if (get_relname_relid(newrelname, namespaceId) != InvalidOid)
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", newrelname)));
+    if (get_relname_relid(newrelname, namespaceId) != InvalidOid) {
+        if (newschema != NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_TABLE),
+                    errmsg("relation \"%s\" already exists in schema \"%s\"",
+                        newrelname,
+                        newschema)));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", newrelname)));
+        }
+    }
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (RelationIsTsStore(targetrelation)) {
@@ -6665,6 +6811,9 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
      */
     (void)namestrcpy(&(relform->relname), newrelname);
 
+    /* Update pg_class tuple with new nsp. */
+    relform->relnamespace = namespaceId;
+
     simple_heap_update(relrelation, &reltup->t_self, reltup);
 
     /* keep the system catalog indexes current */
@@ -6681,14 +6830,33 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
         renamePartitionedTable(myrelid, newrelname);
     }
 
+    if (needChangeNsp && !is_present) {
+        if (changeDependencyFor(RelationRelationId, myrelid, NamespaceRelationId, oldNspOid, namespaceId) != 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("failed to change schema dependency for relation \"%s\"", NameStr(relform->relname))));
+        }
+
+        add_exact_object_address(&thisobj, objsMoved);
+    }
+
     tableam_tops_free_tuple(reltup);
     heap_close(relrelation, RowExclusiveLock);
 
-    /*
-     * Also rename the associated type, if any.
-     */
-    if (OidIsValid(targetrelation->rd_rel->reltype))
-        RenameTypeInternal(targetrelation->rd_rel->reltype, newrelname, namespaceId);
+    if (needChangeNsp && !is_present) {
+        AlterTableNamespaceDependentProcess(relrelation, targetrelation, oldNspOid, namespaceId, objsMoved,
+                                            (char*)newrelname);
+        if (targetrelation->rd_isblockchain) {
+            rename_hist_by_newnsp(myrelid, newschema);
+        }
+        free_object_addresses(objsMoved);
+    } else {
+        /*
+        * Also rename the associated type, if any.
+        */
+        if (OidIsValid(targetrelation->rd_rel->reltype))
+            RenameTypeInternal(targetrelation->rd_rel->reltype, newrelname, oldNspOid);
+    }
 
     /*
      * Also rename the associated constraint, if any.
@@ -7704,6 +7872,9 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
     if (stmt->cmds != NIL) {
         /* process 'ALTER TABLE' cmd */
         ATController(stmt, rel, stmt->cmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
+        if (enable_plpgsql_gsdependency_guc()) {
+            (void)gsplsql_build_ref_type_dependency(get_rel_type_id(relid));
+        }
     } else {
         /* if do not call ATController, close the relation in here, but keep lock until commit */
         relation_close(rel, NoLock);
@@ -8620,7 +8791,7 @@ static void sqlcmd_alter_prep_convert_charset(AlteredTableInfo* tab, Relation re
         Form_pg_attribute attTup = (Form_pg_attribute)GETSTRUCT(tuple);
         int attnum = attTup->attnum;
         if (attnum <= 0 || attTup->attisdropped || !type_is_collatable(attTup->atttypid) ||
-            get_charset_by_collation(attTup->attcollation) == cc->charset)
+            attTup->attcollation == targetcollid)
             continue;
 
         transform = (Node*)makeVar(1, attnum, attTup->atttypid, attTup->atttypmod, attTup->attcollation, 0);
@@ -8641,7 +8812,7 @@ static void sqlcmd_alter_prep_convert_charset(AlteredTableInfo* tab, Relation re
                                format_type_be(targettypid))));
         }
 
-        transform = coerce_to_target_charset(transform, cc->charset, targettypid);
+        transform = coerce_to_target_charset(transform, cc->charset, targettypid, attTup->atttypmod, targetcollid);
 
         exprSetCollation(transform, targetcollid);
 
@@ -9532,12 +9703,12 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
         newslot = MakeSingleTupleTableSlot(newTupDesc, false, oldrel->rd_tam_ops);
 
         /* Preallocate values/isnull arrays */
-        i = Max(newTupDesc->natts, oldTupDesc->natts);
-        values = (Datum*)palloc(i * sizeof(Datum));
-        isnull = (bool*)palloc(i * sizeof(bool));
-        rc = memset_s(values, i * sizeof(Datum), 0, i * sizeof(Datum));
+        int n = Max(newTupDesc->natts, oldTupDesc->natts);
+        values = (Datum*)palloc(n * sizeof(Datum));
+        isnull = (bool*)palloc(n * sizeof(bool));
+        rc = memset_s(values, n * sizeof(Datum), 0, n * sizeof(Datum));
         securec_check(rc, "\0", "\0");
-        rc = memset_s(isnull, i * sizeof(bool), true, i * sizeof(bool));
+        rc = memset_s(isnull, n * sizeof(bool), true, n * sizeof(bool));
         securec_check(rc, "\0", "\0");
 
         /*
@@ -9751,6 +9922,12 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                 }
 
                 CHECK_FOR_INTERRUPTS();
+                if (tab->is_first_after) {
+                    rc = memset_s(values, n * sizeof(Datum), 0, n * sizeof(Datum));
+                    securec_check(rc, "\0", "\0");
+                    rc = memset_s(isnull, n * sizeof(bool), true, n * sizeof(bool));
+                    securec_check(rc, "\0", "\0");
+                }
             }
         } else {
             ((HeapScanDesc) scan)->rs_tupdesc = oldTupDesc;
@@ -9900,6 +10077,12 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                 ResetExprContext(econtext);
 
                 CHECK_FOR_INTERRUPTS();
+                if (tab->is_first_after) {
+                    rc = memset_s(values, n * sizeof(Datum), 0, n * sizeof(Datum));
+                    securec_check(rc, "\0", "\0");
+                    rc = memset_s(isnull, n * sizeof(bool), true, n * sizeof(bool));
+                    securec_check(rc, "\0", "\0");
+                }
             }
         }
 
@@ -11987,6 +12170,9 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     collOid = GetColumnDefCollation(NULL, colDef, typeOid, rel_coll_oid);
     if (DB_IS_CMPT(B_FORMAT)) {
         typeOid = binary_need_transform_typeid(typeOid, &collOid);
+        if (RelationIsColStore(rel) || RelationIsTsStore(rel)) {
+            check_unsupported_charset_for_column(collOid, colDef->colname);
+        }
     }
 
     aclresult = pg_type_aclcheck(typeOid, GetUserId(), ACL_USAGE);
@@ -15604,7 +15790,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
                         "column \"%s\" cannot be cast automatically to type %s", colName, format_type_be(targettype)),
                     errhint("Specify a USING expression to perform the conversion.")));
 #ifndef ENABLE_MULTIPLE_NODES
-        transform = coerce_to_target_charset(transform, target_charset, attTup->atttypid);
+        transform = coerce_to_target_charset(transform, target_charset, attTup->atttypid, attTup->atttypmod, targetcollid);
 #endif
         /* Fix collations after all else */
         assign_expr_collations(pstate, transform);
@@ -16247,6 +16433,9 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
     targetcollid = GetColumnDefCollation(NULL, def, targettype, rel_coll_oid);
     if (DB_IS_CMPT(B_FORMAT)) {
         targettype = binary_need_transform_typeid(targettype, &targetcollid);
+        if (RelationIsColStore(rel) || RelationIsTsStore(rel)) {
+            check_unsupported_charset_for_column(targetcollid, colName);
+        }
     }
     if (attnum == RelAutoIncAttrNum(rel)) {
         CheckAutoIncrementDatatype(targettype, colName);
@@ -16592,8 +16781,8 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
             RangeTblEntry*  rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
             addRTEtoQuery(pstate, rte, true, true, true);
             pstate->p_rawdefaultlist = NULL;
-            update_expr = cookDefault(pstate, update_expr, attTup->atttypid, attTup->atttypmod, NameStr(attTup->attname),
-                def->generatedCol);
+            update_expr = cookDefault(pstate, update_expr, attTup->atttypid, attTup->atttypmod,
+                attTup->attcollation, NameStr(attTup->attname), def->generatedCol);
         }
 
         StoreAttrDefault(rel, attnum, defaultexpr, generatedCol, update_expr);
@@ -18027,6 +18216,11 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
             newCompressOpt->compressDiffConvert != false)) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
                                 errmsg("compress_level=0, compress_chunk_size=4096, compress_prealloc_chunks=0, compress_byte_convert=false, compress_diff_convert=false should be set when compresstype=0")));
+    }
+
+    if (newCompressOpt->compressType == COMPRESS_TYPE_PGZSTD) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("row-compression feature current not support algorithm is PGZSTD.")));
     }
 
     if (newCompressOpt->compressType != COMPRESS_TYPE_ZSTD && newCompressOpt->compressLevel != 0) {
@@ -21462,8 +21656,16 @@ void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid, Oid nspOid, Object
 
     AlterRelationNamespaceInternal(classRel, RelationGetRelid(rel), oldNspOid, nspOid, true, objsMoved);
 
+    AlterTableNamespaceDependentProcess(classRel, rel, oldNspOid, nspOid, objsMoved, NULL);
+
+    heap_close(classRel, RowExclusiveLock);
+}
+
+static void AlterTableNamespaceDependentProcess(Relation classRel ,Relation rel, Oid oldNspOid,
+                                                Oid nspOid, ObjectAddresses* objsMoved, char* newrelname)
+{
     /* Fix the table's row type too */
-    (void)AlterTypeNamespaceInternal(rel->rd_rel->reltype, nspOid, false, false, objsMoved);
+    (void)AlterTypeNamespaceInternal(rel->rd_rel->reltype, nspOid, false, false, objsMoved, newrelname);
 
     /* Change the table's set type too */
     TupleDesc tupDesc = rel->rd_att;
@@ -21480,8 +21682,6 @@ void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid, Oid nspOid, Object
         AlterSeqNamespaces(classRel, rel, oldNspOid, nspOid, objsMoved, AccessExclusiveLock);
         AlterConstraintNamespaces(RelationGetRelid(rel), oldNspOid, nspOid, false, objsMoved);
     }
-
-    heap_close(classRel, RowExclusiveLock);
 }
 
 /*
@@ -21887,6 +22087,51 @@ void RangeVarCallbackOwnsTable(const RangeVar* relation, Oid relId, Oid oldRelId
     AclResult aclresult = pg_class_aclcheck(relId, GetUserId(), ACL_INDEX);
     if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(relId, GetUserId())) {
         aclcheck_error(aclresult, ACL_KIND_CLASS, relation->relname);
+    }
+}
+
+/*
+ * This is intended as a callback for RangeVarGetRelidExtended().  It allows
+ * the relation to be locked only if (1) it's a materialized view and
+ * (2) the current user is the owner (or the superuser).
+ * This meets the permission-checking needs of and REFRESH MATERIALIZED VIEW;
+ * we expose it here so that it can be used by all.
+ */
+void RangeVarCallbackOwnsMatView(const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* arg)
+{
+    char relkind;
+
+    /* Nothing to do if the relation was not found. */
+    if (!OidIsValid(relId)) {
+        return;
+    }
+
+    /*
+     * If the relation does exist, check whether it's an index.  But note that
+     * the relation might have been dropped between the time we did the name
+     * lookup and now.	In that case, there's nothing to do.
+     */
+    relkind = get_rel_relkind(relId);
+    if (!relkind) {
+        return;
+    }
+    if (relkind != RELKIND_RELATION &&
+        relkind != RELKIND_TOASTVALUE &&
+        relkind != RELKIND_MATVIEW) {
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("\"%s\" is not a table or materialized view", relation->relname)));
+    }
+
+    /* Check permissions */
+    AclResult aclresult = pg_class_aclcheck(relId, GetUserId(), ACL_INSERT | ACL_DELETE);
+    if (aclresult != ACLCHECK_OK) {
+        aclcheck_error(aclresult, ACL_KIND_CLASS, relation->relname);
+    }
+
+    bool is_owner = pg_class_ownercheck(relId, GetUserId());
+    if (!is_owner) {
+        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, relation->relname);
     }
 }
 
@@ -22729,6 +22974,30 @@ Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval, bool 
         return NULL;
     }
 
+    /* convert source const's charset to target partkey's charset */
+    if (!partkeyIsFunc && DB_IS_CMPT(B_FORMAT) && OidIsValid(attrs->attcollation)) {
+        assign_expr_collations(NULL, expr);
+        if (attrs->attcollation != exprCollation(expr)) {
+            int attcharset = get_valid_charset_by_collation(attrs->attcollation);
+            expr = coerce_to_target_charset(expr, attcharset, target_oid, target_mod, attrs->attcollation);
+
+            Assert(expr != NULL);
+            if (!IsA(expr, Const)) {
+                expr = (Node*)evaluate_expr((Expr*)expr, target_oid, target_mod, attrs->attcollation);
+            } else if (attrs->attcollation != exprCollation(expr)) {
+                if (expr == (Node*)src) {
+                    /* We are not sure where src comes from, avoid set src->constcollid directly. */
+                    expr = (Node*)copyObject((void*)src);
+                }
+                /*
+                 * The expr is used to compute hash or compare it with the partition boundary.
+                 * Set the correct collation to ensure the correctness of the partition pruning and routing.
+                 */
+                exprSetCollation(expr, attrs->attcollation);
+            }
+        }
+    }
+
     switch (nodeTag(expr)) {
         /* do nothing for Const */
         case T_Const:
@@ -22912,7 +23181,7 @@ static void sqlcmd_check_list_partition_have_duplicate_values(List** key_values_
     ListCell* c2 = NULL;
     for (int k = 0; k < bound_idx; ++k) {
         forboth (c1, key_values_array[part_idx][bound_idx], c2, key_values_array[part_idx][k]) {
-            if (ConstCompareWithNull((Const*)lfirst(c1), (Const*)lfirst(c2)) != 0) {
+            if (ConstCompareWithNull((Const*)lfirst(c1), (Const*)lfirst(c2), ((Const*)lfirst(c2))->constcollid) != 0) {
                 break;
             }
         }
@@ -22938,7 +23207,7 @@ static void sqlcmd_check_two_list_partition_values_overlapped(List** key_values_
             Assert(!(con1->ismaxvalue && con2->ismaxvalue));
             break;
         }
-        if (ConstCompareWithNull(con1, con2) != 0) {
+        if (ConstCompareWithNull(con1, con2, con2->constcollid) != 0) {
             break;
         }
     }
@@ -23488,7 +23757,7 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
         RangePartitionMap *partMap = (RangePartitionMap *)rel->partMap;
         Const *curBound = (Const *)copyObject(partMap->rangeElements[partNum - 1].boundary[0]);
         Const *val = partDef->curStartVal;
-        if (!curBound->ismaxvalue && val != NULL && partitonKeyCompare(&val, &curBound, 1) != 0) {
+        if (!curBound->ismaxvalue && val != NULL && partitonKeyCompare(&curBound, &val, 1) != 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("start value of partition \"%s\" NOT EQUAL up-boundary of last partition.",
                 partDef->partitionInitName ? partDef->partitionInitName : partDef->partitionName)));
@@ -27855,14 +28124,14 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
         // check the first dest partition boundary
         if (srcPartIndex != 0) {
             if (!partMap->rangeElements[srcPartIndex].isInterval) {
-                compare = comparePartitionKey(partMap, partMap->rangeElements[srcPartIndex - 1].boundary,
-                                              (Const**)lfirst(list_head(destPartBoundaryList)), partKeyNum);
+                compare = comparePartitionKey(partMap, (Const**)lfirst(list_head(destPartBoundaryList)),
+                    partMap->rangeElements[srcPartIndex - 1].boundary, partKeyNum);
             } else {
                 Const** partKeyValue = (Const**)lfirst(list_head(destPartBoundaryList));
                 RangeElement& srcPartition = partMap->rangeElements[srcPartIndex];
-                compare = -ValueCmpLowBoudary(partKeyValue, &srcPartition, partMap->intervalValue);
+                compare = ValueCmpLowBoudary(partKeyValue, &srcPartition, partMap->intervalValue);
             }
-            if (compare >= 0) {
+            if (compare <= 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OPERATION),
                         errmsg("the bound of the first resulting partition is too low")));
@@ -27987,6 +28256,21 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
         ATUnusableGlobalIndex(partTableRel);
     }
 }
+#ifdef USE_SPQ
+void spq_btbuild_update_pg_class(Relation heap, Relation index)
+{
+    List *options = NIL;
+    DefElem *opt;
+    opt = makeNode(DefElem);
+    opt->type = T_DefElem;
+    opt->defnamespace = NULL;
+    opt->defname = "spq_build";
+    opt->defaction = DEFELEM_SET;
+    opt->arg = (Node *)makeString("finish");
+    options = lappend(options, opt);
+    ATExecSetRelOptions(index, options, AT_SetRelOptions, ShareUpdateExclusiveLock);
+}
+#endif
 
 void CheckSrcListSubPartitionForSplit(Relation rel, Oid partOid, Oid subPartOid)
 {
@@ -31216,12 +31500,6 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     }
 
     rel = heap_open(GsGlobalConfigRelationId, RowExclusiveLock);
-    if (!OidIsValid(rel)) {
-        ereport(ERROR, 
-            (errcode(ERRCODE_SYSTEM_ERROR),
-                errmsg("could not open gs_global_config")));
-        return;
-    }
 
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
@@ -31739,7 +32017,7 @@ static Node* RebuildGeneratedColumnExpr(Relation rel, AttrNumber gen_attnum)
 {
     ParseState* pstate = NULL;
     RangeTblEntry *rte = NULL;
-    FormData_pg_attribute pgattr = rel->rd_att->attrs[gen_attnum - 1];
+    Form_pg_attribute pgattr = &rel->rd_att->attrs[gen_attnum - 1];
     Node* gen_expr = build_column_default(rel, gen_attnum);
 
     Assert(gen_expr);
@@ -31749,8 +32027,8 @@ static Node* RebuildGeneratedColumnExpr(Relation rel, AttrNumber gen_attnum)
     pstate = make_parsestate(NULL);
     rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
     addRTEtoQuery(pstate, rte, false, true, true);
-    gen_expr = cookDefault(
-        pstate, gen_expr, pgattr.atttypid, pgattr.atttypmod, NameStr(pgattr.attname), ATTRIBUTE_GENERATED_STORED);
+    gen_expr = cookDefault(pstate, gen_expr, pgattr->atttypid, pgattr->atttypmod, pgattr->attcollation,
+        NameStr(pgattr->attname), ATTRIBUTE_GENERATED_STORED);
     /* readd pg_attrdef */
     RemoveAttrDefault(RelationGetRelid(rel), gen_attnum, DROP_RESTRICT, true, true);
     StoreAttrDefault(rel, gen_attnum, gen_expr, ATTRIBUTE_GENERATED_STORED, NULL, true);
@@ -32510,4 +32788,18 @@ void RebuildDependViewForProc(Oid proc_oid)
         list_free(raw_parsetree_list);
     }
     list_free_ext(oid_list);
+}
+
+static void check_unsupported_charset_for_column(Oid collation, const char* col_name)
+{
+    if (!OidIsValid(collation)) {
+        return;
+    }
+
+    int attcharset = get_valid_charset_by_collation(collation);
+    if (attcharset != PG_SQL_ASCII && attcharset != GetDatabaseEncoding()) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("difference between the charset of column %s and the database encoding has not supported",
+                col_name)));
+    }
 }

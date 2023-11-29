@@ -1603,10 +1603,14 @@ void GenericMemoryAllocator::AllocSetStats(MemoryContext context, int level)
 void AllocSetCheckPointer(void* pointer)
 {
     AllocChunkData* chunk = (AllocChunkData*)(((char*)(pointer)) - ALLOC_CHUNKHDRSZ);
-    AllocMagicData* magic =
-        (AllocMagicData*)(((char*)chunk) + ALLOC_CHUNKHDRSZ + MAXALIGN(chunk->requested_size) - ALLOC_MAGICHDRSZ);
 
-    Assert(magic->aset == chunk->aset && magic->size == chunk->size && magic->posnum == PosmagicNum);
+    /* For opt memory context, we use sentinel instead of magic number to protect memory overflow. */
+    if (!IsOptAllocSetContext(chunk->aset)) {
+        AllocMagicData* magic =
+            (AllocMagicData*)(((char*)chunk) + ALLOC_CHUNKHDRSZ + MAXALIGN(chunk->requested_size) - ALLOC_MAGICHDRSZ);
+
+        Assert(magic->aset == chunk->aset && magic->size == chunk->size && magic->posnum == PosmagicNum);
+    }
 }
 
 /*

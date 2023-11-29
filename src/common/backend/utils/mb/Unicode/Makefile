@@ -50,6 +50,7 @@ SPECIALMAPS = euc_cn_to_utf8.map utf8_to_euc_cn.map \
 	euc_tw_to_utf8.map utf8_to_euc_tw.map \
 	sjis_to_utf8.map utf8_to_sjis.map \
 	gb18030_to_utf8.map utf8_to_gb18030.map \
+	gb18030_to_utf8_2022.map utf8_to_gb18030_2022.map \
 	big5_to_utf8.map utf8_to_big5.map
 
 MAPS = $(GENERICMAPS) $(SPECIALMAPS)
@@ -88,6 +89,9 @@ sjis_to_utf8.map utf8_to_sjis.map : CP932.TXT
 
 gb18030_to_utf8.map  utf8_to_gb18030.map : gb-18030-2000.xml
 	$(PERL) $(srcdir)/UCS_to_GB18030.pl
+
+gb18030_to_utf8_2022.map  utf8_to_gb18030_2022.map : gb-18030-2022.xml
+	$(PERL) $(srcdir)/UCS_to_GB18030_2022.pl
 
 big5_to_utf8.map  utf8_to_big5.map : BIG5.TXT CP950.TXT
 	$(PERL) $(srcdir)/UCS_to_BIG5.pl

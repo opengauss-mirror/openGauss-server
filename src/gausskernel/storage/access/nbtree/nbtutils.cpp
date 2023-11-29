@@ -2068,14 +2068,14 @@ void btree_check_third_page(Relation rel, Relation heap, bool need_heaptid_space
 			 errmsg("index row size %lu exceeds maximum %lu for index \"%s\"",
 					(unsigned long)itemsz,
 					(unsigned long)BTREE_MAX_ITEM_SIZE(page),
-                    RelationGetRelationName(rel),
+                    RelationGetRelationName(rel)),
 			 errdetail("Index row references tuple (%u,%hu) in relation \"%s\".",
 					   ItemPointerGetBlockNumber(&tuple->t_tid),
 					   ItemPointerGetOffsetNumber(&tuple->t_tid),
 					   heap ? RelationGetRelationName(heap) : "unknown"),
 			 errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
 					 "Consider a function index of an MD5 hash of the value, "
-					 "or use full text indexing."))));
+					 "or use full text indexing.")));
 }
 
 bool btree_allequalimage(Relation rel, bool debugmessage)

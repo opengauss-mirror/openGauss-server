@@ -1996,6 +1996,9 @@ void InitVectorFunction(FunctionCallInfo finfo, MemoryContext fcacheCxt)
     if (u_sess->attr.attr_sql.dolphin &&
         g_instance.plugin_vec_func_cxt.vec_func_plugin[DOLPHIN_VEC] != NULL) {
         vec_func_hash = g_instance.plugin_vec_func_cxt.vec_func_plugin[DOLPHIN_VEC];
+    } else if (u_sess->attr.attr_sql.whale &&
+        g_instance.plugin_vec_func_cxt.vec_func_plugin[WHALE_VEC] != NULL) {
+        vec_func_hash = g_instance.plugin_vec_func_cxt.vec_func_plugin[WHALE_VEC];
     } else
 #endif
         vec_func_hash = g_instance.vec_func_hash;

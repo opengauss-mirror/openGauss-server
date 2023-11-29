@@ -36,7 +36,7 @@
 #include "utils/lsyscache.h"
 #include "mb/pg_wchar.h"
 #include "parser/parse_utilcmd.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 
 /*
  * CreateTemplateTupleDesc

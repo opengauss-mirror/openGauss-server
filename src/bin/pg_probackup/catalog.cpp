@@ -1214,7 +1214,7 @@ void get_anchor_backup(timelineInfo *tlinfo, int *count, InstanceConfig *instanc
 
         /* sanity */
         if (XLogRecPtrIsInvalid(backup->start_lsn) ||
-            backup->tli <= 0)
+            backup->tli == 0)
             continue;
 
         /* skip invalid backups */
@@ -1393,7 +1393,7 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
 
             /* sanity for closest_backup */
             if (XLogRecPtrIsInvalid(tlinfo->closest_backup->start_lsn) ||
-                tlinfo->closest_backup->tli <= 0)
+                tlinfo->closest_backup->tli == 0)
                 continue;
 
             /*
@@ -1476,7 +1476,7 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
 
             /* sanity */
             if (XLogRecPtrIsInvalid(backup->start_lsn) ||
-                backup->tli <= 0)
+                backup->tli == 0)
                 continue;
 
             /* no point in clogging keep_segments by backups protected by anchor_lsn */
@@ -1592,7 +1592,7 @@ catalog_get_timelines(InstanceConfig *instance)
 
     timelineinfos = walk_files_collect_timelines(instance);
     /* determine which WAL segments must be kept because of wal retention */
-    if (instance->wal_depth <= 0)
+    if (instance->wal_depth == 0)
         return timelineinfos;
 
     /*
@@ -1948,6 +1948,7 @@ write_backup(pgBackup *backup, bool strict)
     }
 
     if (chmod(path_temp, FILE_PERMISSION) == -1) {
+        fclose(fp);
         elog(ERROR, "Cannot change mode of \"%s\": %s", path_temp,
          strerror(errno));
         return;
@@ -1957,13 +1958,17 @@ write_backup(pgBackup *backup, bool strict)
 
     pgBackupWriteControl(fp, backup);
 
-    if (fflush(fp) != 0)
+    if (fflush(fp) != 0){
+        fclose(fp);
         elog(ERROR, "Cannot flush control file \"%s\": %s",
          path_temp, strerror(errno));
+    }
 
-    if (fsync(fileno(fp)) < 0)
+    if (fsync(fileno(fp)) < 0){
+        fclose(fp);
         elog(ERROR, "Cannot sync control file \"%s\": %s",
          path_temp, strerror(errno));
+    }
 
     if (fclose(fp) != 0)
         elog(ERROR, "Cannot close control file \"%s\": %s",

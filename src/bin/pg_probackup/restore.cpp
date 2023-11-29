@@ -25,7 +25,7 @@
 
 typedef struct
 {
-    parray       *pgdata_files;
+    parray       *pgdata_and_dssdata_files;
     parray       *dest_files;
     pgBackup   *dest_backup;
     parray       *dest_external_dirs;
@@ -60,7 +60,7 @@ static void restore_chain(pgBackup *dest_backup, parray *parent_chain,
                           pgRestoreParams *params, const char *pgdata_path,
                           const char *dssdata_path, bool no_sync);
 static void check_incremental_compatibility(const char *pgdata, uint64 system_identifier,
-                                            IncrRestoreMode incremental_mode);
+                                            IncrRestoreMode incremental_mode);                               
 static pgBackup *find_backup_range(parray *backups,
                                    time_t target_backup_id,
                                    pgRecoveryTarget *rt,
@@ -70,11 +70,15 @@ static pgBackup * find_full_backup(parray *backups,
                                    pgBackup *dest_backup,
                                    const char *action);
 static XLogRecPtr determine_shift_lsn(pgBackup *dest_backup);
-static void get_pgdata_files(const char *pgdata_path,
-                             parray *pgdata_files,
+static void get_pgdata_and_dssdata_files(const char *pgdata_path,
+                             const char *dssdata_path,
+                             parray *pgdata_and_dssdata_files,
                              parray *external_dirs);
+static bool skip_some_tblspc_files(pgFile *file);
+static char check_in_dss_instance(pgFile *file, int include_id);
 static void remove_redundant_files(const char *pgdata_path,
-                                   parray *pgdata_files,
+                                   const char *dssdata_path,
+                                   parray *pgdata_and_dssdata_files,
                                    pgBackup *dest_backup,
                                    parray *external_dirs);
 static void threads_handle(pthread_t *threads,
@@ -172,29 +176,40 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
             elog(ERROR,
                 "required parameter not specified: PGDATA (-D, --pgdata)");
 
+        /* Check if restore destination empty : vgdata and vglog */
         if (IsDssMode())
         {
-            /* do not support increment restore in dss mode */
-            if (params->incremental_mode != INCR_NONE)
-            {
-                elog(ERROR, "Incremental restore is not support when enable dss");
-            }
-
             if (!dir_is_empty(instance_config.dss.vgdata, FIO_DSS_HOST))
             {
+                if (params->incremental_mode != INCR_NONE)
+                {
+                    elog(INFO, "Running incremental restore into nonempty directory: \"%s\"",
+                        instance_config.dss.vgdata);
+                }
+                else
+                {
+                    elog(ERROR, "Restore destination is not empty: \"%s\"",
+                        instance_config.dss.vgdata);
+                }
                 dssdata_is_empty = false;
-                elog(ERROR, "Restore destination is not empty: \"%s\"",
-                     instance_config.dss.vgdata);
             }
             if (!dir_is_empty(instance_config.dss.vglog, FIO_DSS_HOST))
             {
+                if (params->incremental_mode != INCR_NONE)
+                {
+                    elog(INFO, "Running incremental restore into nonempty directory: \"%s\"",
+                        instance_config.dss.vglog);
+                }
+                else
+                {
+                    elog(ERROR, "Restore destination is not empty: \"%s\"",
+                        instance_config.dss.vglog);
+                }
                 dssdata_is_empty = false;
-                elog(ERROR, "Restore destination is not empty: \"%s\"",
-                     instance_config.dss.vglog);
             }
         }
 
-        /* Check if restore destination empty */
+        /* Check if restore destination empty : PGDATA */
         if (!dir_is_empty(instance_config.pgdata, FIO_DB_HOST))
         {
             /* Check that remote system is NOT running and systemd id is the same as ours */
@@ -717,7 +732,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
 {
     int         i;
     char        timestamp[100];
-    parray      *pgdata_files = NULL;
+    parray      *pgdata_and_dssdata_files = NULL;
     parray      *dest_files = NULL;
     parray      *external_dirs = NULL;
     /* arrays with meta info for multi threaded backup */
@@ -803,17 +818,18 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     /*
      * Restore dest_backup internal directories.
      */
+    
     create_data_directories(dest_files, instance_config.pgdata,
                             dest_backup->root_dir, true,
                             params->incremental_mode != INCR_NONE,
-                            FIO_DB_HOST);
+                            FIO_DB_HOST, true);
 
     /* some file is in dssserver */
     if (IsDssMode())
         create_data_directories(dest_files, instance_config.dss.vgdata,
                                 dest_backup->root_dir, true,
                                 params->incremental_mode != INCR_NONE,
-                                FIO_DSS_HOST);
+                                FIO_DSS_HOST, true);
 
     /*
      * Restore dest_backup external directories.
@@ -836,9 +852,10 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     /* Get list of files in destination directory and remove redundant files */
     if (params->incremental_mode != INCR_NONE)
     {
-        pgdata_files = parray_new();
-        get_pgdata_files(pgdata_path, pgdata_files, external_dirs);
-        remove_redundant_files(pgdata_path, pgdata_files, dest_backup, external_dirs);
+        pgdata_and_dssdata_files = parray_new();
+        get_pgdata_and_dssdata_files(pgdata_path, dssdata_path, pgdata_and_dssdata_files, external_dirs);
+        remove_redundant_files(pgdata_path, dssdata_path, pgdata_and_dssdata_files,
+                                            dest_backup, external_dirs);
     }
 
     /*
@@ -883,7 +900,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
                                                 num_threads);
 
     threads_handle(threads, threads_args, dest_backup, dest_files,
-                   pgdata_files, external_dirs, parent_chain, params,
+                   pgdata_and_dssdata_files, external_dirs, parent_chain, params,
                    pgdata_path, dssdata_path, use_bitmap, total_bytes);
 
     /* Close page header maps */
@@ -907,10 +924,10 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     if (external_dirs != NULL)
         free_dir_list(external_dirs);
 
-    if (pgdata_files)
+    if (pgdata_and_dssdata_files)
     {
-        parray_walk(pgdata_files, pgFileFree);
-        parray_free(pgdata_files);
+        parray_walk(pgdata_and_dssdata_files, pgFileFree);
+        parray_free(pgdata_and_dssdata_files);
     }
 
     for (i = parray_num(parent_chain) - 1; i >= 0; i--)
@@ -922,8 +939,9 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     }
 }
 
-static void get_pgdata_files(const char *pgdata_path,
-                             parray *pgdata_files,
+static void get_pgdata_and_dssdata_files(const char *pgdata_path,
+                             const char *dssdata_path,
+                             parray *pgdata_and_dssdata_files,
                              parray *external_dirs)
 {
     char   pretty_time[20];
@@ -933,10 +951,14 @@ static void get_pgdata_files(const char *pgdata_path,
 
     time(&start_time);
     if (fio_is_remote(FIO_DB_HOST))
-        fio_list_dir(pgdata_files, pgdata_path, false, true, false, false, true, 0);
+        fio_list_dir(pgdata_and_dssdata_files, pgdata_path, false, true, false, false, true, 0);
     else
-        dir_list_file(pgdata_files, pgdata_path,
+        dir_list_file(pgdata_and_dssdata_files, pgdata_path,
                       false, true, false, false, true, 0, FIO_LOCAL_HOST);
+
+    if (IsDssMode())
+        dir_list_file(pgdata_and_dssdata_files, dssdata_path,
+                      false, true, false, false, true, 0, FIO_DSS_HOST);
 
     /* get external dirs content */
     if (external_dirs)
@@ -954,12 +976,12 @@ static void get_pgdata_files(const char *pgdata_path,
                               false, true, false, false, true, i+1,
                               FIO_LOCAL_HOST);
 
-            parray_concat(pgdata_files, external_files);
+            parray_concat(pgdata_and_dssdata_files, external_files);
             parray_free(external_files);
         }
     }
 
-    parray_qsort(pgdata_files, pgFileCompareRelPathWithExternalDesc);
+    parray_qsort(pgdata_and_dssdata_files, pgFileCompareRelPathWithExternalDesc);
 
     time(&end_time);
     pretty_time_interval(difftime(end_time, start_time),
@@ -983,13 +1005,52 @@ static bool skip_some_tblspc_files(pgFile *file)
     prefix_equ_tbs_version_dir = (strncmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY, 
                                   strlen(TABLESPACE_VERSION_DIRECTORY)) == 0);
 
+    /* In DSS mode, we should skip PG_9.2_201611171 */
+    if (sscanf_res == 2 && IsDssMode() && prefix_equ_tbs_version_dir)
+        return true;
+    /* If the dss is not enabled, we should skip PG_9.2_201611171_node1 */
     if (sscanf_res == 2 && !equ_tbs_version_dir && prefix_equ_tbs_version_dir)
         return true;
     return false;
 }
 
+#define CHECK_FALSE                     0
+#define CHECK_TRUE                      1
+#define CHECK_EXCLUDE_FALSE             2
+
+static char check_in_dss_instance(pgFile *file, int include_id)
+{
+    if (!is_dss_type(file->type)) {
+        return CHECK_TRUE;
+    }
+
+    char instance_id[MAX_INSTANCEID_LEN];
+    char top_path[MAXPGPATH];
+    errno_t rc = EOK;
+    int move = 0;
+
+    /* step1 : skip other instance owner file or dir */
+    strlcpy(top_path, file->rel_path, sizeof(top_path));
+    get_top_path(top_path);
+
+    rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d", include_id);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    move = (int)strlen(top_path) - (int)strlen(instance_id);
+    if (move > 0 && move < MAXPGPATH && strcmp(top_path + move, instance_id) != 0) {
+        char tail = top_path[strlen(top_path) - 1];
+        /* Is this file or dir belongs to other instance? */
+        if (tail >= '0' && tail <= '9') {
+            return CHECK_FALSE;
+        }
+    }
+
+    return CHECK_TRUE;
+}
+
 static void remove_redundant_files(const char *pgdata_path,
-                                   parray *pgdata_files,
+                                   const char *dssdata_path,
+                                   parray *pgdata_and_dssdata_files,
                                    pgBackup *dest_backup,
                                    parray *external_dirs)
 {
@@ -998,8 +1059,8 @@ static void remove_redundant_files(const char *pgdata_path,
 
     elog(INFO, "Removing redundant files in destination directory");
     time(&start_time);
-    for (int i = 0; (size_t)i < parray_num(pgdata_files); i++) {
-        pgFile	   *file = (pgFile *)parray_get(pgdata_files, i);
+    for (int i = 0; (size_t)i < parray_num(pgdata_and_dssdata_files); i++) {
+        pgFile	   *file = (pgFile *)parray_get(pgdata_and_dssdata_files, i);
         bool    in_tablespace = false;
 
         /* For incremental backups, we need to skip some files */
@@ -1011,20 +1072,30 @@ static void remove_redundant_files(const char *pgdata_path,
         if (parray_bsearch(dest_backup->files, file, 
             pgFileCompareRelPathWithExternal) == NULL) {
             char    fullpath[MAXPGPATH];
+            fio_location path_location;
 
             if (file->external_dir_num) {
                 char *external_path = (char *)parray_get(external_dirs,
                                                          file->external_dir_num - 1);
                 join_path_components(fullpath, external_path, file->rel_path);                
+            } else if (is_dss_type(file->type)) {
+                /* skip other instance files in dss mode */
+                char check_res = check_in_dss_instance(file, instance_config.dss.instance_id);
+                if (check_res != CHECK_TRUE) {
+                    continue;
+                } else {
+                    join_path_components(fullpath, dssdata_path, file->rel_path);
+                }
             } else {
                 join_path_components(fullpath, pgdata_path, file->rel_path);
             }            
 
-            fio_delete(file->mode, fullpath, FIO_DB_HOST);
+            path_location = is_dss_type(file->type) ? FIO_DSS_HOST : FIO_DB_HOST;
+            fio_delete(file->mode, fullpath, path_location);
             elog(VERBOSE, "Deleted file \"%s\"", fullpath);
 
             /* shrink pgdata list */
-            parray_remove(pgdata_files, i);
+            parray_remove(pgdata_and_dssdata_files, i);
             i--;
         }
     }
@@ -1033,7 +1104,7 @@ static void remove_redundant_files(const char *pgdata_path,
     pretty_time_interval(difftime(end_time, start_time),
                          pretty_time, lengthof(pretty_time));
 
-    /* At this point PDATA do not contain files, that do not exists in dest backup file list */
+    /* At this point PDATA and DSSDATA do not contain files, that do not exists in dest backup file list */
     elog(INFO, "Redundant files are removed, time elapsed: %s", pretty_time);
 }
 
@@ -1041,7 +1112,7 @@ static void threads_handle(pthread_t *threads,
                            restore_files_arg *threads_args,
                            pgBackup *dest_backup,
                            parray *dest_files,
-                           parray *pgdata_files,
+                           parray *pgdata_and_dssdata_files,
                            parray *external_dirs,
                            parray *parent_chain,
                            pgRestoreParams *params,
@@ -1059,12 +1130,12 @@ static void threads_handle(pthread_t *threads,
     bool   restore_isok = true;
 
     if (dest_backup->stream)
-        dest_bytes = dest_backup->pgdata_bytes + dest_backup->wal_bytes;
+        dest_bytes = dest_backup->pgdata_bytes + dest_backup->dssdata_bytes + dest_backup->wal_bytes;
     else
-        dest_bytes = dest_backup->pgdata_bytes;
+        dest_bytes = dest_backup->pgdata_bytes + dest_backup->dssdata_bytes;
 
     pretty_size(dest_bytes, pretty_dest_bytes, lengthof(pretty_dest_bytes));
-    elog(INFO, "Start restoring backup files. PGDATA size: %s", pretty_dest_bytes);
+    elog(INFO, "Start restoring backup files. DATA size: %s", pretty_dest_bytes);
     time(&start_time);
     thread_interrupted = false;
 
@@ -1074,7 +1145,7 @@ static void threads_handle(pthread_t *threads,
         restore_files_arg *arg = &(threads_args[i]);
 
         arg->dest_files = dest_files;
-        arg->pgdata_files = pgdata_files;
+        arg->pgdata_and_dssdata_files = pgdata_and_dssdata_files;
         arg->dest_backup = dest_backup;
         arg->dest_external_dirs = external_dirs;
         arg->parent_chain = parent_chain;
@@ -1199,7 +1270,7 @@ inline void RestoreCompressFile(FILE *out, char *to_fullpath, pgFile *dest_file)
 }
 
 /*
- * Restore files into $PGDATA.
+ * Restore files into $PGDATA and $VGNAME.
  */
 static void *
 restore_files(void *arg)
@@ -1272,7 +1343,7 @@ restore_files(void *arg)
             join_path_components(to_fullpath, arguments->to_root, dest_file->rel_path);
 
         if (arguments->incremental_mode != INCR_NONE &&
-            parray_bsearch(arguments->pgdata_files, dest_file, pgFileCompareRelPathWithExternalDesc))
+            parray_bsearch(arguments->pgdata_and_dssdata_files, dest_file, pgFileCompareRelPathWithExternalDesc))
         {
             already_exists = true;
         }
@@ -1430,10 +1501,17 @@ create_recovery_conf(time_t backup_id,
      * in "the past" relatively to latest state in the archive?
      * We will get a replica that is "in the future" to the master.
      * We accept this risk because its probability is low.
+     * 
+     * if rt recovery is not bigger than backup, we dont need to 
+     * generate recovery.conf file
+     * 
+     * rt is malloc 0 before
      */
-    pitr_requested = !backup->stream || rt->time_string ||
-        rt->xid_string || rt->lsn_string || rt->target_name ||
-        target_immediate || target_latest || restore_command_provided;
+    pitr_requested =
+            !backup->stream || backup->recovery_time < rt->target_time || backup->recovery_xid < rt->target_xid ||
+            backup->stop_lsn < rt->target_lsn || rt->target_name || target_immediate || target_latest ||
+            restore_command_provided;
+
 
     /* No need to generate recovery.conf at all. */
     if (!pitr_requested)
@@ -1535,51 +1613,7 @@ static void construct_restore_cmd(FILE *fp, pgRecoveryTarget *rt,
                                   bool restore_command_provided,
                                   bool target_immediate)
 {
-    char    restore_command_guc[16384];
-    errno_t rc = 0;
-
     fio_fprintf(fp, "\n## recovery settings\n");
-    /* If restore_command is provided, use it. Otherwise construct it from scratch. */
-    if (restore_command_provided)
-    {
-        rc = sprintf_s(restore_command_guc, sizeof(restore_command_guc), "%s",
-                    instance_config.restore_command);
-        securec_check_ss_c(rc, "\0", "\0");
-    }
-    else
-    {
-        /* default cmdline, ok for local restore */
-        rc = sprintf_s(restore_command_guc, sizeof(restore_command_guc),
-                "%s archive-get -B %s --instance %s "
-                "--wal-file-path=%%p --wal-file-name=%%f",
-                PROGRAM_FULL_PATH ? PROGRAM_FULL_PATH : PROGRAM_NAME,
-                backup_path, instance_name);
-        securec_check_ss_c(rc, "\0", "\0");
-        /* append --remote-* parameters provided via --archive-* settings */
-        if (instance_config.archive.host)
-        {
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), " --remote-host=");
-            securec_check_c(rc, "\0", "\0");
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), instance_config.archive.host);
-            securec_check_c(rc, "\0", "\0");
-        }
-
-        if (instance_config.archive.port)
-        {
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), " --remote-port=");
-            securec_check_c(rc, "\0", "\0");
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), instance_config.archive.port);
-            securec_check_c(rc, "\0", "\0");
-        }
-
-        if (instance_config.archive.user)
-        {
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), " --remote-user=");
-            securec_check_c(rc, "\0", "\0");
-            rc = strcat_s(restore_command_guc, sizeof(restore_command_guc), instance_config.archive.user);
-            securec_check_c(rc, "\0", "\0");
-        }
-    }
 
     /*
      * We've already checked that only one of the four following mutually
@@ -1618,6 +1652,11 @@ static void construct_restore_cmd(FILE *fp, pgRecoveryTarget *rt,
 #if PG_VERSION_NUM >= 120000
         fio_fprintf(fp, "recovery_target_timeline = 'current'\n");
 #endif
+    }
+    if (instance_config.archive.host) {
+        elog(LOG, "archive host specified, input restore command manually.");
+    } else {
+        fprintf(fp, "restore_command = 'cp %s/%%f %%p'\n", arclog_path);
     }
 }
 

@@ -20,6 +20,7 @@
 #include "access/ustore/knl_whitebox_test.h"
 #include "storage/lock/lwlock.h"
 #include "storage/smgr/smgr.h"
+#include "access/multi_redo_api.h"
 
 namespace undo {
 static uint64 USEG_SIZE(uint32 dbId)
@@ -47,6 +48,26 @@ uint32 UndoSpace::Used(void)
             errmsg(UNDOFORMAT("space tail %lu < head %lu."), tail_, head_)));
     }
     return (uint32)((tail_ - head_) / BLCKSZ);
+}
+
+UndoLogOffset UndoSpace::find_oldest_offset(int zid, uint32 db_id) const
+{
+    UndoLogOffset offset = head_;
+    BlockNumber blockno;
+    RelFileNode rnode;
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, offset), db_id);
+    SMgrRelation reln = smgropen(rnode, InvalidBackendId);
+    uint64 seg_size = USEG_SIZE(db_id);
+    while (offset >=seg_size) {
+        offset -= seg_size;
+        blockno = (BlockNumber)(offset / BLCKSZ);
+        if (!smgrexists(reln, MAIN_FORKNUM, blockno)) {
+            offset += seg_size;
+            break;
+        }
+    }
+    smgrclose(reln);
+    return offset;
 }
 
 /* Create segments needed to increase end_ to newEnd. */
@@ -91,7 +112,17 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
 void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
 {
     RelFileNode rnode;
-    UndoLogOffset head = head_;
+    UndoLogOffset head;
+    UndoLogOffset old_head;
+    if (t_thrd.undorecycler_cxt.is_recovery_in_progress) {
+        head = head_exrto;
+        old_head = head_exrto;
+        set_head_exrto(offset);
+    } else {
+        head = head_;
+        old_head = head_;
+        SetHead(offset);
+    }
     Assert(head < offset && head_ <= tail_);
     UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, offset), dbId);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
@@ -104,6 +135,9 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     while (head < offset) {
         /* Create a new undo segment. */
         smgrdounlink(reln, t_thrd.xlog_cxt.InRecovery, (head / BLCKSZ));
+        ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+            "unlink undo log, zid=%d, dbid=%u, new_head=%lu, segId:%lu."),
+            zid, dbId, offset, head/segSize)));
         if (g_instance.undo_cxt.undoTotalSize < segBlocks) {
             ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
                 "unlink undo log, total blocks=%u < segment size."),
@@ -114,8 +148,32 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     }
     smgrclose(reln);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
-        "unlink undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu."),
-        g_instance.undo_cxt.undoTotalSize, zid, dbId, offset)));
+        "unlink undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu, old_head:%lu."),
+        g_instance.undo_cxt.undoTotalSize, zid, dbId, offset, old_head)));
+    return;
+}
+
+/*
+ * Unlink undo segment files which are residual in extreme RTO standby read,
+ * unlink from start to end(not include).
+ */
+void UndoSpace::unlink_residual_log(int zid, UndoLogOffset start, UndoLogOffset end, uint32 db_id) const
+{
+    RelFileNode rnode;
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, start), db_id);
+    SMgrRelation reln = smgropen(rnode, InvalidBackendId);
+    uint64 seg_size = USEG_SIZE(db_id);
+
+    while (start/seg_size < end/seg_size) {
+        /* delete a new undo segment. */
+        BlockNumber block = (BlockNumber)(start / BLCKSZ);
+        smgrdounlink(reln, t_thrd.xlog_cxt.InRecovery, block);
+        ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+            "unlink_residual_log, zid=%d, dbid=%u, start=%lu, end=%lu, segId:%lu, endSegId:%lu."),
+            zid, db_id, start, end, start/seg_size, end/seg_size)));
+        start += seg_size;
+    }
+    smgrclose(reln);
     return;
 }
 
@@ -383,6 +441,7 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
         usp->MarkClean();
         usp->SetLSN(uspMetaInfo->lsn);
         usp->SetHead(uspMetaInfo->head);
+        usp->set_head_exrto(uspMetaInfo->head);
         usp->SetTail(uspMetaInfo->tail);
         if (type == UNDO_LOG_SPACE) {
             usp->CreateNonExistsUndoFile(zoneId, UNDO_DB_OID);
@@ -390,6 +449,9 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
             usp->CreateNonExistsUndoFile(zoneId, UNDO_SLOT_DB_OID);
         }
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used());
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("recovery_space_meta, zone_id:%u, type:%u, "
+            "lsn:%lu, head:%lu, tail:%lu."),
+            zoneId, type, uspMetaInfo->lsn, uspMetaInfo->head, uspMetaInfo->tail)));
     }
     pfree(persistBlock);
 }

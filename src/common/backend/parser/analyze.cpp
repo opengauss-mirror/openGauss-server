@@ -615,7 +615,7 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
         result->rightRefState = nullptr;
     }
 
-    PreventCommandDuringSSOndemandRecovery(parseTree);
+    PreventCommandDuringSSOndemandRedo(parseTree);
     return result;
 }
 
@@ -1594,17 +1594,16 @@ static void CheckUnsupportInsertSelectClause(Query* query)
 }
 
 
-static void SetInsertAttrnoState(ParseState* pstate, List* attrnos) 
+static void SetInsertAttrnoState(ParseState* pstate, List* attrnos, int exprLen) 
 {
     RightRefState* rstate = pstate->rightRefState;
     Relation relation = (Relation)linitial(pstate->p_target_relation);
     rstate->colCnt = RelationGetNumberOfAttributes(relation);
-    int len = list_length(attrnos);
-    rstate->explicitAttrLen = len;
-    rstate->explicitAttrNos = (int*)palloc0(sizeof(int) * len);
+    rstate->explicitAttrLen = exprLen;
+    rstate->explicitAttrNos = (int*)palloc0(sizeof(int) * exprLen);
     
     ListCell* attr = list_head(attrnos);
-    for (int i = 0; i < len; ++i) {
+    for (int i = 0; i < exprLen; ++i) {
         rstate->explicitAttrNos[i] = lfirst_int(attr);
         attr = lnext(attr);
     }
@@ -1627,19 +1626,21 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
     for (int ni = 0; ni < len; ++ni) {
         ResTarget* res = (ResTarget*)lfirst(target);
         char* name = nullptr;
-        if (list_length(res->indirection) > 0) {
-            name = ((Value*)llast(res->indirection))->val.str;
+        if (list_length(res->indirection) > 0 && IsA(linitial(res->indirection), String)) {
+            name = strVal(linitial(res->indirection));
         } else {
             name = res->name;
         }
 
-        for (int ci = 0; ci < colNum; ++ci) {
-            if (attr[ci].attisdropped) {
-                continue;
-            }
-            if (strcmp(name, attr[ci].attname.data) == 0) {
-                rstate->usExplicitAttrNos[ni] = ci + 1;
-                break;
+        if (name != NULL) {
+            for (int ci = 0; ci < colNum; ++ci) {
+                if (attr[ci].attisdropped) {
+                    continue;
+                }
+                if (strcmp(name, attr[ci].attname.data) == 0) {
+                    rstate->usExplicitAttrNos[ni] = ci + 1;
+                    break;
+                }
             }
         }
 
@@ -1652,11 +1653,15 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
     }
 }
 
-static RightRefState* MakeRightRefState() 
+static RightRefState* MakeRightRefStateIfSupported(SelectStmt* selectStmt)
 {
-    RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
-    refState->isSupported = !IsInitdb && DB_IS_CMPT(B_FORMAT);
-    return refState;
+    bool isSupported = DB_IS_CMPT(B_FORMAT) && selectStmt && selectStmt->valuesLists && !IsInitdb;
+    if (isSupported) {
+        RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
+        refState->isSupported = true;
+        return refState;
+    }
+    return nullptr;
 }
 
 /*
@@ -1685,7 +1690,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     /* There can't be any outer WITH to worry about */
     AssertEreport(pstate->p_ctenamespace == NIL, MOD_OPT, "para should be NIL");
 
-    RightRefState* rightRefState = MakeRightRefState();
+    RightRefState* rightRefState = MakeRightRefStateIfSupported((SelectStmt*)stmt->selectStmt);
     
     qry->commandType = CMD_INSERT;
     pstate->p_is_insert = true;
@@ -1854,8 +1859,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Validate stmt->cols list, or build default list if no list given */
     icolumns = checkInsertTargets(pstate, stmt->cols, &attrnos);
-
-    SetInsertAttrnoState(pstate, attrnos);
     
     AssertEreport(list_length(icolumns) == list_length(attrnos), MOD_OPT, "list length inconsistent");
 
@@ -2179,6 +2182,10 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         exprList = transformInsertRow(pstate, exprList, stmt->cols, icolumns, attrnos);
     }
 
+    if (IS_SUPPORT_RIGHT_REF(rightRefState)) {
+        SetInsertAttrnoState(pstate, attrnos, list_length(exprList));
+    }
+
     /*
      * Generate query's target list using the computed list of expressions.
      * Also, mark all the target columns as needing insert permissions.
@@ -2272,7 +2279,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     } else {
         qry->rightRefState = nullptr;
         pstate->rightRefState = nullptr;
-        pfree(rightRefState);
+        pfree_ext(rightRefState);
     }
 
     return qry;
@@ -2630,7 +2637,7 @@ static bool shouldTransformStartWithStmt(ParseState* pstate, SelectStmt* stmt, Q
      * Back up the current select statement to be restored after query re-writing
      * for cases of START WITH CONNNECT BY under CREATE TABLE AS.
      */
-    selectQuery->sql_statement = fetchSelectStmtFromCTAS((char*)pstate->p_sourcetext);
+    selectQuery->sql_statement = fetchSelectStmtFromCTAS((char*)pstrdup(pstate->p_sourcetext));
 
     return true;
 }
@@ -2713,6 +2720,7 @@ static void transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt)
         newUserElem->name = userElem->name;
         
         Node *node = transformExprRecurse(pstate, (Node *)userElem->val);
+        assign_expr_collations(pstate, node);
 
         if (IsA(node, UserSetElem)) {
             newUserElem->name = list_concat(newUserElem->name, ((UserSetElem *)node)->name);
@@ -3403,6 +3411,58 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
     return qry;
 }
 
+/* Find real target entry and convert its character set in UNION tree. */
+static void convert_set_operation_tree_charset(ParseState* pstate, Node* op_tree,
+    int arg_id, Oid target_collation, int target_charset)
+{
+    if (IsA(op_tree, SetOperationStmt)) {
+        SetOperationStmt* opstmt = (SetOperationStmt*)op_tree;
+        convert_set_operation_tree_charset(pstate, opstmt->larg, arg_id, target_collation, target_charset);
+        convert_set_operation_tree_charset(pstate, opstmt->rarg, arg_id, target_collation, target_charset);
+        return;
+    }
+
+    Assert(IsA(op_tree, RangeTblRef));
+    RangeTblRef* rtr = (RangeTblRef*)op_tree;
+    RangeTblEntry* rte = rt_fetch(rtr->rtindex, pstate->p_rtable);
+    TargetEntry* te = NULL;
+    int n = 0;
+
+    foreach_cell(tmp_cell, rte->subquery->targetList) {
+        te = (TargetEntry*)lfirst(tmp_cell);
+        if (te->resjunk) {
+            continue;
+        }
+        if (++n > arg_id) {
+            break;
+        }
+    }
+
+    te->expr = (Expr*)coerce_to_target_charset(
+        (Node*)te->expr, target_charset, exprType((Node*)te->expr), exprTypmod((Node*)te->expr), target_collation);
+}
+
+/* Converts the character set of the query column on a side of the UNION. */
+static void convert_set_operation_charset(ParseState* pstate, Node* op_tree, TargetEntry* arg,
+    int arg_id, Oid target_collation, int target_charset)
+{
+    Node* arg_expr = (Node*)arg->expr;
+    Oid expr_type = exprType(arg_expr);
+    Oid expr_collation = exprCollation(arg_expr);
+    if (expr_collation == BINARY_COLLATION_OID || expr_collation == target_collation) {
+        return;
+    }
+
+    if (!IsA(arg->expr, SetToDefault)) {
+        arg->expr = (Expr*)coerce_to_target_charset(
+            arg_expr, target_charset, expr_type, exprTypmod(arg_expr), target_collation);
+        return;
+    }
+
+    Assert(IsA(op_tree, SetOperationStmt));
+    convert_set_operation_tree_charset(pstate, op_tree, arg_id, target_collation, target_charset);
+}
+
 /*
  * transformSetOperationTree
  *		Recursively transform leaves and internal nodes of a set-op tree
@@ -3533,6 +3593,7 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
         ListCell* ltl = NULL;
         ListCell* rtl = NULL;
         const char* context = NULL;
+        int col_id = 0;
 
         context = (stmt->op == SETOP_UNION ? "UNION" : (stmt->op == SETOP_INTERSECT ? "INTERSECT" : "EXCEPT"));
 
@@ -3664,7 +3725,13 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
              */
             rescolcoll =
                 select_common_collation(pstate, list_make2(lcolnode, rcolnode), (op->op == SETOP_UNION && op->all));
-
+            if (ENABLE_MULTI_CHARSET && rescolcoll != BINARY_COLLATION_OID) {
+                int res_charset = get_valid_charset_by_collation(rescolcoll);
+                convert_set_operation_charset(pstate, op->larg, ltle, col_id, rescolcoll, res_charset);
+                convert_set_operation_charset(pstate, op->rarg, rtle, col_id, rescolcoll, res_charset);
+            }
+            col_id++;
+            
             /* emit results */
             op->colTypes = lappend_oid(op->colTypes, rescoltype);
             op->colTypmods = lappend_int(op->colTypmods, rescoltypmod);
@@ -4430,7 +4497,22 @@ static Query* transformDeclareCursorStmt(ParseState* pstate, DeclareCursorStmt* 
             ERROR, (errcode(ERRCODE_INVALID_CURSOR_DEFINITION), errmsg("cannot specify both SCROLL and NO SCROLL")));
     }
 
-    result = transformStmt(pstate, stmt->query);
+    PG_TRY();
+    {
+        /* according to DeclareCursorName to form a dependency on the used ROW type */
+        if (!(stmt->options & CURSOR_OPT_HOLD)) {
+            u_sess->analyze_cxt.DeclareCursorName = stmt->portalname;
+        }
+        result = transformStmt(pstate, stmt->query);
+    }
+    PG_CATCH();
+    {
+        u_sess->analyze_cxt.DeclareCursorName = NULL;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    u_sess->analyze_cxt.DeclareCursorName = NULL;
 
     /* Grammar should not have allowed anything but SELECT */
     if (!IsA(result, Query) || result->commandType != CMD_SELECT || result->utilityStmt != NULL) {
@@ -4494,6 +4576,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt)
 {
     Query* result = NULL;
 
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(stmt->query);
     /* transform contained query, allowing SELECT INTO */
     stmt->query = (Node*)transformTopLevelStmt(pstate, stmt->query);
 

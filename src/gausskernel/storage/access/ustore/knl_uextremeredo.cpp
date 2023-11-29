@@ -201,7 +201,7 @@ static XLogRecParseState *UHeapXlogFreezeTDParseBlock(XLogReaderState *record, u
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_FREEZE_TD_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_FREEZE_TD_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -213,7 +213,7 @@ static XLogRecParseState *UHeapXlogInvalidTDParseBlock(XLogReaderState *record, 
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_INVALID_TD_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_INVALID_TD_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -225,7 +225,7 @@ static XLogRecParseState *UHeapXlogCleanParseBlock(XLogReaderState *record, uint
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_CLEAN_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_CLEAN_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -276,7 +276,7 @@ static XLogRecParseState *UHeap2XlogBaseShiftParseBlock(XLogReaderState *record,
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -288,7 +288,7 @@ static XLogRecParseState *UHeap2XlogFreezeParseBlock(XLogReaderState *record, ui
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP2_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -404,7 +404,7 @@ static XLogRecParseState *UHeapXlogUheapUndoResetSlotParseBlock(XLogReaderState 
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -416,7 +416,7 @@ static XLogRecParseState *UHeapXlogUheapUndoPageParseBlock(XLogReaderState *reco
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -428,7 +428,7 @@ static XLogRecParseState *UHeapXlogUheapUndoAbortSpecInsertParseBlock(XLogReader
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, UHEAP_UNDOACTION_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -1148,9 +1148,6 @@ void UHeapXlogFreezeTDOperatorPage(RedoBufferInfo *buffer, void *recorddata)
     UHeapPageTDData *tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
     TD *transinfo = tdPtr->td_info;
 
-    if (InHotStandby && TransactionIdIsValid(xlrec->latestFrozenXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, buffer->blockinfo.rnode, buffer->lsn);
-
     UHeapFreezeOrInvalidateTuples(buffer->buf, nFrozen, frozenSlots, true);
 
     for (int i = 0; i < nFrozen; i++) {
@@ -1249,17 +1246,6 @@ void UHeapXlogCleanOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
     uint16 tmpfixed = 0;
     uint16 *nfixed = &tmpfixed;
     char *unused = (char *)xlrec + SizeOfUHeapClean;
-
-    /*
-     * We're about to remove tuples. In Hot Standby mode, ensure that there's
-     * no queries running for which the removed tuples are still visible.
-     *
-     * Not all UHEAP_CLEAN records remove tuples with xids, so we only want to
-     * conflict on the records that cause MVCC failures for user queries. If
-     * latestRemovedXid is invalid, skip conflict processing.
-     */
-    if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, buffer->blockinfo.rnode, buffer->lsn);
 
     /* Update all item pointers per the record, and repair fragmentation */
     if (xlrec->flags & XLZ_CLEAN_CONTAINS_OFFSET) {
@@ -1520,12 +1506,6 @@ void UHeapRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
-const static bool SUPPORT_HOT_STANDBY = false; /* don't support consistency view */
-#else
-const static bool SUPPORT_HOT_STANDBY = true;
-#endif
-
 void UHeap2XlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *blkdata, Size datalen)
 {
     XlUHeapFreeze *xlrec = (XlUHeapFreeze *)recorddata;
@@ -1535,14 +1515,6 @@ void UHeap2XlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void
     OffsetNumber *offsets = (OffsetNumber *)recorddata;
     OffsetNumber *offsetsEnd = NULL;
     UHeapTupleData utuple;
-
-    /*
-     * In Hot Standby mode, ensure that there's no queries running which still
-     * consider the frozen xids as running.
-     */
-    if (InHotStandby && SUPPORT_HOT_STANDBY) {
-        ResolveRecoveryConflictWithSnapshot(cutoffXid, buffer->blockinfo.rnode, buffer->lsn);
-    }
 
     if (datalen > 0) {
         offsetsEnd = (OffsetNumber *)((char *)offsets + datalen);
@@ -2019,6 +1991,9 @@ static void RedoUndoDiscardBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *b
     XLogRecPtr lsn = blockdatarec->undoDiscardParse.lsn;
 
     UndoZone *zone = UndoZoneGroup::GetUndoZone(zoneId);
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+        "redo_undo_discard_block zid=%d, isZoneNull:%d, zone_lsn:%lu, lsn:%lu, end_slot:%lu, end_undo_ptr:%lu, "
+        "recycled_xid:%lu."), zoneId, (int)(zone == NULL), zone->GetLSN(), lsn, endSlot, endUndoPtr, recycledXid)));
     if (zone == NULL) {
         return;
     }
@@ -2028,6 +2003,10 @@ static void RedoUndoDiscardBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *b
         zone->SetRecycleTSlotPtr(endSlot);
         zone->SetDiscardURecPtr(endUndoPtr);
         zone->SetForceDiscardURecPtr(endUndoPtr);
+        if (!IS_EXRTO_READ) {
+            zone->set_discard_urec_ptr_exrto(endUndoPtr);
+            zone->set_force_discard_urec_ptr_exrto(endUndoPtr);
+        }
         zone->SetRecycleXid(recycledXid);
         zone->MarkDirty();
         zone->SetLSN(lsn);
@@ -2048,12 +2027,25 @@ static void RedoUndoUnlinkBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     XLogRecPtr unlinkLsn = blockdatarec->undoUnlinkParse.unlinkLsn;
     UndoLogOffset newHead = blockdatarec->undoUnlinkParse.headOffset;
     UndoLogOffset head = usp->Head();
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+        "redo_undo_unlink_block, zid=%d, usp_lsn:%lu, unlink_lsn:%lu, head:%lu, new_head:%lu."),
+        zoneId, usp->LSN(), unlinkLsn, head, newHead)));
 
     if (usp->LSN() < unlinkLsn) {
-        zone->ForgetUndoBuffer(head, newHead, UNDO_DB_OID);
+        /*
+         * before hot_standby mode, we don,t know we will be primary or standby,
+         * so before hot standby we better do unlinklog.
+        */
+        if (!IS_EXRTO_READ) {
+            zone->ForgetUndoBuffer(head, newHead, UNDO_DB_OID);
+        }
         usp->LockSpace();
         usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, newHead, UNDO_DB_OID);
+        if (IS_EXRTO_READ) {
+            usp->SetHead(newHead);
+        } else {
+            usp->UnlinkUndoLog(zoneId, newHead, UNDO_DB_OID);
+        }
         usp->SetLSN(unlinkLsn);
         usp->UnlockSpace();
     }
@@ -2071,12 +2063,25 @@ static void RedoSlotUnlinkBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     XLogRecPtr unlinkLsn = blockdatarec->undoUnlinkParse.unlinkLsn;
     UndoLogOffset newHead = blockdatarec->undoUnlinkParse.headOffset;
     UndoLogOffset head = usp->Head();
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+        "redo_slot_unlink_block, zid=%d, usp_lsn:%lu, unlink_lsn:%lu, head:%lu, new_head:%lu."),
+        zoneId, usp->LSN(), unlinkLsn, head, newHead)));
 
     if (usp->LSN() < unlinkLsn) {
-        zone->ForgetUndoBuffer(head, newHead, UNDO_SLOT_DB_OID);
+        /*
+         * before hot_standby mode, we don,t know we will be primary or standby,
+         * so before hot standby we better do unlinklog.
+        */
+        if (!IS_EXRTO_READ) {
+            zone->ForgetUndoBuffer(head, newHead, UNDO_SLOT_DB_OID);
+        }
         usp->LockSpace();
         usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, newHead, UNDO_SLOT_DB_OID);
+        if (IS_EXRTO_READ) {
+            usp->SetHead(newHead);
+        } else {
+            usp->UnlinkUndoLog(zoneId, newHead, UNDO_SLOT_DB_OID);
+        }
         usp->SetLSN(unlinkLsn);
         usp->UnlockSpace();
     }

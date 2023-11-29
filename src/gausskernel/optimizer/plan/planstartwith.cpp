@@ -422,6 +422,54 @@ static char* GetSiblingsColNameFromFunc(Node* node)
     return NULL;
 }
 
+static bool raw_unsupported_func_walker(Node *node, Node *context_node)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, FuncCall)) {
+        FuncCall* fcall = (FuncCall*)node;
+        Value *val = (Value *)linitial(fcall->funcname);
+        char* name = strVal(val);
+        if (strcmp(name, "connect_by_root") == 0) {
+            ereport(ERROR,
+                    (errmodule(MOD_OPT_PLANNER),
+                            errmsg("CONNECT BY ROOT operator is not supported in the "
+                                    "START WITH or in the CONNECT BY condition")));
+        } else if (strcmp(name, "sys_connect_by_path") == 0) {
+            ereport(ERROR,
+                    (errmodule(MOD_OPT_PLANNER),
+                            errmsg("SYS_CONNECT_BY_PATH function is not allowed here")));
+        }
+    }
+
+    return raw_expression_tree_walker(node, (bool (*)()) raw_unsupported_func_walker, context_node);
+}
+
+static bool unsupported_func_walker(Node *node, Node *context_node)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, FuncExpr)) {
+        FuncExpr* expr = (FuncExpr*)node;
+        if (expr->funcid == CONNECT_BY_ROOT_FUNCOID) {
+            ereport(ERROR,
+                    (errmodule(MOD_OPT_PLANNER),
+                            errmsg("CONNECT BY ROOT operator is not supported in the "
+                                    "START WITH or in the CONNECT BY condition")));
+        } else if (expr->funcid == SYS_CONNECT_BY_PATH_FUNCOID) {
+            ereport(ERROR,
+                    (errmodule(MOD_OPT_PLANNER),
+                            errmsg("SYS_CONNECT_BY_PATH function is not allowed here")));
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)()) unsupported_func_walker, context_node);
+}
+
 /*
  * @Brief: check fix order-siblings columns, normally we can find sort-key from from
  * basePlan's targetlist, but some special case we need additional process:
@@ -477,6 +525,7 @@ static char *CheckAndFixSiblingsColName(PlannerInfo *root, Plan *basePlan,
 
             /* te->resname may be null, so check it first */
             if (te->resname && strcmp(te->resname, colname) == 0) {
+                unsupported_func_walker((Node*)te->expr, NULL);
                 found = true;
                 break;
             }
@@ -529,6 +578,9 @@ static char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb, Plan *basePl
     char *colname = NULL;
     TargetEntry *te = NULL;
 
+    /* check whether connect_by_root and sys_connect_by_path exist in sortBy */
+    raw_unsupported_func_walker(sb->node, NULL);
+
     if (IsA(sb->node, ColumnRef)) {
         ColumnRef  *cr = (ColumnRef *)sb->node;
         int len = list_length(cr->fields);
@@ -558,11 +610,7 @@ static char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb, Plan *basePl
 
         te = (TargetEntry *)list_nth(root->parse->targetList, siblingIdx - 1);
 
-        if (IsA(te->expr, FuncExpr) && IsStartWithFunction((FuncExpr *)te->expr)) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("Not support refer startwithfunc column in order siblings by.")));
-        }
+        unsupported_func_walker((Node*)te->expr, NULL);
 
         if (te->resname != NULL && IsPseudoReturnColumn(te->resname)) {
             ereport(ERROR,

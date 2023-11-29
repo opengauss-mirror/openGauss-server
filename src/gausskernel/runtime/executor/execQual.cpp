@@ -621,6 +621,9 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
            /* INDEX_VAR is handled by default case */
        default: /* get the tuple from the relation being scanned */
            slot = econtext->ecxt_scantuple;
+           if (u_sess->parser_cxt.in_userset) {
+               u_sess->parser_cxt.has_set_uservar = true;
+           }
            break;
    }
 
@@ -632,7 +635,7 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
     RightRefState* refState = econtext->rightRefState;
     int index = attnum - 1;
     if (refState && refState->values &&
-        (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
+        ((slot == nullptr && IS_ENABLE_INSERT_RIGHT_REF(refState)) ||
          (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
         *isNull = refState->isNulls[index];
         return refState->values[index];
@@ -720,6 +723,9 @@ static Datum ExecEvalScalarVarFast(ExprState* exprstate, ExprContext* econtext, 
            /* INDEX_VAR is handled by default case */
        default: /* get the tuple from the relation being scanned */
            slot = econtext->ecxt_scantuple;
+           if (u_sess->parser_cxt.in_userset) {
+               u_sess->parser_cxt.has_set_uservar = true;
+           }
            break;
    }
 
@@ -1104,6 +1110,9 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
         } else {
             con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
         }
+        if (u_sess->parser_cxt.in_userset) {
+            u_sess->parser_cxt.has_set_uservar = true;
+        }
     } else if (IsA(exprstate->expr, SetVariableExpr)) {
         SetVariableExpr* setvar = (SetVariableExpr*)transformSetVariableExpr((SetVariableExpr*)exprstate->expr);
         con = (Const*)setvar->value;
@@ -1271,6 +1280,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     UserSetElemState* usestate = (UserSetElemState*)exprstate;
     UserSetElem* elem = usestate->use;
     UserSetElem elemcopy;
+    Oid collid = exprCollation((Node*)elem->val);
     elemcopy.xpr = elem->xpr;
     elemcopy.name = elem->name;
 
@@ -1289,10 +1299,13 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     Node* res = NULL;
     char* value  =  NULL;
 
+    if (nodeTag(usestate->instate) != T_CaseExprState && DB_IS_CMPT(B_FORMAT))
+        u_sess->parser_cxt.in_userset = true;
+
     Datum result = ExecEvalExpr(usestate->instate, econtext, isNull, isDone);
 
     if (*isNull) {
-        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, result, true, false);
+        con = makeConst(UNKNOWNOID, -1, collid, -2, result, true, false);
         res = (Node*)con;
         elemcopy.val = (Expr*)const_expression_to_const(res);
     } else {
@@ -1319,7 +1332,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
         Oid atttypid = exprType((Node*)elem->val);
 
         value = CStringFromDatum(atttypid, result);
-        con = processResToConst(value, atttypid);
+        con = processResToConst(value, atttypid, collid);
         if (atttypid == BOOLOID)
             res = (Node*)con;
         else
@@ -1328,6 +1341,7 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
     }
 
     check_set_user_message(&elemcopy);
+    u_sess->parser_cxt.in_userset = false;
 
     return result;
 }
@@ -1345,6 +1359,10 @@ static Datum ExecEvalParamExec(ExprState* exprstate, ExprContext* econtext, bool
 
    if (isDone != NULL)
        *isDone = ExprSingleResult;
+    
+    if (u_sess->parser_cxt.in_userset) {
+        u_sess->parser_cxt.has_set_uservar = true;
+    }
 
    /*
     * PARAM_EXEC params (internal executor parameters) are stored in the
@@ -1355,7 +1373,9 @@ static Datum ExecEvalParamExec(ExprState* exprstate, ExprContext* econtext, bool
        /* Parameter not evaluated yet, so go do it */
        ExecSetParamPlan((SubPlanState*)prm->execPlan, econtext);
        /* ExecSetParamPlan should have processed this param... */
-       Assert(prm->execPlan == NULL);
+       if (!u_sess->parser_cxt.has_set_uservar || !DB_IS_CMPT(B_FORMAT)) {
+            Assert(prm->execPlan == NULL);
+       }
        prm->isConst = true;
        prm->valueType = expression->paramtype;
    }
@@ -1904,6 +1924,7 @@ static void init_fcache(
    fcache->funcResultSlot = NULL;
    fcache->setArgsValid = false;
    fcache->shutdown_reg = false;
+   fcache->setArgByVal = false;
    if(fcache->xprstate.is_flt_frame){
         fcache->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(fcache->func.fn_oid);
         fcache->has_refcursor = func_has_refcursor_args(fcache->func.fn_oid, &fcache->fcinfo_data);
@@ -1935,6 +1956,7 @@ extern void ShutdownFuncExpr(Datum arg)
 
    /* Clear any active set-argument state */
    fcache->setArgsValid = false;
+   fcache->setArgByVal = false;
 
    /* execUtils will deregister the callback... */
    fcache->shutdown_reg = false;
@@ -1975,7 +1997,7 @@ static TupleDesc get_cached_rowtype(Oid type_id, int32 typmod, TupleDesc* cache_
 /*
 * Callback function to release a tupdesc refcount at expression tree shutdown
 */
-static void ShutdownTupleDescRef(Datum arg)
+void ShutdownTupleDescRef(Datum arg)
 {
    TupleDesc* cache_field = (TupleDesc*)DatumGetPointer(arg);
 
@@ -2187,6 +2209,16 @@ void set_result_for_plpgsql_language_function_with_outparam(FuncExprState *fcach
    pfree(nulls);
 }
 
+bool ExecSetArgIsByValue(FunctionCallInfo fcinfo)
+{
+    for (int i = 0; i < fcinfo->nargs; i++) {
+        if (!fcinfo->argnull[i] && !get_typbyval(fcinfo->argTypes[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*
 *		ExecMakeFunctionResult
 *
@@ -2216,6 +2248,8 @@ static Datum ExecMakeFunctionResult(FuncExprState* fcache, ExprContext* econtext
    bool hasSetArg = false;
    int i;
    int* var_dno = NULL;
+   int func_encoding = PG_INVALID_ENCODING;
+   int db_encoding = PG_INVALID_ENCODING;
 
    econtext->plpgsql_estate = plpgsql_estate;
    plpgsql_estate = NULL;
@@ -2335,12 +2369,18 @@ restart:
         } else {
             hasSetArg = (argDone != ExprSingleResult);
         }
+        fcache->setArgByVal = ExecSetArgIsByValue(fcinfo);
    } else {
        /* Re-use callinfo from previous evaluation */
        hasSetArg = fcache->setHasSetArg;
        /* Reset flag (we may set it again below) */
        fcache->setArgsValid = false;
    }
+
+    if (DB_IS_CMPT(B_FORMAT)) {
+        func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+        db_encoding = GetDatabaseEncoding();
+    }
 
    /*
     * Now call the function, passing the evaluated parameter values.
@@ -2400,7 +2440,14 @@ restart:
 
                fcinfo->isnull = false;
                rsinfo.isDone = ExprSingleResult;
-               result = FunctionCallInvoke(fcinfo);
+
+               if (func_encoding != db_encoding) {
+                    DB_ENCODING_SWITCH_TO(func_encoding);
+                    result = FunctionCallInvoke(fcinfo);
+                    DB_ENCODING_SWITCH_BACK(db_encoding);
+               } else {
+                    result = FunctionCallInvoke(fcinfo);
+               }
                if (AUDIT_SYSTEM_EXEC_ENABLED) {
                     audit_system_function(fcinfo, AUDIT_OK);
                 }
@@ -2482,6 +2529,10 @@ restart:
                    if (fcache->func.fn_retset && *isDone == ExprMultipleResult) {
                        fcache->setHasSetArg = hasSetArg;
                        fcache->setArgsValid = true;
+                        /* arg not by value, memory can not be reset */
+                        if (!fcache->setArgByVal) {
+                            econtext->hasSetResultStore = true;
+                        }
                        /* Register cleanup callback if we didn't already */
                        if (!fcache->shutdown_reg) {
                            RegisterExprContextCallback(econtext, ShutdownFuncExpr, PointerGetDatum(fcache));
@@ -2574,7 +2625,13 @@ restart:
        pgstat_init_function_usage(fcinfo, &fcusage);
 
        fcinfo->isnull = false;
-       result = FunctionCallInvoke(fcinfo);
+       if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            result = FunctionCallInvoke(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            result = FunctionCallInvoke(fcinfo);
+        }
        *isNull = fcinfo->isnull;
 
        pgstat_end_function_usage(&fcusage, true);
@@ -2622,6 +2679,8 @@ static Datum ExecMakeFunctionResultNoSets(
    bool proIsProcedure = false;
    bool supportTranaction = false;
    bool is_have_huge_clob = false;
+   int func_encoding = PG_INVALID_ENCODING;
+   int db_encoding = PG_INVALID_ENCODING;
 
 #ifdef ENABLE_MULTIPLE_NODES
    if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
@@ -2709,7 +2768,8 @@ static Datum ExecMakeFunctionResultNoSets(
    }
 
    if (econtext) {
-        fcinfo->can_ignore = econtext->can_ignore;
+        fcinfo->can_ignore = econtext->can_ignore || (econtext->ecxt_estate && econtext->ecxt_estate->es_plannedstmt &&
+                 econtext->ecxt_estate->es_plannedstmt->hasIgnore);
     }
 
     /*
@@ -2805,6 +2865,11 @@ static Datum ExecMakeFunctionResultNoSets(
        }
    }
 
+   if (DB_IS_CMPT(B_FORMAT)) {
+        func_encoding = get_valid_charset_by_collation(fcinfo->fncollation);
+        db_encoding = GetDatabaseEncoding();
+    }
+
    pgstat_init_function_usage(fcinfo, &fcusage);
 
    fcinfo->isnull = false;
@@ -2812,7 +2877,13 @@ static Datum ExecMakeFunctionResultNoSets(
    if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
        StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
        u_sess->instr_cxt.global_instr = NULL;
-       result = FunctionCallInvoke(fcinfo);   // node will be free at here or else;
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            result = FunctionCallInvoke(fcinfo);   // node will be free at here or else;
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            result = FunctionCallInvoke(fcinfo);   // node will be free at here or else;
+        }
        u_sess->instr_cxt.global_instr = save_global_instr;
    } else {
        if (fcinfo->argTypes[0] == CLOBOID && fcinfo->argTypes[1] == CLOBOID && fcinfo->flinfo->fn_addr == textcat) {
@@ -2826,7 +2897,13 @@ static Datum ExecMakeFunctionResultNoSets(
                fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
            }
        }
-       result = FunctionCallInvoke(fcinfo);
+        if (func_encoding != db_encoding) {
+            DB_ENCODING_SWITCH_TO(func_encoding);
+            result = FunctionCallInvoke(fcinfo);
+            DB_ENCODING_SWITCH_BACK(db_encoding);
+        } else {
+            result = FunctionCallInvoke(fcinfo);
+        }
    }
    *isNull = fcinfo->isnull;
     if (AUDIT_SYSTEM_EXEC_ENABLED) {
@@ -2942,7 +3019,12 @@ extern bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo)
    } else if (return_refcursor) {
        fcinfo->refcursor_data.return_number = out_count;
    }
-
+    /* func_has_out_param means whether a func with out param and with GUC proc_outparam_override. */
+    bool func_has_out_param = is_function_with_plpgsql_language_and_outparam((fcinfo->flinfo)->fn_oid);
+    if (func_has_out_param && (return_refcursor || procStruct->prorettype == REFCURSOROID)) {
+        fcinfo->refcursor_data.return_number = out_count + 1;
+    }
+    
    ReleaseSysCache(proctup);
    return use_cursor;
 }
@@ -5539,7 +5621,7 @@ static Datum ExecEvalCurrentOfExpr(ExprState* exprstate, ExprContext* econtext, 
  *		ExecEvalPrefixText
  * ----------------------------------------------------------------
  */
-static Datum ExecEvalPrefixText(GenericExprState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+static Datum ExecEvalPrefixText(PrefixKeyState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
     PrefixKey* pkey = (PrefixKey*)state->xprstate.expr;
     Datum result = ExecEvalExpr(state->arg, econtext, isNull, isDone);
@@ -5548,13 +5630,13 @@ static Datum ExecEvalPrefixText(GenericExprState* state, ExprContext* econtext, 
         return (Datum)0;
     }
 
-    return PointerGetDatum(text_substring(result, 1, pkey->length, false));
+    return PointerGetDatum(text_substring_with_encoding(result, 1, pkey->length, false, state->encoding));
 }
 /* ----------------------------------------------------------------
  *		ExecEvalPrefixBytea
  * ----------------------------------------------------------------
  */
-static Datum ExecEvalPrefixBytea(GenericExprState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+static Datum ExecEvalPrefixBytea(PrefixKeyState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
     PrefixKey* pkey = (PrefixKey*)state->xprstate.expr;
     Datum result = ExecEvalExpr(state->arg, econtext, isNull, isDone);
@@ -6314,16 +6396,20 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
        } break;
        case T_PrefixKey: {
             PrefixKey* pkey = (PrefixKey*)node;
-            GenericExprState* gstate = makeNode(GenericExprState);
+            PrefixKeyState* pstate = makeNode(PrefixKeyState);
             Oid argtype = exprType((Node*)pkey->arg);
 
             if (argtype == BYTEAOID || argtype == RAWOID || argtype == BLOBOID) {
-                gstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixBytea;
+                pstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixBytea;
+                pstate->encoding = PG_INVALID_ENCODING;
             } else {
-                gstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixText;
+                Oid argcollation = exprCollation((Node*)pkey->arg);
+                pstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalPrefixText;
+                pstate->encoding = get_valid_charset_by_collation(argcollation);
             }
-            gstate->arg = ExecInitExpr(pkey->arg, parent);
-            state = (ExprState*)gstate;
+            pstate->arg = ExecInitExpr(pkey->arg, parent);
+            
+            state = (ExprState*)pstate;
         } break;
         case T_UserSetElem: {
             UserSetElem* useexpr = (UserSetElem*)node;
@@ -6805,7 +6891,7 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
 
     SortTargetListAsArray(refState, targetlist, targetArr);
 
-    InitOutputValues(refState, targetArr, values, isnull, targetCount, hasExecs);
+    InitOutputValues(refState, values, isnull, hasExecs);
 
     /*
      * evaluate all the expressions in the target list
@@ -7165,3 +7251,31 @@ void ExecCopyDataToDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* source_cu
    cursor_var->value = Int32GetDatum(source_cursor->row_count);
    cursor_var->isnull = source_cursor->null_open;
 }
+
+#ifdef USE_SPQ
+bool IsJoinExprNull(List *joinExpr, ExprContext *econtext)
+{
+    ListCell *lc;
+    bool joinkeys_null = true;
+ 
+    Assert(joinExpr != nullptr);
+ 
+    foreach(lc, joinExpr) {
+        ExprState *keyexpr = (ExprState *) lfirst(lc);
+        bool isNull = false;
+ 
+        /*
+         * Evaluate the current join attribute value of the tuple
+         */
+        ExecEvalExpr(keyexpr, econtext, &isNull, NULL);
+ 
+        if (!isNull) {
+            /* Found at least one non-null join expression, we're done */
+            joinkeys_null = false;
+            break;
+        }
+    }
+ 
+    return joinkeys_null;
+}
+#endif

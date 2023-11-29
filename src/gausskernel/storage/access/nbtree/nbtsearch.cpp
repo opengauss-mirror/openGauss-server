@@ -83,7 +83,6 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
         ItemId itemid;
         IndexTuple itup;
         BlockNumber blkno;
-        BlockNumber par_blkno;
         BTStack new_stack = NULL;
 
         /*
@@ -114,7 +113,6 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
         itemid = PageGetItemId(page, offnum);
         itup = (IndexTuple)PageGetItem(page, itemid);
         blkno = BTreeInnerTupleGetDownLink(itup);
-        par_blkno = BufferGetBlockNumber(*bufP);
 
         /*
          * We need to save the location of the index entry we chose in the
@@ -128,7 +126,7 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
          */
         if (needStack) {
             new_stack = (BTStack)palloc(sizeof(BTStackData));
-            new_stack->bts_blkno = par_blkno;
+            new_stack->bts_blkno = BufferGetBlockNumber(*bufP);
             new_stack->bts_offset = offnum;
             new_stack->bts_btentry = blkno;
             new_stack->bts_parent = stack_in;
@@ -1852,7 +1850,7 @@ bool _bt_check_natts(const Relation index, bool heapkeyspace, Page page, OffsetN
     return num_tuple_attrs > 0 && num_tuple_attrs <= nkeyatts;
 }
 
-static int btree_setup_posting_items(BTScanOpaque so, int item_idx, OffsetNumber offnum, ItemPointer heap_tid,
+static inline int btree_setup_posting_items(BTScanOpaque so, int item_idx, OffsetNumber offnum, ItemPointer heap_tid,
                                      IndexTuple tuple)
 {
     BTScanPosItem *curr_item = &so->currPos.items[item_idx];
@@ -1878,7 +1876,7 @@ static int btree_setup_posting_items(BTScanOpaque so, int item_idx, OffsetNumber
     return 0;
 }
 
-static void btree_save_posting_item(BTScanOpaque so, int item_idx, OffsetNumber offnum, ItemPointer heap_tid,
+static inline void btree_save_posting_item(BTScanOpaque so, int item_idx, OffsetNumber offnum, ItemPointer heap_tid,
                                     int tuple_offset)
 {
     BTScanPosItem *curr_item = &so->currPos.items[item_idx];

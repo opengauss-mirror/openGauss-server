@@ -695,7 +695,7 @@
 #define PG_VERSION "9.2.4"
 
 /* openGauss version as a string */
-#define OPENGAUSS_VERSION "5.1.0"
+#define OPENGAUSS_VERSION "5.1.1"
 
 /* Gaussdb version as a string*/
 #define DEF_GS_VERSION "(GaussDB A 8.0.0 build 21f07aff) compiled at 2020-03-17 10:59:07 commit 7431 last mr 12039 debug"
@@ -830,6 +830,9 @@
 
 /* Define to build with (Open)SSL support. (--with-openssl) */
 #define USE_SSL 1
+
+/* Define to build with TASSL support. (--with-tassl) */
+/* #undef USE_TASSL 1 */
 
 /* Define to select SysV-style semaphores. */
 #define USE_SYSV_SEMAPHORES 1

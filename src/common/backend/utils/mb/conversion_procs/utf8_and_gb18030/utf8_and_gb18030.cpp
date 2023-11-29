@@ -23,8 +23,14 @@ PG_MODULE_MAGIC;
 PG_FUNCTION_INFO_V1(gb18030_to_utf8);
 PG_FUNCTION_INFO_V1(utf8_to_gb18030);
 
+PG_FUNCTION_INFO_V1(gb18030_2022_to_utf8);
+PG_FUNCTION_INFO_V1(utf8_to_gb18030_2022);
+
 extern "C" Datum gb18030_to_utf8(PG_FUNCTION_ARGS);
 extern "C" Datum utf8_to_gb18030(PG_FUNCTION_ARGS);
+
+extern "C" Datum gb18030_2022_to_utf8(PG_FUNCTION_ARGS);
+extern "C" Datum utf8_to_gb18030_2022(PG_FUNCTION_ARGS);
 
 /*
  * Convert 4-byte GB18030 characters to and from a linear code space
@@ -193,5 +199,33 @@ Datum utf8_to_gb18030(PG_FUNCTION_ARGS)
 
     UtfToLocal(src, len, dest, ULmapGB18030, lengthof(ULmapGB18030), NULL, 0, conv_utf8_to_18030, PG_GB18030);
 
+    PG_RETURN_VOID();
+}
+
+// convert the GB18030-2022 code to the UTF8 code
+Datum gb18030_2022_to_utf8(PG_FUNCTION_ARGS)
+{
+    unsigned char* src = (unsigned char*)PG_GETARG_CSTRING(2);
+    unsigned char* dest = (unsigned char*)PG_GETARG_CSTRING(3);
+    int len = PG_GETARG_INT32(4);
+    // check whether the conversion relationship between two character sets exists.
+    CHECK_ENCODING_CONVERSION_ARGS(PG_GB18030_2022, PG_UTF8);
+ 
+    LocalToUtf(src, len, dest, LUmapGB18030, lengthof(LUmapGB18030), NULL, 0, conv_18030_to_utf8, PG_GB18030_2022);
+ 
+    PG_RETURN_VOID();
+}
+ 
+// convert the UTF8 code to the GB18030-2022 code.
+Datum utf8_to_gb18030_2022(PG_FUNCTION_ARGS)
+{
+    unsigned char* src = (unsigned char*)PG_GETARG_CSTRING(2);
+    unsigned char* dest = (unsigned char*)PG_GETARG_CSTRING(3);
+    int len = PG_GETARG_INT32(4);
+    // check whether the conversion relationship between two character sets exists.
+    CHECK_ENCODING_CONVERSION_ARGS(PG_UTF8, PG_GB18030_2022);
+ 
+    UtfToLocal(src, len, dest, ULmapGB18030, lengthof(ULmapGB18030), NULL, 0, conv_utf8_to_18030, PG_GB18030_2022);
+ 
     PG_RETURN_VOID();
 }

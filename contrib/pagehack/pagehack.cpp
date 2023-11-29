@@ -60,6 +60,8 @@
 #include "access/ustore/knl_utuple.h"
 #include "access/ustore/knl_uundorecord.h"
 #include "access/double_write_basic.h"
+#include "access/extreme_rto/standby_read/block_info_meta.h"
+#include "access/extreme_rto/standby_read/lsn_info_meta.h"
 #include "catalog/pg_control.h"
 #include "catalog/pg_attribute.h"
 #include "catalog/pg_class.h"
@@ -102,7 +104,11 @@
 /* Number of pg_class types */
 #define CLASS_TYPE_NUM 512
 #define TEN 10
-
+#define BLOCK_META_INFO_NUM_PER_PAGE 127
+#define BASE_PAGE_MAP_SIZE 16
+#define BASE_PAGE_MAP_BIT_SIZE (BASE_PAGE_MAP_SIZE * BITS_PER_BYTE)
+#define DIVIDED_BY_TWO 2
+#define WAL_ID_OFFSET 32
 
 typedef unsigned char* binary;
 static const char* indents[] = {  // 10 tab is enough to used.
@@ -830,7 +836,9 @@ typedef enum HackingType {
     HACKING_UNDO_RECORD,
     HACKING_UNDO_FIX,
     HACKING_SEGMENT,
-    NUM_HACKINGTYPE
+    NUM_HACKINGTYPE,
+    HACKING_LSN_INFO_META,
+    HACKING_BLOCK_INFO_META,
 } HackingType;
 
 static HackingType hackingtype = HACKING_HEAP;
@@ -856,7 +864,9 @@ static const char* HACKINGTYPE[] = {"heap",
     "undo_slot",
     "undo_record",
     "undo_fix",
-    "segment"
+    "segment",
+    "lsn_info_meta",
+    "block_info_meta"
 };
 
 const char* PageTypeNames[] = {"DATA", "FSM", "VM"};
@@ -912,6 +922,7 @@ typedef struct FSMAddress {
 const int FSM_BOTTOM_LEVEL = 0;
 
 using namespace undo;
+using namespace extreme_rto_standby_read;
 
 static void formatBytes(unsigned char* start, int len)
 {
@@ -3230,6 +3241,7 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
     /* parse */
     number = CalculateMaxBlockNumber(blknum, start, number);
     if (number == InvalidBlockNumber) {
+        fclose(fd);
         return false;
     } else if ((start + number) > blknum) {
         fprintf(stderr,
@@ -4492,6 +4504,8 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
         if (start_page >= dw_batch_page_num) {
             fprintf(stdout, "start_page %u exceeds the double write file upper limit offset %u\n",
                 start_page, dw_batch_page_num - 1);
+            free(dw_buf);
+            fclose(fd);
             return false;
         }
         file_head.start = (uint16)start_page;
@@ -5030,6 +5044,249 @@ static int ParseUndoSlot(const char *filename)
         }
     }
     close(fd);
+    return true;
+}
+
+static void parse_map_position(uint8 map)
+{
+    uint8 pagemap[BITS_PER_BYTE] = { 0 };
+    int pos = 0;
+    pos = 0;
+    while (map > 0) {
+        pagemap[pos] = map % DIVIDED_BY_TWO;
+        ++pos;
+        map /= DIVIDED_BY_TWO;
+    }
+    for (int loop = BITS_PER_BYTE - 1; loop >= 0; loop--) {
+        fprintf(stdout, "%u", pagemap[loop]);
+    }
+    fprintf(stdout, " ");
+}
+
+static void parse_lsn_info_head(LsnInfoPageHeader *header)
+{
+    PageXLogRecPtr lsn = header->lsn;
+    fprintf(stdout, "%slsn: xlogid %u, xrecoff %u, lsn %lu\n",
+            indents[indentLevel], lsn.xlogid, lsn.xrecoff, ((uint64)lsn.xlogid << WAL_ID_OFFSET) | lsn.xrecoff);
+    fprintf(stdout, "%schecksum: %u, flags: %u, version: %u",
+            indents[indentLevel], header->checksum, header->flags, header->version);
+    fprintf(stdout, "%sbase page map: ", indents[indentLevel]);
+    for (uint32 loop = 0; loop < BASE_PAGE_MAP_SIZE; loop++) {
+        parse_map_position(header->base_page_map[loop]);
+    }
+    fprintf(stdout, "\n");
+}
+
+static void parse_lsn_info_node(LsnInfoNode *lsninfo)
+{
+    fprintf(stdout, "%slsn info list: prev %lu, next: %lu\n",
+            indents[indentLevel], lsninfo->lsn_list.prev, lsninfo->lsn_list.next);
+    fprintf(stdout, "%sflags: %u, type: %u, used: %u\n",
+            indents[indentLevel], lsninfo->flags, lsninfo->type, lsninfo->used);
+    fprintf(stdout, "%slsn:", indents[indentLevel]);
+    for (uint loop = 0; loop < LSN_NUM_PER_NODE; loop++) {
+        fprintf(stdout, " %lu", lsninfo->lsn[loop]);
+    }
+    fprintf(stdout, "\n");
+}
+
+static void parse_base_page_info_node(BasePageInfoNode *pageinfo)
+{
+    RelFileNode rnode = pageinfo->relfilenode;
+    fprintf(stdout, "%slsn info:\n", indents[indentLevel]);
+
+    ++indentLevel;
+    parse_lsn_info_node(&(pageinfo->lsn_info_node));
+    --indentLevel;
+
+    fprintf(stdout, "%sbase page list: prev %lu, next: %lu\n",
+            indents[indentLevel], pageinfo->base_page_list.prev, pageinfo->base_page_list.next);
+    fprintf(stdout, "%scurrent page lsn: %lu\n",
+            indents[indentLevel], pageinfo->cur_page_lsn);
+    fprintf(stdout, "%srefile node:\n", indents[indentLevel]);
+    ++indentLevel;
+    fprintf(stdout, "%sspcnode: %u, dbnode: %u, relnode: %u, bucketnode: %d, opt: %u\n",
+            indents[indentLevel], rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt);
+    --indentLevel;
+    fprintf(stdout, "%sfork num: %d, block num: %u\n",
+            indents[indentLevel], pageinfo->fork_num, pageinfo->block_num);
+    fprintf(stdout, "%snext base page lsn: %lu, base page position: %lu\n",
+            indents[indentLevel], pageinfo->next_base_page_lsn, pageinfo->base_page_position);
+}
+
+static void parse_lsn_info_block(FILE* fd, uint8 isbasepage[], uint32 &handledblock, uint32 loop)
+{
+    char bufferlsn[sizeof(LsnInfoNode)];
+    char bufferpage[sizeof(BasePageInfoNode)];
+    LsnInfoNode *lsnInfo = NULL;
+    BasePageInfoNode *basepageinfo = NULL;
+
+    if (isbasepage[handledblock]) {
+        fprintf(stdout, "it's a basepage.\n");
+        (void)fread(bufferpage, 1, sizeof(BasePageInfoNode), fd);
+        basepageinfo = (BasePageInfoNode *)bufferpage;
+        if (basepageinfo->lsn_info_node.type != LSN_INFO_TYPE_BASE_PAGE) {
+            fprintf(stderr, "Data at page %u, block %u must be base page, but its type is: %u.\n",
+                    loop, handledblock, basepageinfo->lsn_info_node.type); // report error but continue.
+        }
+        parse_base_page_info_node(basepageinfo);
+        handledblock += 2; // index need add by 2 for basepage takes 2 blocks.
+    } else {
+        (void)fread(bufferlsn, 1, sizeof(LsnInfoNode), fd);
+        lsnInfo = (LsnInfoNode *)bufferlsn;
+        if (!is_lsn_info_node_valid(lsnInfo->flags)) {
+            fprintf(stdout, "Data at page %u, block %u is not valid.\n", loop, handledblock);
+        } else {
+            fprintf(stdout, "it's a lsn page.\n");
+            if (lsnInfo->type != LSN_INFO_TYPE_LSNS) {
+                fprintf(stderr, "Data at page %u, block %u must be lsn page, but its type is: %u.\n",
+                        loop, handledblock, lsnInfo->type); // report error but continue.
+            }
+            parse_lsn_info_node(lsnInfo);
+        }
+        handledblock++;
+    }
+}
+
+static bool parse_lsn_info_meta(const char *filename)
+{
+    char bufferhead[sizeof(LsnInfoPageHeader)];
+    LsnInfoPageHeader *pageheader = NULL;
+    FILE* fd = NULL;
+    uint32 loop, loopmap, loopbit, handledblock;
+    uint8 pagemappos;
+    uint8 isbasepage[BASE_PAGE_MAP_BIT_SIZE] = { 0 };
+    if (NULL == (fd = fopen(filename, "rb"))) {
+        fprintf(stderr, "%s: %s\n", filename, strerror(errno));
+        return false;
+    }
+
+    fseek(fd, 0, SEEK_END);
+    long size = ftell(fd);
+    rewind(fd);
+
+    if (size % BLCKSZ != 0) {
+        fprintf(stderr, "Reading lsn/page info meta file error: file size is not divisible by page size(8k).\n");
+        fclose(fd);
+        return false;
+    }
+
+    long pagenum = size / BLCKSZ;
+    fprintf(stdout, "file length is %ld, pagenum is %ld\n", size, pagenum);
+
+    for (loop = 1; loop <= pagenum; loop++) {
+        fprintf(stdout, "Page %u information:\n", loop);
+        ++indentLevel;
+        if (fread(bufferhead, 1, sizeof(LsnInfoPageHeader), fd) != sizeof(LsnInfoPageHeader)) {
+            fprintf(stderr, "%sReading header error", indents[indentLevel]);
+            fclose(fd);
+            return false;
+        }
+
+        pageheader = (LsnInfoPageHeader *)bufferhead;
+        if (!is_lsn_info_page_valid(pageheader)) {
+            fseek(fd, (BASE_PAGE_MAP_BIT_SIZE - 1) * BLCKSZ, SEEK_SET); // push 127 * 64 bytes
+            fprintf(stdout, "%sPage %u is not valid.\n", indents[indentLevel], loop);
+            --indentLevel;
+            continue;
+        }
+        parse_lsn_info_head(pageheader);
+
+        pagemappos = 0;
+        for (loopmap = 0; loopmap < BASE_PAGE_MAP_SIZE; loopmap++) {
+            for (loopbit = 0; loopbit < BITS_PER_BYTE; loopbit++) {
+                isbasepage[pagemappos] = (((pageheader->base_page_map[loopmap]) & (0x1 << loopbit)) >> loopbit);
+                pagemappos++;
+            }
+        }
+
+        handledblock = 1; // 1st block is handled as header
+        while (handledblock < BASE_PAGE_MAP_BIT_SIZE) {
+            fprintf(stdout, "%sBlock %u information: ", indents[indentLevel], handledblock);
+            ++indentLevel;
+            parse_lsn_info_block(fd, isbasepage, handledblock, loop);
+            --indentLevel;
+        }
+        memset_s(isbasepage, sizeof(isbasepage), 0, sizeof(isbasepage));
+        --indentLevel;
+    }
+    fclose(fd);
+    return true;
+}
+
+static void parse_block_info_head(BlockInfoPageHeader *header)
+{
+    PageXLogRecPtr lsn = header->lsn;
+    fprintf(stdout, "%slsn: xlogid %u, xrecoff %u, lsn %lu\n",
+            indents[indentLevel], lsn.xlogid, lsn.xrecoff, ((uint64)lsn.xlogid << WAL_ID_OFFSET) | lsn.xrecoff);
+    fprintf(stdout, "%schecksum: %u, flags: %u\n",
+            indents[indentLevel], header->checksum, header->flags);
+    fprintf(stdout, "%sversion: %u, total_block_num: %lu\n",
+            indents[indentLevel], header->version, header->total_block_num);
+}
+
+static void parse_block_info_content(BlockMetaInfo *blockInfo)
+{
+    fprintf(stdout, "%stimeline: %u, record_num: %u\n",
+            indents[indentLevel], blockInfo->timeline, blockInfo->record_num);
+    fprintf(stdout, "%smin_lsn: %lu, max_lsn: %lu, flags: %u\n",
+            indents[indentLevel], blockInfo->min_lsn, blockInfo->max_lsn, blockInfo->flags);
+    fprintf(stdout, "%slsn_info_list: prev %lu, next: %lu. base_page_info_list: prev %lu, next: %lu\n",
+            indents[indentLevel], blockInfo->lsn_info_list.prev, blockInfo->lsn_info_list.next,
+            blockInfo->base_page_info_list.prev, blockInfo->base_page_info_list.next);
+}
+
+static bool parse_block_info_meta(const char *filename)
+{
+    char bufferhead[sizeof(BlockInfoPageHeader)];
+    char bufferblock[sizeof(BlockMetaInfo)];
+    uint32 loop, loopinfo;
+    FILE* fd = NULL;
+
+    if (NULL == (fd = fopen(filename, "rb"))) {
+        fprintf(stderr, "%s: %s\n", filename, strerror(errno));
+        return false;
+    }
+
+    fseek(fd, 0, SEEK_END);
+    long size = ftell(fd);
+    rewind(fd);
+
+    if (size % BLCKSZ != 0) {
+        fprintf(stderr, "Reading block info meta file error: file size is not divisible by page size(8k).\n");
+        fclose(fd);
+        return false;
+    }
+    long pagenum = size / BLCKSZ;
+    fprintf(stdout, "file length is %ld, pagenum is %ld\n", size, pagenum);
+
+    for (loop = 0; loop < pagenum; loop++) {
+        fprintf(stdout, "Page %u information:\n", loop);
+        ++indentLevel;
+
+        if (fread(bufferhead, 1, sizeof(BlockInfoPageHeader), fd) != sizeof(BlockInfoPageHeader)) {
+            fprintf(stderr, "%sReading header error", indents[indentLevel]);
+            fclose(fd);
+            return false;
+        }
+        parse_block_info_head((BlockInfoPageHeader *)bufferhead);
+
+        for (loopinfo = 0; loopinfo < BLOCK_META_INFO_NUM_PER_PAGE; loopinfo++) {
+            fprintf(stdout, "%sBlock %u information:\n", indents[indentLevel], loopinfo);
+            ++indentLevel;
+            if (fread(bufferblock, 1, sizeof(BlockMetaInfo), fd) != sizeof(BlockMetaInfo)) {
+                fprintf(stderr, "%sReading block meta file error at %u page, %u block.\n",
+                        indents[indentLevel], loop, loopinfo);
+                fclose(fd);
+                return false;
+            }
+            parse_block_info_content((BlockMetaInfo *)bufferblock);
+            --indentLevel;
+        }
+        --indentLevel;
+    }
+
+    fclose(fd);
     return true;
 }
 
@@ -5586,6 +5843,18 @@ static long long int strtollSafe(const char* nptr, long long int default_value)
     return res;
 }
 
+static void checkDssInput(const char* file, const char** socketpath)
+{
+    if (!enable_dss && file != NULL && file[0] == '+') {
+        enable_dss = true;
+    }
+
+    /* set socketpath if not existed when enable dss */
+    if (enable_dss && *socketpath == NULL) {
+        *socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char** argv)
 {
     int c;
@@ -5738,6 +6007,8 @@ int main(int argc, char** argv)
                 break;
         }
     }
+
+    checkDssInput(filename, &socketpath);
 
     if (NULL == filename) {
         fprintf(stderr, "must specify a file to parse.\n");
@@ -5952,6 +6223,18 @@ int main(int argc, char** argv)
             }
             break;
         case HACKING_UNDO_FIX:
+            break;
+        case HACKING_LSN_INFO_META:
+            if (!parse_lsn_info_meta(filename)) {
+                fprintf(stderr, "Error during parsing lsn info meta file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_BLOCK_INFO_META:
+            if (!parse_block_info_meta(filename)) {
+                fprintf(stderr, "Error during parsing block info meta file %s\n", filename);
+                exit(1);
+            }
             break;
         default:
             /* should be impossible to be here */

@@ -476,6 +476,16 @@ function decompress_pkg() {
   fi
 }
 
+function cp_dolphin_upgrade_script() {
+  if ls "$GAUSSHOME"/share/postgresql/extension/ | grep -qE "dolphin--(.*)--(.*)sql" ; then
+    if cp -f "$GAUSSHOME"/share/postgresql/extension/dolphin--*--*sql "$GAUSS_TMP_PATH"/install_bin_"$new_version"/share/postgresql/extension/ ; then
+      log "cp dolphin upgrade script successfully"
+    else
+      die "cp dolphin upgrade script failed" ${err_upgrade_pre}
+    fi
+  fi
+}
+
 function cp_pkg() {
   if [[ X"$new_version" == X ]]; then
     new_version=$(grep new_version "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
@@ -1001,6 +1011,7 @@ function upgrade_pre_step1() {
   check_pkg
   bak_gauss
   decompress_pkg
+  cp_dolphin_upgrade_script
   record_step 1
 }
 

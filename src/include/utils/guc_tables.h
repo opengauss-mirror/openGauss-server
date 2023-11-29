@@ -107,8 +107,9 @@ enum config_group {
     DATA_NODES,
     GTM,
     COORDINATORS,
-    XC_HOUSEKEEPING_OPTIONS
+    XC_HOUSEKEEPING_OPTIONS,
 #endif
+    UWAL
 };
 
 /*

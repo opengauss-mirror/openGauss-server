@@ -1,594 +1,491 @@
-create schema inlist2join_type;
-set current_schema=inlist2join_type;
-set qrw_inlist2join_optmode = 1;
-create table type
+create schema inlist2join_c;
+set current_schema=inlist2join_c;
+set qrw_inlist2join_optmode=1;
+create table t1(c1 int, c2 int, c3 int) with (orientation=column);
+insert into t1 select v,v,v from generate_series(1,12) as v;
+create table t2(c1 int, c2 int, c3 int) with (orientation=column);
+insert into t2 select v,v,v from generate_series(1,10) as v;
+explain (costs off) select c1,c2 from t1 where t1.c2 in (3,4,7);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Join
+         Hash Cond: (inlist2join_c.t1.c2 = "*VALUES*".column1)
+         ->  CStore Scan on t1
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: "*VALUES*".column1
+               ->  Vector Adapter
+                     ->  Values Scan on "*VALUES*"
+(8 rows)
+
+select c1,c2 from t1 where t1.c2 in (3,4,7) order by 1;
+ c1 | c2 
+----+----
+  3 |  3
+  4 |  4
+  7 |  7
+(3 rows)
+
+explain (costs off) select c1,c3 from t1 where t1.c2 in (3,4,7);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Join
+         Hash Cond: (inlist2join_c.t1.c2 = "*VALUES*".column1)
+         ->  CStore Scan on t1
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: "*VALUES*".column1
+               ->  Vector Adapter
+                     ->  Values Scan on "*VALUES*"
+(8 rows)
+
+select c1,c3 from t1 where t1.c3 in (3,4,7) order by 1;
+ c1 | c3 
+----+----
+  3 |  3
+  4 |  4
+  7 |  7
+(3 rows)
+
+explain (costs off) select c2,c3 from t1 where t1.c2 in (3,4,7);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Join
+         Hash Cond: (inlist2join_c.t1.c2 = "*VALUES*".column1)
+         ->  CStore Scan on t1
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: "*VALUES*".column1
+               ->  Vector Adapter
+                     ->  Values Scan on "*VALUES*"
+(8 rows)
+
+select c2,c3 from t1 where t1.c3 in (3,4,7) order by 1;
+ c2 | c3 
+----+----
+  3 |  3
+  4 |  4
+  7 |  7
+(3 rows)
+
+explain (costs off) select t1.c1 as c1, t2.c2 as c2
+from t1,t2
+where t1.c1 = t2.c1 and t1.c1 in (3,4,5,6)
+order by 1,2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: inlist2join_c.t1.c1, inlist2join_c.t2.c2
+         ->  Vector Sonic Hash Join
+               Hash Cond: (inlist2join_c.t1.c1 = inlist2join_c.t2.c1)
+               ->  Vector Sonic Hash Join
+                     Hash Cond: (inlist2join_c.t1.c1 = "*VALUES*".column1)
+                     ->  CStore Scan on t1
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+               ->  Vector Sonic Hash Join
+                     Hash Cond: (inlist2join_c.t2.c1 = "*VALUES*".column1)
+                     ->  CStore Scan on t2
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(19 rows)
+
+select t1.c1 as c1, t2.c2 as c2
+from t1,t2
+where t1.c1 = t2.c1 and t1.c1 in (3,4,5,6)
+order by 1,2;
+ c1 | c2 
+----+----
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+(4 rows)
+
+explain (costs off) select * from
 (
-   col_int      TINYINT
-  ,col_int2     SMALLINT
-  ,col_int4	INTEGER
-  ,col_int8	BIGINT
-  ,col_char     CHAR(20)
-  ,col_varchar  VARCHAR(30)
-  ,col_num      DECIMAL(10,2)
-  ,col_num2     NUMERIC(10,4)
-  ,col_float    FLOAT4
-  ,col_float2   FLOAT8
-  ,col_float3	FLOAT(3)
-  ,col_float4	BINARY_DOUBLE
-  ,col_float5	DECIMAL(10,4)
-  ,col_float6	INTEGER(6,3)
-  ,col_bool	BOOLEAN
-  ,col_text	TEXT
-)distribute by hash(col_int);
-insert into type values
-(0, 5 ,	193540, 1935401906, 'aabccd', 'aabccd', 1.20 , 10.0000, null    , 1.1   , 10.1234, 321.321, 123.123654, 123.123654, true,'aabccd'), 
-(1, 6 ,	134597, 1345971420, 'abccd',  'abccd' , 11.18, 1.1181 , 55.555, 55.555, 10.1234, 321.321, 123.123654, 123.123654, false, 'abccd' ),  
-(2, 7 ,	656473, 656473370 , 'aabccd', 'aabccd', 1.20 , 10.0000, 1.1   , 1.1   , 10.1234, 321.321, 124.123654, 123.123654, true , 'aabccd'),  
-(3, 8 ,	126971, 1269710788, 'abccd',  'abccd' , 11.18, 1.1181 , 55.555, 55.555, 10.1234, 321.321, 123.123654, 123.123654, false, 'abccd' ),  
-(4, 9 ,	115677, 1156776517, 'aabccd', 'aabccd', 1.20 , 10.0000, 1.1   , 1.1   , 10.1234, 321.321, 123.123654, 124.123654, true , 'aabccd'),  
-(5, 10,	128901, 1289013296, 'abccd',  'abccd' , 11.18, 1.1181 , 55.555, 55.555, 10.1234, 321.321, 123.123654, 123.123654, true , 'abccd' );
-select col_int from type where col_int in (1,2) order by 1;
- col_int 
----------
- 1
- 2
-(2 rows)
-
-explain (costs off) select col_int from type where col_int in (1,2) order by 1;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_int
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_int
-         ->  Hash Semi Join
-               Hash Cond: ((inlist2join_type.type.col_int)::bigint = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Streaming(type: REDISTRIBUTE)
-                           ->  Values Scan on "*VALUES*"
-(10 rows)
-
-select col_int2 from type where col_int2 in (5,10) order by 1;
- col_int2 
-----------
-        5
-       10
-(2 rows)
-
-explain (costs off) select col_int2 from type where col_int2 in (5,10) order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_int2
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_int2
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_int2 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_int4 from type where col_int4 in (134597, 134597) order by 1;
- col_int4 
-----------
-   134597
-(1 row)
-
-explain (costs off) select col_int4 from type where col_int4 in (134597, 134597) order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_int4
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_int4
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_int4 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_int8 from type where col_int8 in (1345971420, 1156776517) order by 1;
-  col_int8  
-------------
- 1156776517
- 1345971420
-(2 rows)
-
-explain (costs off) select col_int8 from type where col_int8 in (1345971420, 1156776517) order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_int8
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_int8
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_int8 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_char from type where col_char in ('aabccd','aabccd', 'aab') order by 1;
-       col_char       
-----------------------
- aabccd              
- aabccd              
- aabccd              
-(3 rows)
-
-explain (costs off) select col_char from type where col_char in ('aabccd','aabccd', 'aab') order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_char
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_char
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_char = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_varchar from type where col_varchar in ('abccd', 'abc','aac') order by 1;
- col_varchar 
--------------
- abccd
- abccd
- abccd
-(3 rows)
-
-explain (costs off) select col_varchar from type where col_varchar in ('abccd', 'abc','aac') order by 1;
-                                        QUERY PLAN                                         
--------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_varchar
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_varchar
-         ->  Hash Semi Join
-               Hash Cond: ((inlist2join_type.type.col_varchar)::text = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_num from type where col_num in (1.20, 11.18, 3,45) order by 1;
- col_num 
----------
-    1.20
-    1.20
-    1.20
-   11.18
-   11.18
-   11.18
-(6 rows)
-
-explain (costs off) select col_num from type where col_num  in (1.20, 11.18, 3,45) order by 1;
-                                  QUERY PLAN                                   
--------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_num
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_num
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_num = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_num2 from type where col_num2 in (1.1181, 10.0000) order by 1;
- col_num2 
-----------
-   1.1181
-   1.1181
-   1.1181
-  10.0000
-  10.0000
-  10.0000
-(6 rows)
-
-explain (costs off) select col_num2 from type where col_num2 in (1.1181, 10.0000) order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_num2
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_num2
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_num2 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_float from type where col_float in (1.1, 55.555) order by 1;
- col_float 
------------
-(0 rows)
-
-explain (costs off) select col_float from type where col_float in (1.1, 55.555) order by 1;
+    select t1.c1 as c1, t2.c2 as c2, count(*) as sum
+    from t1,t2
+    where t1.c1 = t2.c1
+    group by 1,2
+) as dt where dt.c1 in (3,4,5,6)
+order by 1,2,3;
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_float
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_float
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_float = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: inlist2join_c.t1.c1, inlist2join_c.t2.c2, (count(*))
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: inlist2join_c.t1.c1, inlist2join_c.t2.c2
+               ->  Vector Sonic Hash Join
+                     Hash Cond: (inlist2join_c.t1.c1 = inlist2join_c.t2.c1)
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (inlist2join_c.t1.c1 = "*VALUES*".column1)
+                           ->  CStore Scan on t1
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: "*VALUES*".column1
+                                 ->  Vector Adapter
+                                       ->  Values Scan on "*VALUES*"
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (inlist2join_c.t2.c1 = "*VALUES*".column1)
+                           ->  CStore Scan on t2
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: "*VALUES*".column1
+                                 ->  Vector Adapter
+                                       ->  Values Scan on "*VALUES*"
+(21 rows)
 
-select col_float2 from type where col_float2 in (10.1234, 1.1, 11.2222) order by 1;
- col_float2 
-------------
-        1.1
-        1.1
-        1.1
-(3 rows)
-
-explain (costs off) select col_float2 from type where col_float2 in (10.1234, 1.1, 11.2222) order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_float2
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_float2
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_float2 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_float3 from type where col_float3	in (341.321, 10.1234, 10.1114, 11.2222) order by 1;
- col_float3 
-------------
-(0 rows)
-
-explain (costs off) select col_float3 from type where col_float3 in (341.321, 10.1234, 10.1114, 11.2222) order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_float3
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_float3
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_float3 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_float4 from type where col_float4	in (321.321, 500.123) order by 1;
- col_float4 
-------------
-    321.321
-    321.321
-    321.321
-    321.321
-    321.321
-    321.321
-(6 rows)
-
-explain (costs off) select col_float4 from type where col_float4 in (321.321, 500.123) order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_float4
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_float4
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_float4 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_float5 from type where col_float5	in (123.123654, 123.1237) order by 1;
- col_float5 
-------------
-   123.1237
-   123.1237
-   123.1237
-   123.1237
-   123.1237
-(5 rows)
-
-explain (costs off) select col_float5 from type where col_float5 in (123.123654,123.1237) order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_float5
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_float5
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_float5 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_float6 from type where col_float6	in (123.124, 113.123654) order by 1;
- col_float6 
-------------
-    123.124
-    123.124
-    123.124
-    123.124
-    123.124
-(5 rows)
-
-explain (costs off) select col_float6 from type where col_float6 in (123.124, 113.123654) order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_float6
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_float6
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_float6 = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_bool from type where col_bool in (true, false) order by 1;
- col_bool 
-----------
- f
- f
- t
- t
- t
- t
-(6 rows)
-
-explain (costs off) select col_bool from type where col_bool in (true, false) order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_bool
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_bool
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_bool = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_text from type where col_text in ('abccd', 'aab') order by 1;
- col_text 
-----------
- abccd
- abccd
- abccd
-(3 rows)
-
-explain (costs off) select col_text from type where col_text in ('abccd', 'aab') order by 1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type.type.col_text
-   ->  Sort
-         Sort Key: inlist2join_type.type.col_text
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type.type.col_text = "*VALUES*".column1)
-               ->  Seq Scan on type
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-CREATE TABLE time
-(                                                                                                                              
-  col_int		int
-  ,col_date		date
-  ,col_timestamp	timestamp
-  ,col_timestamptz	timestamptz
-  ,col_smalldatetime	smalldatetime
-  ,col_char		char
-  ,col_interval		interval
-  ,col_time		time
-  ,col_timetz		timetz
-  ,col_tinterval	tinterval
-)distribute by hash(col_int);
-COPY time(col_int, col_date, col_timestamp, col_timestamptz, col_smalldatetime, col_char, col_interval, col_time, col_timetz, col_tinterval) FROM stdin;
-select col_char from time where col_char in ('a', 'd') order by 1;
- col_char 
-----------
- a
- d
-(2 rows)
-
-explain (costs off) select col_char from time where col_char in ('a', 'd') order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_char
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_char
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_char = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_date from time where col_date in ('2011-11-01 00:00:00', '2012-11-02 00:00:00') order by 1;
-         col_date         
---------------------------
- Tue Nov 01 00:00:00 2011
- Tue Nov 01 00:00:00 2011
- Fri Nov 02 00:00:00 2012
- Fri Nov 02 00:00:00 2012
+select * from
+(
+    select t1.c1 as c1, t2.c2 as c2, count(*) as sum
+    from t1,t2
+    where t1.c1 = t2.c1
+    group by 1,2
+) as dt where dt.c1 in (3,4,5,6)
+order by 1,2,3;
+ c1 | c2 | sum 
+----+----+-----
+  3 |  3 |   1
+  4 |  4 |   1
+  5 |  5 |   1
+  6 |  6 |   1
 (4 rows)
 
-explain (costs off) select col_date from time where col_date in ('2011-11-01 00:00:00', '2012-11-02 00:00:00') order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_date
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_date
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_date = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
+explain (costs off) select t1.c2, count(*) from t1 where t1.c1 in (1,2,3) group by t1.c2 having t1.c2 in (1,3) order by 1;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: inlist2join_c.t1.c2
+         ->  Vector Sort
+               Sort Key: inlist2join_c.t1.c2
+               ->  Vector Sonic Hash Join
+                     Hash Cond: (inlist2join_c.t1.c1 = "*VALUES*".column1)
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (inlist2join_c.t1.c2 = "*VALUES*".column1)
+                           ->  CStore Scan on t1
+                           ->  Vector Unique
+                                 ->  Vector Sort
+                                       Sort Key: "*VALUES*".column1
+                                       ->  Vector Adapter
+                                             ->  Values Scan on "*VALUES*"
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(19 rows)
 
-select col_timestamp from time where col_timestamp in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
-      col_timestamp       
---------------------------
- Sat Sep 09 19:45:37 2017
-(1 row)
-
-explain (costs off) select col_timestamp from time where col_timestamp in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_timestamp
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_timestamp
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_timestamp = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_timestamptz from time where col_timestamptz in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
-       col_timestamptz        
-------------------------------
- Sat Sep 09 19:45:37 2017 PDT
-(1 row)
-
-explain (costs off) select col_timestamptz from time where col_timestamptz in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_timestamptz
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_timestamptz
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_timestamptz = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_smalldatetime from time where col_smalldatetime in ('2017-09-09 19:45:37', '2003-04-12 04:05:06') order by 1;
-    col_smalldatetime     
---------------------------
- Sat Apr 12 04:05:00 2003
- Sat Apr 12 04:05:00 2003
- Sat Apr 12 04:05:00 2003
- Sat Apr 12 04:05:00 2003
-(4 rows)
-
-explain (costs off) select col_smalldatetime from time where col_smalldatetime in ('2017-09-09 19:45:37', '2003-04-12 04:05:06') order by 1;
-                                        QUERY PLAN                                         
--------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_smalldatetime
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_smalldatetime
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_smalldatetime = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_time from time where col_time  in ('08:00:30', '00:00:30', '12:00:30') order by 1;
- col_time 
-----------
- 08:00:30
-(1 row)
-
-explain (costs off) select col_time from time where col_time  in ('08:00:30', '00:00:30', '12:00:30') order by 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_time
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_time
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_time = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_timetz from time where col_timetz  in ('08:00:30+08', '00:00:30+08', '12:00:30+08') order by 1;
- col_timetz  
--------------
- 08:00:30+08
-(1 row)
-
-explain (costs off) select col_timetz from time where col_timetz  in ('08:00:30+08', '00:00:30+08', '12:00:30+08') order by 1;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_timetz
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_timetz
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_timetz = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
-
-select col_interval from time where col_interval in ('2 day 13:34:56', '1 day 18:34:56') order by 1;
-           col_interval            
------------------------------------
- @ 1 day 18 hours 34 mins 56 secs
- @ 2 days 13 hours 34 mins 56 secs
+select t1.c2, count(*) from t1 where t1.c1 in (1,2,3) group by t1.c2 having t1.c2 in (1,3) order by 1;
+ c2 | count 
+----+-------
+  1 |     1
+  3 |     1
 (2 rows)
 
-explain (costs off) select col_interval from time where col_interval in ('2 day 13:34:56', '1 day 18:34:56') order by 1;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_interval
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_interval
-         ->  Hash Semi Join
-               Hash Cond: (inlist2join_type."time".col_interval = "*VALUES*".column1)
-               ->  Seq Scan on "time"
-               ->  Hash
-                     ->  Values Scan on "*VALUES*"
-(9 rows)
+explain (costs off) select t1.c3, t1.c2 from t1 where t1.c1 > 1 AND t1.c2 in (select t2.c2 from t2 where t2.c1 IN (3,4,5,6,7)) order by 1,2;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.c3, t1.c2
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c2 = inlist2join_c.t2.c2)
+               ->  CStore Scan on t1
+                     Filter: (c1 > 1)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: inlist2join_c.t2.c2
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (inlist2join_c.t2.c1 = "*VALUES*".column1)
+                           ->  CStore Scan on t2
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: "*VALUES*".column1
+                                 ->  Vector Adapter
+                                       ->  Values Scan on "*VALUES*"
+(16 rows)
 
-select col_tinterval from time where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
-                          col_tinterval                          
------------------------------------------------------------------
- ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
- ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+select t1.c3, t1.c2 from t1 where t1.c1 > 1 AND t1.c2 in (select t2.c2 from t2 where t2.c1 IN (3,4,5,6,7)) order by 1,2;
+ c3 | c2 
+----+----
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+(5 rows)
+
+select t1.c2, sum(t1.c3) from t1 where t1.c1 in (1,2,3) group by t1.c2 order by t1.c2 limit 2;
+ c2 | sum 
+----+-----
+  1 |   1
+  2 |   2
 (2 rows)
 
-explain (costs off) select col_tinterval from time where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: inlist2join_type."time".col_tinterval
-   ->  Sort
-         Sort Key: inlist2join_type."time".col_tinterval
-         ->  Nested Loop Semi Join
-               Join Filter: (inlist2join_type."time".col_tinterval = "*VALUES*".column1)
-               ->  Seq Scan on "time"
+select max(t1.c2) from t1 where t1.c1 < 4 and t1.c1 in (2,3,4);
+ max 
+-----
+   3
+(1 row)
+
+select t1.c2, t2.c3, count(*) from t1,t2 where t1.c1 = t2.c2 and t1.c1 in (1,2,3) group by t1.c2,t2.c3 order by t1.c2;
+ c2 | c3 | count 
+----+----+-------
+  1 |  1 |     1
+  2 |  2 |     1
+  3 |  3 |     1
+(3 rows)
+
+select t1.c2, t2.c3, sum(t1.c3) from t1,t2 where t1.c1 = t2.c2 and t1.c1 in (1,2,3) group by t1.c2,t2.c3 order by t1.c2 limit 2;
+ c2 | c3 | sum 
+----+----+-----
+  1 |  1 |   1
+  2 |  2 |   2
+(2 rows)
+
+select * from (select * from t1 where t1.c1 in (1,4,11) union all select * from t2) as dt order by 1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+ 11 | 11 | 11
+(13 rows)
+
+select * from (select * from t1 union all select * from t2 where t2.c1 in (1,4,11)) as dt order by 1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+ 11 | 11 | 11
+ 12 | 12 | 12
+(14 rows)
+
+select * from (select * from t1 where t1.c1 in (1,4,11) union all select * from t2 where t2.c1 in (2,3)) as dt order by 1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+ 11 | 11 | 11
+(5 rows)
+
+--测试expression inlist场景
+-- allow for inlist2join
+explain (costs off) select t1.c1, t2.c1 from t1, t2 where t1.c1 = t2.c1 and (t1.c1 + 2) in (1,2,3,4,5) order by 1;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: inlist2join_c.t1.c1
+         ->  Vector Sonic Hash Join
+               Hash Cond: (inlist2join_c.t1.c1 = inlist2join_c.t2.c1)
+               ->  Vector Sonic Hash Join
+                     Hash Cond: ((inlist2join_c.t1.c1 + 2) = "*VALUES*".column1)
+                     ->  CStore Scan on t1
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+               ->  Vector Sonic Hash Join
+                     Hash Cond: ((inlist2join_c.t2.c1 + 2) = "*VALUES*".column1)
+                     ->  CStore Scan on t2
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(19 rows)
+
+select t1.c1, t2.c1 from t1, t2 where t1.c1 = t2.c1 and (t1.c1 + 2) in (1,2,3,4,5) order by 1;
+ c1 | c1 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+(3 rows)
+
+explain (costs off) select t1.c1, t2.c1 from t1, t2 where t1.c1 = t2.c1 and (t1.c2 * 2) in (1,2,3,4,5) order by 1;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: inlist2join_c.t1.c1
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = inlist2join_c.t1.c1)
+               ->  CStore Scan on t2
+               ->  Vector Sonic Hash Join
+                     Hash Cond: ((inlist2join_c.t1.c2 * 2) = "*VALUES*".column1)
+                     ->  CStore Scan on t1
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(13 rows)
+
+select t1.c1, t2.c1 from t1, t2 where t1.c1 = t2.c1 and (t1.c2 *2) in (1,2,3,4,5) order by 1;
+ c1 | c1 
+----+----
+  1 |  1
+  2 |  2
+(2 rows)
+
+-- disallow for inlistjoin
+explain (costs off) select t1.c1, t2.c1 from t1, t2 where t1.c1 = t2.c1 and (t1.c1 + t1.c2) in (1,2,3,4,5) order by 1;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.c1
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  CStore Scan on t2
+               ->  CStore Scan on t1
+                     Filter: ((c1 + c2) = ANY ('{1,2,3,4,5}'::integer[]))
+(8 rows)
+
+select t1.c1, t2.c1 from t1, t2 where t1.c1 = t2.c1 and (t1.c1 + t2.c2) in (1,2,3,4,5) order by 1;
+ c1 | c1 
+----+----
+  1 |  1
+  2 |  2
+(2 rows)
+
+--
+-- forbid inlist2join query rewrite if there's subplan
+set qrw_inlist2join_optmode=1;
+create table t3(c1 int, c2 int, c3 int);
+insert into t3 select v,v,v from generate_series(1,10) as v;
+-- the sublink can be pull up, so there is no subpaln, do inlist2join
+explain (costs off) select * from t1 where t1.c1 in (select c1 from t2 where t2.c2 > 2) AND t1.c2 in (1,2,3);
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Hash Right Semi Join
+         Hash Cond: (t2.c1 = inlist2join_c.t1.c1)
+         ->  CStore Scan on t2
+               Filter: (c2 > 2)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (inlist2join_c.t1.c2 = "*VALUES*".column1)
+               ->  CStore Scan on t1
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: "*VALUES*".column1
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(12 rows)
+
+explain (costs off) select * from t1 where exists (select c1 from t2 where t2.c2 = t1.c1) and t1.c1 in (1,2,3);
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Join
+         Hash Cond: (inlist2join_c.t1.c1 = inlist2join_c.t2.c2)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (inlist2join_c.t1.c1 = "*VALUES*".column1)
+               ->  CStore Scan on t1
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: "*VALUES*".column1
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: inlist2join_c.t2.c2
+               ->  Vector Sonic Hash Join
+                     Hash Cond: (inlist2join_c.t2.c2 = "*VALUES*".column1)
+                     ->  CStore Scan on t2
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: "*VALUES*".column1
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(19 rows)
+
+explain (costs off) select * from t1 join t2 on t1.c1=t2.c1 and t1.c1 not in (select c2 from t3 where t3.c2>2) and t1.c3 in (1,2,3);
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (t2.c1 = inlist2join_c.t1.c1)
+   ->  Row Adapter
+         ->  CStore Scan on t2
+   ->  Hash
+         ->  Nested Loop Anti Join
+               Join Filter: ((inlist2join_c.t1.c1 = t3.c2) OR (inlist2join_c.t1.c1 IS NULL) OR (t3.c2 IS NULL))
+               ->  Hash Join
+                     Hash Cond: (inlist2join_c.t1.c3 = "*VALUES*".column1)
+                     ->  Row Adapter
+                           ->  CStore Scan on t1
+                     ->  Hash
+                           ->  HashAggregate
+                                 Group By Key: "*VALUES*".column1
+                                 ->  Values Scan on "*VALUES*"
                ->  Materialize
-                     ->  Values Scan on "*VALUES*"
+                     ->  Seq Scan on t3
+                           Filter: (c2 > 2)
+(18 rows)
+
+-- the sublink can not be pull up, so there is subpaln, do not inlist2join
+explain (costs off) select * from t1 where t1.c1 in (select c1 from t2 where t2.c2 = t1.c2) AND t1.c2 in (1,2,3);
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Row Adapter
+   ->  CStore Scan on t1
+         Filter: ((c2 = ANY ('{1,2,3}'::integer[])) AND (SubPlan 1))
+         SubPlan 1
+           ->  Row Adapter
+                 ->  CStore Scan on t2
+                       Filter: (c2 = t1.c2)
+(7 rows)
+
+explain (costs off) select * from t1 where exists (select c1 from t2 where t2.c2 > 2) and t1.c1 in (1,2,3);
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Row Adapter
+   ->  Vector Result
+         One-Time Filter: $0
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  CStore Scan on t2
+                       Filter: (c2 > 2)
+         ->  CStore Scan on t1
+               Filter: (c1 = ANY ('{1,2,3}'::integer[]))
 (9 rows)
 
-drop schema inlist2join_type cascade;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to table type
-drop cascades to table "time"
+explain (costs off) select * from t1 join t2 on t1.c1=t2.c1 and t1.c1 not in (select c2 from t3 where t3.c2=t1.c2) and t1.c3 in (1,2,3);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Join
+         Hash Cond: (t1.c1 = t2.c1)
+         ->  CStore Scan on t1
+               Filter: ((c3 = ANY ('{1,2,3}'::integer[])) AND (NOT (SubPlan 1)))
+               SubPlan 1
+                 ->  Seq Scan on t3
+                       Filter: (c2 = t1.c2)
+         ->  CStore Scan on t2
+(9 rows)
+
+--
+drop table t1;
+drop table t2;
+drop table t3;
+drop schema inlist2join_c cascade;

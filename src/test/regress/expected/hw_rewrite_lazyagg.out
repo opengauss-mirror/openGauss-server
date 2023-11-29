@@ -2309,30 +2309,24 @@ explain (costs off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, co
 ------------------------------------------------------------------------------------
 -- basic with as
 explain (costs off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select t.b, sum(cc) from s, t where s.b=t.b group by t.b order by 1,2;
-                   QUERY PLAN                   
-------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Sort
-   Output: t.b, (sum(s.cc))
-   Sort Key: t.b, (sum(s.cc))
-   CTE s
-     ->  HashAggregate
-           Output: t1.b, sum(t1.c)
-           Group By Key: t1.b
-           ->  Seq Scan on lazyagg.t1
-                 Output: t1.b, t1.c
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
    ->  HashAggregate
-         Output: t.b, sum(s.cc)
+         Output: t.b, sum((t1.c)::bigint)
          Group By Key: t.b
          ->  Hash Join
-               Output: s.cc, t.b
-               Hash Cond: (t.b = s.b)
-               ->  Seq Scan on lazyagg.t
-                     Output: t.a, t.b, t.c, t.d
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
                ->  Hash
-                     Output: s.cc, s.b
-                     ->  CTE Scan on s
-                           Output: s.cc, s.b
-(21 rows)
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
 
 -- multi-usage
 explain (costs off, verbose on) with s1(b, cc) as (select b, sum(c) from t1 group by b) select count(*) from s1 where cc > (select sum(cc)/100 from s1) order by 1;

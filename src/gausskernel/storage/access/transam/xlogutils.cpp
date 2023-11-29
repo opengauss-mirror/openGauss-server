@@ -513,7 +513,7 @@ static void CollectInvalidPagesStates(uint32 *nstates_ptr, InvalidPagesState ***
 /* Complain about any remaining invalid-page entries */
 void XLogCheckInvalidPages(void)
 {
-    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_RECOVERY_DONE) {
+    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE) {
         return;
     }
 
@@ -1380,6 +1380,13 @@ void XlogDropRowReation(RelFileNode rnode)
     rbnode.node = rnode;
     rbnode.backend = InvalidBackendId;
     smgrclosenode(rbnode);
+    if (IS_EXRTO_READ) {
+        RelFileNodeBackend standbyReadRnode;
+        standbyReadRnode.node = rnode;
+        standbyReadRnode.node.spcNode = EXRTO_BLOCK_INFO_SPACE_OID;
+        standbyReadRnode.backend = InvalidBackendId;
+        smgrclosenode(standbyReadRnode);
+    }
 }
 
 void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
@@ -1437,6 +1444,10 @@ void XLogDropSpaceShrink(XLogRecParseState *redoblockstate)
  */
 void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
 {
+    if (AmErosRecyclerProcess()) {
+        return;
+    }
+
     forget_invalid_pages(rnode, forknum, 0, false);
 
     /* clear relfilenode match entry of recovery thread hashtbl */
@@ -1513,6 +1524,10 @@ void XLogDropDatabase(Oid dbid)
     smgrcloseall();
 
     forget_invalid_pages_batch(InvalidOid, dbid);
+
+    if (AmErosRecyclerProcess()) {
+        return;
+    }
 
     /* clear dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
@@ -1650,7 +1665,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
                 (void)close(t_thrd.xlog_cxt.sendFile);
                 t_thrd.xlog_cxt.sendFile = -1;
                 ereport(ERROR, (errcode_for_file_access(),
-                                errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
+                                errmsg("could not seek in log segment %s to offset %u: %s", path, startoff, TRANSLATE_ERRNO)));
             }
             t_thrd.xlog_cxt.sendOff = startoff;
         }
@@ -1954,4 +1969,3 @@ XLogRecParseState *multixact_redo_parse_to_block(XLogReaderState *record, uint32
     }
     return recordstatehead;
 }
-

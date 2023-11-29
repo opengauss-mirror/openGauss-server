@@ -221,6 +221,19 @@ static void InitSecurityConfigureNamesBool()
             check_ssl,
             NULL,
             NULL},
+#ifdef USE_TASSL
+        {{"ssl_use_tlcp",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SECURITY,
+            gettext_noop("Enables tlcp in ssl connection. "),
+            NULL},
+            &g_instance.attr.attr_security.ssl_use_tlcp,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
         {{"require_ssl",
             PGC_SIGHUP,
             NODE_ALL,
@@ -345,6 +358,7 @@ static void InitSecurityConfigureNamesBool()
             NULL},
         /* Database Security: Support Transparent Data Encryption */
         /* add guc option about TDE */
+#ifndef ENABLE_FINANCE_MODE
         {{"enable_tde",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -356,6 +370,19 @@ static void InitSecurityConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+#else
+            {{"enable_tde",
+            PGC_INTERNAL,
+            NODE_ALL,
+            TRANSPARENT_DATA_ENCRYPTION,
+            gettext_noop("Enable Transparent Data Encryption feature."),
+            NULL},
+            &g_instance.attr.attr_security.enable_tde,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
         {{"modify_initial_password",
             PGC_SIGHUP,
             NODE_ALL,
@@ -1114,7 +1141,31 @@ static void InitSecurityConfigureNamesString()
             NULL,
             NULL,
             NULL},
+#ifdef USE_TASSL
+        {{"ssl_enc_cert_file",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SECURITY,
+            gettext_noop("Location of the SSL server encryption certificate file."),
+            NULL},
+            &g_instance.attr.attr_security.ssl_enc_cert_file,
+            "server_enc.crt",
+            NULL,
+            NULL,
+            NULL},
 
+        {{"ssl_enc_key_file",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SECURITY,
+            gettext_noop("Location of the SSL server encryption private key file."),
+            NULL},
+            &g_instance.attr.attr_security.ssl_enc_key_file,
+            "server_enc.key",
+            NULL,
+            NULL,
+            NULL},
+#endif
         {{"ssl_ca_file",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -1332,7 +1383,16 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
         "ECDHE-ECDSA-AES128-GCM-SHA256",
         "ECDHE-ECDSA-AES256-GCM-SHA384",
         "DHE-RSA-AES128-GCM-SHA256",
+       
+#ifndef USE_TASSL
         "DHE-RSA-AES256-GCM-SHA384"
+#else
+        "DHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-SM4-SM3", //6
+        "ECDHE-SM4-GCM-SM3", //7
+        "ECC-SM4-SM3",//8
+        "ECC-SM4-GCM-SM3"//9
+#endif
     };
     int maxCnt = lengthof(ssl_ciphers_list);
 
@@ -1370,7 +1430,6 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
                     break;
                 }
             }
-
             if (!find_ciphers_in_list) {
                 pfree_ext(cipherStr_tmp);
                 pfree_ext(ciphers_list);

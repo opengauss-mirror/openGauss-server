@@ -33,6 +33,9 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/multixact.h"
+#include "access/multi_redo_api.h"
+#include "access/extreme_rto/standby_read/block_info_meta.h"
+#include "access/extreme_rto/standby_read/standby_read_delay_ddl.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -267,6 +270,10 @@ Oid createdb(const CreatedbStmt* stmt)
             if (encoding < 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("%s is not a valid encoding name", encoding_name)));
+            if (t_thrd.proc->workingVersionNum < GB18030_2022_VERSION_NUM && encoding == PG_GB18030_2022) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Not support to create database encoding %s in upgrade!", encoding_name)));
+            }
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -624,6 +631,7 @@ Oid createdb(const CreatedbStmt* stmt)
     fparms.dest_dboid = dboid;
     PG_ENSURE_ERROR_CLEANUP(createdb_failure_callback, PointerGetDatum(&fparms));
     {
+        bool hasCopied = false;
         /*
          * Iterate through all tablespaces of the template database, and copy
          * each one to the new database.
@@ -662,6 +670,8 @@ Oid createdb(const CreatedbStmt* stmt)
              * We don't need to copy subdirectories
              */
             (void)copydir(srcpath, dstpath, false, ERROR);
+            
+            hasCopied = true;
 
             /* Record the filesystem change in XLOG */
             {
@@ -678,6 +688,33 @@ Oid createdb(const CreatedbStmt* stmt)
                 (void)XLogInsert(RM_DBASE_ID, XLOG_DBASE_CREATE | XLR_SPECIAL_REL_UPDATE);
             }
         }
+
+        /* Handling situation that the default tablespace has been deleted */
+        if (!hasCopied && OidIsValid(dst_deftablespace)) {
+            struct stat st;
+            char* srcpath = GetDatabasePath(src_dboid, src_deftablespace);
+
+            if (stat(srcpath, &st) < 0 || !S_ISDIR(st.st_mode) || directory_is_empty(srcpath)) {
+                pfree_ext(srcpath);
+            } else {
+                char* dstpath = GetDatabasePath(dboid, dst_deftablespace);
+                (void)copydir(srcpath, dstpath, false, ERROR);
+                
+                /* Record the filesystem change in XLOG */
+                xl_dbase_create_rec xlrec;
+                xlrec.db_id = dboid;
+                xlrec.tablespace_id = dst_deftablespace;
+                xlrec.src_db_id = src_dboid;
+                xlrec.src_tablespace_id = dst_deftablespace;
+                XLogBeginInsert();
+                XLogRegisterData((char*)&xlrec, sizeof(xl_dbase_create_rec));
+                (void)XLogInsert(RM_DBASE_ID, XLOG_DBASE_CREATE | XLR_SPECIAL_REL_UPDATE);
+
+                pfree_ext(srcpath);
+                pfree_ext(dstpath);
+            }
+        }
+
         tableam_scan_end(scan);
         heap_close(rel, AccessShareLock);
 
@@ -783,7 +820,8 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
 #ifdef WIN32
             encoding == PG_UTF8 ||
 #endif
-            (encoding == PG_SQL_ASCII && superuser())))
+            ((encoding == PG_SQL_ASCII && superuser()) ||
+            (encoding == PG_GB18030_2022 && ctype_encoding == PG_GB18030))))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("encoding \"%s\" does not match locale \"%s\"", pg_encoding_to_char(encoding), ctype),
@@ -794,7 +832,8 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
 #ifdef WIN32
             encoding == PG_UTF8 ||
 #endif
-            (encoding == PG_SQL_ASCII && superuser())))
+            ((encoding == PG_SQL_ASCII && superuser()) ||
+            (encoding == PG_GB18030_2022 && collate_encoding == PG_GB18030))))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("encoding \"%s\" does not match locale \"%s\"", pg_encoding_to_char(encoding), collate),
@@ -2434,7 +2473,10 @@ void do_db_drop(Oid dbId, Oid tbSpcId)
     if (!rmtree(dst_path, true)) {
         ereport(WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dst_path)));
     }
-    
+    if (RecoveryInProgress() && IS_EXRTO_READ) {
+        /* remove file start with {db_id}_ */
+        extreme_rto_standby_read::remove_block_meta_info_files_of_db(dbId);
+    }
     if (InHotStandby) {
         /*
          * Release locks prior to commit. XXX There is a race condition
@@ -2478,7 +2520,11 @@ void xlogRemoveRemainSegsByDropDB(Oid dbId, Oid tablespaceId)
 void xlog_db_drop(XLogRecPtr lsn, Oid dbId, Oid tbSpcId)
 {
     UpdateMinRecoveryPoint(lsn, false);
-    do_db_drop(dbId, tbSpcId);
+    if (IS_EXRTO_READ) {
+        update_delay_ddl_db(dbId, tbSpcId, lsn);
+    } else {
+        do_db_drop(dbId, tbSpcId);
+    }
     xlogRemoveRemainSegsByDropDB(dbId, tbSpcId);
 }
 

@@ -246,6 +246,7 @@ extern void EvalPlanQualFetchRowMarksUHeap(EPQState* epqstate);
 extern TupleTableSlot* EvalPlanQualNext(EPQState* epqstate);
 extern void EvalPlanQualBegin(EPQState* epqstate, EState* parentestate, bool isUHeap = false);
 extern void EvalPlanQualEnd(EPQState* epqstate);
+extern bool ExecSetArgIsByValue(FunctionCallInfoData* fcinfo);
 
 /*
  * functions in execProcnode.c
@@ -506,8 +507,7 @@ extern TupleDesc ExecTypeFromTL(List *targetList, bool hasoid, bool markdropped 
 extern TupleDesc ExecCleanTypeFromTL(List *targetList, bool hasoid, const TableAmRoutine *tam_ops = TableAmHeap);
 extern TupleDesc ExecTypeFromExprList(List *exprList, List *namesList, const TableAmRoutine *tam_ops = TableAmHeap);
 extern void UpdateChangedParamSet(PlanState *node, Bitmapset *newchg);
-extern void InitOutputValues(RightRefState *refState, GenericExprState *targetArr[], Datum *values, bool *isnull,
-                             int targetCount, bool *hasExecs);
+extern void InitOutputValues(RightRefState* refState, Datum* values, bool* isnull, bool* hasExecs);
 extern void SortTargetListAsArray(RightRefState *refState, List *targetList, GenericExprState *targetArr[]);
 
 typedef struct TupOutputState {
@@ -691,6 +691,7 @@ extern void ExecCopyDataFromDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* 
 extern void ExecCopyDataToDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* target_cursor);
 
 extern Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tuple tuple);
+extern void RestoreAutoIncrement(Relation rel, EState* estate, Tuple tuple);
 
 /*
  * prototypes from functions in execReplication.cpp
@@ -841,4 +842,7 @@ private:
     bool m_smpEnabled;
 };
 
+#ifdef USE_SPQ
+extern bool IsJoinExprNull(List *joinExpr, ExprContext *econtext);
+#endif
 #endif /* EXECUTOR_H  */

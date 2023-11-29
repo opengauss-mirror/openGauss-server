@@ -3119,10 +3119,35 @@ partition by range (Day)
 CREATE INDEX performance_select_index_index_000 ON fvt_data_partition_scan.performance_select_index_tbl_000(Day) LOCAL;
 SET ENABLE_SEQSCAN = FALSE;
 \! /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/./tmp_check/install//data2/moyq/install/GAUSS200_OLAP_TRUNK/bin/gs_guc reload -D /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/tmp_check/coordinator1 -Z coordinator -c "debug_print_plan=on" >/dev/null
-EXPLAIN (COSTS OFF, NODES OFF) SELECT * FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
+sh: /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/./tmp_check/install//data2/moyq/install/GAUSS200_OLAP_TRUNK/bin/gs_guc: No such file or directory
+EXPLAIN (COSTS OFF) SELECT * FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Bitmap Heap Scan on performance_select_index_tbl_000
+         Recheck Cond: ((day = 1) OR (day = 2))
+         Selected Partitions:  3..4
+         ->  BitmapOr
+               ->  Partitioned Bitmap Index Scan on performance_select_index_index_000
+                     Index Cond: (day = 1)
+                     Selected Partitions:  3..4
+               ->  Partitioned Bitmap Index Scan on performance_select_index_index_000
+                     Index Cond: (day = 2)
+                     Selected Partitions:  3..4
+(12 rows)
+
+\! /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/./tmp_check/install//data2/moyq/install/GAUSS200_OLAP_TRUNK/bin/gs_guc reload -D /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/tmp_check/coordinator1 -Z coordinator -c "debug_print_plan=off" >/dev/null
+sh: /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/./tmp_check/install//data2/moyq/install/GAUSS200_OLAP_TRUNK/bin/gs_guc: No such file or directory
+SELECT * FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
+ starttime | starttimedstoffset | svrstarttime | stsvrdstoffset | endtime | endtimedstoffset | svrendtime | etsvrdstoffset | inserttime | timezoneoffset | objectno | granulityperiod | resultreliablityflag | day | counter_50331654 | counter_50331655 | counter_50331656 | counter_50331657 | counter_50331658 | counter_50331659 | counter_50331660 | counter_50331661 | counter_50331662 | counter_50331663 | counter_50331664 | counter_50331665 | counter_50331666 | counter_50331667 | counter_50331668 | counter_50331669 | counter_50331670 | counter_50331671 | counter_50331672 | counter_50331673 | counter_50331674 | counter_50331675 | counter_50331676 | counter_50331677 | counter_50331678 | counter_50331679 
+-----------+--------------------+--------------+----------------+---------+------------------+------------+----------------+------------+----------------+----------+-----------------+----------------------+-----+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------
+(0 rows)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
+ Aggregate
    ->  Partition Iterator
          Iterations: 2
          ->  Partitioned Bitmap Heap Scan on performance_select_index_tbl_000
@@ -3131,32 +3156,10 @@ EXPLAIN (COSTS OFF, NODES OFF) SELECT * FROM fvt_data_partition_scan.PERFORMANCE
                ->  BitmapOr
                      ->  Partitioned Bitmap Index Scan on performance_select_index_index_000
                            Index Cond: (day = 1)
+                           Selected Partitions:  3..4
                      ->  Partitioned Bitmap Index Scan on performance_select_index_index_000
                            Index Cond: (day = 2)
-(11 rows)
-
-\! /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/./tmp_check/install//data2/moyq/install/GAUSS200_OLAP_TRUNK/bin/gs_guc reload -D /data2/moyq/mppdb_svn/GAUSS200_OLAP_TRUNK/Code/src/test/regress/tmp_check/coordinator1 -Z coordinator -c "debug_print_plan=off" >/dev/null
-SELECT * FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
- starttime | starttimedstoffset | svrstarttime | stsvrdstoffset | endtime | endtimedstoffset | svrendtime | etsvrdstoffset | inserttime | timezoneoffset | objectno | granulityperiod | resultreliablityflag | day | counter_50331654 | counter_50331655 | counter_50331656 | counter_50331657 | counter_50331658 | counter_50331659 | counter_50331660 | counter_50331661 | counter_50331662 | counter_50331663 | counter_50331664 | counter_50331665 | counter_50331666 | counter_50331667 | counter_50331668 | counter_50331669 | counter_50331670 | counter_50331671 | counter_50331672 | counter_50331673 | counter_50331674 | counter_50331675 | counter_50331676 | counter_50331677 | counter_50331678 | counter_50331679 
------------+--------------------+--------------+----------------+---------+------------------+------------+----------------+------------+----------------+----------+-----------------+----------------------+-----+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------
-(0 rows)
-
-EXPLAIN (COSTS OFF, NODES OFF) SELECT COUNT(*) FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
- Aggregate
-   ->  Streaming (type: GATHER)
-         ->  Aggregate
-               ->  Partition Iterator
-                     Iterations: 2
-                     ->  Partitioned Bitmap Heap Scan on performance_select_index_tbl_000
-                           Recheck Cond: ((day = 1) OR (day = 2))
                            Selected Partitions:  3..4
-                           ->  BitmapOr
-                                 ->  Partitioned Bitmap Index Scan on performance_select_index_index_000
-                                       Index Cond: (day = 1)
-                                 ->  Partitioned Bitmap Index Scan on performance_select_index_index_000
-                                       Index Cond: (day = 2)
 (13 rows)
 
 SELECT COUNT(*) FROM fvt_data_partition_scan.PERFORMANCE_SELECT_INDEX_TBL_000 WHERE DAY =1 OR  DAY =2 ;
@@ -3191,12 +3194,12 @@ SELECT * FROM TEST_TIDSCAN_PARTITION ORDER BY 1;
 START TRANSACTION;
 	CURSOR CUR FOR SELECT SCORE  FROM TEST_TIDSCAN_PARTITION WHERE SCORE  > 0;
 	MOVE CUR;
-	EXPLAIN (COSTS OFF, NODES OFF) UPDATE TEST_TIDSCAN_PARTITION SET SCORE =SCORE+1 WHERE CURRENT OF CUR;
+	EXPLAIN (COSTS OFF) UPDATE TEST_TIDSCAN_PARTITION SET SCORE =SCORE+1 WHERE CURRENT OF CUR;
 ERROR:  WHERE CURRENT OF clause not yet supported
 	UPDATE TEST_TIDSCAN_PARTITION SET SCORE =SCORE+1 WHERE CURRENT OF CUR;
---?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 	CLOSE CUR;
---?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 END;
 SELECT * FROM TEST_TIDSCAN_PARTITION ORDER BY 1;
  score 
@@ -3211,12 +3214,12 @@ SELECT * FROM TEST_TIDSCAN_PARTITION ORDER BY 1;
 START TRANSACTION;
 	CURSOR CUR FOR SELECT SCORE  FROM TEST_TIDSCAN_PARTITION WHERE SCORE  > 0;
 	MOVE CUR;
-	EXPLAIN (COSTS OFF, NODES OFF) DELETE FROM TEST_TIDSCAN_PARTITION WHERE CURRENT OF CUR;
+	EXPLAIN (COSTS OFF) DELETE FROM TEST_TIDSCAN_PARTITION WHERE CURRENT OF CUR;
 ERROR:  WHERE CURRENT OF clause not yet supported
 	DELETE FROM TEST_TIDSCAN_PARTITION WHERE CURRENT OF CUR;
---?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 	CLOSE CUR;
---?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 END;
 SELECT * FROM TEST_TIDSCAN_PARTITION ORDER BY 1;
  score 
@@ -3370,11 +3373,20 @@ PARTITION BY RANGE (C_ID)
 	PARTITION UPDATE_PARTITION_PICT_TABLE_059_7  VALUES LESS THAN (4000)
 )
 ENABLE  ROW MOVEMENT; 
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 CREATE INDEX UPDATE_PARTITION_PICT_TABLE_059_INDEX_001 ON fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059(C_ID) LOCAL;
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist
 CREATE INDEX UPDATE_PARTITION_PICT_TABLE_059_INDEX_002 ON fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059(C_ID) LOCAL;
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist
 CREATE INDEX UPDATE_PARTITION_PICT_TABLE_059_INDEX_003 ON fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059(C_ID , C_D_ID) LOCAL;
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist
 CREATE INDEX UPDATE_PARTITION_PICT_TABLE_059_INDEX_004 ON fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059(C_D_ID) LOCAL;
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist
 INSERT INTO  fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059  SELECT C_ID  , C_D_ID , C_W_ID , C_FIRST , C_MIDDLE , C_LAST , C_STREET_1 , C_STREET_2 , C_CITY FROM TPCC.CUSTOMER WHERE C_ID<2000 AND C_D_ID=6 AND C_W_ID =3;
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist on datanode1
+LINE 1: INSERT INTO  fvt_data_partition_scan.UPDATE_PARTITION_PICT_T...
+                     ^
 UPDATE  fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059 UPDATE_059 SET
 	UPDATE_059.C_ID=UPDATE_059.C_ID+2000,
 	UPDATE_059.C_D_ID=FROM_DD.D_ID+WITH_CC.W_ID,
@@ -3383,18 +3395,18 @@ UPDATE  fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059 UPDATE_059 SET
 	(C_STREET_1 , C_STREET_2 , C_CITY )=(SELECT W_STREET_1 , W_STREET_2 , W_CITY FROM TPCC.WAREHOUSE WHERE W_ID=8)
 FROM fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_FROM_000 FROM_DD , fvt_data_partition_scan.WITH_UPDATE_TABLE_001 WITH_CC
 WHERE UPDATE_059.C_ID BETWEEN (SELECT W_ID*80 FROM TPCC.WAREHOUSE  WHERE W_ID=10 ) AND 1000;
-ERROR:  Distributed key column can't be updated in current version
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist on datanode1
+LINE 1: UPDATE  fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_...
+                ^
 SELECT C_ID , C_D_ID , C_W_ID , C_FIRST , C_MIDDLE , C_LAST , C_STREET_1 , C_STREET_2 , C_CITY FROM  fvt_data_partition_scan.UPDATE_PARTITION_PICT_TABLE_059  ORDER BY C_ID , C_D_ID , C_W_ID , C_FIRST , C_MIDDLE;
- c_id | c_d_id | c_w_id | c_first | c_middle | c_last | c_street_1 | c_street_2 | c_city 
-------+--------+--------+---------+----------+--------+------------+------------+--------
-(0 rows)
-
+ERROR:  relation "fvt_data_partition_scan.update_partition_pict_table_059" does not exist on datanode1
+LINE 1: ..., C_LAST , C_STREET_1 , C_STREET_2 , C_CITY FROM  fvt_data_p...
+                                                             ^
 -- Clean up
 DROP SCHEMA fvt_data_partition_scan CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table fvt_data_partition_scan.update_partition_pict_table_from_000
 drop cascades to table fvt_data_partition_scan.with_update_table_001
-drop cascades to table fvt_data_partition_scan.update_partition_pict_table_059
 DROP SCHEMA TPCC CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table tpcc.customer
@@ -3410,22 +3422,33 @@ PARTITION BY RANGE (a)
     PARTITION p1 VALUES LESS THAN (200),
     PARTITION p2 VALUES LESS THAN (300)
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 COPY hw_partition_scan_tenk3 (a, b) FROM stdin;
+ERROR:  relation "hw_partition_scan_tenk3" does not exist
+10	2015-04-25 18:41:30.483823
+20	2015-04-25 18:41:30.489231
+30	2015-04-30 18:41:30.482444
+40	2015-04-22 18:41:30.487192
+50	2015-04-27 18:41:30.48514
+60	2015-04-22 18:41:30.480243
+\.
+invalid command \.
 ;
+ERROR:  syntax error at or near "10"
+LINE 1: 10 2015-04-25 18:41:30.483823
+        ^
 CREATE INDEX hw_partition_scan_tenk3_idx_1 ON hw_partition_scan_tenk3 USING btree (b) LOCAL(PARTITION p0_b_idx, PARTITION p1_b_idx, PARTITION p2_b_idx) ;
+ERROR:  relation "hw_partition_scan_tenk3" does not exist
 ANALYZE hw_partition_scan_tenk3;
+ERROR:  relation "hw_partition_scan_tenk3" does not exist
 SET ENABLE_FAST_QUERY_SHIPPING = OFF;
+ERROR:  unrecognized configuration parameter "enable_fast_query_shipping"
 SET ENABLE_SEQSCAN = OFF;
 SET ENABLE_INDEXSCAN = OFF;
 SELECT * FROM HW_PARTITION_SCAN_TENK3 WHERE B > TO_DATE('2015-04-22 00:00:00','YYYY-MM-DD HH24:MI:SS') ORDER BY 1;
- a  |                b                
-----+---------------------------------
- 10 | Sat Apr 25 18:41:30.483823 2015
- 20 | Sat Apr 25 18:41:30.489231 2015
- 30 | Thu Apr 30 18:41:30.482444 2015
- 40 | Wed Apr 22 18:41:30.487192 2015
- 50 | Mon Apr 27 18:41:30.48514 2015
- 60 | Wed Apr 22 18:41:30.480243 2015
-(6 rows)
-
+ERROR:  relation "hw_partition_scan_tenk3" does not exist on datanode1
+LINE 1: SELECT * FROM HW_PARTITION_SCAN_TENK3 WHERE B > TO_DATE('201...
+                      ^
 DROP TABLE HW_PARTITION_SCAN_TENK3;
+ERROR:  table "hw_partition_scan_tenk3" does not exist

@@ -1111,7 +1111,7 @@ Datum intervaltypmodin(PG_FUNCTION_ARGS)
 
     if (n == 1) {
         if (tl[0] != INTERVAL_FULL_RANGE)
-            typmod = INTERVAL_TYPMOD(INTERVAL_FULL_PRECISION, (unsigned int32)tl[0]);
+            typmod = INTERVAL_TYPMOD(INTERVAL_FULL_PRECISION, (unsigned int)tl[0]);
         else
             typmod = -1;
     } else if (n == 2) {
@@ -1123,9 +1123,9 @@ Datum intervaltypmodin(PG_FUNCTION_ARGS)
             ereport(WARNING,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("INTERVAL(%d) precision reduced to maximum allowed, %d", tl[1], MAX_INTERVAL_PRECISION)));
-            typmod = INTERVAL_TYPMOD(MAX_INTERVAL_PRECISION, (unsigned int32)tl[0]);
+            typmod = INTERVAL_TYPMOD(MAX_INTERVAL_PRECISION, (unsigned int)tl[0]);
         } else
-            typmod = INTERVAL_TYPMOD((unsigned int32)tl[1], (unsigned int32)tl[0]);
+            typmod = INTERVAL_TYPMOD((unsigned int)tl[1], (unsigned int)tl[0]);
     } else {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid INTERVAL type modifier")));
         typmod = 0; /* keep compiler quiet */
@@ -4916,6 +4916,7 @@ Datum generate_series_timestamptz(PG_FUNCTION_ARGS)
         Interval* step = PG_GETARG_INTERVAL_P(2);
         MemoryContext oldcontext;
         Interval interval_zero;
+        errno_t rc;
 
         /* create a function context for cross-call persistence */
         funcctx = SRF_FIRSTCALL_INIT();
@@ -4937,7 +4938,8 @@ Datum generate_series_timestamptz(PG_FUNCTION_ARGS)
         fctx->step = *step;
 
         /* Determine sign of the interval */
-        MemSet(&interval_zero, 0, sizeof(Interval));
+        rc = memset_s(&interval_zero, sizeof(Interval), 0, sizeof(Interval));
+        securec_check(rc, "\0", "\0");
         fctx->step_sign = interval_cmp_internal(&fctx->step, &interval_zero);
 
         if (fctx->step_sign == 0)

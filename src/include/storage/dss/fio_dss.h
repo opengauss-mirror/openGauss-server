@@ -33,11 +33,9 @@
 #include "storage/dss/dss_adaptor.h"
 
 void dss_device_register(dss_device_op_t *dss_device_op, bool enable_dss);
-void dss_set_errno(int *errcode);
-bool dss_exist_file(const char *file_name);
+void dss_set_errno(int *errcode, const char **errmsg = NULL);
 int dss_access_file(const char *file_name, int mode);
 int dss_create_dir(const char *name, mode_t mode);
-bool dss_exist_dir(const char *name);
 int dss_open_dir(const char *name, DIR **dir_handle);
 int dss_read_dir(DIR *dir_handle, struct dirent **result);
 int dss_close_dir(DIR *dir_handle);
@@ -66,7 +64,6 @@ off_t dss_get_file_size(const char *fname);
 int dss_fallocate_file(int handle, int mode, off_t offset, off_t len);
 int dss_link(const char *src, const char *dst);
 int dss_unlink_target(const char *name);
-bool dss_exist_link(const char *name);
 ssize_t dss_read_link(const char *path, char *buf, size_t buf_size);
 int dss_setvbuf(FILE *stream, char *buf, int mode, size_t size);
 int dss_feof(FILE *stream);

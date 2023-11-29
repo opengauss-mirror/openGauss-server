@@ -42,6 +42,10 @@ typedef enum {
     CTRL_ASSERT_FAIL,
     CTRL_PEER_CHANGED,
     CTRL_STOP_QUERY,
+#ifdef USE_SPQ
+    CTRL_QE_BACKWARD,
+    CTRL_BACKWARD_REGIST,
+#endif
     CTRL_MAX_TYPE
 } CtrlMsgType;
 

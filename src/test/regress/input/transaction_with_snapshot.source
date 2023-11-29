@@ -1,3 +1,5 @@
+\c regression
+start transaction with consistent snapshot;
 create database with_snapshot_test dbcompatibility 'b';
 \c with_snapshot_test;
 set global transaction isolation level repeatable read;

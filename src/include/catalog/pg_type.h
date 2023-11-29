@@ -775,6 +775,7 @@ DESCR("hypper log log hashval array");
 #define HLL_HASHVAL_ARRAYOID    4304
 DATA(insert OID = 4370 ( hll_trans_type  PGNSP PGUID  -1 f p P f t \054 0  0 4371 hll_trans_in hll_trans_out hll_trans_recv hll_trans_send -  - - i e f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("hypper log log internal type");
+#define HLL_TRANS_OID    4370
 DATA(insert OID = 4371 ( _hll_trans_type  PGNSP PGUID  -1 f p P f t \054 0  4370 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("hypper log log internal type");
 
@@ -816,9 +817,14 @@ DATA(insert OID = 5729 ( pg_ddl_command   PGNSP PGUID    SIZEOF_POINTER t p P f 
 #define PGDDLCOMMANDOID 5729
 DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in anyset_out - - - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
 #define ANYSETOID		3272
+
+DATA(insert OID = 4408 ( undefined		PGNSP PGUID  -2 f u W f t \054 0 0 0 undefinedin undefinedout undefinedrecv undefinedsend - - - c p f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("undefined objects as PLSQL compilation time");
+#define UNDEFINEDOID		4408
 /*
  * macros
  */
+#define  TYPTYPE_INVALID	'\0'	/* not an allowed type */
 #define  TYPTYPE_BASE		'b' /* base type (ordinary scalar type) */
 #define  TYPTYPE_COMPOSITE	'c' /* composite (e.g., table's rowtype) */
 #define  TYPTYPE_DOMAIN		'd' /* domain over another type */
@@ -827,6 +833,7 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 #define  TYPTYPE_RANGE		'r' /* range type */
 #define  TYPTYPE_TABLEOF    'o' /* table of type */
 #define  TYPTYPE_SET		's' /* set type */
+#define  TYPTYPE_UNDEFINE   'u' /* undefine type */
 
 #define  TYPCATEGORY_INVALID	'\0'	/* not an allowed category */
 #define  TYPCATEGORY_ARRAY		'A'
@@ -849,6 +856,11 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 #define  TYPCATEGORY_TABLEOF_INTEGER  'F' /* table of type, index by integer */
 #define  TYPCATEGORY_SET		'H' 	/* for set type */
 
+#define  TYPALIGN_CHAR			'c' /* char alignment (i.e. unaligned) */
+#define  TYPALIGN_SHORT			's' /* short alignment (typically 2 bytes) */
+#define  TYPALIGN_INT			'i' /* int alignment (typically 4 bytes) */
+#define  TYPALIGN_DOUBLE		'd' /* double alignment (often 8 bytes) */
+
 /* Is a type OID a polymorphic pseudotype?	(Beware of multiple evaluation) */
 #define IsPolymorphicType(typid)  \
 	((typid) == ANYELEMENTOID || \
@@ -864,6 +876,7 @@ DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in 
 	(((typid) == TEXTOID) || \
 	 ((typid) == VARCHAROID) || \
 	 ((typid) == BPCHAROID) || \
-	 ((typid) == NVARCHAR2OID))
+	 ((typid) == NVARCHAR2OID) || \
+	 (type_is_set(typid)))
 
 #endif   /* PG_TYPE_H */

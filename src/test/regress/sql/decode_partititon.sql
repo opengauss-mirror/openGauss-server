@@ -24,8 +24,8 @@ CREATE TABLE tm_t_jhseatmain (
     seattype character varying(2),
     isdefault character varying(2)
 )
-WITH (orientation=row, compression=no)
-DISTRIBUTE BY HASH (seatid);
+WITH (orientation=row, compression=no);
+
 alter table tm_t_jhseatmain REPLICA IDENTITY FULL;
 CREATE INDEX tm_t_jhseatmain_seatid_idx ON tm_t_jhseatmain USING btree (seatid) TABLESPACE pg_default;
 --
@@ -82,7 +82,6 @@ CREATE TABLE tm_t_jhseattrack (
     tasktargetid character varying(8000)
 )
 WITH (orientation=row, compression=no)
-DISTRIBUTE BY HASH (calltrackid)
 PARTITION BY RANGE (inserttimeforhis)
 (
     PARTITION p_000 VALUES LESS THAN ('2018-05-01 00:00:00') TABLESPACE pg_default,

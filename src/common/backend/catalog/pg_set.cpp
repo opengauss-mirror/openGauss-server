@@ -36,6 +36,7 @@
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "catalog/gs_collation.h"
 
 static void checkSetLableValue(char *label)
 {
@@ -49,7 +50,6 @@ static void checkSetLableValue(char *label)
 
     /* character length can not over 255 */
     text *text_label = cstring_to_text(label);
-
     if (text_length(PointerGetDatum(text_label)) > SETNAMELEN) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_NAME),
@@ -64,7 +64,7 @@ static void checkSetLableValue(char *label)
  *
  * vals is a list of Value strings.
  */
-void SetValuesCreate(Oid setTypeOid, List* vals)
+void SetValuesCreate(Oid setTypeOid, List* vals, Oid collation)
 {
     Relation pg_set = NULL;
     text *setlabel = NULL;
@@ -89,6 +89,8 @@ void SetValuesCreate(Oid setTypeOid, List* vals)
      * have any, you'll get a less-than-friendly unique-index violation. It is
      * probably not worth trying harder.
      */
+
+    check_duplicate_value_by_collation(vals, collation, TYPTYPE_SET);
 
     pg_set = heap_open(SetRelationId, RowExclusiveLock);
 

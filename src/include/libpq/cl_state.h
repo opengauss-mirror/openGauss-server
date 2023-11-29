@@ -110,6 +110,7 @@ public:
     size_t called_functions_list_size;
     ProcList *proc_list;
     size_t client_cache_id;
+    void *m_key_adpt;
 
     // sql parser context
     clientlogic_parser_context m_parser_context; 
@@ -117,4 +118,6 @@ public:
 private:
     const ICachedRec* get_cl_proc(const char* pname) const;
 };
+
+#define CL_GET_KEY_ADPT(clientlogic) (KeyAdpt *)(void *)((clientlogic).m_key_adpt)
 #endif /* CL_STATE_H */

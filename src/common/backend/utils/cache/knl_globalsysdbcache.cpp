@@ -18,6 +18,7 @@
 #include "utils/memutils.h"
 #include "utils/builtins.h"
 #include "access/xlog.h"
+#include "access/multi_redo_api.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_auth_members.h"
 #include "catalog/pg_database.h"
@@ -682,7 +683,8 @@ void GlobalSysDBCache::InitSysCacheRelIds()
 void GlobalSysDBCache::RefreshHotStandby()
 {
     Assert(EnableGlobalSysCache());
-    hot_standby = (t_thrd.postmaster_cxt.HaShmData->current_mode != STANDBY_MODE || XLogStandbyInfoActive());
+    hot_standby = (t_thrd.postmaster_cxt.HaShmData->current_mode != STANDBY_MODE || (XLogStandbyInfoActive() &&
+                   !IsExtremeRedo()));
     if (hot_standby || !m_is_inited) {
         return;
     }

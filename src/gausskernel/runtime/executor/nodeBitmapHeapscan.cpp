@@ -63,12 +63,12 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/pruning.h"
 
-static TupleTableSlot* ExecBitmapHeapScan(PlanState* state);
-static TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node);
+TupleTableSlot* ExecBitmapHeapScan(PlanState* state);
+TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node);
 static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node);
 bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres,
     bool* has_cur_xact_write = NULL);
-static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate);
+void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate);
 static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node);
 void BitmapHeapPrefetchNext(
     BitmapHeapScanState* node, TableScanDesc scan, const TIDBitmap* tbm, TBMIterator** prefetch_iterator);
@@ -96,7 +96,7 @@ void BitmapHeapFree(BitmapHeapScanState* node)
     }
     node->tbmres = NULL;
 }
-static TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node)
+TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node)
 {
     Assert(node->ss.ss_currentScanDesc != NULL);
     HBktTblScanDesc hpScan = (HBktTblScanDesc)node->ss.ss_currentScanDesc;
@@ -167,7 +167,7 @@ bool HeapamScanBitmapNextTuple(TableScanDesc scan,
     return true;
 }
 
-static bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmres, TupleTableSlot *slot)
+bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmres, TupleTableSlot *slot)
 {
     bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
     if (isUstore) {
@@ -177,7 +177,7 @@ static bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmre
     }
 }
 
-static bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmres, bool* has_cur_xact_write)
+bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmres, bool* has_cur_xact_write)
 {
     bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
     if (isUstore) {
@@ -193,7 +193,7 @@ static bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmre
  * 
  * Return values: 0: success; -1: fail; 1: need to prefetch.
  */
-static int TableScanBitmapNextTargetRel(TableScanDesc scan, BitmapHeapScanState *node)
+int TableScanBitmapNextTargetRel(TableScanDesc scan, BitmapHeapScanState *node)
 {
     Assert(scan != NULL);
     Assert(node != NULL);
@@ -613,7 +613,7 @@ static bool BitmapHeapRecheck(BitmapHeapScanState* node, TupleTableSlot* slot)
  *		ExecBitmapHeapScan(node)
  * ----------------------------------------------------------------
  */
-static TupleTableSlot* ExecBitmapHeapScan(PlanState* state)
+TupleTableSlot* ExecBitmapHeapScan(PlanState* state)
 {
     BitmapHeapScanState* node = castNode(BitmapHeapScanState, state);
     return ExecScan(&node->ss, node->ss.ScanNextMtd, (ExecScanRecheckMtd)BitmapHeapRecheck);
@@ -1002,7 +1002,7 @@ static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node)
  * Output	:
  * Notes		:
  */
-static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate)
+void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate)
 {
     BitmapHeapScan* plan = NULL;
     Relation currentRelation = NULL;

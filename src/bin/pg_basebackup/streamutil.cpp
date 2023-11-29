@@ -34,7 +34,7 @@ char* dbport = NULL;
 char* dbname = NULL;
 int   rwtimeout = 0;
 int dbgetpassword = 0; /* 0=auto, -1=never, 1=always */
-static char* dbpassword = NULL;
+char* dbpassword = NULL;
 PGconn* conn = NULL;
 int standby_message_timeout = 10 * 1000; /* 10 sec = default */
 static const int PASSWDLEN = 100;
@@ -120,7 +120,7 @@ char* inc_dbport(const char* db_port)
 void ClearAndFreePasswd(void)
 {
     if (dbpassword != nullptr) {
-        errno_t errorno = memset_s(dbpassword, PASSWDLEN + 1, '\0', PASSWDLEN + 1);
+        errno_t errorno = memset_s(dbpassword, sizeof(dbpassword), '\0', sizeof(dbpassword));
         securec_check_c(errorno, "\0", "\0");
         free(dbpassword);
         dbpassword = nullptr;

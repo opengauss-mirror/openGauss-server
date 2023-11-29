@@ -34,10 +34,43 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "access/heapam.h"
+#include "utils/relcache.h"
+#include "utils/snapshot.h"
 
 static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, char* partExprKeyStr = NULL);
 static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
     ItemPointer tupleid, HeapTupleHeader oldtuple, Oid oldPartitionOid, int2 bucketid, char* partExprKeyStr = NULL);
+static LockTupleMode ExecUpdateLockMode(EState *estate, ResultRelInfo *relinfo);
+
+#define GET_ALL_UPDATED_COLUMNS(relinfo, estate)                                     \
+    (bms_union(exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->updatedCols, \
+        exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->extraUpdatedCols))
+
+/*
+ * ExecUpdateLockMode -- find the appropriate UPDATE tuple lock mode for a
+ * given ResultRelInfo
+ */
+static LockTupleMode
+ExecUpdateLockMode(EState *estate, ResultRelInfo *relinfo)
+{
+    Bitmapset  *keyCols;
+    Bitmapset  *updatedCols;
+
+    /*
+     * Compute lock mode to use.  If columns that are part of the key have not
+     * been modified, then we can use a weaker lock, allowing for better
+     * concurrency.
+     */
+    updatedCols = GET_ALL_UPDATED_COLUMNS(relinfo, estate);
+    keyCols = RelationGetIndexAttrBitmap(relinfo->ri_RelationDesc,
+                                         INDEX_ATTR_BITMAP_KEY);
+
+    if (bms_overlap(keyCols, updatedCols))
+        return LockTupleExclusive;
+
+    return LockTupleNoKeyExclusive;
+}
+
 /*
  * Perform MERGE.
  */
@@ -391,9 +424,12 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
     if (mergeMatchedActionStates != NIL) {
         MergeActionState* action = (MergeActionState*)linitial(mergeMatchedActionStates);
 
+lmerge_matched:
         slot = ExecMergeProjQual(mtstate, mergeMatchedActionStates, econtext, slot, slot, estate);
 
         if (slot != NULL) {
+            TM_Result result = TM_Ok;
+            TM_FailureData tmfd;
             (void)ExecUpdate(tupleid,
                              oldPartitionOid,
                              bucketid,
@@ -404,7 +440,146 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
                              mtstate,
                              mtstate->canSetTag,
                              partKeyUpdated,
-                             partExprKeyStr);
+                             &result,
+                             partExprKeyStr,
+                             &tmfd);
+
+            /*
+             * The matched tuple has been updated or deleted by trigger or
+             * other session, we have to check the updated version of the
+             * tuple to see if we want to process it under RC rules.
+             */
+            switch (result) {
+                case TM_Ok:
+                    /* all good; perform final actions */
+                    break;
+                case TM_SelfUpdated:
+                case TM_SelfModified:
+                    /* The SQL standard disallows this for MERGE, but... */
+                    if (TransactionIdIsCurrentTransactionId(tmfd.xmax)) {
+                        if (!MERGE_UPDATE_MULTI)
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                                    errmsg("MERGE command cannot affect row a second time"),
+                                    errhint("Ensure that not more than one source row matches any one target row.")));
+                        /* already updated or deleted. */
+                        break;
+                    }
+                    /* This shouldn't happen */
+                    elog(ERROR, "attempted to update or delete invisible tuple");
+                    break;
+                case TM_Deleted:
+                    if (IsolationUsesXactSnapshot())
+                        ereport(ERROR,
+                                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                errmsg("could not serialize access due to concurrent delete")));
+
+                    if (resultRelInfo->ri_RelationDesc->rd_rel->relrowmovement) {
+                        Assert(RELATION_IS_PARTITIONED(resultRelInfo->ri_RelationDesc));
+                        /*
+                         * the may be a row movement update action which delete tuple from original
+                         * partition and insert tuple to new partition or we can add lock on the tuple to
+                         * be delete or updated to avoid throw exception
+                         */
+                        ereport(ERROR,
+                                (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                                errmsg("partition table update conflict"),
+                                errdetail("disable row movement of table can avoid this conflict")));
+                    }
+                    /*
+                    * If the tuple was already deleted, return to let caller
+                    * handle it under NOT MATCHED clauses.
+                    */
+                    return false;
+                case TM_Updated:
+                    {
+                        Relation   resultRelationDesc;
+                        Relation   partRelationDesc;
+                        TupleTableSlot *epqslot;
+                        LockTupleMode lockmode;
+                        bool    isNull,
+                                isPartition;
+
+                        /*
+                         * The target tuple was concurrently updated by some other
+                         * transaction. Run EvalPlanQual() with the new version of
+                         * the tuple. If it does not return a tuple, then we
+                         * switch to the NOT MATCHED list of actions. If it does
+                         * return a tuple and the join qual is still satisfied,
+                         * then we just need to recheck the MATCHED actions,
+                         * starting from the top, and execute the first qualifying
+                         * action.
+                         */
+                        resultRelationDesc = resultRelInfo->ri_RelationDesc;
+                        isPartition = RELATION_IS_PARTITIONED(resultRelationDesc);
+                        if (isPartition) {
+                            Partition partition = NULL;
+
+                            searchFakeReationForPartitionOid(estate->esfRelations,
+                                estate->es_query_cxt,
+                                resultRelationDesc,
+                                oldPartitionOid,
+                                GetCurrentPartitionNo(oldPartitionOid),
+                                partRelationDesc,
+                                partition,
+                                RowExclusiveLock);
+                        }
+                        lockmode = ExecUpdateLockMode(estate, resultRelInfo);
+                        epqslot = EvalPlanQual(estate, epqstate,
+                                               isPartition ? partRelationDesc : resultRelationDesc,
+                                               resultRelInfo->ri_RangeTableIndex,
+                                               lockmode, &tmfd.ctid, tmfd.xmax,
+                                               resultRelationDesc->rd_rel->relrowmovement);
+
+                        /*
+                         * If we got no tuple, or the tuple we get has a
+                         * NULL ctid, go back to caller: this one is not a
+                         * MATCHED tuple anymore, so they can retry with
+                         * NOT MATCHED actions.
+                         */
+                        if (TupIsNull(epqslot))
+                            return false;
+
+                        (void) ExecGetJunkAttribute(epqslot,
+                                                    resultRelInfo->ri_junkFilter->jf_junkAttNo,
+                                                    &isNull);
+                        if (isNull)
+                            return false;
+
+                        /*
+                         * For partitioned table we have to check if the partition oid
+                         * is NULL.
+                         */
+                        if (isPartition) {
+                            Datum partoid;
+                            partoid = ExecGetJunkAttribute(epqslot,
+                                                           resultRelInfo->ri_partOidAttNum,
+                                                           &isNull);
+                            if (isNull)
+                                ereport(ERROR,
+                                        (errcode(ERRCODE_NULL_JUNK_ATTRIBUTE),
+                                         errmsg("tableoid is null when merge partitioned table")));
+                            Assert(oldPartitionOid == DatumGetObjectId(partoid));
+                        }
+
+                        /*
+                         * A non-NULL ctid means that we are still dealing
+                         * with MATCHED case. Restart the loop so that we
+                         * apply all the MATCHED rules again, to ensure
+                         * that the first qualifying WHEN MATCHED action
+                         * is executed.
+                         *
+                         * Update tupleid to that of the new tuple, for
+                         * the refetch we do at the top.
+                         */
+                        saved_slot = slot = epqslot;
+                        *tupleid = tmfd.ctid;
+                        goto lmerge_matched;
+                    }
+                default:
+                    elog(ERROR, "unexpected tuple operation result: %d", result);
+                    break;
+            }
         }
         if (action->commandType == CMD_UPDATE /* && tuple_updated*/)
             InstrCountFiltered2(&mtstate->ps, 1);

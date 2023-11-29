@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/hio.h"
+#include "access/multi_redo_api.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
 #include "access/transam.h"
@@ -165,7 +166,8 @@ Buffer UBTreeGetRoot(Relation rel, int access)
             valid = PinBuffer(buf, NULL);
             if (valid) {
                 LockBuffer(rootbuf, BT_READ);
-                isRootCacheValid = RelFileNodeEquals(buf->tag.rnode, rel->rd_node) && (buf->tag.blockNum == rootblkno);
+                isRootCacheValid = (!IS_EXRTO_STANDBY_READ) && RelFileNodeEquals(buf->tag.rnode, rel->rd_node) &&
+                                   (buf->tag.blockNum == rootblkno);
                 if (!isRootCacheValid)
                     UnlockReleaseBuffer(rootbuf);
             } else {

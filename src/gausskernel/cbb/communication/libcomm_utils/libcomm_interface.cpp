@@ -737,7 +737,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     struct FCMSG_T fcmsgs = {0x0};
 
     // for connect between cn and dn, channel is duplex
-    fcmsgs.type = (IS_PGXC_COORDINATOR) ? CTRL_CONN_DUAL : CTRL_CONN_REQUEST;
+    fcmsgs.type = (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) ? CTRL_CONN_DUAL : CTRL_CONN_REQUEST;
     fcmsgs.extra_info = (IS_PGXC_COORDINATOR && (u_sess != NULL)) ? 
                         (unsigned long)(unsigned)u_sess->pgxc_cxt.NumDataNodes : 0;
 
@@ -762,6 +762,30 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     fcmsgs.streamcap = ((unsigned long)(unsigned)g_instance.attr.attr_network.comm_control_port << 32) +
                        (long)g_instance.attr.attr_network.comm_sctp_port;
 
+#ifdef USE_SPQ
+    if (fcmsgs.type == CTRL_CONN_DUAL) {
+        bool found = false;
+        QCConnKey key = {
+            .query_id = libcomm_addrinfo->streamKey.queryId,
+            .plan_node_id = libcomm_addrinfo->streamKey.planNodeId,
+            .node_id = node_idx,
+            .type = SPQ_QE_CONNECTION,
+        };
+        pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        QCConnEntry* entry = (QCConnEntry*)hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_ENTER, &found);
+        if (!found) {
+            entry->forward = {
+                .idx = node_idx,
+                .sid = streamid,
+                .ver = version,
+                .type = GSOCK_PRODUCER,
+            };
+            entry->backward.idx = 0;
+        }
+        pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+    }
+#endif
+
     LIBCOMM_PTHREAD_MUTEX_UNLOCK(&(pmailbox->sinfo_lock));
     rc = gs_send_ctrl_msg(&g_instance.comm_cxt.g_s_node_sock[node_idx], &fcmsgs, ROLE_PRODUCER);
     if (rc <= 0) {
@@ -772,6 +796,20 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
             mc_strerror(errno));
 
         errno = ECOMMTCPTCPDISCONNECT;
+#ifdef USE_SPQ
+        if (fcmsgs.type == CTRL_CONN_DUAL) {
+            QCConnKey key = {
+                .query_id = libcomm_addrinfo->streamKey.queryId,
+                .plan_node_id = libcomm_addrinfo->streamKey.planNodeId,
+                .node_id = node_idx,
+                .type = SPQ_QE_CONNECTION,
+            };
+            bool found = false;
+            pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+            hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_REMOVE, &found);
+            pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+        }
+#endif
         return -1;
     }
 
@@ -781,7 +819,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     libcomm_addrinfo->gs_sock.idx = node_idx;
     libcomm_addrinfo->gs_sock.sid = streamid;
     libcomm_addrinfo->gs_sock.ver = version;
-    libcomm_addrinfo->gs_sock.type = IS_PGXC_COORDINATOR ? GSOCK_DAUL_CHANNEL : GSOCK_PRODUCER;
+    libcomm_addrinfo->gs_sock.type = (IS_PGXC_COORDINATOR) ? GSOCK_DAUL_CHANNEL : GSOCK_PRODUCER;
 
     COMM_DEBUG_LOG("(s|send connect)\tConnect finish for node[%d]:%s.",
         node_idx,
@@ -1031,7 +1069,7 @@ int gs_connect(libcommaddrinfo** libcomm_addrinfo, int addr_num, int timeout)
         re = gs_internal_connect(addr_info);
         // errno set in gs_connect
         if (re < 0) {
-            if (IS_PGXC_COORDINATOR) {
+            if (IS_PGXC_COORDINATOR || IS_SPQ_COORDINATOR) {
                 continue;
             } else {
                 error_index = i;

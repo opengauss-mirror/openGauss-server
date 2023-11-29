@@ -289,6 +289,35 @@ typedef enum {
     PLPGSQL_CURSOR_NAME
 } PLpgSQL_con_info_item_value;
 
+/*
+ * GsDependency object type
+ */
+typedef enum {
+    GSDEPEND_OBJECT_TYPE_INVALID = 0,
+    GSDEPEND_OBJECT_TYPE_UNDEFIND,
+    GSDEPEND_OBJECT_TYPE_VARIABLE,
+    GSDEPEND_OBJECT_TYPE_TYPE,
+    GSDEPEND_OBJECT_TYPE_FUNCTION,
+    GSDEPEND_OBJECT_TYPE_PROCHEAD,
+    GSDEPEND_OBJECT_TYPE_PKG,
+    GSDEPEND_OBJECT_TYPE_PKG_BODY,
+    GSDEPEND_OBJECT_TYPE_PKG_RECOMPILE
+} GsDependObjectType;
+
+/*
+* GsDependency reference object position type
+*/
+#define GSDEPEND_REFOBJ_POS_INVALID 0
+#define GSDEPEND_REFOBJ_POS_IN_TYPE 1
+#define GSDEPEND_REFOBJ_POS_IN_PKGSPEC 2
+#define GSDEPEND_REFOBJ_POS_IN_PROCHEAD 4
+#define GSDEPEND_REFOBJ_POS_IN_PROCBODY 8
+#define GSDEPEND_REFOBJ_POS_IN_PKGBODY 16
+#define GSDEPEND_REFOBJ_POS_IN_PKGRECOMPILE_OBJ (GSDEPEND_REFOBJ_POS_IN_PKGSPEC | \
+                                           GSDEPEND_REFOBJ_POS_IN_PKGBODY | GSDEPEND_REFOBJ_POS_IN_PROCBODY)
+#define GSDEPEND_REFOBJ_POS_IN_PKGALL_OBJ (GSDEPEND_REFOBJ_POS_IN_PKGRECOMPILE_OBJ)
+#define GSDEPEND_REFOBJ_POS_IN_PROCALL (GSDEPEND_REFOBJ_POS_IN_PROCHEAD | GSDEPEND_REFOBJ_POS_IN_PROCBODY)
+
 /**********************************************************************
  * Node and structure definitions
  **********************************************************************/
@@ -301,6 +330,46 @@ typedef struct PLpgSQL_datum { /* Generic datum array item		*/
     int dno;
     bool ispkg;
 } PLpgSQL_datum;
+
+/*
+ * DependenciesDatum is the common supertype for DependenciesUndefined, DependenciesVariable,
+ * DependenciesType, DependenciesProchead
+ */
+typedef struct DependenciesDatum { /* Generic datum array item		*/
+    NodeTag type;
+} DependenciesDatum;
+
+/*
+ * PLpgSQL dependencies undefined/type/variable/function/procedure
+ */
+typedef struct DependenciesUndefined { /* Generic datum array item		*/
+    NodeTag type;
+} DependenciesUndefined;
+
+typedef struct DependenciesVariable {
+    NodeTag type;
+    char* typName;
+    int32 typMod;
+    char* extraInfo;
+} DependenciesVariable;
+
+typedef struct DependenciesType{
+    NodeTag type;
+    char typType;
+    char typCategory;
+    char* attrInfo;
+    bool isRel;
+    char* elemTypName;
+    char* idxByTypName;
+} DependenciesType;
+
+typedef struct DependenciesProchead{
+    NodeTag type;
+    bool undefined;
+    char* proName;
+    char* proArgSrc;
+    char* funcHeadSrc;
+} DependenciesProchead;
 
 typedef enum PLpgSQL_trigtype
 {
@@ -377,6 +446,7 @@ typedef struct PLpgSQL_expr { /* SQpL Query to plan and execute	*/
     bool is_have_tableof_index_func;
     /* dno maybe is 0, so need an extra variable */
     int tableof_func_dno;
+    uint64 unique_sql_id;
 } PLpgSQL_expr;
 
 typedef struct { /* openGauss data type */
@@ -402,6 +472,8 @@ typedef struct { /* openGauss data type */
      * then convert to tuple descriptior.
      */
     Oid cursorCompositeOid = InvalidOid;
+    Oid tableofOid;
+    TypeDependExtend* dependExtend;
 } PLpgSQL_type;
 
 typedef struct {
@@ -972,7 +1044,7 @@ typedef struct {    /* condition information item name for signal/resignal */
     char *table_name;
     char *column_name;
     char *cursor_name;
-    int sqlerrcode;     /* mysql_errno */
+    char *sqlerrcode;     /* mysql_errno */
 } PLpgSQL_condition_info_item;
 
 typedef struct {    /* siganl_information_item */
@@ -1160,6 +1232,10 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     bool is_autonomous;
     bool is_plpgsql_func_with_outparam;
     bool is_insert_gs_source;
+    /* gs depend  */
+    bool isValid;
+    bool is_need_recompile;
+    Oid namespaceOid;
 } PLpgSQL_function;
 
 class AutonomousSession;
@@ -1361,6 +1437,13 @@ typedef struct plpgsql_pkg_hashent {
     
 } plpgsql_pkg_HashEnt;
 
+#define PACKAGE_INVALID 0x0
+#define PACKAGE_SPEC_VALID 0x1
+#define PACKAGE_SPEC_INVALID 0xFE
+#define PACKAGE_BODY_VALID 0x2
+#define PACKAGE_BODY_INVALID 0xFD
+#define PACKAGE_VALID 0x3
+
 typedef struct PLpgSQL_package { /* Complete compiled package   */
     char* pkg_signature;
     Oid pkg_oid;
@@ -1406,6 +1489,15 @@ typedef struct PLpgSQL_package { /* Complete compiled package   */
     knl_u_plpgsql_pkg_context* u_pkg;
     Oid namespaceOid;
     bool isInit;
+
+    /**
+     * gs_dependencies_fn.h
+     */
+    NodeTag type;
+    List* preRefObjectOidList;
+    List* preSelfObjectList;
+    unsigned char status;
+    bool is_need_recompile;
 } PLpgSQL_package;
 
 
@@ -1497,6 +1589,19 @@ typedef struct PlDebugEntry {
     PLpgSQL_function* func;
 } PlDebugEntry;
 
+typedef enum AddBreakPointError {
+    ADD_BP_ERR_ALREADY_EXISTS = -1,
+    ADD_BP_ERR_OUT_OF_RANGE = -2,
+    ADD_BP_ERR_INVALID_BP_POS = -3
+} AddBreakPointError;
+
+typedef struct PLDebug_codeline {
+    NodeTag type;
+    int lineno;
+    char* code;
+    bool canBreak;
+} PLDebug_codeline;
+
 typedef List* (*RawParserHook)(const char*, List**);
 
 const int MAXINT8LEN = 25;
@@ -1527,6 +1632,7 @@ const char DEBUG_STEP_INTO_HEADER = 's';
 const char DEBUG_STEP_INTO_HEADER_AFTER = 'S';
 const char DEBUG_BACKTRACE_HEADER = 't';
 const char DEBUG_SET_VARIABLE_HEADER = 'h';
+const char DEBUG_INFOCODE_HEADER = 'i';
 
 /* server return message */
 const int DEBUG_SERVER_SUCCESS = 0;
@@ -1562,7 +1668,7 @@ const int DEBUG_SERVER_PRINT_VAR_FRAMENO_EXCEED = 1;
         if (!g_instance.pldebug_cxt.debug_comm[idx].Used())                                   \
             ereport(ERROR,                                                                    \
                     (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_PLDEBUGGER_ERROR),            \
-                     errmsg("Debug Comm %d has been released or not turn on yet.", idx)));                        \
+                     errmsg("Debug Comm %d has been released or not turned on yet.", idx)));                        \
     } while (0)
 
 static const char *stringFromCompileStatus(int strindex)
@@ -1632,6 +1738,7 @@ extern void RecvUnixMsg(const char* buf, int bufLen, char* destBuf, int destLen)
 extern char* ResizeDebugBufferIfNecessary(char* buffer, int* oldSize, int needSize);
 extern void ReleaseDebugCommIdx(int idx);
 extern void SendUnixMsg(int socket, const char* val, int len, bool is_client);
+extern List* collect_breakable_line(PLpgSQL_function* func);
 
 /**********************************************************************
  * Function declarations
@@ -1648,7 +1755,7 @@ typedef struct plpgsql_hashent {
     DListCell* cell; /* Dlist cell for delete function compile results. */
 } plpgsql_HashEnt;
 
-extern PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool forValidator);
+extern PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool forValidator, bool isRecompile = false);
 extern void delete_function(PLpgSQL_function* func, bool fromPackage = false);
 extern PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo); /* parse trigger func */
 extern PLpgSQL_function* plpgsql_compile_inline(char* proc_source);
@@ -1663,10 +1770,10 @@ extern bool plpgsql_parse_tripword(char* word1, char* word2, char* word3, PLwdat
 extern bool plpgsql_parse_quadword(char* word1, char* word2, char* word3, char* word4, PLwdatum* wdatum,
     PLcword* cword, int* tok_flag);
 extern PLpgSQL_type* plpgsql_parse_wordtype(char* ident);
-extern PLpgSQL_type* plpgsql_parse_cwordtype(List* idents);
+extern PLpgSQL_type* plpgsql_parse_cwordtype(List* idents, TypeDependExtend* dependExtend = NULL);
 extern PLpgSQL_type* plpgsql_parse_wordrowtype(char* ident);
 extern PLpgSQL_type* plpgsql_parse_cwordrowtype(List* idents);
-extern PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation);
+extern PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation, TypeDependExtend* type_depend_extend = NULL);
 extern PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation);
 extern PLpgSQL_type* plpgsql_build_nested_datatype();
 extern const char *plpgsql_code_int2cstring(int sqlcode);
@@ -1691,12 +1798,13 @@ extern bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgs
 extern void plpgsql_HashTableDeleteAll();
 extern void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId);
 extern void delete_package_and_check_invalid_item(Oid pkgOid);
+extern void plpgsql_hashtable_clear_invalid_obj(bool need_clear = false);
 extern void plpgsql_HashTableDelete(PLpgSQL_function* func);
 extern bool plpgsql_get_current_value_stp_with_exception();
 extern void plpgsql_restore_current_value_stp_with_exception(bool saved_current_stp_with_exception);
 extern void plpgsql_set_current_value_stp_with_exception();
 extern void delete_pkg_in_HashTable(Oid pkgOid);
-extern PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec, bool isCreate=false);
+extern PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec, bool isCreate=false, bool isRecompile = false);
 extern PLpgSQL_datum* plpgsql_pkg_adddatum(const List* wholeName, char** objname, char** pkgname);
 extern int plpgsql_pkg_adddatum2ns(const List* name);
 extern bool plpgsql_check_insert_colocate(
@@ -1807,7 +1915,7 @@ extern PLpgSQL_nsitem* plpgsql_ns_lookup(
 extern PLpgSQL_nsitem* plpgsql_ns_lookup_label(PLpgSQL_nsitem* ns_cur, const char* name);
 extern void free_func_tableof_index();
 extern void free_temp_func_tableof_index(List* temp_tableof_index);
-
+extern char* GetPackageSchemaName(Oid packageOid);
 
 /* ----------
  * Other functions in pl_funcs.c
@@ -1942,6 +2050,12 @@ typedef struct ExceptionContext {
     PLpgSQL_declare_handler handler_type;
 } ExceptionContext;
 
+/*Save the type recorded during the cursor definition*/
+typedef struct CursorRecordType {
+    char* cursor_name;
+    Oid type_oid;
+} CursorRecordType;
+
 /* Quick access array state */
 #define IS_ARRAY_STATE(state_list, state) ((state_list && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) ? \
                                           (linitial_int(state_list) == state) : false)
@@ -1986,4 +2100,13 @@ extern void stp_reserve_subxact_resowner(ResourceOwner resowner);
 extern void stp_cleanup_subxact_resowner(int64 minStackId);
 extern void stp_cleanup_subxact_resource(int64 stackId);
 extern void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status);
+extern void examine_parameter_list(List* parameters, Oid languageOid, const char* queryString,
+    oidvector** parameterTypes, TypeDependExtend** type_depend_extend, ArrayType** allParameterTypes,
+    ArrayType** parameterModes, ArrayType** parameterNames,
+    List** parameterDefaults, Oid* requiredResultType, List** defargpos, bool fenced, bool* has_undefined = NULL);
+extern void compute_return_type(
+    TypeName* returnType, Oid languageOid, Oid* prorettype_p, bool* returnsSet_p, bool fenced, int startLineNumber,
+    TypeDependExtend* type_depend_extend, bool is_refresh_head);
+void plpgsql_free_override_stack(int depth);
+
 #endif /* PLPGSQL_H */

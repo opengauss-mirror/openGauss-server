@@ -61,7 +61,7 @@ select relname, relpages >0 as relpagesgtzero, reltuples >0 as reltuplesgtzero f
 -------------------------------------+----------------+-----------------
  hw_partition_vacuum_partition_table | t              | t
  inx_btree_id                        | t              | t
- inx_hash_id                         | t              | t
+ inx_hash_id                         | f              | f
 (3 rows)
 
 --i9. vacuum index
@@ -73,7 +73,7 @@ select relname, relpages >0 as relpagesgtzero, reltuples >0 as reltuplesgtzero f
 -------------------------------------+----------------+-----------------
  hw_partition_vacuum_partition_table | t              | t
  inx_btree_id                        | t              | t
- inx_hash_id                         | t              | t
+ inx_hash_id                         | f              | f
 (3 rows)
 
 --i11. delete all the tuples
@@ -94,9 +94,9 @@ vacuum;
 select relname, relpages >0 as relpagesgtzero, reltuples >0 as reltuplesgtzero from pg_class where relname='hw_partition_vacuum_partition_table' or relname='inx_btree_id' or relname='inx_hash_id' order by 1;
                relname               | relpagesgtzero | reltuplesgtzero 
 -------------------------------------+----------------+-----------------
- hw_partition_vacuum_partition_table | f              | f
- inx_btree_id                        | t              | f
- inx_hash_id                         | t              | f
+ hw_partition_vacuum_partition_table | t              | t
+ inx_btree_id                        | t              | t
+ inx_hash_id                         | f              | f
 (3 rows)
 
 --i14. selete table

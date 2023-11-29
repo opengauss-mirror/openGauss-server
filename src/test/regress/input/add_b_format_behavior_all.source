@@ -1,0 +1,165 @@
+create database b_behavior_all dbcompatibility 'b';
+\c b_behavior_all
+
+CREATE TABLE t(a int);
+CREATE TABLE test_at_modify_syntax1(a int, b int NOT NULL);
+CREATE TABLE test_at_modify_syntax2(a int, b int NOT NULL);
+create table company(name varchar(100), loc varchar(100), no integer);
+insert into company values ('macrosoft',    'usa',          001);
+insert into company values ('oracle',       'usa',          002);
+insert into company values ('backberry',    'canada',       003);
+
+-- session all behavior
+set b_format_behavior_compat_options = 'ALL';
+
+set session transaction isolation level repeatable read;
+start transaction;
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d b_behavior_all -c "insert into t values(1);";
+select * from t;
+commit;
+select * from t;
+set @aa = 10;
+select @aa;
+ALTER TABLE test_at_modify_syntax1 MODIFY b varchar(8);
+\d+ test_at_modify_syntax1;
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_1();
+select _gbk'高斯';
+
+\c
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='all'" >/dev/null 2>&1
+select pg_sleep(1);
+set session transaction isolation level repeatable read;
+start transaction;
+select * from t;
+\! @abs_bindir@/gsql -p @portstring@ -d b_behavior_all -c "insert into t values(1);";
+select * from t;
+commit;
+select * from t;
+set @aa = 20;
+select @aa;
+ALTER TABLE test_at_modify_syntax2 MODIFY b varchar(8);
+\d+ test_at_modify_syntax2;
+create or replace procedure test_cursor_2
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_2();
+select _gbk'高斯';
+
+drop table t, test_at_modify_syntax1, test_at_modify_syntax2, company;
+drop procedure test_cursor_2;
+\c
+set names utf8;
+CREATE TABLE t_charset_1(
+    futf8_bin varchar(16) CHARSET utf8mb4 COLLATE 'utf8mb4_bin',
+    futf8_uni varchar(16) CHARSET utf8mb4 COLLATE 'utf8mb4_unicode_ci',
+    futf8_gen varchar(16) CHARSET utf8mb4 COLLATE 'utf8mb4_general_ci',
+    fgbk_bin varchar(16) CHARSET gbk COLLATE 'gbk_bin',
+    fgbk_chi varchar(16) CHARSET gbk COLLATE 'gbk_chinese_ci',
+    fgb18030_bin varchar(16) CHARSET gb18030 COLLATE 'gb18030_bin',
+    fgb18030_chi varchar(16) CHARSET gb18030 COLLATE 'gb18030_chinese_ci',
+    fbytea bytea,
+    fblob blob,
+    fbit bit varying(64)
+);
+CREATE TABLE t_charset_2(
+    futf8_bin varchar(16) CHARSET utf8mb4 COLLATE 'utf8mb4_bin',
+    futf8_uni varchar(16) CHARSET utf8mb4 COLLATE 'utf8mb4_unicode_ci',
+    futf8_gen varchar(16) CHARSET utf8mb4 COLLATE 'utf8mb4_general_ci',
+    fgbk_bin varchar(16) CHARSET gbk COLLATE 'gbk_bin',
+    fgbk_chi varchar(16) CHARSET gbk COLLATE 'gbk_chinese_ci',
+    fgb18030_bin varchar(16) CHARSET gb18030 COLLATE 'gb18030_bin',
+    fgb18030_chi varchar(16) CHARSET gb18030 COLLATE 'gb18030_chinese_ci',
+    fbytea bytea,
+    fblob blob,
+    fbit bit varying(64)
+);
+INSERT INTO t_charset_1(futf8_bin, futf8_uni, futf8_gen, fgbk_bin, fgbk_chi, fgb18030_bin, fgb18030_chi, fbytea, fblob, fbit)
+    VALUES('高斯DB', '高斯db', '高斯db', '高斯DB', '高斯db', '高斯DB', '高斯db', '高斯DB', 'E9AB98E696AF', B'111010011010101110011000111001101001011010101111');
+-- test copy
+copy (select * from t_charset_1) to '@abs_srcdir@/data/t_charset_1.data';
+\! cat @abs_srcdir@/data/t_charset_1.data
+copy t_charset_2 from '@abs_srcdir@/data/t_charset_1.data';
+select * from t_charset_2;
+
+copy (select * from t_charset_1) to '@abs_srcdir@/data/t_charset_1.data' encoding 'utf8';
+\! cat @abs_srcdir@/data/t_charset_1.data
+copy t_charset_2 from '@abs_srcdir@/data/t_charset_1.data' encoding 'utf8';
+select * from t_charset_2;
+
+copy (select * from t_charset_1) to '@abs_srcdir@/data/t_charset_1.data' encoding 'gbk';
+\! cat @abs_srcdir@/data/t_charset_1.data
+copy t_charset_2 from '@abs_srcdir@/data/t_charset_1.data' encoding 'gbk';
+select * from t_charset_2;
+
+copy t_charset_1 to '@abs_srcdir@/data/t_charset_1.csv'  encoding 'gbk' FIXED FORMATTER (futf8_bin(1, 10), futf8_uni(11, 10), futf8_gen(21, 10), fgbk_bin(31, 10), fgbk_chi(41, 10), fgb18030_bin(51, 10), fgb18030_chi(61, 10), fbytea(71, 20), fblob(91, 20), fbit(111, 60));
+\! cat @abs_srcdir@/data/t_charset_1.csv
+copy t_charset_2 from '@abs_srcdir@/data/t_charset_1.csv'  encoding 'gbk' FIXED FORMATTER (futf8_bin(1, 10), futf8_uni(11, 10), futf8_gen(21, 10), fgbk_bin(31, 10), fgbk_chi(41, 10), fgb18030_bin(51, 10), fgb18030_chi(61, 10));
+select * from t_charset_2;
+
+copy t_charset_1 to '@abs_srcdir@/data/t_charset_1.csv' DELIMITERS '分隔符' with (FORMAT CSV, ESCAPE '+', encoding 'gbk');
+\! cat @abs_srcdir@/data/t_charset_1.csv
+copy t_charset_2 from '@abs_srcdir@/data/t_charset_1.csv' DELIMITERS '分隔符' with (FORMAT CSV, ESCAPE '+', encoding 'gbk'); -- ERROR
+copy t_charset_1 to '@abs_srcdir@/data/t_charset_1.csv' DELIMITERS '|' with (FORMAT CSV, ESCAPE '+', encoding 'gbk');
+\! cat @abs_srcdir@/data/t_charset_1.csv
+copy t_charset_2 from '@abs_srcdir@/data/t_charset_1.csv' DELIMITERS '|' with (FORMAT CSV, ESCAPE '+', encoding 'gbk');
+select * from t_charset_2;
+
+-- test select into outfile
+select * from t_charset_1 into outfile '@abs_srcdir@/data/t_charset_1.data2';
+\! cat @abs_srcdir@/data/t_charset_1.data2
+select * from t_charset_1 into outfile '@abs_srcdir@/data/t_charset_1.data2' character set 'utf8';
+\! cat @abs_srcdir@/data/t_charset_1.data2
+select * from t_charset_1 into outfile '@abs_srcdir@/data/t_charset_1.data2' character set 'gbk';
+\! cat @abs_srcdir@/data/t_charset_1.data2
+
+-- test gs_dump
+create database b_behavior_all2 dbcompatibility 'b';
+\! @abs_bindir@/gs_dump b_behavior_all -p @portstring@ -f @abs_bindir@/t_charset_1.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d b_behavior_all2 -p @portstring@ @abs_bindir@/t_charset_1.tar >/dev/null 2>&1; echo $?
+\c b_behavior_all2
+select * from t_charset_1;
+select * from t_charset_2;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
+select pg_sleep(1);
+\c regression

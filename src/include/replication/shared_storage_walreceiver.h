@@ -40,31 +40,33 @@ extern bool SharedStorageXlogReadCheck(XLogReaderState *xlogreader, XLogRecPtr r
 
 #define IS_SHARED_STORAGE_MAIN_STANDBY_MODE                              \
     (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby &&            \
-     g_instance.attr.attr_storage.xlog_file_path != 0)
+     g_instance.attr.attr_storage.xlog_file_path != NULL)
 #define IS_SHARED_STORAGE_CASCADE_STANDBY_MODE                           \
     (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby &&              \
-     g_instance.attr.attr_storage.xlog_file_path != 0)
+     g_instance.attr.attr_storage.xlog_file_path != NULL)
 
 #define IS_SHARED_STORAGE_STANDBY_CLUSTER                                    \
         (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY && \
-         g_instance.attr.attr_storage.xlog_file_path != 0)
+         g_instance.attr.attr_storage.xlog_file_path != NULL)
 
 
 #define IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE                   \
     (t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&                      \
      g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY && \
-     g_instance.attr.attr_storage.xlog_file_path != 0)
+     g_instance.attr.attr_storage.xlog_file_path != NULL)
 
 #define IS_SHARED_STORAGE_PRIMARY_CLUSTER_STANDBY_MODE                   \
     (t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&                      \
      g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY && \
-     g_instance.attr.attr_storage.xlog_file_path != 0)
+     g_instance.attr.attr_storage.xlog_file_path != NULL)
 #define IS_SHARED_STORAGE_PRIMARY_CLUSTER_PRIMARY_MODE                        \
     (((IS_PGXC_DATANODE && t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) ||    \
       (IS_PGXC_COORDINATOR && t_thrd.xlog_cxt.server_mode == NORMAL_MODE)) && \
      g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY &&      \
-     g_instance.attr.attr_storage.xlog_file_path != 0)
+     g_instance.attr.attr_storage.xlog_file_path != NULL)
 #define IS_SHARED_STORAGE_STANBY_MODE \
-    (g_instance.attr.attr_storage.xlog_file_path != 0 && t_thrd.xlog_cxt.server_mode == STANDBY_MODE)
-#define IS_SHARED_STORAGE_MODE (g_instance.attr.attr_storage.xlog_file_path != 0)
+    (g_instance.attr.attr_storage.xlog_file_path != NULL && t_thrd.xlog_cxt.server_mode == STANDBY_MODE)
+#define IS_SHARED_STORAGE_MODE (g_instance.attr.attr_storage.xlog_file_path != NULL)
+
+#define MAX_XLOG_FILE_SIZE_BUFFER 256
 #endif /* INCLUDE_REPLICATION_SHARED_STORAGE_WALRECEIVER_H_ */

@@ -2057,9 +2057,9 @@ lazy_truncate_heap(Relation onerel, VacuumStmt *vacstmt, LVRelStats *vacrelstats
          */
         if (RelationIsPartition(onerel)) {
             Assert(vacstmt->onepart && vacstmt->onepartrel);
-            PartitionTruncate(vacstmt->onepartrel, vacstmt->onepart, new_rel_pages);
+            PartitionTruncate(vacstmt->onepartrel, vacstmt->onepart, new_rel_pages, vacrelstats->latestRemovedXid);
         } else {
-            RelationTruncate(onerel, new_rel_pages);
+            RelationTruncate(onerel, new_rel_pages, vacrelstats->latestRemovedXid);
         }
 
         /*
@@ -2115,7 +2115,7 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
     while (blkno > vacrelstats->nonempty_pages) {
         Buffer          buf;
         Page            page;
-        bool            hastup = NULL;
+        bool            hastup = false;
 
         /*
          * Check if another process requests a lock on our relation. We are

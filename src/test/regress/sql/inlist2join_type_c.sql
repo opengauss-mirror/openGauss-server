@@ -20,8 +20,7 @@ create table type
   ,col_float6	INTEGER(6,3)
   ,col_bool	BOOLEAN
   ,col_text	TEXT
-)with (orientation=column)
-distribute by hash(col_int);
+)with (orientation=column);
 
 insert into type values
 (0, 5 ,	193540, 1935401906, 'aabccd', 'aabccd', 1.20 , 10.0000, null    , 1.1   , 10.1234, 321.321, 123.123654, 123.123654, true,'aabccd'), 
@@ -76,8 +75,7 @@ CREATE TABLE time
   ,col_time		time
   ,col_timetz		timetz
   ,col_tinterval	tinterval
-)with (orientation=column)
-distribute by hash(col_int);
+)with (orientation=column);
 
 COPY time(col_int, col_date, col_timestamp, col_timestamptz, col_smalldatetime, col_char, col_interval, col_time, col_timetz, col_tinterval) FROM stdin;
 3	2011-11-01 00:00:00	2017-09-09 19:45:37	2017-09-09 19:45:37	2003-04-12 04:05:06	a	2 day 13:34:56	1984-2-6 01:00:30	1984-2-6 01:00:30+8	["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]
@@ -105,3 +103,4 @@ explain (costs off) select col_interval from time where col_interval in ('2 day 
 select col_tinterval from time where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
 explain (costs off) select col_tinterval from time where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
 drop schema inlist2join_type_c cascade;
+

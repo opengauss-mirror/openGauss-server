@@ -216,6 +216,12 @@ select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3;
 
 drop table if exists test1;
 create table test1 (f1 int,f2 int,f3 text);
+
+-- prepare with empty var or not exist var
+set @v_empty := '';
+prepare stmt_empty as @v_empty;
+prepare stmt_empty as @does_not_exist;
+
 -- insertStmt
 set @v2 := 'insert into test1 values(1, 2, 123)';
 prepare stmt2 as @v2;

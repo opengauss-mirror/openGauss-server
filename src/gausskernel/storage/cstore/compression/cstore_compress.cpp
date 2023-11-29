@@ -2567,7 +2567,7 @@ void NumericDecompressReleaseResources(
  */
 void compression_options::reset(void)
 {
-    m_sampling_fihished = false; /* need a sampling */
+    m_sampling_finished = false; /* need a sampling */
     m_adopt_numeric2int_ascale_rle = true;
     m_adopt_numeric2int_int32_rle = true;
     m_adopt_numeric2int_int64_rle = true;

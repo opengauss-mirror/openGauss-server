@@ -61,7 +61,20 @@ struct TxnRedoWorker {
     RedoItem *pendingTail; /* The tail of the RedoItem list. */
     RedoItem *procHead;
     RedoItem *procTail;
+    XLogRecPtr dispatched_txn_lsn; /* Max lsn dispatched to txn worker*/
+    XLogRecPtr transed_txn_lsn; /* Max lsn transfer to txn worker list*/
+    XLogRecPtr txn_trying_lsn; /* EndPtr of trying record on txn worker*/
 };
+
+XLogRecPtr getTransedTxnLsn(TxnRedoWorker *worker)
+{
+    return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->transed_txn_lsn);
+}
+
+XLogRecPtr getTryingTxnLsn(TxnRedoWorker *worker)
+{
+    return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->txn_trying_lsn);
+}
 
 TxnRedoWorker *StartTxnRedoWorker()
 {
@@ -71,6 +84,8 @@ TxnRedoWorker *StartTxnRedoWorker()
 
     worker->procHead = NULL;
     worker->procTail = NULL;
+    worker->dispatched_txn_lsn = 0;
+    worker->transed_txn_lsn = 0;
     return worker;
 }
 
@@ -90,6 +105,7 @@ void AddTxnRedoItem(TxnRedoWorker *worker, RedoItem *item)
      * TxnRedoItems are never shared with other workers.
      * Simply use the next pointer for worker 0.
      */
+    worker->dispatched_txn_lsn = item->record.EndRecPtr;
     if (worker->pendingHead == NULL) {
         worker->pendingHead = item;
     } else {
@@ -210,6 +226,7 @@ void MoveTxnItemToApplyQueue(TxnRedoWorker *worker)
     worker->procTail = worker->pendingTail;
     worker->pendingHead = NULL;
     worker->pendingTail = NULL;
+    pg_atomic_write_u64(&worker->transed_txn_lsn, worker->dispatched_txn_lsn);
 }
 
 static RedoItem *ProcTxnItem(RedoItem *item)
@@ -255,32 +272,36 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
     while (item != NULL) {
         XLogReaderState *record = &item->record;
         XLogRecPtr lrEnd;
+        XLogRecPtr curRead;
 
+        pg_atomic_write_u64(&worker->txn_trying_lsn, record->EndRecPtr);
         if (forceAll) {
             GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_6]);
             XLogRecPtr lrRead; /* lastReplayedReadPtr */
             GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
+            GetReplayingRecPtrFromWorkers(&curRead);
             /* we need to get lastCompletedPageLSN as soon as possible,so */
             /* we can not sleep here. */
             XLogRecPtr oldReplayedPageLSN = InvalidXLogRecPtr;
-            while (XLByteLT(lrEnd, record->EndRecPtr)) {
+            while (XLByteLT(curRead, record->EndRecPtr)) {
                 /* update lastreplaylsn */
                 if (!XLByteEQ(oldReplayedPageLSN, lrEnd)) {
                     SetXLogReplayRecPtr(lrRead, lrEnd);
                     oldReplayedPageLSN = lrEnd;
                 }
                 GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
+                GetReplayingRecPtrFromWorkers(&curRead);
                 RedoInterruptCallBack();
             }
             CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_6]);
         }
 
-        GetReplayedRecPtrFromWorkers(&lrEnd);
+        GetReplayingRecPtrFromWorkers(&curRead);
         /*
          * Make sure we can replay this record.  This check is necessary
          * on the master and on the hot backup after it reaches consistency.
          */
-        if (XLByteLE(record->EndRecPtr, lrEnd)) {
+        if (XLByteLE(record->EndRecPtr, curRead)) {
             item = ProcTxnItem(item);
         } else {
             break;
@@ -295,6 +316,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
         XLogRecPtr oldReplayedPageLSN = InvalidXLogRecPtr;
         XLogRecPtr lrRead;
         XLogRecPtr lrEnd;
+        XLogRecPtr curRead;
         do {
             GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
             if (XLByteLT(g_dispatcher->dispatchEndRecPtr, lrEnd)) {

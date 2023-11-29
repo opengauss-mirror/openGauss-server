@@ -28,6 +28,7 @@ function print_help()
     -mc|--make_check       this values of parameter is on or off, the default value is on.
     -s|--symbol_mode       whether separate symbol in debug mode, the default value is on.
     -co|--cmake_opt        more cmake options
+    -T|--tassl             build with tassl
 "
 }
 
@@ -119,6 +120,10 @@ while [ $# -gt 0 ]; do
             extra_config_opt=$2
             shift 2
             ;;
+        -T|--tassl)
+            build_with_tassl="YES"
+            shift 1
+            ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2
             echo "please input right paramtenter, the following command may help you"
@@ -144,6 +149,8 @@ else
     declare CMAKE_BUILD_DIR=${ROOT_DIR}/tmp_build
     if [ "$product_mode"x == "lite"x ]; then
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON ${extra_cmake_opt}"
+    elif [ "$product_mode"x == "finance"x ]; then
+        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_FINANCE_MODE=ON ${extra_cmake_opt}"
     else
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
     fi

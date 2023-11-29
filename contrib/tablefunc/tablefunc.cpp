@@ -1435,9 +1435,9 @@ static bool compatCrosstabTupleDescs(TupleDesc ret_tupdesc, TupleDesc sql_tupdes
      * attribute [2] of the sql tuple should match attributes [1] to [natts]
      * of the return tuple
      */
-    sql_attr = sql_tupdesc->attrs[2];
+    sql_attr = &sql_tupdesc->attrs[2];
     for (i = 1; i < ret_tupdesc->natts; i++) {
-        ret_attr = ret_tupdesc->attrs[i];
+        ret_attr = &ret_tupdesc->attrs[i];
 
         if (ret_attr->atttypid != sql_attr->atttypid)
             return false;

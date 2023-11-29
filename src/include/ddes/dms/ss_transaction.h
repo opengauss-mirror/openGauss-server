@@ -42,6 +42,13 @@ typedef struct SSBroadcastXminAck {
     TransactionId xmin;
 } SSBroadcastXminAck;
 
+typedef struct SSBroadcastSnapshot {
+    SSBroadcastOp type; // must be first
+    TransactionId xmin;
+    TransactionId xmax;
+    CommitSeqNo csn;
+} SSBroadcastSnapshot;
+
 typedef struct SSBroadcastSI {
     SSBroadcastOp type; // must be first
     Oid tablespaceid;
@@ -96,6 +103,7 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
 bool SSGetOldestXminFromAllStandby();
 int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSGetOldestXminAck(SSBroadcastXminAck *ack_data);
+void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount);
 void SSSendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n);
 void SSBCastDropRelAllBuffer(RelFileNode *rnodes, int rnode_len);
 void SSBCastDropRelRangeBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);
@@ -112,5 +120,9 @@ int SSCheckDbBackends(char *data, uint32 len, char *output_msg, uint32 *output_m
 int SSCheckDbBackendsAck(char *data, unsigned int len);
 bool SSCheckDbBackendsFromAllStandby(Oid dbid);
 void SSStandbyUpdateRedirectInfo();
+void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
+int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len);
+int SSReloadReformCtrlPage(uint32 len);
+void SSRequestAllStandbyReloadReformCtrlPage();
 
 #endif

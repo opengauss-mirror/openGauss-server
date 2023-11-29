@@ -355,9 +355,9 @@ call p1();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -375,9 +375,9 @@ call p1();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -398,9 +398,9 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning | 64   | Unhandled user-defined warning condition
+  level  | code  |                 message                  
+---------+-------+------------------------------------------
+ Warning | 01000 | Unhandled user-defined warning condition
 (1 row)
 
 CREATE OR REPLACE PROCEDURE p1() IS
@@ -416,9 +416,9 @@ call p1();
 ERROR:  Unhandled user-defined not found condition
 CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 show warnings;
- level | code |                  message                   
--------+------+--------------------------------------------
- Error | 128  | Unhandled user-defined not found condition
+ level | code  |                  message                   
+-------+-------+--------------------------------------------
+ Error | 02000 | Unhandled user-defined not found condition
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -437,9 +437,9 @@ call p1();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p1() line 5 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 DROP TABLE IF EXISTS t1;
@@ -642,7 +642,7 @@ show warnings;
  level | code  |          message          
 -------+-------+---------------------------
  Error | 42P01 | table "t1" does not exist
- Error | 192   | table is not defined
+ Error | 03000 | table is not defined
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -663,7 +663,7 @@ show warnings;
  level | code  |          message          
 -------+-------+---------------------------
  Error | 42P01 | table "t1" does not exist
- Error | 192   | table "t1" does not exist
+ Error | 03000 | table "t1" does not exist
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -684,7 +684,7 @@ show warnings;
  level | code  |          message          
 -------+-------+---------------------------
  Error | 42P01 | table "t1" does not exist
- Error | 192   | table "t1" does not exist
+ Error | 03000 | table "t1" does not exist
 (2 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -789,10 +789,11 @@ CONTEXT:  PL/pgSQL function p1() line 4 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |       message        
----------+------+----------------------
- Warning | 1120 | table is not defined
-(1 row)
+  level  | code  |          message          
+---------+-------+---------------------------
+ Error   | 42P01 | table "t1" does not exist
+ Warning | 1120  | table is not defined
+(2 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1045,10 +1046,10 @@ CONTEXT:  PL/pgSQL function p1() line 3 at RESIGNAL
 (1 row)
 
 show warnings;
-  level  | code |                 message                  
----------+------+------------------------------------------
- Warning | 64   | Unhandled user-defined warning condition
- Warning | 1    | this is warnings
+  level  | code  |                 message                  
+---------+-------+------------------------------------------
+ Warning | 01000 | Unhandled user-defined warning condition
+ Warning | 1     | this is warnings
 (2 rows)
 
 CREATE OR REPLACE PROCEDURE p1(a out text) IS
@@ -1335,10 +1336,9 @@ show warnings;
   level  | code  |          message          
 ---------+-------+---------------------------
  Error   | 42P01 | table "t1" does not exist
- Warning | 64    | column is not defined2222
- Warning | 64    | column is not defined2222
- Warning | 64    | column is not defined
-(4 rows)
+ Warning | 01000 | column is not defined2222
+ Warning | 01000 | column is not defined
+(3 rows)
 
 DROP TABLE IF EXISTS t1;
 NOTICE:  table "t1" does not exist, skipping
@@ -1367,8 +1367,8 @@ show warnings;
   level  | code  |          message          
 ---------+-------+---------------------------
  Error   | 42P01 | table "t1" does not exist
- Warning | 64    | column is not defined2222
- Warning | 64    | column is not defined
+ Warning | 01000 | column is not defined2222
+ Warning | 01000 | column is not defined
 (3 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -1398,8 +1398,8 @@ show warnings;
   level  | code  |          message          
 ---------+-------+---------------------------
  Error   | 42P01 | table "t1" does not exist
- Error   | 192   | column is not defined2222
- Warning | 64    | column is not defined
+ Error   | 03000 | column is not defined2222
+ Warning | 01000 | column is not defined
 (3 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -1517,8 +1517,8 @@ show warnings;
   level  | code  |          message          
 ---------+-------+---------------------------
  Error   | 42P01 | table "t1" does not exist
- Warning | 64    | column is not defined2222
- Warning | 64    | column is not defined
+ Warning | 01000 | column is not defined2222
+ Warning | 01000 | column is not defined
 (3 rows)
 
 DROP TABLE IF EXISTS t1;
@@ -1608,9 +1608,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1639,9 +1639,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1733,9 +1733,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1764,9 +1764,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1795,9 +1795,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1826,9 +1826,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1857,9 +1857,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1888,9 +1888,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1919,9 +1919,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1950,9 +1950,9 @@ call p2();
 ERROR:  table "t1" does not exist
 CONTEXT:  PL/pgSQL function p2() line 6 at RESIGNAL
 show warnings;
- level |   code   |          message          
--------+----------+---------------------------
- Error | 16908420 | table "t1" does not exist
+ level | code  |          message          
+-------+-------+---------------------------
+ Error | 42P01 | table "t1" does not exist
 (1 row)
 
 select @a, @error_count;
@@ -1961,5 +1961,100 @@ select @a, @error_count;
   0 |            2
 (1 row)
 
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near "01001"
+LINE 4:         resignal sqlstate 01001;
+                                  ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate 01001;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near "01001"
+LINE 4:         resignal sqlstate value 01001;
+                                        ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value 01001;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values 01001;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected word is value. at or near "values"
+LINE 4:         resignal sqlstate values 01001;
+                                  ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values 01001;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected value is a string. at or near ";"
+LINE 4:         resignal sqlstate value;
+                                       ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate value;
+    END;
+    DROP TABLE t1;
+END
+CREATE OR REPLACE PROCEDURE p() IS
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values;
+    END;
+    DROP TABLE t1;
+END;
+/
+ERROR:  syntax error, the expected word is value. at or near "values"
+LINE 4:         resignal sqlstate values;
+                                  ^
+QUERY:   DECLARE BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        resignal sqlstate values;
+    END;
+    DROP TABLE t1;
+END
 \c regression
 drop database mysql_test_resignal;

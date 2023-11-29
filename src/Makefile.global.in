@@ -174,6 +174,7 @@ enable_jemalloc_debug	= @enable_jemalloc_debug@
 enable_privategauss             = @enable_privategauss@
 enable_multiple_nodes		= @enable_multiple_nodes@
 enable_lite_mode		= @enable_lite_mode@
+enable_finance_mode		= @enable_finance_mode@
 enable_mot			= @enable_mot@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
@@ -260,7 +261,7 @@ endif
 # Saved arguments form configure
 with_3rd = @with_3rdpartydir@
 with_jdk = @with_jdk@
-
+with_tassl = @with_tassl@
 ifeq ($(with_3rd), NONE)
   BINARYPATH = binarylibs/kernel/dependency
   PLATFORMPATH = binarylibs/kernel/platform
@@ -283,7 +284,11 @@ ifeq ($(with_3rd), NONE)
   CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(top_builddir)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(top_builddir)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
-  LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  ifeq ($(with_tassl), yes)
+    LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/tassl/$(LIB_NOT_SUPPORT_LLT)
+  else
+    LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  endif
   SECURE_HOME = $(top_builddir)/$(PLATFORMPATH)/Huawei_Secure_C/$(LIB_NOT_SUPPORT_LLT)
   SECUREDYNAMICLIB_HOME = $(top_builddir)/$(PLATFORMPATH)/Huawei_Secure_C/Dynamic_Lib
   LICENSE_HOME = $(top_builddir)/$(PLATFORMPATH)/AdaptiveLM_C_V100R005C01SPC002/$(LIB_SUPPORT_LLT)
@@ -322,7 +327,12 @@ else
   CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(with_3rd)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(with_3rd)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
-  LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  ifeq ($(with_tassl), yes)
+    LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/tassl/$(LIB_NOT_SUPPORT_LLT)
+  else
+    LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  endif
+
 ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 LIBKMC_HOME = $(with_3rd)/$(PLATFORMPATH)/kmc/comm
@@ -914,6 +924,11 @@ ETCD_BIN_PATH = $(ETCD_HOME)/bin
 LIBNANOMSG_INCLUDE_PATH = $(LIBNANOMSG_HOME)/include
 LIBNANOMSG_LIB_PATH = $(LIBNANOMSG_HOME)/lib
 
+
+TOOLSDIR = $(top_srcdir)/src/tools
+GEN_KEYWORDLIST = $(PERL) -I $(TOOLSDIR) $(TOOLSDIR)/gen_keywordlist.pl
+GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
+
 #############################################################################
 # curl component
 #############################################################################
@@ -1110,7 +1125,10 @@ submake-pagecompression:
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression
+submake-kwlist:
+	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
+
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression submake-kwlist
 
 
 ##########################################################################
@@ -1229,6 +1247,7 @@ ifeq ($(enable_libnet), yes)
    override CFLAGS := $(CFLAGS) -DUSE_LIBNET
 endif
 
+override CPPFLAGS := $(CPPFLAGS) -DUSE_SPQ
 
 ##########################################################################
 #

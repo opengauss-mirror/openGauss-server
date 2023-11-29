@@ -1436,9 +1436,10 @@ static void create_tuple_entry(TupleDesc tupdesc)
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_soft_parse", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_hard_parse", INT8OID, -1, 0);
 
-    for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
-        if (num == NET_SEND_TIME)
+    for (num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
+        if (num == NET_SEND_TIME) {
             continue;
+        }
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
     }
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "NET_SEND_INFO", TEXTOID, -1, 0);
@@ -1458,6 +1459,10 @@ static void create_tuple_entry(TupleDesc tupdesc)
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_mem_used", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_spill_count", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_spill_size", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[NET_SEND_TIME], INT8OID, -1, 0);
+    for (num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
+    }
 }
 
 static void set_tuple_cn_node_name(UniqueSQL* unique_sql, Datum* values, int* i)
@@ -1544,10 +1549,11 @@ static void set_tuple_value(UniqueSQL* unique_sql, Datum* values, bool* nulls, i
     values[i++] = Int64GetDatum(unique_sql->parse.soft_parse);
     values[i++] = Int64GetDatum(unique_sql->parse.hard_parse);
 
-    // time Info
-    for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
-        if (num == NET_SEND_TIME)
+    // time Info p1
+    for (num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
+        if (num == NET_SEND_TIME) {
             continue;
+        }
         values[i++] = Int64GetDatum(unique_sql->timeInfo.TimeInfoArray[num]);
     }
     int idx = 0;
@@ -1576,6 +1582,11 @@ static void set_tuple_value(UniqueSQL* unique_sql, Datum* values, bool* nulls, i
     values[i++] = Int64GetDatum(unique_sql->hash_state.used_work_mem);
     values[i++] = Int64GetDatum(unique_sql->hash_state.spill_counts);
     values[i++] = Int64GetDatum(unique_sql->hash_state.spill_size);
+    // time Info
+    values[i++] = Int64GetDatum(unique_sql->timeInfo.TimeInfoArray[NET_SEND_TIME]);
+    for (num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+        values[i++] = Int64GetDatum(unique_sql->timeInfo.TimeInfoArray[num]);
+    }
 
     Assert(arr_size == i);
 }
@@ -1614,7 +1625,7 @@ Datum get_instr_unique_sql(PG_FUNCTION_ARGS)
 {
     FuncCallContext* funcctx = NULL;
     long num = 0;
-#define INSTRUMENTS_UNIQUE_SQL_ATTRNUM (35 + TOTAL_TIME_INFO_TYPES - 1)
+#define INSTRUMENTS_UNIQUE_SQL_ATTRNUM (35 + TOTAL_TIME_INFO_TYPES)
     CheckVersion();
     check_unique_sql_permission();
 
@@ -1695,7 +1706,7 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
      */
     if (sql == NULL || query == NULL || g_instance.stat_cxt.UniqueSQLHashtbl == NULL || !is_local_unique_sql() ||
         IsAbortedTransactionBlockState() || CheckSkipSQL(query) ||
-        u_sess->unique_sql_cxt.skipUniqueSQLCount != 0) {
+        u_sess->unique_sql_cxt.skipUniqueSQLCount != 0 || u_sess->unique_sql_cxt.skip_sql_in_open) {
         return;
     }
 
@@ -1961,7 +1972,9 @@ void SetUniqueSQLIdInBatchBindExecute(CachedPlanSource* cplan, const ParamListIn
         SetLocalUniqueSQLId(cplan->query_list);
     } else {
         for (int i = 0; i < batch_count; i++) {
-            pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
+            if (CURRENT_STMT_METRIC_HANDLE != nullptr) {
+                pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
+            }
             SetParamsFromParams(params_set[i]);
             SetLocalUniqueSQLId(cplan->query_list);
         }

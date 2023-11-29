@@ -116,7 +116,7 @@ typedef struct RelFileNodeV2 {
 } RelFileNodeV2;
 
 
-#define IsSegmentFileNode(rnode) ((rnode).bucketNode > InvalidBktId)
+#define IsSegmentFileNode(rnode) ((rnode).bucketNode > InvalidBktId && (rnode).spcNode != EXRTO_BLOCK_INFO_SPACE_OID)
 #define IsHeapFileNode(rnode)  (!IsSegmentFileNode(rnode))
 #define IsSegmentPhysicalRelNode(rNode) (IsSegmentFileNode(rNode) && (rNode).relNode <= 5)
 

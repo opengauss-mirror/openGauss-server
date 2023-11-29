@@ -49,6 +49,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/planner.h"
 #include "optimizer/predtest.h"
+#include "optimizer/prep.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
@@ -386,8 +387,11 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
                     Assert(IsA(best_path, ResultPath));
                     plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
                 }
-            } else {
+            } else if (IsA(best_path, ResultPath)) {
                 plan = (Plan*)create_result_plan(root, (ResultPath*)best_path);
+            } else {
+                Assert(IsA(best_path, Path));
+                plan = create_scan_plan(root, best_path);
             }
             break;
         case T_ProjectSet:
@@ -2667,6 +2671,28 @@ static Scan* create_indexscan_plan(
     return scan_plan;
 }
 
+static bool CheckBitmapScanQualExists(PlannerInfo *root, List *indexquals, Node *clause)
+{
+    foreach_cell (cell, indexquals) {
+        Node *node = lfirst_node(Node, cell);
+        if (equal((const void *)node, (const void *)clause)) {
+            return true;
+        }
+
+        if (IsA(node, BoolExpr)) {
+            BoolExpr *be = (BoolExpr *)node;
+            if (be->boolop != AND_EXPR) {
+                continue;
+            }
+            if (CheckBitmapScanQualExists(root, be->args, clause)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /*
  * create_bitmap_scan_plan
  *	  Returns a bitmap scan plan for the base relation scanned by 'best_path'
@@ -2717,6 +2743,9 @@ static BitmapHeapScan* create_bitmap_scan_plan(
      * the scan becomes lossy, so they have to be included in bitmapqualorig.
      */
     qpqual = NIL;
+    if (indexquals != NIL && IsA(best_path->bitmapqual, BitmapOrPath)) {
+        linitial(indexquals) = canonicalize_qual(linitial_node(Expr, indexquals), false);
+    }
     foreach (l, scan_clauses) {
         RestrictInfo* rinfo = (RestrictInfo*)lfirst(l);
         Node* clause = (Node*)rinfo->clause;
@@ -2724,7 +2753,7 @@ static BitmapHeapScan* create_bitmap_scan_plan(
         Assert(IsA(rinfo, RestrictInfo));
         if (rinfo->pseudoconstant)
             continue; /* we may drop pseudoconstants here */
-        if (list_member(indexquals, clause))
+        if (CheckBitmapScanQualExists(root, indexquals, clause))
             continue; /* simple duplicate */
         if (rinfo->parent_ec && list_member_ptr(indexECs, rinfo->parent_ec))
             continue; /* derived from same EquivalenceClass */
@@ -9250,6 +9279,12 @@ bool is_projection_capable_plan(Plan* plan)
         case T_MergeAppend:
         case T_RecursiveUnion:
         case T_Stream:
+#ifdef USE_SPQ
+        case T_Motion:
+        case T_ShareInputScan:
+        case T_Sequence:
+        case T_PartitionSelector:
+#endif
             return false;
 
         case T_PartIterator:
@@ -10697,3 +10732,10 @@ bool is_projection_capable_path(Path *path)
     }
     return true;
 }
+
+#ifdef USE_SPQ
+List* spq_make_null_eq_clause(List* joinqual, List** otherqual, List* nullinfo)
+{
+    return make_null_eq_clause(joinqual, otherqual, nullinfo);
+}
+#endif

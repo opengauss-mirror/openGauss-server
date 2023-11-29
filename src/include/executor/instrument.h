@@ -724,11 +724,15 @@ public:
     /* get ThreadInstrumentation */
     ThreadInstrumentation *getThreadInstrumentation(int idx, int planNodeId, int smpId)
     {
-        ThreadInstrumentation *threadInstr =
-#ifdef ENABLE_MULTIPLE_NODES
-            getThreadInstrumentationCN(idx, planNodeId, smpId);
+        ThreadInstrumentation *threadInstr = NULL;
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+        if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+            threadInstr = getThreadInstrumentationCN(idx, planNodeId, smpId);
+        } else {
+            threadInstr = getThreadInstrumentationDN(planNodeId, smpId);
+        }
 #else
-            getThreadInstrumentationDN(planNodeId, smpId);
+        threadInstr = getThreadInstrumentationDN(planNodeId, smpId);
 #endif /* ENABLE_MULTIPLE_NODES */
         return threadInstr;
     }

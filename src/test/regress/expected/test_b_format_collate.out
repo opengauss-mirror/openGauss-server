@@ -80,6 +80,13 @@ DETAIL:  this collation only support in B-format database
 create table t1(a blob);
 -- test B format
 \c test_collate_B
+SET b_format_behavior_compat_options = 'enable_multi_charset';
+SHOW b_format_behavior_compat_options;
+ b_format_behavior_compat_options 
+----------------------------------
+ enable_multi_charset
+(1 row)
+
 -- test create table/alter table
 drop table if exists t_collate;
 NOTICE:  table "t_collate" does not exist, skipping
@@ -980,7 +987,7 @@ select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f
 ERROR:  syntax error at or near "select"
 LINE 2: select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 ...
         ^
-select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1;
  f1 | f1 
 ----+----
  S  | S
@@ -1042,7 +1049,7 @@ select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f
 ERROR:  syntax error at or near "select"
 LINE 2: select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 ...
         ^
-select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1; --fail 
+select tab1.f1, tab3.f1 from test_join1 as tab1, test_join3 as tab3 where tab1.f1 = tab3.f1;
  f1 | f1 
 ----+----
  S  | S
@@ -1135,11 +1142,14 @@ select * from test_sep_option3 union select * from test_sep_option4 order by f1;
  Š  | Š
 (4 rows)
 
-select * from test_sep_option1 union select * from test_sep_option3;  -- fail
-ERROR:  collation mismatch between implicit collations "utf8mb4_general_ci" and "utf8mb4_bin"
-LINE 1: select * from test_sep_option1 union select * from test_sep_...
-                                                    ^
-HINT:  You can choose the collation by applying the COLLATE clause to one or both expressions.
+select * from test_sep_option1 union select * from test_sep_option3 order by f1;
+ f1 | f2 
+----+----
+ s  | s
+ ś  | ś
+ Š  | Š
+(3 rows)
+
 -- test setop
 drop table if exists test_sep_option1;
 drop table if exists test_sep_option2;
@@ -2445,6 +2455,86 @@ select distinct c3 from test_utf8mb4_bin;
  fxlP7sW8vA9hcYdKqRHLwDzRSaAjV1VrMZFYRsmjb9JpsIPdGu7Gpi6OzaOqmR                                      
 (1 row)
 
+-- test alter table convert to
+SET b_format_behavior_compat_options = 'enable_multi_charset';
+drop table if exists test_convert_to;
+NOTICE:  table "test_convert_to" does not exist, skipping
+create table test_convert_to(a text, b char(10))collate utf8mb4_general_ci;
+insert into test_convert_to values('abcd'),('中文');
+select pg_get_tabledef('test_convert_to');
+                           pg_get_tabledef                           
+---------------------------------------------------------------------
+ SET search_path = public;                                          +
+ CREATE TABLE test_convert_to (                                     +
+     a text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
+     b character(10) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                  +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"              +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+alter table test_convert_to convert to charset utf8mb4 collate utf8mb4_bin;
+select pg_get_tabledef('test_convert_to');
+                       pg_get_tabledef                        
+--------------------------------------------------------------
+ SET search_path = public;                                   +
+ CREATE TABLE test_convert_to (                              +
+     a text CHARACTER SET "UTF8" COLLATE utf8mb4_bin,        +
+     b character(10) CHARACTER SET "UTF8" COLLATE utf8mb4_bin+
+ )                                                           +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_bin"              +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+alter table test_convert_to convert to charset gbk collate gbk_bin;
+select pg_get_tabledef('test_convert_to');
+                     pg_get_tabledef                     
+---------------------------------------------------------
+ SET search_path = public;                              +
+ CREATE TABLE test_convert_to (                         +
+     a text CHARACTER SET "GBK" COLLATE gbk_bin,        +
+     b character(10) CHARACTER SET "GBK" COLLATE gbk_bin+
+ )                                                      +
+ CHARACTER SET = "GBK" COLLATE = "gbk_bin"              +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+select * from test_convert_to;
+  a   | b 
+------+---
+ abcd | 
+ 中文 | 
+(2 rows)
+
+alter table test_convert_to convert to charset default;
+select pg_get_tabledef('test_convert_to');
+                           pg_get_tabledef                           
+---------------------------------------------------------------------
+ SET search_path = public;                                          +
+ CREATE TABLE test_convert_to (                                     +
+     a text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
+     b character(10) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                  +
+ CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"              +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+select * from test_convert_to;
+  a   | b 
+------+---
+ abcd | 
+ 中文 | 
+(2 rows)
+
+create database b_ascii encoding = 0;
+\c b_ascii
+set client_encoding = utf8;
+select substring_inner('中文中文',2 ,3);
+ERROR:  invalid byte sequence for encoding "UTF8": 0xb8
+select regexp_substr('中文中文','[中]');
+ERROR:  invalid byte sequence for encoding "UTF8": 0xe4
+select substr('中文中文', 2);
+ERROR:  invalid byte sequence for encoding "UTF8": 0xb8
 \c regression
 clean connection to all force for database test_collate_A;
 clean connection to all force for database test_collate_B;

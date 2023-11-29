@@ -1,35 +1,36 @@
-\! chmod 600 @abs_srcdir@/sslcert_withpwd/*
-\! @abs_bindir@/gs_guc encrypt -M client -K Gauss@123 -D @abs_srcdir@/sslcert_withpwd/ > /dev/null 2>&1
-gs_guc encrypt -M client -K *** 
-\! @abs_bindir@/gs_guc encrypt -M server -K Gauss@123 -D @abs_srcdir@/sslcert_withpwd/ > /dev/null 2>&1
-gs_guc encrypt -M server -K *** 
-\! cp @abs_srcdir@/sslcert_withpwd/server.*  @abs_srcdir@/tmp_check/coordinator1
-\! cp @abs_srcdir@/sslcert_withpwd/client.*  @abs_srcdir@/tmp_check/coordinator1
-\! cp @abs_srcdir@/sslcert_withpwd/cacert.pem  @abs_srcdir@/tmp_check/coordinator1
+\! chmod 600 /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/*
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc encrypt -M client -K Gauss@123 -D /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/ > /dev/null 2>&1
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc encrypt -M server -K Gauss@123 -D /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/ > /dev/null 2>&1
+\! cp /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/server.*  /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1
+cp: target '/data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1' is not a directory
+\! cp /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/client.*  /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1
+cp: target '/data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1' is not a directory
+\! cp /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/cacert.pem  /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1
 \setenv PGSSLMODE prefer
 \! echo $PGSSLMODE
 prefer
-\setenv PGSSLROOTCERT @abs_srcdir@/tmp_check/coordinator1/cacert.pem
+\setenv PGSSLROOTCERT /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/cacert.pem
 \! echo $PGSSLROOTCERT
-@abs_srcdir@/tmp_check/coordinator1/cacert.pem
-\setenv PGSSLCERT @abs_srcdir@/tmp_check/coordinator1/client.crt
+/data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/cacert.pem
+\setenv PGSSLCERT /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/client.crt
 \! echo $PGSSLCERT
-@abs_srcdir@/tmp_check/coordinator1/client.crt
-\setenv PGSSLKEY @abs_srcdir@/tmp_check/coordinator1/client.key
+/data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/client.crt
+\setenv PGSSLKEY /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/client.key
 \! echo $PGSSLKEY
-@abs_srcdir@/tmp_check/coordinator1/client.key
-\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c ssl=on >/dev/null 2>&1
-\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "ssl_ca_file='cacert.pem'" >/dev/null 2>&1
-\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "ssl_cert_file='server.crt'" >/dev/null 2>&1
-\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "ssl_key_file='server.key'" >/dev/null 2>&1
-\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#hostssl    all             all             127.0.0.1/32               sha256#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
-\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
-\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
+/data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/client.key
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc set -Z coordinator -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -c ssl=on >/dev/null 2>&1
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc set -Z coordinator -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -c "ssl_ca_file='cacert.pem'" >/dev/null 2>&1
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc set -Z coordinator -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -c "ssl_cert_file='server.crt'" >/dev/null 2>&1
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc set -Z coordinator -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -c "ssl_key_file='server.key'" >/dev/null 2>&1
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#hostssl    all             all             127.0.0.1/32               sha256#g' /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/pg_hba.conf
+sed: can't read /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/pg_hba.conf: Not a directory
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_ctl stop -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_ctl start -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -Z coordinator > /dev/null
 \! sleep 5
-\! @abs_bindir@/gsql -d postgres -r -h 127.0.0.1 -p @portstring@ -W gauss@123 -c 'show ssl'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d postgres -r -h 127.0.0.1 -p 25632 -W gauss@123 -c 'show ssl'
  ssl 
 -----
- on
+ off
 (1 row)
 
 \setenv PGSSLMODE
@@ -44,31 +45,36 @@ prefer
 \setenv PGSSLKEY
 \! echo $PGSSLKEY
 
-\! sed -i 's#hostssl.*all.*all.*127.0.0.1/32.*sha256#host    all             all             127.0.0.1/32            sha256#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
-\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
-\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
-\! @abs_bindir@/gsql -d postgres -r -h 127.0.0.1 -p @portstring@ -W gauss@123 -c 'show ssl'
- ssl 
------
- on
-(1 row)
-
-\! rm -rf @abs_srcdir@/tmp_check/coordinator1/server.*
-\! rm -rf @abs_srcdir@/tmp_check/coordinator1/client.*
-\! rm -rf @abs_srcdir@/tmp_check/coordinator1/cacert.pem
-\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c  ssl=off >/dev/null 2>&1
-\! sed -i 's/^ssl_ca_file/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
-\! sed -i 's/^ssl_cert_file/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
-\! sed -i 's/^ssl_key_file/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
-\! sed -i 's#hostssl.*all.*all.*127.0.0.1/32.*sha256#host    all             all             127.0.0.1/32            sha256#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
-\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
-\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
-\! sleep 5
-\! @abs_bindir@/gsql -d postgres -h 127.0.0.1 -p @portstring@ -W gauss@123 -c 'show ssl'
+\! sed -i 's#hostssl.*all.*all.*127.0.0.1/32.*sha256#host    all             all             127.0.0.1/32            sha256#g' /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/pg_hba.conf
+sed: can't read /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/pg_hba.conf: Not a directory
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_ctl stop -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_ctl start -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d postgres -r -h 127.0.0.1 -p 25632 -W gauss@123 -c 'show ssl'
  ssl 
 -----
  off
 (1 row)
 
-\! rm -rf @abs_srcdir@/sslcert_withpwd/server.key.*
-\! rm -rf @abs_srcdir@/sslcert_withpwd/client.key.*
+\! rm -rf /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/server.*
+\! rm -rf /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/client.*
+\! rm -rf /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/cacert.pem
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_guc set -Z coordinator -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -c  ssl=off >/dev/null 2>&1
+\! sed -i 's/^ssl_ca_file/#&/' /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/postgresql.conf
+sed: can't read /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/postgresql.conf: Not a directory
+\! sed -i 's/^ssl_cert_file/#&/' /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/postgresql.conf
+sed: can't read /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/postgresql.conf: Not a directory
+\! sed -i 's/^ssl_key_file/#&/' /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/postgresql.conf
+sed: can't read /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/postgresql.conf: Not a directory
+\! sed -i 's#hostssl.*all.*all.*127.0.0.1/32.*sha256#host    all             all             127.0.0.1/32            sha256#g' /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/pg_hba.conf
+sed: can't read /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1/pg_hba.conf: Not a directory
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_ctl stop -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gs_ctl start -D /data2/jiangyan/openGauss-server/src/test/regress/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! sleep 5
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d postgres -h 127.0.0.1 -p 25632 -W gauss@123 -c 'show ssl'
+ ssl 
+-----
+ off
+(1 row)
+
+\! rm -rf /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/server.key.*
+\! rm -rf /data2/jiangyan/openGauss-server/src/test/regress/sslcert_withpwd/client.key.*

@@ -183,7 +183,25 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(multi_node_hint);
     COPY_SCALAR_FIELD(uniqueSQLId);
     COPY_SCALAR_FIELD(cause_type);
-
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(spq_session_id);
+    COPY_SCALAR_FIELD(current_id);
+    COPY_SCALAR_FIELD(enable_adaptive_scan);
+    COPY_SCALAR_FIELD(is_spq_optmized);
+    COPY_SCALAR_FIELD(numSlices);
+    if (from->numSlices > 0) {
+        newnode->slices = (PlanSlice*)palloc0(from->numSlices * sizeof(PlanSlice));
+        for (int i = 0; i < from->numSlices; i++) {
+            COPY_SCALAR_FIELD(slices[i].sliceIndex);
+            COPY_SCALAR_FIELD(slices[i].parentIndex);
+            COPY_SCALAR_FIELD(slices[i].gangType);
+            COPY_SCALAR_FIELD(slices[i].numsegments);
+            COPY_SCALAR_FIELD(slices[i].worker_idx);
+            COPY_SCALAR_FIELD(slices[i].directDispatch.isDirectDispatch);
+            COPY_NODE_FIELD(slices[i].directDispatch.contentIds);
+        }
+    }
+#endif
     /*
      * Not copy ng_queryMem to avoid memory leak in CachedPlan context,
      * and dywlm_client_manager always calls CalculateQueryMemMain to generate it.
@@ -277,7 +295,9 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(pred_total_time);
     COPY_SCALAR_FIELD(pred_max_memory);
     CopyNdpPlan(from, newnode);
-
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(spq_scan_partial);
+#endif
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 }
 
@@ -1207,6 +1227,10 @@ static void CopyJoinFields(const Join* from, Join* newnode)
     COPY_SCALAR_FIELD(optimizable);
     COPY_NODE_FIELD(nulleqqual);
     COPY_SCALAR_FIELD(skewoptimize);
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(prefetch_inner);
+    COPY_SCALAR_FIELD(is_set_op_join);
+#endif
 }
 
 /*
@@ -1361,6 +1385,10 @@ static Material* _copyMaterial(const Material* from)
     CopyPlanFields((const Plan*)from, (Plan*)newnode);
     COPY_SCALAR_FIELD(materialize_all);
     CopyMemInfoFields(&from->mem_info, &newnode->mem_info);
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(spq_strict);
+    COPY_SCALAR_FIELD(spq_shield_child_from_rescans);
+#endif
 
     return newnode;
 }
@@ -1457,6 +1485,9 @@ static Agg* _copyAgg(const Agg* from)
     CopyPlanFields((const Plan*)from, (Plan*)newnode);
 
     COPY_SCALAR_FIELD(aggstrategy);
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(aggsplittype);
+#endif
     COPY_SCALAR_FIELD(numCols);
     if (from->numCols > 0) {
         COPY_POINTER_FIELD(grpColIdx, from->numCols * sizeof(AttrNumber));
@@ -1846,6 +1877,9 @@ static VecAgg* _copyVecAgg(const VecAgg* from)
     CopyPlanFields((const Plan*)from, (Plan*)newnode);
 
     COPY_SCALAR_FIELD(aggstrategy);
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(aggsplittype);
+#endif
     COPY_SCALAR_FIELD(numCols);
     if (from->numCols > 0) {
         COPY_POINTER_FIELD(grpColIdx, from->numCols * sizeof(AttrNumber));
@@ -2236,7 +2270,9 @@ static Stream* _copyStream(const Stream* from)
     COPY_SCALAR_FIELD(stream_level);
     COPY_NODE_FIELD(origin_consumer_nodes);
     COPY_SCALAR_FIELD(is_recursive_local);
-
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(streamID);
+#endif
     return newnode;
 }
 
@@ -2294,6 +2330,10 @@ static RemoteQuery* _copyRemoteQuery(const RemoteQuery* from)
     newnode->isCustomPlan = from->isCustomPlan;
     newnode->isFQS = from->isFQS;
     COPY_NODE_FIELD(relationOids);
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(streamID);
+    COPY_SCALAR_FIELD(nodeCount);
+#endif
     return newnode;
 }
 
@@ -2563,6 +2603,7 @@ static Param* _copyParam(const Param* from)
     COPY_SCALAR_FIELD(tableOfIndexType);
     COPY_SCALAR_FIELD(recordVarTypOid);
     COPY_NODE_FIELD(tableOfIndexTypeList);
+    COPY_SCALAR_FIELD(is_bind_param);
 
     return newnode;
 }
@@ -2596,6 +2637,9 @@ static Aggref* _copyAggref(const Aggref* from)
     COPY_SCALAR_FIELD(agghas_collectfn);
     COPY_SCALAR_FIELD(aggstage);
 #endif /* PGXC */
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(aggsplittype);
+#endif
     COPY_SCALAR_FIELD(aggcollid);
     COPY_SCALAR_FIELD(inputcollid);
     COPY_NODE_FIELD(aggdirectargs);
@@ -2607,6 +2651,9 @@ static Aggref* _copyAggref(const Aggref* from)
     COPY_SCALAR_FIELD(aggkind);
     COPY_SCALAR_FIELD(agglevelsup);
     COPY_LOCATION_FIELD(location);
+    COPY_NODE_FIELD(aggargtypes);
+    COPY_SCALAR_FIELD(aggsplit);
+    COPY_SCALAR_FIELD(aggtranstype);
 
     return newnode;
 }
@@ -5532,6 +5579,7 @@ static RenameStmt* _copyRenameStmt(const RenameStmt* from)
     COPY_NODE_FIELD(objarg);
     COPY_STRING_FIELD(subname);
     COPY_STRING_FIELD(newname);
+    COPY_STRING_FIELD(newschema);
     COPY_SCALAR_FIELD(behavior);
     COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(renameTargetList);
@@ -5897,6 +5945,7 @@ static CreateSeqStmt* _copyCreateSeqStmt(const CreateSeqStmt* from)
     COPY_SCALAR_FIELD(uuid);
     COPY_SCALAR_FIELD(canCreateTempSeq);
     COPY_SCALAR_FIELD(is_large);
+    COPY_SCALAR_FIELD(missing_ok);
 
     return newnode;
 }
@@ -7394,7 +7443,137 @@ static AutoIncrement *_copyAutoIncrement(const AutoIncrement *from)
     COPY_SCALAR_FIELD(autoincout_funcid);
     return newnode;
 }
+#ifdef USE_SPQ
+static SpqSeqScan* _copySpqSeqScan(const SpqSeqScan* from)
+{
+    SpqSeqScan* newnode = makeNode(SpqSeqScan);
 
+    CopyScanFields((const Scan*)from, &newnode->scan);
+
+    newnode->isFullTableScan = from->isFullTableScan;
+    newnode->isAdaptiveScan = from->isAdaptiveScan;
+    newnode->isDirectRead = from->isDirectRead;
+
+    return newnode;
+}
+
+static SpqIndexScan* _copySpqIndexScan(const SpqIndexScan* from)
+{
+    SpqIndexScan* newnode = (SpqIndexScan *)_copyIndexScan((IndexScan *)from);
+    newnode->scan.scan.plan.type = T_SpqIndexScan;
+    return newnode;
+}
+
+static SpqIndexOnlyScan* _copySpqIndexOnlyScan(const SpqIndexOnlyScan* from)
+{
+    SpqIndexOnlyScan* newnode = (SpqIndexOnlyScan *)_copyIndexOnlyScan((IndexOnlyScan *)from);
+    newnode->scan.scan.plan.type = T_SpqIndexOnlyScan;
+    return newnode;
+}
+
+static SpqBitmapHeapScan* _copySpqBitmapHeapScan(const SpqBitmapHeapScan* from)
+{
+    SpqBitmapHeapScan* newnode = (SpqBitmapHeapScan*)_copyBitmapHeapScan((BitmapHeapScan *)from);
+    newnode->scan.scan.plan.type = T_SpqBitmapHeapScan;
+    return newnode;
+}
+
+static Motion* _copyMotion(const Motion *from)
+{
+    Motion *newnode = makeNode(Motion);
+ 
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((Plan *) from, (Plan *) newnode);
+ 
+    COPY_SCALAR_FIELD(sendSorted);
+    COPY_SCALAR_FIELD(motionID);
+ 
+    COPY_SCALAR_FIELD(motionType);
+ 
+    COPY_NODE_FIELD(hashExprs);
+    if (from->hashExprs) {
+        COPY_POINTER_FIELD(hashFuncs, list_length(from->hashExprs) * sizeof(Oid));
+    }
+ 
+    COPY_SCALAR_FIELD(numSortCols);
+    if (from->numSortCols > 0) {
+        COPY_POINTER_FIELD(sortColIdx, from->numSortCols * sizeof(AttrNumber));
+        COPY_POINTER_FIELD(sortOperators, from->numSortCols * sizeof(Oid));
+        COPY_POINTER_FIELD(collations, from->numSortCols * sizeof(Oid));
+        COPY_POINTER_FIELD(nullsFirst, from->numSortCols * sizeof(bool));
+    }
+ 
+    COPY_SCALAR_FIELD(segidColIdx);
+    COPY_SCALAR_FIELD(numHashSegments);
+ 
+    return newnode;
+}
+static Result *_copyResult(const Result *from)
+{
+    Result *newnode = makeNode(Result);
+ 
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((const Plan *) from, (Plan *) newnode);
+ 
+    /*
+     * copy remainder of node
+     */
+    COPY_NODE_FIELD(resconstantqual);
+ 
+    COPY_SCALAR_FIELD(numHashFilterCols);
+    if (from->numHashFilterCols > 0) {
+        COPY_POINTER_FIELD(hashFilterColIdx, from->numHashFilterCols * sizeof(AttrNumber));
+        COPY_POINTER_FIELD(hashFilterFuncs, from->numHashFilterCols * sizeof(Oid));
+    }
+ 
+    return newnode;
+}
+/*
+ * _copyAssertOp
+ */
+static AssertOp *_copyAssertOp(const AssertOp *from)
+{
+    AssertOp *newnode = makeNode(AssertOp);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((Plan *) from, (Plan *) newnode);
+
+    COPY_SCALAR_FIELD(errcode);
+    COPY_NODE_FIELD(errmessage);
+
+    return newnode;
+}
+ 
+static ShareInputScan *_copyShareInputScan(const ShareInputScan *from)
+{
+    ShareInputScan *newnode = makeNode(ShareInputScan);
+
+    /* copy node superclass fields */
+    CopyPlanFields((Plan *) from, (Plan *) newnode);
+    COPY_SCALAR_FIELD(cross_slice);
+    COPY_SCALAR_FIELD(share_id);
+    COPY_SCALAR_FIELD(producer_slice_id);
+    COPY_SCALAR_FIELD(this_slice_id);
+    COPY_SCALAR_FIELD(nconsumers);
+
+    return newnode;
+}
+ 
+static Sequence *_copySequence(const Sequence *from)
+{
+    Sequence *newnode = makeNode(Sequence);
+    CopyPlanFields((Plan *) from, (Plan *) newnode);
+    COPY_NODE_FIELD(subplans);
+
+    return newnode;
+}
+#endif
 static CondInfo *_copyCondInfo(const CondInfo *from)
 {
     CondInfo* newnode = makeNode(CondInfo);
@@ -7422,6 +7601,16 @@ static CharsetCollateOptions *_copyCharsetcollateOptions(const CharsetCollateOpt
     COPY_SCALAR_FIELD(cctype);
     COPY_SCALAR_FIELD(charset);
     COPY_STRING_FIELD(collate);
+    return newnode;
+}
+
+static CharsetClause *_copyCharsetClause(const CharsetClause* from)
+{
+    CharsetClause* newnode = makeNode(CharsetClause);
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(charset);
+    COPY_SCALAR_FIELD(is_binary);
+    COPY_LOCATION_FIELD(location);
     return newnode;
 }
 
@@ -7552,6 +7741,31 @@ void* copyObject(const void* from)
         case T_SeqScan:
             retval = _copySeqScan((SeqScan*)from);
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+            retval = _copySpqSeqScan((SpqSeqScan*)from);
+            break;
+        case T_AssertOp:
+            retval = _copyAssertOp((AssertOp*)from);
+            break;
+        case T_ShareInputScan:
+            retval = _copyShareInputScan((ShareInputScan*)from);
+            break;
+        case T_Sequence:
+            retval = _copySequence((Sequence*)from);
+            break;
+        case T_Result:
+            retval = _copyResult((Result*)from);
+            break;
+        case T_SpqIndexScan:
+            retval = _copySpqIndexScan((SpqIndexScan*)from);
+            break;
+        case T_SpqIndexOnlyScan:
+            retval = _copySpqIndexOnlyScan((SpqIndexOnlyScan*)from);
+        case T_SpqBitmapHeapScan:
+            retval = _copySpqBitmapHeapScan((SpqBitmapHeapScan*)from);
+            break;
+#endif
         case T_IndexScan:
             retval = _copyIndexScan((IndexScan*)from);
             break;
@@ -8808,6 +9022,7 @@ void* copyObject(const void* from)
             break;
         case T_ShowEventStmt:
             retval =node_copy_show_event_info((ShowEventStmt *)from);
+            break;
         case T_IndexHintRelationData:
             retval = _copyIndexHintRelationData((IndexHintRelationData *)from);
             break;
@@ -8826,6 +9041,14 @@ void* copyObject(const void* from)
         case T_DolphinCallStmt:
             retval = _copyDolphinCallStmt((DolphinCallStmt *)from);
             break;
+        case T_CharsetClause:
+            retval = _copyCharsetClause((CharsetClause *)from);
+            break;
+#ifdef USE_SPQ
+        case T_Motion:
+            retval = _copyMotion((Motion*)from);
+            break;;
+#endif
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("copyObject: unrecognized node type: %d", (int)nodeTag(from))));

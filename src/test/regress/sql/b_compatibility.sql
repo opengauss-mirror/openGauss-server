@@ -531,6 +531,87 @@ end;
 
 call labeltest(9);
 
+create table tb_1092829(id int);
+-- failed
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+“abel1*”:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE “label1”;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+
+-- failed
+create or replace procedure prc_2_1092829(n int)
+as
+BEGIN
+label#:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE label#;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+
+--failed
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+测试中文:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE 测试中文;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+
+-- failed
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+1_hello:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE 1_hello;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+
+-- success
+create or replace procedure prc_1092829(n int)
+as
+BEGIN
+_hello:
+loop
+n:=n-1;
+IF n<5 then
+LEAVE _hello;
+END IF;
+insert into tb_1092829 values(n);
+END loop;
+END;
+/
+
+call prc_1092829(10);
+select * from tb_1092829;
+drop function prc_1092829;
+drop table tb_1092829;
+
 --success
 create or replace procedure proc_label(n int)
 as

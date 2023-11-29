@@ -909,10 +909,12 @@ void PortalSetResultFormat(Portal portal, int nFormats, int16* formats)
     int i;
 
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef USE_SPQ
     if (StreamTopConsumerAmI()) {
         portal->streamInfo.RecordSessionInfo();
         u_sess->stream_cxt.global_obj->m_portal = portal;
     }
+#endif
 #endif
 
     /* Do nothing if portal won't return tuples */
@@ -1011,6 +1013,7 @@ bool PortalRun(
 {
     gstrace_entry(GS_TRC_ID_PortalRun);
     increase_instr_portal_nesting_level();
+    OgRecordAutoController _local_opt(EXECUTION_TIME);
 
     bool result = false;
     uint64 nprocessed;
@@ -1069,6 +1072,13 @@ bool PortalRun(
         queryDesc->plannedstmt->has_obsrel) {
         increase_rp_number();
     }
+
+#ifdef USE_SPQ
+    if (!IS_SPQ_RUNNING && queryDesc != NULL && (queryDesc->plannedstmt) != NULL &&
+        queryDesc->plannedstmt->is_spq_optmized) {
+        t_thrd.spq_ctx.spq_role = ROLE_QUERY_COORDINTOR;
+    }
+#endif /* USE_SPQ */
 
     /*
      * Set up global portal context pointers.
@@ -1282,7 +1292,8 @@ bool PortalRun(
     }
 
     /* update unique sql stat */
-    if (is_instr_top_portal() && is_unique_sql_enabled() && is_local_unique_sql()) {
+    if (((IS_UNIQUE_SQL_TRACK_TOP && is_instr_top_portal()) || IS_UNIQUE_SQL_TRACK_ALL)
+        && is_unique_sql_enabled() && is_local_unique_sql()) {
         /* Instrumentation: update unique sql returned rows(SELECT) */
         // only CN can update this counter
         if (portal->queryDesc != NULL && portal->queryDesc->estate && portal->queryDesc->estate->es_plannedstmt &&
@@ -1297,7 +1308,8 @@ bool PortalRun(
         }
 
         /* PortalRun using unique_sql_start_time as unique sql elapse start time */
-        if (IsNeedUpdateUniqueSQLStat(portal) && IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL()) {
+        if ((IsNeedUpdateUniqueSQLStat(portal) && IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL())
+            || IS_UNIQUE_SQL_TRACK_ALL) {
             instr_unique_sql_report_elapse_time(u_sess->unique_sql_cxt.unique_sql_start_time);
         }
 
@@ -1416,7 +1428,8 @@ static uint64 PortalRunSelect(Portal portal, bool forward, long count, DestRecei
              * <<IS_PGXC_COORDINATOR && !StreamTopConsumerAmI()>> means that
              * we are on DWS CN.
              */
-            if (IS_PGXC_COORDINATOR && !StreamTopConsumerAmI() && queryDesc->plannedstmt->has_obsrel &&
+            if ((IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) &&
+	        !StreamTopConsumerAmI() && queryDesc->plannedstmt->has_obsrel &&
                 u_sess->instr_cxt.obs_instr) {
                 u_sess->instr_cxt.obs_instr->insertData(queryDesc->plannedstmt->queryId);
             }
@@ -1759,6 +1772,7 @@ static void PortalRunMulti(
 {
     bool active_snapshot_set = false;
     ListCell* stmtlist_item = NULL;
+    OgRecordAutoController _local_opt(EXECUTION_TIME);
     PGSTAT_INIT_TIME_RECORD();
 #ifdef PGXC
     CombineTag combine;

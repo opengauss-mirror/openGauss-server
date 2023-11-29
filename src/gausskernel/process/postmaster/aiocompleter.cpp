@@ -612,7 +612,7 @@ static void CompltrConfig(SIGNAL_ARGS)
  */
 static void CompltrQuickDie(SIGNAL_ARGS)
 {
-    PG_SETMASK(&t_thrd.libpq_cxt.BlockSig);
+    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
     /*
      * We DO NOT want to run proc_exit() callbacks -- we're here because

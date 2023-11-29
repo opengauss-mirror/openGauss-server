@@ -1925,12 +1925,6 @@ static void inline_cte(PlannerInfo *root, CommonTableExpr *cte)
 
     (void) inline_cte_walker((Node*)root->parse, &context);
 
-    /*
-     * We would expect the reference number to be zero after inline, however, the 
-     * reference count of cte are not accurate for re-entry issues at parsing stage
-     * Until fixed, we only check for non-negative refcnt result.
-     */
-    Assert(context.refcount >= 0);
     /* Mark this CTE as inlined */
     cte->cterefcount = -1;
 }
@@ -3309,6 +3303,9 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
         case T_Stream:
         case T_PartIterator:
         case T_StartWithOp:
+#ifdef USE_SPQ
+        case T_ShareInputScan:
+#endif
             break;
 
         default:
@@ -6685,9 +6682,11 @@ static bool safe_pullup_uncorrelated_sublink_where(Node* inout_quals, Query* sub
  
     level_up_varnos = pull_varnos((Node*)subQuery->jointree, 1, true);
     if (!bms_is_empty(level_up_varnos) && bms_is_subset(level_up_varnos, *available_rels)) {
+        bms_free(level_up_varnos);
         return false;
     }
-    
+
+    bms_free(level_up_varnos);
     if (!IsA(inout_quals, OpExpr)) {
         return false;
     }
@@ -6721,9 +6720,11 @@ bool safe_pullup_op_expr_sublink(OpExpr* expr)
     // sublink should be only one
     sublinkList = pull_sublink((Node*)expr, 0, false, false);
     if (sublinkList == NULL || list_length(sublinkList) != 1) {
+        list_free_ext(sublinkList);
         return false;
     }
- 
+
+    list_free_ext(sublinkList);
     return true;
 }
 

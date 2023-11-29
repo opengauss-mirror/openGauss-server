@@ -613,7 +613,7 @@ Datum regexp_replace(PG_FUNCTION_ARGS)
     re = RE_compile_and_cache(pattern, re_flags.cflags, PG_GET_COLLATION());
     result = replace_text_regexp(src, (void*)re, r, position, occurrence);
 
-    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         PG_RETURN_NULL();
     else
         PG_RETURN_TEXT_P(result);
@@ -684,7 +684,7 @@ Datum textregexreplace_noopt(PG_FUNCTION_ARGS)
 
     result = replace_text_regexp(s, (void*)re, r, 1, occurrence);
 
-    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         PG_RETURN_NULL();
     else
         PG_RETURN_TEXT_P(result);
@@ -739,7 +739,7 @@ Datum textregexreplace(PG_FUNCTION_ARGS)
 
     result = replace_text_regexp(s, (void*)re, r, 1, occurrence);
 
-    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
         PG_RETURN_NULL();
     else
         PG_RETURN_TEXT_P(result);
@@ -1326,13 +1326,13 @@ static ArrayType* build_regexp_matches_result(regexp_matches_ctx* matchctx)
 /* return value datatype must be text */
 #define RESET_NULL_FLAG(_result)                                                   \
     do {                                                                           \
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {   \
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS && !ACCEPT_EMPTY_STR) {   \
             if ((_result) == ((Datum)0)) {                                         \
                 fcinfo->isnull = true;                                             \
             } else {                                                               \
                 text *t = DatumGetTextP((_result));                                \
                 fcinfo->isnull = false;                                            \
-                if (VARSIZE_ANY_EXHDR(t) == 0) {                                   \
+                if (VARSIZE_ANY_EXHDR(t) == 0 && !ACCEPT_EMPTY_STR) {            \
                     fcinfo->isnull = true;                                         \
                     (_result) = (Datum)0;                                          \
                 }                                                                  \
@@ -1739,7 +1739,7 @@ Datum regexp_substr_core(PG_FUNCTION_ARGS)
                                              PG_GET_COLLATION());
 
     if (ret == NULL || (VARHDRSZ == VARSIZE(ret) &&
-        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)) {
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);

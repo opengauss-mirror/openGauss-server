@@ -31,6 +31,11 @@ void GetPlanNodePlainText(
     RemoteQuery* rq = NULL;
     char* extensible_name = NULL;
     switch (nodeTag(plan)) {
+#ifdef USE_SPQ
+        case T_Result:
+            *pname = *sname = *pt_operation = "SPQ Result";
+            break;
+#endif
         case T_BaseResult:
             *pname = *sname = *pt_operation = "Result";
             break;
@@ -125,6 +130,54 @@ void GetPlanNodePlainText(
                 }
             }
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+            *pt_operation = "TABLE ACCESS";
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned Seq Scan";
+                } else {
+                    *pname = *sname = *pt_options = "Spq Seq Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned Sample Scan";
+                } else {
+                    *pname = *sname = *pt_options = "Spq Sample Scan";
+                }
+            }
+            break;
+        case T_AssertOp:
+            *pname = *sname = *pt_operation = "Assert";
+            break;
+        case T_ShareInputScan:
+            *pname = *sname = *pt_operation = "ShareInputScan";
+            break;
+        case T_Sequence:
+            *pname = *sname = *pt_operation = "Sequence";
+            break;
+        case T_SpqIndexScan:
+            *pt_operation = "INDEX";
+            if (((IndexScan*)plan)->scan.isPartTbl)
+                *pname = *sname = *pt_options = "Partitioned Index Scan";
+            else
+                *pname = *sname = *pt_options = "Spq Index Scan";
+            break;
+        case T_SpqIndexOnlyScan:
+            *pt_operation = "INDEX";
+            if (((IndexOnlyScan*)plan)->scan.isPartTbl)
+                *pname = *sname = *pt_options = "Partitioned Index Only Scan";
+            else
+                *pname = *sname = *pt_options = "Spq Index Only Scan";
+            break;
+        case T_SpqBitmapHeapScan:
+            *pt_operation = "TABLE ACCESS";
+            if (((Scan*)plan)->isPartTbl)
+                *pname = *sname = *pt_options = "Partitioned Bitmap Heap Scan";
+            else
+                *pname = *sname = *pt_options = "Spq Bitmap Heap Scan";
+            break;
+#endif
         case T_CStoreScan:
             *pt_operation = "TABLE ACCESS";
             if (!((Scan*)plan)->tablesample) {

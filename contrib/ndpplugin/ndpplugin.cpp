@@ -301,11 +301,7 @@ static bool NdpScanGetPage(NdpScanDesc ndpScan)
         Assert(req >= resp);
 
         if (ndpScan->handledBlock < ndpScan->nBlock) {
-#ifdef ENABLE_SSL
             if ((req - resp) >= NDP_MAX_AWAIT_REQUEST) {
-#else
-            if ((req - resp) >= NDP_MAX_AWAIT_REQUEST || g_ndp_instance.pageContext->Empty()) {
-#endif
                 pg_usleep(NDP_RPC_WAIT_USEC);
             } else {
                 NdpScanTryPushDownScan((HeapScanDesc)ndpScan->scan, ndpScan);
@@ -1467,6 +1463,11 @@ static void knl_u_ndp_init(knl_u_ndp_context* ndp_cxt)
 void _PG_init(void)
 {
     ereport(DEBUG2, (errmsg("init ndpplugin.")));
+
+    if (!ENABLE_DSS) {
+        ereport(DEBUG2, (errmsg("ndpplugin is not support while DMS and DSS disable.")));
+        return;
+    }
 
     pthread_mutex_lock(&g_ndp_instance.mutex);
 

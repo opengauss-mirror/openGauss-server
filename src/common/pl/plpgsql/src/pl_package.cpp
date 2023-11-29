@@ -41,8 +41,8 @@
 #include "miscadmin.h"
 #include "parser/scanner.h"
 #include "parser/parser.h"
-
-
+#include "catalog/pg_object.h"
+#include "catalog/gs_dependencies_fn.h"
 
 static void plpgsql_pkg_append_dlcell(plpgsql_pkg_HashEnt* entity);
 
@@ -54,7 +54,10 @@ extern void plpgsql_compile_error_callback(void* arg);
 
 static Node* plpgsql_bind_variable_column_ref(ParseState* pstate, ColumnRef* cref);
 static Node* plpgsql_describe_ref(ParseState* pstate, ColumnRef* cref);
-
+static void gsplsql_pkg_set_status(PLpgSQL_package* pkg, bool isSpec, bool isCreate, bool isValid, bool isRecompile,
+                                   bool pkg_spec_valid, bool pkg_body_valid);
+static void gsplsql_pkg_set_status_in_mem(PLpgSQL_package* pkg, bool is_spec, bool is_valid);
+static inline bool gsplsql_pkg_get_valid(PLpgSQL_package* pkg, bool is_spec);
 /*
  * plpgsql_parser_setup_bind		set up parser hooks for dynamic parameters
  * only support DBE_SQL.
@@ -750,7 +753,8 @@ extern PLpgSQL_package* plpgsql_pkg_HashTableLookup(PLpgSQL_pkg_hashkey* pkg_key
     }
 }
 
-static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_package* pkg, PLpgSQL_pkg_hashkey* hashkey, bool isSpec)
+static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_package* pkg,
+    PLpgSQL_pkg_hashkey* hashkey, bool isSpec, bool isCreate)
 {
     Form_gs_package pkg_struct = (Form_gs_package)GETSTRUCT(pkg_tup);
     Datum pkgsrcdatum;
@@ -819,6 +823,7 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
      */
     PLpgSQL_compile_context* curr_compile = createCompileContext(context_name);
     SPI_NESTCOMPILE_LOG(curr_compile->compile_cxt);
+    bool pkg_is_null = false;
     if (pkg == NULL) {
         pkg = (PLpgSQL_package*)MemoryContextAllocZero(
             SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(PLpgSQL_package));
@@ -830,6 +835,7 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
         pkg->proc_list = NULL;
         pkg->invalItems = NIL;
         pkg->use_count = 0;
+        pkg_is_null = true;
     }
     saved_pseudo_current_userId = u_sess->misc_cxt.Pseudo_CurrentUserId;
     u_sess->misc_cxt.Pseudo_CurrentUserId = &pkg->pkg_owner;
@@ -866,6 +872,9 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
      * most signature will not be so long originally, so we should do a strdup.
      */
     curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(pkg->pkg_cxt);
+    if (enable_plpgsql_gsdependency() && isSpec && pkg_is_null) {
+        gsplsql_prepare_gs_depend_for_pkg_compile(pkg, isCreate);
+    }
     pkg->pkg_signature = pstrdup(signature);
     pkg->pkg_searchpath = (OverrideSearchPath*)palloc0(sizeof(OverrideSearchPath));
     pkg->pkg_searchpath->addCatalog = true;
@@ -1084,7 +1093,7 @@ List* GetPackageListName(const char* pkgName, const Oid nspOid)
 /*
  * compile and init package by package oid
  */
-PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec, bool isCreate)
+PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec, bool isCreate, bool isRecompile)
 {
 #ifdef ENABLE_MULTIPLE_NODES
         ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
@@ -1095,6 +1104,8 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
     PLpgSQL_package* pkg = NULL;
     PLpgSQL_pkg_hashkey hashkey;
     bool pkg_valid = false;
+    bool pkg_spec_valid = true;
+    bool pkg_body_valid = true;
     /*
      * Lookup the gs_package tuple by Oid; we'll need it in any case
      */
@@ -1111,12 +1122,33 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
     }
     pkg_struct = (Form_gs_package)GETSTRUCT(pkg_tup);
     hashkey.pkgOid = pkgOid;
+    if (enable_plpgsql_gsdependency_guc()) {
+        if (isCreate) {
+            u_sess->plsql_cxt.need_create_depend = true;
+        } else {
+            /**
+             * only check for pkg need recompile or not,
+             * flag u_sess->plsql_cxt.need_create_depend would be set under ddl
+             */
+            if (isSpec) {
+                pkg_spec_valid = GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGSPEC);
+            } else {
+                pkg_body_valid = GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGBODY);
+            }
+        }
+    }
     pkg = plpgsql_pkg_HashTableLookup(&hashkey);
-
+    if ((!pkg_body_valid || !pkg_spec_valid) && pkg != NULL &&
+         !u_sess->plsql_cxt.need_create_depend && u_sess->SPI_cxt._connected >= 0 &&
+         !isRecompile && !u_sess->plsql_cxt.during_compile) {
+        pkg->is_need_recompile = true;
+    }
+    bool pkg_status = true;
     if (pkg != NULL) {
         Assert(pkg->pkg_oid == pkgOid);
-        if (pkg->pkg_xmin == HeapTupleGetRawXmin(pkg_tup) &&
-            ItemPointerEquals(&pkg->pkg_tid, &pkg_tup->t_self)) {
+        pkg_status = pkg->pkg_xmin == HeapTupleGetRawXmin(pkg_tup) &&
+            ItemPointerEquals(&pkg->pkg_tid, &pkg_tup->t_self) && !isRecompile && !pkg->is_need_recompile;
+        if (pkg_status) {
                 pkg_valid = true;
         } else {
             /* need reuse pkg slot in hash table later, we need clear all refcount for this pkg and delete it here */
@@ -1126,24 +1158,33 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
     }
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     Oid old_value = saveCallFromPkgOid(pkgOid);
+    int oidCompileStatus = getCompileStatus();
+    bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
+    bool save_curr_status = GetCurrCompilePgObjStatus();
+    bool save_is_pkg_compile = u_sess->plsql_cxt.is_pkg_compile;
     PG_TRY();
     {
+        SetCurrCompilePgObjStatus(true);
         if (!pkg_valid) {
             pkg = NULL;
-            pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, true);
+            pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, true, isCreate);
+            gsplsql_pkg_set_status_in_mem(pkg, true, GetCurrCompilePgObjStatus());
 #ifndef ENABLE_MULTIPLE_NODES
-            PackageInit(pkg, isCreate);
+            PackageInit(pkg, isCreate, isSpec);
 #endif
             if (!isSpec && pkg != NULL) {
-                pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, false);
+                gsplsql_pkg_set_status(pkg, true, false, GetCurrCompilePgObjStatus(), false,
+                        pkg_spec_valid, pkg_body_valid);
+                pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, false, isCreate);
                 if (pkg == NULL) {
                     ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("package %u not found", pkgOid)));
                 }
+                gsplsql_pkg_set_status_in_mem(pkg, false, GetCurrCompilePgObjStatus());
                 ReleaseSysCache(pkg_tup);
                 pkg_tup = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
-                PackageInit(pkg, isCreate);
+                PackageInit(pkg, isCreate, isSpec);
 #endif
             } else if(!isSpec && pkg == NULL) {
                 ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
@@ -1151,38 +1192,60 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
             }
         } else {
             if (!pkg->is_bodycompiled && !isSpec) {
-                pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, false);
+                pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, false, isCreate);
+                gsplsql_pkg_set_status_in_mem(pkg, false, GetCurrCompilePgObjStatus());
+            }  else {
+                if (pkg != NULL) {
+                    bool temp_pkg_valid = gsplsql_pkg_get_valid(pkg, isSpec);
+                    UpdateCurrCompilePgObjStatus(temp_pkg_valid);
+                    if (!temp_pkg_valid) {
+                        ereport(LOG, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
+                                      errmsg("In nested compilation, package %s is invalid.", pkg->pkg_signature)));
+                    }
+                }
             }
-        
             /* package must be compiled befor init */
 #ifndef ENABLE_MULTIPLE_NODES
             if (pkg != NULL) {
-                PackageInit(pkg, isCreate);
+                PackageInit(pkg, isCreate, isSpec);
             } else {
                 ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("package spec %u not found", pkgOid))); 
             }
 #endif
         }
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        u_sess->plsql_cxt.is_pkg_compile = save_is_pkg_compile;
     }
     PG_CATCH();
     {
+        SetCurrCompilePgObjStatus(save_curr_status);
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        u_sess->plsql_cxt.is_pkg_compile = save_is_pkg_compile;
 #ifndef ENABLE_MULTIPLE_NODES
         bool insertError = u_sess->attr.attr_common.plsql_show_all_error ||
                                 !u_sess->attr.attr_sql.check_function_bodies;
         if (insertError) {
             InsertError(pkgOid);
         }
-#endif
         popToOldCompileContext(save_compile_context);
+        CompileStatusSwtichTo(oidCompileStatus);
+#endif
         PG_RE_THROW();
     }
     PG_END_TRY();
+    if (enable_plpgsql_gsdependency_guc() && !pkg_valid) {
+        gsplsql_complete_gs_depend_for_pkg_compile(pkg, isCreate, isRecompile);
+    }
     if (HeapTupleIsValid(pkg_tup)) {
         ReleaseSysCache(pkg_tup);
         pkg_tup = NULL;
     }
     restoreCallFromPkgOid(old_value);
+    gsplsql_pkg_set_status(pkg, isSpec, isCreate, GetCurrCompilePgObjStatus(), isRecompile,
+                           pkg_spec_valid, pkg_body_valid);
+    UpdateCurrCompilePgObjStatus(save_curr_status);
+    pkg->is_need_recompile = false;
     /*
      * Finally return the compiled function
      */
@@ -1659,4 +1722,85 @@ void InsertErrorMessage(const char* message, int yyloc, bool isQueryString, int 
         lines = GetProcedureLineNumberInPackage(t_thrd.postgres_cxt.debug_query_string, yyloc);
     }
     addErrorList(message, lines);
+}
+
+static inline bool gsplsql_pkg_get_valid(PLpgSQL_package* pkg, bool is_spec)
+{
+    if (is_spec) {
+        return (pkg->status & PACKAGE_SPEC_VALID) == PACKAGE_SPEC_VALID;
+    }
+    return (pkg->status & PACKAGE_BODY_VALID) == PACKAGE_BODY_VALID;;
+}
+
+static void gsplsql_pkg_set_status_in_mem(PLpgSQL_package* pkg, bool is_spec, bool is_valid)
+{
+    if (pkg == NULL) {
+        return;
+    }
+    if (is_spec) {
+        if (is_valid) {
+            pkg->status |= PACKAGE_SPEC_VALID;
+        } else {
+            pkg->status &= PACKAGE_SPEC_INVALID;
+        }
+    } else {
+        if (is_valid) {
+            pkg->status |= PACKAGE_BODY_VALID;
+        } else {
+            pkg->status &= PACKAGE_BODY_INVALID;
+        }
+    }
+}
+
+static void gsplsql_pkg_set_status(PLpgSQL_package* pkg, bool isSpec, bool isCreate, bool isValid, bool isRecompile,
+                                   bool pkg_spec_valid, bool pkg_body_valid)
+{
+    gsplsql_pkg_set_status_in_mem(pkg, isSpec, GetCurrCompilePgObjStatus());
+    if (!enable_plpgsql_gsdependency_guc() || pkg == NULL) {
+        return;
+    }
+    if (isSpec) {
+        if (pkg_spec_valid != isValid) {
+            SetPgObjectValid(pkg->pkg_oid, OBJECT_TYPE_PKGSPEC, isValid);
+            if (!isValid) {
+                SetPgObjectValid(pkg->pkg_oid, OBJECT_TYPE_PKGBODY, isValid);
+            }
+            HeapTuple tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkg->pkg_oid));
+            if (!HeapTupleIsValid(tup)) {
+                ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                                errmsg("cache lookup failed for package %u, while compile package", pkg->pkg_oid),
+                                errdetail("cache lookup failed"),
+                                errcause("System error"),
+                                erraction("Drop or rebuild the package")));
+            }
+            bool is_null;
+            (void)SysCacheGetAttr(PACKAGEOID, tup, Anum_gs_package_pkgbodydeclsrc, &is_null);
+            if (is_null || !isValid) {
+                gsplsql_set_pkg_func_status(pkg->namespaceOid, pkg->pkg_oid, isValid);
+            }
+            ReleaseSysCache(tup);
+        }
+    } else {
+        if (pkg_body_valid != isValid) {
+            bool spec_status = gsplsql_pkg_get_valid(pkg, true);
+            if (!spec_status && isValid) {
+                spec_status = isValid;
+            }
+            SetPgObjectValid(pkg->pkg_oid, OBJECT_TYPE_PKGSPEC, spec_status);
+            SetPgObjectValid(pkg->pkg_oid, OBJECT_TYPE_PKGBODY, isValid);
+            gsplsql_set_pkg_func_status(pkg->namespaceOid, pkg->pkg_oid, isValid);
+        }
+    }
+    if (isValid) {
+        return;
+    }
+    if (isCreate) {
+        ereport(WARNING, (errmodule(MOD_PLSQL),
+                        errmsg("Package %screated with compilation erors.", isSpec ? "" : "Body ")));
+    } else if (isRecompile) {
+        ereport(WARNING, (errmodule(MOD_PLSQL),
+                        errmsg("Package %s %srecompile with compilation erors.",
+                               pkg->pkg_signature, isSpec ? "" : "Body ")));
+    }
+    return;
 }

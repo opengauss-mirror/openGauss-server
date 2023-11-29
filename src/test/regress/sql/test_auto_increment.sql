@@ -1568,6 +1568,136 @@ INSERT INTO test_autoinc_batch_copy VALUES(DEFAULT, 1);
 SELECT col1,col2 FROM test_autoinc_batch_copy ORDER BY 1;
 
 drop table test_autoinc_batch_copy;
+
+-- upsert not auto_increment column
+CREATE TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 1 ), ( 2 ), ( 3 )
+ON DUPLICATE KEY UPDATE action = 'update';
+SELECT LAST_INSERT_ID(); -- 3
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 4 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3 4
+drop table test_autoinc_upsert;
+-- upsert auto_increment 3
+CREATE TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 2 ), ( 3 )
+ON DUPLICATE KEY UPDATE id = '3';
+SELECT LAST_INSERT_ID(); -- 4
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 3 4
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 4 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 3 4 5
+drop table test_autoinc_upsert;
+-- upsert auto_increment 2
+CREATE TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 2 ), ( 3 )
+ON DUPLICATE KEY UPDATE id = '2';
+SELECT LAST_INSERT_ID(); -- 3
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 4 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3 4
+drop table test_autoinc_upsert;
+-- upsert auto_increment 5
+CREATE TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 2 ), ( 3 ), ( 4 )
+ON DUPLICATE KEY UPDATE id = '5';
+SELECT LAST_INSERT_ID(); -- 6
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 5 6 7
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 5 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 5 6 7 8
+drop table test_autoinc_upsert;
+-- temp table upsert not auto_increment column
+CREATE TEMPORARY TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 1 ), ( 2 ), ( 3 )
+ON DUPLICATE KEY UPDATE action = 'update';
+SELECT LAST_INSERT_ID(); -- 3
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 4 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3 4
+drop table test_autoinc_upsert;
+-- upsert auto_increment 3
+CREATE TEMPORARY TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 2 ), ( 3 )
+ON DUPLICATE KEY UPDATE id = '3';
+SELECT LAST_INSERT_ID(); -- 4
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 3 4
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 4 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 3 4 5
+drop table test_autoinc_upsert;
+-- upsert auto_increment 2
+CREATE TEMPORARY TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 2 ), ( 3 )
+ON DUPLICATE KEY UPDATE id = '2';
+SELECT LAST_INSERT_ID(); -- 3
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 4 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 2 3 4
+drop table test_autoinc_upsert;
+-- upsert auto_increment 5
+CREATE TEMPORARY TABLE test_autoinc_upsert ( id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY( ID ),
+val INT NOT NULL, UNIQUE( val ),
+test_autoinc_upsert INT DEFAULT 1,
+action varchar( 10 ) DEFAULT 'insert',
+comment varchar( 30 ) );
+INSERT INTO test_autoinc_upsert ( val ) VALUES ( 1 ), ( 2 ) ON DUPLICATE KEY UPDATE action = 'update';
+SELECT * FROM test_autoinc_upsert ORDER BY 2;
+INSERT INTO test_autoinc_upsert (val )
+VALUES ( 2 ), ( 3 ), ( 4 )
+ON DUPLICATE KEY UPDATE id = '5';
+SELECT LAST_INSERT_ID(); -- 6
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 5 6 7
+INSERT INTO test_autoinc_upsert (val ) VALUES ( 5 );
+SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 5 6 7 8
+drop table test_autoinc_upsert;
+
 \c regression
 clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;

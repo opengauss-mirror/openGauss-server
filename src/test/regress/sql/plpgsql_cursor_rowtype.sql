@@ -694,6 +694,106 @@ set behavior_compat_options='';
 
 drop procedure check_compile;
 
+--游标依赖row type，后续alter type
+create type foo as (a int, b int);
+
+--游标依赖type，alter type报错
+begin;
+declare c cursor for select (i,2^30)::foo from generate_series(1,10) i;
+fetch c;
+fetch c;
+alter type foo alter attribute b type text;--error
+end;
+
+--第二次开始从缓存中获取type
+begin;
+cursor c for select (i,2^30)::foo from generate_series(1,10) i;
+fetch c;
+fetch c;
+alter type foo alter attribute b type text;--error
+end;
+
+--close后，可以成功alter
+begin;
+declare c cursor for select (i,2^30)::foo from generate_series(1,10) i;
+fetch c;
+fetch c;
+close c;
+alter type foo alter attribute b type text;--success
+declare c cursor for select (i,2^30)::foo from generate_series(1,10) i;
+fetch c;
+fetch c;
+rollback;
+
+begin;
+cursor c for select (i,2^30)::foo from generate_series(1,10) i;
+close c;
+alter type foo alter attribute b type text;--success
+end;
+
+--多个游标依赖，只关闭一个
+begin;
+cursor c1 for select (i,2^30)::foo from generate_series(1,10) i;
+cursor c2 for select (i,2^30)::foo from generate_series(1,10) i;
+close c1;
+alter type foo alter attribute b type text;--error
+end;
+
+--多个游标依赖，都关闭
+begin;
+cursor c1 for select (i,2^30)::foo from generate_series(1,10) i;
+cursor c2 for select (i,2^30)::foo from generate_series(1,10) i;
+close c1;
+close c2;
+alter type foo alter attribute b type text;--success
+end;
+
+--WITH HOLD游标，事务结束继续保留
+begin;
+cursor c3 WITH HOLD for select (i,2^30)::foo from generate_series(1,10) i;
+fetch c3;
+end;
+fetch c3;
+alter type foo alter attribute b type text;--success
+fetch c3;
+close c3;
+
+---- 不在 TRANSACTION Block里的游标声明导致 core的问题
+--游标依赖row type，后续alter type
+drop type if exists type_cursor_bugfix_0001;
+create type type_cursor_bugfix_0001 as (a int, b int);
+
+--游标依赖type，alter type报错
+begin;
+declare c5 cursor for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+fetch c5;
+fetch c5;
+alter type type_cursor_bugfix_0001 alter attribute b type text;--error
+end;
+/
+
+--close后，可以成功alter
+begin;
+declare c7 cursor for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+fetch c7;
+fetch c7;
+close c7;
+alter type type_cursor_bugfix_0001 alter attribute b type text;--success
+declare c8 cursor for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+fetch c8;
+fetch c8;
+rollback;
+/
+
+begin;
+cursor c9 for select (i,2^30)::type_cursor_bugfix_0001 from generate_series(1,10) i;
+close c9;
+alter type type_cursor_bugfix_0001 alter attribute b type text;--success
+end;
+
+drop type if exists type_cursor_bugfix_0001;
+
+
 ----  clean  ----
 drop package pck1;
 drop package pck2;

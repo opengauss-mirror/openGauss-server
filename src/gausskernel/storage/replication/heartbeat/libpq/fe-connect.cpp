@@ -34,12 +34,14 @@
 #define SOCK_ERRNO errno
 #define SOCK_ERRNO_SET(e) (errno = (e))
 
+#ifndef FREE_AND_RESET
 #define FREE_AND_RESET(ptr) do { \
     if (NULL != (ptr)) { \
         free(ptr);       \
         (ptr) = NULL;    \
     }                    \
 } while (0)
+#endif
 
 namespace PureLibpq {
 typedef struct PQconninfoOption {
@@ -380,21 +382,21 @@ static bool parseConnParam(const char *conninfo, ConnParam *param)
     tmp = conninfo_getval(connOptions, "host");
     if (tmp == NULL) {
         ereport(COMMERROR, (errmsg("The remote host is NULL.")));
-        goto OUT;
+        goto OUTCONN;
     }
     param->remoteIp = pstrdup(tmp);
 
     tmp = conninfo_getval(connOptions, "port");
     if (tmp == NULL) {
         ereport(COMMERROR, (errmsg("The remote port is NULL.")));
-        goto OUT;
+        goto OUTCONN;
     }
     param->remotePort = atoi(tmp);
 
     tmp = conninfo_getval(connOptions, "localhost");
     if (tmp == NULL) {
         ereport(COMMERROR, (errmsg("The local host is NULL.")));
-        goto OUT;
+        goto OUTCONN;
     }
     param->localIp = pstrdup(tmp);
 
@@ -410,7 +412,7 @@ static bool parseConnParam(const char *conninfo, ConnParam *param)
 
     ret = true;
 
-OUT:
+OUTCONN:
     /*
      * Free the option info - all is in conn now
      */

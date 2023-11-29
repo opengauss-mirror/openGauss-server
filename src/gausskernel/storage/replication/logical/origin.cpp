@@ -438,7 +438,7 @@ Size ReplicationOriginShmemSize(void)
      * we keep the replay state of *remote* transactions. But for now it seems
      * sufficient to reuse it, lest we introduce a separate guc.
      */
-    if (g_instance.attr.attr_storage.max_replication_slots == 0)
+    if (g_instance.attr.attr_storage.max_replication_slots == 0 || ENABLE_DMS)
         return size;
 
     size = add_size(size, offsetof(ReplicationStateShmStruct, states));
@@ -520,7 +520,7 @@ void CheckPointReplicationOrigin(void)
     pg_crc32c crc;
     struct stat st;
 
-    if (g_instance.attr.attr_storage.max_replication_slots == 0) {
+    if (g_instance.attr.attr_storage.max_replication_slots == 0 || ENABLE_DMS) {
         return;
     }
 
@@ -645,7 +645,7 @@ void StartupReplicationOrigin(void)
     pg_crc32c file_crc;
     pg_crc32c crc;
 
-    if (g_instance.attr.attr_storage.max_replication_slots == 0)
+    if (g_instance.attr.attr_storage.max_replication_slots == 0 || ENABLE_DMS)
         return;
 
     INIT_CRC32C(crc);
@@ -962,6 +962,28 @@ static void ReplicationOriginExitCleanup(int code, Datum arg)
         cv = &u_sess->reporigin_cxt.curRepState->orginCV;
         mutex = &u_sess->reporigin_cxt.curRepState->originMutex;
         u_sess->reporigin_cxt.curRepState->acquired_by = 0;
+
+        /*
+         * For table sync worker, clean the origin status when thread exit.
+         * Otherwise it will remain if worker exit abnormally.
+         */
+        if (t_thrd.applyworker_cxt.curWorker && AM_TABLESYNC_WORKER) {
+            /* first WAL log */
+            {
+                xl_replorigin_drop xlrec;
+
+                xlrec.node_id = u_sess->reporigin_cxt.originId;
+                XLogBeginInsert();
+                XLogRegisterData((char *)(&xlrec), sizeof(xlrec));
+                XLogInsert(RM_REPLORIGIN_ID, XLOG_REPLORIGIN_DROP);
+            }
+
+            /* then reset the in-memory entry */
+            u_sess->reporigin_cxt.curRepState->roident = InvalidRepOriginId;
+            u_sess->reporigin_cxt.curRepState->remote_lsn = InvalidXLogRecPtr;
+            u_sess->reporigin_cxt.curRepState->local_lsn = InvalidXLogRecPtr;
+        }
+        
         u_sess->reporigin_cxt.curRepState = NULL;
     }
 

@@ -107,6 +107,9 @@ extern int SPI_execute_snapshot(SPIPlanPtr plan, Datum* Values, const char* Null
 extern int SPI_execute_with_args(const char* src, int nargs, Oid* argtypes, Datum* Values, const char* Nulls,
     bool read_only, long tcount, Cursor_Data* cursor_data, parse_query_func parser = GetRawParser());
 extern SPIPlanPtr SPI_prepare(const char* src, int nargs, Oid* argtypes, parse_query_func parser = GetRawParser());
+#ifdef USE_SPQ
+extern SPIPlanPtr SPI_prepare_spq(const char* src, int nargs, Oid* argtypes, parse_query_func parser = GetRawParser());
+#endif
 extern SPIPlanPtr SPI_prepare_cursor(const char* src, int nargs, Oid* argtypes, int cursorOptions, parse_query_func parser = GetRawParser());
 extern SPIPlanPtr SPI_prepare_params(const char* src, ParserSetupHook parserSetup, void* parserSetupArg, int cursorOptions, parse_query_func parser = GetRawParser());
 extern int SPI_keepplan(SPIPlanPtr plan);
@@ -132,6 +135,7 @@ extern char* SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber);
 extern Datum SPI_getbinval(HeapTuple tuple, TupleDesc tupdesc, int fnumber, bool* isnull);
 extern char* SPI_gettype(TupleDesc tupdesc, int fnumber);
 extern Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber);
+extern Oid SPI_getcollation(TupleDesc tupdesc, int fnumber);
 extern char* SPI_getrelname(Relation rel);
 extern char* SPI_getnspname(Relation rel);
 extern void* SPI_palloc(Size size);

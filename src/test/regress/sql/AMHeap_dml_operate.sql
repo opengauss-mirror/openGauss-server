@@ -303,7 +303,7 @@ SET ENABLE_MERGEJOIN = ON;
 SET ENABLE_NESTLOOP = OFF;
 SET ENABLE_HASHJOIN = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
+EXPLAIN (COSTS OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
 SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) order by 1, 2, 3 limit 10;
 
 drop table partition_heap_test_t1;
@@ -336,7 +336,7 @@ SET ENABLE_MERGEJOIN = ON;
 SET ENABLE_NESTLOOP = OFF;
 SET ENABLE_HASHJOIN = OFF;
 
-EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
+EXPLAIN (COSTS OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
 SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) order by 1, 2, 3;
 
 drop table partition_heap_test_t1;

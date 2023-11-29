@@ -459,7 +459,7 @@ void barrier_redo(XLogReaderState* record)
     /* Nothing to do */
     XLogRecPtr barrierLSN = record->EndRecPtr;
     char* barrierId = XLogRecGetData(record);
-    if (IS_HADR_BARRIER(barrierId) && IS_DISASTER_RECOVER_MODE) {
+    if (IS_HADR_BARRIER(barrierId) && IS_MULTI_DISASTER_RECOVER_MODE) {
         ereport(WARNING, (errmsg("The HADR barrier %s is not for streaming standby cluster", barrierId)));
         return;
     }
@@ -496,7 +496,7 @@ void barrier_redo(XLogReaderState* record)
             t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo = csn + 1;
     }
 
-    if (!IS_DISASTER_RECOVER_MODE || XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
+    if (!IS_MULTI_DISASTER_RECOVER_MODE || XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
         XLByteLT(barrierLSN, t_thrd.xlog_cxt.minRecoveryPoint) ||
         t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired) {
         return;
@@ -1047,7 +1047,7 @@ static void barrier_redo_pause(char* barrierId)
             RedoInterruptCallBack();
             if (IS_OBS_DISASTER_RECOVER_MODE) {
                 update_recovery_barrier();
-            } else if (IS_DISASTER_RECOVER_MODE) {
+            } else if (IS_MULTI_DISASTER_RECOVER_MODE) {
                 RequestXLogStreamForBarrier();
             }
             ereport(DEBUG4, ((errmodule(MOD_REDO), errcode(ERRCODE_LOG), 

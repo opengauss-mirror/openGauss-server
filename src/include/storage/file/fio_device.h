@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <pthread.h> 
 #include "storage/dss/fio_dss.h"
 #include "storage/file/fio_device_com.h"
 
@@ -94,40 +95,117 @@ static inline int close_dev(int fd)
     }
 }
 
+typedef struct g_dss_io_stat {
+    int read_bytes;
+    unsigned long long write_bytes;
+    unsigned long long read_write_count;
+    bool is_ready_for_stat;
+    pthread_mutex_t lock;
+    g_dss_io_stat() {
+        pthread_mutex_init(&lock, NULL);
+        is_ready_for_stat = false;
+        read_bytes = 0;
+        write_bytes = 0;
+        read_write_count = 0;
+    }
+    ~g_dss_io_stat() {
+        pthread_mutex_destroy(&lock);
+    }
+} g_dss_io_stat;
+
+extern g_dss_io_stat g_dss_io_stat_var;
+/*Initialize global variable*/
+static inline void init_dss_io_stat()
+{
+    pthread_mutex_lock(&g_dss_io_stat_var.lock);
+    g_dss_io_stat_var.is_ready_for_stat = true;
+    g_dss_io_stat_var.read_bytes = 0;
+    g_dss_io_stat_var.write_bytes = 0;
+    g_dss_io_stat_var.read_write_count = 0;
+    
+}
+
+#define KB 1024
+/*
+* duration: statistical duration
+* kB_read: total read kilobyte during the time
+* kB_write: total write kilobyte during the time
+* io_count: total read and write count
+*/
+static inline void get_dss_io_stat(int duration, unsigned long long *kB_read, unsigned long long *kB_write, int *io_count)
+{
+    sleep(duration);
+    if (kB_read) {
+        *kB_read = g_dss_io_stat_var.read_bytes / duration / KB;
+    }
+    if (kB_write) {
+        *kB_write = g_dss_io_stat_var.write_bytes / duration / KB;
+    }
+    if (io_count) {
+        *io_count = g_dss_io_stat_var.read_write_count;
+    }
+    g_dss_io_stat_var.is_ready_for_stat = false;
+    pthread_mutex_unlock(&g_dss_io_stat_var.lock);
+}
+
 static inline ssize_t read_dev(int fd, void *buf, size_t count)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_read_file(fd, buf, count);
+        ret = dss_read_file(fd, buf, count);
     } else {
-        return read(fd, buf, count);
+        ret = read(fd, buf, count);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.read_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline ssize_t pread_dev(int fd, void *buf, size_t count, off_t offset)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_pread_file(fd, buf, count, offset);
+        ret = dss_pread_file(fd, buf, count, offset);
     } else {
-        return pread(fd, buf, count, offset);
+        ret = pread(fd, buf, count, offset);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.read_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline ssize_t write_dev(int fd, const void *buf, size_t count)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_write_file(fd, buf, count);
+        ret = dss_write_file(fd, buf, count);
     } else {
-        return write(fd, buf, count);
+        ret = write(fd, buf, count);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.write_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline ssize_t pwrite_dev(int fd, const void *buf, size_t count, off_t offset)
 {
+    ssize_t ret = 0;
     if (is_dss_fd(fd)) {
-        return dss_pwrite_file(fd, buf, count, offset);
+        ret = dss_pwrite_file(fd, buf, count, offset);
     } else {
-        return pwrite(fd, buf, count, offset);
+        ret = pwrite(fd, buf, count, offset);
     }
+    if (g_dss_io_stat_var.is_ready_for_stat) {
+        g_dss_io_stat_var.write_bytes += count;
+        g_dss_io_stat_var.read_write_count += 1;
+    }
+    return ret;
 }
 
 static inline off_t lseek_dev(int fd, off_t offset, int whence)
@@ -166,10 +244,10 @@ static inline int fallocate_dev(int fd, int mode, off_t offset, off_t len)
 static inline int access_dev(const char *pathname, int mode)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_file(pathname) && !dss_exist_dir(pathname)) {
+        if (dss_access_file(pathname, mode) != GS_SUCCESS) {
             return -1;
         }
-        return dss_access_file(pathname, mode);
+        return 0;
     } else {
         return access(pathname, mode);
     }
@@ -215,7 +293,8 @@ static inline int symlink_dev(const char *target, const char *linkpath)
 static inline ssize_t readlink_dev(const char *pathname, char *buf, size_t bufsiz)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_link(pathname)) {
+        struct stat st;
+        if (dss_lstat_file(pathname, &st) != GS_SUCCESS || !S_ISLNK(st.st_mode)) {
             return -1;
         }
 
@@ -249,11 +328,13 @@ static inline int unlink_dev(const char *pathname)
 static inline int lstat_dev(const char * pathname, struct stat * statbuf)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_file(pathname) && !dss_exist_dir(pathname)) {
-            errno = ENOENT;
+        if (dss_lstat_file(pathname, statbuf) != GS_SUCCESS) {
+            if (errno == ERR_DSS_FILE_NOT_EXIST) {
+                errno = ENOENT;
+            }
             return -1;
         }
-        return dss_lstat_file(pathname, statbuf);
+        return GS_SUCCESS;
     } else {
         return lstat(pathname, statbuf);
     }
@@ -262,11 +343,13 @@ static inline int lstat_dev(const char * pathname, struct stat * statbuf)
 static inline int stat_dev(const char *pathname, struct stat *statbuf)
 {
     if (is_dss_file(pathname)) {
-        if (!dss_exist_file(pathname) && !dss_exist_dir(pathname)) {
-            errno = ENOENT;
+        if (dss_stat_file(pathname, statbuf) != GS_SUCCESS) {
+            if (errno == ERR_DSS_FILE_NOT_EXIST) {
+                errno = ENOENT;
+            }
             return -1;
         }
-        return dss_stat_file(pathname, statbuf);
+        return GS_SUCCESS;
     } else {
         return stat(pathname, statbuf);
     }
@@ -346,6 +429,16 @@ static inline int fseek_dev(FILE *stream, long offset, int whence)
         return dss_fseek_file(stream, offset, whence);
     } else {
         return fseek(stream, offset, whence);
+    }
+}
+
+static inline int fseeko_dev(FILE *stream, long offset, int whence)
+{
+    DSS_STREAM *dss_stream = (DSS_STREAM *)stream;
+    if (unlikely(dss_stream->magic_head == DSS_MAGIC_NUMBER)) {
+        return dss_fseek_file(stream, offset, whence);
+    } else {
+        return fseeko(stream, offset, whence);
     }
 }
 
@@ -522,6 +615,7 @@ static inline int closedir_dev(DIR *dirp)
 #define fread(ptr, size, nmemb, stream) fread_dev((ptr), (size), (nmemb), (stream))
 #define fwrite(ptr, size, nmemb, stream) fwrite_dev((ptr), (size), (nmemb), (stream))
 #define fseek(stream, offset, whence) fseek_dev((stream), (offset), (whence))
+#define fseeko(stream, offset, whence) fseeko_dev((stream), (offset), (whence))
 #define ftell(stream) ftell_dev((stream))
 #define fflush(stream) fflush_dev((stream))
 #define feof(stream) feof_dev((stream))

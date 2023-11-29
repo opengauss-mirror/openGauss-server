@@ -64,6 +64,7 @@
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_attrdef.h"
+#include "catalog/pg_partition.h"
 #include "libpq/libpq-fs.h"
 #include "libpq/libpq-int.h"
 #include "catalog/pgxc_node.h"
@@ -248,6 +249,7 @@ const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
+const uint32 RB_OBJECT_VERSION_NUM = 92831;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -837,6 +839,8 @@ int main(int argc, char** argv)
         exit_horribly(NULL, "%s set uppercase_attribute_name to off failed.\n", progname);
     }
 #endif
+
+    fout->workingVersionNum = GetVersionNumFromServer(fout);
 
     if (CheckIfStandby(fout)) {
         (void)remove(filename);
@@ -2333,9 +2337,10 @@ static void selectDumpableTable(Archive* fout, TableInfo* tbinfo)
     /*
      * skipping recycle bin object
      */
-    if (GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
+    if (tbinfo->dobj.dump && GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
         IsRbObject(fout, tbinfo->dobj.catId.tableoid, tbinfo->dobj.catId.oid, tbinfo->dobj.name)) {
         tbinfo->dobj.dump = false;
+        return;
     }
 }
 
@@ -2355,20 +2360,6 @@ static void selectDumpableTable(Archive* fout, TableInfo* tbinfo)
  */
 static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
 {
-    /*
-     * Do not dump type defined by package.
-     */
-    if (GetVersionNum(fout) >= PACKAGE_ENHANCEMENT &&
-        IsPackageObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid)) {
-        tyinfo->dobj.dump = false;
-        return;
-    }
-
-    if (GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
-        IsRbObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid, tyinfo->dobj.name)) {
-        tyinfo->dobj.dump = false;
-        return;
-    }
     /* skip complex types, except for standalone composite types */
     if (OidIsValid(tyinfo->typrelid) && tyinfo->typrelkind != RELKIND_COMPOSITE_TYPE) {
         TableInfo* tytable = findTableByOid(tyinfo->typrelid);
@@ -2404,6 +2395,21 @@ static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
         tyinfo->dobj.dump = false;
     else
         tyinfo->dobj.dump = true;
+
+    if (tyinfo->dobj.dump && GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
+        IsRbObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid, tyinfo->dobj.name)) {
+        tyinfo->dobj.dump = false;
+        return;
+    }
+
+    /*
+     * Do not dump type defined by package.
+     */
+    if (tyinfo->dobj.dump && GetVersionNum(fout) >= PACKAGE_ENHANCEMENT &&
+        IsPackageObject(fout, tyinfo->dobj.catId.tableoid, tyinfo->dobj.catId.oid)) {
+        tyinfo->dobj.dump = false;
+        return;
+    }
 }
 
 /*
@@ -2463,11 +2469,6 @@ static void selectDumpablePublicationTable(DumpableObject *dobj)
  */
 static void selectDumpableObject(DumpableObject* dobj, Archive* fout = NULL)
 {
-    if (GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
-        IsRbObject(fout, dobj->catId.tableoid, dobj->catId.oid, dobj->name)) {
-        dobj->dump = false;
-        return;
-    }
     /*
      * Default policy is to dump if parent nmspace is dumpable, or always
      * for non-nmspace-associated items.
@@ -2476,6 +2477,12 @@ static void selectDumpableObject(DumpableObject* dobj, Archive* fout = NULL)
         dobj->dump = dobj->nmspace->dobj.dump;
     else
         dobj->dump = true;
+
+    if (dobj->dump && GetVersionNum(fout) >= USTORE_UPGRADE_VERSION &&
+        IsRbObject(fout, dobj->catId.tableoid, dobj->catId.oid, dobj->name)) {
+        dobj->dump = false;
+        return;
+    }
 }
 
 /*
@@ -3758,6 +3765,7 @@ static void dumpClientGlobalKeys(Archive *fout, const Oid nspoid, const char *ns
                 rc = memcpy_s(algorithm, MAX_CLIENT_KEYS_PARAM_SIZE, unescaped_data, unescapedDataSize);
                 securec_check_c(rc, "", "");
             }
+            PQfreemem(unescaped_data);
         } 
         appendPQExpBuffer(createClientGlobalKeysQry,
             "CREATE CLIENT MASTER KEY %s.%s ", nspname, fmtId(global_key_name));
@@ -3897,6 +3905,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
                 rc = memcpy_s(key_algorithm_str, MAX_CLIENT_KEYS_PARAM_SIZE, unescaped_data, unescapedDataSize);
             }
             securec_check_c(rc, "", "");
+            PQfreemem(unescaped_data);
         } 
 
         unsigned char *deprocessed_cek = NULL;
@@ -3939,6 +3948,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
                 rc = memcpy_s(algorithm, MAX_CLIENT_KEYS_PARAM_SIZE, unescaped_data, unescapedDataSize);
                 securec_check_c(rc, "", "");
             }
+            PQfreemem(unescaped_data);
         }
         appendPQExpBuffer(createColumnEncryptionKeysQry,
             "CREATE COLUMN ENCRYPTION KEY %s.%s ", nspname, column_key_name);
@@ -5724,36 +5734,48 @@ ConvInfo* getConversions(Archive* fout, int* numConversions)
 bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname)
 {
     PGresult* res = NULL;
-    PQExpBuffer query = createPQExpBuffer();
     bool isRecycleObj = false;
     int colNum = 0;
     int tupNum = 0;
     char* recycleObject = NULL;
     char* f = "f";
 
-    /* Make sure we are in proper schema */
-    selectSourceSchema(fout, "pg_catalog");
+    if (GetVersionNum(fout) >= RB_OBJECT_VERSION_NUM) {
+        PQExpBuffer query = createPQExpBuffer();
+        /* Make sure we are in proper schema */
+        selectSourceSchema(fout, "pg_catalog");
+        appendPQExpBuffer(query,
+            "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
+            classid,
+            objid);
+        res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
-    appendPQExpBuffer(query,
-        "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
-        classid,
-        objid);
-    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-
-    colNum = PQfnumber(res, "gs_is_recycle_obj");
-    recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
-    if (strcmp(recycleObject, f) == 0) {
-        isRecycleObj = false;
+        colNum = PQfnumber(res, "gs_is_recycle_obj");
+        recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
+        if (strcmp(recycleObject, f) == 0) {
+            isRecycleObj = false;
+        } else {
+            isRecycleObj = true;
+        }
+        GS_FREE(recycleObject);
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return isRecycleObj;
     } else {
-        isRecycleObj = true;
+        return false;
     }
-    GS_FREE(recycleObject);
-    PQclear(res);
-    destroyPQExpBuffer(query);
-    return isRecycleObj;
+    
 }
 
 uint32 GetVersionNum(Archive *fout)
+{
+    if (unlikely(fout->workingVersionNum == 0)) {
+        fout->workingVersionNum = GetVersionNumFromServer(fout);
+    }
+    return fout->workingVersionNum;
+}
+
+uint32 GetVersionNumFromServer(Archive *fout)
 {
     PGresult* res = NULL;
     PQExpBuffer query = createPQExpBuffer();
@@ -5761,10 +5783,7 @@ uint32 GetVersionNum(Archive *fout)
     int colNum = 0;
     int tupNum = 0;
 
-    /* Make sure we are in proper schema */
-    selectSourceSchema(fout, "pg_catalog");
-
-    appendPQExpBuffer(query, "SELECT working_version_num()");
+    appendPQExpBuffer(query, "SELECT pg_catalog.working_version_num()");
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     colNum = PQfnumber(res, "working_version_num");
     versionNum = atooid(PQgetvalue(res, tupNum, colNum));
@@ -6140,8 +6159,9 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
      */
 
     if (fout->remoteVersion >= 70300) {
+        /* enable_hashjoin in this sql */
         appendPQExpBuffer(query,
-            "SELECT tableoid, oid, proname, prolang, "
+            "SELECT /*+ set(enable_hashjoin on) */ tableoid, oid, proname, prolang, "
             "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, "
             "prorettype, proacl, "
             "pronamespace, "
@@ -9296,7 +9316,6 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
         selectSourceSchema(fout, tbinfo->dobj.nmspace->dobj.name);
 
         /* find all the user attributes and their types */
-
         /*
          * we must read the attribute names in attribute number order! because
          * we will use the attnum to index into the attnames array later.  We
@@ -9320,8 +9339,14 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "a.attstattarget, a.attstorage, t.typstorage, "
                 "a.attnotnull, a.atthasdef, a.attisdropped, "
                 "a.attlen, a.attalign, a.attislocal, a.attkvtype, t.oid AS typid, "
-                "CASE WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' "
-                "WHEN t.typtype = 'e' THEN 'enum(' || (select pg_catalog.string_agg(''''||enumlabel||'''', ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid) || ')' ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
+                "CASE ");
+            if (TabExists(fout, "pg_catalog", "pg_set")) {
+                appendPQExpBuffer(q,
+                    "WHEN t.typtype = 's' THEN concat('set(', (select pg_catalog.string_agg(concat('''', setlabel, ''''), ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid), ')') ");
+
+            }
+            appendPQExpBuffer(q,
+                "WHEN t.typtype = 'e' THEN concat('enum(', (select pg_catalog.string_agg(concat('''', enumlabel, ''''), ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid), ')') ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
                 "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
                 "CASE WHEN a.attcollation <> t.typcollation "
@@ -9338,6 +9363,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "AND a.attnum > 0::pg_catalog.int2 "
                 "ORDER BY a.attrelid, a.attnum",
                 tbinfo->dobj.catId.oid);
+            
             appendPQExpBuffer(ce_sql,
                 "SELECT b.column_name, a.column_key_name, b.encryption_type, "
                 "pg_catalog.format_type(c.atttypmod, b.data_type_original_mod) AS client_encryption_original_type from "
@@ -17908,6 +17934,11 @@ static bool PartkeyexprIsNull(Archive* fout, TableInfo* tbinfo, bool isSubPart)
     PGresult* partkeyexpr_res = NULL;
     int i_partkeyexpr;
     bool partkeyexprIsNull = true;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+    if (!is_column_exists(AH->connection, PartitionRelationId, "partkeyexpr")) {
+        return true;
+    }
+
     if (!isSubPart)
         appendPQExpBuffer(partkeyexpr,
             "select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = \'%s\' and "
@@ -18338,12 +18369,19 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 newStrategy);
             for (i = 1; i <= partkeynum; i++) {
-                if (i == partkeynum)
-                    appendPQExpBuffer(
-                        partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-                else
-                    appendPQExpBuffer(
-                        partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                if (partkeyexprIsNull) {
+                    if (i == partkeynum)
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                    else
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                } else {
+                    if (i == partkeynum)
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d], ", i);
+                }
             }
         } else {
             appendPQExpBuffer(partitionq,
@@ -19536,8 +19574,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                 if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
                     appendPQExpBuffer(q, "WITH OPTIONS");
                 } else if (fout->remoteVersion >= 70100) {
-                    if (isBcompatibility && hasSpecificExtension(fout, "dolphin") && strcmp(tbinfo->atttypnames[j], "numeric") == 0)
-                        tbinfo->atttypnames[j] = "number";
+                    if (isBcompatibility && hasSpecificExtension(fout, "dolphin") && strcmp(tbinfo->atttypnames[j], "numeric") == 0) {
+                        free(tbinfo->atttypnames[j]);
+                        tbinfo->atttypnames[j] = gs_strdup("number");
+                    }
                     appendPQExpBuffer(q, "%s", tbinfo->atttypnames[j]);
                     if (has_encrypted_column) {
                         char *encryption_type = NULL;
@@ -20679,6 +20719,10 @@ static const char* getAttrName(int attrnum, TableInfo* tblInfo)
             return "tablebucketid";
         case UidAttributeNumber:
             return "gs_tuple_uid";
+#endif
+#ifdef USE_SPQ
+        case RootSelfItemPointerAttributeNumber:
+            return "_root_ctid";
 #endif
         default:
             break;
@@ -23530,4 +23574,28 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
+}
+
+bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName)
+{
+    char query[300];
+
+    bool exist = false;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+    sprintf(query, "SELECT * FROM pg_proc a LEFT JOIN pg_namespace b on a.pronamespace=b.oid WHERE a.proname='%s' and b.nspname='%s'", funcName, funcNamespace);
+    
+    exist = isExistsSQLResult(AH->connection, query);
+    return exist;
+}
+
+bool TabExists(Archive* fout, const char* schemaName, const char* tabName)
+{
+    char query[300];
+    bool exist = false;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+
+    sprintf(query, "SELECT * FROM pg_tables  WHERE schemaname='%s' and tablename='%s'", schemaName, tabName);
+    
+    exist = isExistsSQLResult(AH->connection, query);
+    return exist;
 }

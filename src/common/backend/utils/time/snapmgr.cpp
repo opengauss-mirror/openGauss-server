@@ -45,9 +45,11 @@
 
 #include <sys/stat.h>
 #include "access/csnlog.h"
+#include "access/multi_redo_api.h"
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
+#include "access/multi_redo_api.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
 #include "miscadmin.h"
@@ -248,6 +250,10 @@ loop:
             ereport(FATAL, (errmsg("SS xid %lu's csn %lu is still COMMITTING after Master txn waited.", xid, csn)));
         }
         if (looped) {
+            /* don't change csn log in recovery */
+            if (snapshot->takenDuringRecovery) {
+                return false;
+            }
             ereport(DEBUG1, (errmsg("transaction id %lu's csn %ld is changed to ABORT after lockwait.", xid, csn)));
             /* recheck if transaction id is finished */
             RecheckXidFinish(xid, csn);
@@ -281,9 +287,9 @@ loop:
                 *sync = true;
             }
             if (TransactionIdIsValid(parentXid))
-                SyncWaitXidEnd(parentXid, buffer);
+                SyncWaitXidEnd(parentXid, buffer, snapshot);
             else
-                SyncWaitXidEnd(xid, buffer);
+                SyncWaitXidEnd(xid, buffer, snapshot);
             looped = true;
             parentXid = InvalidTransactionId;
             goto loop;
@@ -529,7 +535,7 @@ Snapshot GetTransactionSnapshot(bool force_local_snapshot)
         return u_sess->utils_cxt.CurrentSnapshot;
     }
 
-    if (IsolationUsesXactSnapshot()) {
+    if (IsolationUsesXactSnapshot()|| IS_EXRTO_STANDBY_READ) {
 #ifdef PGXC
         /*
          * Consider this test case taken from portals.sql
@@ -554,12 +560,17 @@ Snapshot GetTransactionSnapshot(bool force_local_snapshot)
         if (IsConnFromCoord())
             SnapshotSetCommandId(GetCurrentCommandId(false));
 #endif
+        if (IS_EXRTO_STANDBY_READ) {
+            t_thrd.pgxact->xmin = u_sess->utils_cxt.CurrentSnapshot->xmin;
+            t_thrd.proc->exrto_min = u_sess->utils_cxt.CurrentSnapshot->read_lsn;
+            t_thrd.proc->exrto_read_lsn = t_thrd.proc->exrto_min;
+            t_thrd.proc->exrto_gen_snap_time = GetCurrentTimestamp();
+        }
         return u_sess->utils_cxt.CurrentSnapshot;
     }
     Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
     u_sess->utils_cxt.CurrentSnapshot =
         GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, force_local_snapshot);
-
     return u_sess->utils_cxt.CurrentSnapshot;
 }
 
@@ -572,6 +583,7 @@ void StreamTxnContextSetSnapShot(void* snapshotPtr)
     u_sess->utils_cxt.CurrentSnapshot->xmax = snapshot->xmax;
     u_sess->utils_cxt.CurrentSnapshot->timeline = snapshot->timeline;
     u_sess->utils_cxt.CurrentSnapshot->snapshotcsn = snapshot->snapshotcsn;
+    u_sess->utils_cxt.CurrentSnapshot->read_lsn = snapshot->read_lsn;
 
     u_sess->utils_cxt.CurrentSnapshot->curcid = snapshot->curcid;
 
@@ -615,6 +627,16 @@ Snapshot GetLatestSnapshot(void)
     return u_sess->utils_cxt.SecondarySnapshot;
 }
 
+Snapshot get_standby_snapshot()
+{
+    if (u_sess->utils_cxt.FirstSnapshotSet) {
+        Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+        return u_sess->utils_cxt.CurrentSnapshot;
+    }
+
+    return GetTransactionSnapshot();
+}
+
 /*
  * GetCatalogSnapshot
  *      Get a snapshot that is sufficiently up-to-date for scan of the
@@ -630,7 +652,25 @@ Snapshot GetCatalogSnapshot()
     if (HistoricSnapshotActive())
         return u_sess->utils_cxt.HistoricSnapshot;
 
+    if (IS_EXRTO_RECOVERY_IN_PROGRESS && t_thrd.role != TRACK_STMT_WORKER && !dummyStandbyMode) {
+        return get_standby_snapshot();
+    }
+
     return SnapshotNow;
+}
+
+/*
+ * get_toast_snapshot
+ *      Get a snapshot that is sufficiently up-to-date for scan of the
+ *      toast with the specified OID.
+ */
+Snapshot get_toast_snapshot()
+{
+    if (IS_EXRTO_RECOVERY_IN_PROGRESS && t_thrd.role != TRACK_STMT_WORKER && !dummyStandbyMode) {
+        return get_standby_snapshot();
+    }
+
+    return SnapshotToast;
 }
 
 /*
@@ -1062,6 +1102,9 @@ static void SnapshotResetXmin(void)
         t_thrd.proc->snapCSN = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
+
+        t_thrd.proc->exrto_read_lsn = 0;
+        t_thrd.proc->exrto_gen_snap_time = 0;
     }
 }
 
@@ -1222,6 +1265,11 @@ void AtEOXact_Snapshot(bool isCommit)
     u_sess->utils_cxt.FirstSnapshotSet = false;
 
     SnapshotResetXmin();
+    t_thrd.proc->exrto_min = InvalidXLogRecPtr;
+    if (IS_EXRTO_STANDBY_READ && t_thrd.proc->exrto_reload_cache) {
+        t_thrd.proc->exrto_reload_cache = false;
+        reset_invalidation_cache();
+    }
 }
 
 /*

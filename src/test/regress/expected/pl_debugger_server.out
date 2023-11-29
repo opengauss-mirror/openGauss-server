@@ -161,7 +161,7 @@ ERROR:  must attach a execute func before execute dbe_pldebugger.abort
 DETAIL:  execute func not attached before execute dbe_pldebugger.abort
 -- turn off without turn on
 select * from dbe_pldebugger.turn_off(1);
-WARNING:  function 1 has not be turned on
+WARNING:  function 1 has not been turned on
  turn_off 
 ----------
  f
@@ -655,8 +655,51 @@ select z_pk.pro1(1,2,'+');
    13
 (1 row)
 
+--test anonymous
+delete from debug_info;
+CREATE OR REPLACE FUNCTION test_increment(x int) RETURNS int AS
+$BODY$
+DECLARE
+    y int;
+BEGIN
+    x := x + 1;
+    y := y * 2;
+    RETURN y;
+END
+$BODY$
+LANGUAGE plpgsql;
+CREATE TABLE test_anonymous(a int, b text);
+insert into debug_info select * from dbe_pldebugger.turn_on(0);
+do $$
+declare
+	funcoid oid;
+    k int;
+begin
+	select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';
+	perform * from pg_proc where oid = funcoid;
+    k = test_increment(3);
+    insert into test_anonymous values(k, 'test');
+    k = abs(-k);
+    insert into test_anonymous values(k, 'test2');
+end;
+$$;
+delete from debug_info;
+insert into debug_info select * from dbe_pldebugger.turn_on(0);
+do $$
+declare
+	funcoid oid;
+    k int;
+begin
+	select oid from pg_proc into funcoid where proname='abs' and prosrc='int8abs';
+	perform * from pg_proc where oid = funcoid;
+    k = test_increment(3);
+    insert into test_anonymous values(k, 'test');
+    k = abs(-k);
+    insert into test_anonymous values(k, 'test2');
+end;
+$$;
 drop schema pl_debugger cascade;
-NOTICE:  drop cascades to 18 other objects
+NOTICE:  drop cascades to 20 other objects
 DETAIL:  drop cascades to table test
 drop cascades to function test_debug(integer)
 drop cascades to table show_code_table
@@ -675,3 +718,5 @@ drop cascades to function test_setvar(integer)
 --?drop cascades to package .*
 drop cascades to function pl_debugger.pro1(integer,integer,character varying)
 drop cascades to function pl_debugger.pro2(integer,character varying)
+drop cascades to function test_increment(integer)
+drop cascades to table test_anonymous

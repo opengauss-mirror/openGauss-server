@@ -26,7 +26,7 @@ SELECT PG_GET_VIEWDEF('VIEW_TEST1_P');
 SET ENABLE_SEQSCAN = FALSE;
 SET ENABLE_BITMAPSCAN = FALSE;
 EXPLAIN (COSTS off) SELECT * FROM TEST1_P WHERE TEST1_F1 > 5000;
-                                QUERY PLAN                                 
+                             QUERY PLAN                              
 ---------------------------------------------------------------------
  Partition Iterator
    Iterations: 0

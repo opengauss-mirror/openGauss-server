@@ -314,7 +314,7 @@ uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file)
     BufferTag phy_tag = buf_desc->tag;
     Block block = BufHdrGetBlock(buf_desc);
 
-    uint32 buf_state = LockBufHdr(buf_desc);
+    uint64 buf_state = LockBufHdr(buf_desc);
     XLogRecPtr page_lsn = BufferGetLSN(buf_desc);
     UnlockBufHdr(buf_desc, buf_state);
 

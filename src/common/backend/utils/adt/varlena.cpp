@@ -42,7 +42,7 @@
 #include "executor/node/nodeSort.h"
 #include "pgxc/groupmgr.h"
 #include "openssl/evp.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 #include "catalog/pg_collation_fn.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
@@ -140,6 +140,8 @@ static void text_format_append_string(StringInfo buf, const char* str, int flags
 
 // adapt A db's substrb
 static text* get_substring_really(Datum str, int32 start, int32 length, bool length_not_specified);
+
+static text* get_result_of_concat(text* result, FunctionCallInfo fcinfo);
 
 /*****************************************************************************
  *	 CONVERSION ROUTINES EXPORTED FOR USE BY C CODE							 *
@@ -675,6 +677,7 @@ Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
         switch (typeoid) {
             /* binary type no need to transform */
             case BLOBOID:
+            case BYTEAOID:
                 break;
             /* string type need to transform to binary type */
             case TEXTOID:
@@ -803,6 +806,26 @@ Datum unknownsend(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
+Datum undefinedin(PG_FUNCTION_ARGS)
+{
+    return unknownin(fcinfo);
+}
+
+Datum undefinedout(PG_FUNCTION_ARGS)
+{
+    return unknownout(fcinfo);
+}
+
+Datum undefinedrecv(PG_FUNCTION_ARGS)
+{
+    return unknownrecv(fcinfo);
+}
+
+Datum undefinedsend(PG_FUNCTION_ARGS)
+{
+    return unknownsend(fcinfo);
+}
+
 static Datum text_length_huge(Datum str)
 {
     if (pg_database_encoding_max_length() == 1) {
@@ -857,6 +880,25 @@ int32 text_length(Datum str)
         int32 result = 0;
 
         result = pg_mbstrlen_with_len(VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t));
+        if ((Pointer)(t) != (Pointer)(str))
+            pfree_ext(t);
+
+        PG_RETURN_INT32(result);
+    }
+}
+
+int32 text_length_with_encoding(Datum str, int encoding)
+{
+    Assert(PG_VALID_ENCODING(encoding));
+
+    /* fastpath when max encoding length is one */
+    if (pg_encoding_max_length(encoding) == 1)
+        PG_RETURN_INT32(toast_raw_datum_size(str) - VARHDRSZ);
+    else {
+        text* t = DatumGetTextPP(str);
+        int32 result = 0;
+
+        result = pg_encoding_mbstrlen_with_len(VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t), encoding);
         if ((Pointer)(t) != (Pointer)(str))
             pfree_ext(t);
 
@@ -1340,6 +1382,22 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
 
     /* not reached: suppress compiler warning */
     return NULL;
+}
+
+text* text_substring_with_encoding(Datum str, int32 start, int32 length, bool length_not_specified, int encoding)
+{
+    Assert(encoding != PG_INVALID_ENCODING);
+
+    int db_encoding = GetDatabaseEncoding();
+    if (encoding == db_encoding) {
+        return text_substring(str, start, length, length_not_specified);
+    }
+
+    text* result = NULL;
+    DB_ENCODING_SWITCH_TO(encoding);
+    result = text_substring(str, start, length, length_not_specified);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
 }
 
 // adapt A db's substr(text str,integer start,integer length)
@@ -1974,17 +2032,16 @@ Datum texteq(PG_FUNCTION_ARGS)
     Datum arg2 = PG_GETARG_DATUM(1);
     bool result = false;
 
-    Oid collid = PG_GET_COLLATION();
-    if (is_b_format_collation(collid)) {
-        result = texteq_with_collation(fcinfo);
-        PG_RETURN_BOOL(result);
-    }
-
     if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) || VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("texteq could not support more than 1GB clob/blob data")));
     }
     Size len1, len2;
+
+    if (is_b_format_collation(PG_GET_COLLATION())) {
+        result = texteq_with_collation(fcinfo);
+        PG_RETURN_BOOL(result);
+    }
 
     /*
      * Since we only care about equality or not-equality, we can avoid all the
@@ -2164,7 +2221,6 @@ Datum text_gt(PG_FUNCTION_ARGS)
     FUNC_CHECK_HUGE_POINTER(false, arg1, "text_gt()");
 
     bool result = false;
-
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) > 0);
 
     PG_FREE_IF_COPY(arg1, 0);
@@ -2180,7 +2236,6 @@ Datum text_ge(PG_FUNCTION_ARGS)
     FUNC_CHECK_HUGE_POINTER(false, arg1, "text_ge()");
 
     bool result = false;
-
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) >= 0);
 
     PG_FREE_IF_COPY(arg1, 0);
@@ -3278,7 +3333,7 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT ||
+        if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT&& !ACCEPT_EMPTY_STR) ||
             u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
             PG_RETURN_NULL();
         else {
@@ -3292,10 +3347,12 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, length, false);
 
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (NULL == result || (0 == VARSIZE_ANY_EXHDR(result) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)) {
         PG_RETURN_NULL();
-    else
-        PG_RETURN_BYTEA_P(result);
+    }
+
+    PG_RETURN_BYTEA_P(result);
 }
 
 // adapt A db's substr(bytea x,integer y)
@@ -3310,7 +3367,7 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
             PG_RETURN_NULL();
         else {
             result = PG_STR_GET_BYTEA("");
@@ -3323,10 +3380,12 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, -1, true);
 
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (NULL == result || (0 == VARSIZE_ANY_EXHDR(result) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)) {
         PG_RETURN_NULL();
-    else
-        PG_RETURN_BYTEA_P(result);
+    }
+
+    PG_RETURN_BYTEA_P(result);
 }
 
 // Does the real work for bytea_substr_orclcompat() and bytea_substr_no_len_orclcompat().
@@ -4284,14 +4343,20 @@ Datum replace_text_with_two_args(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-
     if (PG_ARGISNULL(1))
         PG_RETURN_TEXT_P(PG_GETARG_TEXT_PP(0));
-
-    return DirectFunctionCall3(replace_text,
-        PG_GETARG_DATUM(0),
-        PG_GETARG_DATUM(1),
-        CStringGetTextDatum("\0"));
+    FunctionCallInfoData locfcinfo;
+    Datum result;
+    InitFunctionCallInfoData(locfcinfo, NULL, 3, InvalidOid, NULL, NULL);
+    locfcinfo.arg[0] = PG_GETARG_DATUM(0);
+    locfcinfo.arg[1] = PG_GETARG_DATUM(1);
+    locfcinfo.arg[2] = CStringGetTextDatum("\0");
+    locfcinfo.argnull[0] = false;
+    locfcinfo.argnull[1] = false;
+    locfcinfo.argnull[2] = false;
+    result = (*replace_text)(&locfcinfo);
+    fcinfo->isnull = locfcinfo.isnull;
+    return result;
 }
 
 /*
@@ -4391,10 +4456,12 @@ Datum replace_text(PG_FUNCTION_ARGS)
     ret_text = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if (VARHDRSZ == VARSIZE(ret_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (VARHDRSZ == VARSIZE(ret_text) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
-    else
-        PG_RETURN_TEXT_P(ret_text);
+    }
+
+    PG_RETURN_TEXT_P(ret_text);
 }
 
 /*
@@ -4682,7 +4749,7 @@ Datum split_text(PG_FUNCTION_ARGS)
     if (inputstring_len < 1) {
         text_position_cleanup(&state);
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR && !RETURN_NS) {
             PG_RETURN_NULL();
         }
 
@@ -4697,7 +4764,7 @@ Datum split_text(PG_FUNCTION_ARGS)
             PG_RETURN_TEXT_P(inputstring);
         }
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR && !RETURN_NS) {
             PG_RETURN_NULL();
         }
 
@@ -4716,7 +4783,7 @@ Datum split_text(PG_FUNCTION_ARGS)
             PG_RETURN_TEXT_P(inputstring);
         }
 
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
             PG_RETURN_NULL();
         }
 
@@ -4743,7 +4810,7 @@ Datum split_text(PG_FUNCTION_ARGS)
         result_text = text_substring(PointerGetDatum(inputstring), start_posn, end_posn - start_posn, false);
     }
 
-    if (TEXTISORANULL(result_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (TEXTISORANULL(result_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     }
 
@@ -4935,7 +5002,7 @@ Datum array_to_text(PG_FUNCTION_ARGS)
     result = array_to_text_internal(fcinfo, v, fldsep, NULL);
 
     /* To A db, empty string need return NULL.*/
-    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -4972,7 +5039,7 @@ Datum array_to_text_null(PG_FUNCTION_ARGS)
     result = array_to_text_internal(fcinfo, v, fldsep, null_string);
 
     /* To A db, empty string need return NULL.*/
-    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -6302,11 +6369,25 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL || (0 == VARSIZE_ANY_EXHDR(result) && !DB_IS_CMPT(B_FORMAT | PG_FORMAT))) &&
-        (CONCAT_VARIADIC || DB_IS_CMPT(A_FORMAT)))
+    return get_result_of_concat(result, fcinfo);
+}
+
+static text* get_result_of_concat(text* result, FunctionCallInfo fcinfo)
+{
+    if (result == NULL) {
         PG_RETURN_NULL();
-    else
+    }
+
+    if (VARSIZE_ANY_EXHDR(result) > 0 ||
+        DB_IS_CMPT(B_FORMAT | PG_FORMAT) ||
+        (DB_IS_CMPT(A_FORMAT) && ACCEPT_EMPTY_STR)) {
         return result;
+    }
+
+    if (DB_IS_CMPT(A_FORMAT) || CONCAT_VARIADIC) {
+        PG_RETURN_NULL();
+    }
+    return result;
 }
 
 /*
@@ -6425,7 +6506,7 @@ Datum text_left(PG_FUNCTION_ARGS)
     }
 
     rlen = pg_mbcharcliplen(p, len, part_off);
-    if (0 == rlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == rlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     }
 
@@ -6462,7 +6543,7 @@ Datum text_right(PG_FUNCTION_ARGS)
         }
     }
     off = pg_mbcharcliplen(p, len, part_off);
-    if (0 == (len - off) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (0 == (len - off) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
     }
 
@@ -6761,7 +6842,8 @@ Datum text_format(PG_FUNCTION_ARGS)
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if (result == NULL ||
+        (VARSIZE_ANY_EXHDR(result) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR))
         PG_RETURN_NULL();
     else
         PG_RETURN_TEXT_P(result);
@@ -7127,7 +7209,7 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (total == 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
             PG_RETURN_NULL();
         else {
             result = cstring_to_text("");
@@ -7136,8 +7218,10 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     }
 
     result = get_substring_really(str, start, length, false);
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
+    }
     PG_RETURN_TEXT_P(result);
 }
 
@@ -7152,7 +7236,7 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((total == 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR)
             PG_RETURN_NULL();
         else {
             result = cstring_to_text("");
@@ -7161,8 +7245,10 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     }
 
     result = get_substring_really(str, start, -1, true);
-    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) {
         PG_RETURN_NULL();
+    }
     PG_RETURN_TEXT_P(result);
 }
 
@@ -7296,4 +7382,12 @@ Datum btvarstrequalimage(PG_FUNCTION_ARGS)
         PG_RETURN_BOOL(true);
     else
         PG_RETURN_BOOL(false);
+}
+
+Datum text_interval(PG_FUNCTION_ARGS)
+{
+    char* input = TextDatumGetCString(PG_GETARG_TEXT_P(0));
+    int32 typmod = PG_GETARG_INT32(1);
+    return DirectFunctionCall3(interval_in, CStringGetDatum(input), ObjectIdGetDatum(InvalidOid),
+                                Int32GetDatum(typmod));
 }

@@ -190,7 +190,6 @@ static PageRedoWorker *CreateWorker(uint32 id)
     worker->statWaitReach = 0;
     worker->statWaitReplay = 0;
     worker->oldCtx = NULL;
-    worker->bufferPinWaitBufId = -1;
     worker->remoteReadPageNum = 0;
     
     worker->badPageHashTbl = BadBlockHashTblCreate();
@@ -412,6 +411,7 @@ void ApplyProcHead(RedoItem *head)
     while (head != NULL) {
         RedoItem *cur = head;
         g_redoWorker->current_item = &cur->record;
+        pg_atomic_write_u64((volatile uint64*)&g_redoWorker->curReplayingReadRecPtr, cur->record.ReadRecPtr);
         head = head->nextByWorker[g_redoWorker->id + 1];
         ApplyAndFreeRedoItem(cur);
     }
@@ -555,12 +555,64 @@ static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
     }
 }
 
+/*
+ * If woker do a page vacuum redo, it should wait if it's operator
+ * may cause snapshot invalid.
+ */
+static void wait_valid_snapshot(XLogReaderState *record)
+{
+    RmgrId rm_id = XLogRecGetRmid(record);
+    uint8 info = (XLogRecGetInfo(record) & ~XLR_INFO_MASK) & XLOG_HEAP_OPMASK;
+    xl_heap_clean* xlrec = NULL;
+    uint64 blockcnt = 0;
+    XLogRecPtr cur_transed_lsn = InvalidXLogRecPtr;
+    XLogRecPtr txn_trying_lsn = InvalidXLogRecPtr;
+
+    if(rm_id != RM_HEAP2_ID || info != XLOG_HEAP2_CLEAN)
+        return;
+
+    xlrec = (xl_heap_clean*)XLogRecGetData(record);
+
+    /*
+     * If xlrec->latestRemovedXid <= t_thrd.xact_cxt.ShmemVariableCache->standbyXmin then
+     * it will not incluence current snapshot, so it can exec redo.
+     */
+    while(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin < xlrec->latestRemovedXid &&
+                                                            !in_full_sync_dispatch()) {
+        if(cur_transed_lsn == InvalidXLogRecPtr)
+            cur_transed_lsn = getTransedTxnLsn(g_dispatcher->txnWorker);
+        txn_trying_lsn = getTryingTxnLsn(g_dispatcher->txnWorker);
+        /*
+         * Normaly, it need wait for startup thread handle xact wal records, but there be a case
+         * that if a very old xid commit and no new xact comes then xlrec->latestRemovedXid >
+         * t_thrd.xact_cxt.ShmemVariableCache->standbyXmin all the time.
+         * 
+         * So if all xact record before current vacuum record finished, then avoid wait.
+         * And if startup go fast then here on lsn, it can avoid wait too.
+         */
+        if (cur_transed_lsn <= GetXLogReplayRecPtr(NULL) || txn_trying_lsn >= record->EndRecPtr)
+            return;
+
+        blockcnt++;
+        if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
+            XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]wait_valid_snapshot:recordEndLsn:%lu, blockcnt:%lu, "
+                                     "Workerid:%u, LatestReplayedRecPtr:%lu",
+                                     record->EndRecPtr, blockcnt, g_redoWorker->id, LatestReplayedRecPtr)));
+        }
+        RedoInterruptCallBack();
+    }
+}
+
 /* Run from the worker thread. */
 static void ApplySinglePageRecord(RedoItem *item, bool replayUndo)
 {
     XLogReaderState *record = &item->record;
     long readbufcountbefore = u_sess->instr_cxt.pg_buffer_usage->local_blks_read;
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+
+    wait_valid_snapshot(record);
     ApplyRedoRecord(record);
     (void)MemoryContextSwitchTo(oldCtx);
     record->readblocks = u_sess->instr_cxt.pg_buffer_usage->local_blks_read - readbufcountbefore;
@@ -858,7 +910,7 @@ static void ApplyMultiPageSyncWithTrxnRecord(RedoItem *item)
     uint64 blockcnt = 0;
     pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
     while (XLogRecPtrIsInvalid(LatestReplayedRecPtr) || XLByteLT(LatestReplayedRecPtr, endLSN)) {
-        /* block if trxn hasn‘t update the last replayed lsn */
+        /* block if trxn hasn't update the last replayed lsn */
         LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL, NULL);
         blockcnt++;
         if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
@@ -969,6 +1021,19 @@ XLogRecPtr GetCompletedRecPtr(PageRedoWorker *worker)
 {
     pg_read_barrier();
     return pg_atomic_read_u64(&worker->lastReplayedEndRecPtr);
+}
+
+XLogRecPtr GetReplyingRecPtr(PageRedoWorker *worker)
+{
+    XLogRecPtr curReplayingReadRecPtr;
+    XLogRecPtr lastReplayedEndRecPtr;
+    XLogRecPtr result;
+    pg_read_barrier();
+
+    curReplayingReadRecPtr = pg_atomic_read_u64(&worker->curReplayingReadRecPtr);
+    lastReplayedEndRecPtr = pg_atomic_read_u64(&worker->lastReplayedEndRecPtr);
+
+    return lastReplayedEndRecPtr > curReplayingReadRecPtr ? lastReplayedEndRecPtr : curReplayingReadRecPtr;
 }
 
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */

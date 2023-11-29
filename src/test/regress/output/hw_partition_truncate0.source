@@ -199,7 +199,7 @@ select count(*) from partition_truncate_table_0000;
 --50 rows
 rollback;
 select count(*) from partition_truncate_table_0000;
-ERROR:  relation "partition_truncate_table_0000" does not exist
+ERROR:  relation "partition_truncate_table_0000" does not exist on datanode1
 LINE 1: select count(*) from partition_truncate_table_0000;
                              ^
 --can not find the partitioned table

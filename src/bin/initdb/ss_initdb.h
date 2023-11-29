@@ -45,14 +45,16 @@ extern int32 ss_nodeid;
 
 extern bool ss_issharedstorage;
 extern bool ss_need_mkclusterdir;
+extern bool ss_need_mkspecialdir;
 
 /* check dms url when gs_initdb */
 
 extern bool ss_check_nodedatainfo(bool enable_dss);
 extern int ss_check_shareddir(char* path, int32 node_id, bool *ss_need_mkclusterdir);
+extern bool ss_check_specialdir(char *path);
 
 extern void ss_createdir(const char** ss_dirs, int32 num, int32 node_id, const char* pg_data, const char* vgdata_dir, const char* vglog_dir);
-extern void ss_mkdirdir(int32 node_id, const char* pg_data, const char* vgdata_dir, const char* vglog_dir, bool need_mkclusterdir);
+extern void ss_mkdirdir(int32 node_id, const char* pg_data, const char* vgdata_dir, const char* vglog_dir, bool need_mkclusterdir, bool need_mkspecialdir);
 extern char** ss_addnodeparmater(char** conflines);
 
 

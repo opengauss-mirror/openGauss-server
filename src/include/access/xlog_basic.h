@@ -99,7 +99,7 @@
  * The XLog directory and control file (relative to $PGDATA)
  */
 #define SS_XLOGDIR (g_instance.datadir_cxt.xlogDir)
-#define SS_XLOGRECOVERYDIR (g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir)
+#define SS_XLOGRECOVERYDIR (g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir)
 #define XLOGDIR "pg_xlog"
 #define ARCHIVEDIR "pg_xlog/archive_status"
 #define XLOG_CONTROL_FILE (g_instance.datadir_cxt.controlPath)
@@ -109,6 +109,8 @@
 #define PG_LSN_XLOG_FLUSH_CHK_FILE "global/pg_lsnxlogflushchk"
 #define REDO_STATS_FILE             "redo.state"
 #define REDO_STATS_FILE_TMP         "redo.state.tmp"
+
+#define SS_DORADO_CTRL_FILE (g_instance.datadir_cxt.controlInfoPath)
 
 
 #define InvalidRepOriginId 0

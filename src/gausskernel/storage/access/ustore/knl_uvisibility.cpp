@@ -249,6 +249,10 @@ bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer b
         }
         uint64 globalFrozenXid = isFlashBack ? pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid) :
         pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
+        if (RecoveryInProgress()) {
+            /* in hot standby mode, if globalRecycleXid advance during query, it may cause data inconsistency */
+            globalFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.hotStandbyRecycleXid);
+        }
         if (TransactionIdIsValid(tdinfo.xid) && TransactionIdPrecedes(tdinfo.xid, globalFrozenXid)) {
             /* The slot is old enough that we can treat it as frozen. */
             tdinfo.td_slot = UHEAPTUP_SLOT_FROZEN;
@@ -813,6 +817,10 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
         uint64 oldestRecycleXidHavingUndo = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
         uint64 oldestXidHavingUndo = (isFlashBack || isLogical) ?
             oldestRecycleXidHavingUndo : pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
+        if (RecoveryInProgress()) {
+            /* in hot standby mode, if globalRecycleXid advance during query, it may cause data inconsistency */
+            oldestXidHavingUndo = pg_atomic_read_u64(&g_instance.undo_cxt.hotStandbyRecycleXid);
+        } 
         if (TransactionIdIsValid(tdinfo.xid) && TransactionIdPrecedes(tdinfo.xid, oldestXidHavingUndo)) {
             if (TransactionIdOlderThanAllUndo(tdinfo.xid)) {
                 isFrozen = true;

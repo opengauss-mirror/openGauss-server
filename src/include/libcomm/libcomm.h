@@ -720,4 +720,32 @@ extern void set_comm_fault_injection(int type);
 extern bool is_comm_fault_injection(LibcommFaultInjection type);
 #endif
 
+#ifdef USE_SPQ
+constexpr uint16 SPQ_QE_CONNECTION = 0;
+constexpr uint16 SPQ_QC_CONNECTION = 1;
+struct QCConnKey {
+    uint64 query_id;
+    uint32 plan_node_id;
+    uint16 node_id;
+    uint16 type;
+};
+struct QCConnEntry {
+    QCConnKey key;
+    uint64 streamcap;
+    gsocket forward;
+    gsocket backward;
+    int scannedPageNum;
+    int internal_node_id;
+};
+struct BackConnInfo {
+    uint16 node_idx;
+    uint16 version;
+    uint64 streamcap;
+    uint64 query_id;
+    CommStreamKey stream_key;
+    gsocket *backward;
+};
+extern int gs_r_build_reply_connection(BackConnInfo* fcmsgr, int local_version, uint16 *sid);
+#endif
+
 #endif  //_GS_LIBCOMM_H_

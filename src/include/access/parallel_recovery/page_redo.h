@@ -72,6 +72,7 @@ struct PageRedoWorker {
      */
     XLogRecPtr lastReplayedReadRecPtr;
     XLogRecPtr lastReplayedEndRecPtr;
+    XLogRecPtr curReplayingReadRecPtr;
 #if (!defined __x86_64__) && (!defined __aarch64__)
             /* protects lastReplayedReadRecPtr and lastReplayedEndRecPtr */
     slock_t ptrLck;  
@@ -183,7 +184,6 @@ struct PageRedoWorker {
     uint64 statWaitReplay;
     pg_atomic_uint32 readyStatus;
     MemoryContext oldCtx;
-    int bufferPinWaitBufId;
     RedoTimeCost timeCostList[TIME_COST_NUM];
     uint32 remoteReadPageNum;
     HTAB *badPageHashTbl;
@@ -224,6 +224,7 @@ bool ProcessPendingPageRedoItems(PageRedoWorker* worker);
 
 /* Run-time worker states. */
 uint64 GetCompletedRecPtr(PageRedoWorker* worker);
+XLogRecPtr GetReplyingRecPtr(PageRedoWorker *worker);
 bool IsRecoveryRestartPointSafe(PageRedoWorker* worker, XLogRecPtr restartPoint);
 void SetWorkerRestartPoint(PageRedoWorker* worker, XLogRecPtr restartPoint);
 

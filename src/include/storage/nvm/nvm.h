@@ -28,7 +28,7 @@
 
 void nvm_init(void);
 
-BufferDesc *NvmBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fork_num,
+BufferDesc *NvmBufferAlloc(const RelFileNode& rel_file_node, char relpersistence, ForkNumber fork_num,
     BlockNumber block_num, BufferAccessStrategy strategy, bool *found, const XLogPhyBlock *pblk);
 
 #endif

@@ -703,6 +703,7 @@ with_zlib
 with_system_tzdata
 with_libxslt
 with_libxml
+with_tassl
 XML2_CONFIG
 with_ossp_uuid
 with_selinux
@@ -753,6 +754,7 @@ enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
+enable_finance_mode
 enable_mot
 enable_memory_check
 enable_mysql_fdw
@@ -820,6 +822,7 @@ SHELL'
 ac_subst_files=''
 ac_user_opts='
 with_3rdpartydir
+with_tassl
 enable_option_checking
 with_template
 with_includes
@@ -838,6 +841,7 @@ enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
+enable_finance_mode
 enable_mot
 enable_memory_check
 enable_mysql_fdw
@@ -921,6 +925,7 @@ verbose=
 x_includes=NONE
 x_libraries=NONE
 with_3rdpartydir=NONE
+
 # Installation directory options.
 # These are left unexpanded so users can "make install exec_prefix=/foo"
 # and all the variables that are supposed to be based on exec_prefix
@@ -1604,6 +1609,7 @@ Optional Packages:
                           use system time zone data in DIR
   --without-zlib          do not use Zlib
   --with-gnu-ld           assume the C compiler uses GNU ld [default=no]
+  --with-tassl            build with tassl support
 
 Some influential environment variables:
   CC          C compiler command
@@ -2198,7 +2204,7 @@ PACKAGE_VERSION='9.2.4'
 # Postgres-XC 1.1devel is based on PostgreSQL 9.2.4
 PACKAGE_XC_VERSION='1.1'
 # openGauss is based on PostgreSQL 9.2.4 and it will be the Kernel of GaussDB database
-OPENGAUSS_VERSION='5.1.0'
+OPENGAUSS_VERSION='5.1.1'
 
 cat >>confdefs.h <<_ACEOF
 #define PG_VERSION "$PACKAGE_VERSION"
@@ -2877,47 +2883,6 @@ _ACEOF
 
 fi
 
-# Check whether --enable-mot was given.
-if test "${enable_mot+set}" = set; then
-  enableval=$enable_mot;
-  case $enableval in
-    yes)
-      if test "$enable_multiple_nodes" = yes; then
-
-        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
-            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
-          { (exit 1); exit 1; }; }
-
-      fi
-      ;;
-    no)
-      :
-      ;;
-    *)
-      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
-$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
-   { (exit 1); exit 1; }; }
-      ;;
-  esac
-
-else
-  enable_mot=no
-
-fi
-
-if test "$enable_multiple_nodes" = yes; then
-
-  enable_mot=no
-fi
-
-if test "$enable_mot" = yes; then
-
-cat >>confdefs.h <<\_ACEOF
-#define ENABLE_MOT 1
-_ACEOF
-
-fi
-
 #
 # '-memory-check'-like feature can be enabled
 #
@@ -3232,6 +3197,94 @@ _ACEOF
 
 fi
 
+#
+# --enable-finance-mode enables
+#
+
+# Check whether --enable-finance-mode was given.
+if test "${enable_finance_mode+set}" = set; then
+  enableval=$enable_finance_mode;
+  case $enableval in
+    yes)
+      if test "$enable_lite_nodes" = yes; then
+        { { $as_echo "$as_me:$LINENO: error: --enable-finance-mode option is not supported with --enable-lite-nodes option" >&5
+            $as_echo "$as_me: error: --enable-finance-mode option is not supported with --enable-lite-nodes option" >&2;}
+              { (exit 1); exit 1; }; }
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-finance-mode option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-finance-mode option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_finance_mode=no
+
+fi
+
+if test "$enable_lite_nodes" = yes; then
+
+  enable_finance_mode=no
+fi
+
+if test "$enable_finance_mode" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_FINANCE_MODE 1
+_ACEOF
+
+fi
+
+# Check whether --enable-mot was given.
+if test "${enable_mot+set}" = set; then
+  enableval=$enable_mot;
+  case $enableval in
+    yes)
+      if test "$enable_multiple_nodes" = yes; then
+
+        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
+            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
+          { (exit 1); exit 1; }; }
+
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_mot=no
+
+fi
+
+if test "$enable_multiple_nodes" = yes; then
+
+  enable_mot=no
+fi
+
+if test "$enable_finance_mode" = yes; then
+
+  enable_mot=no
+fi
+
+if test "$enable_mot" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_MOT 1
+_ACEOF
+
+fi
 
 #
 # --with-openeuler-os enable
@@ -3275,7 +3328,7 @@ _ACEOF
 
 fi
 
-if [ "$(cat /etc/system-release)" == "openEuler release 22.03 LTS" ]; then
+if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 22.03".* ]]; then
     with_openeuler_major=yes
 fi
 
@@ -6339,6 +6392,7 @@ cat >>confdefs.h <<\_ACEOF
 #define USE_SSL 1
 _ACEOF
 
+
 #
 # SELinux
 #
@@ -6569,7 +6623,35 @@ if test "$with_libxml" = yes; then
     LDFLAGS="$LDFLAGS -L${xml2_lib}"
 fi
 
+#
+# TASSL
+#
 
+# Check whether --with-tassl was given.
+if test "${with_tassl+set}" = set; then
+  withval=$with_tassl;
+  case $withval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define USE_TASSL 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --with-tassl option" >&5
+$as_echo "$as_me: error: no argument expected for --with-tassl option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  with_tassl=no
+
+fi
 
 #
 # XSLT

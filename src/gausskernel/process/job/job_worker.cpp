@@ -352,6 +352,9 @@ void JobExecuteWorkerMain()
     (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
 
     SetProcessingMode(NormalProcessing);
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
 
     /* execute job procedure */
     elog(LOG, "Job is running, worker: %lu, job id: %d", t_thrd.proc_cxt.MyProcPid, job_id);

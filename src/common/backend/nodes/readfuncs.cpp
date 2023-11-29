@@ -736,6 +736,12 @@ THR_LOCAL bool skip_read_extern_fields = false;
         READ_DONE();                                                                \
     } while (0)
 
+
+#ifdef USE_SPQ
+#define READ_STREAM_ID() READ_INT_FIELD(streamID)
+#else
+#define READ_STREAM_ID() {}
+#endif
 /*
  * function for _readStream and _readVecStream.
  */
@@ -761,6 +767,7 @@ THR_LOCAL bool skip_read_extern_fields = false;
         READ_INT_FIELD(stream_level);                       \
         READ_NODE_FIELD(origin_consumer_nodes);             \
         READ_BOOL_FIELD(is_recursive_local);                \
+        READ_STREAM_ID();                                   \
                                                             \
         READ_DONE();                                        \
     } while (0)
@@ -1731,6 +1738,16 @@ static PLDebug_frame* _readPLDebug_frame(void)
     READ_DONE();
 }
 
+static PLDebug_codeline* _readPLDebug_codeline(void)
+{
+    READ_LOCALS(PLDebug_codeline);
+    READ_INT_FIELD(lineno);
+    READ_STRING_FIELD(code);
+    READ_BOOL_FIELD(canBreak);
+
+    READ_DONE();
+}
+
 /*
  * _readWithCheckOption
  */
@@ -2132,6 +2149,10 @@ static Param* _readParam(void)
     {
         READ_NODE_FIELD(tableOfIndexTypeList);
     }
+    IF_EXIST(is_bind_param)
+    {
+        READ_BOOL_FIELD(is_bind_param);
+    }
     READ_DONE();
 }
 
@@ -2205,6 +2226,9 @@ static Aggref* _readAggref(void)
     READ_BOOL_FIELD(agghas_collectfn);
     READ_INT_FIELD(aggstage);
 #endif /* PGXC */
+#ifdef USE_SPQ
+    READ_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     READ_OID_FIELD(aggcollid);
     READ_OID_FIELD(inputcollid);
     IF_EXIST(aggdirectargs)
@@ -2227,6 +2251,18 @@ static Aggref* _readAggref(void)
     READ_LOCATION_FIELD(location);
     READ_TYPEINFO_FIELD(aggtype);
     READ_TYPEINFO_FIELD(aggtrantype);
+    IF_EXIST(aggargtypes)
+    {
+        READ_NODE_FIELD(aggargtypes);
+    }
+    IF_EXIST(aggsplit)
+    {
+        READ_INT_FIELD(aggsplit);
+    }
+    IF_EXIST(aggtranstype)
+    {
+        READ_OID_FIELD(aggtranstype);
+    }
     READ_DONE();
 }
 
@@ -3400,6 +3436,11 @@ static Plan* _readPlan(Plan* local_node)
         READ_FLOAT_FIELD(pred_total_time);
         READ_LONG_FIELD(pred_max_memory);
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        READ_BOOL_FIELD(spq_scan_partial);
+    }
+#endif
     READ_DONE();
 }
 
@@ -3465,11 +3506,14 @@ static Agg* _readAgg(Agg* local_node)
     _readPlan(&local_node->plan);
 
     READ_ENUM_FIELD(aggstrategy, AggStrategy);
+#ifdef USE_SPQ
+    READ_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     READ_INT_FIELD(numCols);
     READ_ATTR_ARRAY(grpColIdx, numCols);
     READ_OPERATOROID_ARRAY(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(grp_collations, numCols);
     }
 #endif
@@ -4055,7 +4099,7 @@ static Unique* _readUnique(Unique* local_node)
     READ_ATTR_ARRAY(uniqColIdx, numCols);
     READ_OPERATOROID_ARRAY(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(uniq_collations, numCols);
     }
 #endif
@@ -4371,6 +4415,10 @@ static Material* _readMaterial(Material* local_node)
     _readPlan(&local_node->plan);
     READ_BOOL_FIELD(materialize_all);
     read_mem_info(&local_node->mem_info);
+#ifdef USE_SPQ   
+    READ_BOOL_FIELD(spq_strict);
+    READ_BOOL_FIELD(spq_shield_child_from_rescans);
+#endif
 
     READ_DONE();
 }
@@ -4433,7 +4481,7 @@ static Group* _readGroup(Group* local_node)
     READ_ATTR_ARRAY(grpColIdx, numCols);
     READ_OPERATOROID_ARRAY(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(grp_collations, numCols);
     }
 #endif
@@ -4457,6 +4505,10 @@ static Join* _readJoin(Join* local_node)
     READ_BOOL_FIELD(optimizable);
     READ_NODE_FIELD(nulleqqual);
     READ_UINT_FIELD(skewoptimize);
+#ifdef USE_SPQ
+    READ_BOOL_FIELD(prefetch_inner);
+    READ_BOOL_FIELD(is_set_op_join);
+#endif
 
     READ_DONE();
 }
@@ -4495,7 +4547,7 @@ static HashJoin* _readHashJoin(HashJoin* local_node)
     read_mem_info(&local_node->mem_info);
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_NODE_FIELD(hash_collations);
     }
 #endif
@@ -4593,7 +4645,7 @@ static PlannedStmt* _readPlannedStmt(void)
     }
     READ_INT_FIELD(num_nodes);
 
-    if (t_thrd.proc->workingVersionNum < 92097 || local_node->num_streams > 0) {
+    if (t_thrd.proc->workingVersionNum < 92097 || local_node->num_streams > 0 || IS_SPQ_RUNNING) {
 	    local_node->nodesDefinition = (NodeDefinition*)palloc0(sizeof(NodeDefinition) * local_node->num_nodes);
 	    for (int i = 0; i < local_node->num_nodes; i++) {
 	        READ_OID_FIELD(nodesDefinition[i].nodeoid);
@@ -4654,6 +4706,12 @@ static PlannedStmt* _readPlannedStmt(void)
     IF_EXIST(cause_type) {
         READ_UINT_FIELD(cause_type);
     }
+#ifdef USE_SPQ
+    READ_UINT64_FIELD(spq_session_id);
+    READ_INT_FIELD(current_id);
+    READ_BOOL_FIELD(enable_adaptive_scan);
+    READ_BOOL_FIELD(is_spq_optmized);
+#endif
 
     READ_DONE();
 }
@@ -4701,6 +4759,84 @@ static Scan* _readSeqScan(void)
 
     READ_END();
 }
+#ifdef USE_SPQ
+static SpqSeqScan* _readSpqSeqScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqSeqScan);
+    READ_TEMP_LOCALS();
+ 
+    _readScan(&local_node->scan);
+    READ_BOOL_FIELD(isFullTableScan);
+    READ_BOOL_FIELD(isAdaptiveScan);
+    READ_BOOL_FIELD(isDirectRead);
+ 
+    READ_END();
+}
+
+static SpqIndexScan* _readSpqIndexScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqIndexScan);
+    READ_TEMP_LOCALS();
+
+    _readIndexScan(&local_node->scan);
+
+    READ_END();
+}
+
+static SpqIndexOnlyScan* _readSpqIndexOnlyScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqIndexOnlyScan);
+    READ_TEMP_LOCALS();
+
+    _readIndexOnlyScan(&local_node->scan);
+
+    READ_END();
+}
+
+static SpqBitmapHeapScan* _readSpqBitmapHeapScan(void)
+{
+    READ_LOCALS_NO_FIELDS(SpqBitmapHeapScan);
+    READ_TEMP_LOCALS();
+
+    _readBitmapHeapScan(&local_node->scan);
+
+    READ_END();
+}
+
+/*
+ * _readAssertOp
+ */
+static AssertOp* _readAssertOp(void)
+{
+    READ_LOCALS(AssertOp);
+    _readPlan(&local_node->plan);
+    READ_INT_FIELD(errcode);
+    READ_NODE_FIELD(errmessage);
+    READ_END();
+}
+ 
+static ShareInputScan* _readShareInputScan(void)
+{
+    READ_LOCALS(ShareInputScan);
+    READ_BOOL_FIELD(cross_slice);
+    READ_INT_FIELD(share_id);
+    READ_INT_FIELD(producer_slice_id);
+    READ_INT_FIELD(this_slice_id);
+    READ_INT_FIELD(nconsumers);
+    _readPlan(&local_node->scan.plan);
+ 
+    READ_END();
+}
+ 
+static Sequence* _readSequence(void)
+{
+    READ_LOCALS(Sequence);
+    _readPlan(&local_node->plan);
+    READ_NODE_FIELD(subplans);
+ 
+    READ_END();
+}
+#endif
 
 static SetOp* _readSetOp(SetOp* local_node)
 {
@@ -4716,7 +4852,7 @@ static SetOp* _readSetOp(SetOp* local_node)
     READ_ATTR_ARRAY(dupColIdx, numCols);
     READ_OPERATOROID_ARRAY(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(dup_collations, numCols);
     }
 #endif
@@ -5188,6 +5324,9 @@ static VecAgg* _readVecAgg(VecAgg* local_node)
     _readPlan(&local_node->plan);
 
     READ_ENUM_FIELD(aggstrategy, AggStrategy);
+#ifdef USE_SPQ
+    READ_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     READ_INT_FIELD(numCols);
     READ_ATTR_ARRAY(grpColIdx, numCols);
     READ_OID_ARRAY(grpOperators, numCols);
@@ -6138,6 +6277,18 @@ static CharsetCollateOptions* _readCharsetcollateOptions()
     READ_DONE();
 }
 
+static CharsetClause* _readCharsetClause()
+{
+    READ_LOCALS(CharsetClause);
+
+    READ_NODE_FIELD(arg);
+    READ_INT_FIELD(charset);
+    READ_BOOL_FIELD(is_binary);
+    READ_LOCATION_FIELD(location);
+
+    READ_DONE();
+}
+
 static PrefixKey* _readPrefixKey()
 {
     READ_LOCALS(PrefixKey);
@@ -6164,6 +6315,32 @@ static UserVar* _readUserVar()
 
     READ_STRING_FIELD(name);
     READ_NODE_FIELD(value);
+
+    READ_DONE();
+}
+
+static DependenciesProchead* _readDependenciesProchead()
+{
+    READ_LOCALS(DependenciesProchead);
+
+    READ_BOOL_FIELD(undefined);
+    READ_STRING_FIELD(proName);
+    READ_STRING_FIELD(proArgSrc);
+    READ_STRING_FIELD(funcHeadSrc);
+
+    READ_DONE();
+}
+
+static DependenciesType* _readDependenciesType()
+{
+    READ_LOCALS(DependenciesType);
+
+    READ_CHAR_FIELD(typType);
+    READ_CHAR_FIELD(typCategory);
+    READ_STRING_FIELD(attrInfo);
+    READ_BOOL_FIELD(isRel);
+    READ_STRING_FIELD(elemTypName);
+    READ_STRING_FIELD(idxByTypName);
 
     READ_DONE();
 }
@@ -6325,6 +6502,22 @@ Node* parseNodeString(void)
         return_value = _readNestLoop();
     } else if (MATCH("SEQSCAN", 7)) {
         return_value = _readSeqScan();
+#ifdef USE_SPQ
+    } else if (MATCH("SPQSEQSCAN", 10)) {
+        return_value = _readSpqSeqScan();
+    } else if (MATCH("ASSERTOP", 8)) {
+        return_value = _readAssertOp();
+    } else if (MATCH("SHAREINPUTSCAN", 14)) {
+        return_value = _readShareInputScan();
+    } else if (MATCH("SEQUENCE", 8)) {
+        return_value = _readSequence();
+    } else if (MATCH("SPQINDEXSCAN", 12)) {
+        return_value = _readSpqIndexScan();
+    } else if (MATCH("SPQINDEXONLYSCAN", 16)) {
+        return_value = _readSpqIndexOnlyScan();
+    } else if (MATCH("SPQBITMAPHEAPSCAN", 17)) {
+        return_value = _readSpqBitmapHeapScan();
+#endif
     } else if (MATCH("BITMAPHEAPSCAN", 14)) {
         return_value = _readBitmapHeapScan(NULL);
     } else if (MATCH("BITMAPINDEXSCAN", 15)) {
@@ -6629,6 +6822,8 @@ Node* parseNodeString(void)
         return_value = _readPLDebug_breakPoint(); 
     } else if (MATCH("PLDEBUG_FRAME", 13)) {
         return_value = _readPLDebug_frame();
+    } else if (MATCH("PLDEBUG_CODELINE", 16)) {
+        return_value = _readPLDebug_codeline();
     } else if (MATCH("TdigestData", 11)) {
         return_value = _readTdigestData();
     } else if (MATCH("AUTO_INCREMENT", 14)) {
@@ -6645,7 +6840,13 @@ Node* parseNodeString(void)
         return_value = _readUserVar();
     } else if (MATCH("CHARSETCOLLATE", 14)) {
         return_value = _readCharsetcollateOptions();
-    } else {
+    } else if (MATCH("CHARSET", 7)) {
+        return_value = _readCharsetClause();
+    }  else if (MATCH("DependenciesProchead", 20)) {
+        return_value = _readDependenciesProchead();
+    }  else if (MATCH("DependenciesType", 16)) {
+        return_value = _readDependenciesType();
+    }  else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("parseNodeString(): badly formatted node string \"%s\"...", token)));

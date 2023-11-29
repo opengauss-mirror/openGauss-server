@@ -206,6 +206,7 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define PD_ENCRYPT_PAGE 0x0020    /* is a encryt cluster */
 #define PD_CHECKSUM_FNV1A 0x0040  /* page checksum using FNV-1a hash */
 #define PD_JUST_AFTER_FPW 0x0080  /* page just after redo full page write */
+#define PD_EXRTO_PAGE 0x0400        /* is a rto file page */
 #define PD_TDE_PAGE 0x0100        /* there is TdePageInfo at the end of a page */
 
 #define PD_VALID_FLAG_BITS 0x01FF /* OR of all valid pd_flags bits */

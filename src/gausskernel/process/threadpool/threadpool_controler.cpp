@@ -575,7 +575,7 @@ void ThreadPoolControler::GetCpuAndNumaNum(int32 *totalCpuNum, int32 *totalNumaN
 
     FILE* fp = NULL;
 
-    if ((fp = popen("LANG=en_US.UTF-8;lscpu", "r")) != NULL) {
+    if ((fp = popen("LANGUAGE=en_US.UTF-8;LANG=en_US.UTF-8;lscpu", "r")) != NULL) {
         while (fgets(buf, sizeof(buf), fp) != NULL) {
             if (strncmp("CPU(s)", buf, strlen("CPU(s)")) == 0 &&
                 strncmp("On-line CPU(s) list", buf, strlen("On-line CPU(s) list")) != 0 &&

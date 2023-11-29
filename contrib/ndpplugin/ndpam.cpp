@@ -166,24 +166,6 @@ void pm_get_pageinfo(NdpScanDesc ndpScan, BlockNumber page, CephObject *object, 
     }
 }
 
-bool IsPageHitDms(RelFileNode& node, BlockNumber page)
-{
-    int bufId = 0;
-    BufferTag newTag;
-
-    INIT_BUFFERTAG(newTag, node, MAIN_FORKNUM, page);
-    uint32 new_hash = BufTableHashCode(&newTag);
-    LWLock *new_partition_lock = BufMappingPartitionLock(new_hash);
-    /* see if the block is in the buffer pool already */
-    (void)LWLockAcquire(new_partition_lock, LW_SHARED);
-    bufId = BufTableLookup(&newTag, new_hash);
-    LWLockRelease(new_partition_lock);
-    if (bufId != -1) {
-        return true;
-    }
-    return false;
-}
-
 void CopyCLog(int64 pageno, char *pageBuffer)
 {
     int slotno;
@@ -229,16 +211,15 @@ int NdpIoSlot::SetReq(RelFileNode& node, uint16 taskId, uint16 tableId, AuInfo& 
     errno_t rc = memset_s(req.pageMap, BITMAP_SIZE_PER_AU_BYTE, 0, BITMAP_SIZE_PER_AU_BYTE);
     securec_check(rc, "", "");
 
-    if (SS_STANDBY_MODE) {
-        // SSIsPageHitDms(node, startBlockNum, auinfo.pageNum, req.pageMap, &bitCount);
-    } else {
-        for (uint32 i = startBlockNum, offset = 0; i != startBlockNum + auinfo.pageNum; ++i, ++offset) {
-            bool cached = IsPageHitDms(node, i);
-            if (!cached) {
-                NDPSETBIT(req.pageMap, offset);
-                ++bitCount;
-            }
+    for (uint32 i = startBlockNum, offset = 0; i != startBlockNum + auinfo.pageNum; ++i, ++offset) {
+        bool cached = IsPageHitBufferPool(node, MAIN_FORKNUM, i);
+        if (!cached) {
+            NDPSETBIT(req.pageMap, offset);
+            ++bitCount;
         }
+    }
+    if (SS_STANDBY_MODE) {
+        SSIsPageHitDms(node, startBlockNum, auinfo.pageNum, req.pageMap, &bitCount);
     }
     return bitCount;
 }

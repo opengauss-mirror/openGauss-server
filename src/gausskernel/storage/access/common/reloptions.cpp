@@ -85,6 +85,10 @@ static void ValidateStrOptEncryptAlgo(const char *val);
 static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
 
+#ifdef USE_SPQ
+static void CheckSpqBTBuildOption(const char *val);
+#endif
+
 static relopt_bool boolRelOpts[] = {
     {{"autovacuum_enabled", "Enables autovacuum in this relation", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST}, true},
     {{"user_catalog_table",
@@ -238,7 +242,7 @@ static relopt_int intRelOpts[] = {
         0, 1, 32
     },
     {{ "compress_level", "Level of page compression.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, -31, 31},
-    {{ "compresstype", "compress type (none, pglz or zstd or pgzstd).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 3},
+    {{ "compresstype", "compress type (none, pglz or zstd. pgzstd isn't available now).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 2},
     {{ "compress_chunk_size", "Size of chunk to store compressed page.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
      BLCKSZ / 2,
      BLCKSZ / 16,
@@ -518,6 +522,15 @@ static relopt_string stringRelOpts[] = {
         validateWithCheckOption,
         NULL
     },
+#ifdef USE_SPQ
+    {
+        { "spq_build", "Btree index build using PX", RELOPT_KIND_BTREE },
+        0,
+        true,
+        CheckSpqBTBuildOption,
+        NULL
+    },
+#endif
     {
         {"view_sql_security", "View has SQL SECURITY OPTION defined (INVOKER or DEFINER).", RELOPT_KIND_VIEW},
         0,
@@ -1232,7 +1245,7 @@ static void parse_one_reloption(relopt_value *option, const char *text_str, int 
         case RELOPT_TYPE_INT64: {
             relopt_int64 *optint = (relopt_int64 *)option->gen;
 
-            parsed = parse_int64(value, &option->values.int64_val, NULL);
+            parsed = parse_int64(value, &option->values.int64_val, 0, NULL);
             if (validate && !parsed)
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -2006,6 +2019,10 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "check_option", RELOPT_TYPE_STRING, offsetof(StdRdOptions, check_option_offset)},
         { "view_sql_security", RELOPT_TYPE_STRING, offsetof(StdRdOptions, view_security_option_offset)},
         { "collate", RELOPT_TYPE_INT, offsetof(StdRdOptions, collate)},
+#ifdef USE_SPQ
+            /* SPQ index B-Tree build: btree index build use spq */
+        {"spq_build", RELOPT_TYPE_STRING, offsetof(StdRdOptions, spq_bt_build_offset)},
+#endif
         { "deduplication", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, deduplication)}
     };
 
@@ -2434,6 +2451,13 @@ static void ValidateStrOptCompression(const char *val)
  */
 static void ValidateStrOptTableAccessMethod(const char* val)
 {
+#ifdef ENABLE_FINANCE_MODE
+    if (pg_strcasecmp(val, TABLE_ACCESS_METHOD_USTORE) == 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for \"TABLE_ACCESS_METHOD\" option."),
+                errdetail("TABLE_ACCESS_METHOD==USTORE is incorrect, not work on finance mode.")));
+#endif
     if (pg_strcasecmp(val, TABLE_ACCESS_METHOD_ASTORE) != 0 && pg_strcasecmp(val, TABLE_ACCESS_METHOD_USTORE) != 0)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -3048,6 +3072,12 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
 
 void CheckCompressOption(TableCreateSupport *tableCreateSupport)
 {
+#ifdef ENABLE_FINANCE_MODE
+    if (HasCompressOption(tableCreateSupport)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("ERROR: The function of compress is incorrect. not work on finance mode.")));
+    }
+#endif
     if (tableCreateSupport->compressType != (int)COMPRESS_TYPE_NONE && !tableCreateSupport->is_orientation_row) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
                         errmsg("row-compression feature only support orientation is row.")));
@@ -3078,3 +3108,21 @@ void CheckCompressOption(TableCreateSupport *tableCreateSupport)
             errmsg("Algorithm PGZSTD current not support ustore.")));
     }
 }
+
+#ifdef USE_SPQ
+/*
+ * before check spq reloption, make sure guc params of spq_enable_btbuild is on
+ */
+void CheckSpqBTBuildOption(const char *val)
+{
+    if (!u_sess->attr.attr_spq.spq_enable_btbuild) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("spq_build is not supported, please set gauss_enable_spq_btbuild=on")));
+    }
+
+    if (val == NULL || (strcmp(val, "on") != 0 && strcmp(val, "off") != 0 && strcmp(val, "finish") != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid value for \"spq_build\" option"),
+                        errdetail("Valid values are \"on\", and \"off\".")));
+    }
+}
+#endif

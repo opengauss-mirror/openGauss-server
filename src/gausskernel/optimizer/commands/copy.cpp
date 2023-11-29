@@ -269,8 +269,9 @@ static void bulkload_set_readattrs_func(CopyState cstate);
 static void bulkload_init_time_format(CopyState cstate);
 static Datum CopyReadBinaryAttribute(
     CopyState cstate, int column_no, FmgrInfo* flinfo, Oid typioparam, int32 typmod, bool* isnull);
-static void CopyAttributeOutText(CopyState cstate, char* string);
-static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, bool single_attr);
+static void CopyAttributeOutText(CopyState cstate, char* string, int str_encoding, FmgrInfo *convert_finfo);
+static void CopyAttributeOutCSV(
+    CopyState cstate, char* string, bool use_quote, bool single_attr, int str_encoding, FmgrInfo *convert_finfo);
 static void SelectAttributeIntoOutfile(CopyState cstate, char* string, bool is_optionally, Oid fn_oid);
 static void ProcessEnclosedChar(CopyState cstate, char* cur_char, char enclosedc, char escapedc);
 static void CopyNonEncodingAttributeOut(CopyState cstate, char* string, bool use_quote);
@@ -1250,7 +1251,8 @@ void VerifyEncoding(int encoding)
 {
     Oid proc;
 
-    if (encoding == GetDatabaseEncoding() || encoding == PG_SQL_ASCII || GetDatabaseEncoding() == PG_SQL_ASCII)
+    if (encoding == GetDatabaseEncoding() || encoding == PG_SQL_ASCII || GetDatabaseEncoding() == PG_SQL_ASCII ||
+        (GetDatabaseEncoding() == PG_GB18030_2022 && encoding == PG_GB18030))
         return;
 
     proc = FindDefaultConversionProc(encoding, GetDatabaseEncoding());
@@ -1283,7 +1285,7 @@ static void PrintDelimHeader(CopyState cstate)
             CopySendString(cstate, cstate->delim);
         hdr_delim = true;
         colname = NameStr(attr[attnum - 1].attname);
-        CopyAttributeOutCSV(cstate, colname, false, list_length(cstate->attnumlist) == 1);
+        CopyAttributeOutCSV(cstate, colname, false, list_length(cstate->attnumlist) == 1, GetDatabaseEncoding(), NULL);
     }
 }
 
@@ -2755,6 +2757,10 @@ static bool CheckCopyFileInBlackList(const char* path)
         FindFileName(g_instance.attr.attr_common.external_pid_file),
         FindFileName(g_instance.attr.attr_security.ssl_cert_file),
         FindFileName(g_instance.attr.attr_security.ssl_key_file),
+ #ifdef USE_TASSL
+        FindFileName(g_instance.attr.attr_security.ssl_enc_cert_file),
+        FindFileName(g_instance.attr.attr_security.ssl_enc_key_file),
+#endif
         FindFileName(g_instance.attr.attr_security.ssl_ca_file),
         FindFileName(g_instance.attr.attr_security.ssl_crl_file),
         FindFileName(u_sess->attr.attr_security.pg_krb_server_keyfile),
@@ -3091,6 +3097,8 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
     }
     /* Get info about the columns we need to process. */
     cstate->out_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    cstate->out_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    cstate->attr_encodings = (int*)palloc(num_phys_attrs * sizeof(int));
     foreach (cur, cstate->attnumlist) {
         int attnum = lfirst_int(cur);
         Oid out_func_oid;
@@ -3101,6 +3109,13 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
         else
             getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
+        /* set conversion functions */
+        cstate->attr_encodings[attnum - 1] = get_valid_charset_by_collation(attr[attnum - 1].attcollation);
+        construct_conversion_fmgr_info(cstate->attr_encodings[attnum - 1], cstate->file_encoding,
+            (void*)&cstate->out_convert_funcs[attnum - 1]);
+        if (cstate->attr_encodings[attnum - 1] != cstate->file_encoding) {
+            cstate->need_transcoding = true;
+        }
     }
 
     /*
@@ -3411,10 +3426,13 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
                                     CopyAttributeOutCSV(cstate,
                                         string,
                                         use_quote,
-                                        list_length(cstate->attnumlist) == 1);
+                                        list_length(cstate->attnumlist) == 1,
+                                        cstate->attr_encodings[attnum - 1],
+                                        &cstate->out_convert_funcs[attnum - 1]);
                                     break;
                                 case FORMAT_TEXT:
-                                    CopyAttributeOutText(cstate, string);
+                                    CopyAttributeOutText(cstate, string, cstate->attr_encodings[attnum - 1],
+                                        &cstate->out_convert_funcs[attnum - 1]);
                                     break;
                                 default:
                                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Invalid file format")));
@@ -3530,6 +3548,7 @@ void BulkloadErrorCallback(void* arg)
                 cstate->cur_lineno,
                 cstate->cur_attname,
                 lineval);
+            pfree_ext(lineval);
         } else {
             /* error is relevant to a particular line */
             if (cstate->line_buf_converted || !cstate->need_transcoding) {
@@ -4263,7 +4282,7 @@ uint64 CopyFrom(CopyState cstate)
      */
     if ((resultRelInfo->ri_TrigDesc != NULL &&
         (resultRelInfo->ri_TrigDesc->trig_insert_before_row || resultRelInfo->ri_TrigDesc->trig_insert_instead_row)) ||
-        cstate->volatile_defexprs) {
+        cstate->volatile_defexprs || isForeignTbl) {
         useHeapMultiInsert = false;
     } else {
         useHeapMultiInsert = true;
@@ -4800,6 +4819,8 @@ uint64 CopyFrom(CopyState cstate)
 
             if (!skip_tuple && isForeignTbl) {
                 resultRelInfo->ri_FdwRoutine->ExecForeignInsert(estate, resultRelInfo, slot, NULL);
+                Assert(!useHeapMultiInsert);
+                resetPerTupCxt = true;
                 processed++;
             } else if (!skip_tuple) {
                 /*
@@ -4985,6 +5006,14 @@ uint64 CopyFrom(CopyState cstate)
                  * tuples inserted by an INSERT command.
                  */
                 processed++;
+            } else {/*skip_tupe == true*/
+                /*
+                 * only the before row insert trigget would make skip_tupe==true
+                 * which useHeapMultiInsert must be false
+                 * so we can safely reset the per-tuple memory context in next iteration
+                 */
+                Assert(useHeapMultiInsert == false);
+                resetPerTupCxt = true;
             }
 #ifdef PGXC
         }
@@ -5650,6 +5679,9 @@ bool IsTypeAcceptEmptyStr(Oid typeOid)
         case CHAROID:
             return true;
         default:
+            if (type_is_set(typeOid)) {
+                return true;
+            }
             return false;
     }
 }
@@ -5748,6 +5780,8 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     MemoryContext oldcontext;
     AdaptMem* memUsage = (AdaptMem*)mem_info;
     bool volatile_defexprs = false;
+    int* attr_encodings = NULL;
+    FmgrInfo* in_convert_funcs = NULL;
 
     cstate = BeginCopy(true, rel, NULL, queryString, attnamelist, options);
     oldcontext = MemoryContextSwitchTo(cstate->copycontext);
@@ -5772,10 +5806,12 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
      * input function we use depends on text/binary format choice.)
      */
     in_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    in_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
     typioparams = (Oid*)palloc(num_phys_attrs * sizeof(Oid));
     accept_empty_str = (bool*)palloc(num_phys_attrs * sizeof(bool));
     defmap = (int*)palloc(num_phys_attrs * sizeof(int));
     defexprs = (ExprState**)palloc(num_phys_attrs * sizeof(ExprState*));
+    attr_encodings = (int*)palloc(num_phys_attrs * sizeof(int));
     if (cstate->trans_expr_list != NULL) {
         cstate->as_typemods = (AssignTypmod *)palloc0(num_phys_attrs * sizeof(AssignTypmod));
         cstate->transexprs = (ExprState **)palloc0(num_phys_attrs * sizeof(ExprState*));
@@ -5796,7 +5832,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
 
     /* Output functions are required to convert default values to output form */
     cstate->out_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
-
+    cstate->out_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
     for (attnum = 1; attnum <= num_phys_attrs; attnum++) {
         /* We don't need info for dropped attributes */
         if (attr[attnum - 1].attisdropped)
@@ -5809,6 +5845,9 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
         else
             getTypeInputInfo(attr[attnum - 1].atttypid, &in_func_oid, &typioparams[attnum - 1]);
         fmgr_info(in_func_oid, &in_functions[attnum - 1]);
+        attr_encodings[attnum - 1] = get_valid_charset_by_collation(attr[attnum - 1].attcollation);
+        construct_conversion_fmgr_info(
+            GetDatabaseEncoding(), attr_encodings[attnum - 1], (void*)&in_convert_funcs[attnum - 1]);
 
         /* Get default info if needed */
         if (!list_member_int(cstate->attnumlist, attnum) && !ISGENERATEDCOL(tupDesc, attnum - 1)) {
@@ -5843,6 +5882,11 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
                         else
                             getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
                         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
+                        construct_conversion_fmgr_info(attr_encodings[attnum - 1], cstate->file_encoding,
+                            (void*)&cstate->out_convert_funcs[attnum - 1]);
+                        if (attr_encodings[attnum - 1] != cstate->file_encoding) {
+                            cstate->need_transcoding = true;
+                        }
                     }
                 } else {
 #endif /* PGXC */
@@ -5872,6 +5916,8 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     cstate->defexprs = defexprs;
     cstate->volatile_defexprs = volatile_defexprs;
     cstate->num_defaults = num_defaults;
+    cstate->attr_encodings = attr_encodings;
+    cstate->in_convert_funcs = in_convert_funcs;
 
     if (func) {
         cstate->copyGetDataFunc = func;
@@ -6159,13 +6205,16 @@ extern void SPI_pop_conditional(bool pushed);
  * @in typmod:  some datatype mode
  * @return: the datatype value outputed from built-in datatype input function
  */
-Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod)
+Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod,
+    int encoding, FmgrInfo* convert_finfo)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
     bool pushed = false;
     short nargs = 3;
     char* date_time_fmt = NULL;
+    char* converted_str = NULL;
+    int db_encoding = GetDatabaseEncoding();
 
     if (str == NULL && flinfo->fn_strict)
         return (Datum)0; /* just return null result */
@@ -6206,12 +6255,17 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
     }
 
     InitFunctionCallInfoData(fcinfo, flinfo, nargs, InvalidOid, NULL, NULL);
+    if (str != NULL && db_encoding != encoding) {
+        converted_str = try_fast_encoding_conversion(str, strlen(str), db_encoding, encoding, (void*)convert_finfo);
+    } else {
+        converted_str = str;
+    }
 
-    fcinfo.arg[0] = CStringGetDatum(str);
+    fcinfo.arg[0] = CStringGetDatum(converted_str);
     fcinfo.arg[1] = ObjectIdGetDatum(typioparam);
     fcinfo.arg[2] = Int32GetDatum(typmod);
 
-    fcinfo.argnull[0] = (str == NULL);
+    fcinfo.argnull[0] = (converted_str == NULL);
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
 
@@ -6223,8 +6277,17 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
         fcinfo.argnull[3] = false;
     }
 
-    result = FunctionCallInvoke(&fcinfo);
+    if (encoding != db_encoding) {
+        DB_ENCODING_SWITCH_TO(encoding);
+        result = FunctionCallInvoke(&fcinfo);
+        DB_ENCODING_SWITCH_BACK(db_encoding);
+    } else {
+        result = FunctionCallInvoke(&fcinfo);
+    }
 
+    if (converted_str != str) {
+        pfree_ext(converted_str);
+    }
     /* Should get null result if and only if str is NULL */
     if (str == NULL) {
         if (!fcinfo.isnull)
@@ -6401,8 +6464,8 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                  * 1. A db SQL compatibility requires; or
                  * 2. This column donesn't accept any empty string.
                  */
-                if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT || !accept_empty_str[m]) &&
-                    (string != NULL && string[0] == '\0')) {
+                if (((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR) ||
+                    !accept_empty_str[m]) && (string != NULL && string[0] == '\0')) {
                     /* for any type, '' = null */
                     string = NULL;
                 }
@@ -6419,8 +6482,8 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
             cstate->cur_attname = NameStr(attr[m].attname);
             cstate->cur_attval = string;
             atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m].atttypmod;
-            values[m] =
-                InputFunctionCallForBulkload(cstate, &in_functions[m], string, typioparams[m], atttypmod);
+            values[m] = InputFunctionCallForBulkload(cstate, &in_functions[m], string, typioparams[m], atttypmod,
+                cstate->attr_encodings[m], &cstate->in_convert_funcs[m]);
             if (string != NULL)
                 nulls[m] = false;
             cstate->cur_attname = NULL;
@@ -6660,9 +6723,12 @@ static void append_defvals(Datum* values, CopyState cstate)
                 CopyAttributeOutCSV(&new_cstate,
                     string,
                     false /* don't force quote */,
-                    false /* there's at least one user-supplied attribute */);
+                    false /* there's at least one user-supplied attribute */,
+                    cstate->attr_encodings[attindex],
+                    &cstate->out_convert_funcs[attindex]);
             else
-                CopyAttributeOutText(&new_cstate, string);
+                CopyAttributeOutText(&new_cstate, string, cstate->attr_encodings[attindex],
+                    &cstate->out_convert_funcs[attindex]);
             CopySendString(&new_cstate, new_cstate.delim);
         }
     }
@@ -6890,6 +6956,7 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
     for (;;) {
         int prev_raw_ptr;
         char c;
+        char sec = '\0';
 
         /*
          * Load more data if needed.  Ideally we would just force four bytes
@@ -6927,6 +6994,27 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
         /* OK to fetch a character */
         prev_raw_ptr = raw_buf_ptr;
         c = copy_raw_buf[raw_buf_ptr++];
+        if (raw_buf_ptr < copy_buf_len) {
+            sec = copy_raw_buf[raw_buf_ptr];
+        }
+        if (IS_TEXT(cstate) && (cstate->copy_dest == COPY_NEW_FE) && !cstate->is_load_copy) {
+            if (c == '\\') {
+                char c2;
+                IF_NEED_REFILL_AND_NOT_EOF_CONTINUE(0);
+
+                /* get next character */
+                c2 = copy_raw_buf[raw_buf_ptr];
+
+                /*
+                 * If the following character is a newline or CRLF,
+                 * skip the '\\'.
+                 */
+                if (c2 == '\n' || c2 == '\r' ||
+                    (c2 == '\r' && (raw_buf_ptr + 1) < copy_buf_len && copy_raw_buf[raw_buf_ptr + 1] == '\n')) {
+                    continue;
+                }
+            }
+        }
 
         if (csv_mode) {
             /*
@@ -7218,10 +7306,12 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
          * high-bit set, so as an optimization we can avoid this block
          * entirely if it is not set.
          */
-        if (cstate->encoding_embeds_ascii && IS_HIGHBIT_SET(c)) {
+        if ((cstate->encoding_embeds_ascii || cstate->file_encoding == PG_GBK || cstate->file_encoding == PG_GB18030)
+            && IS_HIGHBIT_SET(c)) {
             int mblen;
 
             mblen_str[0] = c;
+            mblen_str[1] = sec;
             /* All our encodings only read the first byte to get the length */
             mblen = pg_encoding_mblen(cstate->file_encoding, mblen_str);
             IF_NEED_REFILL_AND_NOT_EOF_CONTINUE(mblen - 1);
@@ -7359,6 +7449,8 @@ static int CopyReadAttributesTextT(CopyState cstate)
         int input_len;
         bool saw_non_ascii = false;
         proc_col_num++;
+        int byte_count = 0;
+        int pos = 0;
 
         /* Make sure there is enough space for the next value */
         if (fieldno >= cstate->max_fields) {
@@ -7412,8 +7504,29 @@ static int CopyReadAttributesTextT(CopyState cstate)
                 found_delim = true;
                 break;
             }
+            if (PG_GB18030 == GetDatabaseEncoding() || PG_GB18030_2022 == GetDatabaseEncoding()) {
+                if (pos == byte_count) {
+                    unsigned char c1 = (unsigned char)(c);
+                    if (c1 < (unsigned char)0x80) {
+                        byte_count = 1;
+                    } else if (c1 >= (unsigned char)0x81 && c1 <= (unsigned char)0xFE) {
+                        char nextc = *cur_ptr;
+                        unsigned char nextc1 = (unsigned char)(nextc);
+                        if (nextc1 >= (unsigned char)0x30 && nextc1 <= (unsigned char)0x39) {
+                            byte_count = 4;
+                        } else {
+                            byte_count = 2;
+                        }
+                    } else {
+                        ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
+                            errmsg("invalid character encoding in gb18030 or gb18030_2022")));
+                    }
+                    pos = 0;
+                }
+                pos++;
+            }
 
-            if (c == '\\' && !cstate->without_escaping) {
+            if (c == '\\' && !cstate->without_escaping && byte_count != 2) {
                 if (cur_ptr >= line_end_ptr) {
                     break;
                 }
@@ -7928,7 +8041,7 @@ static Datum CopyReadBinaryAttribute(
     } while (0)
 
 template <bool multbyteDelim>
-static void CopyAttributeOutTextT(CopyState cstate, char* string)
+static void CopyAttributeOutTextT(CopyState cstate, char* string, int str_encoding, FmgrInfo *convert_finfo)
 {
     char* ptr = NULL;
     char* start = NULL;
@@ -7938,7 +8051,12 @@ static void CopyAttributeOutTextT(CopyState cstate, char* string)
     int delimLen = cstate->delim_len;
 
     if (cstate->need_transcoding)
-        ptr = pg_server_to_any(string, strlen(string), cstate->file_encoding);
+        if (str_encoding == GetDatabaseEncoding()) {
+            ptr = pg_server_to_any(string, strlen(string), cstate->file_encoding, (void*)convert_finfo);
+        } else {
+            ptr = try_fast_encoding_conversion(
+                string, strlen(string), str_encoding, cstate->file_encoding, (void*)convert_finfo);
+        }
     else
         ptr = string;
 
@@ -8083,19 +8201,20 @@ static void CopyAttributeOutTextT(CopyState cstate, char* string)
     DUMPSOFAR();
 }
 
-static void CopyAttributeOutText(CopyState cstate, char* string)
+static void CopyAttributeOutText(CopyState cstate, char* string, int str_encoding, FmgrInfo *convert_finfo)
 {
     switch (cstate->delim_len) {
         case 1:
-            CopyAttributeOutTextT<false>(cstate, string);
+            CopyAttributeOutTextT<false>(cstate, string, str_encoding, convert_finfo);
             break;
         default:
-            CopyAttributeOutTextT<true>(cstate, string);
+            CopyAttributeOutTextT<true>(cstate, string, str_encoding, convert_finfo);
     }
 }
 
 template <bool multbyteDelim>
-static void CopyAttributeOutCSVT(CopyState cstate, char* string, bool use_quote, bool single_attr)
+static void CopyAttributeOutCSVT(CopyState cstate, char* string, bool use_quote, bool single_attr,
+    int str_encoding, FmgrInfo *convert_finfo)
 {
     char* ptr = NULL;
     char* start = NULL;
@@ -8110,7 +8229,12 @@ static void CopyAttributeOutCSVT(CopyState cstate, char* string, bool use_quote,
         use_quote = true;
 
     if (cstate->need_transcoding)
-        ptr = pg_server_to_any(string, strlen(string), cstate->file_encoding);
+        if (str_encoding == GetDatabaseEncoding()) {
+            ptr = pg_server_to_any(string, strlen(string), cstate->file_encoding, (void*)convert_finfo);
+        } else {
+            ptr = try_fast_encoding_conversion(
+                string, strlen(string), str_encoding, cstate->file_encoding, (void*)convert_finfo);
+        }
     else
         ptr = string;
 
@@ -8172,14 +8296,15 @@ static void CopyAttributeOutCSVT(CopyState cstate, char* string, bool use_quote,
  * Send text representation of one attribute, with conversion and
  * CSV-style escaping
  */
-static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, bool single_attr)
+static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, bool single_attr,
+    int str_encoding, FmgrInfo *convert_finfo)
 {
     switch (cstate->delim_len) {
         case 1:
-            CopyAttributeOutCSVT<false>(cstate, string, use_quote, single_attr);
+            CopyAttributeOutCSVT<false>(cstate, string, use_quote, single_attr, str_encoding, convert_finfo);
             break;
         default:
-            CopyAttributeOutCSVT<true>(cstate, string, use_quote, single_attr);
+            CopyAttributeOutCSVT<true>(cstate, string, use_quote, single_attr, str_encoding, convert_finfo);
     }
 }
 
@@ -8707,7 +8832,7 @@ bool StrToInt32(const char* s, int *val)
     return true;
 }
 
-char* TrimStr(const char* str)
+char* TrimStrQuote(const char* str, bool isQuote)
 {
     if (str == NULL) {
         return NULL;
@@ -8735,10 +8860,22 @@ char* TrimStr(const char* str)
     }
 
     len = end - begin + 1;
+
+    if (isQuote && len>=2 && *begin == '"' && *end == '"') {
+        begin++;
+        end--;
+        len = end - begin + 1;
+    }
+
     rc = memmove_s(cpyStr, strlen(cpyStr), begin, len);
     securec_check(rc, "\0", "\0");
     cpyStr[len] = '\0';
     return cpyStr;
+}
+
+char* TrimStr(const char* str) 
+{
+    return TrimStrQuote(str, false);
 }
 
 /* Deserialize the LOCATION options into locations list.
@@ -9596,6 +9733,8 @@ CopyState beginExport(
     }
     /* Get info about the columns we need to process. */
     cstate->out_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    cstate->out_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    cstate->attr_encodings = (int*)palloc(num_phys_attrs * sizeof(int));
     ListCell* cur = NULL;
     foreach (cur, cstate->attnumlist) {
         int attnum = lfirst_int(cur);
@@ -9607,6 +9746,12 @@ CopyState beginExport(
         else
             getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
+        cstate->attr_encodings[attnum - 1] = get_valid_charset_by_collation(attr[attnum - 1].attcollation);
+        construct_conversion_fmgr_info(cstate->attr_encodings[attnum - 1], cstate->file_encoding,
+            (void*)&cstate->out_convert_funcs[attnum - 1]);
+        if (cstate->attr_encodings[attnum - 1] != cstate->file_encoding) {
+            cstate->need_transcoding = true;
+        }
     }
 
     /*

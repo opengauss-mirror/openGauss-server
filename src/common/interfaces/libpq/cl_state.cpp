@@ -34,6 +34,7 @@
 #include "client_logic_cache/cached_proc.h"
 #include "client_logic_cache/dataTypes.def"
 #include "client_logic_data_fetcher/data_fetcher_manager.h"
+#include "keymgr/security_key_adpt.h"
 
 PGClientLogic::PGClientLogic(PGconn *conn, JNIEnv *java_env, jobject jdbc_handle)
     : m_conn(conn),
@@ -68,6 +69,7 @@ PGClientLogic::PGClientLogic(PGconn *conn, JNIEnv *java_env, jobject jdbc_handle
     m_data_fetcher_manager = new DataFetcherManager(conn, java_env, jdbc_handle);
     m_parser_context.eaten_begin = false;
     m_parser_context.eaten_declare = false;
+    m_key_adpt = key_adpt_new();
 }
 
 PGClientLogic::~PGClientLogic()
@@ -105,6 +107,8 @@ PGClientLogic::~PGClientLogic()
     }
     m_cached_column_manager->clear();
     delete m_cached_column_manager;
+
+    key_adpt_free((KeyAdpt *)m_key_adpt);
 }
 
 void PGClientLogic::clear_functions_list()

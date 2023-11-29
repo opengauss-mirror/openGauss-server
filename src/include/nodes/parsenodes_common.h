@@ -155,6 +155,16 @@ typedef struct DropRoleStmt {
     DropBehavior behavior;    /* CASCADE or RESTRICT */
 } DropRoleStmt;
 
+typedef struct TypeDependExtend {
+    Oid typeOid;       /* real depend type OID */
+    Oid undefDependObjOid; /* undefined oid in gs_dependencies_obj when the column's type is undefined */
+    bool dependUndefined;
+    char* schemaName;
+    char* packageName;
+    char* objectName;
+    char typType;
+    char typCategory;
+} TypeDependExtend;
 /*
  * TypeName - specifies a type in definitions
  *
@@ -181,6 +191,7 @@ typedef struct TypeName {
     int end_location;  /* %TYPE and date specified, token end location */
     bool pct_rowtype;  /* %ROWTYPE specified? */
     int charset;
+    TypeDependExtend* dependExtend = NULL;
 } TypeName;
 
 typedef enum FunctionParameterMode {
@@ -751,6 +762,17 @@ typedef struct CharsetCollateOptions {
     int charset;
     char* collate;
 } CharsetCollateOptions;
+
+/*
+ * CharsetClause - a  expression
+ */
+typedef struct CharsetClause {
+    NodeTag type;
+    Node *arg;      /* string const */
+    int charset;    /* encoding id */
+    bool is_binary;
+    int location;
+} CharsetClause;
 
 /* ----------------------
  * Create Schema Statement
@@ -1946,7 +1968,13 @@ typedef struct RightRefState {
 /* ****************************************************************************
  * 	Query Tree
  * *************************************************************************** */
-
+#ifdef USE_SPQ
+typedef uint8 ParentStmtType;
+#define PARENTSTMTTYPE_NONE	0
+#define PARENTSTMTTYPE_CTAS	1
+#define PARENTSTMTTYPE_COPY	2
+#define PARENTSTMTTYPE_REFRESH_MATVIEW	3
+#endif
 /*
  * Query -
  * 	  Parse analysis turns all statements into a Query tree
@@ -2079,6 +2107,11 @@ typedef struct Query {
     RightRefState* rightRefState;
     List* withCheckOptions; /* a list of WithCheckOption's */
     List* indexhintList;   /* a list of b mode index hint members */
+    
+#ifdef USE_SPQ
+    void* intoPolicy;
+    ParentStmtType parentStmtType;
+#endif
 } Query;
 
 /* ----------------------
@@ -2221,6 +2254,7 @@ typedef struct CreateFunctionStmt {
     List* withClause;     /* a list of DefElem */
     bool isProcedure;     /* true if it is a procedure */
     char* inputHeaderSrc;
+    char* funcHeadSrc;
     bool isPrivate;       /* in package, it's true is a private procedure*/
     bool isFunctionDeclare; /* in package,it's true is a function delcare*/
     bool isExecuted;
@@ -2357,6 +2391,7 @@ typedef struct RenameStmt {
     char* subname;           /* name of contained object (column, rule,
                               * trigger, etc) */
     char* newname;           /* the new name */
+    char* newschema;         /* the new schema name */
     DropBehavior behavior;   /* RESTRICT or CASCADE behavior */
     bool missing_ok;         /* skip error if missing? */
     List* renameTargetList = NULL;

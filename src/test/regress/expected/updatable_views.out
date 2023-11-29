@@ -2472,5 +2472,23 @@ explain (costs off) UPDATE ro_view1 SET a = a + b;
 UPDATE ro_view1 SET a = a + b;
 ERROR:  new row violates WITH CHECK OPTION for view "ro_view1"
 DETAIL:  Failing row contains (10, 2).
+create table default_t (a int, b varchar default 'table default');
+insert into default_t values (1, 'dec');
+create view default_v as select b, a from default_t;
+update default_v set b = default where a = 1;
+select * from default_v;
+       b       | a 
+---------------+---
+ table default | 1
+(1 row)
+
+alter view default_v alter column b set default 'view default';
+update default_v set b = default where a = 1;
+select * from default_v;
+      b       | a 
+--------------+---
+ view default | 1
+(1 row)
+
 \c regression
 drop database updatable_views_db;

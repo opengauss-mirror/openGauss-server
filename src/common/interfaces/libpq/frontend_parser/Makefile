@@ -13,11 +13,6 @@ subdir = src/common/interfaces/libpq/frontend_parser
 top_builddir = ../../../../../
 backenddir = $(top_builddir)/src/common/backend
 
-# where to find gen_keywordlist.pl and subsidiary files
-TOOLSDIR = $(top_srcdir)/src/tools
-GEN_KEYWORDLIST = $(PERL) -I $(TOOLSDIR) $(TOOLSDIR)/gen_keywordlist.pl
-GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
-
 # shared library parameters
 NAME= parser_frontend
 
@@ -34,16 +29,13 @@ include $(top_builddir)/src/Makefile.global
 include $(top_builddir)/src/Makefile.shlib
 parser.o gram.o: scan.cpp
 gram.hpp: gram.cpp
-gram.o  kwlookup.o parser.o: gram.hpp kwlist_d.h
+gram.o  kwlookup.o parser.o: gram.hpp submake-kwlist
 scan.o: gram.hpp scan.cpp
 #gram.cpp: build-parser
 
 gram.cpp: gram.y
 	/usr/bin/bison -d  -o gram.cpp gram.y -t
 #	$(MAKE) -f Makefile.parser
-
-kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
-	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
 
 scan.cpp: scan.l
 	/usr/bin/flex -CF -b -p -o'scan.cpp' scan.l

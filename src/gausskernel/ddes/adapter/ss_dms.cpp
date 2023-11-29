@@ -102,6 +102,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_status));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_snapshot));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_of_master));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_page_status));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_thread_init));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_owner));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_wait_reform));
@@ -126,6 +127,10 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_refresh_logger));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_validate_drc));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_reform_req_opengauss_ondemand_redo_buffer));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_mes_max_watting_rooms));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_send_opengauss_oldest_xmin));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_drc_info));
+
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
 }
@@ -226,6 +231,12 @@ int dms_request_opengauss_txn_of_master(dms_context_t *dms_ctx, dms_opengauss_tx
     return g_ss_dms_func.dms_request_opengauss_txn_of_master(dms_ctx, dms_txn_swinfo);
 }
 
+int dms_request_opengauss_page_status(dms_context_t *dms_ctx, unsigned int page, int page_num,
+    unsigned long int *page_map, int *bit_count)
+{
+    return g_ss_dms_func.dms_request_opengauss_page_status(dms_ctx, page, page_num, page_map, bit_count);
+}
+
 int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
     unsigned int timeout, unsigned char resend_after_reform)
 {
@@ -298,9 +309,9 @@ int dms_get_ssl_param(const char *param_name, char *param_value, unsigned int si
     return g_ss_dms_func.dms_get_ssl_param(param_name, param_value, size);
 }
 
-int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip)
+int dms_recovery_page_need_skip(char pageid[DMS_PAGEID_SIZE], unsigned char *skip, unsigned int alloc)
 {
-    return g_ss_dms_func.dms_recovery_page_need_skip(pageid, skip);
+    return g_ss_dms_func.dms_recovery_page_need_skip(pageid, skip, alloc);
 }
 
 int dms_reform_failed(void)
@@ -338,4 +349,19 @@ int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *
     int *redo_status)
 {
     return g_ss_dms_func.dms_reform_req_opengauss_ondemand_redo_buffer(dms_ctx, block_key, key_len, redo_status);
+}
+
+unsigned int dms_get_mes_max_watting_rooms(void)
+{
+    return g_ss_dms_func.dms_get_mes_max_watting_rooms();
+}
+
+int dms_send_opengauss_oldest_xmin(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id)
+{
+    return g_ss_dms_func.dms_send_opengauss_oldest_xmin(dms_ctx, oldest_xmin, dest_id);
+}
+
+int get_drc_info(int* is_found, stat_drc_info_t* drc_info)
+{
+    return g_ss_dms_func.dms_get_drc_info(is_found, drc_info);
 }

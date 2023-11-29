@@ -248,6 +248,7 @@ extern int ErrOutToClient(bool outToClient);
 extern int geterrcode(void);
 extern int geterrposition(void);
 extern int getinternalerrposition(void);
+extern const char* translate_errno(int errcode);
 extern int signal_is_warnings_throw(bool is_warning_throw);
 extern int signal_returnd_sqlstate(const char *returnd_sqlstate);
 extern int signal_class_origin(const char *class_origin);
@@ -260,6 +261,7 @@ extern int signal_schema_name(const char *schema_name);
 extern int signal_table_name(const char *table_name);
 extern int signal_column_name(const char *column_name);
 extern int signal_cursor_name(const char *cursor_name);
+extern int signal_mysql_errno(const char *mysql_errno);
 extern int signal_is_signal(int is_signal);
 
 extern void save_error_message(void);
@@ -315,7 +317,7 @@ typedef struct FormatCallStack {
 #define securec_check(errno, charList, ...)                                                                            \
     {                                                                                                                  \
         if (EOK != errno) {                                                                                            \
-            freeSecurityFuncSpace(static_cast<char*>(charList), ##__VA_ARGS__);                                        \
+            freeSecurityFuncSpace(charList, ##__VA_ARGS__);                                        \
             switch (errno) {                                                                                           \
                 case EINVAL:                                                                                           \
                     elog(ERROR,                                                                                        \
@@ -445,6 +447,12 @@ typedef struct FormatCallStack {
     }                                                         \
     while (0)
 
+#define PG_TRY_RETURN(ret)                                      \
+    t_thrd.log_cxt.PG_exception_stack = save_exception_stack;   \
+    t_thrd.log_cxt.error_context_stack = save_context_stack;    \
+    gstrace_tryblock_exit(false, oldTryCounter);                \
+    return ret;
+
 // ADIO means async direct io
 #ifndef ENABLE_LITE_MODE
 #define ADIO_RUN() if (g_instance.attr.attr_storage.enable_adio_function) {
@@ -535,6 +543,7 @@ typedef struct ErrorData {
     char* table_name;      /* table_name for signal/resignal */
     char* column_name;     /* column_name for signal/resignal */
     char* cursor_name;     /* cursor_name for signal/resignal */
+    char* mysql_errno;     /* mysql_errno for signal/resignal */
     bool is_warnings_throw;
     int is_signal;
 } ErrorData;
@@ -594,7 +603,6 @@ extern ErrorDataArea *initErrorDataArea();
 extern void resetErrorDataArea(bool, bool);
 extern void pushErrorData(ErrorData *);
 extern void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to);
-extern void copyDiffErrorDataArea(ErrorDataArea *from, ErrorDataArea *to, ErrorData *edata);
 extern uint64 SqlErrorDataErrorCount();
 extern uint64 SqlErrorDataWarnCount();
 extern int SqlErrorDataCount();
@@ -668,10 +676,12 @@ extern void write_stderr_with_prefix(const char* fmt, ...)
 
 extern void getElevelAndSqlstate(int* eLevel, int* sqlState);
 extern void get_time_now(char* nowTime, int timeLen);
-void freeSecurityFuncSpace(char* charList, ...);
+void freeSecurityFuncSpace(const char* charList, ...);
 
 extern void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
+
+#define TRANSLATE_ERRNO (translate_errno(errno))
 
 /* helpful macro */
 #define AssertEreport(condition, module, msg)                                                   \

@@ -3256,5 +3256,137 @@ alter table t1 modify f1 int after f3, modify f5 bool first, modify f3 timestamp
 SELECT pg_get_tabledef('t1');
 drop table if exists t1 cascade;
 
+-- test about setting schema by RenameStmt
+CREATE SCHEMA test1;
+CREATE SCHEMA test2;
+CREATE TABLE test1.test(a int primary key, b int not null);
+CREATE INDEX ON test1.test using btree(b);
+INSERT INTO test1.test VALUES (1, 1);
+\d+ test1.test
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT * FROM test1.test;
+-- check about type
+SELECT n.nspname, t.typname FROM pg_type t, pg_namespace n where t.typnamespace = n.oid and t.typname in ('test','tttt');
+ALTER TABLE test1.test RENAME TO test2.tttt;
+\d+ test1.test
+\d+ test2.tttt
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+INSERT INTO test2.tttt VALUES (2, 2);
+SELECT * FROM test1.test;
+SELECT * FROM test2.tttt;
+-- check about type
+SELECT n.nspname, t.typname FROM pg_type t, pg_namespace n where t.typnamespace = n.oid and t.typname in ('test','tttt');
+
+-- just rename
+ALTER TABLE test2.tttt RENAME TO test2.ttt;
+SELECT * FROM test2.tttt;
+SELECT * FROM test2.ttt;
+-- check about type
+SELECT n.nspname, t.typname FROM pg_type t, pg_namespace n where t.typnamespace = n.oid and t.typname = 'ttt';
+
+-- just move to other schema
+CREATE TABLE test1.t1 (a int);
+\d+ test1.t1
+ALTER TABLE test1.t1 RENAME TO test2.t1;
+\d+ test1.t1
+\d+ test2.t1
+-- check about type
+SELECT n.nspname, t.typname FROM pg_type t, pg_namespace n where t.typnamespace = n.oid and t.typname = 't1';
+
+-- test about partition table
+CREATE TABLE test1.sales_table1
+(
+    order_no INTEGER NOT NULL,
+    goods_name CHAR(20) NOT NULL,
+    sales_date DATE NOT NULL,
+    sales_volume INTEGER,
+    sales_store CHAR(20)
+)
+PARTITION BY RANGE(sales_date)
+(
+    PARTITION sales_table1_season1 VALUES LESS THAN('2021-04-01 00:00:00'),
+    PARTITION sales_table1_season2 VALUES LESS THAN('2021-07-01 00:00:00'),
+    PARTITION sales_table1_season3 VALUES LESS THAN('2021-10-01 00:00:00'),
+    PARTITION sales_table1_season4 VALUES LESS THAN(MAXVALUE)
+);
+
+CREATE TABLE test1.sales_table2
+(
+    order_no INTEGER NOT NULL,
+    goods_name CHAR(20) NOT NULL,
+    sales_date DATE NOT NULL,
+    sales_volume INTEGER,
+    sales_store CHAR(20)
+)
+PARTITION BY RANGE(sales_date)
+(
+    PARTITION sales_table2_season1 VALUES LESS THAN('2021-04-01 00:00:00'),
+    PARTITION sales_table2_season2 VALUES LESS THAN('2021-07-01 00:00:00'),
+    PARTITION sales_table2_season3 VALUES LESS THAN('2021-10-01 00:00:00'),
+    PARTITION sales_table2_season4 VALUES LESS THAN(MAXVALUE)
+);
+
+CREATE TABLE test1.sales_table3
+(
+    order_no INTEGER NOT NULL,
+    goods_name CHAR(20) NOT NULL,
+    sales_date DATE NOT NULL,
+    sales_volume INTEGER,
+    sales_store CHAR(20)
+)
+PARTITION BY RANGE(sales_date)
+(
+    PARTITION sales_table3_season1 VALUES LESS THAN('2021-04-01 00:00:00'),
+    PARTITION sales_table3_season2 VALUES LESS THAN('2021-07-01 00:00:00'),
+    PARTITION sales_table3_season3 VALUES LESS THAN('2021-10-01 00:00:00'),
+    PARTITION sales_table3_season4 VALUES LESS THAN(MAXVALUE)
+);
+SELECT n.nspname, c.relname, p.relname AS partition_name
+FROM pg_class c, pg_namespace n, pg_partition p 
+WHERE n.oid = c.relnamespace and c.oid = p.parentid and c.relname like '%sales_table%' ORDER BY 1, 2, 3;
+ALTER TABLE test1.sales_table1 RENAME TO test2.sales_table1;
+ALTER TABLE test1.sales_table2 RENAME TO test2.sales_table3;
+ALTER TABLE test1.sales_table3 RENAME TO test1.sales_table4;
+SELECT n.nspname, c.relname, p.relname AS partition_name
+FROM pg_class c, pg_namespace n, pg_partition p 
+WHERE n.oid = c.relnamespace and c.oid = p.parentid and c.relname like '%sales_table%' ORDER BY 1, 2, 3;
+
+-- rename table with view or matview
+CREATE TABLE test1.test_table_view1 (a int);
+CREATE TABLE test1.test_table_view2 (a int);
+CREATE TABLE test1.test_table_matview1 (a int);
+CREATE TABLE test1.test_table_matview2 (a int);
+
+CREATE VIEW test1.test_view1 AS SELECT * FROM test1.test_table_view1;
+CREATE VIEW test1.test_view2 AS SELECT * FROM test1.test_table_view2;
+CREATE MATERIALIZED VIEW test1.test_matview1 AS SELECT * FROM test1.test_table_matview1;
+CREATE MATERIALIZED VIEW test1.test_matview2 AS SELECT * FROM test1.test_table_matview2;
+
+ALTER TABLE test1.test_table_view1 RENAME TO test2.test_table_view1; -- just move to other schema
+ALTER TABLE test1.test_table_view2 RENAME TO test2.test_table_view3; -- rename and move to other schema
+SELECT * FROM test1.test_view1;
+SELECT pg_get_viewdef('test1.test_view1');
+SELECT * FROM test1.test_view2;
+SELECT pg_get_viewdef('test1.test_view2');
+
+ALTER TABLE test1.test_table_matview1 RENAME TO test2.test_table_matview1; -- just move to other schema
+ALTER TABLE test1.test_table_matview2 RENAME TO test2.test_table_matview3; -- rename and move to other schema
+SELECT * FROM test1.test_matview1;
+SELECT pg_get_viewdef('test1.test_matview1');
+SELECT * FROM test1.test_matview2;
+SELECT pg_get_viewdef('test1.test_matview2');
+
+-- rename to a existed table
+CREATE TABLE test1.name1 (a int);
+CREATE TABLE test2.name1 (a int);
+CREATE TABLE test2.name2 (a int);
+ALTER TABLE test1.name1 RENAME TO test2.name1;
+ALTER TABLE test1.name1 RENAME TO test2.name2;
+ALTER TABLE test2.name1 RENAME TO test2.name2;
+
+CREATE TABLE t_after_first ( c4 INT , c5 INT ) ;
+INSERT INTO t_after_first VALUES ( 1 , 2 ) , ( 3 , 4 ) ;
+ALTER TABLE t_after_first ADD COLUMN c11 VARCHAR ( 2 ) , ADD COLUMN c22 VARCHAR ( 2 ) AFTER c11 , ADD COLUMN c57 INT FIRST;
+select * from t_after_first;
 \c postgres
 drop database test_first_after_B;

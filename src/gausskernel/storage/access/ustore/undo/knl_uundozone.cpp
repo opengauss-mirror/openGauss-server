@@ -21,6 +21,7 @@
 #include "access/ustore/undo/knl_uundotxn.h"
 #include "access/ustore/undo/knl_uundospace.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "access/multi_redo_api.h"
 #include "knl/knl_thread.h"
 #include "miscadmin.h"
 #include "storage/smgr/fd.h"
@@ -43,11 +44,15 @@ UndoZone::UndoZone()
     SetLSN(0);
     SetInsertURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
     SetDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    set_discard_urec_ptr_exrto(UNDO_LOG_BLOCK_HEADER_SIZE);
     SetForceDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    set_force_discard_urec_ptr_exrto(UNDO_LOG_BLOCK_HEADER_SIZE);
     SetAllocateTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
     SetRecycleTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    set_recycle_tslot_ptr_exrto(UNDO_LOG_BLOCK_HEADER_SIZE);
     SetFrozenSlotPtr(INVALID_UNDO_SLOT_PTR);
     SetRecycleXid(InvalidTransactionId);
+    set_recycle_xid_exrto(InvalidTransactionId);
     SetFrozenXid(InvalidTransactionId);
     InitSlotBuffer();
     SetAttachPid(0);
@@ -56,12 +61,14 @@ UndoZone::UndoZone()
     undoSpace_.LockInit();
     undoSpace_.SetLSN(0);
     undoSpace_.SetHead(0);
+    undoSpace_.set_head_exrto(0);
     undoSpace_.SetTail(0);
 
     slotSpace_.MarkClean();
     slotSpace_.LockInit();
     slotSpace_.SetLSN(0);
     slotSpace_.SetHead(0);
+    slotSpace_.set_head_exrto(0);
     slotSpace_.SetTail(0);
 }
 
@@ -74,19 +81,28 @@ bool UndoZone::CheckNeedSwitch(UndoRecordSize size)
     return false;
 }
 
-bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp)
+bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto)
 {
     int startZid = UNDO_PTR_GET_ZONE_ID(starturp);
     int endZid = UNDO_PTR_GET_ZONE_ID(endurp);
     UndoLogOffset start = UNDO_PTR_GET_OFFSET(starturp);
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endurp);
-    Assert(start == forceDiscardURecPtr_);
     WHITEBOX_TEST_STUB(UNDO_CHECK_RECYCLE_FAILED, WhiteboxDefaultErrorEmit);
-
-    if ((startZid == endZid) && (forceDiscardURecPtr_ <= insertURecPtr_) && (end <= insertURecPtr_)
-        && (start < end)) {
-        return true;
+    if (isexrto) {
+        if ((startZid == endZid) && (forceDiscardURecPtr_ <= insertURecPtr_) && (end <= insertURecPtr_) &&
+            (start < end)) {
+            return true;
+        }
+    } else {
+        if ((startZid == endZid) && (forceDiscardURecPtr_ <= insertURecPtr_) && (end <= insertURecPtr_) &&
+            (start < end) && (start == forceDiscardURecPtr_)) {
+            return true;
+        }
     }
+    ereport(WARNING, (errmodule(MOD_UNDO),
+                      errmsg(UNDOFORMAT("check_recycle: zone:%d, startZid:%d, endZid:%d, start:%lu, end:%lu, "
+                                        "forceDiscardURecPtr_:%lu, insertURecPtr_:%lu."),
+                             zid_, startZid, endZid, start, end, forceDiscardURecPtr_, insertURecPtr_)));
     return false;
 }
 
@@ -125,6 +141,48 @@ UndoRecordState UndoZone::CheckUndoRecordValid(UndoLogOffset offset, bool checkF
         ereport(DEBUG1, (errmsg(UNDOFORMAT("The record has been force recycled: zid=%d, forceDiscardURecPtr=%lu, "
             "discardURecPtr=%lu, offset=%lu."),
             this->zid_, this->forceDiscardURecPtr_, this->discardURecPtr_, offset)));
+        return UNDO_RECORD_FORCE_DISCARD;
+    }
+    return UNDO_RECORD_DISCARD;
+}
+
+/*
+ * Check whether the undo record is discarded or not. If it's already discarded
+ * return false otherwise return true. Caller must hold the space discardLock_.
+ */
+UndoRecordState UndoZone::check_record_valid_exrto(UndoLogOffset offset, bool check_force_recycle,
+    TransactionId *last_xid) const
+{
+    Assert((offset < UNDO_LOG_MAX_SIZE) && (offset >= UNDO_LOG_BLOCK_HEADER_SIZE));
+    Assert(force_discard_urec_ptr_exrto <= insertURecPtr_);
+ 
+    if (offset >= this->insertURecPtr_) {
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("The undo record not insert yet: zid=%d, "
+            "insert=%lu, offset=%lu."),
+            this->zid_, this->insertURecPtr_, offset)));
+        return UNDO_RECORD_NOT_INSERT;
+    }
+    if (offset >= this->force_discard_urec_ptr_exrto) {
+        return UNDO_RECORD_NORMAL;
+    }
+    if (last_xid != NULL) {
+        *last_xid = recycle_xid_exrto;
+    }
+    if (offset >= this->discard_urec_ptr_exrto && check_force_recycle) {
+        TransactionId recycle_xmin;
+        TransactionId oldest_xmin = GetOldestXminForUndo(&recycle_xmin);
+        if (TransactionIdPrecedes(recycle_xid_exrto, recycle_xmin)) {
+            ereport(DEBUG1, (errmsg(
+                UNDOFORMAT("oldestxmin %lu, recycle_xmin %lu > recyclexid_exrto %lu: zid=%d,"
+                "force_discard_urec_ptr_exrto=%lu, discard_urec_ptr_exrto=%lu, offset=%lu."),
+                oldest_xmin, recycle_xmin, recycle_xid_exrto, this->zid_, this->force_discard_urec_ptr_exrto,
+                this->discard_urec_ptr_exrto, offset)));
+            return UNDO_RECORD_DISCARD;
+        }
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("The record has been force recycled: zid=%d, "
+            "force_discard_urec_ptr_exrto=%lu, "
+            "discard_urec_ptr_exrto=%lu, offset=%lu."),
+            this->zid_, this->force_discard_urec_ptr_exrto, this->discard_urec_ptr_exrto, offset)));
         return UNDO_RECORD_FORCE_DISCARD;
     }
     return UNDO_RECORD_DISCARD;
@@ -220,7 +278,14 @@ UndoSlotPtr UndoZone::AllocateSlotSpace(void)
 void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRecycleSize)
 {
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endurp);
-    int startSegno = (int)(undoSpace_.Head() / UNDO_LOG_SEGMENT_SIZE);
+    int startSegno;
+    UndoLogOffset head;
+    if (t_thrd.undorecycler_cxt.is_recovery_in_progress) {
+        head = undoSpace_.Head_exrto();
+    } else {
+        head = undoSpace_.Head();
+    }
+    startSegno = (int)(head / UNDO_LOG_SEGMENT_SIZE);
     int endSegno = (int)(end / UNDO_LOG_SEGMENT_SIZE);
 
     if (unlikely(startSegno < endSegno)) {
@@ -229,10 +294,10 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
         }
         ForgetUndoBuffer(startSegno * UNDO_LOG_SEGMENT_SIZE, endSegno * UNDO_LOG_SEGMENT_SIZE, UNDO_DB_OID);
         undoSpace_.LockSpace();
-        UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, undoSpace_.Head());
+        UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, head);
         undoSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_LOG_SEGMENT_SIZE, UNDO_DB_OID);
         Assert(undoSpace_.Head() <= insertURecPtr_);
-        if (pLevel_ == UNDO_PERMANENT) {
+        if (pLevel_ == UNDO_PERMANENT && (!t_thrd.undorecycler_cxt.is_recovery_in_progress)) {
             START_CRIT_SECTION();
             undoSpace_.MarkDirty();
             XlogUndoUnlink undoUnlink;
@@ -247,11 +312,40 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
     return;
 }
 
+/* Release undo space from starturp to endurp and advance discard. */
+uint64 UndoZone::release_residual_record_space()
+{
+    UndoLogOffset unlink_start = undoSpace_.find_oldest_offset(zid_, UNDO_DB_OID);
+    UndoLogOffset unlink_end = undoSpace_.Head();
+    uint64 start_segno = unlink_start / UNDO_LOG_SEGMENT_SIZE;
+    uint64 end_segno = unlink_end / UNDO_LOG_SEGMENT_SIZE;
+    ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
+                     errmsg("release_residual_record_space start_segno:%lu end_segno:%lu.", start_segno, end_segno)));
+    ForgetUndoBuffer(start_segno * UNDO_LOG_SEGMENT_SIZE, end_segno * UNDO_LOG_SEGMENT_SIZE, UNDO_DB_OID);
+    undoSpace_.LockSpace();
+    undoSpace_.unlink_residual_log(zid_, unlink_start, unlink_end, UNDO_DB_OID);
+    undoSpace_.UnlockSpace();
+    if (unlink_start > unlink_end) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("release_residual_record_space start:%lu "
+            "is bigger than end:%lu."),
+            unlink_start, unlink_end)));
+        return 0;
+    } else {
+        return (unlink_end / UNDO_LOG_SEGMENT_SIZE) - (unlink_start / UNDO_LOG_SEGMENT_SIZE);
+    }
+}
+
 /* Release slot space from starturp to endurp and advance discard. */
 void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, int *forceRecycleSize)
 {
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endSlotPtr);
-    int startSegno = (int)(slotSpace_.Head() / UNDO_META_SEGMENT_SIZE);
+    UndoLogOffset head;
+    if (t_thrd.undorecycler_cxt.is_recovery_in_progress) {
+        head = slotSpace_.Head_exrto();
+    } else {
+        head = slotSpace_.Head();
+    }
+    int startSegno = (int)(head / UNDO_META_SEGMENT_SIZE);
     int endSegno = (int)(end / UNDO_META_SEGMENT_SIZE);
 
     if (unlikely(startSegno < endSegno)) {
@@ -260,10 +354,10 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
         }
         ForgetUndoBuffer(startSegno * UNDO_META_SEGMENT_SIZE, endSegno * UNDO_META_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
         slotSpace_.LockSpace();
-        UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, slotSpace_.Head());
+        UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, head);
         slotSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_META_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
         Assert(slotSpace_.Head() <= allocateTSlotPtr_);
-        if (pLevel_ == UNDO_PERMANENT) {
+        if (pLevel_ == UNDO_PERMANENT && !(t_thrd.undorecycler_cxt.is_recovery_in_progress)) {
             START_CRIT_SECTION();
             slotSpace_.MarkDirty();
             XlogUndoUnlink undoUnlink;
@@ -276,6 +370,27 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
         slotSpace_.UnlockSpace();
     }
     return;
+}
+
+/* Release slot space from starturp to endurp and advance discard. */
+uint64 UndoZone::release_residual_slot_space()
+{
+    UndoLogOffset unlink_start = slotSpace_.find_oldest_offset(zid_, UNDO_SLOT_DB_OID);
+    UndoLogOffset unlink_end = slotSpace_.Head();
+    uint64 start_segno = unlink_start / UNDO_LOG_SEGMENT_SIZE;
+    uint64 end_segno = unlink_end / UNDO_LOG_SEGMENT_SIZE;
+    ForgetUndoBuffer(start_segno * UNDO_LOG_SEGMENT_SIZE, end_segno * UNDO_LOG_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
+    slotSpace_.LockSpace();
+    slotSpace_.unlink_residual_log(zid_, unlink_start, unlink_end, UNDO_SLOT_DB_OID);
+    slotSpace_.UnlockSpace();
+    if (unlink_start > unlink_end) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("release_residual_slot_space start:%lu is bigger "
+            "than end:%lu."),
+            unlink_start, unlink_end)));
+        return 0;
+    } else {
+        return (unlink_end / UNDO_META_SEGMENT_SIZE) - (unlink_start / UNDO_META_SEGMENT_SIZE);
+    }
 }
 
 void UndoZone::PrepareSwitch(void)
@@ -513,10 +628,19 @@ static void RecoveryZone(UndoZone *uzone,
     uzone->SetLSN(uspMetaInfo->lsn);
     uzone->SetInsertURecPtr(uspMetaInfo->insertURecPtr);
     uzone->SetDiscardURecPtr(uspMetaInfo->discardURecPtr);
+    uzone->set_discard_urec_ptr_exrto(uspMetaInfo->discardURecPtr);
     uzone->SetForceDiscardURecPtr(uspMetaInfo->forceDiscardURecPtr);
+    uzone->set_force_discard_urec_ptr_exrto(uspMetaInfo->forceDiscardURecPtr);
     uzone->SetAllocateTSlotPtr(uspMetaInfo->allocateTSlotPtr);
     uzone->SetRecycleTSlotPtr(uspMetaInfo->recycleTSlotPtr);
+    uzone->set_recycle_tslot_ptr_exrto(uspMetaInfo->recycleTSlotPtr);
     uzone->SetRecycleXid(uspMetaInfo->recycleXid);
+    uzone->set_recycle_xid_exrto(uspMetaInfo->recycleXid);
+    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("recovery_zone id:%d, lsn:%lu, "
+        "insert_urec_ptr:%lu, discard_urec_ptr:%lu, force_discard_urec_ptr:%lu, allocate_tslot_ptr:%lu, "
+        "recycle_tslot_ptr:%lu, recycle_xid:%lu."), zoneId, uspMetaInfo->lsn, uspMetaInfo->insertURecPtr,
+        uspMetaInfo->discardURecPtr, uspMetaInfo->forceDiscardURecPtr, uspMetaInfo->allocateTSlotPtr,
+        uspMetaInfo->recycleTSlotPtr, uspMetaInfo->recycleXid)));
 }
 
 /* Initialize parameters in the undo zone. */
@@ -528,11 +652,15 @@ void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence)
     uzone->SetLSN(0);
     uzone->SetInsertURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
     uzone->SetDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->set_discard_urec_ptr_exrto(UNDO_LOG_BLOCK_HEADER_SIZE);
     uzone->SetForceDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->set_force_discard_urec_ptr_exrto(UNDO_LOG_BLOCK_HEADER_SIZE);
     uzone->SetAllocateTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
     uzone->SetRecycleTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->set_recycle_tslot_ptr_exrto(UNDO_LOG_BLOCK_HEADER_SIZE);
     uzone->SetFrozenSlotPtr(INVALID_UNDO_SLOT_PTR);
     uzone->SetRecycleXid(InvalidTransactionId);
+    uzone->set_recycle_xid_exrto(InvalidTransactionId);
     uzone->SetFrozenXid(InvalidTransactionId);
     uzone->SetAttachPid(0);
 }
@@ -544,6 +672,7 @@ void InitUndoSpace(UndoZone *uzone, UndoSpaceType type)
     usp->MarkClean();
     usp->SetLSN(0);
     usp->SetHead(0);
+    usp->set_head_exrto(0);
     usp->SetTail(0);
 }
 

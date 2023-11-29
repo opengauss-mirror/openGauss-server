@@ -1,0 +1,180 @@
+\c regression
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select 'aa' = 'AA';
+
+set names utf8;
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select 'aa' = 'AA';
+
+-- error case
+set names utf8 collate gbk_bin;
+
+create database charset_connection_test dbcompatibility 'b';
+\c charset_connection_test
+-- show encoding settings
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select 'aa' = 'AA';
+
+set names utf8;
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select 'aa' = 'AA';
+
+-- expect error cases
+SET NAMES utf8mb4 COLLATE utf8mb4_general_ci;
+SET NAMES utf8 collate = 'utf8_bin';
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='all'" >/dev/null 2>&1
+select pg_sleep(1);
+\c
+
+-- show encoding settings
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select 'aa' = 'AA';
+
+--error cases
+SET NAMES 'utf8' COLLATE DEFAULT;
+SET NAMES 'gbk' COLLATE 'utf8mb4_bin';
+SET NAMES utf8 COLLATE gbk_bin;
+SET NAMES COLLATE 'utf8mb4_bin';
+
+SET NAMES gbk;
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select '高斯aa' = '高斯AA';
+select '高斯aa' = '高斯AA' collate 'utf8mb4_bin'; --error case
+select '高斯aa' = '高斯AA' collate 'gbk_bin';
+
+set collation_connection = utf8mb4_bin;
+show character_set_connection;
+show collation_connection;
+select 'aa' = 'AA';
+
+set character_set_connection = gbk;
+show character_set_connection;
+show collation_connection;
+select '高斯aa' = '高斯AA';
+
+SET NAMES DEFAULT;
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select '高斯aa' = '高斯AA';
+
+SET NAMES;
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select '高斯aa' = '高斯AA';
+
+-- test default
+set names gbk;
+set names utf8 collate default;
+show character_set_connection;
+show collation_connection;
+
+set names gbk;
+set names utf8 collate 'default';
+show character_set_connection;
+show collation_connection;
+
+set names gbk;
+set collation_connection = default;
+show character_set_connection;
+show collation_connection;
+
+-- test charset = -1
+set collation_connection = 'C';
+show character_set_connection;
+show collation_connection;
+
+set collation_connection = 'default';
+show character_set_connection;
+show collation_connection;
+
+set collation_connection = 'POSIX';
+show character_set_connection;
+show collation_connection;
+
+set collation_connection = "binary";
+set collation_connection = binary;
+show character_set_connection;
+show collation_connection;
+set names utf8;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
+select pg_sleep(1);
+\c
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+select '高斯aa' = '高斯AA'; --false
+
+set b_format_behavior_compat_options = 'ALL';
+set @aa = '高斯aa';
+set @bb = (select '高斯aa');
+select @cc := '高斯aa';
+select @dd := (select '高斯aa');
+select '高斯aa' into @ee;
+select @aa,@bb,@cc,@dd,@ee;
+select collation for(@aa), collation for(@bb), collation for(@cc), collation for(@dd), collation for(@ee);
+
+set names gbk;
+set @aa = '高斯aa';
+set @bb = (select '高斯aa');
+select @cc := '高斯aa';
+select @dd := (select '高斯aa');
+select '高斯aa' into @ee;
+select @aa,@bb,@cc,@dd,@ee;
+select collation for(@aa), collation for(@bb), collation for(@cc), collation for(@dd), collation for(@ee);
+
+set @aa = '高斯aa' collate utf8mb4_unicode_ci;
+set @bb = (select '高斯aa' collate utf8mb4_unicode_ci);
+select @cc := '高斯aa' collate utf8mb4_unicode_ci;
+select @dd := (select '高斯aa' collate utf8mb4_unicode_ci);
+select '高斯aa' collate utf8mb4_unicode_ci into @ee;
+
+set client_encoding = utf8mb4;
+select @aa,@bb,@cc,@dd,@ee;
+
+set names utf8;
+set @aa = '高斯aa' collate utf8mb4_unicode_ci;
+set @bb = (select '高斯aa' collate utf8mb4_unicode_ci);
+select @cc := '高斯aa' collate utf8mb4_unicode_ci;
+select @dd := (select '高斯aa' collate utf8mb4_unicode_ci);
+select '高斯aa' collate utf8mb4_unicode_ci into @ee;
+select @aa,@bb,@cc,@dd,@ee;
+select collation for(@aa), collation for(@bb), collation for(@cc), collation for(@dd), collation for(@ee);
+
+set names gbk;
+create table t(a text collate utf8mb4_bin, b text collate utf8mb4_unicode_ci);
+insert into t values('高斯aa', '高斯bb');
+select * from t into @a,@b;
+select @a,@b;
+select collation for(@a), collation for(@b);
+select * from t where a = 'c' into @a,@b;
+select @a,@b;
+select collation for(@a), collation for(@b);
+create database charset_gbk dbcompatibility 'b' encoding 'gbk' lc_ctype = 'C' lc_collate = 'C';
+\c charset_gbk
+set client_encoding = utf8;
+show client_encoding;
+show character_set_connection;
+show collation_connection;
+create table t1(a text charset gbk collate gbk_bin);
+insert into t1 values('高斯');
+select * from t1;
+create database latin1_db dbcompatibility 'b' encoding 'latin1' lc_ctype = 'C' lc_collate = 'C';
+\c latin1_db
+select '高斯aa' = '高斯AA';
+\c regression

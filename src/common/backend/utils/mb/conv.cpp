@@ -14,6 +14,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "mb/pg_wchar.h"
+#include "Unicode/gb18030_to_utf8_2022.map"
+#include "Unicode/utf8_to_gb18030_2022.map"
 
 /*
  * LATINn ---> MIC when the charset's local codes map directly to MIC
@@ -479,6 +481,16 @@ void UtfToLocal(const unsigned char *utf, int len, unsigned char *iso, const pg_
             l = l_save;
         }
         /* Now check ordinary map */
+        // add gb18030-2022 conv judge.
+        if (encoding == PG_GB18030_2022) {
+            p = (pg_utf_to_local*)bsearch(&iutf, ULmapGB18030_2022,
+                lengthof(ULmapGB18030_2022), sizeof(pg_utf_to_local), compare1);
+            if (p != NULL) {
+                iso = store_coded_char(iso, p->code);
+                continue;
+            }
+        }
+
         p = (pg_utf_to_local *)bsearch(&iutf, map, mapsize, sizeof(pg_utf_to_local), compare1);
         if (p != NULL) {
             iso = store_coded_char(iso, p->code);
@@ -602,6 +614,15 @@ void LocalToUtf(const unsigned char *iso, int len, unsigned char *utf, const pg_
             iiso |= *iso++;
         }
 
+        // add gb18030-2022 conv judge
+        if (encoding == PG_GB18030_2022) {
+            p = (pg_local_to_utf*)bsearch(&iiso, LUmapGB18030_2022,
+                lengthof(LUmapGB18030_2022), sizeof(pg_local_to_utf), compare2);
+            if (p != NULL) {
+                utf = store_coded_char(utf, p->utf);
+                continue;
+            }
+        }
         p = (pg_local_to_utf*)bsearch(&iiso, map, mapsize, sizeof(pg_local_to_utf), compare2);
         if (p != NULL) {
             utf = store_coded_char(utf, p->utf);

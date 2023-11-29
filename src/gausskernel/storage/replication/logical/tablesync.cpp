@@ -776,7 +776,15 @@ static void copy_table(Relation rel)
 
     /* Create CopyState for ingestion of the data from publisher. */
     attnamelist = make_copy_attnamelist(relmapentry);
-    cstate = BeginCopyFrom(rel, NULL, attnamelist, NIL, &mem_info, (const char*)cmd.data, copy_read_data);
+    cstate = BeginCopyFrom(rel, NULL, attnamelist, NIL, &mem_info, NULL, copy_read_data);
+
+    RangeTblEntry *rte = makeNode(RangeTblEntry);
+    rte->rtekind = RTE_RELATION;
+    rte->relid = RelationGetRelid(rel);
+    rte->relkind = rel->rd_rel->relkind;
+    rte->requiredPerms = ACL_SELECT;
+
+    cstate->range_table = list_make1(rte);
 
     /* Do the copy */
     (void)CopyFrom(cstate);

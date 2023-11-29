@@ -349,7 +349,7 @@ void CStorePSort::ResetTupleSortState(bool endFlag)
         m_tupleSlot = NULL;
     }
 
-    // clear memory contex
+    // clear memory context
     MemoryContextReset(m_psortMemContext);
 
     if (!endFlag) {
@@ -385,7 +385,7 @@ void CStorePSort::ResetBatchSortState(bool endFlag)
         m_batchSortState = NULL;
     }
 
-    // clear memory contex
+    // clear memory context
     MemoryContextReset(m_psortMemContext);
 
     if (!endFlag) {

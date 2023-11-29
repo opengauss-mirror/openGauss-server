@@ -773,8 +773,9 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
      *
      * First we prepare to log, then after lock acquired we issue log record.
      */
-    if (lockmode >= AccessExclusiveLock && (locktag->locktag_type == LOCKTAG_RELATION ||
-        locktag->locktag_type == LOCKTAG_PARTITION || locktag->locktag_type == LOCKTAG_PARTITION_SEQUENCE) &&
+    if (lockmode >= AccessExclusiveLock &&
+        (locktag->locktag_type == LOCKTAG_RELATION || locktag->locktag_type == LOCKTAG_PARTITION ||
+         locktag->locktag_type == LOCKTAG_PARTITION_SEQUENCE || locktag->locktag_type == LOCKTAG_OBJECT) &&
         !RecoveryInProgress() && XLogStandbyInfoActive()) {
         LogAccessExclusiveLockPrepare();
         log_lock = true;
@@ -1058,7 +1059,12 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
          * lots of empty bytes with every message.	See lock.h to check how a
          * locktag is defined for LOCKTAG_RELATION
          */
-        LogAccessExclusiveLock(locktag->locktag_field1, locktag->locktag_field2);
+        uint32 seq = InvalidOid;
+        if (locktag->locktag_type == LOCKTAG_PARTITION || locktag->locktag_type == LOCKTAG_PARTITION_SEQUENCE ||
+            locktag->locktag_type == LOCKTAG_OBJECT) {
+            seq = locktag->locktag_field3;
+        }
+        LogAccessExclusiveLock(locktag->locktag_field1, locktag->locktag_field2, seq);
     }
 
     instr_stmt_report_lock(LOCK_END, lockmode);
@@ -1260,7 +1266,7 @@ static void RemoveLocalLock(LOCALLOCK *locallock)
     }
 }
 
-bool inline IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)
+inline  bool IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)
 {
     Assert(proclock1->groupLeader != t_thrd.proc || t_thrd.proc->lockGroupLeader != NULL);
     return proclock1 != proclock2 && proclock1->groupLeader == proclock2->groupLeader;
@@ -2057,8 +2063,9 @@ void LockReleaseAll(LOCKMETHODID lockmethodid, bool allLocks)
      * released: it is always and only released when a toplevel transaction
      * ends.
      */
-    if (lockmethodid == DEFAULT_LOCKMETHOD)
+    if ((lockmethodid == DEFAULT_LOCKMETHOD) && (t_thrd.role != PAGEREDO)) {
         VirtualXactLockTableCleanup();
+    }
 
     numLockModes = lockMethodTable->numLockModes;
 
@@ -3797,30 +3804,6 @@ void lock_twophase_recover(TransactionId xid, uint16 info, void *recdata, uint32
     }
 
     LWLockRelease(partitionLock);
-}
-
-/*
- * Re-acquire a lock belonging to a transaction that was prepared, when
- * when starting up into hot standby mode.
- */
-void lock_twophase_standby_recover(TransactionId xid, uint16 info, void *recdata, uint32 len)
-{
-    TwoPhaseLockRecord *rec = (TwoPhaseLockRecord *)recdata;
-    LOCKTAG *locktag = NULL;
-    LOCKMODE lockmode;
-    LOCKMETHODID lockmethodid;
-
-    Assert(len == sizeof(TwoPhaseLockRecord));
-    locktag = &rec->locktag;
-    lockmode = rec->lockmode;
-    lockmethodid = locktag->locktag_lockmethodid;
-
-    CHECK_LOCKMETHODID(lockmethodid);
-
-    if (lockmode == AccessExclusiveLock && locktag->locktag_type == LOCKTAG_RELATION) {
-        StandbyAcquireAccessExclusiveLock(xid, locktag->locktag_field1 /* dboid */,
-                                          locktag->locktag_field2 /* reloid */);
-    }
 }
 
 /*

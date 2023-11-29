@@ -44,6 +44,8 @@ typedef struct {       /* Per-attribute information */
     bool typisvarlena; /* is it varlena (ie possibly toastable)? */
     int16 format;      /* format code for this column */
     FmgrInfo finfo;    /* Precomputed call info for output fn */
+    int encoding;      /* The character set of the text type attribute, valid when different from server_encoding */
+    FmgrInfo convert_finfo;    /* Precomputed call info for encoding conversion fn */
 } PrinttupAttrInfo;
 
 typedef struct {

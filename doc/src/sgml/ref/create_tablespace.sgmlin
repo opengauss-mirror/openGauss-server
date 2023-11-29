@@ -11,15 +11,20 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE TABLESPACE tablespace_name
-    [ OWNER user_name ]  [ RELATIVE ]  LOCATION 'directory' [ MAXSIZE 'space_size' ]
-    [with_option_clause];
+    {[ OWNER user_name ]  [ RELATIVE ]  LOCATION 'directory' [ MAXSIZE 'space_size' ]
+    [with_option_clause]} |
+    {[LOGGING | NOLOGGING] DATAFILE 'directory' [SIZE space_size space_size_unit] [REUSE]
+    [AUTOEXTEND ON [NEXT next_size next_size_unit] [MAXSIZE 'autoextend_size'] | AUTOEXTEND OFF]} |
+    {DATAFILE 'directory' [SIZE space_size space_size_unit] [REUSE]
+    [AUTOEXTEND ON [NEXT next_size next_size_unit] [MAXSIZE 'autoextend_size'] | AUTOEXTEND OFF] {LOGGING | NOLOGGING}};
 
 where option_clause can be:
-WITH ( filesystem= { 'systemtype '| " systemtype " | systemtype }
- [ { , address = { ' ip:port [ , ... ] ' | " ip:port [ , ... ] "} } ]
-, cfgpath = { 'path '| " path " } ,storepath = { 'rootpath '| " rootpath "} 
-[{, random_page_cost = { 'value '| " value " | value }}]
-[{,seq_page_cost = { 'value '| " value " | value }}])
+WITH ({filesystem = {'general' | "general" | general} |
+    address = {'ip:port[,...]'} |
+    cfgpath = {'path'} |
+    storepath = {'rootpath'} |
+    random_page_cost = {'value' | value} |
+    seq_page_cost = {'value' | value}}[,...])
 </synopsis>
 </refsynopsisdiv>
 </refentry>

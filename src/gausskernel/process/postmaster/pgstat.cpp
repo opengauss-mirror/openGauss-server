@@ -1769,7 +1769,15 @@ void pgstat_init_function_usage(FunctionCallInfoData* fcinfo, PgStat_FunctionCal
         hash_ctl.keysize = sizeof(Oid);
         hash_ctl.entrysize = sizeof(PgStat_BackendFunctionEntry);
         hash_ctl.hash = oid_hash;
-        hash_ctl.hcxt = u_sess->stat_cxt.pgStatLocalContext;
+        /*
+         * hence the u_sess->stat_cxt.pgStatFunctions is used for whole session
+         * should use memory context under uess.top_mem_contxt here
+         */
+        hash_ctl.hcxt = AllocSetContextCreate(u_sess->top_mem_cxt,
+                                              "Function stat hash",
+                                              ALLOCSET_SMALL_MINSIZE,
+                                              ALLOCSET_SMALL_INITSIZE,
+                                              ALLOCSET_SMALL_MAXSIZE);
         u_sess->stat_cxt.pgStatFunctions = hash_create(
             "Function stat entries", PGSTAT_FUNCTION_HASH_SIZE, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
     }
@@ -3302,6 +3310,33 @@ void pgstat_couple_decouple_session(bool is_couple)
     pgstat_increment_changecount_after(beentry);
 }
 
+static void clear_backend_entry(volatile PgBackendStatus* beentry)
+{
+    /*
+     * Clear status entry, following the protocol of bumping st_changecount
+     * before and after.  We use a volatile pointer here to ensure the
+     * compiler doesn't try to get cute.
+     */
+    pgstat_increment_changecount_before(beentry);
+
+    beentry->st_procpid = 0;   /* mark pid invalid */
+    beentry->st_sessionid = 0; /* mark sessionid invalid */
+    beentry->globalSessionId.sessionId = 0;
+    beentry->globalSessionId.nodeId = 0;
+    beentry->globalSessionId.seq = 0;
+
+    /*
+     * make sure st_changecount is an even before release it.
+     *
+     * In case some thread was interrupted by SIGTERM at any time with a mess st_changecount
+     * in PgBackendStatus, PgstatCollectorMain may hang-up in waiting its change to even and
+     * can not exit after receiving SIGTERM signal
+     */
+    do {
+        pgstat_increment_changecount_after(beentry);
+    } while ((beentry->st_changecount & 1) != 0);
+}
+
 /*
  * Shut down a single backend's statistics reporting at process exit.
  *
@@ -3328,29 +3363,18 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
     if (OidIsValid(u_sess->proc_cxt.MyDatabaseId))
         pgstat_report_stat(true);
 
-    /*
-     * Clear my status entry, following the protocol of bumping st_changecount
-     * before and after.  We use a volatile pointer here to ensure the
-     * compiler doesn't try to get cute.
-     */
-    pgstat_increment_changecount_before(beentry);
-
-    beentry->st_procpid = 0;   /* mark pid invalid */
-    beentry->st_sessionid = 0; /* mark sessionid invalid */
-    beentry->globalSessionId.sessionId = 0;
-    beentry->globalSessionId.nodeId = 0;
-    beentry->globalSessionId.seq = 0;
+    /* Clear my status entry */
+    clear_backend_entry(beentry);
 
     /*
-     * make sure st_changecount is an even before release it.
-     *
-     * In case some thread was interrupted by SIGTERM at any time with a mess st_changecount
-     * in PgBackendStatus, PgstatCollectorMain may hang-up in waiting its change to even and
-     * can not exit after receiving SIGTERM signal
+     * Thread pool worker also needs to clear
+     * t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]
      */
-    do {
-        pgstat_increment_changecount_after(beentry);
-    } while ((beentry->st_changecount & 1) != 0);
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        beentry != &t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        clear_backend_entry(&t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]);
+        WaitUntilLWLockInfoNeverAccess(&t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1]);
+    }
 
     /*
      * handle below cases:
@@ -4699,6 +4723,12 @@ const char* pgstat_get_wait_dms(WaitEventDMS w)
         case WAIT_EVENT_DLS_REQ_TABLE:
             event_name = "DlsReqTable";
             break;
+        case WAIT_EVENT_DLS_REQ_PART_X:
+            event_name = "DlsReqPartX";
+            break;
+        case WAIT_EVENT_DLS_REQ_PART_S:
+            event_name = "DlsReqPartS";
+            break;
         case WAIT_EVENT_DLS_WAIT_TXN:
             event_name = "DlsWaitTxn";
             break;
@@ -4731,6 +4761,30 @@ const char* pgstat_get_wait_dms(WaitEventDMS w)
             break;
         case WAIT_EVENT_LATCH_S_REMOTE:
             event_name = "LatchSRemote";
+            break;
+        case WAIT_EVENT_ONDEMAND_REDO:
+            event_name = "OndemandRedo";
+            break;
+        case WAIT_EVENT_PAGE_STATUS_INFO:
+            event_name = "PageStatusInfo";
+            break;
+        case WAIT_EVENT_OPENGAUSS_SEND_XMIN:
+            event_name = "OpenGaussSendXmin";
+            break;
+        case WAIT_EVENT_DCS_REQ_CREATE_XA_RES:
+            event_name = "DcsReqCreateXaRes";
+            break;
+        case WAIT_EVENT_DCS_REQ_DELETE_XA_RES:
+            event_name = "DcsReqDeleteXaRes";
+            break;
+        case WAIT_EVENT_DCS_REQ_XA_OWNER_ID:
+            event_name = "DcsReqXaOwnerId";
+            break;
+        case WAIT_EVENT_DCS_REQ_XA_IN_USE:
+            event_name = "DcsReqXaInUse";
+            break;
+        case WAIT_EVENT_DCS_REQ_END_XA:
+            event_name = "DcsReqEndXa";
             break;
         default:
             event_name = "unknown wait event";
@@ -8162,17 +8216,6 @@ Size sessionTimeShmemSize(void)
     return mul_size(SessionTimeArraySize, sizeof(SessionTimeEntry));
 }
 
-const char* TimeInfoTypeName[TOTAL_TIME_INFO_TYPES] = {"DB_TIME",
-    "CPU_TIME",
-    "EXECUTION_TIME",
-    "PARSE_TIME",
-    "PLAN_TIME",
-    "REWRITE_TIME",
-    "PL_EXECUTION_TIME",
-    "PL_COMPILATION_TIME",
-    "NET_SEND_TIME",
-    "DATA_IO_TIME"};
-
 void sessionTimeShmemInit(void)
 {
     bool found = false;
@@ -8267,6 +8310,12 @@ static void endMySessionTimeEntry(int code, Datum arg)
 {
     DetachMySessionTimeEntry(t_thrd.shemem_ptr_cxt.mySessionTimeEntry);
 
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        t_thrd.shemem_ptr_cxt.mySessionTimeEntry !=
+        &t_thrd.shemem_ptr_cxt.sessionTimeArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        DetachMySessionTimeEntry(&t_thrd.shemem_ptr_cxt.sessionTimeArray[t_thrd.proc_cxt.MyBackendId - 1]);
+    }
+
     /* don't bother this entry any more. */
     t_thrd.shemem_ptr_cxt.mySessionTimeEntry = NULL;
 }
@@ -8307,68 +8356,60 @@ void AttachMySessionTimeEntry(void)
     Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
 }
 
+static void addThreadTimeEntry()
+{
+    for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {
+        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[i] +=
+            u_sess->stat_cxt.localTimeInfoArray[i];
+    }
+}
+void ResetMemory(void* dest, size_t size)
+{
+    errno_t rc;
+    rc = memset_s(dest, size, 0, size);
+    securec_check(rc, "\0", "\0");
+}
+
 void timeInfoRecordStart(void)
 {
-    if (u_sess->stat_cxt.localTimeInfoArray[DB_TIME] == 0) {
-        u_sess->stat_cxt.localTimeInfoArray[DB_TIME] = GetCurrentTimestamp();
-        if (u_sess->attr.attr_common.enable_instr_cpu_timer)
-            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
+    if (!og_time_record_start()) {
+        return;
     }
+    if (u_sess->attr.attr_common.enable_instr_cpu_timer)
+        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
 }
 
 void timeInfoRecordEnd(void)
 {
-    errno_t rc;
-    if (u_sess->stat_cxt.localTimeInfoArray[DB_TIME] != 0) {
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
-
-        if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
-            int64 cur = getCpuTime();
-
-            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
-        }
-        u_sess->stat_cxt.localTimeInfoArray[DB_TIME] =
-            GetCurrentTimestamp() - u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[CPU_TIME] += u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[DB_TIME] += u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[EXECUTION_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[EXECUTION_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PARSE_TIME] += u_sess->stat_cxt.localTimeInfoArray[PARSE_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PLAN_TIME] += u_sess->stat_cxt.localTimeInfoArray[PLAN_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[REWRITE_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[REWRITE_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PL_EXECUTION_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[PL_EXECUTION_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[PL_COMPILATION_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[PL_COMPILATION_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[NET_SEND_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[NET_SEND_TIME];
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[DATA_IO_TIME] +=
-            u_sess->stat_cxt.localTimeInfoArray[DATA_IO_TIME];
-
-        t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
-        Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
-
-        UniqueSQLStat sqlStat;
-        sqlStat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;
-        sqlStat.netInfo = u_sess->stat_cxt.localNetInfo;
-        if (u_sess->unique_sql_cxt.unique_sql_id != 0 && is_unique_sql_enabled())
-            UpdateUniqueSQLStat(NULL, NULL, 0, NULL, &sqlStat);
-        rc = memset_s(u_sess->stat_cxt.localTimeInfoArray,
-            sizeof(int64) * TOTAL_TIME_INFO_TYPES,
-            0,
-            sizeof(int64) * TOTAL_TIME_INFO_TYPES);
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(u_sess->stat_cxt.localNetInfo,
-            sizeof(uint64) * TOTAL_NET_INFO_TYPES,
-            0,
-            sizeof(uint64) * TOTAL_NET_INFO_TYPES);
-        securec_check(rc, "\0", "\0");
+    if (!og_time_record_is_started()) {
+        return;
     }
+    t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
+
+    if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
+        int64 cur = getCpuTime();
+        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - 
+            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
+    }
+    og_time_record_end();
+    og_get_record_stat()->print_self();
+
+    addThreadTimeEntry();
+    t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
+    Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
+
+    UniqueSQLStat sqlStat;
+    sqlStat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;
+    sqlStat.netInfo = u_sess->stat_cxt.localNetInfo;
+    if (u_sess->unique_sql_cxt.unique_sql_id != 0 && is_unique_sql_enabled()) {
+        UpdateUniqueSQLStat(NULL, NULL, 0, NULL, &sqlStat);
+
+    }
+
+    ResetMemory(u_sess->stat_cxt.localTimeInfoArray,
+        sizeof(int64) * TOTAL_TIME_INFO_TYPES);
+    ResetMemory(u_sess->stat_cxt.localNetInfo,
+        sizeof(uint64) * TOTAL_NET_INFO_TYPES);
 }
 
 /* generate result of pv_session_time view */
@@ -8508,6 +8549,12 @@ static void endMySessionStatEntry(int code, Datum arg)
 {
     /* mark my entry not active. */
     t_thrd.shemem_ptr_cxt.mySessionStatEntry->isValid = false;
+
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        t_thrd.shemem_ptr_cxt.mySessionStatEntry !=
+        &t_thrd.shemem_ptr_cxt.sessionStatArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        t_thrd.shemem_ptr_cxt.sessionStatArray[t_thrd.proc_cxt.MyBackendId - 1].isValid = false;
+    }
 
     /* don't bother this entry any more. */
     t_thrd.shemem_ptr_cxt.mySessionStatEntry = NULL;
@@ -8743,6 +8790,12 @@ static void endMySessionMemoryEntry(int code, Datum arg)
 
     /* mark my entry not active. */
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->isValid = false;
+
+    if (IS_THREAD_POOL_WORKER && t_thrd.proc_cxt.MyBackendId != InvalidBackendId &&
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry !=
+        &t_thrd.shemem_ptr_cxt.sessionMemoryArray[t_thrd.proc_cxt.MyBackendId - 1]) {
+        t_thrd.shemem_ptr_cxt.sessionMemoryArray[t_thrd.proc_cxt.MyBackendId - 1].isValid = false;
+    }
 
     /* don't bother this entry any more. */
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry = NULL;

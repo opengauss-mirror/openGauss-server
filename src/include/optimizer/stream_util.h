@@ -83,4 +83,8 @@ extern Plan* update_plan_refs(PlannerInfo* root, Plan* plan, Index* fromRTI, Ind
 extern void set_node_ref_subplan_walker(Plan* result_plan, set_node_ref_subplan_context* context);
 extern void StreamPlanWalker(PlannedStmt *pstmt, Plan *plan, bool *need);
 extern void mark_distribute_setop_remotequery(PlannerInfo* root, Node* node, Plan* plan, List* subPlans);
+#ifdef USE_SPQ
+extern void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str,
+                                RemoteQuery* step, bool push_subplan, uint64 queryId);
+#endif
 #endif /* STREAM_UTIL_H */

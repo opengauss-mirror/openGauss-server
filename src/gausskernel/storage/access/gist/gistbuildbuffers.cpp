@@ -699,6 +699,6 @@ static void WriteTempFileBlock(BufFile *file, long blknum, void *ptr)
          * the other errors in Read/WriteTempFileBlock shouldn't happen, but
          * an error at write can easily happen if you run out of disk space.
          */
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write block %ld of temporary file: %m", blknum)));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write block %ld of temporary file: %s", blknum, TRANSLATE_ERRNO)));
     }
 }

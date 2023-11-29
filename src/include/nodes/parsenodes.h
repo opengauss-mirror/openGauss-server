@@ -34,6 +34,9 @@
 #include "tcop/dest.h"
 #include "nodes/parsenodes_common.h"
 
+#define CURSOR_OPT_SPQ_OK 0x0200 /* SPQ Execution */
+#define CURSOR_OPT_SPQ_FORCE 0x0400 /* Force to generate a SPQ plan */
+
 /*
  * Relids
  *              Set of relation identifiers (indexes into the rangetable).
@@ -207,9 +210,15 @@ typedef enum RTEKind {
 #ifdef PGXC
     RTE_REMOTE_DUMMY, /* RTEs created by remote plan reduction */
 #endif               /* PGXC */
-    RTE_RESULT       /* RTE represents an empty FROM clause; such
+    RTE_RESULT,      /* RTE represents an empty FROM clause; such
                       * RTEs are added by the planner, they're not
                       * present during parsing or rewriting */
+#ifdef USE_SPQ
+    RTE_NAMEDTUPLESTORE,
+    RTE_TABLEFUNC, /* TableFunc(.., column list) */
+    RTE_VOID, /* CDB: deleted RTE */
+    RTE_TABLEFUNCTION /* CDB: Functions over multiset input */
+#endif
 } RTEKind;
 
 typedef struct RangeTblEntry {
@@ -374,6 +383,9 @@ typedef struct RangeTblEntry {
                                  * Select * from table_name subpartition (subpartition_name);
                                  * or delete from table_name partition (partition_name, ...)
                                  */
+#ifdef USE_SPQ
+    bool forceDistRandom;
+#endif
 } RangeTblEntry;
 
 /*
@@ -484,6 +496,10 @@ typedef struct WindowClause {
     Node* endOffset;       /* expression for ending bound, if any */
     Index winref;          /* ID referenced by window functions */
     bool copiedOrder;      /* did we copy orderClause from refname? */
+#ifdef USE_SPQ
+    bool rePartitionSPQ;   /* did we reassign the tleSortGroupRef when constructing partition Clause */
+    bool reOrderSPQ;       /* did we reassign the tleSortGroupRef when constructing order Clause */
+#endif
 } WindowClause;
 
 /*
@@ -1131,6 +1147,7 @@ typedef struct CreateSeqStmt {
     int64 uuid;            /* UUID of the sequence, mark unique sequence globally */
     bool canCreateTempSeq; /* create sequence when "create table (like )" */
     bool is_large;
+    bool missing_ok; /* skip error if a Sequence is exists */
 } CreateSeqStmt;
 
 typedef struct AlterSeqStmt {
@@ -1373,6 +1390,21 @@ typedef struct AlterFunctionStmt {
     FuncWithArgs* func; /* name and args of function */
     List* actions;      /* list of DefElem */
 } AlterFunctionStmt;
+
+enum CompileEntry {
+    COMPILE_PROCEDURE,
+    COMPILE_FUNCTION,
+    COMPILE_PACKAGE,
+    COMPILE_PKG_SPECIFICATION,
+    COMPILE_PKG_BODY
+};
+
+typedef struct CompileStmt {
+    NodeTag type;
+    List* objName;
+    List* funcArgs;
+    CompileEntry compileItem;
+} CompileStmt;
 
 typedef struct InlineCodeBlock {
     NodeTag type;
@@ -2348,6 +2380,7 @@ typedef struct DolphinCallStmt
 typedef struct CreateSetStmt {
     NodeTag type;
     TypeName *typname;  /* type of column */
+    Oid set_collation;
 } CreateSetStmt;
 
 /* ----------------------
@@ -2384,5 +2417,42 @@ typedef struct GetDiagStmt {
     bool hasCondNum;
     List *condNum;
 } GetDiagStmt;
+
+#ifdef USE_SPQ
+typedef struct RangeTblFunction {
+    NodeTag type;
+    Node *funcexpr; /* expression tree for func call */
+    int funccolcount; /* number of columns it contributes to RTE */
+    /* These fields record the contents of a column definition list, if any: */
+    List *funccolnames; /* column names (list of String) */
+    List *funccoltypes; /* OID list of column type OIDS */
+    List *funccoltypmods; /* integer list of column typmods */
+    List *funccolcollations; /* OID list of column collation OIDS */
+
+    bytea *funcuserdata; /* describe function user data. assume bytea */
+
+    /* This is set during planning for use by the executor: */
+    Bitmapset *funcparams; /* PARAM_EXEC Param IDs affecting this func */
+} RangeTblFunction;
+#endif
+
+extern inline NodeTag transform_node_tag(Node* raw_parse_tree)
+{
+    if (!raw_parse_tree) {
+        return T_Invalid;
+    }
+    if (nodeTag(raw_parse_tree) == T_SelectStmt) {
+        SelectStmt *stmt = (SelectStmt *)raw_parse_tree;
+        /* treat select into @var and select into file as common select */
+        if (stmt->intoClause == NULL || stmt->intoClause->userVarList != NIL || stmt->intoClause->filename != NULL) {
+            return T_SelectStmt;
+        }
+        return T_CreateStmt;
+    } else if (nodeTag(raw_parse_tree) == T_ExplainStmt) {
+        return transform_node_tag(((ExplainStmt*)raw_parse_tree)->query);
+    }
+    return nodeTag(raw_parse_tree);
+}
+
 #endif /* PARSENODES_H */
 

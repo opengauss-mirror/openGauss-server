@@ -52,6 +52,7 @@
 
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "storage/file/fio_device.h"
 /* data for errcontext callback */
 typedef struct LogicalErrorCallbackState {
     LogicalDecodingContext *ctx;
@@ -83,6 +84,15 @@ static void parallel_change_cb_wrapper(ParallelReorderBuffer *cache, ReorderBuff
 
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
 static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin);
+
+/* Checkout aurgments whether coming from ALTER SYSTEM SET*/
+bool QuoteCheckOut(char* newval)
+{
+    int len = strlen(newval);
+    if(len >= 2 && newval[0] == '"' && newval[0] == newval[len - 1])
+        return true;
+    return false;
+}
 
 /*
  * Make sure the current settings & environment are capable of doing logical
@@ -173,7 +183,7 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
 
     ctx->out = makeStringInfo();
     ctx->prepare_write = prepare_write;
-    ctx->write = do_write;
+    ctx->do_write = do_write;
 
     ctx->output_plugin_options = output_plugin_options;
     ctx->fast_forward = fast_forward;
@@ -220,7 +230,7 @@ static LogicalDecodingContext *StartupDecodingContextForArea(List *output_plugin
 
     ctx->out = makeStringInfo();
     ctx->prepare_write = prepare_write;
-    ctx->write = do_write;
+    ctx->do_write = do_write;
 
     ctx->output_plugin_options = output_plugin_options;
     ctx->fast_forward = fast_forward;
@@ -599,7 +609,7 @@ void DecodingContextFindStartpoint(LogicalDecodingContext *ctx)
         char *err = NULL;
 
         /* the read_page callback waits for new WAL */
-        record = XLogReadRecord(ctx->reader, startptr, &err);
+        record = XLogReadRecord(ctx->reader, startptr, &err, true, SS_XLOGDIR);
         if (err != NULL)
             ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
                 errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
@@ -657,7 +667,7 @@ void OutputPluginWrite(struct LogicalDecodingContext *ctx, bool last_write)
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
             errmsg("OutputPluginPrepareWrite needs to be called before OutputPluginWrite")));
 
-    ctx->write(ctx, ctx->write_location, ctx->write_xid, last_write);
+    ctx->do_write(ctx, ctx->write_location, ctx->write_xid, last_write);
     ctx->prepared_write = false;
 }
 
@@ -1562,9 +1572,11 @@ void LogicalCleanSnapDirectory(bool rebuild)
     struct stat st;
 
     Assert(t_thrd.slot_cxt.MyReplicationSlot != NULL);
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
 
     int rc = snprintf_s(snappath, MAXPGPATH, MAXPGPATH - 1,
-        "pg_replslot/%s/snap", NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
+        "%s/%s/snap", replslot_path, NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
     securec_check_ss(rc, "\0", "\0");
 
     if (stat(snappath, &st) == 0 && S_ISDIR(st.st_mode)) {

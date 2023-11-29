@@ -84,6 +84,7 @@
 #include "utils/memutils.h"
 #include "utils/relcache.h"
 #include "utils/relfilenodemap.h"
+#include "storage/file/fio_device.h"
 
 /*
  * We use a very simple form of a slab allocator for frequently allocated
@@ -2055,6 +2056,8 @@ static void ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
         ReorderBufferSerializeTXN(rb, subtxn);
     }
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
     /* serialize changestream */
     dlist_foreach_modify(change_i, &txn->changes)
     {
@@ -2079,7 +2082,7 @@ static void ReorderBufferSerializeTXN(ReorderBuffer *rb, ReorderBufferTXN *txn)
              * No need to care about TLIs here, only used during a single run,
              * so each LSN only maps to a specific WAL record.
              */
-            nRet = sprintf_s(path, MAXPGPATH, "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap",
+            nRet = sprintf_s(path, MAXPGPATH, "%s/%s/snap/xid-%lu-lsn-%X-%X.snap", replslot_path,
                              NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name), txn->xid, (uint32)(recptr >> 32),
                              (uint32)recptr);
             securec_check_ss(nRet, "", "");
@@ -2230,7 +2233,7 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
     if ((Size)(write(fd, rb->outbuf, ondisk->size)) != ondisk->size) {
         (void)CloseTransientFile(fd);
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
-            errcode_for_file_access(), errmsg("could not write to xid %lu's data file: %m", txn->xid)));
+            errcode_for_file_access(), errmsg("could not write to xid %lu's data file: %s", txn->xid, TRANSLATE_ERRNO)));
     }
 
     if (txn->final_lsn < change->lsn) {
@@ -2263,6 +2266,8 @@ static Size ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn
     txn->nentries_mem = 0;
     Assert(dlist_is_empty(&txn->changes));
 
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
     last_segno = (txn->final_lsn) / XLogSegSize;
     while (restored < (unsigned)g_instance.attr.attr_common.max_changes_in_memory && *segno <= last_segno) {
         int readBytes;
@@ -2285,7 +2290,7 @@ static Size ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn
              * No need to care about TLIs here, only used during a single run,
              * so each LSN only maps to a specific WAL record.
              */
-            rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap",
+            rc = sprintf_s(path, sizeof(path), "%s/%s/snap/xid-%lu-lsn-%X-%X.snap", replslot_path,
                            NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name), txn->xid, (uint32)(recptr >> 32),
                            (uint32)recptr);
             securec_check_ss(rc, "", "");
@@ -2499,13 +2504,15 @@ static void ReorderBufferRestoreCleanup(ReorderBuffer *rb, ReorderBufferTXN *txn
     } else {
         slot = ((LogicalDecodingContext *)rb->private_data)->slot;
     }
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
     /* iterate over all possible filenames, and delete them */
     for (cur = first; cur <= last; cur++) {
         char path[MAXPGPATH];
         XLogRecPtr recptr;
         recptr = (cur * XLogSegSize);
-        rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap", NameStr(slot->data.name),
-                       txn->xid, (uint32)(recptr >> 32), uint32(recptr));
+        rc = sprintf_s(path, sizeof(path), "%s/%s/snap/xid-%lu-lsn-%X-%X.snap", replslot_path, NameStr(slot->data.name),
+            txn->xid, (uint32)(recptr >> 32), uint32(recptr));
         securec_check_ss(rc, "", "");
         if (unlink(path) != 0 && errno != ENOENT)
             ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
@@ -2523,7 +2530,9 @@ void ReorderBufferClear(const char *slotname)
     struct stat statbuf;
     char path[MAXPGPATH] = {0};
     char path_xid[MAXPGPATH] = {0};
-    errno_t rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap", slotname);
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+    errno_t rc = sprintf_s(path, sizeof(path), "%s/%s/snap", replslot_path, slotname);
     securec_check_ss(rc, "", "");
 
     if (lstat(path, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode)) {
@@ -2534,7 +2543,7 @@ void ReorderBufferClear(const char *slotname)
     while ((spill_de = ReadDirExtended(spill_dir, path, DEBUG2)) != NULL) {
         /* only look at names that can be ours */
         if (strncmp(spill_de->d_name, "xid", strlen("xid")) == 0) {
-            rc = sprintf_s(path_xid, sizeof(path_xid), "pg_replslot/%s/snap/%s", slotname, spill_de->d_name);
+            rc = sprintf_s(path_xid, sizeof(path_xid), "%s/%s/snap/%s", replslot_path, slotname, spill_de->d_name);
             securec_check_ss(rc, "", "");
             if (unlink(path_xid) != 0) {
                 ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
@@ -2556,8 +2565,10 @@ void StartupReorderBuffer(void)
     DIR *logical_dir = NULL;
     struct dirent *logical_de = NULL;
 
-    logical_dir = AllocateDir("pg_replslot");
-    while ((logical_de = ReadDirExtended(logical_dir, "pg_replslot", DEBUG2)) != NULL) {
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+    logical_dir = AllocateDir(replslot_path);
+    while ((logical_de = ReadDirExtended(logical_dir, replslot_path, DEBUG2)) != NULL) {
         if (strncmp(logical_de->d_name, ".", strlen(".")) == 0 ||
             strncmp(logical_de->d_name, "..", strlen("..")) == 0)
             continue;

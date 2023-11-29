@@ -40,6 +40,7 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/multixact.h"
+#include "access/multi_redo_api.h"
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
 #include "catalog/catversion.h"
@@ -1366,7 +1367,7 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
      * relfilenode of non mapped system relations during decoding.
      */
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive() && !force_non_historic) {
+    if ((HistoricSnapshotActive() && !force_non_historic) || IS_EXRTO_RECOVERY_IN_PROGRESS) {
         snapshot = GetCatalogSnapshot();
     }
 
@@ -1601,7 +1602,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
      */
     Snapshot snapshot = NULL;
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive()) {
+    if (HistoricSnapshotActive() || IS_EXRTO_RECOVERY_IN_PROGRESS) {
         snapshot =  GetCatalogSnapshot();
     }
 
@@ -2372,7 +2373,7 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
     relation->rd_createcsn = csnInfo.createcsn;
     relation->rd_changecsn = csnInfo.changecsn;
 
-    if (relation->rd_id >= FirstNormalObjectId && IS_DISASTER_RECOVER_MODE) {
+    if (relation->rd_id >= FirstNormalObjectId && IS_MULTI_DISASTER_RECOVER_MODE) {
         TransactionId xmin = HeapTupleGetRawXmin(pg_class_tuple);
         relation->xmin_csn = CSNLogGetDRCommitSeqNo(xmin);
     } else {
@@ -4055,8 +4056,6 @@ void RelationCacheInvalidate(void)
             /* Delete this entry immediately */
             Assert(!relation->rd_isnailed);
             RelationClearRelation(relation, false);
-            hash_seq_term(&status);
-            hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
         } else {
             /*
              * If it's a mapped relation, immediately update its rd_node in
@@ -4151,19 +4150,7 @@ void InvalidateRelationNodeList()
         relation = idhentry->reldesc;
 
         if (relation->rd_locator_info != NULL) {
-            bool clear = RelationHasReferenceCountZero(relation) &&
-                    !(RelationIsIndex(relation) && relation->rd_refcnt > 0 && relation->rd_indexcxt != NULL);
             RelationClearRelation(relation, !RelationHasReferenceCountZero(relation));
-            if (!clear) {
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
-                while ((idhentry = (RelIdCacheEnt*)hash_seq_search(&status)) != NULL) {
-                    Relation start_relation = idhentry->reldesc;
-                    if (start_relation == relation) {
-                        break;
-                    }
-                }
-            }
         }
     }
 }
@@ -4394,8 +4381,6 @@ void AtEOXact_RelationCache(bool isCommit)
                 relation->rd_createSubid = InvalidSubTransactionId;
             } else if (RelationHasReferenceCountZero(relation)) {
                 RelationClearRelation(relation, false);
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
                 continue;
             } else {
                 /*
@@ -4430,8 +4415,6 @@ void AtEOXact_RelationCache(bool isCommit)
         }
         if (relation->partMap != NULL && relation->partMap->isDirty) {
             RelationClearRelation(relation, false);
-            hash_seq_term(&status);
-            hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
         }
     }
 
@@ -8759,4 +8742,3 @@ bool IsRelationReplidentKey(Relation r, int attno)
     RelationClose(idx_rel);
     return false;
 }
-

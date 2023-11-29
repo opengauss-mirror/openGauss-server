@@ -843,6 +843,9 @@ void InitProcess(void)
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->snapXmax = InvalidTransactionId;
     t_thrd.proc->snapCSN = InvalidCommitSeqNo;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.pgxact->prepare_xid = InvalidTransactionId;
@@ -905,6 +908,9 @@ void InitProcess(void)
     /* Initialize fields for group XID clearing. */
     t_thrd.proc->procArrayGroupMember = false;
     t_thrd.proc->procArrayGroupMemberXid = InvalidTransactionId;
+    t_thrd.proc->procArrayGroupSubXactNXids = InvalidTransactionId;
+    t_thrd.proc->procArrayGroupSubXactXids = NULL;
+    t_thrd.proc->procArrayGroupSubXactLatestXid = InvalidTransactionId;
     pg_atomic_init_u32(&t_thrd.proc->procArrayGroupNext, INVALID_PGPROCNO);
 
     /* Initialize fields for group snapshot getting. */
@@ -1106,6 +1112,10 @@ void InitAuxiliaryProcess(void)
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->snapXmax = InvalidTransactionId;
     t_thrd.proc->snapCSN = InvalidCommitSeqNo;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
+    t_thrd.proc->exrto_reload_cache = true;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.proc->backendId = InvalidBackendId;
@@ -2086,6 +2096,10 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
                     ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
                         errmsg("could not obtain lock on row in relation,waitSec = %d", waitSec)));
                 } else {
+                    StringInfoData callStack;
+                    initStringInfo(&callStack);
+                    get_stack_according_to_tid(t_thrd.storage_cxt.conflicting_lock_thread_id, &callStack);
+                    FreeStringInfo(&callStack);
                     ereport(ERROR, (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
                                 (errmsg("Lock wait timeout: thread %lu on node %s waiting for %s on %s after %ld.%03d ms",
                                         t_thrd.proc_cxt.MyProcPid, g_instance.attr.attr_common.PGXCNodeName, modename, buf.data, msecs,
@@ -2601,7 +2615,7 @@ bool enable_session_sig_alarm(int delayms)
     struct itimerval timeval;
     errno_t rc = EOK;
 
-    /* Session timer only work when connect form app, not work for inner conncection. */
+    /* Session timer only work when connect from app, not work for inner conncection. */
     if (!IsConnFromApp() || IS_THREAD_POOL_STREAM) {
         return true;
     }
@@ -2648,7 +2662,7 @@ bool enable_idle_in_transaction_session_sig_alarm(int delayms)
     struct itimerval timeval;
     errno_t rc = EOK;
 
-    /* Session timer only work when connect form app, not work for inner conncection. */
+    /* Session timer only work when connect from app, not work for inner conncection. */
     if (!IsConnFromApp() || IS_THREAD_POOL_STREAM) {
         return true;
     }

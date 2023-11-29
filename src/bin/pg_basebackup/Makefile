@@ -47,6 +47,7 @@ OBJS=receivelog.o streamutil.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a \
      $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a \
 	 $(top_builddir)/src/common/backend/lib/string.o
 endif
+OBJS += $(top_builddir)/src/gausskernel/storage/gs_uwal/gs_uwal_adaptor.o
 
 
 all: gs_basebackup pg_receivexlog pg_recvlogical

@@ -126,7 +126,12 @@ Node* MultiExecHash(HashState* node)
             break;
         /* We have to compute the hash value */
         econtext->ecxt_innertuple = slot;
+#ifdef USE_SPQ
+        bool hashkeys_null = false;
+        if (ExecHashGetHashValue(hashtable, econtext, hashkeys, false, hashtable->keepNulls, &hashvalue, &hashkeys_null)) {
+#else
         if (ExecHashGetHashValue(hashtable, econtext, hashkeys, false, hashtable->keepNulls, &hashvalue)) {
+#endif
             int bucketNumber;
 
             bucketNumber = ExecHashGetSkewBucket(hashtable, hashvalue);
@@ -145,6 +150,15 @@ Node* MultiExecHash(HashState* node)
             }
             hashtable->totalTuples += 1;
         }
+#ifdef USE_SPQ
+        if (hashkeys_null) {
+            node->hs_hashkeys_null = true;
+            if (node->hs_quit_if_hashkeys_null) {
+                ExecEndNode(outerNode);
+                return NULL;
+            }
+        }
+#endif
     }
     (void)pgstat_report_waitstatus(oldStatus);
 
@@ -1348,6 +1362,86 @@ void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot *slot, uint32 h
  * because it contains a null attribute, and hence it should be discarded
  * immediately.  (If keep_nulls is true then FALSE is never returned.)
  */
+#ifdef USE_SPQ
+bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* hashkeys, bool outer_tuple,
+    bool keep_nulls, uint32* hashvalue, bool *hashkeys_null)
+{
+    if (!IS_SPQ_RUNNING) {
+        return ExecHashGetHashValue(hashtable, econtext, hashkeys, outer_tuple, keep_nulls, hashvalue);
+    }
+    uint32 hashkey = 0;
+    FmgrInfo* hashfunctions = NULL;
+    ListCell* hk = NULL;
+    int i = 0;
+    MemoryContext oldContext;
+ 
+    Assert(hashkeys_null);
+    *hashkeys_null = true;
+ 
+    /*
+     * We reset the eval context each time to reclaim any memory leaked in the
+     * hashkey expressions.
+     */
+    ResetExprContext(econtext);
+
+    oldContext = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
+
+    if (outer_tuple)
+        hashfunctions = hashtable->outer_hashfunctions;
+    else
+        hashfunctions = hashtable->inner_hashfunctions;
+
+    foreach (hk, hashkeys) {
+        ExprState* keyexpr = (ExprState*)lfirst(hk);
+        Datum keyval;
+        bool isNull = false;
+
+        /* rotate hashkey left 1 bit at each step */
+        hashkey = (hashkey << 1) | ((hashkey & 0x80000000) ? 1 : 0);
+
+        /*
+         * Get the join attribute value of the tuple
+         */
+        keyval = ExecEvalExpr(keyexpr, econtext, &isNull, NULL);
+
+        /*
+         * If the attribute is NULL, and the join operator is strict, then
+         * this tuple cannot pass the join qual so we can reject it
+         * immediately (unless we're scanning the outside of an outer join, in
+         * which case we must not reject it).  Otherwise we act like the
+         * hashcode of NULL is zero (this will support operators that act like
+         * IS NOT DISTINCT, though not any more-random behavior).  We treat
+         * the hash support function as strict even if the operator is not.
+         *
+         * Note: currently, all hashjoinable operators must be strict since
+         * the hash index AM assumes that.	However, it takes so little extra
+         * code here to allow non-strict that we may as well do it.
+         */
+        if (isNull) {
+            if (hashtable->hashStrict[i] && !keep_nulls) {
+                MemoryContextSwitchTo(oldContext);
+                return false; /* cannot match */
+            }
+            /* else, leave hashkey unmodified, equivalent to hashcode 0 */
+        } else {
+            /* Compute the hash function */
+            uint32 hkey;
+
+            hkey = DatumGetUInt32(FunctionCall1(&hashfunctions[i], keyval));
+            hashkey ^= hkey;
+
+            *hashkeys_null = false;
+        }
+
+        i++;
+    }
+
+    MemoryContextSwitchTo(oldContext);
+    hashkey = DatumGetUInt32(hash_uint32(hashkey));
+    *hashvalue = hashkey;
+    return true;
+}
+#endif
 bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* hashkeys, bool outer_tuple,
     bool keep_nulls, uint32* hashvalue)
 {

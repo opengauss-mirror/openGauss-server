@@ -29,7 +29,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "utils/guc.h"
-
+#include "commands/copy.h"
 #include "access/multi_redo_settings.h"
 #include "access/multi_redo_api.h"
 #include "threadpool/threadpool_controler.h"
@@ -44,8 +44,6 @@ void ConfigRecoveryParallelism()
 
     if (g_instance.attr.attr_storage.recovery_parse_workers > 1) {
         g_instance.comm_cxt.predo_cxt.redoType = EXTREME_REDO;
-        g_extreme_rto_type = g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery ?
-            ONDEMAND_EXTREME_RTO : DEFAULT_EXTREME_RTO;
         g_instance.attr.attr_storage.batch_redo_num = g_instance.attr.attr_storage.recovery_parse_workers;
         uint32 total_recovery_parallelism = g_instance.attr.attr_storage.batch_redo_num * 2 +
                                             g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker *
@@ -58,7 +56,7 @@ void ConfigRecoveryParallelism()
                              g_instance.attr.attr_storage.recovery_parse_workers,
                              g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker,
                              total_recovery_parallelism)));
-        g_supportHotStandby = false;
+        g_supportHotStandby = g_instance.attr.attr_storage.EnableHotStandby;
         SetConfigOption("recovery_parallelism", buf, PGC_POSTMASTER, PGC_S_OVERRIDE);
     } else if (g_instance.attr.attr_storage.max_recovery_parallelism > 1) {
         g_instance.comm_cxt.predo_cxt.redoType = PARALLEL_REDO;
@@ -135,7 +133,7 @@ static uint32 GetCPUCount()
 
 void ParseBindCpuInfo(RedoCpuBindControl *control)
 {
-    char* attr = TrimStr(g_instance.attr.attr_storage.redo_bind_cpu_attr);
+    char* attr = TrimStrQuote(g_instance.attr.attr_storage.redo_bind_cpu_attr, true);
     if (attr == NULL) {
         return;
     }
@@ -146,10 +144,14 @@ void ParseBindCpuInfo(RedoCpuBindControl *control)
 
     ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
     ptoken = pg_strtolower(ptoken);
+    if (ptoken == NULL) {
+        return;
+    }
 
     int bindNum = 0;
     if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
         control->bindType = REDO_NO_CPU_BIND;
+        pfree_ext(ptoken);
         return;
     } else if (strncmp("cpubind", ptoken, strlen("cpubind")) == 0) {
         control->bindType = REDO_CPU_BIND;
@@ -171,6 +173,7 @@ void ParseBindCpuInfo(RedoCpuBindControl *control)
                       "2. The process has been bind to other CPUs and there is no intersection,"
                       "use taskset -pc to check process CPU bind info.\n")));
     }
+    pfree_ext(ptoken);
 }
 
 bool CpuCanConfiged(RedoCpuBindControl *contrl, int cpuid, int numaid)
@@ -195,6 +198,7 @@ void ConfigBindCpuInfo(RedoCpuBindControl *contrl)
     ThreadPoolControler::GetActiveCpu(sysNumaCpuIdList, &sysNumaCpuIdNum);
 
     if (sysNumaCpuIdNum == 0) {
+        pfree_ext(sysNumaCpuIdList);
         return;
     }
 

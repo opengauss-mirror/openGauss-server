@@ -483,20 +483,22 @@ Instrumentation* InstrAlloc(int n, int instrument_options)
 void InstrStartNode(Instrumentation* instr)
 {
 
-    if (
-#ifndef ENABLE_MULTIPLE_NODES
-        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
+    if (!u_sess->attr.attr_common.enable_seqscan_fusion && !instr->first_time) {
+#else
+    if ((t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !u_sess->attr.attr_common.enable_seqscan_fusion && !instr->first_time)
+        || (t_thrd.spq_ctx.spq_role != ROLE_UTILITY && !instr->first_time)) {
 #endif
-        !instr->first_time) {
         instr->enter_time = GetCurrentTimestamp();
         instr->first_time = true;
     }
 
-    if (
-#ifndef ENABLE_MULTIPLE_NODES
-        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
+    if (!u_sess->attr.attr_common.enable_seqscan_fusion && !instr->first_time) {
+#else
+    if ((t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !u_sess->attr.attr_common.enable_seqscan_fusion && !instr->first_time)
+        || (t_thrd.spq_ctx.spq_role != ROLE_UTILITY && !instr->first_time)) {
 #endif
-        !instr->first_time) {
         CPUUsageGetCurrent(&instr->cpuusage_start);
     }
 
@@ -526,7 +528,7 @@ void AddControlMemoryContext(Instrumentation* instr, MemoryContext context)
         return;
 
     MemoryContext old_context = NULL;
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) {
         Assert(u_sess->instr_cxt.global_instr->getInstrDataContext() != NULL);
         old_context = MemoryContextSwitchTo(u_sess->instr_cxt.global_instr->getInstrDataContext());
     } else {
@@ -563,8 +565,11 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
         INSTR_TIME_SET_ZERO(instr->starttime);
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
     if (!u_sess->attr.attr_common.enable_seqscan_fusion)
+#else
+    if ((t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !u_sess->attr.attr_common.enable_seqscan_fusion)
+        || t_thrd.spq_ctx.spq_role != ROLE_UTILITY)
 #endif
         CPUUsageGetCurrent(&cpu_usage);  
 
@@ -573,8 +578,11 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
         BufferUsageAccumDiff(&instr->bufusage, u_sess->instr_cxt.pg_buffer_usage, &instr->bufusage_start);
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
     if (!u_sess->attr.attr_common.enable_seqscan_fusion)
+#else
+    if ((t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !u_sess->attr.attr_common.enable_seqscan_fusion)
+        || t_thrd.spq_ctx.spq_role != ROLE_UTILITY)
 #endif
         CPUUsageAccumDiff(&instr->cpuusage, &cpu_usage, &instr->cpuusage_start);
 
@@ -584,11 +592,12 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
         instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
     }
 
-    if (
-#ifndef ENABLE_MULTIPLE_NODES
-        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
+    if (!u_sess->attr.attr_common.enable_seqscan_fusion && containMemory) {
+#else
+    if ((t_thrd.spq_ctx.spq_role == ROLE_UTILITY && !u_sess->attr.attr_common.enable_seqscan_fusion && containMemory)
+        || (t_thrd.spq_ctx.spq_role != ROLE_UTILITY && containMemory)) {
 #endif
-        containMemory) {
         int64 memory_size = 0;
         int64 control_memory_size = 0;
         /* calculate the memory context size of this Node */
@@ -863,7 +872,8 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
      * if allocInstrSlot exec on CN or on compute pool, switch context to m_instrDataContext
      * else switch context to streamRuntimeContext
      */
-    if (IS_PGXC_COORDINATOR && u_sess->instr_cxt.global_instr)
+    if ((IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) &&
+	u_sess->instr_cxt.global_instr)
         tmp_context = u_sess->instr_cxt.global_instr->getInstrDataContext();
     else
         tmp_context = MemoryContextOriginal((char*)u_sess->instr_cxt.global_instr);
@@ -994,6 +1004,57 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
                     break;
             }
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    pname = "Partitioned Seq Scan";
+                } else {
+                    pname = "Spq Seq Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    pname = "Partitioned Sample Scan";
+                } else {
+                    pname = "Spq Sample Scan";
+                }
+            }
+            plan_type = IO_OP;
+            break;
+        case T_AssertOp:
+            pname = "Assert";
+            plan_type = UTILITY_OP;
+            break;
+        case T_ShareInputScan:
+            pname = "ShareInputScan";
+            plan_type = UTILITY_OP;
+            break;
+        case T_Sequence:
+            pname = "Sequence";
+            plan_type = UTILITY_OP;
+            break;
+        case T_SpqIndexScan:
+            if (((IndexScan*)plan)->scan.isPartTbl)
+                pname = "Partitioned Index Scan";
+            else
+                pname = "Spq Index Scan";
+            plan_type = IO_OP;
+            break;
+        case T_SpqIndexOnlyScan:
+            if (((IndexOnlyScan*)plan)->scan.isPartTbl)
+                pname = "Partitioned Index Only Scan";
+            else
+                pname = "Spq Index Only Scan";
+            plan_type = IO_OP;
+            break;
+        case T_SpqBitmapHeapScan:
+            if (((Scan*)plan)->isPartTbl)
+                pname = "Partitioned Bitmap Heap Scan";
+            else
+                pname = "Spq Bitmap Heap Scan";
+            plan_type = IO_OP;
+            break;
+#endif
         case T_SeqScan:
             if (!((Scan*)plan)->tablesample) {
                 if (((Scan*)plan)->isPartTbl) {
@@ -1505,7 +1566,7 @@ StreamInstrumentation::StreamInstrumentation(int size, int num_streams, int gath
 {
     m_query_id = u_sess->debug_query_id;
     MemoryContext oldcontext = NULL;
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR){
         m_instrDataContext = AllocSetContextCreate(CurrentMemoryContext,
             "InstrDataContext",
             ALLOCSET_DEFAULT_MINSIZE,
@@ -1516,21 +1577,26 @@ StreamInstrumentation::StreamInstrumentation(int size, int num_streams, int gath
         m_instrDataContext = NULL;
     }
 
-    if (IS_PGXC_COORDINATOR) {
+     if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR){
         /* adopt for a lot gather operator */
         m_threadInstrArrayLen = m_nodes_num * ((m_num_streams + m_gather_count) * m_query_dop) + 1;
 
         /* including thr top consumer list and cn */
         m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count + 1));
     } else {
-#ifdef ENABLE_MULTIPLE_NODES
-        /*
-         * in DN, m_gather_count is 1 in general(gather operator)
-         * in compute pool, m_gather_count = 3 actually.
-         */
-        m_threadInstrArrayLen = (m_num_streams + m_gather_count) * m_query_dop;
-        /* including the top consumer list. */
-        m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count));
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+         if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+             /*
+              * in DN, m_gather_count is 1 in general(gather operator)
+              * in compute pool, m_gather_count = 3 actually.
+              */
+             m_threadInstrArrayLen = (m_num_streams + m_gather_count) * m_query_dop;
+             /* including the top consumer list. */
+             m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count));
+         } else {
+             m_threadInstrArrayLen = (m_num_streams + m_gather_count + 1) * m_query_dop;
+             m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count + 1));
+         }
 #else
         /* single node need a lot gather operator */
         m_threadInstrArrayLen = (m_num_streams + m_gather_count + 1) * m_query_dop;
@@ -1557,7 +1623,7 @@ StreamInstrumentation::StreamInstrumentation(int size, int num_streams, int gath
         m_threadInstrArray[i] = NULL;
     }
 
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) {
         MemoryContextSwitchTo(oldcontext);
     }
 
@@ -1570,7 +1636,7 @@ StreamInstrumentation::~StreamInstrumentation()
     if (CPUMon::m_has_perf)
         CPUMon::Shutdown();
 
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) {
         Assert(m_instrDataContext != NULL);
 
         if (m_instrDataContext) {
@@ -1814,6 +1880,17 @@ void StreamInstrumentation::getStreamInfo(
                 getStreamInfo(plan, planned_stmt, dop, info, offset);
             }
         } break;
+#ifdef USE_SPQ
+        case T_Sequence: {
+            Sequence* sequence = (Sequence*)result_plan;
+            ListCell* lc = NULL;
+            foreach (lc, sequence->subplans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                getStreamInfo(plan, planned_stmt, dop, info, offset);
+            }
+            break;
+        }
+#endif /* USE_SPQ */
 
         default:
             if (result_plan->lefttree)
@@ -1981,6 +2058,7 @@ void StreamInstrumentation::deserialize(int idx, char* msg, size_t len, bool ope
     query_id = ntohl64(query_id);
     msg += 8;
 
+#ifndef USE_SPQ
     if (!operator_statitics) {
         Assert(query_id == (uint64)u_sess->debug_query_id);
         if (query_id != (uint64)u_sess->debug_query_id) {
@@ -1991,6 +2069,7 @@ void StreamInstrumentation::deserialize(int idx, char* msg, size_t len, bool ope
                         query_id)));
         }
     }
+#endif
 
     rc = memcpy_s(&node_id, sizeof(int), msg, sizeof(int));
     securec_check(rc, "\0", "\0");
@@ -2022,7 +2101,7 @@ void StreamInstrumentation::deserialize(int idx, char* msg, size_t len, bool ope
     int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
     int slot = 1 + idx * dn_num_streams + offset + smp_id;
     /* adopt for compute pool */
-    if (IS_PGXC_DATANODE) {
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) {
         int plan_id_offset =
             m_planIdOffsetArray[node_id - 1] == 0 ? -1 : (m_planIdOffsetArray[node_id - 1] * m_query_dop);
         slot = plan_id_offset + smp_id;
@@ -2030,7 +2109,7 @@ void StreamInstrumentation::deserialize(int idx, char* msg, size_t len, bool ope
 
     /* allocate threadinstrumentation in CN if receive from DN. */
     if (m_threadInstrArray[slot] == NULL) {
-        if (IS_PGXC_DATANODE)
+	    if (!IS_SPQ_EXECUTOR || IS_PGXC_DATANODE)
             tmp_context = MemoryContextOriginal((char*)u_sess->instr_cxt.global_instr);
         else
             tmp_context = u_sess->instr_cxt.global_instr->getInstrDataContext();
@@ -2193,7 +2272,7 @@ void StreamInstrumentation::deserializeTrack(int idx, char* msg, size_t len)
     int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
     int slot = 1 + idx * dn_num_streams + offset + smp_id;
     /* adopt for compute pool */
-    if (IS_PGXC_DATANODE) {
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) {
         offset = m_planIdOffsetArray[segment_id - 1] == 0 ? -1 : (m_planIdOffsetArray[segment_id - 1] * m_query_dop);
         slot = offset;
     }
@@ -2203,7 +2282,7 @@ void StreamInstrumentation::deserializeTrack(int idx, char* msg, size_t len)
     }
 
     if (m_threadInstrArray[slot] == NULL) {
-        if (IS_PGXC_DATANODE)
+        if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE)
             tmp_context = MemoryContextOriginal((char*)u_sess->instr_cxt.global_instr);
         else
             tmp_context = u_sess->instr_cxt.global_instr->getInstrDataContext();
@@ -2372,22 +2451,26 @@ void StreamInstrumentation::TrackEndTime(int plan_node_id, int track_id)
 /* run in CN only m_planIdOffsetArray[planNodeId-1] > 0 , planNodeId RUN IN DN */
 bool StreamInstrumentation::isFromDataNode(int plan_node_id)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    if (u_sess->instr_cxt.global_instr && m_planIdOffsetArray[plan_node_id - 1] > 0) {
-        int num_streams = u_sess->instr_cxt.global_instr->getInstruThreadNum();
-        int query_dop = u_sess->instr_cxt.global_instr->get_query_dop();
-        int dn_num_threads = DN_NUM_STREAMS_IN_CN(num_streams, m_gather_count, query_dop);
-        int offset = (m_planIdOffsetArray[plan_node_id - 1] - 1) * query_dop;
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+    if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+        if (u_sess->instr_cxt.global_instr && m_planIdOffsetArray[plan_node_id - 1] > 0) {
+            int num_streams = u_sess->instr_cxt.global_instr->getInstruThreadNum();
+            int query_dop = u_sess->instr_cxt.global_instr->get_query_dop();
+            int dn_num_threads = DN_NUM_STREAMS_IN_CN(num_streams, m_gather_count, query_dop);
+            int offset = (m_planIdOffsetArray[plan_node_id - 1] - 1) * query_dop;
 
-        for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
-            /* avoid for activesql */
-            ThreadInstrumentation* thread_instr = m_threadInstrArray[1 + i * dn_num_threads + offset];
-            if (thread_instr != NULL && thread_instr->m_instrArrayMap[plan_node_id - 1] != -1)
-                return true;
+            for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+                /* avoid for activesql */
+                ThreadInstrumentation* thread_instr = m_threadInstrArray[1 + i * dn_num_threads + offset];
+                if (thread_instr != NULL && thread_instr->m_instrArrayMap[plan_node_id - 1] != -1)
+                    return true;
+            }
+            return false;
         }
         return false;
+    } else {
+        return true;
     }
-    return false;
 #else
     return true;
 #endif
@@ -2396,7 +2479,7 @@ bool StreamInstrumentation::isFromDataNode(int plan_node_id)
 /* set NetWork in DN */
 void StreamInstrumentation::SetNetWork(int plan_node_id, int64 buf_len)
 {
-    if (IS_PGXC_DATANODE) {
+    if (!IS_SPQ_EXECUTOR || IS_PGXC_DATANODE){
         ThreadInstrumentation* thread_instr =
             m_threadInstrArray[m_planIdOffsetArray[plan_node_id - 1] * m_query_dop + u_sess->stream_cxt.smp_id];
 
@@ -2523,7 +2606,7 @@ void StreamInstrumentation::aggregate(int plannode_num)
  */
 void StreamInstrumentation::SetStreamSend(int plan_node_id, bool send)
 {
-    if (IS_PGXC_DATANODE) {
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) {
         ThreadInstrumentation* thread_instr =
             m_threadInstrArray[m_planIdOffsetArray[plan_node_id - 1] * m_query_dop + u_sess->stream_cxt.smp_id];
 
@@ -2787,7 +2870,8 @@ void OBSInstrumentation::serializeSend()
 {
     ereport(DEBUG5, (errmodule(MOD_ACCELERATE), errmsg("in %s", __FUNCTION__)));
 
-    if (IS_PGXC_DATANODE && !StreamTopConsumerAmI() && u_sess->instr_cxt.p_OBS_instr_valid == NULL)
+    if ((!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) &&
+        !StreamTopConsumerAmI() && u_sess->instr_cxt.p_OBS_instr_valid == NULL)
         return;
 
     StringInfoData buf;
@@ -2795,7 +2879,8 @@ void OBSInstrumentation::serializeSend()
 
     LWLockAcquire(OBSRuntimeLock, LW_EXCLUSIVE);
 
-    if (IS_PGXC_DATANODE && !StreamTopConsumerAmI() && *u_sess->instr_cxt.p_OBS_instr_valid == false) {
+    if ((!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) &&
+        !StreamTopConsumerAmI() && *u_sess->instr_cxt.p_OBS_instr_valid == false) {
         ereport(DEBUG1,
             (errmodule(MOD_ACCELERATE), errmsg("u_sess->instr_cxt.obs_instr is deleted in top consumer thread.")));
         LWLockRelease(OBSRuntimeLock);
@@ -2821,7 +2906,8 @@ void OBSInstrumentation::deserialize(char* msg, size_t len)
 {
     ereport(DEBUG5, (errmodule(MOD_ACCELERATE), errmsg("in %s", __FUNCTION__)));
 
-    if (IS_PGXC_DATANODE && !StreamTopConsumerAmI() && u_sess->instr_cxt.p_OBS_instr_valid == NULL)
+    if ((!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) &&
+        !StreamTopConsumerAmI() && u_sess->instr_cxt.p_OBS_instr_valid == NULL)
         return;
 
     errno_t rc = EOK;
@@ -2832,7 +2918,8 @@ void OBSInstrumentation::deserialize(char* msg, size_t len)
 
     LWLockAcquire(OBSRuntimeLock, LW_EXCLUSIVE);
 
-    if (IS_PGXC_DATANODE && !StreamTopConsumerAmI() && *u_sess->instr_cxt.p_OBS_instr_valid == false) {
+    if ((!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) &&
+        !StreamTopConsumerAmI() && *u_sess->instr_cxt.p_OBS_instr_valid == false) {
         ereport(DEBUG1,
             (errmodule(MOD_ACCELERATE), errmsg("u_sess->instr_cxt.obs_instr is deleted in top consumer thread.")));
         LWLockRelease(OBSRuntimeLock);
@@ -2894,7 +2981,8 @@ void OBSInstrumentation::save(const char* relname, int file_scanned, int64 data_
 {
     ereport(DEBUG5, (errmodule(MOD_ACCELERATE), errmsg("in %s", __FUNCTION__)));
 
-    if (IS_PGXC_DATANODE && !StreamTopConsumerAmI() && u_sess->instr_cxt.p_OBS_instr_valid == NULL)
+    if ((!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) &&
+        !StreamTopConsumerAmI() && u_sess->instr_cxt.p_OBS_instr_valid == NULL)
         return;
 
     errno_t rc = EOK;
@@ -2905,7 +2993,8 @@ void OBSInstrumentation::save(const char* relname, int file_scanned, int64 data_
 
     LWLockAcquire(OBSRuntimeLock, LW_EXCLUSIVE);
 
-    if (IS_PGXC_DATANODE && !StreamTopConsumerAmI() && *u_sess->instr_cxt.p_OBS_instr_valid == false) {
+    if ((!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) &&
+        !StreamTopConsumerAmI() && *u_sess->instr_cxt.p_OBS_instr_valid == false) {
         ereport(DEBUG1,
             (errmodule(MOD_ACCELERATE), errmsg("u_sess->instr_cxt.obs_instr is deleted in top consumer thread.")));
         LWLockRelease(OBSRuntimeLock);
@@ -2945,7 +3034,10 @@ void OBSInstrumentation::insertData(uint64 queryid)
     ListCell* lc = NULL;
     OBSRuntimeInfo* info = NULL;
 
+#ifndef USE_SPQ
     Assert(IS_PGXC_COORDINATOR);
+#endif
+
     Assert(!StreamTopConsumerAmI());
 
     LWLockAcquire(OBSRuntimeLock, LW_EXCLUSIVE);
@@ -3122,7 +3214,8 @@ void ExplainCreateDNodeInfoOnDN(
             p_dnode_info->execute_on_datanode = on_dn;
             p_dnode_info->userid = GetUserId();
 
-            if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+            if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR ||
+                IS_SINGLE_NODE) {
                 MemoryContext old_context;
                 old_context = MemoryContextSwitchTo(g_instance.wlm_cxt->oper_resource_track_mcxt);
                 int plan_len = strlen(plan_name) + 1;
@@ -3134,7 +3227,8 @@ void ExplainCreateDNodeInfoOnDN(
                 p_dnode_info->estimated_rows = estimated_rows;
             }
         } else {
-            if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+            if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR ||
+                IS_SINGLE_NODE) {
                 ereport(LOG,
                     (errmsg("Realtime Trace Error: The new information has the same hash key as the existed record in "
                             "the hash table, which is not expected.")));
@@ -3686,7 +3780,8 @@ void* ExplainGetSessionStatistics(int* num)
         return NULL;
     }
 
-    if (!(IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
+    if (!((IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) ||
+        IS_SINGLE_NODE)) {
         ereport(WARNING, (errmsg("This view is not allowed on datanode.")));
         return NULL;
     }
@@ -3753,71 +3848,73 @@ void* ExplainGetSessionStatistics(int* num)
         LWLockRelease(GetMainLWLockByIndex(FirstOperatorRealTLock + j));
 
     *num = i;
-#ifdef ENABLE_MULTIPLE_NODES
-    char keystr[NAMEDATALEN] = {0};
-    int retry_count = 0;
-    PGXCNodeAllHandles* pgxc_handles = NULL;
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+    if (IS_SPQ_RUNNING) {
+        char keystr[NAMEDATALEN] = {0};
+        int retry_count = 0;
+        PGXCNodeAllHandles* pgxc_handles = NULL;
 
-retry:
-    pgxc_handles = WLMRemoteInfoCollectorStart();
+        retry:
+        pgxc_handles = WLMRemoteInfoCollectorStart();
 
-    if (pgxc_handles == NULL) {
-        pfree_ext(stat_array);
-        *num = 0;
-        ereport(LOG, (errmsg("remote collector failed, reason: connect error.")));
-        return NULL;
-    }
-
-    for (i = 0; i < *num; ++i) {
-        stat_element = stat_array + i;
-
-        /* Get real time info from each data nodes */
-        if (stat_element->execute_on_datanode) {
-            rc = snprintf_s(keystr,
-                NAMEDATALEN,
-                NAMEDATALEN - 1,
-                "%lu,%lu,%d",
-                stat_element->tid,
-                stat_element->query_id,
-                stat_element->plan_node_id);
-            securec_check_ss(rc, "\0", "\0");
-
-            int ret = WLMRemoteInfoSender(pgxc_handles, keystr, WLM_COLLECT_OPERATOR_RUNTIME);
-            if (ret != 0) {
-                ++retry_count;
-                release_pgxc_handles(pgxc_handles);
-                ereport(WARNING, (errmsg("send failed, retry_count: %d", retry_count)));
-                pg_usleep(3 * USECS_PER_SEC);
-
-                if (retry_count >= 3)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_CONNECTION_FAILURE),
-                            errmsg("Remote Sender: Failed to send command to datanode")));
-
-                goto retry;
-            }
-
-            initGenralInfo(stat_element);
-            size_info temp_info;
-            rc = memset_s(&temp_info, sizeof(size_info), 0, sizeof(size_info));
-            securec_check(rc, "\0", "\0");
-            temp_info.plan_node_name = stat_element->plan_node_name;
-            temp_info.min_cpu_time = -1;
-            temp_info.min_peak_memory = -1;
-            temp_info.min_spill_size = -1;
-            temp_info.dn_count = 0;
-            temp_info.startup_time = -1;
-
-            /* Fetch session statistics from each datanode */
-            WLMRemoteInfoReceiver(pgxc_handles, &temp_info, sizeof(size_info), OperatorStrategyFunc4SessionInfo);
-            if (temp_info.has_data)
-                getFinalInfo(stat_element, temp_info);
-            else
-                stat_element->status = true;
+        if (pgxc_handles == NULL) {
+            pfree_ext(stat_array);
+            *num = 0;
+            ereport(LOG, (errmsg("remote collector failed, reason: connect error.")));
+            return NULL;
         }
-    }
 
-    WLMRemoteInfoCollectorFinish(pgxc_handles);
+        for (i = 0; i < *num; ++i) {
+            stat_element = stat_array + i;
+
+            /* Get real time info from each data nodes */
+            if (stat_element->execute_on_datanode) {
+                rc = snprintf_s(keystr,
+                                NAMEDATALEN,
+                                NAMEDATALEN - 1,
+                                "%lu,%lu,%d",
+                                stat_element->tid,
+                                stat_element->query_id,
+                                stat_element->plan_node_id);
+                securec_check_ss(rc, "\0", "\0");
+
+                int ret = WLMRemoteInfoSender(pgxc_handles, keystr, WLM_COLLECT_OPERATOR_RUNTIME);
+                if (ret != 0) {
+                    ++retry_count;
+                    release_pgxc_handles(pgxc_handles);
+                    ereport(WARNING, (errmsg("send failed, retry_count: %d", retry_count)));
+                    pg_usleep(3 * USECS_PER_SEC);
+
+                    if (retry_count >= 3)
+                        ereport(ERROR,
+                                (errcode(ERRCODE_CONNECTION_FAILURE),
+                                    errmsg("Remote Sender: Failed to send command to datanode")));
+
+                    goto retry;
+                }
+
+                initGenralInfo(stat_element);
+                size_info temp_info;
+                rc = memset_s(&temp_info, sizeof(size_info), 0, sizeof(size_info));
+                securec_check(rc, "\0", "\0");
+                temp_info.plan_node_name = stat_element->plan_node_name;
+                temp_info.min_cpu_time = -1;
+                temp_info.min_peak_memory = -1;
+                temp_info.min_spill_size = -1;
+                temp_info.dn_count = 0;
+                temp_info.startup_time = -1;
+
+                /* Fetch session statistics from each datanode */
+                WLMRemoteInfoReceiver(pgxc_handles, &temp_info, sizeof(size_info), OperatorStrategyFunc4SessionInfo);
+                if (temp_info.has_data)
+                    getFinalInfo(stat_element, temp_info);
+                else
+                    stat_element->status = true;
+            }
+        }
+
+        WLMRemoteInfoCollectorFinish(pgxc_handles);
+    }
 #endif
     return stat_array;
 }
@@ -3850,7 +3947,8 @@ void ExplainSetSessionInfo(int plan_node_id, Instrumentation* instr, bool on_dat
 
     uint32 hash_code = GetHashPlanCode(&qid, sizeof(Qpid));
 
-    if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE) {
+    if (((IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR) &&
+    !IsConnFromCoord()) || IS_SINGLE_NODE) {
         LockOperHistHashPartition(hash_code, LW_EXCLUSIVE);
 
         ExplainDNodeInfo* p_detail =
@@ -3889,12 +3987,16 @@ void ExplainSetSessionInfo(int plan_node_id, Instrumentation* instr, bool on_dat
         p_detail->can_record_to_table = u_sess->instr_cxt.can_record_to_table;
         p_detail->status = Operator_Normal;
         UnLockOperHistHashPartition(hash_code);
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(USE_SPQ)
             return;
+#else
+            if (t_thrd.spq_ctx.spq_role == ROLE_UTILITY) {
+                return;
+            }
 #endif
     }
 
-    if (IS_PGXC_DATANODE) {
+    if (IS_SPQ_COORDINATOR || IS_PGXC_DATANODE) {
         LockOperHistHashPartition(hash_code, LW_EXCLUSIVE);
         ExplainDNodeInfo* p_detail =
             (ExplainDNodeInfo*)hash_search(g_operator_table.collected_info_hashtbl, &qid, HASH_ENTER, &has_found);
@@ -3950,7 +4052,7 @@ void* ExplainGetSessionInfo(const Qpid* qid, int removed, int* num)
         return NULL;
     }
 
-    if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+    if (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
         TimestampTz current_time = GetCurrentTimestamp();
 
         for (j = 0; j < NUM_OPERATOR_HISTORY_PARTITIONS; j++)
@@ -4044,75 +4146,77 @@ void* ExplainGetSessionInfo(const Qpid* qid, int removed, int* num)
 
         for (j = NUM_OPERATOR_HISTORY_PARTITIONS; --j >= 0;)
             LWLockRelease(GetMainLWLockByIndex(FirstOperatorHistLock + j));
-#ifdef ENABLE_MULTIPLE_NODES
-        int retry_count = 0;
-        int i;
-        PGXCNodeAllHandles* pgxc_handles = NULL;
-        char keystr[NAMEDATALEN];
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
+        if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+            int retry_count = 0;
+            int i;
+            PGXCNodeAllHandles* pgxc_handles = NULL;
+            char keystr[NAMEDATALEN];
 
-    retry:
-        pgxc_handles = WLMRemoteInfoCollectorStart();
+            retry:
+            pgxc_handles = WLMRemoteInfoCollectorStart();
 
-        if (pgxc_handles == NULL) {
-            pfree_ext(stat_array);
-            *num = 0;
-            return NULL;
-        }
-
-        for (i = 0; i < *num; ++i) {
-            if (i >= record_pos && i <= un_record_pos) {
-                continue;
+            if (pgxc_handles == NULL) {
+                pfree_ext(stat_array);
+                *num = 0;
+                return NULL;
             }
 
-            stat_element = stat_array + i;
-
-            if (stat_element->execute_on_datanode) {
-                rc = snprintf_s(keystr,
-                    NAMEDATALEN,
-                    NAMEDATALEN - 1,
-                    "%lu,%lu,%d,%d",
-                    stat_element->tid,
-                    stat_element->query_id,
-                    stat_element->plan_node_id,
-                    stat_element->remove);
-                securec_check_ss(rc, "\0", "\0");
-
-                int ret = WLMRemoteInfoSender(pgxc_handles, keystr, WLM_COLLECT_OPERATOR_SESSION);
-
-                if (ret != 0) {
-                    ++retry_count;
-                    release_pgxc_handles(pgxc_handles);
-                    ereport(WARNING, (errmsg("send failed, retry_count: %d", retry_count)));
-
-                    pg_usleep(3 * USECS_PER_SEC);
-
-                    if (retry_count >= 3)
-                        ereport(ERROR,
-                            (errcode(ERRCODE_CONNECTION_FAILURE),
-                                errmsg("Remote Sender: Failed to send command to datanode")));
-                    goto retry;
+            for (i = 0; i < *num; ++i) {
+                if (i >= record_pos && i <= un_record_pos) {
+                    continue;
                 }
 
-                initGenralInfo(stat_element);
-                size_info temp_info;
-                rc = memset_s(&temp_info, sizeof(size_info), 0, sizeof(size_info));
-                securec_check(rc, "\0", "\0");
-                temp_info.plan_node_name = stat_element->plan_node_name;
-                temp_info.min_cpu_time = -1;
-                temp_info.min_peak_memory = -1;
-                temp_info.min_spill_size = -1;
-                temp_info.dn_count = 0;
-                temp_info.startup_time = -1;
+                stat_element = stat_array + i;
 
-                /* Fetch session statistics from each datanode */
-                WLMRemoteInfoReceiver(pgxc_handles, &temp_info, sizeof(size_info), OperatorStrategyFunc4SessionInfo);
+                if (stat_element->execute_on_datanode) {
+                    rc = snprintf_s(keystr,
+                                    NAMEDATALEN,
+                                    NAMEDATALEN - 1,
+                                    "%lu,%lu,%d,%d",
+                                    stat_element->tid,
+                                    stat_element->query_id,
+                                    stat_element->plan_node_id,
+                                    stat_element->remove);
+                    securec_check_ss(rc, "\0", "\0");
 
-                if (temp_info.has_data)
-                    getFinalInfo(stat_element, temp_info);
+                    int ret = WLMRemoteInfoSender(pgxc_handles, keystr, WLM_COLLECT_OPERATOR_SESSION);
+
+                    if (ret != 0) {
+                        ++retry_count;
+                        release_pgxc_handles(pgxc_handles);
+                        ereport(WARNING, (errmsg("send failed, retry_count: %d", retry_count)));
+
+                        pg_usleep(3 * USECS_PER_SEC);
+
+                        if (retry_count >= 3)
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_CONNECTION_FAILURE),
+                                        errmsg("Remote Sender: Failed to send command to datanode")));
+                        goto retry;
+                    }
+
+                    initGenralInfo(stat_element);
+                    size_info temp_info;
+                    rc = memset_s(&temp_info, sizeof(size_info), 0, sizeof(size_info));
+                    securec_check(rc, "\0", "\0");
+                    temp_info.plan_node_name = stat_element->plan_node_name;
+                    temp_info.min_cpu_time = -1;
+                    temp_info.min_peak_memory = -1;
+                    temp_info.min_spill_size = -1;
+                    temp_info.dn_count = 0;
+                    temp_info.startup_time = -1;
+
+                    /* Fetch session statistics from each datanode */
+                    WLMRemoteInfoReceiver(pgxc_handles, &temp_info, sizeof(size_info), OperatorStrategyFunc4SessionInfo);
+
+                    if (temp_info.has_data)
+                        getFinalInfo(stat_element, temp_info);
+                }
             }
-        }
 
-        WLMRemoteInfoCollectorFinish(pgxc_handles);
+            WLMRemoteInfoCollectorFinish(pgxc_handles);
+        }
 #endif
         *num = record_pos;
         return stat_array;
@@ -4154,7 +4258,7 @@ void releaseExplainTable()
             p_dnode_info->status = Operator_Invalid;
         }
 
-        if (IS_PGXC_DATANODE) {
+        if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) {
             hash_search(g_operator_table.collected_info_hashtbl, &qid, HASH_REMOVE, NULL);
         }
 
@@ -4168,8 +4272,9 @@ void releaseExplainTable()
 
         ExplainDNodeInfo* p_dnode_info =
             (ExplainDNodeInfo*)hash_search(g_operator_table.explain_info_hashtbl, &qid, HASH_FIND, &found);
-        if (found && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && p_dnode_info != NULL && p_dnode_info->plan_name != NULL) {
-            pfree_ext(p_dnode_info->plan_name);
+        if (found && (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
+            p_dnode_info != NULL && p_dnode_info->plan_name != NULL) {
+                pfree_ext(p_dnode_info->plan_name);
         }
 
         hash_search(g_operator_table.explain_info_hashtbl, &qid, HASH_REMOVE, NULL);
@@ -4198,7 +4303,8 @@ void removeExplainInfo(int plan_node_id)
 
     ExplainDNodeInfo* p_dnode_info =
         (ExplainDNodeInfo*)hash_search(g_operator_table.explain_info_hashtbl, &qid, HASH_FIND, &found);
-    if (found && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && p_dnode_info != NULL && p_dnode_info->plan_name != NULL) {
+    if (found && (IS_SPQ_COORDINATOR || IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
+        p_dnode_info != NULL && p_dnode_info->plan_name != NULL) {
         pfree_ext(p_dnode_info->plan_name);
     }
 

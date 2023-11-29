@@ -41,42 +41,49 @@ alter user noindependent_user identified by 'gauss@789';
 ERROR:  Only independent user himself can alter his own password.
 grant independent_user to noindependent_user;
 ERROR:  Only independent user himself can decide his own membership.
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'alter user noindependent_user with noindependent;'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U noindependent_user -W 'gauss@123' -p 25632 -c 'alter user noindependent_user with noindependent;'
 ALTER ROLE
-\! @abs_bindir@/gsql -d regression -U independent_user -W 'gauss@123' -p @portstring@ -c 'create table independent_tbl(id1 int,id2 int);insert into independent_tbl values(100,100);insert into independent_tbl values(300,300);'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U independent_user -W 'gauss@123' -p 25632 -c 'create table independent_tbl(id1 int,id2 int);insert into independent_tbl values(100,100);insert into independent_tbl values(300,300);'
 CREATE TABLE
 INSERT 0 1
 INSERT 0 1
-\! @abs_bindir@/gsql -d regression -U independent_user -W 'gauss@123' -p @portstring@ -c 'create view independent_user.myview as select * from independent_user.independent_tbl;'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U independent_user -W 'gauss@123' -p 25632 -c 'create view independent_user.myview as select * from independent_user.independent_tbl;'
 CREATE VIEW
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'create table noindependent_tbl(id1 int,id2 int);insert into noindependent_tbl values(100,100);insert into noindependent_tbl values(300,300);'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U noindependent_user -W 'gauss@123' -p 25632 -c 'create table noindependent_tbl(id1 int,id2 int);insert into noindependent_tbl values(100,100);insert into noindependent_tbl values(300,300);'
 CREATE TABLE
 INSERT 0 1
 INSERT 0 1
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'create view noindependent_user.myview as select * from noindependent_user.noindependent_tbl;'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U noindependent_user -W 'gauss@123' -p 25632 -c 'create view noindependent_user.myview as select * from noindependent_user.noindependent_tbl;'
 CREATE VIEW
 --independent
 insert into independent_user.independent_tbl values(100,100);
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 delete from independent_user.independent_tbl where id1=100;
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 update independent_user.independent_tbl set id2=500 where id1=300;
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 select * from independent_user.independent_tbl;
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 grant select on independent_user.independent_tbl to sysuser;
-ERROR:  permission denied for relation independent_tbl
+ERROR:  no privileges were granted for "independent_tbl"
 revoke select on independent_user.independent_tbl from sysuser;
-ERROR:  permission denied for relation independent_tbl
+ERROR:  no privileges could be revoked for "independent_tbl"
 copy independent_user.independent_tbl to STDOUT;
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 alter table independent_user.independent_tbl owner to sysuser;
 ERROR:  must be owner of relation independent_tbl
+DETAIL:  N/A
 truncate independent_user.independent_tbl;
 vacuum independent_user.independent_tbl;
 analyze independent_user.independent_tbl;
 select * from independent_user.myview;
 ERROR:  permission denied for relation myview
+DETAIL:  N/A
 select has_table_privilege('independent_user.independent_tbl','select');
  has_table_privilege 
 ---------------------
@@ -137,6 +144,7 @@ alter table noindependent_user.noindependent_tbl owner to sysuser;
 truncate noindependent_user.noindependent_tbl;
 select * from noindependent_user.myview;
 ERROR:  permission denied for relation noindependent_tbl
+DETAIL:  N/A
 select has_table_privilege('noindependent_user.noindependent_tbl','select');
  has_table_privilege 
 ---------------------
@@ -183,18 +191,22 @@ select has_table_privilege('noindependent_user.noindependent_tbl','trigger');
 create table independent_user.like_independent_tbl(like independent_user.independent_tbl);
 create table independent_user.temp_create_tbl as select * from independent_user.independent_tbl;
 ERROR:  permission denied for relation temp_create_tbl
+DETAIL:  N/A
 select * into independent_user.temp_create_tbl from independent_user.independent_tbl;
 ERROR:  permission denied for relation temp_create_tbl
+DETAIL:  N/A
 create table public.temp_create_tbl as select * from independent_user.independent_tbl;
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 select * into public.temp_create_tbl from independent_user.independent_tbl;
 ERROR:  permission denied for relation independent_tbl
+DETAIL:  N/A
 create index indep_idx on independent_user.independent_tbl(id2);
 drop index independent_user.indep_idx;
 --test disable password for independent
-\! @abs_bindir@/gsql -d regression -U independent_user -W 'gauss@123' -p @portstring@ -c 'alter user independent_user password disable;'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U independent_user -W 'gauss@123' -p 25632 -c 'alter user independent_user password disable;'
 ALTER ROLE
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'alter user noindependent_user password disable;'
+\! /data2/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data2/jiangyan/openGauss-server_/dest/bin/gsql -d regression -U noindependent_user -W 'gauss@123' -p 25632 -c 'alter user noindependent_user password disable;'
 ERROR:  Only system admin can disable user's password.
 alter user independent_user password disable;
 ERROR:  Only independent user himself can disable his own password.

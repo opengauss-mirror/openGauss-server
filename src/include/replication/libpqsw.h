@@ -46,8 +46,7 @@ bool libpqsw_process_message(int qtype, const StringInfo msg);
 /* process P type msg, true if need redirect*/
 bool libpqsw_process_parse_message(const char* commandTag, List* query_list);
 /* process Q type msg, true if need in redirect mode*/
-bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string,
-    size_t query_string_len = 0);
+bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string);
 /* is need send ready_for_query messge to front, if in redirect then false*/
 bool libpqsw_need_end();
 /* udpate if need ready_for_query messge flag */
@@ -84,6 +83,8 @@ bool libpqsw_is_end();
 bool libpqsw_only_localrun();
 void libpqsw_create_conn();
 void libpqsw_trace_q_msg(const char* commandTag, const char* queryString);
+void libpqsw_disconnect(bool clear_queue);
+void libpqsw_check_ddl_on_primary(const char* commandTag);
 
 #ifdef _cplusplus
 }
@@ -124,6 +125,8 @@ typedef struct {
     bool need_end;
     /* if connected to master*/
     bool already_connected;
+    bool client_enable_ce;
+    bool have_savepoint;
 } RedirectState;
 
 // the max len =(PBEPBEDS) == 8, 20 is enough
@@ -132,6 +135,7 @@ typedef struct {
 #define PBE_MAX_SET_BLOCK (10)
 enum RedirectType {
     RT_NORMAL, //transfer to standby
+    RT_TXN_STATUS,
     RT_SET  //not transfer to standby,set props=xxx or 'C' close msg
 };
 
@@ -141,6 +145,7 @@ enum RedirectType {
 #define SS_STANDBY_REQ_BEGIN            0x8
 #define SS_STANDBY_REQ_END              0x10
 #define SS_STANDBY_REQ_SIMPLE_Q         0x20
+#define SS_STANDBY_REQ_SAVEPOINT        0x40
 
 typedef struct {
     int pbe_types[PBE_MESSAGE_STACK];
@@ -244,6 +249,8 @@ public:
         state.inited = false;
         state.need_end = true;
         state.already_connected = false;
+        state.client_enable_ce = false;
+        state.have_savepoint = false;
         ss_standby_state = 0;
         server_proc_slot = 0;
         ss_standby_sxid = 0;

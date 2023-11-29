@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE characterMapping SYSTEM "http://www.unicode.org/unicode/reports/tr22/CharacterMapping.dtd">
+<characterMapping id="gb-18030-2022" version="1">
+ <history>
+  <modified version="1" date="2022-03-27">
+   A list of character encodings in which the location of the GB/T 13000 code is changed compared to version 2000
+  </modified>
+ </history>
+ 
+ <validity>
+  <state type="FIRST"  s="00" e="80" next="VALID" max="7f"/>
+  <state type="FIRST"  s="81" e="fe" next="SECOND"/>
+ 
+  <state type="SECOND" s="40" e="7e" next="VALID" max="ffff"/>
+  <state type="SECOND" s="80" e="fe" next="VALID" max="ffff"/>
+  <state type="SECOND" s="30" e="39" next="THIRD"/>
+ 
+  <state type="THIRD"  s="81" e="fe" next="FOURTH"/>
+ 
+  <state type="FOURTH" s="30" e="39" next="VALID" max="10ffff"/>
+ </validity>
+ <assignments sub="1A">
+  <!-- One to one mappings -->
+ 
+  <!-- changes between 2000 and 2005 -->
+  <a u="E7C7" b="81 35 F4 37"/>
+  <a u="1E3F" b="A8 BC"/>
+ 
+  <!-- changes between 2005 and 2022 -->
+  <a u="FE10" b="A6 D9"/>
+  <a u="FE12" b="A6 DA"/>
+  <a u="FE11" b="A6 DB"/>
+  <a u="FE13" b="A6 DC"/>
+  <a u="FE14" b="A6 DD"/>
+  <a u="FE15" b="A6 DE"/>
+  <a u="FE16" b="A6 DF"/>
+  <a u="FE17" b="A6 EC"/>
+  <a u="FE18" b="A6 ED"/>
+  <a u="FE19" b="A6 F3"/>
+  <a u="9FB4" b="FE 59"/>
+  <a u="9FB5" b="FE 61"/>
+  <a u="9FB6" b="FE 66"/>
+  <a u="9FB7" b="FE 67"/>
+  <a u="9FB8" b="FE 6D"/>
+  <a u="9FB9" b="FE 7E"/>
+  <a u="9FBA" b="FE 90"/>
+  <a u="9FBB" b="FE A0"/>
+  <a u="E78D" b="84 31 82 36"/>
+  <a u="E78F" b="84 31 82 37"/>
+  <a u="E78E" b="84 31 82 38"/>
+  <a u="E790" b="84 31 82 39"/>
+  <a u="E791" b="84 31 83 30"/>
+  <a u="E792" b="84 31 83 31"/>
+  <a u="E793" b="84 31 83 32"/>
+  <a u="E794" b="84 31 83 33"/>
+  <a u="E795" b="84 31 83 34"/>
+  <a u="E796" b="84 31 83 35"/>
+  <a u="E81E" b="82 35 90 37"/>
+  <a u="E826" b="82 35 90 38"/>
+  <a u="E82B" b="82 35 90 39"/>
+  <a u="E82C" b="82 35 91 30"/>
+  <a u="E832" b="82 35 91 31"/>
+  <a u="E843" b="82 35 91 32"/>
+  <a u="E854" b="82 35 91 33"/>
+  <a u="E864" b="82 35 91 34"/>
+  <!-- Fallback mappings from Unicode to bytes -->
+  <!-- NONE -->
+  <!-- Fallback mappings from bytes to Unicode -->
+  <!-- NONE -->
+  <!-- Roundtrip-mappings that can be enumerated
+       Note that GB 18030 defines roundtrip mappings for all Unicode code points U+0000..U+10ffff.
+       This would require 1.1 million <a> elements.
+       However, most four-byte GB 18030 mappings can be enumerated efficiently within distinct ranges.
+       Therefore, we use <range> elements for all but the 38 or so assignments above.
+    -->
+  <!-- NONE -->
+ </assignments>
+</characterMapping>

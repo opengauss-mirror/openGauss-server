@@ -714,7 +714,7 @@
 #define PGXC_VERSION_NUM 
 
 /* openGauss version as a number string */
-#define OPENGAUSS_VERSION_NUM_STR "5.1.0" 
+#define OPENGAUSS_VERSION_NUM_STR "5.1.1" 
 
 /* A string containing the version number, platform, and C compiler */
 #define PG_VERSION_STR "@PG_VERSION_STR@"
@@ -833,6 +833,9 @@
 /* Define to build with (Open)SSL support. (--with-openssl) */
 #cmakedefine USE_SSL 1
 
+/* Define to build with TASSL support. (--with-tassl) */
+#cmakedefine USE_TASSL 1
+
 /* Define to select SysV-style semaphores. */
 #define USE_SYSV_SEMAPHORES 1
 
@@ -919,6 +922,10 @@
 /* Define to 1 if you want to generate gauss product as lite mode.
  *  * (--enable-lite-mode) */
 #cmakedefine ENABLE_LITE_MODE
+
+/* Define to 1 if you want to generate gauss product as finance mode.
+ *  * (--enable-lite-mode) */
+#cmakedefine ENABLE_FINANCE_MODE
 
 /* Define to 1 if you want to use mot
  * --enable-mot */

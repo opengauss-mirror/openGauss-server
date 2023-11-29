@@ -2228,6 +2228,7 @@ retry_init:
     krbconfig = gs_getenv_r("MPPDB_KRB5_FILE_PATH");
     if (krbconfig != NULL) {
         if (realpath(krbconfig, real_krbconfig) == NULL) {
+            (void)syscalllockRelease(&kerberos_conn_lock);
             return -1;
         }
         check_backend_env(real_krbconfig);
@@ -3035,7 +3036,7 @@ static int ident_inet(hbaPort* port)
     if (rc != 0) {
         ereport(LOG,
             (errcode_for_socket_access(),
-                errmsg("could not connect to Ident server at address \"%s\", port %s: %m", remote_addr_s, ident_port)));
+                errmsg("could not connect to Ident server at address \"%s\", port %s: %s", remote_addr_s, ident_port, TRANSLATE_ERRNO)));
         ident_return = false;
         goto ident_inet_done;
     }

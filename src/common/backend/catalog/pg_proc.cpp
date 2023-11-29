@@ -75,6 +75,8 @@
 #include "commands/tablecmds.h"
 #include "storage/lmgr.h"
 #include "libpq/md5.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/gs_dependencies.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
@@ -1030,6 +1032,24 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
     return user_define_fun;
 }
 
+static void plpgsql_clear_created_func(Oid funcoid)
+{
+    if (u_sess->SPI_cxt._connected > -1 &&
+        u_sess->plsql_cxt.plpgsql_HashTable != NULL) {
+        HASH_SEQ_STATUS hash_seq;
+        hash_seq_init(&hash_seq, u_sess->plsql_cxt.plpgsql_HashTable);
+        plpgsql_hashent* hash_ent = NULL;
+        while ((hash_ent = (plpgsql_hashent*)hash_seq_search(&hash_seq)) != NULL) {
+            PLpgSQL_function* func = hash_ent->function;
+            if (hash_ent->key.funcOid == funcoid && !OidIsValid(func->pkg_oid)) {
+                delete_function(func, false);
+                hash_seq_term(&hash_seq);
+                break;
+            }
+        }
+    }
+}
+
 /* ----------------------------------------------------------------
  * ProcedureCreate
  *
@@ -1043,7 +1063,8 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     bool isAgg, bool isWindowFunc, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
-    bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate)
+    bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate,
+    TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt)
 {
     Oid retval;
     int parameterCount;
@@ -1079,10 +1100,10 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     char* libPath = NULL;
     char* final_file_name = NULL;
     List* name = NULL;
-	
+    List* dependenciesRefObjOids = NULL;
     /* sanity checks */
     Assert(PointerIsValid(prosrc));
-
+    u_sess->plsql_cxt.compile_has_warning_info = false;
     /* 
      * Check function name to ensure that it doesn't conflict with existing synonym.
      */
@@ -1453,7 +1474,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     tupDesc = RelationGetDescr(rel);
 
     /* A db do not overload a function by arguments.*/
-    NameData* pkgname = NULL;
+    char* pkgname = NULL;
     char* schemaName = get_namespace_name(procNamespace);
     if (OidIsValid(propackageid)) {
         pkgname = GetPackageName(propackageid);
@@ -1461,13 +1482,13 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     if (pkgname == NULL) { 
         name = list_make2(makeString(schemaName), makeString(pstrdup(procedureName)));
     } else {
-        name = list_make3(makeString(schemaName), makeString(pstrdup(pkgname->data)), makeString(pstrdup(procedureName)));
+        name = list_make3(makeString(schemaName), makeString(pstrdup(pkgname)), makeString(pstrdup(procedureName)));
     }
 #ifndef ENABLE_MULTIPLE_NODES
     if (pkgname == NULL) {
         LockProcName(schemaName, NULL, procedureName);
     } else {
-        LockProcName(schemaName, pkgname->data, procedureName);
+        LockProcName(schemaName, pkgname, procedureName);
     }
 #endif
     if (isOraStyle && !package) {
@@ -1583,6 +1604,18 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
          */
         replaces[Anum_pg_proc_proowner - 1] = false;
         replaces[Anum_pg_proc_proacl - 1] = false;
+        retval = HeapTupleGetOid(oldtup);
+        if (enable_plpgsql_gsdependency_guc()) {
+            GsDependObjDesc objDesc = gsplsql_construct_func_head_obj(retval, procNamespace, propackageid);
+            objDesc.type = GSDEPEND_OBJECT_TYPE_PROCHEAD;
+            gsplsql_remove_dependencies_object(&objDesc);
+            //delete dependencies
+            objDesc.refPosType = GSDEPEND_REFOBJ_POS_IN_PROCALL;
+            Relation relation = heap_open(DependenciesRelationId, RowExclusiveLock);
+            dependenciesRefObjOids = gsplsql_delete_objs(relation, &objDesc);
+            CommandCounterIncrement();
+            heap_close(relation, RowExclusiveLock);
+        }
 
         /* Okay, do it... */
         tup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
@@ -1621,13 +1654,16 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
 
         (void)simple_heap_insert(rel, tup);
         is_update = false;
+        retval = HeapTupleGetOid(tup);
     }
 
     /* Need to update indexes for either the insert or update case */
     CatalogUpdateIndexes(rel, tup);
-
-    retval = HeapTupleGetOid(tup);
-
+    GsDependObjDesc funcHeadObjDesc;
+    if (enable_plpgsql_gsdependency_guc()) {
+        CommandCounterIncrement();
+        funcHeadObjDesc = gsplsql_construct_func_head_obj(retval, procNamespace, propackageid);
+    }
     /*
      * Create dependencies for the new function.  If we are updating an
      * existing function, first delete any existing pg_depend entries.
@@ -1657,12 +1693,16 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
                 retval, JitExec::JIT_PURGE_SCOPE_SP, JitExec::JIT_PURGE_REPLACE, procedureName);
         }
 #endif
+    } else {
+        CacheInvalidateFunction(retval, InvalidOid);
     }
 
     myself.classId = ProcedureRelationId;
     myself.objectId = retval;
     myself.objectSubId = 0;
 
+    bool hasDependency = false;
+    bool hasUndefined = false;
     if (u_sess->attr.attr_common.IsInplaceUpgrade && myself.objectId < FirstBootstrapObjectId && !is_update)
         recordPinnedDependency(&myself);
     else {
@@ -1678,18 +1718,60 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         referenced.objectSubId = 0;
         recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
+        GsDependParamBody gsDependParamBody;
+        gsplsql_init_gs_depend_param_body(&gsDependParamBody);
+        if (enable_plpgsql_gsdependency()) {
+            gsDependParamBody.dependNamespaceOid = procNamespace;
+            if (NULL != u_sess->plsql_cxt.curr_compile_context &&
+                NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+                Assert(propackageid ==
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid);
+                gsDependParamBody.dependPkgOid = propackageid;
+                gsDependParamBody.dependPkgName = pkgname;
+            }
+            gsDependParamBody.refPosType = GSDEPEND_REFOBJ_POS_IN_PROCHEAD;
+            gsDependParamBody.type = GSDEPEND_OBJECT_TYPE_TYPE;
+            gsDependParamBody.dependName = funcHeadObjDesc.name;
+        }
+
         /* dependency on return type */
         referenced.classId = TypeRelationId;
         referenced.objectId = returnType;
         referenced.objectSubId = 0;
-        recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+        if (enable_plpgsql_gsdependency() && NULL != retTypDependExt) {
+            gsDependParamBody.dependExtend = retTypDependExt;
+            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
+            if (gsDependParamBody.hasDependency) {
+                hasDependency = true;
+            }
+            if (gsDependParamBody.dependExtend->dependUndefined) {
+                hasUndefined = true;
+            }
+        } else {
+            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+        }
 
         /* dependency on parameter types */
         for (i = 0; i < allParamCount; i++) {
             referenced.classId = TypeRelationId;
             referenced.objectId = allParams[i];
             referenced.objectSubId = 0;
-            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+            /*
+             * in plsql_dependency GUC, we don't build the dependency between procedure and type
+             * when the type is dropped or rebuild we don't want the procedure to be dropped.
+             */
+            if (enable_plpgsql_gsdependency() && NULL != paramTypDependExt) {
+                gsDependParamBody.dependExtend = paramTypDependExt + i;
+                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL, &gsDependParamBody);
+                if (gsDependParamBody.hasDependency) {
+                    hasDependency = true;
+                }
+                if (gsDependParamBody.dependExtend->dependUndefined) {
+                    hasUndefined = true;
+                }
+            } else {
+                recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+            }
         }
 
         /* dependency on packages */
@@ -1723,6 +1805,34 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         recordDependencyOnCurrentExtension(&myself, is_update);
     }
 
+    if (enable_plpgsql_gsdependency_guc()) {
+        CommandCounterIncrement();
+        gsplsql_delete_unrefer_depend_obj_in_list(dependenciesRefObjOids, false);
+        list_free(dependenciesRefObjOids);
+        if (hasDependency && stmt != NULL) {
+            funcHeadObjDesc.type = GSDEPEND_OBJECT_TYPE_PROCHEAD;
+            DependenciesProchead procHead;
+            procHead.type = T_DependenciesProchead;
+            procHead.proName = pstrdup(procedureName);
+            procHead.proArgSrc = stmt->inputHeaderSrc;
+            procHead.funcHeadSrc = stmt->funcHeadSrc;
+            if (stmt->funcHeadSrc == NULL) {
+                ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("The header info of procedure %s is null.", procHead.proName)));
+            }
+            procHead.undefined = hasUndefined;
+            gsplsql_update_object_ast(&funcHeadObjDesc, (DependenciesDatum*)(&procHead));
+            pfree_ext(procHead.proName);
+        }
+        //schema func
+        if (!OidIsValid(propackageid)) {
+            funcHeadObjDesc.name = (char*)procedureName;
+            funcHeadObjDesc.type = GSDEPEND_OBJECT_TYPE_FUNCTION;
+            gsplsql_build_ref_dependency(&funcHeadObjDesc, nullptr);
+        }
+    }
+
     heap_freetuple_ext(tup);
 
     /* Post creation hook for new function */
@@ -1732,13 +1842,27 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     if (OidIsValid(retval)) {
         if (!is_update) {
             PgObjectOption objectOpt = {true, true, false, false};
-            CreatePgObject(retval, OBJECT_TYPE_PROC, proowner, objectOpt);
+            CreatePgObject(retval, OBJECT_TYPE_PROC, proowner, objectOpt, !hasUndefined);
         } else {
             UpdatePgObjectMtime(retval, OBJECT_TYPE_PROC);
+            CommandCounterIncrement();
+            if (enable_plpgsql_gsdependency_guc()) {
+                SetPgObjectValid(retval, OBJECT_TYPE_PROC, true);
+            }
         }
     }
 
     heap_close(rel, RowExclusiveLock);
+    CacheInvalidateFunction(retval, InvalidOid);
+    if (u_sess->SPI_cxt._connected == -1 && !u_sess->plsql_cxt.isCreatePkg &&
+        !u_sess->plsql_cxt.isCreatePkgFunction) {
+            plpgsql_hashtable_clear_invalid_obj();
+    }
+    if (!OidIsValid(propackageid)) {
+        SetCurrCompilePgObjStatus(!hasUndefined);
+    } else {
+        UpdateCurrCompilePgObjStatus(!hasUndefined);
+    }
 
     /*
      * To user-defined C_function, need rename library filename to special name,
@@ -1761,14 +1885,12 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         copyLibraryToSpecialName(absolutePath, final_file_name, libPath, function_type);
     }
 
+    /* Advance command counter so new tuple can be seen by validator */
+    CommandCounterIncrement();
     /* Verify function body */
     if (OidIsValid(languageValidator)) {
         ArrayType* set_items = NULL;
         int save_nestlevel;
-
-        /* Advance command counter so new tuple can be seen by validator */
-        CommandCounterIncrement();
-
         /* Set per-function configuration parameters */
         set_items = (ArrayType*)DatumGetPointer(proconfig);
         if (set_items != NULL) { /* Need a new GUC nesting level */
@@ -1782,11 +1904,40 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         if (set_items != NULL)
             AtEOXact_GUC(true, save_nestlevel);
     }
+    int rc = CompileWhich();
+    if ((rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) && enable_plpgsql_gsdependency_guc()) {
+        MemoryContext oldCxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+        u_sess->plsql_cxt.func_compiled_list = list_append_unique_oid(u_sess->plsql_cxt.func_compiled_list, retval);
+        MemoryContextSwitchTo(oldCxt);
+        PLpgSQL_package* pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+        if (pkg->is_bodycompiled) {
+            u_sess->plsql_cxt.real_func_num++;
+        }
+    }
     if (user_defined_c_fun) {
         libraryLock.unLock();
     }
-
+    if (enable_plpgsql_gsdependency_guc() && !OidIsValid(propackageid)) {
+        if (u_sess->plsql_cxt.has_error) {
+            SetPgObjectValid(retval, OBJECT_TYPE_PROC, false);
+        } else {
+            SetPgObjectValid(retval, OBJECT_TYPE_PROC, GetCurrCompilePgObjStatus());
+        }
+        if (!GetCurrCompilePgObjStatus()) {
+            ereport(WARNING, (errmodule(MOD_PLSQL),
+                errmsg("%s created with compilation erors.",
+                    proIsProcedure ? "Procedure" : "Function")));
+        }
+    }
+    if (enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.has_error) {
+            SetPgObjectValid(retval, OBJECT_TYPE_PROC, false);
+    } 
+    if (propackageid == InvalidOid) {
+        plpgsql_clear_created_func(ObjectIdGetDatum(retval));
+    }
     pfree_ext(final_file_name);
+    pfree_ext(pkgname);
+    list_free_ext(name);
     return myself;
 }
 
@@ -1963,7 +2114,7 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
     ErrorContextCallback sqlerrcontext;
     bool haspolyarg = false;
     int i;
-
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     bool replace = false;
     /*
      * 3 means the number of arguments of function fmgr_sql_validator, while 'is_replace' is the third one,
@@ -2049,7 +2200,7 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
             foreach (lc, raw_parsetree_list) {
                 Node* parsetree = (Node*)lfirst(lc);
                 List* querytree_sublist = NIL;
-
+                t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
 #ifdef PGXC
                 /* Block CTAS in SQL functions */
                 if (IsA(parsetree, CreateTableAsStmt))
@@ -2093,6 +2244,7 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
     }
 
     ReleaseSysCache(tuple);
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     PG_RETURN_VOID();
 }

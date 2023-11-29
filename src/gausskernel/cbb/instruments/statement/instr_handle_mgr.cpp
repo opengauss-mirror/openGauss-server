@@ -26,10 +26,11 @@
 #include "instruments/instr_statement.h"
 #include "knl/knl_variable.h"
 #include "utils/memutils.h"
+#include "utils/palloc.h"
 
 #define CHECK_STMT_TRACK_ENABLED()                                              \
 {                                                                               \
-    if (!ENABLE_STATEMENT_TRACK) {                                              \
+    if (IsInitdb || !ENABLE_STATEMENT_TRACK) {                                              \
         return;                                                                 \
     } else if (u_sess->statement_cxt.statement_level[0] == STMT_TRACK_OFF &&    \
         u_sess->statement_cxt.statement_level[1] == STMT_TRACK_OFF) {           \
@@ -481,4 +482,88 @@ void* bind_statement_context()
             break;
     }
     return NULL;
+}
+
+/*
+ * Save the old parent statement information before execution.
+ */
+void PLSQLStmtTrackStack::save_old_info()
+{
+    old_unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
+    old_parent_unique_sql_id = u_sess->unique_sql_cxt.parent_unique_sql_id;
+    old_is_top_unique_sql = IsTopUniqueSQL();
+    old_is_multi_unique_sql = u_sess->unique_sql_cxt.is_multi_unique_sql;
+    old_force_gen_unique_sql = u_sess->unique_sql_cxt.force_generate_unique_sql;
+    old_multi_sql_offset = u_sess->unique_sql_cxt.multi_sql_offset;
+    old_curr_single_unique_sql = u_sess->unique_sql_cxt.curr_single_unique_sql;
+}
+
+/*
+ * Reset the information of the current statement.
+ */
+void PLSQLStmtTrackStack::reset_current_info()
+{
+    u_sess->unique_sql_cxt.parent_unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
+    u_sess->unique_sql_cxt.unique_sql_id = 0;
+    u_sess->debug_query_id = generate_unique_id64(&gt_queryId);
+    pgstat_report_queryid(u_sess->debug_query_id);
+    if (old_is_top_unique_sql) {
+        SetIsTopUniqueSQL(false);
+    }
+    if (old_is_multi_unique_sql) {
+        u_sess->unique_sql_cxt.is_multi_unique_sql = false;
+        u_sess->unique_sql_cxt.multi_sql_offset = 0;
+    }
+    u_sess->unique_sql_cxt.curr_single_unique_sql = NULL;
+    u_sess->unique_sql_cxt.force_generate_unique_sql = true;
+}
+
+/*
+ * When we want to record the PL/SQL within a procedure or function,
+ * Save the parent statement information and initialize the current statement
+ * before execution.
+ */
+void PLSQLStmtTrackStack::push()
+{
+    if (IsInitdb || (IS_UNIQUE_SQL_TRACK_TOP && !u_sess->unique_sql_cxt.is_open_cursor) || 
+        CURRENT_STMT_METRIC_HANDLE == NULL) {
+        return;
+    }
+
+    uint64 old_debug_query_id = u_sess->debug_query_id;
+    save_old_info();
+    reset_current_info();
+    parent_handler = CURRENT_STMT_METRIC_HANDLE;
+    u_sess->statement_cxt.curStatementMetrics = NULL;
+    parent_handler->debug_query_id = old_debug_query_id;
+    statement_init_metric_context();
+    instr_stmt_report_stat_at_handle_init();
+    instr_stmt_report_start_time();
+
+}
+
+/*
+ * After executing the PL/SQL,
+ * upload the information of the current statement and restore the parent statement information.
+ */
+void PLSQLStmtTrackStack::pop()
+{
+    if (IsInitdb || (IS_UNIQUE_SQL_TRACK_TOP && !u_sess->unique_sql_cxt.is_open_cursor) || 
+        CURRENT_STMT_METRIC_HANDLE == NULL) {
+        return;
+    }
+    u_sess->unique_sql_cxt.unique_sql_id = old_unique_sql_id;
+    u_sess->unique_sql_cxt.parent_unique_sql_id = old_parent_unique_sql_id;
+    if (old_is_top_unique_sql) {
+        SetIsTopUniqueSQL(true);
+    }
+    if (old_is_multi_unique_sql) {
+        u_sess->unique_sql_cxt.is_multi_unique_sql = true;
+        u_sess->unique_sql_cxt.multi_sql_offset = old_multi_sql_offset;
+    }
+    u_sess->unique_sql_cxt.curr_single_unique_sql = old_curr_single_unique_sql;
+    u_sess->unique_sql_cxt.force_generate_unique_sql = old_force_gen_unique_sql;
+
+    statement_commit_metirc_context();
+    u_sess->statement_cxt.curStatementMetrics = parent_handler;
 }

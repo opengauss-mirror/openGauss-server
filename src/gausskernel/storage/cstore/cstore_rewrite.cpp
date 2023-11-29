@@ -154,7 +154,7 @@ FORCE_INLINE bool HeapBulkInsert::Full() const
 template <bool needCopy>
 void HeapBulkInsert::Append(HeapTuple tuple)
 {
-    // add *this* prefix, so sourceinsight can hilight these memthods.
+    // add *this* prefix, so Source Insight can highlight these methods.
     MemoryContext oldMemCnxt = MemoryContextSwitchTo(this->m_MemCnxt);
 
     // buffer the input tuples as more as possible.
@@ -431,15 +431,15 @@ void CStoreRewriter::RewriteColsData()
         int scanedTuples = 0;
 
         // init scankey
-        // explaination: key[0]  --> col_id = 1
+        // explanation: key[0]  --> col_id = 1
         ScanKeyInit(&key[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(1));
 
-        // explaination: key[1]  --> cu_id = nextCuId
+        // explanation: key[1]  --> cu_id = nextCuId
         ScanKeyInit(&key[1], (AttrNumber)CUDescCUIDAttr, BTEqualStrategyNumber, F_OIDEQ, UInt32GetDatum(nextCuId));
 
         // each col_id of cudesc
         for (int i = 0; i < nOldAttrs; i++) {
-            // skip the droped column
+            // skip the dropped column
             if (unlikely(m_OldTupDesc->attrs[i].attisdropped))
                 continue;
 

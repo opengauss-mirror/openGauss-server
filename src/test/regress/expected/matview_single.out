@@ -141,5 +141,76 @@ drop table test_syn cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to materialized view mv_test_syn
 drop cascades to materialized view imv_test_syn
+-- case 5: drop mlog table.
+create table imv1_t(a int);
+insert into imv1_t values(1);
+create incremental materialized view imv1_v as select * from imv1_t;
+declare
+    oid int := (select oid from pg_class where relname = 'imv1_t');
+    table_name varchar(20) := 'mlog_' || oid;
+    sql_stmt text := 'Drop table ' || table_name;
+begin
+    execute sql_stmt;
+END;
+/
+--?ERROR:  Use 'Drop table' to drop mlog table mlog_.* is not allowed.
+--?CONTEXT:  SQL statement "Drop table mlog_.*"
+PL/pgSQL function inline_code_block line 5 at EXECUTE statement
+-- case 6: drop table that looks like a mlog with valid oid.
+drop materialized view imv1_v;
+declare
+    oid int := (select oid from pg_class where relname = 'imv1_t');
+    table_name varchar(20) := 'mlog_' || oid;
+    create_stmt text := 'Create table ' || table_name || '(a int)' ;
+    drop_stmt text := 'Drop table ' || table_name;
+begin
+    execute create_stmt;
+    execute drop_stmt;
+END;
+/
+--?WARNING:  "mlog_.*" is not an appropriated name for relation
+DETAIL:  The kernel may treat it as a mlog table of materialized view
+--?CONTEXT:  SQL statement "Create table mlog_.*(a int)"
+PL/pgSQL function inline_code_block line 6 at EXECUTE statement
+-- case 7: drop table that looks like a mlog without valid oid.
+create table mlog_99999(a int);
+WARNING:  "mlog_99999" is not an appropriated name for relation
+DETAIL:  The kernel may treat it as a mlog table of materialized view
+drop table mlog_99999;
+drop table imv1_t cascade;
+-- test about the privileges of refresh
+create table t (id int);
+insert into t select generate_series(1,10);
+create materialized view mv_t as select * from t;
+create user testuser with password 'Gauss@123';
+grant usage on schema public to testuser;
+grant select on t to testuser;
+grant select on mv_t to testuser;
+set role testuser password 'Gauss@123';
+-- failed, permission denied
+refresh materialized view mv_t;
+ERROR:  permission denied for relation mv_t
+DETAIL:  N/A
+reset role;
+grant delete,insert on mv_t to testuser;
+set role testuser password 'Gauss@123';
+-- failed, permission denied
+refresh materialized view mv_t;
+ERROR:  must be owner of relation mv_t
+DETAIL:  N/A
+reset role;
+grant index on mv_t to testuser;
+set role testuser password 'Gauss@123';
+-- failed, permission denied
+refresh materialized view mv_t;
+ERROR:  must be owner of relation mv_t
+DETAIL:  N/A
+reset role;
+alter table mv_t owner to testuser;
+set role testuser password 'Gauss@123';
+-- success
+refresh materialized view mv_t;
+reset role;
+drop user testuser cascade;
 \c regression
 drop database test_imv_db;

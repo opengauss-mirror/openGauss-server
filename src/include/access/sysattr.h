@@ -29,7 +29,12 @@
 #define XC_NodeIdAttributeNumber (-8)
 #define BucketIdAttributeNumber (-9)
 #define UidAttributeNumber (-10)
+#ifdef USE_SPQ
+#define RootSelfItemPointerAttributeNumber (-11)
+#define FirstLowInvalidHeapAttributeNumber (-12)
+#else
 #define FirstLowInvalidHeapAttributeNumber (-11)
+#endif
 
 #else
 #define FirstLowInvalidHeapAttributeNumber (-8)

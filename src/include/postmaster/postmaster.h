@@ -215,7 +215,12 @@ extern void set_disable_conn_mode(void);
 #define IsConnPortFromCoord(port) \
     ((port)->cmdline_options != NULL && strstr((port)->cmdline_options, "remotetype=coordinator") != NULL)
 #else
+#ifdef USE_SPQ
+#define IsConnPortFromCoord(port) \
+    ((port)->cmdline_options != NULL && strstr((port)->cmdline_options, "remotetype=coordinator") != NULL)
+#else
 #define IsConnPortFromCoord(port) false
+#endif
 extern bool get_addr_from_socket(int sock, struct sockaddr *saddr);
 extern int get_ip_port_from_addr(char* sock_ip, int* port, struct sockaddr saddr);
 #endif
@@ -245,6 +250,9 @@ extern bool SetDBStateFileState(DbState state, bool optional);
 extern void GPCResetAll();
 extern void initRandomState(TimestampTz start_time, TimestampTz stop_time);
 extern bool PMstateIsRun(void);
+extern bool pm_state_is_startup();
+extern bool pm_state_is_recovery();
+extern bool pm_state_is_hot_standby();
 extern ServerMode GetHaShmemMode(void);
 extern void InitProcessAndShareMemory();
 extern void InitShmemForDcfCallBack();

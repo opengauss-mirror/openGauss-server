@@ -141,6 +141,8 @@ enum ModuleId {
     MOD_LOGICAL_DECODE,    /* logical decode */
     MOD_GPRC, /* global package runtime cache */
     MOD_DISASTER_READ,
+    MOD_STANDBY_READ,
+
     MODE_REPSYNC, /* debug info for func SyncRepWaitForLSN */
     MOD_SQLPATCH,
     MOD_DMS, /* DMS */
@@ -149,6 +151,7 @@ enum ModuleId {
     MOD_GPI, /* debug info for global partition index */
     MOD_PARTITION,
     MOD_SRF, /* debug info for SRF */
+    MOD_SS_TXNSTATUS, /* debug info for SS TXNSTATUS */
 
     /*
      * Add your module id above.

@@ -89,10 +89,14 @@
 #include "executor/node/nodeModifyTable.h"
 #include "optimizer/gplanmgr.h"
 #include "instruments/instr_statement.h"
+#include "catalog/gs_collation.h"
 #include "replication/libpqsw.h"
 
 /* Hook for plugins to get control in planner() */
 THR_LOCAL ndp_pushdown_hook_type ndp_pushdown_hook = NULL;
+#ifdef USE_SPQ
+THR_LOCAL spq_planner_hook_type spq_planner_hook = NULL;
+#endif
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -376,6 +380,12 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
     instr_time starttime;
     double totaltime = 0;
 
+#ifdef USE_SPQ
+    if (spq_planner_hook) {
+        return (*spq_planner_hook) (parse, cursorOptions, boundParams);
+    }
+#endif
+
     INSTR_TIME_SET_CURRENT(starttime);
 
 #ifdef PGXC
@@ -521,6 +531,8 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     bool use_tenant = false;
     List* parse_hint_warning = NIL;
 
+    if (cursorOptions & CURSOR_OPT_SPQ_OK)
+        cursorOptions &= ~CURSOR_OPT_SPQ_OK;
     //if it is pgxc plan for tsstore delete sql.errport
     if((!u_sess->attr.attr_sql.enable_stream_operator || !u_sess->opt_cxt.is_stream) && IS_PGXC_COORDINATOR) {
         checkTsstoreQuery(parse);
@@ -1259,6 +1271,24 @@ static inline bool contain_system_column(Node *var_list)
     return result;
 }
 
+static inline bool contain_placeholdervar(Node *var_list)
+{
+    List* vars = pull_var_clause(var_list, PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+    ListCell* lc = NULL;
+    bool result = false;
+
+    foreach (lc, vars) {
+        Node* var = (Node*)lfirst(lc);
+        if (IsA(var, PlaceHolderVar)) {
+            result = true;
+            break;
+        }
+    }
+
+    list_free_ext(vars);
+    return result;
+}
+
 /* --------------------
  * subquery_planner
  *	  Invokes the planner on a subquery.  We recurse to here for each
@@ -1818,6 +1848,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             bool support_rewrite = true;
             do {
                 if (contain_system_column((Node*)root->parse->targetList)) {
+                    support_rewrite = false;
+                    break;
+                }
+                if (root->parse->jointree != NULL && contain_placeholdervar(root->parse->jointree->quals)) {
                     support_rewrite = false;
                     break;
                 }
@@ -9066,6 +9100,28 @@ static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
     }
     return false;
 }
+
+static bool IsCollationUnSupportedByVectorEngine(Oid collation)
+{
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        return false;
+    }
+
+    if (is_b_format_collation(collation)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has unsupport collation: %u", collation)));
+        return true;
+    }
+
+    int charset = get_valid_charset_by_collation(collation);
+    if (charset != GetDatabaseEncoding()) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has charset: %d different from server_encoding", charset)));
+        return true;
+    }
+    return false;
+}
+
 /*
  * @Description: Check if it has unsupport expression in vector engine
  *
@@ -9103,22 +9159,30 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
                     errmsg("Vectorize plan failed due to has system column")));
                 return true;
             } else {
-                return IsTypeUnSupportedByVectorEngine(var->vartype);
+                return (IsTypeUnSupportedByVectorEngine(var->vartype) ||
+                    IsCollationUnSupportedByVectorEngine(var->varcollid));
             }
             break;
         }
         case T_Const: {
             Const* c = (Const *)node;
-            return IsTypeUnSupportedByVectorEngine(c->consttype);
+            return (IsTypeUnSupportedByVectorEngine(c->consttype) ||
+                IsCollationUnSupportedByVectorEngine(c->constcollid));
         }
         case T_Param: {
             Param *par = (Param *)node;
-            return IsTypeUnSupportedByVectorEngine(par->paramtype);
+            return (IsTypeUnSupportedByVectorEngine(par->paramtype) ||
+                IsCollationUnSupportedByVectorEngine(par->paramcollid));
         }
         case T_SubPlan: {
             SubPlan* subplan = (SubPlan*)node;
             /* make sure that subplan return type must supported by vector engine */
             if (!IsTypeSupportedByVectorEngine(subplan->firstColType)) {
+                return true;
+            }
+
+            Oid collation = exprCollation(node);
+            if (IsCollationUnSupportedByVectorEngine(collation)) {
                 return true;
             }
             break;
@@ -9135,6 +9199,15 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
 	     */
             if (planContext && !planContext->currentExprIsFilter
                 && !IsTypeSupportedByVectorEngine(exprType(node))) {
+                return true;
+            }
+
+            Oid collation = exprInputCollation(node);
+            if (IsCollationUnSupportedByVectorEngine(collation)) {
+                return true;
+            }
+            collation = exprCollation(node);
+            if (IsCollationUnSupportedByVectorEngine(collation)) {
                 return true;
             }
             break;
@@ -12079,6 +12152,9 @@ bool findConstraintByVar(Var* var, Oid relid, constraintType conType)
         ArrayType* arr = NULL;
 
         adatum = SysCacheGetAttr(CONSTROID, htup, Anum_pg_constraint_conkey, &isNull);
+        if (adatum == 0) {
+            continue;
+        }
 
         arr = DatumGetArrayTypeP(adatum);
         attnums = (int16*)ARR_DATA_PTR(arr);
@@ -15891,3 +15967,88 @@ adjust_plan_for_srfs(PlannerInfo *root, Plan *plan, List *targets, List *targets
     }
     return newplan;
 }
+
+#ifdef USE_SPQ
+static Node* get_spq_multiple_from_expr(
+    PlannerInfo* root, Node* expr, double rows, double* skew_multiple, double* bias_multiple)
+{
+    List* groupExprs = NIL;
+    Oid datatype = exprType((Node*)(expr));
+    bool use_skew_multiple = true;
+
+    if (!OidIsValid(datatype) || !IsSpqTypeDistributable(datatype))
+        return NULL;
+
+    groupExprs = list_make1(expr);
+    get_multiple_from_exprlist(root, groupExprs, rows, &use_skew_multiple, true, skew_multiple, bias_multiple);
+    list_free_ext(groupExprs);
+
+    return expr;
+}
+
+
+List* spq_get_distributekey_from_tlist(
+    PlannerInfo* root, List* tlist, List* groupcls, double rows, double* result_multiple, void* skew_info)
+{
+    ListCell* lcell = NULL;
+    List* distkey = NIL;
+    double multiple = 0.0;
+    double bias_multiple = 0.0;
+    double skew_multiple = 0.0;
+    List* exprMultipleList = NIL;
+
+    foreach (lcell, groupcls) {
+        Node* expr = (Node*)lfirst(lcell);
+
+        if (IsA(expr, SortGroupClause))
+            expr = get_sortgroupclause_expr((SortGroupClause*)expr, tlist);
+
+        expr = get_spq_multiple_from_expr(root, expr, rows, &skew_multiple, &bias_multiple);
+        if (expr != NULL) {
+            /*
+             * we can't estimate skew of grouping sets because there's
+             * null added, so just add all columns and set mutiple to 1
+             */
+            if (root->parse->groupingSets) {
+                distkey = lappend(distkey, expr);
+                *result_multiple = 1;
+                continue;
+            }
+            if ((skew_multiple == 1.0) && (bias_multiple <= 1.0)) {
+                *result_multiple = 1;
+                list_free_ext(exprMultipleList);
+                return list_make1(expr);
+            } else if ((u_sess->pgxc_cxt.NumDataNodes == skew_multiple) &&
+                       (u_sess->pgxc_cxt.NumDataNodes ==
+                           bias_multiple)) { /* All the expr are const, return the first expr.  */
+                if (distkey == NULL)
+                    distkey = lappend(distkey, expr);
+                *result_multiple = u_sess->pgxc_cxt.NumDataNodes;
+
+                continue;
+            } else {
+                if (skew_multiple == 1.0) {
+                    /*
+                     * If distinct num of multiple has no skew, we should use bias multiple to
+                     * compute mix multiple.
+                     */
+                    multiple = bias_multiple;
+                }
+                else if (bias_multiple <= 1.0) /* mcf has no skew, handle skew_multiple */
+                    multiple = skew_multiple;
+                else
+                    multiple = Max(bias_multiple, skew_multiple);
+
+                exprMultipleList = add_multiple_to_list(expr, multiple, exprMultipleList);
+            }
+        }
+    }
+
+    if (exprMultipleList != NULL) {
+        distkey = get_mix_diskey_by_exprlist(root, exprMultipleList, rows, result_multiple, (AggSkewInfo*)skew_info);
+        list_free_ext(exprMultipleList);
+    }
+
+    return distkey;
+}
+#endif

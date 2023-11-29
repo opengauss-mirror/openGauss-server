@@ -394,6 +394,8 @@ static void parse_object(JsonLexContext *lex, JsonSemAction *sem)
     json_struct_action oend = sem->object_end;
     JsonTokenType tok;
 
+    check_stack_depth();
+
     if (ostart != NULL) {
         (*ostart) (sem->semstate);
     }
@@ -468,6 +470,8 @@ static void parse_array(JsonLexContext *lex, JsonSemAction *sem)
      */
     json_struct_action astart = sem->array_start;
     json_struct_action aend = sem->array_end;
+
+    check_stack_depth();
 
     if (astart != NULL) {
         (*astart) (sem->semstate);
@@ -1892,7 +1896,6 @@ Datum json_build_array(PG_FUNCTION_ARGS)
     appendStringInfoChar(result, '[');
     for (i = 0; i < nargs; i++) {
         val_type = get_fn_expr_argtype(fcinfo->flinfo, i);
-        arg = PG_GETARG_DATUM(i + 1);
         /* see comments in json_build_object above */
         if (val_type == UNKNOWNOID && get_fn_expr_arg_stable(fcinfo->flinfo, i)) {
             val_type = TEXTOID;

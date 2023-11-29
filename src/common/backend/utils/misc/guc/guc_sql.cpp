@@ -347,7 +347,8 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
     {"enable_modify_column", B_FORMAT_OPT_ENABLE_MODIFY_COLUMN},
     {"default_collation", B_FORMAT_OPT_DEFAULT_COLLATION},
     {"fetch", B_FORMAT_OPT_FETCH},
-    {"diagnostics", B_FORMAT_OPT_DIAGNOSTICS}
+    {"diagnostics", B_FORMAT_OPT_DIAGNOSTICS},
+    {"enable_multi_charset", B_FORMAT_OPT_ENABLE_MULTI_CHARSET}
 };
 
 typedef struct behavior_compat_entry {
@@ -365,7 +366,7 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"unbind_divide_bound", OPT_UNBIND_DIVIDE_BOUND},
     {"correct_to_number", OPT_CORRECT_TO_NUMBER},
     {"compat_concat_variadic", OPT_CONCAT_VARIADIC},
-    {"merge_update_multi", OPT_MEGRE_UPDATE_MULTI},
+    {"merge_update_multi", OPT_MERGE_UPDATE_MULTI},
     {"convert_string_digit_to_numeric", OPT_CONVERT_TO_NUMERIC},
     {"plstmt_implicit_savepoint", OPT_PLSTMT_IMPLICIT_SAVEPOINT},
     {"hide_tailing_zero", OPT_HIDE_TAILING_ZERO},
@@ -382,7 +383,9 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"pgformat_substr", OPT_PGFORMAT_SUBSTR},
     {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO},
     {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN},
-    {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL}
+    {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL},
+    {"accept_empty_str", OPT_ACCEPT_EMPTY_STR},
+    {"plpgsql_dependency", OPT_PLPGSQL_DEPENDENCY}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -472,6 +475,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_union_all_subquery_orderby",
+          PGC_USERSET,
+          NODE_SINGLENODE,
+          QUERY_TUNING_METHOD,
+          gettext_noop("Enable union all to order subquery."),
+          NULL},
+         &u_sess->attr.attr_sql.enable_union_all_subquery_orderby,
+         false,
+         NULL,
+         NULL,
+         NULL},
         {{"enable_global_stats",
             PGC_SUSET,
             NODE_ALL,
@@ -568,7 +582,7 @@ static void InitSqlConfigureNamesBool()
             gettext_noop("Enable llvm for executor."),
             NULL},
             &u_sess->attr.attr_sql.enable_codegen,
-            true,
+            false,
             NULL,
             NULL,
             NULL},
@@ -1076,6 +1090,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+            {{"transform_to_numeric_operators",
+              PGC_USERSET,
+              NODE_SINGLENODE,
+              QUERY_TUNING_METHOD,
+              gettext_noop("When turn on, choose numeric (op) numeric for varchar (op) int."),
+              NULL},
+             &u_sess->attr.attr_sql.transform_to_numeric_operators,
+             false,
+             NULL,
+             NULL,
+             NULL},
         {{"check_function_bodies",
             PGC_USERSET,
             NODE_ALL,
@@ -2195,6 +2220,10 @@ static void InitSqlConfigureNamesInt()
             1,
             MIN_QUERY_DOP,
             INT_MAX,
+#elif defined(ENABLE_FINANCE_MODE)
+            1,
+            1,
+            1,
 #else
             1,
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3090,6 +3119,7 @@ static void InitSqlConfigureNamesEnum()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_FINANCE_MODE
         {{"try_vector_engine_strategy",
             PGC_USERSET,
             NODE_ALL,
@@ -3102,6 +3132,20 @@ static void InitSqlConfigureNamesEnum()
             NULL,
             strategy_assign_vector_targetlist,
             NULL},
+#else
+        {{"try_vector_engine_strategy",
+            PGC_INTERNAL,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Sets the strategy of using vector engine for row table."),
+            NULL},
+            &u_sess->attr.attr_sql.vectorEngineStrategy,
+            OFF_VECTOR_ENGINE,
+            vector_engine_strategy,
+            NULL,
+            strategy_assign_vector_targetlist,
+            NULL},
+#endif
         {{"multi_stats_type",
             PGC_USERSET,
             NODE_ALL,
@@ -3382,7 +3426,8 @@ static bool b_format_forbid_distribute_parameter(const char *elem)
         "set_session_transaction",
         "enable_set_variables",
         "enable_modify_column",
-        "fetch"
+        "fetch",
+        "enable_multi_charset"
     };
     for (int i = 0; i < B_FORMAT_FORBID_GUC_NUM; i++) {
         if (strcmp(forbidList[i], elem) == 0) {
@@ -3397,6 +3442,10 @@ static bool b_format_forbid_distribute_parameter(const char *elem)
  */
 static bool check_b_format_behavior_compat_options(char **newval, void **extra, GucSource source)
 {
+    if (strcasecmp(*newval, "ALL") == 0) {
+        return true;
+    }
+
     char *rawstring = NULL;
     List *elemlist = NULL;
     ListCell *cell = NULL;
@@ -3454,11 +3503,17 @@ static bool check_b_format_behavior_compat_options(char **newval, void **extra, 
  */
 static void assign_b_format_behavior_compat_options(const char *newval, void *extra)
 {
+    int start = 0;
+    int result = 0;
+
+    if (strcasecmp(newval, "ALL") == 0) {
+        u_sess->utils_cxt.b_format_behavior_compat_flags = 0xFFFFFFFF;
+        return;
+    }
+
     char *rawstring = NULL;
     List *elemlist = NULL;
     ListCell *cell = NULL;
-    int start = 0;
-    int result = 0;
  
     rawstring = pstrdup(newval);
     (void)SplitIdentifierString(rawstring, ',', &elemlist);

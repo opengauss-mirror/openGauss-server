@@ -62,6 +62,8 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/buf/buf_internals.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/buf/bufpage.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 #include "pgxc/pgxcnode.h"
@@ -78,6 +80,8 @@
 #include "storage/lock/lock.h"
 #include "nodes/makefuncs.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "storage/file/fio_device.h"
+#include "ddes/dms/ss_dms_recovery.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -87,6 +91,8 @@
 #define UPPERCASE_LETTERS_ID 55
 #define LOWERCASE_LETTERS_ID 87
 #define DISPLACEMENTS_VALUE 32
+#define MAX_DURATION_TIME 60
+#define DSS_IO_STAT_COLUMN_NUM 3
 
 const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
@@ -711,6 +717,9 @@ void pg_stat_get_stat_list(List** stat_list, uint32* statFlag_ref, Oid relid)
     } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
         *statFlag_ref = relid;
         *stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
+    } else if (isPartitionObject(relid, PART_OBJ_TYPE_TABLE_PARTITION, true)) {
+        *statFlag_ref = partid_get_parentid(relid);
+        *stat_list = list_make1_oid(relid);
     } else {
         *statFlag_ref = InvalidOid;
         *stat_list = list_make1_oid(relid);
@@ -1815,9 +1824,14 @@ static void pgOutputRemainInfoToFile(RemainSegsCtx* remainSegsCtx)
 
 Datum pg_free_remain_segment(PG_FUNCTION_ARGS)
 {
-    Oid spaceId = PG_GETARG_OID(0);
-    Oid dbId = PG_GETARG_OID(1);
-    Oid segmentId = PG_GETARG_OID(2);
+    int32 spaceId = PG_GETARG_INT32(0);
+    int32 dbId = PG_GETARG_INT32(1);
+    int32 segmentId = PG_GETARG_INT32(2);
+
+    if (spaceId < 0 || dbId < 0 || segmentId < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Input segment [%d, %d, %d] is not valid segment!", spaceId, dbId, segmentId)));
+    }
 
     RemainSegsCtx* remainSegsCtx = (RemainSegsCtx *)palloc(sizeof(RemainSegsCtx));
     remainSegsCtx->remainSegsBuf = NULL;
@@ -1825,7 +1839,7 @@ Datum pg_free_remain_segment(PG_FUNCTION_ARGS)
     
     ReadRemainSegsFileForFunc(remainSegsCtx);
 
-    int segIdx = pgCheckRemainSegment(remainSegsCtx, spaceId, dbId, segmentId);
+    int segIdx = pgCheckRemainSegment(remainSegsCtx, (Oid)spaceId, (Oid)dbId, (Oid)segmentId);
     if (segIdx >= 0 && (uint32)segIdx < remainSegsCtx->remainSegsNum) {
         pgDoFreeRemainSegment(remainSegsCtx, segIdx);
 
@@ -1833,7 +1847,7 @@ Datum pg_free_remain_segment(PG_FUNCTION_ARGS)
 
         pgOutputRemainInfoToFile(remainSegsCtx);
     } else {
-        ereport(ERROR, (errmsg("Input segment [%u, %u, %u] is not remained segment!", spaceId, dbId, segmentId)));
+        ereport(ERROR, (errmsg("Input segment [%d, %d, %d] is not remained segment!", spaceId, dbId, segmentId)));
      }
 
     if (remainSegsCtx->remainSegsBuf != NULL) {
@@ -6095,7 +6109,7 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
 
     int WLM_SESSION_INFO_ATTRNUM = 0;
     if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION)
-        WLM_SESSION_INFO_ATTRNUM = 87;
+        WLM_SESSION_INFO_ATTRNUM = 77 + TOTAL_TIME_INFO_TYPES;
     else
         WLM_SESSION_INFO_ATTRNUM = 68;
 
@@ -6193,10 +6207,13 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_deleted", INT8OID, -1, 0);
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "t_blocks_fetched", INT8OID, -1, 0);
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "t_blocks_hit", INT8OID, -1, 0);
-            for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+            for (num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
                 TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
             }
             TupleDescInitEntry(tupdesc, (AttrNumber)++i, "is_slow_query", INT8OID, -1, 0);
+            for (num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+                TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
+            }
         }
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         funcctx->user_fctx = WLMGetSessionInfo(&qid, removed, &num);
@@ -6431,11 +6448,15 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
             values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_deleted);
             values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_blocks_fetched);
             values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_blocks_hit);
-            /* time Info */
-            for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+            /* time Info p1*/
+            for (num = 0; num < TOTAL_TIME_INFO_TYPES_P1; num++) {
                 values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.localTimeInfoArray[num]);
             }
             values[++i] = Int64GetDatum(0);
+            /* time Info */
+            for (num = TOTAL_TIME_INFO_TYPES_P1; num < TOTAL_TIME_INFO_TYPES; num++) {
+                values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.localTimeInfoArray[num]);
+            }
         }
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
@@ -8689,7 +8710,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          */
         for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
 
-            uint32 buf_state;
+            uint64 buf_state;
             bufHdr = GetBufferDescriptor(i);
 
             /* Lock each buffer header before inspecting. */
@@ -9253,6 +9274,66 @@ void insert_pv_session_memory(Tuplestorestate* tupStore, TupleDesc tupDesc, cons
     values[ARR_3] = Int32GetDatum((entry->peakChunksQuery - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
 
     tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+
+static inline double calcCacheHitRate() {
+    uint64 cache = g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets +
+        g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets;
+    uint64 total = cache + g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets;
+    double hitrate = total == 0 ? 0 : ((cache * 1.0) / total);
+    return hitrate;
+}
+
+/* txnstatus_cache_stat view pg_tde_info */
+Datum ss_txnstatus_cache_stat(PG_FUNCTION_ARGS)
+{
+    int i = 0;
+    errno_t rc = 0;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(8, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "vcache_gets", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hcache_gets", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "nio_gets", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_hcache_gettime_us", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_nio_gettime_us", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cache_hit_rate", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hcache_eviction", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_eviction_refcnt", FLOAT8OID, -1, 0);
+    BlessTupleDesc(tupdesc);
+
+    Datum values[8];
+    bool nulls[8] = {false};
+    HeapTuple tuple = NULL;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    i = 0;
+    double avgnio = g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets == 0 ? 0 :
+        (g_instance.dms_cxt.SSDFxStats.txnstatus_total_niogets_time * 1.0 /
+        g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets);
+    double avghash = g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets == 0 ? 0 :
+        (g_instance.dms_cxt.SSDFxStats.txnstatus_total_hcgets_time * 1.0 /
+        g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets);
+    double avgref = g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions == 0 ? 0 :
+        (g_instance.dms_cxt.SSDFxStats.txnstatus_total_eviction_refcnt * 1.0 /
+        g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions);
+
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_varcache_gets);
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_hashcache_gets);
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_network_io_gets);
+    values[i++] = Float8GetDatum(avghash);
+    values[i++] = Float8GetDatum(avgnio);
+    values[i++] = Float8GetDatum(calcCacheHitRate());
+    values[i++] = Int64GetDatum(g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions);
+    values[i] = Float8GetDatum(avgref);
+    
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
 
@@ -14648,6 +14729,48 @@ Datum track_memory_context_detail(PG_FUNCTION_ARGS)
     }
 }
 
+
+/*
+ * @Description : Get the statistical information for DSS IO, including read bytes, write bytes and io times.
+ * @in         	: Duration of statistics.
+ * @out         : None.
+ * @return      : Node.
+ */
+Datum dss_io_stat(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("This function only supports shared storage.")));
+    }
+    Datum result;
+    TupleDesc tupdesc;
+    int32 duration = PG_GETARG_INT32(0);
+    if (duration > MAX_DURATION_TIME) {
+        ereport(ERROR, (errmsg("The duration is too long, and it must be less than 60s.")));
+    }
+    init_dss_io_stat();
+    unsigned long long read_bytes = 0;
+    unsigned long long write_bytes = 0;
+    int io_count = 0;
+    get_dss_io_stat(duration, &read_bytes, &write_bytes, &io_count);
+    // tuple header
+    int i = 1;
+    tupdesc = CreateTemplateTupleDesc(DSS_IO_STAT_COLUMN_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "read_kilobyte_per_sec", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "write_kilobyte_per_sec", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i, "io_times", INT4OID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+    // tuple body
+    Datum values[DSS_IO_STAT_COLUMN_NUM];
+    bool nulls[DSS_IO_STAT_COLUMN_NUM]={false};
+    i = 0;
+    values[i++] = UInt64GetDatum(read_bytes);
+    values[i++] = UInt64GetDatum(write_bytes);
+    values[i] = Int32GetDatum(io_count);
+    
+    HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(heap_tuple);
+    PG_RETURN_DATUM(result); 
+}
 #ifdef ENABLE_MULTIPLE_NODES
 /* Get the head row of the view of index status */
 TupleDesc get_index_status_view_frist_row()
@@ -14778,5 +14901,362 @@ Datum gs_get_index_status(PG_FUNCTION_ARGS)
     }
     SRF_RETURN_DONE(funcctx);
 }
-
 #endif
+
+TupleDesc create_query_node_reform_info_tupdesc()
+{
+    int column = 10;
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "reform_node_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "reform_type", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "reform_start_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "reform_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "is_reform_success", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "action", TEXTOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+/*
+* @Description : Convert timeval to string
+* @in          : time
+* @out         : buffer
+*/
+void timeval_to_string(timeval time, char* buffer, int buf_size)
+{
+    if (buffer == NULL || buf_size == 0 || time.tv_sec == 0) {
+        return;
+    }
+    time_t format_time = time.tv_sec;
+    struct tm *p_time = localtime(&format_time);
+    
+    char tmp_buf[32] = {0};
+    strftime(tmp_buf, sizeof(tmp_buf), "%Y-%m-%d %H:%M:%S", p_time);
+    errno_t rc = sprintf_s(buffer, buf_size - 1, "%s.%ld ", tmp_buf, time.tv_usec / 1000);
+    securec_check_ss(rc, "\0", "\0");
+}
+
+
+typedef struct {
+    uint64 changed_inst_list;
+    uint64 stable_inst_list;
+    uint8 iterate_idx;
+    ss_reform_info_t reform_info;
+} reform_iterate_t;
+/*
+ * @Description : Get reform information about special node
+ * @in         	: None
+ * @out         : None
+ * @return      : record
+ */
+Datum query_node_reform_info(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
+    }
+
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info at Standby node while DMS enabled!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        reform_iterate_t *iterate = (reform_iterate_t *)palloc0(sizeof(reform_iterate_t));
+        ss_reform_info_t reform_info = g_instance.dms_cxt.SSReformInfo;
+        iterate->reform_info = reform_info;
+        iterate->changed_inst_list = reform_info.old_bitmap ^ reform_info.new_bitmap;
+        iterate->stable_inst_list = reform_info.old_bitmap & reform_info.new_bitmap;
+        iterate->iterate_idx = 0;
+
+        funcctx->user_fctx = (void *)iterate;
+        funcctx->tuple_desc = create_query_node_reform_info_tupdesc();
+        MemoryContextSwitchTo(oldcontext);
+    }
+    
+    funcctx = SRF_PERCALL_SETUP();
+    reform_iterate_t *iterate = (reform_iterate_t *)funcctx->user_fctx;
+    ss_reform_info_t reform_info = iterate->reform_info;
+    for (uint64 i = iterate->iterate_idx; i < DMS_MAX_INSTANCE; i++) {
+        if (!((reform_info.old_bitmap | reform_info.new_bitmap) & (((uint64)1) << i))) {
+            continue;
+        }
+
+#define MAX_BUF_SIZE 256
+        char tmp_buf[MAX_BUF_SIZE] = {0};
+        Datum values[10];
+        values[0] = UInt16GetDatum(i);
+        if (i == (uint64)SS_MY_INST_ID) {
+            switch (reform_info.reform_type) {
+                case DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS:
+                    values[1] = CStringGetTextDatum("Normal reform");
+                    break;
+                case DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS:
+                    values[1] = CStringGetTextDatum("Failover");
+                    break;
+                case DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS:
+                    values[1] = CStringGetTextDatum("Switchover");
+                    break;
+                default:
+                    values[1] = CStringGetTextDatum("NULL");
+            }
+
+            timeval_to_string(reform_info.reform_start_time, tmp_buf, MAX_BUF_SIZE);
+            values[2] = CStringGetTextDatum(tmp_buf);
+
+            timeval_to_string(reform_info.reform_end_time, tmp_buf, MAX_BUF_SIZE);
+            values[3] = CStringGetTextDatum(tmp_buf);
+            values[4] = BoolGetDatum(reform_info.reform_success);
+
+            if (reform_info.reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
+                timeval_to_string(reform_info.redo_start_time, tmp_buf, MAX_BUF_SIZE);
+                values[5] = CStringGetTextDatum(tmp_buf);
+
+                timeval_to_string(reform_info.redo_end_time, tmp_buf, MAX_BUF_SIZE);
+                values[6] = CStringGetTextDatum(tmp_buf);
+
+                values[7] = UInt64GetDatum(reform_info.redo_total_bytes);
+
+                timeval_to_string(reform_info.construct_hashmap, tmp_buf, MAX_BUF_SIZE);
+                values[8] = CStringGetTextDatum(tmp_buf);
+            } else {
+                sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
+                values[5] = CStringGetTextDatum(tmp_buf);
+                values[6] = CStringGetTextDatum(tmp_buf);
+                values[7] = UInt64GetDatum(-1);
+                values[8] = CStringGetTextDatum(tmp_buf);
+            }
+        } else {
+            values[1] = CStringGetTextDatum("-");
+            sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
+            values[2] = CStringGetTextDatum(tmp_buf);
+            values[3] = CStringGetTextDatum(tmp_buf);
+            values[4] = BoolGetDatum(reform_info.reform_success);
+            values[5] = CStringGetTextDatum(tmp_buf);
+            values[6] = CStringGetTextDatum(tmp_buf);
+            values[7] = UInt64GetDatum(-1);
+            values[8] = CStringGetTextDatum(tmp_buf);
+        }
+
+        if (iterate->changed_inst_list & (1 << i)) {
+            if (reform_info.old_bitmap & (1 << i)) {
+                sprintf_s(tmp_buf, MAX_BUF_SIZE, "kick off");
+            } else {
+                sprintf_s(tmp_buf, MAX_BUF_SIZE, "join in");
+            }
+        } else if (iterate->stable_inst_list & (1 << i)) {
+            sprintf_s(tmp_buf, MAX_BUF_SIZE, "stable");
+        }
+        
+        values[9] = CStringGetTextDatum(tmp_buf);
+        bool nulls[10] = {false};
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        if (tuple != NULL) {
+            iterate->iterate_idx++;
+            SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+        }
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+
+void buftag_get_buf_info(BufferTag tag, stat_buf_info_t *buf_info)
+{
+    errno_t err = memset_s(buf_info, sizeof(stat_buf_info_t), 0, sizeof(stat_buf_info_t));
+    securec_check(err, "\0", "\0");
+    securec_check(err, "", "");
+    uint32 hash_code = BufTableHashCode(&tag);
+
+    LWLock *lock = BufMappingPartitionLock(hash_code);
+    (void)LWLockAcquire(lock, LW_SHARED);
+    int buf_id = BufTableLookup(&tag, hash_code);
+    if (buf_id >= 0) {
+        BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
+
+        buf_info->rec_lsn = buf_desc->extra->rec_lsn;
+        buf_info->lsn_on_disk = buf_desc->extra->lsn_on_disk;
+        buf_info->aio_in_progress = buf_desc->extra->aio_in_progress;
+        buf_info->dirty_queue_loc = buf_desc->extra->dirty_queue_loc;
+        buf_info->mem_lsn = BufferGetLSN(buf_desc);
+
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+        buf_info->lock_mode = buf_ctrl->lock_mode;
+        err = memcpy_s(buf_info->data, DMS_RESID_SIZE, &tag, sizeof(BufferTag));
+        securec_check(err, "", "");
+        LWLockRelease(lock);
+    } else {
+        LWLockRelease(lock);
+        ereport(INFO, (errmsg("buffer does not exist in local buffer pool ")));
+    }
+}
+
+RelFileNode relname_get_relfilenode(text* relname)
+{
+    RelFileNode rnode;
+    RangeVar* relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
+    Relation rel = relation_openrv(relrv, AccessShareLock);
+    if (rel == NULL) {
+        ereport(ERROR, (errmsg("Open relation failed!")));
+        return rnode;
+    }
+    RelationOpenSmgr(rel);
+    rnode = rel->rd_smgr->smgr_rnode.node;
+    relation_close(rel, AccessShareLock);
+    return rnode;
+}
+
+TupleDesc create_query_page_distribution_info_tupdesc()
+{
+    int column = 8;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "instance_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "is_master", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "is_owner", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "is_copy", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "lock_mode", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "mem_lsn", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "disk_lsn", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "is_dirty", BOOLOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+int compute_copy_insts_count(uint64 bitmap)
+{
+    int count = 0;
+    for (uint8 i = 0; i < DMS_MAX_INSTANCES; i++) {
+        uint64 tmp = (uint64)1 << i;
+        if (bitmap & tmp) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* this struct is used to control the iteration during query_page_distribution_info */
+typedef struct st_dms_iterate {
+    stat_drc_info_t *drc_info;
+    uint8 iterate_idx;
+} dms_iterate_t;
+
+Datum query_page_distribution_info_internal(text* relname, ForkNumber fork, BlockNumber blockno, PG_FUNCTION_ARGS)
+{
+    if (fork >= MAX_FORKNUM) {
+        ereport(ERROR, (errmsg("[SS] forknumber must be less than MAX_FORKNUM(4)!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    unsigned char masterId = CM_INVALID_ID8;
+    if (SRF_IS_FIRSTCALL()) {
+        RelFileNode rnode = relname_get_relfilenode(relname);
+        
+        BufferTag tag;
+        INIT_BUFFERTAG(tag, rnode, fork, blockno);
+        
+        stat_buf_info_t buf_info;
+        buftag_get_buf_info(tag, &buf_info);
+        char resid[DMS_PAGEID_SIZE];
+        errno_t rc = memcpy_s(resid, DMS_PAGEID_SIZE, &tag, sizeof(BufferTag));
+        securec_check(rc, "\0", "\0");
+
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        stat_drc_info_t *drc_info = (stat_drc_info_t*)palloc0(sizeof(stat_drc_info_t));
+        InitDmsBufContext(&drc_info->dms_ctx, tag);
+        drc_info->claimed_owner = CM_INVALID_ID8;
+        drc_info->buf_info[0] = buf_info;
+        rc = memcpy_s(drc_info->data, DMS_PAGEID_SIZE, &tag, sizeof(BufferTag));
+        securec_check(rc, "\0", "\0");
+        int is_found = 0;
+
+        int ret = get_drc_info(&is_found, drc_info);
+        if (ret != DMS_SUCCESS) {
+            ereport(ERROR, (errmsg("[SS] some errors occurred while querying DRC!")));
+        }
+        if (!is_found) {
+            ereport(INFO, (errmsg("[SS] could not find a DRC entry in DRC for page (%u/%u/%u/%d/%d %d-%u)!",
+                    rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt, fork, blockno)));
+        }
+        int count = compute_copy_insts_count(drc_info->copy_insts);
+                
+        dms_iterate_t *iterate = (dms_iterate_t*)palloc0(sizeof(dms_iterate_t));
+        iterate->drc_info = drc_info;
+        iterate->iterate_idx = 0;
+        count = (drc_info->claimed_owner == masterId) ? count : count + 1;
+
+        funcctx->user_fctx = (void*)iterate;
+        funcctx->tuple_desc = create_query_page_distribution_info_tupdesc();
+        funcctx->max_calls = (!is_found) ? 0 : (count + 1);
+        MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        Datum values[8];
+        bool nulls[8] = {false};
+        bool ret_tup = false;
+
+        dms_iterate_t *iterate = (dms_iterate_t*)funcctx->user_fctx;
+        for (uint8 i = iterate->iterate_idx; i < DMS_MAX_INSTANCES; i++) {
+            uint64 tmp = (uint64)1 << i;
+            if ((iterate->drc_info->copy_insts & tmp) || (iterate->drc_info->claimed_owner == i) || (iterate->drc_info->master_id == i)) {
+                ret_tup = true;
+                values[0] = UInt8GetDatum(i);                                       // instance id
+                values[1] = BoolGetDatum(iterate->drc_info->master_id == i);        // is master?
+                values[2] = BoolGetDatum(iterate->drc_info->claimed_owner == i);    // is owner?
+                if (iterate->drc_info->copy_insts & tmp) {                          // is copy?
+                    values[3] = BoolGetDatum(true);
+                    iterate->drc_info->copy_insts = iterate->drc_info->copy_insts & ~tmp;
+                } else {
+                    values[3] = BoolGetDatum(false);
+                }
+                if (iterate->drc_info->buf_info[i].lock_mode == 1) {                // lock mode
+                    values[4] = CStringGetTextDatum("Share lock");
+                } else if (iterate->drc_info->buf_info[i].lock_mode == 2) {
+                    values[4] = CStringGetTextDatum("Exclusive lock");
+                } else {
+                    values[4] = CStringGetTextDatum("No lock"); 
+                }
+                values[5] = UInt64GetDatum((uint64)iterate->drc_info->buf_info[i].mem_lsn);          // mem lsn
+                values[6] = UInt64GetDatum((uint64)iterate->drc_info->buf_info[i].lsn_on_disk);      // disk lsn
+                if (iterate->drc_info->buf_info[i].dirty_queue_loc != PG_UINT64_MAX &&               // is dirty?
+                    iterate->drc_info->buf_info[i].dirty_queue_loc != 0) {
+                    values[7] = BoolGetDatum(true); 
+                } else {
+                    values[7] = BoolGetDatum(false);
+                }
+                iterate->iterate_idx = i + 1;
+                break;
+            }
+        }
+        if (ret_tup) {
+            HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+            if (tuple != NULL) {
+                SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+            }
+        } else {
+            SRF_RETURN_DONE(funcctx);
+        }
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+
+Datum query_page_distribution_info(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_page_distribution_info without shared storage deployment!")));
+    }
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_page_distribution_info at Standby node while DMS enabled!")));
+    }
+    text* relname = PG_GETARG_TEXT_PP(0);
+    ForkNumber fork = PG_GETARG_INT64(1);
+    BlockNumber blockno = PG_GETARG_INT64(2);
+    return query_page_distribution_info_internal(relname, fork, blockno, fcinfo);
+}

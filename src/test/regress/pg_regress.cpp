@@ -611,6 +611,7 @@ static int regrGetServPid(char* pcBuff, unsigned int uiBuffLen,
 #else
     if (!getcwd(cwd, MAXPGPATH)) {
         fprintf(stderr, _("\n Get current dir fail.\n"));
+        free((char*)data_folder);
         return -1;
     }
     if (strlen(cwd) + strlen("/tmp_check/") + strlen(data_folder) + strlen("/postmaster.pid") >= uiBuffLen) {
@@ -620,6 +621,7 @@ static int regrGetServPid(char* pcBuff, unsigned int uiBuffLen,
               "length needed: %lu.\n"),
             uiBuffLen,
             (strlen(cwd) + strlen("/") + strlen("tmp_check/") + strlen(data_folder) + strlen("/postmaster.pid") + 1));
+            free((char*)data_folder);
             return REGR_ERRCODE_BUFF_NOT_ENOUGH;
     }
 
@@ -1333,6 +1335,7 @@ static void start_gtm(void)
 
     /* Save static PID number */
     myinfo.gtm_pid = node_pid;
+    free((char*)data_folder);
 }
 
 /* Start single datanode for test */
@@ -1442,12 +1445,14 @@ static void start_ss_node(int i)
 
     (void)snprintf(buf,
                    sizeof(buf),
-                   SYSTEMQUOTE "\"%s/gaussdb\" -p %d -D \"%s/%s\" -c log_statement=all -c logging_collector=true -c "
+                   SYSTEMQUOTE "\"%s/gaussdb\" -p %d -D \"%s/%s\" -c comm_sctp_port=%d -c comm_control_port=%d -c log_statement=all -c logging_collector=true -c "
                                "\"listen_addresses=%s\" & > \"%s/log/postmaster_%s.log\" 2>&1" SYSTEMQUOTE,
                                bindir,
                                port_number,
                                temp_install,
                                data_folder,
+                               port_number + 30,
+                               port_number + 40,
                                hostname ? hostname : "*",
                                outputdir,
                                data_folder);
@@ -1740,6 +1745,7 @@ static void* thread_initdb(void* arg)
 static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i)
 {
     char* data_folder = get_node_info_name(i, is_cn ? COORD : DATANODE, false);
+    char* node_name = get_node_info_name(i, is_cn ? COORD : DATANODE, true);
     char** args = thread->args;
     int thi = thread->thi;
     pthread_t* thd = &(thread->thd[thi]);
@@ -1750,7 +1756,7 @@ static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i
         SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s%s\" -L \"%s\" --noclean%s%s > "
                     "\"%s/log/initdb%d.log\" 2>&1" SYSTEMQUOTE,
         bindir,
-        (char*)get_node_info_name(i, is_cn ? COORD : DATANODE, true),
+        node_name,
         init_database ? "-U upcheck" : "",
         temp_install,
         data_folder,
@@ -1773,6 +1779,7 @@ static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i
     thread->thi++;
 
     free(data_folder);
+    free(node_name);
 }
 
 /*
@@ -1986,12 +1993,13 @@ static void initdb_node_info(bool standby)
         char buf[MAXPGPATH * 4];
 
         char* data_folder = get_node_info_name(i, DATANODE, false);
+        char* node_name   = get_node_info_name(i, DATANODE, true);
         (void)snprintf(buf,
             sizeof(buf),
             SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s_standby\" -L \"%s\" "
                         "--noclean%s%s > \"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
-            (char*)get_node_info_name(i, DATANODE, true),
+            node_name,
             init_database ? "-U upcheck" : "",
             temp_install,
             data_folder,
@@ -2008,6 +2016,7 @@ static void initdb_node_info(bool standby)
             exit_nicely(2);
         }
         free(data_folder);
+        free(node_name);
     }
 }
 
@@ -2233,6 +2242,24 @@ static void config_dn(bool standby)
                 "replconninfo2 = 'localhost=127.0.0.1 localport=%d remotehost=127.0.0.1 remoteport=%d'\n",
                 myinfo.dn_primary_port[i], myinfo.dn_secondary_port[i]);
             fputs(buf, pg_conf);
+        }
+
+        if (ss_standby_read) {
+            if (i == 0) {
+                (void)snprintf(buf, sizeof(buf),
+                    "replconninfo1 = 'localhost=127.0.0.1 localport=%d localheartbeatport=%d remotehost=127.0.0.1 "
+                    "remoteport=%d remoteheartbeatport=%d'\n",
+                    myinfo.dn_primary_port[i], myinfo.dn_primary_port[i] + 1, myinfo.dn_primary_port[i + 1],
+                    myinfo.dn_primary_port[i + 1] + 1);
+                fputs(buf, pg_conf);
+            } else {
+                (void)snprintf(buf, sizeof(buf),
+                    "replconninfo1 = 'localhost=127.0.0.1 localport=%d localheartbeatport=%d remotehost=127.0.0.1 "
+                    "remoteport=%d remoteheartbeatport=%d'\n",
+                    myinfo.dn_primary_port[i], myinfo.dn_primary_port[i] + 1, myinfo.dn_primary_port[0],
+                    myinfo.dn_primary_port[0] + 1);
+                fputs(buf, pg_conf);
+            }
         }
 
         if (temp_config != NULL) {
@@ -3173,10 +3200,18 @@ static void convertSourcefilesIn(char* pcSourceSubdir, char* pcDestDir, char* pc
                 replace_string(line, "@libdir@", dlpath);
                 replace_string(line, "@DLSUFFIX@", DLSUFFIX);
                 replace_string(line, "@gsqldir@", psqldir);
-                replace_string(line, "@datanode1@", get_node_info_name(0, DATANODE, true));
-                replace_string(line, "@datanode2@", get_node_info_name(1, DATANODE, true));
-                replace_string(line, "@coordinator1@", get_node_info_name(0, COORD, true));
-                replace_string(line, "@coordinator2@", get_node_info_name(1, COORD, true));
+                char* node_name = get_node_info_name(0, DATANODE, true);
+                replace_string(line, "@datanode1@", node_name);
+                free(node_name);
+                node_name = get_node_info_name(1, DATANODE, true); 
+                replace_string(line, "@datanode2@", node_name);
+                free(node_name);
+                node_name=get_node_info_name(0, COORD, true);
+                replace_string(line, "@coordinator1@", node_name);
+                free(node_name);
+                node_name = get_node_info_name(1, COORD, true);
+                replace_string(line, "@coordinator2@", node_name);
+                free(node_name);
                 replace_string(line, "@pgbench_dir@", pgbenchdir);
                 replace_string(line, "@client_logic_hook@", client_logic_hook);
                 char* ptr = GetStartNodeCmdString(0, DATANODE);
@@ -4679,6 +4714,24 @@ static int regrReloadAndParseLineBuffer(bool* pbBuffReloadReq, bool* pbHalfReadT
     return iRet;
 }
 
+static int countTestLines(const char* filename){
+    char command[1024];
+    snprintf(command, sizeof(command), "grep -c '^test:' %s", filename);
+
+    FILE *f = popen(command, "r");
+    if(f == NULL){
+       fprintf(stderr, "Failed to execute command.\n");
+       return -1;
+    }
+
+    char result[10];
+    fgets(result, sizeof(result), f);
+    pclose(f);
+
+    int count = atoi((result));
+    return count;
+}
+
 /*
  * Run all the tests specified in one schedule file
  */
@@ -4701,6 +4754,8 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
     bool bIgnoreLineOnReload = false;
     bool isSystemTableDDL = false;
     bool isPlanAndProto = false;
+    int all_test_lines = 0;
+    int done_test_lines = 0;
     if (grayscale_upgrade != -1) {
         g_uiTotalBuf = 0;
     }
@@ -4743,6 +4798,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
     /* Initializing the "total time taken by the test suite execution" */
     g_dGroupTotalTime = 0;
 
+    all_test_lines = countTestLines(schedule);
     scf = fopen(schedule, "r");
     if (!scf) {
         fprintf(stderr, _("%s: could not open file \"%s\" for reading: %s\n"), progname, schedule, gs_strerror(errno));
@@ -4917,7 +4973,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 } else if (use_jdbc_client) {
                     status(_("jdbc test %-24s .... "), tests[0]);
                 } else {
-                    status(_("test %-24s .... "), tests[0]);
+                    status(_("test(%d/%d) %-24s .... "), ++done_test_lines, all_test_lines, tests[0]);
                 }
                 makeNestedDirectory(tests[0]);
 
@@ -5046,7 +5102,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
             } else if (isPlanAndProto) {
                 status(_("parallel group (%d plan_proto_tests): "), num_tests);
             } else {
-                status(_("parallel group (%d tests): "), num_tests);
+                status(_("parallel group (%d tests)(%d/%d): "), num_tests, ++done_test_lines, all_test_lines);
             }
 
             wait_for_tests(pids, statuses, tests, num_tests);
@@ -5412,7 +5468,7 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
     return;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 224
+#define BASE_GLOBAL_VARIABLE_NUM 235
 
 #define CMAKE_CMD_BUF_LEN 1000
 
@@ -5461,7 +5517,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1393
+#define BASE_PGXC_LIKE_MACRO_NUM 1397
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 
@@ -5747,7 +5803,7 @@ static int initialize_myinfo(
     datanode_stream_ctl_port = (int*)malloc(sizeof(int) * datanode_num);
     datanode_sctp_port = (int*)malloc(sizeof(int) * datanode_num);
 
-    if (standby_defined) {
+    if (standby_defined || ss_standby_read) {
         dns_port = (int*)malloc(sizeof(int) * datanode_num);
         dns_ctl_port = (int*)malloc(sizeof(int) * datanode_num);
         dns_sctp_port = (int*)malloc(sizeof(int) * datanode_num);
@@ -5770,7 +5826,7 @@ static int initialize_myinfo(
         datanode_sctp_port[i] = init_port++;  // Reserve sctp port for datanode.
         datanode_stream_ctl_port[i] = init_port++;
 
-        if (standby_defined) {
+        if (standby_defined || ss_standby_read) {
             dns_port[i] = init_port++;
             init_port++;
             dns_sctp_port[i] = init_port++;

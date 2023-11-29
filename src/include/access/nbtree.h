@@ -27,6 +27,10 @@
 #include "access/relscan.h"
 #include "nodes/execnodes.h"
 
+#ifdef USE_SPQ
+#include "access/spq_btbuild.h"
+#endif
+
 /* There's room for a 16-bit vacuum cycle ID in BTPageOpaqueData */
 typedef uint16 BTCycleId;
 
@@ -367,6 +371,10 @@ enum {
     BTREE_NEWROOT_ORIG_BLOCK_NUM = 0,
     BTREE_NEWROOT_LEFT_BLOCK_NUM,
     BTREE_NEWROOT_META_BLOCK_NUM
+};
+
+enum {
+    BTREE_REUSE_PAGE_BLOCK_NUM = 0,
 };
 
 typedef struct xl_btree_metadata_old {
@@ -1100,6 +1108,9 @@ typedef struct BTWriteState {
     BlockNumber btws_pages_alloced; /* # pages allocated */
     BlockNumber btws_pages_written; /* # pages written out */
     Page btws_zeropage;             /* workspace for filling zeroes */
+#ifdef USE_SPQ
+    SPQLeaderState *spqleader;      /* spq btbuild leader */
+#endif
 } BTWriteState;
 
 typedef struct BTOrderedIndexListElement {
@@ -1238,6 +1249,10 @@ typedef struct {
      * BTBuildState.  Workers have their own spool and spool2, though.)
      */
     BTLeader   *btleader;
+#ifdef USE_SPQ
+    /* spq btbuild leader */
+    SPQLeaderState *spqleader;
+#endif
 } BTBuildState;
 
 /* 
@@ -1334,9 +1349,10 @@ extern Buffer _bt_getroot(Relation rel, int access);
 extern Buffer _bt_gettrueroot(Relation rel);
 extern int _bt_getrootheight(Relation rel);
 extern void _bt_checkbuffer_valid(Relation rel, Buffer buf);
-extern void _bt_checkpage(Relation rel, Buffer buf);
+extern void _bt_checkpage(Relation rel, Buffer buf, BlockNumber par_blkno = InvalidBlockNumber);
 extern Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access);
-extern Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access);
+extern Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access,
+                               BlockNumber par_blkno = InvalidBlockNumber);
 extern void _bt_relbuf(Relation rel, Buffer buf);
 extern void _bt_pageinit(Page page, Size size);
 extern bool _bt_page_recyclable(Page page);
@@ -1409,6 +1425,9 @@ extern void btree_check_third_page(Relation rel, Relation heap, bool need_heapti
 extern int btree_num_keep_atts_fast(Relation rel, IndexTuple lastleft, IndexTuple firstright);
 extern bool btree_allequalimage(Relation rel, bool debugmessage);
 
+#ifdef USE_SPQ
+extern void spq_load(BTWriteState wstate);
+#endif
 
 /*
  * prototypes for functions in nbtxlog.c

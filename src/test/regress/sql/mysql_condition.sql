@@ -1094,6 +1094,93 @@ end;
 $$ language plpgsql;
 
 select stacked_diagnostics_test();
+CREATE OR REPLACE PROCEDURE p_resig1() IS
+begin
+DECLARE EXIT HANDLER FOR SQLSTATE '42P01'
+BEGIN
+RESIGNAL;
+END;
+DROP TABLE t1;
+end;
+/
+call p_resig1();
+get diagnostics condition 1 @p1 = CLASS_ORIGIN,@p2 = SUBCLASS_ORIGIN,@p3 = MESSAGE_TEXT,@p4 = MYSQL_ERRNO,@p5 = CONSTRAINT_CATALOG,@p6 = CONSTRAINT_SCHEMA,
+@p7 = CONSTRAINT_NAME,@p8 = CATALOG_NAME,@p9 = SCHEMA_NAME,@p10 = TABLE_NAME,@p11 = COLUMN_NAME,@p12 = CURSOR_NAME;
+select @p1,@p2,@p3,@p4;
+
+-- core 
+drop table if exists t1;
+create table t3 (w char unique, x char);
+insert into t3 values ('a', 'b');
+
+create or replace procedure bug6900_9074(a int)
+AS
+begin
+  declare exit handler for sqlstate '23000' 
+  begin
+      RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+  end;
+  begin
+    declare exit handler for sqlexception
+    begin
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %', SQLSTATE, SQLCODE, SQLERRM;
+    end;
+
+    if a = 1 then
+      insert into t3 values ('a', 'b');
+    elseif a = 2 then
+      insert into t3 values ('c', 'd');
+    else
+      insert into t3 values ('x', 'y', 'z');
+    end if;
+  end;
+  drop table t1;
+end;
+/
+call bug6900_9074(0);
+call bug6900_9074(1);
+call bug6900_9074(2);
+drop procedure bug6900_9074;
+CREATE TABLE t1(c1 TEXT NOT NULL); 
+CREATE OR REPLACE PROCEDURE p_1145188()
+AS
+BEGIN
+DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+BEGIN
+-- Here the current DA is nonempty because no prior statements
+-- executing within the handler have cleared it
+GET CURRENT DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET CURRENT DIAGNOSTICS CONDITION 1 @luser = MYSQL_ERRNO, @msg = MESSAGE_TEXT;
+RAISE NOTICE 'current DA before mapped insert , error = % , msg = %', @errno, @msg;
+GET STACKED DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET STACKED DIAGNOSTICS CONDITION 1 @errno1 = MYSQL_ERRNO, @mingshigang2 = MESSAGE_TEXT;
+RAISE NOTICE 'stacked DA before mapped insert , error = % , msg = %', @errno1, @msg1;
+
+INSERT INTO t1 (c1) VALUES(0),(1),(2);
+GET CURRENT DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET CURRENT DIAGNOSTICS CONDITION 1 @luser = MYSQL_ERRNO, @msg = MESSAGE_TEXT;
+RAISE NOTICE 'current DA before mapped insert , error = % , msg = %', @errno, @msg;
+GET STACKED DIAGNOSTICS @num=NUMBER,@rowcount=ROW_COUNT;
+RAISE NOTICE 'NUMBER=%,ROW_COUNT=%',@num,@rowcount;
+GET STACKED DIAGNOSTICS CONDITION 1 @errno1 = MYSQL_ERRNO, @mingshigang2 = MESSAGE_TEXT;
+RAISE NOTICE 'stacked DA before mapped insert , error = % , msg = %', @errno1, @msg1;
+END;
+
+GET CURRENT DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+RAISE NOTICE 'current DA before mapped insert , num = % , errcount = %', @num, @errcount;
+
+INSERT INTO t1 (c1) VALUES(NULL);
+
+GET CURRENT DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+RAISE NOTICE 'current DA before mapped insert , num = % , errcount = %', @num, @errcount;
+GET STACKED DIAGNOSTICS @num=NUMBER,@errcount= ROW_COUNT;
+
+END;
+/
+call p_1145188();
 \c regression
 -- test access to exception data
 create function zero_divide() returns int as $$

@@ -27,7 +27,6 @@
 #include "client_logic_common/statement_data.h"
 #include "driver_error.h"
 #include "jni_string_convertor.h"
-#include "client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.h"
 
 typedef struct pg_conn PGconn; /* forward declaration */
 

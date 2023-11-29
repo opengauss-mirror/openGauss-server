@@ -47,6 +47,7 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
+#include "access/multi_redo_api.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/storage.h"
@@ -61,7 +62,7 @@
 static void apply_map_update(RelMapFile* map, Oid relationId, Oid fileNode, bool add_okay);
 static void merge_map_updates(RelMapFile* map, const RelMapFile* updates, bool add_okay);
 static void write_relmap_file(bool shared, RelMapFile* newmap, bool write_wal, bool send_sinval, bool preserve_files,
-    Oid dbid, Oid tsid, const char* dbpath);
+    Oid dbid, Oid tsid, const char* dbpath, XLogRecPtr redo_lsn = 0);
 static void perform_relmap_update(bool shared, const RelMapFile* updates);
 static int WriteOldVersionRelmap(RelMapFile* map, int fd);
 static int ReadOldVersionRelmap(RelMapFile* map, int fd);
@@ -493,7 +494,8 @@ void RelationMapFinishBootstrap(void)
             g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, RELMAPPER_FILENAME);
         securec_check_ss_c(rc, "\0", "\0");
 
-        if (dss_exist_file(map_file_name)) {
+        struct stat st;
+        if (stat(map_file_name, &st) == 0 && S_ISREG(st.st_mode)) {
             return;
         }
     }
@@ -741,7 +743,7 @@ loop:
  * map update could be happening.
  */
 static void write_relmap_file(bool shared, RelMapFile* newmap, bool write_wal, bool send_sinval, bool preserve_files,
-    Oid dbid, Oid tsid, const char* dbpath)
+    Oid dbid, Oid tsid, const char* dbpath, XLogRecPtr redo_lsn)
 {
     int fd;
     RelMapFile* real_map = NULL;
@@ -869,7 +871,7 @@ static void write_relmap_file(bool shared, RelMapFile* newmap, bool write_wal, b
      * as soon as others began to use the now-committed data.
      */
     if (send_sinval) {
-        CacheInvalidateRelmap(dbid);
+        CacheInvalidateRelmap(dbid, redo_lsn);
     }
     /*
      * Make sure that the files listed in the map are not deleted if the outer
@@ -1100,7 +1102,11 @@ void relmap_redo(XLogReaderState* record)
          */
         XLogRecPtr lsn = record->EndRecPtr;
         UpdateMinRecoveryPoint(lsn, false);
-        write_relmap_file((xlrec->dbid == InvalidOid), &new_map, false, true, false, xlrec->dbid, xlrec->tsid, dbpath);
+        if (!IS_EXRTO_READ) {
+            lsn = 0;
+        }
+        write_relmap_file((xlrec->dbid == InvalidOid), &new_map, false, true, false, xlrec->dbid, xlrec->tsid, dbpath,
+            lsn);
         pfree_ext(dbpath);
     } else {
         ereport(PANIC, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("relmap_redo: unknown op code %u", info)));

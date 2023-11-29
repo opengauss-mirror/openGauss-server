@@ -1,0 +1,24 @@
+<refentry id="sql-alteraggregate">
+ <indexterm zone="sql-alteraggregate">
+  <primary>ALTER AGGREGATE</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>ALTER AGGREGATE</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>ALTER AGGREGATE</refname>
+  <refpurpose>alter the definition of an aggregate function</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+ALTER AGGREGATE name ( argtype [ , ... ] ) RENAME TO new_name
+ALTER AGGREGATE name ( argtype [ , ... ] ) OWNER TO new_owner
+ALTER AGGREGATE name ( argtype [ , ... ] ) SET SCHEMA new_schema
+</synopsis>
+ </refsynopsisdiv>
+ </refentry>

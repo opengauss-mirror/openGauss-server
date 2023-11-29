@@ -95,7 +95,7 @@ typedef struct {
     int dirtyflag; /* true if the buffer changed */
 } RedoBufferInfo;
 
-extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint32 *buf_state, ReadBufferMethod flushmethod);
+extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint64 *buf_state, ReadBufferMethod flushmethod);
 
 #define MakeRedoBufferDirty(bufferinfo) ((bufferinfo)->dirtyflag = true)
 #define RedoBufferDirtyClear(bufferinfo) ((bufferinfo)->dirtyflag = false)
@@ -105,7 +105,7 @@ extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint32 *bu
 
 typedef struct {
     RedoBufferTag blockinfo;
-    pg_atomic_uint32 state;
+    pg_atomic_uint64 state;
 } RedoBufferDesc;
 
 typedef struct {
@@ -160,6 +160,7 @@ typedef enum {
     BLOCK_DATA_SEG_SPACE_SHRINK,
     BLOCK_DATA_SEG_FULL_SYNC_TYPE,
     BLOCK_DATA_SEG_EXTEND,
+    BLOCK_DATA_CLEANUP_TYPE,
 } XLogBlockParseEnum;
 
 /* ********BLOCK COMMON HEADER  END ***************** */
@@ -216,6 +217,7 @@ typedef enum {
 typedef struct {
     uint32 blockddltype;
     int rels;
+    uint32 mainDataLen;
     char *mainData;
     bool compress;
 } XLogBlockDdlParse;
@@ -497,6 +499,7 @@ typedef struct {
     Oid dbNode;           /* database */
     int2 bucketNode; /* bucket   */
     uint2 opt;
+    bool is_conflict_type; /* whether wal log type is conflict with standby read if redo */
     XLogPhyBlock pblk;
 } XLogBlockHead;
 
@@ -594,6 +597,10 @@ typedef struct {
 } XLogBlockSegNewPage;
 
 typedef struct {
+    TransactionId removed_xid;
+} WalCleanupInfoParse;
+
+typedef struct {
     XLogBlockHead blockhead;
     XLogBlockRedoHead redohead;
     union {
@@ -623,6 +630,7 @@ typedef struct {
         XLogBlockSegDdlParse blocksegddlrec;
         XLogBlockSegFullSyncParse blocksegfullsyncrec;
         XLogBlockSegNewPage blocksegnewpageinfo;
+        WalCleanupInfoParse clean_up_info;
     } extra_rec;
 } XLogBlockParse;
 
@@ -693,6 +701,7 @@ typedef enum {
     XLOG_HEAD_DISTRIBUTE,
     XLOG_MID_DISTRIBUTE,
     XLOG_TAIL_DISTRIBUTE,
+    XLOG_SKIP_DISTRIBUTE,
 } XlogDistributePos;
 
 typedef struct {
@@ -818,7 +827,7 @@ extern void XLogRedoBufferRelease(RedoBufferManager* buffermanager, Buffer buffe
 extern BlockNumber XLogRedoBufferGetBlkNumber(RedoBufferManager* buffermanager, Buffer bufferid);
 extern Block XLogRedoBufferGetBlk(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot);
 extern Block XLogRedoBufferGetPage(RedoBufferManager* buffermanager, Buffer bufferid);
-extern void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot, uint32 state);
+extern void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot, uint64 state);
 
 #define XLogRedoBufferInitFunc(bufferManager, buffernum, defOperate, interruptOperte) do { \
     XLogRedoBufferInit(bufferManager, buffernum, defOperate, interruptOperte); \
@@ -945,6 +954,10 @@ static inline Buffer AtomicExchangeBuffer(volatile Buffer *ptr, Buffer newval)
     }
     return old;
 }
+
+/* this is an estimated value */
+static const uint32 MAX_BUFFER_NUM_PER_WAL_RECORD = XLR_MAX_BLOCK_ID + 1;
+static const uint32 LSN_MOVE32 = 32;
 
 void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
@@ -1107,7 +1120,7 @@ void XLogRecSetSegNewPageInfo(XLogBlockSegNewPage *state, char *mainData, Size l
 void XLogRecSetAuxiBlkNumState(XLogBlockDataParse* blockdatarec, BlockNumber auxilaryblkn1, BlockNumber auxilaryblkn2);
 void XLogRecSetBlockDataStateContent(XLogReaderState *record, uint32 blockid, XLogBlockDataParse *blockdatarec);
 void XLogRecSetBlockDataState(XLogReaderState* record, uint32 blockid, XLogRecParseState* recordblockstate,
-    XLogBlockParseEnum type = BLOCK_DATA_MAIN_DATA_TYPE);
+    XLogBlockParseEnum type = BLOCK_DATA_MAIN_DATA_TYPE, bool is_conflict_type = false);
 extern char* XLogBlockDataGetBlockData(XLogBlockDataParse* datadecode, Size* len);
 void Heap2RedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void HeapRedoDataBlock(
@@ -1116,8 +1129,9 @@ void SegPageRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdat
 extern void xlog_redo_data_block(
     XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void XLogRecSetBlockDdlState(XLogBlockDdlParse* blockddlstate, uint32 blockddltype, char *mainData,
-    int rels = 1, bool compress = false);
+    int rels = 1, bool compress = false, uint32 main_data_len = 0);
 XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse* datadecode, RedoBufferInfo* bufferinfo);
+extern void wal_rec_set_clean_up_info_state(WalCleanupInfoParse *parse_state, TransactionId removed_xid);
 
 void BtreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 void Btree2RedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
@@ -1271,8 +1285,9 @@ extern void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrec
 extern void GinRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 extern bool IsCheckPoint(const XLogRecParseState *parseState);
-
+bool is_backup_end(const XLogRecParseState *parse_state);
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
+void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);
 
 #endif

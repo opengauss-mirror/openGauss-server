@@ -35,11 +35,11 @@
 #define SS_IN_ONDEMAND_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery == true)
 #define SS_ONDEMAND_BUILD_DONE (ENABLE_DMS && SS_IN_ONDEMAND_RECOVERY \
                                 && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true)
-#define SS_ONDEMAND_RECOVERY_DONE (ENABLE_DMS && SS_IN_ONDEMAND_RECOVERY \
-                                   && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone == true)
+#define SS_ONDEMAND_REDO_DONE (SS_IN_ONDEMAND_RECOVERY \
+                               && t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
 #define SS_REPLAYED_BY_ONDEMAND (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY && \
                                  t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true && \
-                                 t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRecoveryDone == true)
+                                 t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
 
 #define REFORM_CTRL_VERSION 1
 
@@ -55,13 +55,26 @@ typedef struct st_reformer_ctrl {
     int primaryInstId;
     int recoveryInstId;
     SSGlobalClusterState clusterStatus;
+    ClusterRunMode clusterRunMode;
     pg_crc32c crc;
 } ss_reformer_ctrl_t;
 
 typedef struct st_reform_info {
     bool in_reform;
     dms_role_t dms_role;
-    SSReformType reform_type;
+    dms_reform_type_t reform_type;
+    unsigned long long bitmap_nodes;
+    timeval reform_start_time;
+    timeval reform_end_time;
+    uint64 old_bitmap;      // Save the cluster nodes bitmap before REFORM
+    uint64 new_bitmap;      // Save the cluster nodes bitmap after REFORM
+    
+    timeval redo_start_time;
+    timeval redo_end_time;
+    timeval construct_hashmap;
+    uint64 redo_total_bytes;
+    bool reform_success;
+    bool is_hashmap_constructed;
 } ss_reform_info_t;
 
 typedef enum st_failover_ckpt_status {
@@ -73,7 +86,10 @@ typedef enum st_failover_ckpt_status {
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
     volatile failover_ckpt_status_t failover_ckpt_status;
-    char recovery_xlogDir[MAXPGPATH];
+    char recovery_xlog_dir[MAXPGPATH];
+    int recovery_inst_id;
+    volatile SSGlobalClusterState cluster_ondemand_status;
+    char xlog_list[DMS_MAX_INSTANCE][MAXPGPATH];;
     LWLock* update_seg_lock;
     bool new_primary_reset_walbuf_flag;
     bool ready_to_startup;              // when DB start (except failover), the flag will set true

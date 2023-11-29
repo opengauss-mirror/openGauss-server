@@ -1792,6 +1792,9 @@ ClearGenericRootCache(PlannerInfo *pinfo, bool onlyPossionCache)
             foreach (lc, rel->indexlist) {
                 IndexOptInfo *idxinfo = (IndexOptInfo *)lfirst(lc);
                 idxinfo->predOK = false;
+                if (idxinfo->rel != NULL && idxinfo->rel != rel) {
+                    idxinfo->rel = rel;
+                }
             }
 
             foreach (lc, rel->baserestrictinfo) {

@@ -1,130 +1,146 @@
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_freeze_max_age=8888"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_freeze_max_age=8888"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_freeze_max_age=8888 set ].
 ERROR: The value 8888 is outside the valid range for parameter "autovacuum_freeze_max_age" (100000 .. 576460752303423487).
-ERROR: The value "8888" for parameter "autovacuum_freeze_max_age" is incorrect.
+ERROR: The value "8888" for parameter "autovacuum_freeze_max_age" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_freeze_max_age=8000000"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: autovacuum_freeze_max_age=8000000: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_freeze_max_age=8000000"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_freeze_max_age=8000000 set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: autovacuum_freeze_max_age=8000000: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_freeze_max_age=576460752303423488"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_freeze_max_age=576460752303423488"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_freeze_max_age=576460752303423488 set ].
 ERROR: The value 576460752303423488 is outside the valid range for parameter "autovacuum_freeze_max_age" (100000 .. 576460752303423487).
-ERROR: The value "576460752303423488" for parameter "autovacuum_freeze_max_age" is incorrect.
+ERROR: The value "576460752303423488" for parameter "autovacuum_freeze_max_age" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=254789435kB"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: bulk_write_ring_size=254789435kB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=254789435kB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=254789435kB set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: bulk_write_ring_size=254789435kB: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=23546435kN"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=23546435kN"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=23546435kN set ].
 ERROR: Valid units for this parameter "bulk_write_ring_size" are "kB", "MB" and "GB".
 ERROR: The parameter "bulk_write_ring_size" requires an integer value.
-ERROR: The value "23546435kN" for parameter "bulk_write_ring_size" is incorrect.
+ERROR: The value "23546435kN" for parameter "bulk_write_ring_size" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=900MB"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: bulk_write_ring_size=900MB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=900MB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=900MB set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: bulk_write_ring_size=900MB: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=2791353MB"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=2791353MB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=2791353MB set ].
 ERROR: The value 2858345472 is outside the valid range for parameter "bulk_write_ring_size" (16384 .. 2147483647).
-ERROR: The value "2791353MB" for parameter "bulk_write_ring_size" is incorrect.
+ERROR: The value "2791353MB" for parameter "bulk_write_ring_size" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=9007199254900000MB"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=9007199254900000MB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=9007199254900000MB set ].
 ERROR: The parameter "bulk_write_ring_size" requires an integer value.
-ERROR: The value "9007199254900000MB" for parameter "bulk_write_ring_size" is incorrect.
+ERROR: The value "9007199254900000MB" for parameter "bulk_write_ring_size" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=87GB"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: bulk_write_ring_size=87GB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=87GB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=87GB set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: bulk_write_ring_size=87GB: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=8791GB"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=8791GB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=8791GB set ].
 ERROR: The value 9218031616 is outside the valid range for parameter "bulk_write_ring_size" (16384 .. 2147483647).
-ERROR: The value "8791GB" for parameter "bulk_write_ring_size" is incorrect.
+ERROR: The value "8791GB" for parameter "bulk_write_ring_size" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bulk_write_ring_size=8796093022900GB"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bulk_write_ring_size=8796093022900GB"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bulk_write_ring_size=8796093022900GB set ].
 ERROR: The parameter "bulk_write_ring_size" requires an integer value.
-ERROR: The value "8796093022900GB" for parameter "bulk_write_ring_size" is incorrect.
+ERROR: The value "8796093022900GB" for parameter "bulk_write_ring_size" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=15372286s"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=15372286s"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=15372286s set ].
 ERROR: The value 15372286 is outside the valid range for parameter "autovacuum_naptime" (1 .. 2147483).
-ERROR: The value "15372286s" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "15372286s" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=254mi"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=254mi"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=254mi set ].
 ERROR: Valid units for this parameter "autovacuum_naptime" are "s", "min", "h", and "d".
 ERROR: The parameter "autovacuum_naptime" requires an integer value.
-ERROR: The value "254mi" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "254mi" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=153min"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: autovacuum_naptime=153min: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=153min"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=153min set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: autovacuum_naptime=153min: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=254857min"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=254857min"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=254857min set ].
 ERROR: The value 15291420 is outside the valid range for parameter "autovacuum_naptime" (1 .. 2147483).
-ERROR: The value "254857min" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "254857min" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=1537228672000000000min"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=1537228672000000000min"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=1537228672000000000min set ].
 ERROR: The parameter "autovacuum_naptime" requires an integer value.
-ERROR: The value "1537228672000000000min" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "1537228672000000000min" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=65h"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: autovacuum_naptime=65h: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=65h"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=65h set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: autovacuum_naptime=65h: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=25645h"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=25645h"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=25645h set ].
 ERROR: The value 92322000 is outside the valid range for parameter "autovacuum_naptime" (1 .. 2147483).
-ERROR: The value "25645h" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "25645h" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=2562047788015216h"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=2562047788015216h"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=2562047788015216h set ].
 ERROR: The parameter "autovacuum_naptime" requires an integer value.
-ERROR: The value "2562047788015216h" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "2562047788015216h" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=5d"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: autovacuum_naptime=5d: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=5d"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=5d set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: autovacuum_naptime=5d: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=256d"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=256d"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=256d set ].
 ERROR: The value 22118400 is outside the valid range for parameter "autovacuum_naptime" (1 .. 2147483).
-ERROR: The value "256d" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "256d" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=114841866167300d"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "autovacuum_naptime=114841866167300d"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c autovacuum_naptime=114841866167300d set ].
 ERROR: The parameter "autovacuum_naptime" requires an integer value.
-ERROR: The value "114841866167300d" for parameter "autovacuum_naptime" is incorrect.
+ERROR: The value "114841866167300d" for parameter "autovacuum_naptime" is incorrect, requires a integer value
 Try "gs_guc --help" for more information.
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=6.6"
---?realpath.*
-expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc set: bgwriter_lru_multiplier=6.6: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=6.6"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bgwriter_lru_multiplier=6.6 set ].
+expected instance path: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc set: bgwriter_lru_multiplier=6.6: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=11.2"
+\! /usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc set -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=11.2"
+The gs_guc run with the following arguments: [/usr3/data1/jiangyan/openGauss-server/src/test/regress/./tmp_check/install//data1/jiangyan/openGauss-server//dest/bin/gs_guc -D /usr3/data1/jiangyan/openGauss-server/src/test/regress/tmp_check/datanode1/ -c bgwriter_lru_multiplier=11.2 set ].
 ERROR: The value 11.2 is outside the valid range for parameter "bgwriter_lru_multiplier" (0 .. 10).
-ERROR: The value "11.2" for parameter "bgwriter_lru_multiplier" is incorrect.
+ERROR: The value "11.2" for parameter "bgwriter_lru_multiplier" is incorrect, requires a string value
 Try "gs_guc --help" for more information.

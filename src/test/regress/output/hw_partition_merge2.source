@@ -71,7 +71,6 @@ create index idx1_test_merge_index on test_merge_index_test(c1) local;
 create index idx2_test_merge_index on test_merge_index_test(c1, c2) local;
 create index idx3_test_merge_index on test_merge_index_test(c1, c2, c3) local;
 create index idx4_test_merge_index on test_merge_index_test using hash (c1) local;
-ERROR:  access method "hash" does not support row store
 --4.1 merge 2 partitions into one
 alter table test_merge_index_test merge partitions 
 	test_merge_index_test_p1, test_merge_index_test_p2
@@ -81,18 +80,16 @@ SET enable_seqscan = ON;
 SET enable_indexscan = OFF;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Seq Scan on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -398,18 +395,16 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Seq Scan on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -715,18 +710,16 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Seq Scan on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -1037,18 +1030,16 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = ON;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -1354,18 +1345,16 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -1671,18 +1660,16 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -1993,18 +1980,16 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
 SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -2310,18 +2295,16 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -2627,18 +2610,16 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 29
-               ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..29
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partition Iterator
+         Iterations: 29
+         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..29
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -2953,18 +2934,16 @@ SET enable_seqscan = ON;
 SET enable_indexscan = OFF;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Seq Scan on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -3270,18 +3249,16 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Seq Scan on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -3587,18 +3564,16 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Seq Scan on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -3909,18 +3884,16 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = ON;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -4226,18 +4199,16 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -4543,18 +4514,16 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -4865,18 +4834,16 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
 SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -5182,18 +5149,16 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -5499,18 +5464,16 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 27
-               ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-                     Selected Partitions:  1..27
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partition Iterator
+         Iterations: 27
+         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+               Selected Partitions:  1..27
+(6 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -5851,18 +5814,14 @@ SET enable_seqscan = ON;
 SET enable_indexscan = OFF;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Sort
-         Sort Key: c1
-         ->  Partition Iterator
-               Iterations: 1
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: c1
+   ->  Partitioned Seq Scan on test_merge_index_test
+         Selected Partitions:  1
+(4 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -6168,18 +6127,14 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Sort
-         Sort Key: c1, c2
-         ->  Partition Iterator
-               Iterations: 1
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: c1, c2
+   ->  Partitioned Seq Scan on test_merge_index_test
+         Selected Partitions:  1
+(4 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -6485,18 +6440,14 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Sort
-         Sort Key: c1, c2, c3
-         ->  Partition Iterator
-               Iterations: 1
-               ->  Partitioned Seq Scan on test_merge_index_test
-                     Selected Partitions:  1
-(8 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: c1, c2, c3
+   ->  Partitioned Seq Scan on test_merge_index_test
+         Selected Partitions:  1
+(4 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -6807,16 +6758,12 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = ON;
 SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-               Selected Partitions:  1
-(6 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Partitioned Index Scan using idx2_test_merge_index on test_merge_index_test
+   Selected Partitions:  1
+(2 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -7122,16 +7069,12 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-               Selected Partitions:  1
-(6 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Partitioned Index Scan using idx2_test_merge_index on test_merge_index_test
+   Selected Partitions:  1
+(2 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -7437,16 +7380,12 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
-               Selected Partitions:  1
-(6 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Partitioned Index Scan using idx3_test_merge_index on test_merge_index_test
+   Selected Partitions:  1
+(2 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  
@@ -7757,16 +7696,12 @@ SET enable_seqscan = OFF;
 SET enable_indexscan = OFF;
 SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-               Selected Partitions:  1
-(6 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+   Selected Partitions:  1
+(2 rows)
 
 select * from test_merge_index_test order by c1;
  c1  | c2  | c3  
@@ -8072,16 +8007,12 @@ select * from test_merge_index_test order by c1;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-               Selected Partitions:  1
-(6 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+   Selected Partitions:  1
+(2 rows)
 
 select * from test_merge_index_test order by c1, c2;
  c1  | c2  | c3  
@@ -8387,16 +8318,12 @@ select * from test_merge_index_test order by c1, c2;
  299 | 299 | 299
 (299 rows)
 
-EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   Merge Sort Key: c1, c2, c3
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
-               Selected Partitions:  1
-(6 rows)
+EXPLAIN (COSTS OFF) select * from test_merge_index_test order by c1, c2, c3;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Partitioned Index Only Scan using idx3_test_merge_index on test_merge_index_test
+   Selected Partitions:  1
+(2 rows)
 
 select * from test_merge_index_test order by c1, c2, c3;
  c1  | c2  | c3  

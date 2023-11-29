@@ -33,10 +33,18 @@
 
 extern char ssl_cert_file[];
 extern char ssl_key_file[];
+
 extern char ssl_ca_file[];
 extern char ssl_crl_file[];
 extern char* ssl_cipher_file;
 extern char* ssl_rand_file;
+#ifdef USE_TASSL
+extern char ssl_enc_cert_file[];
+extern char ssl_enc_key_file[];
+extern char *ssl_enc_cipher_file;
+extern char *ssl_enc_rand_file;
+#endif 
+
 
 extern char pgxcnodename[];
 /* global variables for con */
@@ -44,7 +52,6 @@ extern char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN];
 extern int standby_recv_timeout;
 extern int standby_connect_timeout; /* 120 sec = default */
 extern char gaussdb_state_file[MAXPGPATH];
-extern SSInstanceConfig instance_config;
 
 void delete_datadir(const char* dirname);
 

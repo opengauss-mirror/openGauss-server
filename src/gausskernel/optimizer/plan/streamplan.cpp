@@ -1217,7 +1217,7 @@ NodeDefinition* get_all_datanodes_def()
     NodeDefinition* nodeDefArray = NULL;
     int rc = 0;
 
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         PgxcNodeGetOidsForInit(NULL, &dn_node_arr, NULL, &dn_node_num, NULL, false);
     } else {
         PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
@@ -1230,7 +1230,7 @@ NodeDefinition* get_all_datanodes_def()
             pfree_ext(dn_node_arr);
             dn_node_arr = NULL;
         }
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             PgxcNodeGetOidsForInit(NULL, &dn_node_arr, NULL, &dn_node_num, NULL, false);
         } else {
             PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
@@ -1249,7 +1249,7 @@ NodeDefinition* get_all_datanodes_def()
     nodeDefArray = (NodeDefinition*)palloc(sizeof(NodeDefinition) * u_sess->pgxc_cxt.NumDataNodes);
     NodeDefinition* res = NULL;
     for (i = 0; i < u_sess->pgxc_cxt.NumDataNodes; i++) {
-        if (!IS_DISASTER_RECOVER_MODE) {
+        if (!IS_MULTI_DISASTER_RECOVER_MODE) {
             Oid current_primary_oid = PgxcNodeGetPrimaryDNFromMatric(dn_node_arr[i]);
             res = PgxcNodeGetDefinition(current_primary_oid);
         } else {
@@ -1672,11 +1672,15 @@ Plan* create_local_redistribute(PlannerInfo* root, Plan* lefttree, List* redistr
  */
 uint2* get_bucketmap_by_execnode(ExecNodes* exec_node, PlannedStmt* plannedstmt, int *bucketCnt)
 {
+#ifndef USE_SPQ
     if (exec_node == NULL) {
         return NULL;
     }
-
+#endif
     int nodeLen = list_length(exec_node->nodeList);
+#ifdef USE_SPQ
+    nodeLen = plannedstmt->num_nodes;
+#endif
     if (nodeLen == 0) {
         return NULL;
     }

@@ -941,8 +941,9 @@ static void SlruReportIOError(SlruCtl ctl, int64 pageno, TransactionId xid)
     switch (t_thrd.xact_cxt.slru_errcause) {
         case SLRU_OPEN_FAILED:
             ereport(ERROR, (errmodule(MOD_SLRU), errcode_for_file_access(),
-                            errmsg("could not access status of transaction %lu , nextXid is %lu ", xid,
-                                   t_thrd.xact_cxt.ShmemVariableCache->nextXid),
+                            errmsg("could not access status of transaction %lu , nextXid is %lu, pageno %ld, "
+                                   "t_thrd.pgxact->xmin %lu",
+                                   xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid, pageno, t_thrd.pgxact->xmin),
                             errdetail("Could not open file \"%s\": %m.", path)));
             break;
         case SLRU_SEEK_FAILED:

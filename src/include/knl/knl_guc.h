@@ -51,5 +51,8 @@
 #include "knl_guc/knl_instance_attr_resource.h"
 #include "knl_guc/knl_session_attr_common.h"
 #include "knl_guc/knl_instance_attr_common.h"
+#ifdef USE_SPQ
+#include "knl_guc/knl_session_attr_spq.h"
+#endif
 
 #endif /* SRC_INCLUDE_KNL_KNL_GUC_H_ */

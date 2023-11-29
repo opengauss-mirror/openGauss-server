@@ -28,6 +28,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
+#include "parser/parse_collate.h"
 #include "nodes/parsenodes_common.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -404,8 +405,8 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
     attrtype = attnumTypeId(rd, attrno);
     attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
     attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
-    if (DB_IS_CMPT(B_FORMAT)) {
-        attrcharset = get_charset_by_collation(attrcollation);
+    if (DB_IS_CMPT(B_FORMAT) && OidIsValid(attrcollation)) {
+        attrcharset = get_valid_charset_by_collation(attrcollation);
     }
 
     /*
@@ -501,7 +502,12 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
         bool is_all_satisfied = pstate->p_is_td_compatible_truncation &&
             (attrtype == BPCHAROID || attrtype == VARCHAROID) &&
             ((type_mod > 0 && attrtypmod < type_mod) || type_mod < 0);
-        if (is_all_satisfied) {
+
+        if (type_is_set(attrtype)) {
+            Node* orig_expr = (Node*)expr;
+            expr = (Expr*)coerce_to_settype(
+                    pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1, attrcollation);
+        } else if (is_all_satisfied) {
             expr = (Expr*)coerce_to_target_type(
                 pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_EXPLICIT_CAST, -1);
             pstate->tdTruncCastStatus = TRUNC_CAST_QUERY;
@@ -551,7 +557,10 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
         }
     }
 #ifndef ENABLE_MULTIPLE_NODES
-    expr = (Expr*)coerce_to_target_charset((Node*)expr, attrcharset, attrtype);
+    if (attrcharset != PG_INVALID_ENCODING) {
+        assign_expr_collations(pstate, (Node*)expr);
+        expr = (Expr*)coerce_to_target_charset((Node*)expr, attrcharset, attrtype, attrtypmod, attrcollation);
+    }
 #endif
 
     ELOG_FIELD_NAME_END;
@@ -1624,6 +1633,9 @@ static int FigureColnameInternal(Node* node, char** name)
                 case ANY_SUBLINK:
                 case ROWCOMPARE_SUBLINK:
                 case CTE_SUBLINK:
+#ifdef USE_SPQ
+                case NOT_EXISTS_SUBLINK:
+#endif
                     break;
             }
             break;

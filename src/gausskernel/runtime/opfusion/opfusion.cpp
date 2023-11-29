@@ -662,7 +662,7 @@ static void* TryReuseOpfusionObj(FusionType ftype, MemoryContext context, Cached
      * we save the obj without FusionType check in FusionFactory
      * so must check here
      */
-    if (INSERT_FUSION != ftype && DELETE_FUSION != ftype) {
+    if (INSERT_FUSION != ftype && DELETE_FUSION != ftype && UPDATE_FUSION != ftype) {
         return NULL;
     }
 
@@ -805,6 +805,8 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
     }
     (void)MemoryContextSwitchTo(m_local.m_tmpContext);
     if (num_params > 0) {
+        Oid param_collation = GetCollationConnection();
+        int param_charset = GetCharsetConnection();
         for (paramno = 0; paramno < num_params; paramno++) {
             Oid ptype = m_global->m_psrc->param_types[paramno];
             int32 plength;
@@ -816,8 +818,8 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
             plength = pq_getmsgint(input_message, 4);
             isNull = (plength == -1);
             /* add null value process for date type */
-            if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+            if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
+                TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
                 plength == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                 isNull = true;
             }
@@ -875,6 +877,8 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
                  */
                 if (isNull) {
                     pstring = NULL;
+                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
                 } else {
                     pstring = pg_client_to_server(pbuf.data, plength);
                 }

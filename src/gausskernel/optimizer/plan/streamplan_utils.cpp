@@ -1652,6 +1652,19 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                     *parent_node_id = save_parent_id;
                 }
             } break;
+#ifdef USE_SPQ
+            case T_Sequence: {
+                Sequence* sequence = (Sequence*)result_plan;
+                ListCell* lc = NULL;
+                foreach(lc, sequence->subplans) {
+                    Plan* plan = (Plan*)lfirst(lc);
+                    finalize_node_id(plan, plan_node_id, parent_node_id, num_streams, num_plannodes, total_num_streams,
+                        max_push_sql_num, gather_count, subplans, subroots, initplans, subplan_ids, false,
+                        is_under_ctescan, is_data_node_exec, is_read_only, node_group_info_context);
+                    *parent_node_id = save_parent_id;
+                }
+            } break;
+#endif
             case T_CteScan: {
                 if (STREAM_RECURSIVECTE_SUPPORTED) {
                     CteScan* cte_plan = (CteScan*)result_plan;
@@ -1864,7 +1877,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
          * (3) For initplan, if main query is from cn, just gather the subplan
          * (4) vectorize subplan and set plan references
          */
-        if (IS_STREAM_PLAN) {
+        if ((IS_SPQ_COORDINATOR && list_length(subplans) > 0 ) || (!IS_SPQ_RUNNING && IS_STREAM_PLAN)) {
             /* Block pushing down Random()/GS_ENCRYPT_AES128() in Replicated plan temporarily */
             if (is_replicated_plan(result_plan) && is_execute_on_multinodes(result_plan)) {
                 List* nodelist = check_random_expr(result_plan);
@@ -1922,7 +1935,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                     subplan_ids[subplan->plan_id] = subplan_ids[0];
 
                 if (!has_finalized) {
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ) 
                     /*
                      * subplan on dn and main plan on cn. In such case, we only
                      * support initplan, and gather the result to cn.
@@ -1930,6 +1943,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                      * single no need to consider this situation, because subplan
                      * and the node contains subplan will not parallel.
                      */
+                if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
                     if (is_execute_on_coordinator(result_plan) ||
                         (is_execute_on_allnodes(result_plan) && !is_data_node_exec)) {
                         Plan* child_plan = NULL;
@@ -1999,8 +2013,13 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                         /* Push only nodelist but not entire exec_nodes here. */
                         pushdown_execnodes(plan, result_plan->exec_nodes, false, true);
                     }
+                }
 #endif
+#ifdef USE_SPQ
+                    if (check_stream_support() && t_thrd.spq_ctx.spq_role == ROLE_UTILITY) {
+#else
                     if (check_stream_support()) {
+#endif
                         PlannerInfo* subroot = NULL;
                         Plan* child_root = NULL;
                         ListCell* lr = NULL;

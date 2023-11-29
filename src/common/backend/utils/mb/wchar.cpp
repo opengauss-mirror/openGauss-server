@@ -1990,6 +1990,12 @@ pg_wchar_tbl pg_wchar_table[] = {
         pg_gb18030_dsplen,
         pg_gb18030_verifier,
         4},                                                              /* PG_GB18030 */
+    {pg_gb180302wchar_with_len,
+        pg_wchar2gb18030_with_len,
+        pg_gb18030_mblen,
+        pg_gb18030_dsplen,
+        pg_gb18030_verifier,
+        4},                                                             /* PG_GB18030_2022 */
     {0, 0, pg_sjis_mblen, pg_sjis_dsplen, pg_sjis_verifier, 2},          /* PG_SJIS */
     {0, 0, pg_big5_mblen, pg_big5_dsplen, pg_big5_verifier, 2},          /* PG_BIG5 */
     {0, 0, pg_uhc_mblen, pg_uhc_dsplen, pg_uhc_verifier, 2},             /* PG_UHC */

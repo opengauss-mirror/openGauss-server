@@ -45,6 +45,10 @@ typedef enum NodeTag {
      * TAGS FOR PLAN NODES (plannodes.h)
      */
     T_Plan = 100,
+#ifdef USE_SPQ
+    T_Plan_Start,
+    T_Result,
+#endif
     T_BaseResult,
     T_ProjectSet,
     T_ModifyTable,
@@ -57,6 +61,12 @@ typedef enum NodeTag {
     T_BitmapOr,
     T_Scan,
     T_SeqScan,
+#ifdef USE_SPQ
+    T_SpqSeqScan,
+    T_SpqIndexScan,
+    T_SpqIndexOnlyScan,
+    T_SpqBitmapHeapScan,
+#endif
     T_IndexScan,
     T_IndexOnlyScan,
     T_BitmapIndexScan,
@@ -115,6 +125,16 @@ typedef enum NodeTag {
     T_AlterAppWorkloadGroupMappingStmt,
     T_DropAppWorkloadGroupMappingStmt,
 #endif
+#ifdef USE_SPQ
+    T_Sequence,
+    T_Motion,
+    T_ShareInputScan,
+    T_SplitUpdate,
+    T_AssertOp,
+    T_PartitionSelector,
+    T_PartitionPruneInfo,
+    T_Plan_End,
+#endif
     /* these aren't subclasses of Plan: */
     T_NestLoopParam,
     T_PartIteratorParam,
@@ -159,6 +179,12 @@ typedef enum NodeTag {
     T_BitmapOrState,
     T_ScanState,
     T_SeqScanState,
+#ifdef USE_SPQ
+    T_SpqSeqScanState,
+    T_AssertOpState,
+    T_ShareInputScanState,
+    T_SequenceState,
+#endif
     T_IndexScanState,
     T_IndexOnlyScanState,
     T_BitmapIndexScanState,
@@ -307,6 +333,7 @@ typedef enum NodeTag {
     T_UserSetElemState,
     T_ListPartitionDefState,
     T_HashPartitionDefState,
+    T_PrefixKeyState,
 
     /*
      * TAGS FOR PLANNER NODES (relation.h)
@@ -443,6 +470,10 @@ typedef enum NodeTag {
     T_DropEventStmt,
     T_ShowEventStmt,
     T_CompileStmt,
+    T_DependenciesProchead,
+    T_DependenciesUndefined,
+    T_DependenciesType,
+    T_DependenciesVariable,
     T_DoStmt,
     T_RenameStmt,
     T_RuleStmt,
@@ -571,6 +602,9 @@ typedef enum NodeTag {
     T_Constraint,
     T_DefElem,
     T_RangeTblEntry,
+#ifdef USE_SPQ
+    T_RangeTblFunction,
+#endif
     T_WithCheckOption,
     T_TableSampleClause,
     T_TimeCapsuleClause,
@@ -817,6 +851,7 @@ typedef enum NodeTag {
     T_PLDebug_variable,
     T_PLDebug_breakPoint,
     T_PLDebug_frame,
+    T_PLDebug_codeline,
 
     T_TdigestData,
 
@@ -827,17 +862,33 @@ typedef enum NodeTag {
     T_CondInterval,
     T_IndexCI,
     T_RelCI,
+#ifdef USE_SPQ
+    T_GpPolicy,
+#endif
     T_CentroidPoint,
     T_UserSetElem,
     T_UserVar,
     T_CharsetCollateOptions,
     T_FunctionSources,
+    
     /* ndpplugin tag */
     T_NdpScanCondition,
     T_CondInfo,
     T_GetDiagStmt,
     T_DolphinCallStmt,
-    T_CallContext
+    T_CallContext,
+    T_CharsetClause,
+
+    /* timescaledb plugin tag */
+    T_ModifyTablePath,
+    T_AggPath,
+    T_WindowAggPath,
+    T_SortPath,
+    T_MinMaxAggPath,
+    T_GatherPath,
+    T_ForeignKeyCacheInfo,
+    T_Gather
+
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
@@ -1051,8 +1102,12 @@ typedef enum JoinType {
     JOIN_RIGHT_ANTI, /* Right Anti join */
 
     JOIN_LEFT_ANTI_FULL, /* unmatched LHS tuples */
-    JOIN_RIGHT_ANTI_FULL /* unmatched RHS tuples */
-
+    JOIN_RIGHT_ANTI_FULL, /* unmatched RHS tuples */
+#ifdef USE_SPQ
+    JOIN_LASJ_NOTIN, /* Left Anti Semi Join with Not-In semantics: */
+                     /* If any NULL values are produced by inner side, */
+                     /* return no join results. Otherwise, same as LASJ */
+#endif
     /*
      * We might need additional join types someday.
      */
@@ -1103,5 +1158,38 @@ struct TdigestData {
     double valuetoc;
     CentroidPoint nodes[0];
 };
-
+#ifdef USE_SPQ
+#define AGGSPLITOP_COMBINE	0x01	/* substitute combinefn for transfn */
+#define AGGSPLITOP_SKIPFINAL	0x02	/* skip finalfn, return state as-is */
+#define AGGSPLITOP_SERIALIZE	0x04	/* apply serializefn to output */
+#define AGGSPLITOP_DESERIALIZE	0x08	/* apply deserializefn to input */
+ 
+#define AGGSPLITOP_DEDUPLICATED	0x100
+ 
+/* Supported operating modes (i.e., useful combinations of these options): */
+typedef enum AggSplit {
+    /* Basic, non-split aggregation: */
+    AGGSTAGE_NORMAL = 0,
+    /* Initial phase of partial aggregation, with serialization: */
+    AGGSTAGE_PARTIAL = AGGSPLITOP_SKIPFINAL | AGGSPLITOP_SERIALIZE,
+    /* Final phase of partial aggregation, with deserialization: */
+    AGGSTAGE_FINAL = AGGSPLITOP_COMBINE | AGGSPLITOP_DESERIALIZE,
+ 
+    /*
+     * The inputs have already been deduplicated for DISTINCT.
+     * This is internal to the planner, it is never set on Aggrefs, and is
+     * stripped away from Aggs in setrefs.c.
+     */
+    AGGSTAGE_DEDUPLICATED = AGGSPLITOP_DEDUPLICATED,
+ 
+    AGGSTAGE_INTERMEDIATE = AGGSPLITOP_SKIPFINAL | AGGSPLITOP_SERIALIZE | AGGSPLITOP_COMBINE | AGGSPLITOP_DESERIALIZE,
+} AggSplit;
+ 
+ 
+/* Test whether an AggSplit value selects each primitive option: */
+#define DO_AGGSPLIT_COMBINE(as)		(((as) & AGGSPLITOP_COMBINE) != 0)
+#define DO_AGGSPLIT_SKIPFINAL(as)	(((as) & AGGSPLITOP_SKIPFINAL) != 0)
+#define DO_AGGSPLIT_SERIALIZE(as)	(((as) & AGGSPLITOP_SERIALIZE) != 0)
+#define DO_AGGSPLIT_DESERIALIZE(as) (((as) & AGGSPLITOP_DESERIALIZE) != 0)
+#endif
 #endif /* NODES_H */

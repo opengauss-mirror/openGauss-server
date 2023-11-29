@@ -1659,3 +1659,100 @@ drop table declare;
 drop table declare_test;
 drop schema trigger_declare_test cascade;
 NOTICE:  drop cascades to function declare()
+create schema part_bri_warnning;
+set search_path = 'part_bri_warnning';
+drop table if exists target;
+NOTICE:  table "target" does not exist, skipping
+create table target (c1 int, c2 int, c3 timestamp)
+partition by range(c2)
+(
+  partition p1 values less than (2),
+  partition p2 values less than (4),
+  partition p3 values less than (6),
+  partition p4 values less than (8),
+  partition p5 values less than (MAXVALUE)
+);
+create function target_tri() return trigger
+as
+begin
+    new.c1 = 2;
+    return new;
+end;
+/
+create trigger test_part_trigger 
+    before update on target
+    for each row
+    execute procedure target_tri();
+	
+--merge updated
+insert into target values (1, 1, now());
+\parallel on 2
+begin
+    update target set c2 = 1 where c1 = 1;
+    perform pg_sleep(4);
+end;
+/
+begin
+    perform pg_sleep(2);
+	merge into target t1 using (select 1 c1) t2 on (t1.c1 = t2.c1)
+	when matched then update set t1.c2 = 4;
+end;
+/
+\parallel off
+-- concurrent update
+delete from target;
+insert into target values (1, 1, now());
+\parallel on 2
+begin
+    update target set c2 = 1 where c1 = 1;
+    perform pg_sleep(4);
+end;
+/
+begin
+	perform pg_sleep(2);
+    update target set c1=10 where c1=1;
+end;
+/
+\parallel off
+drop table target;
+drop function target_tri;
+--self modify
+create table t1(c1 int, c2 text, c3 timestamp, c4 int)
+partition by range(c4)
+(
+  partition p1 values less than (2),
+  partition p2 values less than (4),
+  partition p3 values less than (6),
+  partition p4 values less than (8),
+  partition p5 values less than (MAXVALUE)
+);
+create table t2 (c1 int);
+insert into t1 values (1, 'a', '2023-09-15',1);
+create or replace function t1_tri_func() return trigger as
+begin
+    new.c3 = '2023-09-16';
+    return new;
+end;
+/
+create trigger t1_tri
+    before update on t1
+    for each row
+    execute procedure t1_tri_func();
+insert into t2 values (1);
+insert into t2 values (1);
+merge into t1 using t2
+on (t1.c1 = t2.c1)
+when matched then update set c2 = 'e'
+when not matched then insert values (5, 'e', '2023-09-20',0);
+ERROR:  MERGE command cannot affect row a second time
+HINT:  Ensure that not more than one source row matches any one target row.
+select * from t1 order by c1;
+ c1 | c2 |            c3            | c4 
+----+----+--------------------------+----
+  1 | a  | Fri Sep 15 00:00:00 2023 |  1
+(1 row)
+
+drop table t1;
+drop table t2;
+drop function t1_tri_func;
+drop schema part_bri_warnning;

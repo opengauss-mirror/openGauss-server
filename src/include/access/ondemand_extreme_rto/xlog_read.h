@@ -31,6 +31,21 @@
 namespace ondemand_extreme_rto {
 XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 XLogRecord *ReadNextXLogRecord(XLogReaderState **xlogreaderptr, int emode);
+XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg);
 
 }  // namespace ondemand_extreme_rto
+
+typedef struct XLogFileId {
+    XLogSegNo segno;
+    TimeLineID tli;
+} XLogFileId;
+
+typedef struct XLogFileIdCacheEntry {
+    XLogFileId id;
+    int fd;
+} XLogFileIdCacheEntry;
+
+int SimpleXLogPageReadInFdCache(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *pageTLI, char* xlog_path = NULL);
+void CloseAllXlogFileInFdCache(void);
 #endif /* ONDEMAND_EXTREME_RTO_XLOG_READ_H */

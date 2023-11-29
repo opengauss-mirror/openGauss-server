@@ -595,10 +595,12 @@ typedef struct {
 static FileInfo *repallocFileInfo(FileInfo *file_infos, const int new_num, const int old_num)
 {
     if (new_num < 0 || (size_t)new_num >= ((0x3fffffff) / sizeof(FileInfo *))) {
+        free(file_infos);
         return NULL;
     }
     FileInfo *tmps = (FileInfo *)malloc(sizeof(FileInfo) * new_num);
     if (tmps == NULL) {
+        free(file_infos);
         return NULL;
     }
     for (int i = 0; i < old_num; i++) {

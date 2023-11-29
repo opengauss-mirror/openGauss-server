@@ -274,7 +274,9 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    (void)InitStreamObject(queryDesc->plannedstmt);
+    if (!IS_SPQ_COORDINATOR) {
+        (void)InitStreamObject(queryDesc->plannedstmt);
+    }
 #endif
 
     if (StreamTopConsumerAmI() && queryDesc->instrument_options != 0 && IS_PGXC_DATANODE) {
@@ -319,6 +321,10 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
         estate->es_param_exec_vals =
             (ParamExecData *)palloc0(queryDesc->plannedstmt->nParamExec * sizeof(ParamExecData));
     }
+
+#ifdef USE_SPQ
+    estate->es_sharenode = nullptr;
+#endif
 
     /*
      * If non-read-only query, set the command ID to mark output tuples with
@@ -1500,7 +1506,8 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
 #ifdef ENABLE_MULTIPLE_NODES
             (IS_PGXC_COORDINATOR && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
 #else
-            (StreamTopConsumerAmI() && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
+            (!IS_SPQ_RUNNING && StreamTopConsumerAmI() && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
+            (IS_SPQ_COORDINATOR && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
 #endif
             plannedstmt->planTree->plan_node_id == list_nth_int(plannedstmt->subplan_ids, i - 1))) {
             estate->es_under_subplan = true;
@@ -2192,7 +2199,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
      */
     estate->es_direction = direction;
 
-    if (IS_PGXC_DATANODE) {
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE) {
         /* Collect Material for Subplan first */
         ExecCollectMaterialForSubplan(estate);
 
@@ -2297,8 +2304,8 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
             slot = ExecFilterJunk(estate->es_junkFilter, slot);
         }
 
-#ifdef ENABLE_MULTIPLE_NDOES
-        if (stream_instrument) {
+#if defined(ENABLE_MULTIPLE_NDOES) || defined(USE_SPQ)
+        if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY && stream_instrument) {
             t_thrd.pgxc_cxt.GlobalNetInstr = planstate->instrument;
         }
 #endif

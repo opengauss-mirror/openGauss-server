@@ -26,6 +26,8 @@
 #ifndef INSTR_HANDLE_MGR_H
 #define INSTR_HANDLE_MGR_H
 #include "pgstat.h"
+#include "instruments/instr_unique_sql.h"
+#include "instruments/instr_statement.h"
 
 #define CURRENT_STMT_METRIC_HANDLE ((StatementStatContext*)(u_sess->statement_cxt.curStatementMetrics))
 #define CHECK_STMT_HANDLE() \
@@ -42,3 +44,37 @@ void release_statement_context(PgBackendStatus* beentry, const char* func, int l
 void* bind_statement_context();
 
 #endif
+
+class PLSQLStmtTrackStack {
+public:
+    PLSQLStmtTrackStack()
+    {
+    }
+
+    ~PLSQLStmtTrackStack()
+    {
+    }
+    void push();
+    void pop();
+    void save_old_info();
+    void reset_current_info();
+
+private:
+    uint64 old_unique_sql_id;
+    uint64 old_parent_unique_sql_id;
+
+    bool old_is_top_unique_sql;
+    bool old_is_multi_unique_sql;
+    bool old_force_gen_unique_sql;
+
+    int32 old_multi_sql_offset;
+    char *old_curr_single_unique_sql;
+
+    uint64 n_soft_parse;
+    uint64 n_hard_parse;
+    uint64 n_return_rows;
+
+    StatementStatContext *parent_handler;
+
+    bool push_succ;
+};

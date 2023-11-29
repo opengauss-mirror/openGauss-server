@@ -1,0 +1,1835 @@
+-- test about issue
+create schema not_accept_schema;
+set current_schema to 'not_accept_schema';
+create table tchar(c char(10));
+set behavior_compat_options to '';
+insert into tchar values(' ');
+select * from tchar where c = '';
+ c 
+---
+(0 rows)
+
+select * from tchar where c = ' ';
+     c      
+------------
+           
+(1 row)
+
+select * from tchar where c is null;
+ c 
+---
+(0 rows)
+
+drop table tchar;
+-- test about const str
+select '' is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select ' ' is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ' abc ' is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select length('');
+ length 
+--------
+       
+(1 row)
+
+select length(null);
+ length 
+--------
+       
+(1 row)
+
+select length(' ');
+ length 
+--------
+      1
+(1 row)
+
+select length(' abc ');
+ length 
+--------
+      5
+(1 row)
+
+select '123'::char(3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::char(3) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::varchar(3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::varchar(3) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::text is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::text is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::clob is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::clob is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::blob is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::blob is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::bytea is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::bytea is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::int1 is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::int1 is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::int2 is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::int2 is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::int is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::int is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::int8 is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::int8 is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::float4 is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::float4 is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::float8 is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::float8 is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '123'::numeric is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select ''::numeric is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select ''::date is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select ''::time is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select ''::timestamp is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- test about var str
+create table result_tab ("statement" text, result text);
+declare
+str_empty text := '';
+str_space text := ' ';
+str_num text := '123';
+str text := ' abc ';
+begin
+    insert into result_tab select 'select str_empty is null', str_empty is null;
+    insert into result_tab select 'select str_space is null', str_space is null;
+    insert into result_tab select 'select str is null', str is null;
+    insert into result_tab select 'select length(str_empty)', length(str_empty);
+    insert into result_tab select 'select length(null)', length(null);
+    insert into result_tab select 'select length(str_space)', length(str_space);
+    insert into result_tab select 'select length(str)', length(str);
+    insert into result_tab select 'select str_num::text is null', str_num::text is null;
+    insert into result_tab select 'select str_empty::text is null', str_empty::text is null;
+    insert into result_tab select 'select str_num::bytea is null;', str_num::bytea is null;
+    insert into result_tab select 'select str_empty::bytea is null', str_empty::bytea is null;
+    insert into result_tab select 'select str_num::int is null', str_num::int is null;
+    insert into result_tab select 'select str_num::float8 is null', str_num::float8 is null;
+    insert into result_tab select 'select str_num::numeric is null', str_num::numeric is null;
+end;
+/
+select * from result_tab;
+            statement            | result 
+---------------------------------+--------
+ select str_empty is null        | true
+ select str_space is null        | false
+ select str is null              | false
+ select length(str_empty)        | 
+ select length(null)             | 
+ select length(str_space)        | 1
+ select length(str)              | 5
+ select str_num::text is null    | false
+ select str_empty::text is null  | true
+ select str_num::bytea is null;  | false
+ select str_empty::bytea is null | true
+ select str_num::int is null     | false
+ select str_num::float8 is null  | false
+ select str_num::numeric is null | false
+(14 rows)
+
+-- test about function which return str
+SELECT overlay('hello' placing 'world' from 2 for 3 ) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT overlay('hello' placing '' from 1 for 5 ) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT quote_ident('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT quote_literal('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT quote_nullable('') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT reverse('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT ''||'' is null;
+ ?column? 
+----------
+ true
+(1 row)
+
+SELECT ''||41;
+ ?column? 
+----------
+ 41
+(1 row)
+
+SELECT lower('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT initcap('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT ascii('');
+ ascii 
+-------
+      
+(1 row)
+
+SELECT lpad('yes', 5) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT lpad('yes', 1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT lpad('yes', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT lpad('yes', 5, 'z') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT lpad('yes', 1, 'z') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT lpad('yes', 0, 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT rpad('yes', 5) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT rpad('yes', 1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT rpad('yes', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT rpad('yes', 5, 'z') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT rpad('yes', 1, 'z') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT rpad('yes', 0, 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT btrim('yzy', 'y') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT btrim('zzz', 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT ltrim('yzy', 'y') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT ltrim('zzz', 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT rtrim('yzy', 'y') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT rtrim('zzz', 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT btrim(' z ') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT btrim('   ') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT ltrim(' z ') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT ltrim('   ') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT rtrim(' z ') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT rtrim('   ') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT translate('xyx', 'x', 'z') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT translate('xzx', 'x', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT translate('xxx', 'x', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT translate('xxx', 'x', ' ') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT translate('xxx', '', 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT translate('', 'x', 'z') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT repeat('a', 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT repeat('a', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT repeat(' ', 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT repeat(' ', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT repeat('', 3) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT repeat('', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT pg_catalog.oidvectortypes('123 456') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT pg_catalog.oidvectortypes('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT pg_catalog.oidvectortypes(' ') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_replace('Thomas', '.[mN]a.', 'M') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT regexp_replace('omas', '.[mN]a.', '');
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+SELECT regexp_replace('Thomas', '', 'M') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT regexp_replace('', '.[mN]a.', 'M') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_replace('omas', '.[mN]a.', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_replace('foobarbaz','b(..)', E'X\\1Y', 2, 2, 'n') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT regexp_replace('bar','b(..)', '', 1, 1, 'n') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_replace('foobarbaz','b(..)', E'X\\1Y', 'g') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT regexp_replace('abc','abc', '', 'g') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_substr('str','st') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT regexp_substr('str','[ac]') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_substr('str','') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_substr('','st') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT regexp_split_to_table('hello world', E'\\s+') is null;
+ ?column? 
+----------
+ f
+ f
+(2 rows)
+
+SELECT regexp_split_to_table('', E'\\s+') is null;
+ ?column? 
+----------
+(0 rows)
+
+SELECT regexp_split_to_table('hello world', '') is null;
+ ?column? 
+----------
+(0 rows)
+
+SELECT regexp_split_to_table('hello world', null) is null;
+ ?column? 
+----------
+(0 rows)
+
+SELECT substr('123', 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substr('123', 4) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substr('123', 1, 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substr('123', 1, 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substr('123', 1, -1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substr('123'::bytea, 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substr('123'::bytea, 4) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substr('123'::bytea, 1, 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substr('123'::bytea, 1, 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substr('123'::bytea, 1, -1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substrb('123', 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substrb('123', 4) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substrb('123', 1, 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substrb('123', 1, 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substrb('123', 1, -1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substring('123', 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substring('123', 4) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substring('123', 1, 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substring('123', 1, 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT substring('123', 1, -1) is null;
+ERROR:  negative substring length not allowed
+SELECT substring('123'::bytea, 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substring('123'::bytea, 4) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substring('123'::bytea, 1, 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substring('123'::bytea, 1, 0) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT substring('123'::bytea, 1, -1) is null;
+ERROR:  negative substring length not allowed
+SELECT replace('abc', 'ab', 'd') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('abc', 'abc', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT replace('abc', 'abc', null) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT replace('abc', 'ab', '') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('abc', 'ab', null) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('abc', '', 'd') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('abc', null, 'd') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('', 'ab', 'd') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT replace(null, 'ab', 'd') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT replace('abc', 'ab') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('abc', 'abc') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT replace('abc', '') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('abc', null) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT replace('', 'ab') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT replace(null, 'ab') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part('1~2~3', '~', 3) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT split_part('1~2~3~', '~', 4) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part('1~2~3', '~', -1) is null;
+ERROR:  field position must be greater than zero
+SELECT split_part('1~2~3', '', 1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part('1~2~3', '', 2) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part('1~2~3', null, 1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part('', '~', 1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part(null, '~', 1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT split_part('1~2~3', '|', 1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT split_part('1~2~3', '|', 2) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT concat('Hello', ' World!') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT concat('', ' World!') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT concat('Hello', '') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT concat('', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT concat('Hello', null) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT concat(null, ' World!') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT concat_ws(',', 'ABCDE', 2, NULL, 22);
+ concat_ws  
+------------
+ ABCDE,2,22
+(1 row)
+
+SELECT concat_ws('', 'ABCDE', 2, NULL, 22);
+ concat_ws 
+-----------
+ 
+(1 row)
+
+SELECT concat_ws(',', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT concat_ws('', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT left('abcde', 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT left('abcde', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT left('abcde', -1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT left('', 1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT left('', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT left('', -1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT right('abcde', 2) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT right('abcde', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT right('abcde', -1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT right('', 1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT right('', 0) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT right('', -1) is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT format('Hello %s', 'World');
+   format    
+-------------
+ Hello World
+(1 row)
+
+SELECT format('Hello %s', '');
+ format 
+--------
+ Hello 
+(1 row)
+
+SELECT format('%s', 'World');
+ format 
+--------
+ World
+(1 row)
+
+SELECT format('', 'World');
+ format 
+--------
+ 
+(1 row)
+
+SELECT format('', '');
+ format 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[1, 2, 3, NULL, 5], ',') AS RESULT;
+ result  
+---------
+ 1,2,3,5
+(1 row)
+
+SELECT array_to_string(ARRAY[1, 2, 3, NULL, 5], '') AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[1, 2, 3, NULL, 5], null) AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[NULL], '') AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[NULL], null) AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[1, 2, 3, NULL, 5], ',', '*') AS RESULT;
+  result   
+-----------
+ 1,2,3,*,5
+(1 row)
+
+SELECT array_to_string(ARRAY[1, 2, 3, NULL, 5], '', '') AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[1, 2, 3, NULL, 5], null, null) AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[NULL], '', '') AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT array_to_string(ARRAY[NULL], null, null) AS RESULT;
+ result 
+--------
+ 
+(1 row)
+
+SELECT nlssort('A', 'nls_sort=schinese_pinyin_m') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT nlssort('', 'nls_sort=schinese_pinyin_m') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT nlssort('A', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT convert('text_in_utf8'::bytea, 'UTF8', 'GBK') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT convert(''::bytea, 'UTF8', 'GBK') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT convert('text_in_utf8'::bytea, '', 'GBK') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT convert('text_in_utf8'::bytea, 'UTF8', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT convert_from('text_in_utf8'::bytea, 'UTF8') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT convert_from(''::bytea, 'UTF8') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT convert_from('text_in_utf8'::bytea, '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT convert_to('text_in_utf8'::bytea, 'UTF8') is null;
+ERROR:  function convert_to(bytea, unknown) does not exist
+LINE 1: SELECT convert_to('text_in_utf8'::bytea, 'UTF8') is null;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT convert_to(''::bytea, 'UTF8') is null;
+ERROR:  function convert_to(bytea, unknown) does not exist
+LINE 1: SELECT convert_to(''::bytea, 'UTF8') is null;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT convert_to('text_in_utf8'::bytea, '') is null;
+ERROR:  function convert_to(bytea, unknown) does not exist
+LINE 1: SELECT convert_to('text_in_utf8'::bytea, '') is null;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT md5('ABC') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT md5('') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT sha('ABC') is null;
+ERROR:  sha/sha1 is supported only in B-format database
+SELECT sha('') is null;
+ERROR:  sha/sha1 is supported only in B-format database
+SELECT sha1('ABC') is null;
+ERROR:  sha/sha1 is supported only in B-format database
+SELECT sha1('') is null;
+ERROR:  sha/sha1 is supported only in B-format database
+SELECT sha2('ABC') is null;
+ERROR:  function sha2(unknown) does not exist
+LINE 1: SELECT sha2('ABC') is null;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT sha2('') is null;
+ERROR:  function sha2(unknown) does not exist
+LINE 1: SELECT sha2('') is null;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT decode('MTIzAAE=', 'base64') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT decode('', 'base64') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT decode('MTIzAAE=', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select similar_escape('\s+ab','2') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select similar_escape('\s+ab','') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select similar_escape('','2') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select svals('"aa"=>"bb"') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select svals('') is null;
+ ?column? 
+----------
+(0 rows)
+
+select tconvert('aa', 'bb') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select tconvert('', 'bb') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select tconvert('aa', '') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select tconvert('', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT encode(E'123\\000\\001', 'base64') is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT encode('', 'base64') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT encode(E'123\\000\\001', '') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- test about vec
+CREATE TABLE vec_t1
+(
+    c varchar
+) WITH (ORIENTATION = COLUMN);
+CREATE TABLE vec_t2
+(
+    c varchar not null
+) WITH (ORIENTATION = COLUMN);
+insert into vec_t1 values('');
+insert into vec_t1 values(' ');
+insert into vec_t1 values('abc');
+insert into vec_t2 values('');
+ERROR:  null value in column "c" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert into vec_t2 values(' ');
+insert into vec_t2 values('abc');
+select c as input, substr(c, 1, 2) as result, result is null as is_null from vec_t1;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | f
+ abc   | ab     | f
+(3 rows)
+
+select c as input, substr(c, 1, 1) as result, result is null as is_null from vec_t1;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | f
+ abc   | a      | f
+(3 rows)
+
+select c as input, substr(c, 0, 2) as result, result is null as is_null from vec_t1;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | f
+ abc   | ab     | f
+(3 rows)
+
+select c as input, substr(c, 1, 0) as result, result is null as is_null from vec_t1;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | t
+ abc   |        | t
+(3 rows)
+
+select c as input, substr(c, 1, -1) as result, result is null as is_null from vec_t1;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | t
+ abc   |        | t
+(3 rows)
+
+delete from vec_t1;
+insert into vec_t1 values('');
+insert into vec_t1 values('yzy');
+insert into vec_t1 values('zzz');
+insert into vec_t1 values(' z ');
+insert into vec_t1 values('   ');
+SELECT c as input, btrim(c, 'y') as result, result is null as isnull from vec_t1;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | z      | f
+ zzz   | zzz    | f
+  z    |  z     | f
+       |        | f
+(5 rows)
+
+SELECT c as input, btrim(c, 'z') as result, result is null as isnull from vec_t1;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yzy    | f
+ zzz   |        | t
+  z    |  z     | f
+       |        | f
+(5 rows)
+
+SELECT c as input, btrim(c) as result, result is null as isnull from vec_t1;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yzy    | f
+ zzz   | zzz    | f
+  z    | z      | f
+       |        | t
+(5 rows)
+
+SELECT c as input, rtrim(c, 'y') as result, result is null as isnull from vec_t1;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yz     | f
+ zzz   | zzz    | f
+  z    |  z     | f
+       |        | f
+(5 rows)
+
+SELECT c as input, rtrim(c, 'z') as result, result is null as isnull from vec_t1;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yzy    | f
+ zzz   |        | t
+  z    |  z     | f
+       |        | f
+(5 rows)
+
+SELECT c as input, rtrim(c) as result, result is null as isnull from vec_t1;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yzy    | f
+ zzz   | zzz    | f
+  z    |  z     | f
+       |        | t
+(5 rows)
+
+-- test row to vec
+set try_vector_engine_strategy=force;
+create table vec_t3(c text);
+insert into vec_t3 values('');
+insert into vec_t3 values(' ');
+insert into vec_t3 values('abc');
+explain analyze select c as input, substr(c, 1, 2) as result, result is null as is_null from vec_t3;
+--?QUERY PLAN.*
+--?.*
+--?Row Adapter.*
+--?Vector Adapter(type: BATCH MODE).*
+--?Seq Scan on vec_t3.*
+--?.*
+(4 rows)
+
+select c as input, substr(c, 1, 2) as result, result is null as is_null from vec_t3;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | f
+ abc   | ab     | f
+(3 rows)
+
+select c as input, substr(c, 1, 1) as result, result is null as is_null from vec_t3;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | f
+ abc   | a      | f
+(3 rows)
+
+select c as input, substr(c, 0, 2) as result, result is null as is_null from vec_t3;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | f
+ abc   | ab     | f
+(3 rows)
+
+select c as input, substr(c, 1, 0) as result, result is null as is_null from vec_t3;
+ input | result | is_null 
+-------+--------+---------
+       |        | t
+       |        | t
+ abc   |        | t
+(3 rows)
+
+delete from vec_t3;
+insert into vec_t3 values('');
+insert into vec_t3 values('yzy');
+insert into vec_t3 values('zzz');
+insert into vec_t3 values(' z ');
+insert into vec_t3 values('   ');
+explain analyze SELECT c as input, rtrim(c, 'y') as result, result is null as isnull from vec_t3;
+--?QUERY PLAN.*
+--?.*
+--?Row Adapter.*
+--?Vector Adapter(type: BATCH MODE).*
+--?Seq Scan on vec_t3.*
+--?.*
+(4 rows)
+
+SELECT c as input, rtrim(c, 'y') as result, result is null as isnull from vec_t3;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yz     | f
+ zzz   | zzz    | f
+  z    |  z     | f
+       |        | f
+(5 rows)
+
+SELECT c as input, rtrim(c, 'z') as result, result is null as isnull from vec_t3;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yzy    | f
+ zzz   |        | t
+  z    |  z     | f
+       |        | f
+(5 rows)
+
+SELECT c as input, rtrim(c) as result, result is null as isnull from vec_t3;
+ input | result | isnull 
+-------+--------+--------
+       |        | t
+ yzy   | yzy    | f
+ zzz   | zzz    | f
+  z    |  z     | f
+       |        | t
+(5 rows)
+
+create table pad2_tab(a text, b int);
+insert into pad2_tab values('yes', 5), ('yes', 1), ('yes', 0);
+create table pad3_tab(a text, b int, c text);
+insert into pad3_tab values('yes', 5, 'z'), ('yes', 1, 'z'), ('yes', 0, 'z');
+SELECT a as p1, b as p2, lpad(a, b) is null from pad2_tab;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yes |  5 | f
+ yes |  1 | f
+ yes |  0 | t
+(3 rows)
+
+SELECT a as p1, b as p2, lpad(a, b, c) is null from pad3_tab;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yes |  5 | f
+ yes |  1 | f
+ yes |  0 | t
+(3 rows)
+
+SELECT a as p1, b as p2, rpad(a, b) is null from pad2_tab;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yes |  5 | f
+ yes |  1 | f
+ yes |  0 | t
+(3 rows)
+
+SELECT a as p1, b as p2, rpad(a, b, c) is null from pad3_tab;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yes |  5 | f
+ yes |  1 | f
+ yes |  0 | t
+(3 rows)
+
+create table trim2(a text, b text);
+insert into trim2 values('yzy', 'y'), ('zzz', 'z');
+create table trim1(a text);
+insert into trim1 values(' z '), ('   ');
+SELECT a as p1, b as p2, btrim(a, b) is null from trim2;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yzy | y  | f
+ zzz | z  | t
+(2 rows)
+
+SELECT a as p1, b as p2, ltrim(a, b) is null from trim2;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yzy | y  | f
+ zzz | z  | t
+(2 rows)
+
+SELECT a as p1, b as p2, rtrim(a, b) is null from trim2;
+ p1  | p2 | ?column? 
+-----+----+----------
+ yzy | y  | f
+ zzz | z  | t
+(2 rows)
+
+SELECT a as p1, btrim(a) is null from trim1;
+ p1  | ?column? 
+-----+----------
+  z  | f
+     | t
+(2 rows)
+
+SELECT a as p1, ltrim(a) is null from trim1;
+ p1  | ?column? 
+-----+----------
+  z  | f
+     | t
+(2 rows)
+
+SELECT a as p1, rtrim(a) is null from trim1;
+ p1  | ?column? 
+-----+----------
+  z  | f
+     | t
+(2 rows)
+
+create table translate3(a text, b text, c text);
+insert into translate3 values('xyx', 'x', 'z'), ('xzx', 'x', ''), ('xxx', 'x', ''), ('xxx', 'x', ' '), ('xxx', '', 'z'), ('', 'x', 'z');
+SELECT a as p1, b as p2, c as p3, translate(a, b, c) is null from translate3;
+ p1  | p2 | p3 | ?column? 
+-----+----+----+----------
+ xyx | x  | z  | f
+ xzx | x  |    | t
+ xxx | x  |    | t
+ xxx | x  |    | f
+ xxx |    | z  | t
+     | x  | z  | t
+(6 rows)
+
+create table repeat2 (a text, b int);
+insert into repeat2 values('a', 3), ('a', 0), (' ', 3), ('', 3), ('', 0);
+SELECT a as p1, b as p2, repeat(a, b) is null from repeat2;
+ p1 | p2 | ?column? 
+----+----+----------
+ a  |  3 | f
+ a  |  0 | t
+    |  3 | f
+    |  3 | t
+    |  0 | t
+(5 rows)
+
+create table oidvectortypes1 (a oidvector);
+insert into oidvectortypes1 values ('123 456'), (''), (' ');
+SELECT a as p1, oidvectortypes(a) is null from oidvectortypes1;
+   p1    | ?column? 
+---------+----------
+ 123 456 | f
+         | t
+         | t
+(3 rows)
+
+create table regexp_replace3 (a text, b text, c text);
+insert into regexp_replace3 values('Thomas', '.[mN]a.', 'M'), ('omas', '.[mN]a.', ''), ('Thomas', '', 'M'), ('', '.[mN]a.', 'M'), ('omas', '.[mN]a.', '');
+SELECT a as p1, b as p2, c as p3, regexp_replace(a, b, c) is null from regexp_replace3;
+   p1   |   p2    | p3 | ?column? 
+--------+---------+----+----------
+ Thomas | .[mN]a. | M  | f
+ omas   | .[mN]a. |    | t
+ Thomas |         | M  | f
+        | .[mN]a. | M  | t
+ omas   | .[mN]a. |    | t
+(5 rows)
+
+create table regexp_replace6 (a text, b text, c text, d int, e int, f text);
+insert into regexp_replace6 values ('foobarbaz','b(..)', E'X\\1Y', 2, 2, 'n'), ('bar','b(..)', '', 1, 1, 'n');
+SELECT a as p1, b as p2, c as p3, d as p4, e as p5, f as p6, regexp_replace(a, b, c, d, e, f) is null from regexp_replace6;
+    p1     |  p2   |  p3  | p4 | p5 | p6 | ?column? 
+-----------+-------+------+----+----+----+----------
+ foobarbaz | b(..) | X\1Y |  2 |  2 | n  | f
+ bar       | b(..) |      |  1 |  1 | n  | t
+(2 rows)
+
+create table regexp_split_to_table2 (a text, b text);
+insert into regexp_split_to_table2 values('hello world', E'\\s+'), ('', E'\\s+'), ('hello world', ''), ('hello world', null);
+SELECT a as p1, b as p2, regexp_split_to_table(a, b) is null from regexp_split_to_table2;
+     p1      | p2  | ?column? 
+-------------+-----+----------
+ hello world | \s+ | f
+ hello world | \s+ | f
+(2 rows)
+
+create table substr2(a bytea, b int);
+insert into substr2 values ('123'::bytea, 3), ('123'::bytea, 4);
+select a as p1, b as p2, substr(a, b) is null from substr2;
+    p1    | p2 | ?column? 
+----------+----+----------
+ \x313233 |  3 | f
+ \x313233 |  4 | t
+(2 rows)
+
+create table substr3(a bytea, b int, c int);
+insert into substr3 values('123'::bytea, 1, 2), ('123'::bytea, 1, 0);
+select a as p1, b as p2, c as p3, substr(a, b, c) is null from substr3;
+    p1    | p2 | p3 | ?column? 
+----------+----+----+----------
+ \x313233 |  1 |  2 | f
+ \x313233 |  1 |  0 | t
+(2 rows)
+
+create table replace3 (a text, b text, c text);
+insert into replace3 values ('abc', 'ab', 'd'), ('abc', 'abc', ''), ('abc', 'abc', ''), ('abc', 'ab', ''), ('abc', 'ab', null), ('abc', '', 'd'), ('abc', null, 'd'), ('', 'ab', 'd'), (null, 'ab', 'd');
+SELECT a as p1, b as p2, c as p3, replace(a, b, c) is null from replace3;
+ p1  | p2  | p3 | ?column? 
+-----+-----+----+----------
+ abc | ab  | d  | f
+ abc | abc |    | t
+ abc | abc |    | t
+ abc | ab  |    | f
+ abc | ab  |    | f
+ abc |     | d  | f
+ abc |     | d  | f
+     | ab  | d  | t
+     | ab  | d  | t
+(9 rows)
+
+create table replace2 (a text, b text);
+insert into replace2 values('abc', 'ab'), ('abc', 'abc'), ('abc', ''), ('abc', null), ('', 'ab'), (null, 'ab');
+SELECT a as p1, b as p2, replace(a, b) is null from replace2;
+ p1  | p2  | ?column? 
+-----+-----+----------
+ abc | ab  | f
+ abc | abc | t
+ abc |     | f
+ abc |     | f
+     | ab  | t
+     | ab  | t
+(6 rows)
+
+create table split_part3 (a text, b text, c int);
+insert into split_part3 values('1~2~3', '~', 3), ('1~2~3~', '~', 4), ('1~2~3', '', 1), ('1~2~3', null, 1), ('', '~', 1), (null, '~', 1);
+SELECT a as p1, b as p2, c as p3, split_part(a, b, c) is null from split_part3;
+   p1   | p2 | p3 | ?column? 
+--------+----+----+----------
+ 1~2~3  | ~  |  3 | f
+ 1~2~3~ | ~  |  4 | t
+ 1~2~3  |    |  1 | t
+ 1~2~3  |    |  1 | t
+        | ~  |  1 | t
+        | ~  |  1 | t
+(6 rows)
+
+create table array_to_string2(a integer[], b text);
+insert into array_to_string2 values(ARRAY[1, 2, 3, NULL, 5], ','), (ARRAY[1, 2, 3, NULL, 5], ''), (ARRAY[1, 2, 3, NULL, 5], null), (ARRAY[NULL], ''), (ARRAY[NULL], null);
+SELECT a as p1, b as p2, array_to_string(a, b) AS RESULT from array_to_string2;
+       p1       | p2 | result  
+----------------+----+---------
+ {1,2,3,NULL,5} | ,  | 1,2,3,5
+ {1,2,3,NULL,5} |    | 
+ {1,2,3,NULL,5} |    | 
+ {NULL}         |    | 
+ {NULL}         |    | 
+(5 rows)
+
+create table array_to_string3(a integer[], b text, c text);
+insert into array_to_string3 values(ARRAY[1, 2, 3, NULL, 5], ',', '*'), (ARRAY[1, 2, 3, NULL, 5], '', ''), (ARRAY[1, 2, 3, NULL, 5], null, null), (ARRAY[NULL], '', ''), (ARRAY[NULL], null, null);
+SELECT a as p1, b as p2, c as p3, array_to_string(a, b, c) AS RESULT from array_to_string3;
+       p1       | p2 | p3 |  result   
+----------------+----+----+-----------
+ {1,2,3,NULL,5} | ,  | *  | 1,2,3,*,5
+ {1,2,3,NULL,5} |    |    | 
+ {1,2,3,NULL,5} |    |    | 
+ {NULL}         |    |    | 
+ {NULL}         |    |    | 
+(5 rows)
+
+set try_vector_engine_strategy=off;

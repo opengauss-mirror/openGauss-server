@@ -47,6 +47,7 @@
 #include "utils/elog.h"
 #include "commands/sqladvisor.h"
 #include "distributelayer/streamMain.h"
+#include "replication/libpqsw.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
@@ -968,6 +969,13 @@ SPIPlanPtr SPI_prepare(const char *src, int nargs, Oid *argtypes, parse_query_fu
     return SPI_prepare_cursor(src, nargs, argtypes, 0, parser);
 }
 
+#ifdef USE_SPQ
+SPIPlanPtr SPI_prepare_spq(const char *src, int nargs, Oid *argtypes, parse_query_func parser)
+{
+    return SPI_prepare_cursor(src, nargs, argtypes, CURSOR_OPT_SPQ_OK | CURSOR_OPT_SPQ_FORCE, parser);
+}
+#endif
+
 SPIPlanPtr SPI_prepare_cursor(const char *src, int nargs, Oid *argtypes, int cursorOptions, parse_query_func parser)
 {
     _SPI_plan plan;
@@ -1424,6 +1432,22 @@ Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber)
     }
 }
 
+Oid SPI_getcollation(TupleDesc tupdesc, int fnumber)
+{
+    SPI_result = 0;
+
+    if (fnumber > tupdesc->natts || fnumber == 0 || fnumber <= FirstLowInvalidHeapAttributeNumber) {
+        SPI_result = SPI_ERROR_NOATTRIBUTE;
+        return InvalidOid;
+    }
+
+    if (fnumber > 0) {
+        return tupdesc->attrs[fnumber - 1].attcollation;
+    } else {
+        return (SystemAttributeDefinition(fnumber, true, false, false))->attcollation;
+    }
+}
+
 char *SPI_getrelname(Relation rel)
 {
     return pstrdup(RelationGetRelationName(rel));
@@ -1629,6 +1653,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
     AutoDopControl dopControl;
     dopControl.CloseSmp();
 #endif
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
     /*
      * Check that the plan is something the Portal code will special-case as
@@ -1649,6 +1674,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 
     Assert(list_length(plan->plancache_list) == 1);
     plansource = (CachedPlanSource *)linitial(plan->plancache_list);
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(plansource->raw_parse_tree);
 
     SPI_STACK_LOG("begin", NULL, plan);
     /* Push the SPI stack */
@@ -1813,6 +1839,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 
     /* reset flag */
     u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     _SPI_end_call(true);
 
@@ -2283,6 +2310,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
     spi_err_context.arg = (void *)src;
     spi_err_context.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &spi_err_context;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
     /*
      * Parse the request string into a list of raw parse trees.
@@ -2305,6 +2333,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
         Node *parsetree = (Node *)lfirst(list_item);
         List *stmt_list = NIL;
         CachedPlanSource *plansource = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
         // get cachedplan if has any
         enable_spi_gpc = false;
         if (ENABLE_CN_GPC && u_sess->SPI_cxt._current->spi_hash_key != INVALID_SPI_KEY
@@ -2396,6 +2425,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
     plan->plancache_list = plancache_list;
     plan->oneshot = false;
     u_sess->SPI_cxt._current->plan_id = -1;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     /*
      * Pop the error context stack
@@ -2454,6 +2484,7 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
     ErrorContextCallback spi_err_context;
     List *query_string_locationlist = NIL;
     int stmt_num = 0;
+    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     /*
      * Setup error traceback support for ereport()
      */
@@ -2476,6 +2507,14 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
     foreach (list_item, raw_parsetree_list) {
         Node *parsetree = (Node *)lfirst(list_item);
         CachedPlanSource *plansource = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.attr.attr_sql.enableRemoteExcute) {
+            libpqsw_check_ddl_on_primary(CreateCommandTag(parsetree));
+        }
+#endif
+
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && PointerIsValid(query_string_locationlist) &&
             list_length(query_string_locationlist) > 1) {
@@ -2494,6 +2533,7 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_fun
 
     plan->plancache_list = plancache_list;
     plan->oneshot = true;
+    t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
     /*
      * Pop the error context stack
@@ -2606,6 +2646,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
     CachedPlan *cplan = NULL;
     ListCell *lc1 = NULL;
     bool tmp_enable_light_proxy = u_sess->attr.attr_sql.enable_light_proxy;
+    NodeTag old_command_tag = t_thrd.postgres_cxt.cur_command_tag;
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
     bool need_remember_cplan = false;
 
@@ -2666,6 +2707,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
         List *stmt_list = NIL;
 
         spi_err_context.arg = (void *)plansource->query_string;
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(plansource->raw_parse_tree);
 
         /*
          * If this is a one-shot plan, we still need to do parse analysis.
@@ -2956,6 +2998,7 @@ fail:
     }
 
     u_sess->attr.attr_sql.enable_light_proxy = tmp_enable_light_proxy;
+    t_thrd.postgres_cxt.cur_command_tag = old_command_tag;
 
     return my_res;
 }

@@ -707,6 +707,17 @@ static void check_backid_option(char *command_name)
         dbuser = gs_pstrdup(instance_config.conn_opt.pguser);
 }
 
+static void check_dss_input()
+{
+    if (!instance_config.dss.enable_dss && instance_config.dss.vgname != NULL) {
+        instance_config.dss.enable_dss = true;
+    }
+
+    if (instance_config.dss.enable_dss && instance_config.dss.socketpath == NULL) {
+        instance_config.dss.socketpath = getSocketpathFromEnv();
+    }
+}
+
 int main(int argc, char *argv[])
 {
     char       *command = NULL,
@@ -761,7 +772,7 @@ int main(int argc, char *argv[])
     optind += 1;
     /* Parse command line only arguments */
     parse_cmdline_args(argc, argv, command_name);
-    
+
     /* Initialize logger */
     init_logger(backup_path, &instance_config.logger);
     
@@ -829,6 +840,8 @@ int main(int argc, char *argv[])
 
     /* compress_init */
     compress_init();
+
+    check_dss_input();
 
     dss_init();
 
@@ -923,10 +936,7 @@ compress_init(void)
 #ifndef HAVE_LIBZ
         if (instance_config.compress_alg == ZLIB_COMPRESS)
             elog(ERROR, "This build does not support zlib compression");
-        else
 #endif
-        if (instance_config.compress_alg == PGLZ_COMPRESS && num_threads > 1)
-            elog(ERROR, "Multithread backup does not support pglz compression");
     }
 }
 
@@ -956,12 +966,13 @@ static void dss_init(void)
         parse_vgname_args(instance_config.dss.vgname);
 
         /* Check dss connect */
-        if (!dss_exist_dir(instance_config.dss.vgdata)) {
+        struct stat st;
+        if (stat(instance_config.dss.vgdata, &st) != 0 || !S_ISDIR(st.st_mode)) {
             elog(ERROR, "Could not connect dssserver, vgdata: \"%s\", socketpath: \"%s\", check and retry later.",
                  instance_config.dss.vgdata, instance_config.dss.socketpath);
         }
 
-        if (strlen(instance_config.dss.vglog) && !dss_exist_dir(instance_config.dss.vglog)) {
+        if (strlen(instance_config.dss.vglog) && (stat(instance_config.dss.vglog, &st) != 0 || !S_ISDIR(st.st_mode))) {
             elog(ERROR, "Could not connect dssserver, vglog: \"%s\", socketpath: \"%s\", check and retry later.",
                  instance_config.dss.vglog, instance_config.dss.socketpath);
         }

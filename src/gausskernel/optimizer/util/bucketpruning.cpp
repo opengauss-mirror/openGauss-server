@@ -88,7 +88,7 @@ static BucketPruningContext* makePruningContext(
     PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, List* restrictInfo);
 static Expr* RestrictInfoGetExpr(List* restrictInfo);
 static BucketPruningResult* BucketPruningForExpr(BucketPruningContext* bpcxt, Expr* expr);
-static int getConstBucketId(Const* val, int bucketmapsize);
+static int getConstBucketId(Const* val, Oid collation, int bucketmapsize);
 static BucketPruningResult* BucketPruningForBoolExpr(BucketPruningContext* bpcxt, BoolExpr* expr);
 static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, OpExpr* expr);
 static int GetExecBucketId(ExecNodes* exec_nodes, ParamListInfo params);
@@ -635,7 +635,7 @@ static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, 
     }
 
     /* time for pruning */
-    int id = getConstBucketId(constArg, bpcxt->rte->bucketmapsize);
+    int id = getConstBucketId(constArg, varArg->varcollid, bpcxt->rte->bucketmapsize);
 
     if (pg_strcasecmp(opName, "=") == 0) {
         return makePruningResult(id);
@@ -653,7 +653,7 @@ static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, 
  * @in  Const: the const val which we want the bucketid of it
  * @return the bucketid index of the const val
  */
-static int getConstBucketId(Const* val, int bucketmapsize)
+static int getConstBucketId(Const* val, Oid collation, int bucketmapsize)
 {
     uint32 hashval = 0;
     int bucketid = 0;
@@ -662,7 +662,7 @@ static int getConstBucketId(Const* val, int bucketmapsize)
         return 0;
     }
 
-    hashval = compute_hash(val->consttype, val->constvalue, LOCATOR_TYPE_HASH);
+    hashval = compute_hash(val->consttype, val->constvalue, LOCATOR_TYPE_HASH, collation);
 
     bucketid = compute_modulo((unsigned int)(abs((int)hashval)), bucketmapsize);
 

@@ -1,0 +1,33 @@
+create schema not_accept_schema_copy;
+set current_schema to 'not_accept_schema_copy';
+set behavior_compat_options to '';
+create table t ("t_varchar" varchar, "t_text" text, "t_char" char(10), "t_bytea" bytea);
+insert into t values('abc', 'abc', 'abc', 'abc'), ('   ', '   ', '   ', '   '), ('', '', '', '');
+
+create table t_stdin ("t_varchar" varchar, "t_text" text, "t_char" char(10), "t_bytea" bytea);
+create table t_csv ("t_varchar" varchar, "t_text" text, "t_char" char(10), "t_bytea" bytea);
+create table t_text_tab ("t_varchar" varchar, "t_text" text, "t_char" char(10), "t_bytea" bytea);
+create table t_binary ("t_varchar" varchar, "t_text" text, "t_char" char(10), "t_bytea" bytea);
+
+COPY t TO '@abs_srcdir@/data/datanode1/not_accept_t_csv.data' WITH(FORMAT 'csv');
+COPY t TO '@abs_srcdir@/data/datanode1/not_accept_t_text.data' WITH(FORMAT 'text');
+COPY t TO '@abs_srcdir@/data/datanode1/not_accept_t_binary.data' WITH(FORMAT 'binary');
+
+COPY t_csv FROM '@abs_srcdir@/data/datanode1/not_accept_t_csv.data' WITH(FORMAT 'csv');
+COPY t_text_tab FROM '@abs_srcdir@/data/datanode1/not_accept_t_text.data' WITH(FORMAT 'text');
+COPY t_binary FROM '@abs_srcdir@/data/datanode1/not_accept_t_binary.data' WITH(FORMAT 'binary');
+
+SELECT * FROM t;
+SELECT * FROM t_csv;
+SELECT * FROM t_text_tab;
+SELECT * FROM t_binary;
+
+SELECT "t_varchar" is null as "varchar is null", "t_text" is null as "text is null", "t_char" is null as "char is null", "t_bytea" is null as "bytea is null" FROM t;
+SELECT "t_varchar" is null as "varchar is null", "t_text" is null as "text is null", "t_char" is null as "char is null", "t_bytea" is null as "bytea is null" FROM t_csv;
+SELECT "t_varchar" is null as "varchar is null", "t_text" is null as "text is null", "t_char" is null as "char is null", "t_bytea" is null as "bytea is null" FROM t_text_tab;
+SELECT "t_varchar" is null as "varchar is null", "t_text" is null as "text is null", "t_char" is null as "char is null", "t_bytea" is null as "bytea is null" FROM t_binary;
+
+\d t;
+\d t_csv;
+\d t_text;
+\d t_binary;

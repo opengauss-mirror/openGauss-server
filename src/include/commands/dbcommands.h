@@ -76,5 +76,6 @@ extern bool IsSetTableSpace(AlterDatabaseStmt* stmt);
 extern int errdetail_busy_db(int notherbackends, int npreparedxacts);
 extern void PreCleanAndCheckConns(const char* dbname, bool missing_ok);
 #endif
+extern void do_db_drop(Oid dbId, Oid tbSpcId);
 
 #endif /* DBCOMMANDS_H */

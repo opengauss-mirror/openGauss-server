@@ -1066,6 +1066,7 @@ void execute_job(int4 job_id)
         FlushErrorState();
 
         t_thrd.utils_cxt.CurrentResourceOwner = save;
+        ResourceOwnerRelease(save, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
         /* Update last_end_date and  job_status='f' and failure_count++ */
         update_pg_job_info(job_id, Pgjob_Fail, start_date, new_next_date, edata->message, is_scheduler_job);
         elog_job_detail(job_id, what, Pgjob_Fail, edata->message);
@@ -1583,7 +1584,7 @@ void RemoveJobById(Oid objectId)
         heap_endscan(scan);
         if (!HeapTupleIsValid(cp_tuple)) {
             heap_close(relation, RowExclusiveLock);
-            return;
+            PG_TRY_RETURN();
         }
         /* If remove job by function remove_job, we should check the permission. */
         if (ischeck) {

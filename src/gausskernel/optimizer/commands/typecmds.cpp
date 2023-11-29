@@ -83,6 +83,8 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/pg_object.h"
 
 /* result structure for get_rels_with_domain() */
 typedef struct {
@@ -644,6 +646,20 @@ ObjectAddress DefineType(List* names, List* parameters)
  */
 void RemoveTypeById(Oid typeOid)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    GsDependObjDesc ref_obj;
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+        gsplsql_init_gs_depend_obj_desc(&ref_obj);
+        char relkind = get_rel_relkind(typeOid);
+        if (relkind == RELKIND_COMPOSITE_TYPE || relkind == '\0') {
+            ref_obj.name = NULL;
+            Oid elem_oid = get_array_internal_depend_type_oid(typeOid);
+            if (!OidIsValid(elem_oid)) {
+                gsplsql_get_depend_obj_by_typ_id(&ref_obj, typeOid, InvalidOid, true);
+            }
+        }
+    }
+#endif
     Relation relation;
     HeapTuple tup;
 
@@ -682,6 +698,37 @@ void RemoveTypeById(Oid typeOid)
     ReleaseSysCache(tup);
 
     heap_close(relation, RowExclusiveLock);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM && NULL != ref_obj.name) {
+        CommandCounterIncrement();
+        ref_obj.refPosType = GSDEPEND_REFOBJ_POS_IN_TYPE;
+        gsplsql_remove_type_gs_dependency(&ref_obj);
+        if (enable_plpgsql_gsdependency_guc()) {
+            ref_obj.type = GSDEPEND_OBJECT_TYPE_TYPE;
+            (void)gsplsql_remove_ref_dependency(&ref_obj);
+            Oid pkg_oid = GetTypePackageOid(typeOid);
+            if (OidIsValid(pkg_oid)) {
+                bool invalid_pkg = true;
+                if (NULL != u_sess->plsql_cxt.curr_compile_context &&
+                    NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+                    invalid_pkg = pkg_oid ==
+                        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+                }
+                if (invalid_pkg) {
+                    bool is_spec = ref_obj.name[0] != '$';
+                    SetPgObjectValid(pkg_oid, is_spec ? OBJECT_TYPE_PKGSPEC : OBJECT_TYPE_PKGBODY, false);
+                    if (is_spec) {
+                        SetPgObjectValid(pkg_oid, OBJECT_TYPE_PKGBODY, false);
+                    }
+                    gsplsql_set_pkg_func_status(GetPackageNamespace(pkg_oid), pkg_oid, false);
+                }
+            }
+        }
+        pfree_ext(ref_obj.schemaName);
+        pfree_ext(ref_obj.packageName);
+        pfree_ext(ref_obj.name);
+    }
+#endif
 }
 
 /*
@@ -878,7 +925,8 @@ ObjectAddress DefineDomain(CreateDomainStmt* stmt)
                      * Cook the constr->raw_expr into an expression. Note:
                      * name is strictly for error message
                      */
-                    defaultExpr = cookDefault(pstate, constr->raw_expr, basetypeoid, basetypeMod, domainName, 0);
+                    defaultExpr = cookDefault(pstate, constr->raw_expr, basetypeoid, basetypeMod,
+                        baseType->typcollation, domainName, 0);
 
                     /*
                      * If the expression is just a NULL constant, we treat it
@@ -1318,11 +1366,11 @@ ObjectAddress DefineSet(CreateSetStmt *stmt)
         -1,                              /* typMod (Domains only) */
         0,                               /* Array dimensions of typbasetype */
         false,                           /* Type NOT NULL */
-        InvalidOid);                     /* type's collation */
+        100);                            /* type's collation */
 
     /* Enter the set's values into pg_set */
     setTypeOid=address.objectId;
-    SetValuesCreate(setTypeOid, stmt->typname->typmods);
+    SetValuesCreate(setTypeOid, stmt->typname->typmods, stmt->set_collation);
     stmt->typname->typeOid = setTypeOid;
     stmt->typname->typmods = NIL;
     return address;
@@ -2278,8 +2326,8 @@ ObjectAddress AlterDomainDefault(List* names, Node* defaultRaw)
          * Cook the colDef->raw_expr into an expression. Note: Name is
          * strictly for error message
          */
-        defaultExpr =
-            cookDefault(pstate, defaultRaw, typTup->typbasetype, typTup->typtypmod, NameStr(typTup->typname), 0);
+        defaultExpr = cookDefault(pstate, defaultRaw, typTup->typbasetype, typTup->typtypmod,
+            typTup->typcollation, NameStr(typTup->typname), 0);
         /*
          * If the expression is just a NULL constant, we treat the command
          * like ALTER ... DROP DEFAULT.  (But see note for same test in
@@ -3282,6 +3330,14 @@ ObjectAddress RenameType(RenameStmt* stmt)
     }
 #endif
 
+    if (enable_plpgsql_gsdependency_guc() &&
+        gsplsql_is_object_depend(typeOid, GSDEPEND_OBJECT_TYPE_TYPE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                errmsg("The rename operator of %s is not allowed, because it is referenced by the other object.",
+                    TypeNameToString(typname))));
+    }
+
     /*
      * If type is composite we need to rename associated pg_class entry too.
      * RenameRelationInternal will call RenameTypeInternal automatically.
@@ -3652,7 +3708,7 @@ Oid AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses* objsMoved)
  * Returns the type's old namespace OID.
  */
 Oid AlterTypeNamespaceInternal(
-    Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved)
+    Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved, char* newTypeName)
 {
     Relation rel;
     HeapTuple tup;
@@ -3686,7 +3742,8 @@ Oid AlterTypeNamespaceInternal(
     CheckSetNamespace(oldNspOid, nspOid, TypeRelationId, typeOid);
 
     /* check for duplicate name (more friendly than unique-index failure) */
-    if (SearchSysCacheExists2(TYPENAMENSP, CStringGetDatum(NameStr(typform->typname)), ObjectIdGetDatum(nspOid)))
+    char* checkTypeName = (newTypeName == NULL) ? NameStr(typform->typname) : newTypeName;
+    if (SearchSysCacheExists2(TYPENAMENSP, CStringGetDatum(checkTypeName), ObjectIdGetDatum(nspOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("type \"%s\" already exists in schema \"%s\"",
@@ -3708,6 +3765,9 @@ Oid AlterTypeNamespaceInternal(
      * tup is a copy, so we can scribble directly on it
      */
     typform->typnamespace = nspOid;
+    if (newTypeName != NULL) {
+    	(void)namestrcpy(&(typform->typname), newTypeName);
+    }
 
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
@@ -3755,8 +3815,10 @@ Oid AlterTypeNamespaceInternal(
     add_exact_object_address(&thisobj, objsMoved);
 
     /* Recursively alter the associated array type, if any */
-    if (OidIsValid(arrayOid))
-        AlterTypeNamespaceInternal(arrayOid, nspOid, true, true, objsMoved);
+    if (OidIsValid(arrayOid)) {
+        AlterTypeNamespaceInternal(arrayOid, nspOid, true, true, objsMoved,
+                                    (newTypeName == NULL) ? NULL : makeArrayTypeName(newTypeName, nspOid));
+    }
 
     return oldNspOid;
 }

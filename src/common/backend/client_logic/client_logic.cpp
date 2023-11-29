@@ -54,7 +54,7 @@
 #include "postgres_ext.h"
 #include "catalog/pg_proc.h"
 
-const size_t ENCRYPTED_VALUE_MIN_LENGTH = 170;
+const size_t ENCRYPTED_VALUE_MIN_LENGTH = 116;
 const size_t ENCRYPTED_VALUE_MAX_LENGTH = 1024;
 static bool get_cmk_name(const Oid global_key_id, NameData &cmk_name);
 

@@ -149,6 +149,8 @@ static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo,
 static RestrictInfo* expand_indexqual_rowcompare(RestrictInfo* rinfo, IndexOptInfo* index, int indexcol);
 static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* prefix,
     Pattern_Prefix_Status pstatus, int prefixkey_len);
+static List* prefix_quals_with_encdoing(Node* leftop, Oid opfamily, Oid collation, Const* prefix,
+    Pattern_Prefix_Status pstatus, int prefixkey_len);
 static List* network_prefix_quals(Node* leftop, Oid expr_op, Oid opfamily, Datum rightop);
 static Datum string_to_datum(const char* str, Oid datatype);
 static Const* string_to_const(const char* str, Oid datatype);
@@ -3558,7 +3560,7 @@ static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo,
         case OID_BYTEA_LIKE_OP:
             if (!op_in_opfamily(expr_op, opfamily)) {
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
+                return prefix_quals_with_encdoing(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3568,7 +3570,7 @@ static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo,
             if (!op_in_opfamily(expr_op, opfamily)) {
                 /* the right-hand const is type text for all of these */
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like_IC, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
+                return prefix_quals_with_encdoing(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3578,7 +3580,7 @@ static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo,
             if (!op_in_opfamily(expr_op, opfamily)) {
                 /* the right-hand const is type text for all of these */
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
+                return prefix_quals_with_encdoing(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3588,7 +3590,7 @@ static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo,
             if (!op_in_opfamily(expr_op, opfamily)) {
                 /* the right-hand const is type text for all of these */
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex_IC, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
+                return prefix_quals_with_encdoing(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -4008,6 +4010,23 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
     return result;
 }
 
+static List* prefix_quals_with_encdoing(Node* leftop, Oid opfamily, Oid collation, Const* prefix_const,
+    Pattern_Prefix_Status pstatus, int prefixkey_len)
+{
+    List* result = NULL;
+    int tmp_encoding = get_valid_charset_by_collation(prefix_const->constcollid);
+    int db_encoding = GetDatabaseEncoding();
+
+    if (tmp_encoding == db_encoding) {
+        return prefix_quals(leftop, opfamily, collation, prefix_const, pstatus, prefixkey_len);
+    }
+
+    DB_ENCODING_SWITCH_TO(tmp_encoding);
+    result = prefix_quals(leftop, opfamily, collation, prefix_const, pstatus, prefixkey_len);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
+}
+
 /*
  * Given a leftop and a rightop, and a inet-family sup/sub operator,
  * generate suitable indexqual condition(s).  expr_op is the original
@@ -4231,10 +4250,11 @@ static Const* prefix_const_node(Const* con, int prefix_len, Oid datatype)
             return makeConst(datatype, -1, con->constcollid, con->constlen, prefix_value, false, false);
         }
     } else {
+        int charset = get_valid_charset_by_collation(con->constcollid);
         /* length of characters */
-        prefix_const_len = text_length(con->constvalue);
+        prefix_const_len = text_length_with_encoding(con->constvalue, charset);
         if (prefix_len < prefix_const_len) {
-            prefix_value = PointerGetDatum(text_substring(con->constvalue, 1, prefix_len, false));
+            prefix_value = PointerGetDatum(text_substring_with_encoding(con->constvalue, 1, prefix_len, false, charset));
             return makeConst(datatype, -1, con->constcollid, con->constlen, prefix_value, false, false);
         }
     }

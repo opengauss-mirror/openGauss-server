@@ -617,11 +617,14 @@ extern DefaultACLInfo* getDefaultACLs(Archive* fout, int* numDefaultACLs);
 extern void getExtensionMembership(Archive* fout, ExtensionInfo extinfo[], int numExtensions);
 extern void help(const char* progname);
 extern bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname);
+extern uint32 GetVersionNumFromServer(Archive* fout);
 extern uint32 GetVersionNum(Archive* fout);
 extern void getPublications(Archive *fout);
 extern void getPublicationTables(Archive *fout, TableInfo tblinfo[], int numTables);
 extern void getSubscriptions(Archive *fout);
 extern EventTriggerInfo *getEventTriggers(Archive *fout, int *numEventTriggers);
+bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName);
+bool TabExists(Archive* fout, const char* schemaName, const char* tabName);
 
 #ifdef GSDUMP_LLT
 void stopLLT();

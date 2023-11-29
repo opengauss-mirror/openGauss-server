@@ -89,6 +89,8 @@
 #include "tcop/utility.h"
 #include "tsearch/ts_type.h"
 #include "commands/comment.h"
+#include "catalog/gs_dependencies_fn.h"
+#include "utils/sec_rls_utils.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
@@ -135,11 +137,12 @@ static void CreateFunctionComment(Oid funcOid, List* options, bool lock = false)
  * validator, so as not to produce a NOTICE and then an ERROR for the same
  * condition.)
  */
-static void compute_return_type(
-    TypeName* returnType, Oid languageOid, Oid* prorettype_p, bool* returnsSet_p, bool fenced, int startLineNumber)
+void compute_return_type(
+    TypeName* returnType, Oid languageOid, Oid* prorettype_p, bool* returnsSet_p, bool fenced, int startLineNumber,
+    TypeDependExtend* type_depend_extend, bool is_refresh_head)
 {
-    Oid rettype;
-    Type typtup;
+    Oid rettype = InvalidOid;
+    Type typtup = NULL;
     AclResult aclresult;
     Oid typowner = InvalidOid;
     ObjectAddress address;
@@ -150,7 +153,11 @@ static void compute_return_type(
      */
     bool isalter = false;
 
-    typtup = LookupTypeName(NULL, returnType, NULL);
+    if (enable_plpgsql_gsdependency()) {
+        typtup = LookupTypeName(NULL, returnType, NULL, true, type_depend_extend);
+    } else {
+        typtup = LookupTypeName(NULL, returnType, NULL);
+    }
 
     /*
      * If the type is relation, then we check
@@ -161,8 +168,8 @@ static void compute_return_type(
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("return type '%s' must be in installation group", TypeNameToString(returnType))));
     }
-
-    if (typtup) {
+    TypeTupStatus typStatus = GetTypeTupStatus(typtup);
+    if (NormalTypeTup == typStatus) {
         if (!((Form_pg_type)GETSTRUCT(typtup))->typisdefined) {
             if (languageOid == SQLlanguageId)
                 ereport(ERROR,
@@ -217,43 +224,53 @@ static void compute_return_type(
             (languageOid != INTERNALlanguageId && languageOid != ClanguageId)) {
             const char* message = "type does not exist";
             InsertErrorMessage(message, startLineNumber);
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type \"%s\" does not exist", typnam)));
-        }
-
-        /* Reject if there's typmod decoration, too */
-        if (returnType->typmods != NIL)
-            ereport(ERROR,
-                (errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("type modifier cannot be specified for shell type \"%s\"", typnam)));
-
-        /* Otherwise, go ahead and make a shell type */
-        ereport(NOTICE,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("type \"%s\" is not yet defined", typnam),
-                errdetail("Creating a shell type definition.")));
-        namespaceId = QualifiedNameGetCreationNamespace(returnType->names, &typname);
-
-        if (u_sess->attr.attr_sql.enforce_a_behavior) {
-            typowner = GetUserIdFromNspId(namespaceId);
-
-            if (!OidIsValid(typowner))
-                typowner = GetUserId();
-            else if (typowner != GetUserId())
-                isalter = true;
+            if (UndefineTypeTup == typStatus) {
+                if (!is_refresh_head) {
+                    ereport(WARNING, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type \"%s\" does not exist", typnam)));
+                }
+                rettype = typeTypeId(typtup);
+                ReleaseSysCache(typtup);
+            } else {
+                if (!is_refresh_head) {
+                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type \"%s\" does not exist", typnam)));
+                }
+            }
         } else {
-            typowner = GetUserId();
-        }
-        aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
-        if (isalter) {
-            aclresult = pg_namespace_aclcheck(namespaceId, typowner, ACL_CREATE);
+            /* Reject if there's typmod decoration, too */
+            if (returnType->typmods != NIL)
+                ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("type modifier cannot be specified for shell type \"%s\"", typnam)));
+
+            /* Otherwise, go ahead and make a shell type */
+            ereport(NOTICE,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("type \"%s\" is not yet defined", typnam),
+                    errdetail("Creating a shell type definition.")));
+            namespaceId = QualifiedNameGetCreationNamespace(returnType->names, &typname);
+
+            if (u_sess->attr.attr_sql.enforce_a_behavior) {
+                typowner = GetUserIdFromNspId(namespaceId);
+
+                if (!OidIsValid(typowner))
+                    typowner = GetUserId();
+                else if (typowner != GetUserId())
+                    isalter = true;
+            } else {
+                typowner = GetUserId();
+            }
+            aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
                 aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            if (isalter) {
+                aclresult = pg_namespace_aclcheck(namespaceId, typowner, ACL_CREATE);
+                if (aclresult != ACLCHECK_OK)
+                    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            }
+            address = TypeShellMake(typname, namespaceId, typowner);
+            rettype = address.objectId;
+            Assert(OidIsValid(rettype));
         }
-        address = TypeShellMake(typname, namespaceId, typowner);
-        rettype = address.objectId;
-        Assert(OidIsValid(rettype));
     }
 
     aclresult = pg_type_aclcheck(rettype, GetUserId(), ACL_USAGE);
@@ -277,9 +294,10 @@ static void compute_return_type(
  * requiredResultType is set to InvalidOid if there are no OUT parameters,
  * else it is set to the OID of the implied result type.
  */
-static void examine_parameter_list(List* parameters, Oid languageOid, const char* queryString,
-    oidvector** parameterTypes, ArrayType** allParameterTypes, ArrayType** parameterModes, ArrayType** parameterNames,
-    List** parameterDefaults, Oid* requiredResultType, List** defargpos, bool fenced)
+void examine_parameter_list(List* parameters, Oid languageOid, const char* queryString,
+    oidvector** parameterTypes, TypeDependExtend** type_depend_extend, ArrayType** allParameterTypes,
+    ArrayType** parameterModes, ArrayType** parameterNames,
+    List** parameterDefaults, Oid* requiredResultType, List** defargpos, bool fenced, bool* has_undefined)
 {
     int parameterCount = list_length(parameters);
     Oid* inTypes = NULL;
@@ -307,6 +325,9 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         allTypes = (Datum*)palloc(parameterCount * sizeof(Datum));
         paramModes = (Datum*)palloc(parameterCount * sizeof(Datum));
         paramNames = (Datum*)palloc0(parameterCount * sizeof(Datum));
+        if (enable_plpgsql_gsdependency()) {
+            *type_depend_extend = (TypeDependExtend*)palloc0((parameterCount) * sizeof(TypeDependExtend));
+        }
     }
 
     *parameterDefaults = NIL;
@@ -326,8 +347,16 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         AclResult aclresult;
         char* objname = NULL;
         objname = strVal(linitial(t->names));
-        typtup = LookupTypeName(NULL, t, NULL);
-        if (!HeapTupleIsValid(typtup)) {
+        if (enable_plpgsql_gsdependency()) {
+            typtup = LookupTypeName(NULL, t, NULL, true, (*type_depend_extend) + i);
+            if (NULL != has_undefined && !*has_undefined && (*type_depend_extend)[i].dependUndefined) {
+                *has_undefined = true;
+            }
+        } else {
+            typtup = LookupTypeName(NULL, t, NULL);
+        }
+        int typ_tup_status = GetTypeTupStatus(typtup);
+        if (NormalTypeTup != typ_tup_status) {
             toid = findPackageParameter(objname);
         }
         /*
@@ -338,6 +367,15 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("argument type '%s' must be in installation group", TypeNameToString(t))));
+        }
+        
+        if (enable_plpgsql_gsdependency() && UndefineTypeTup == typ_tup_status) {
+            if (OidIsValid(toid)) {
+                gsplsql_delete_unrefer_depend_obj_oid((*type_depend_extend)[i].undefDependObjOid, false);
+                (*type_depend_extend)[i].undefDependObjOid = InvalidOid;
+                ReleaseSysCache(typtup);
+                typtup = NULL;
+            }
         }
 
         if (typtup) {
@@ -972,6 +1010,8 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
     Oid namespaceId = InvalidOid;
     AclResult aclresult;
     oidvector* parameterTypes = NULL;
+    TypeDependExtend* param_type_depend_ext = NULL;
+    TypeDependExtend* ret_type_depend_ext = NULL;
     ArrayType* allParameterTypes = NULL;
     ArrayType* parameterModes = NULL;
     ArrayType* parameterNames = NULL;
@@ -1160,25 +1200,49 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
      * Convert remaining parameters of CREATE to form wanted by
      * ProcedureCreate.
      */
-    examine_parameter_list(stmt->parameters, languageOid, queryString, &parameterTypes, &allParameterTypes,
-        &parameterModes, &parameterNames, &parameterDefaults, &requiredResultType, &defargpos, fenced);
-
-    prodefaultargpos = GetDefaultArgPos(defargpos);
-
-    if (stmt->returnType) {
-        /* explicit RETURNS clause */
-        compute_return_type(stmt->returnType, languageOid, &prorettype, &returnsSet, fenced, stmt->startLineNumber);
-    } else if (OidIsValid(requiredResultType)) {
-        /* default RETURNS clause from OUT parameters */
-        prorettype = requiredResultType;
-        returnsSet = false;
+    if (stmt->isOraStyle) {
+        set_function_style_a();
     } else {
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION), errmsg("function result type must be specified")));
-        /* Alternative possibility: default to RETURNS VOID */
-        prorettype = VOIDOID;
-        returnsSet = false;
+        set_function_style_pg();
     }
+    CreatePlsqlType oldCreatePlsqlType = u_sess->plsql_cxt.createPlsqlType;
+    Oid old_curr_object_nspoid = u_sess->plsql_cxt.curr_object_nspoid;
+    PG_TRY();
+    {
+        set_create_plsql_type_not_check_nsp_oid();
+        u_sess->plsql_cxt.curr_object_nspoid = namespaceId;
+        examine_parameter_list(stmt->parameters, languageOid, queryString, &parameterTypes, &param_type_depend_ext, &allParameterTypes,
+            &parameterModes, &parameterNames, &parameterDefaults, &requiredResultType, &defargpos, fenced);
+
+        prodefaultargpos = GetDefaultArgPos(defargpos);
+
+        if (stmt->returnType) {
+            /* explicit RETURNS clause */
+            InstanceTypeNameDependExtend(&ret_type_depend_ext);
+            compute_return_type(stmt->returnType, languageOid, &prorettype, &returnsSet, fenced, stmt->startLineNumber,
+            ret_type_depend_ext, false);
+        } else if (OidIsValid(requiredResultType)) {
+            /* default RETURNS clause from OUT parameters */
+            InstanceTypeNameDependExtend(&ret_type_depend_ext);
+            prorettype = requiredResultType;
+            returnsSet = false;
+        } else {
+            ereport(
+                ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION), errmsg("function result type must be specified")));
+            /* Alternative possibility: default to RETURNS VOID */
+            prorettype = VOIDOID;
+            returnsSet = false;
+        }
+        set_create_plsql_type(oldCreatePlsqlType);
+        u_sess->plsql_cxt.curr_object_nspoid = old_curr_object_nspoid;
+    }
+    PG_CATCH();
+    {
+        set_create_plsql_type(oldCreatePlsqlType);
+        u_sess->plsql_cxt.curr_object_nspoid = old_curr_object_nspoid;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     if (returnsSet) {
         Oid typerelid = typeidTypeRelid(prorettype);
@@ -1257,15 +1321,20 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         package,
         proIsProcedure,
         stmt->inputHeaderSrc,
-        stmt->isPrivate);
+        stmt->isPrivate,
+        param_type_depend_ext,
+        ret_type_depend_ext,
+        stmt);
 
     CreateFunctionComment(address.objectId, functionOptions);
-
+    pfree_ext(param_type_depend_ext);
+    pfree_ext(ret_type_depend_ext);
     u_sess->plsql_cxt.procedure_start_line = 0;
     u_sess->plsql_cxt.procedure_first_line = 0;
     u_sess->plsql_cxt.isCreateFunction = false;
     if (u_sess->plsql_cxt.debug_query_string != NULL && !OidIsValid(pkg_oid)) {
         pfree_ext(u_sess->plsql_cxt.debug_query_string);
+        u_sess->plsql_cxt.has_error = false;
     }
     return address;
 }
@@ -1548,9 +1617,8 @@ void RemoveFunctionById(Oid funcOid)
 
     Form_pg_proc procedureStruct = (Form_pg_proc)GETSTRUCT(tup);
     isagg = procedureStruct->proisagg;
-
-#ifdef ENABLE_MOT
     char* funcName = pstrdup(NameStr(procedureStruct->proname));
+#ifdef ENABLE_MOT
     bool isNull = false;
     Datum prokindDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_prokind, &isNull);
     bool proIsProcedure = isNull ? false : PROC_IS_PRO(CharGetDatum(prokindDatum));
@@ -1562,12 +1630,24 @@ void RemoveFunctionById(Oid funcOid)
         PrepareCFunctionLibrary(tup);
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    GsDependObjDesc func_head_obj;
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+        Oid pro_namespace = procedureStruct->pronamespace;
+        bool is_null;
+        Datum pro_package_id_datum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &is_null);
+        Oid proc_packageid = DatumGetObjectId(pro_package_id_datum);
+        func_head_obj = gsplsql_construct_func_head_obj(funcOid, pro_namespace, proc_packageid);
+    }
+#endif
+
     simple_heap_delete(relation, &tup->t_self);
 
     ReleaseSysCache(tup);
 
     heap_close(relation, RowExclusiveLock);
 
+    CacheInvalidateFunction(funcOid, InvalidOid);
     /*
      * If there's a pg_aggregate tuple, delete that too.
      */
@@ -1599,6 +1679,21 @@ void RemoveFunctionById(Oid funcOid)
         JitExec::PurgeJitSourceCache(funcOid, JitExec::JIT_PURGE_SCOPE_SP, JitExec::JIT_PURGE_EXPIRE, funcName);
     }
     pfree_ext(funcName);
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+        CommandCounterIncrement();
+        func_head_obj.type = GSDEPEND_OBJECT_TYPE_PROCHEAD;
+        gsplsql_remove_dependencies_object(&func_head_obj);
+        func_head_obj.refPosType = GSDEPEND_REFOBJ_POS_IN_PROCALL;
+        gsplsql_remove_gs_dependency(&func_head_obj);
+        if (enable_plpgsql_gsdependency_guc()) {
+            func_head_obj.name = funcName;
+            func_head_obj.type = GSDEPEND_OBJECT_TYPE_FUNCTION;
+            gsplsql_remove_ref_dependency(&func_head_obj);
+        }
+        free_gs_depend_obj_desc(&func_head_obj);
+    }
 #endif
 }
 /*
@@ -1643,6 +1738,25 @@ void RemovePackageById(Oid pkgOid, bool isBody)
     HeapTuple pkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
     if (!HeapTupleIsValid(pkgtup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgOid)));
+#ifndef ENABLE_MULTIPLE_NODES
+    GsDependObjDesc pkg;
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+        bool is_null;
+        Datum schema_name_datum = SysCacheGetAttr(PACKAGEOID, pkgtup, Anum_gs_package_pkgnamespace, &is_null);
+        pkg.schemaName = get_namespace_name(DatumGetObjectId(schema_name_datum));
+        Datum pkg_name_datum = SysCacheGetAttr(PACKAGEOID, pkgtup, Anum_gs_package_pkgname, &is_null);
+        pkg.packageName = pstrdup(NameStr(*DatumGetName(pkg_name_datum)));
+        pkg.name = NULL;
+        pkg.type = GSDEPEND_OBJECT_TYPE_INVALID;
+        if (isBody) {
+            pkg.type = GSDEPEND_OBJECT_TYPE_PKG_BODY;
+            pkg.refPosType = GSDEPEND_REFOBJ_POS_IN_PKGBODY;
+        } else {
+            pkg.type = GSDEPEND_OBJECT_TYPE_PKG;
+            pkg.refPosType = GSDEPEND_REFOBJ_POS_IN_PKGALL_OBJ;
+        }
+    }
+#endif
     if (!isBody) {
         /*
             if replace package specification,delete all function in this package first.
@@ -1673,19 +1787,64 @@ void RemovePackageById(Oid pkgOid, bool isBody)
         HeapTuple newtup = heap_modify_tuple(pkgtup, RelationGetDescr(relation), values, nulls, replaces);
         DropErrorByOid(PLPGSQL_PACKAGE_BODY, pkgOid); 
         simple_heap_update(relation, &newtup->t_self, newtup);
+        CatalogUpdateIndexes(relation, newtup);
     }
     ReleaseSysCache(pkgtup);
 
     heap_close(relation, RowExclusiveLock);
 
+    CacheInvalidateFunction(InvalidOid, pkgOid);
     /*
      * If there's a pg_aggregate tuple, delete that too.
      */
 
     /* Recode time of delete package. */
     if (pkgOid != InvalidOid) {
-        DeletePgObject(pkgOid, OBJECT_TYPE_PKGSPEC);
+        if (isBody) {
+            DeletePgObject(pkgOid, OBJECT_TYPE_PKGSPEC);
+        } else {
+            DeletePgObject(pkgOid, OBJECT_TYPE_PKGSPEC);
+            DeletePgObject(pkgOid, OBJECT_TYPE_PKGBODY);
+        }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+            CommandCounterIncrement();
+            gsplsql_remove_gs_dependency(&pkg);
+            if (enable_plpgsql_gsdependency_guc()) {
+                gsplsql_remove_ref_dependency(&pkg);
+            }
+            pfree_ext(pkg.packageName);
+            pfree_ext(pkg.schemaName);
+        }
+#endif
     }
+}
+
+void DeleteFunctionByFuncTuple(HeapTuple proctup)
+{
+    Oid funcOid = InvalidOid;
+    if (HeapTupleIsValid(proctup)) {
+        funcOid = HeapTupleGetOid(proctup);
+        if (!OidIsValid(funcOid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmodule(MOD_PLSQL),
+                    errmsg("cache lookup failed for relid %u", funcOid)));
+        }
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmodule(MOD_PLSQL),
+                    errmsg("cache lookup failed for relid %u", funcOid)));
+    }
+    (void)deleteDependencyRecordsFor(ProcedureRelationId, funcOid, true);
+    DeleteTypesDenpendOnPackage(ProcedureRelationId, funcOid);
+    /* the 'shared dependencies' also change when update. */
+    deleteSharedDependencyRecordsFor(ProcedureRelationId, funcOid, 0);
+
+    /* send invalid message for for relation holding replaced function as trigger */
+    InvalidRelcacheForTriggerFunction(funcOid, ((Form_pg_proc)GETSTRUCT(proctup))->prorettype);
+    RemoveFunctionById(funcOid);
 }
 
 void DeleteFunctionByPackageOid(Oid package_oid) 
@@ -1701,29 +1860,7 @@ void DeleteFunctionByPackageOid(Oid package_oid)
     SysScanDesc scan = systable_beginscan(pg_proc_rel, InvalidOid, false, NULL, 1, &entry);
     while ((oldtup = systable_getnext(scan)) != NULL) {
         HeapTuple proctup = heap_copytuple(oldtup);
-        Oid funcOid = InvalidOid;
-        if (HeapTupleIsValid(proctup)) {
-            funcOid = HeapTupleGetOid(proctup);
-            if (!OidIsValid(funcOid)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmodule(MOD_PLSQL),
-                        errmsg("cache lookup failed for relid %u", funcOid)));
-            }
-        } else {
-            ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmodule(MOD_PLSQL),
-                        errmsg("cache lookup failed for relid %u", funcOid)));
-        }
-        (void)deleteDependencyRecordsFor(ProcedureRelationId, funcOid, true);
-        DeleteTypesDenpendOnPackage(ProcedureRelationId, funcOid);
-        /* the 'shared dependencies' also change when update. */
-        deleteSharedDependencyRecordsFor(ProcedureRelationId, funcOid, 0);
-
-        /* send invalid message for for relation holding replaced function as trigger */
-        InvalidRelcacheForTriggerFunction(funcOid, ((Form_pg_proc)GETSTRUCT(proctup))->prorettype);
-        RemoveFunctionById(funcOid);
+        DeleteFunctionByFuncTuple(proctup);
         heap_freetuple(proctup);
     }    
     systable_endscan(scan);
@@ -2100,6 +2237,202 @@ bool IsFunctionTemp(AlterFunctionStmt* stmt)
     heap_close(rel, RowExclusiveLock);
     tableam_tops_free_tuple(tup);
     return false;
+}
+
+static inline void SetFuncValid(Oid func_oid, bool is_procedure)
+{
+    SetPgObjectValid(func_oid, OBJECT_TYPE_PROC, GetCurrCompilePgObjStatus());
+    if (!GetCurrCompilePgObjStatus()) {
+        ereport(WARNING, (errmodule(MOD_PLSQL),
+                          errmsg("%s %s recompile with compilation errors.",
+                            is_procedure ? "Procedure" : "Functions",
+                                 get_func_name(func_oid))));
+    }
+}
+
+static inline bool CheckBeforeRecompile(Oid func_oid)
+{
+    if (OidIsValid(gsplsql_get_pkg_oid_by_func_oid(func_oid))) {
+        ereport(WARNING,  (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is a function in package", get_func_name(func_oid)),
+                          errhint("Replace the ALTER FUNCTION with ALTER PACKAGE.")));
+        return false;
+    }
+    if (gsplsql_is_undefined_func(func_oid)) {
+        ereport(WARNING,  (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                          errmsg("\"%s\" header is undefined, you can try to recreate.", get_func_name(func_oid))));
+        return false;
+    }
+    return true;
+}
+
+static void CheckIsTriggerAndAssign(Oid func_oid, FunctionCallInfo fcinfo, TriggerData* trigdata)
+{
+
+    HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,  (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errdetail("cache lookup failed for function %u", func_oid)));
+    }
+    Form_pg_proc proc = (Form_pg_proc)GETSTRUCT(tuple);
+    char functyptype = get_typtype(proc->prorettype);
+    if (functyptype == TYPTYPE_PSEUDO) {
+        if (proc->prorettype == TRIGGEROID || (proc->prorettype == OPAQUEOID && proc->pronargs == 0)) {
+            error_t rc = memset_s(&trigdata, sizeof(TriggerData), 0, sizeof(TriggerData));
+            securec_check(rc, "", "");
+            trigdata->type = T_TriggerData;
+            fcinfo->context = (Node*)trigdata;
+        }
+    }
+    ReleaseSysCache(tuple);
+}
+
+void RecompileSingleFunction(Oid func_oid, bool is_procedure)
+{
+    FunctionCallInfoData fake_fcinfo;
+    FmgrInfo flinfo;
+    if (!CheckBeforeRecompile(func_oid)) {
+        return;
+    }
+    error_t rc = memset_s(&fake_fcinfo, sizeof(fake_fcinfo), 0, sizeof(fake_fcinfo));
+    securec_check(rc, "", "");
+    rc = memset_s(&flinfo, sizeof(flinfo), 0, sizeof(flinfo));
+    securec_check(rc, "", "");
+
+    fake_fcinfo.flinfo = &flinfo;
+    fake_fcinfo.arg = (Datum*)palloc0(sizeof(Datum));
+    fake_fcinfo.arg[0] = ObjectIdGetDatum(func_oid);
+    flinfo.fn_oid = func_oid;
+    flinfo.fn_mcxt = CurrentMemoryContext;
+
+    _PG_init();
+    PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
+    int save_compile_status = getCompileStatus();
+    bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
+    u_sess->plsql_cxt.isCreateFunction = false;
+    u_sess->plsql_cxt.compile_has_warning_info = false;
+    int save_searchpath_stack = list_length(u_sess->catalog_cxt.overrideStack);
+
+    PG_TRY();
+    {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_RECOMPILE;
+        if (GetPgObjectValid(func_oid, OBJECT_TYPE_PROC)) {
+            u_sess->plsql_cxt.need_create_depend = false;
+        } else {
+            u_sess->plsql_cxt.need_create_depend = true;
+        }
+        SetCurrCompilePgObjStatus(true);
+        TriggerData trigdata;
+        CheckIsTriggerAndAssign(func_oid, &fake_fcinfo, &trigdata);
+        PLpgSQL_function* func = plpgsql_compile(&fake_fcinfo, true, true);
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        if(func != NULL) {
+            SetFuncValid(func->fn_oid, is_procedure);
+        }
+        SetCurrCompilePgObjStatus(true);
+        if (enable_plpgsql_gsdependency_guc()) {
+            u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_END;
+        }
+    }
+    PG_CATCH();
+    {
+        if (enable_plpgsql_gsdependency_guc()) {
+            u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_END;
+        }
+        SetCurrCompilePgObjStatus(true);
+        u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        u_sess->plsql_cxt.compile_status = save_compile_status;
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+
+        clearCompileContextList(save_compile_list_length);
+        plpgsql_free_override_stack(save_searchpath_stack);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
+static bool IsNeedRecompile(Oid oid)
+{
+    bool is_null;
+    HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(oid));
+    if (!HeapTupleIsValid(tuple)) {
+        return false;
+    }
+    Datum pro_lang_datum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prolang, &is_null);
+    char* lang = get_language_name(DatumGetObjectId(pro_lang_datum));
+    ReleaseSysCache(tuple);
+    return (!IsSystemObjOid(oid) && !IsMaskingFunctionOid(oid) && !IsRlsFunction(oid) &&
+            strcasecmp(lang, "plpgsql") == 0);
+}
+
+static inline void ReportRecompileFuncWarning(CompileStmt* stmt)
+{
+    ereport(WARNING,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+             errmsg("%s %s does not exist, if it is a stored %s, use ALTER %s.",
+                    stmt->compileItem == COMPILE_FUNCTION ? "Functions" : "Procedure",
+                    NameListToString(stmt->objName),
+                    stmt->compileItem == COMPILE_FUNCTION ? "procedure" : "functions",
+                    stmt->compileItem == COMPILE_FUNCTION ? "PROCEDURE" : "FUNCTION")));
+}
+
+static void RecompileFunctionWithArgs(CompileStmt* stmt)
+{
+    Oid func_oid = LookupFuncNameTypeNames(stmt->objName, stmt->funcArgs, false);
+    if (!OidIsValid(func_oid)) {
+        ReportRecompileFuncWarning(stmt);
+        return;
+    }
+    if (PROC_IS_FUNC(get_func_prokind(func_oid)) && stmt->compileItem == COMPILE_PROCEDURE) {
+        ReportRecompileFuncWarning(stmt);
+    }
+    if (PROC_IS_PRO(get_func_prokind(func_oid)) && stmt->compileItem == COMPILE_FUNCTION) {
+        ReportRecompileFuncWarning(stmt);
+    }
+    if (IsNeedRecompile(func_oid)) {
+        RecompileSingleFunction(func_oid, stmt->compileItem == COMPILE_PROCEDURE);
+        return;
+    }
+    return;
+}
+
+void RecompileFunction(CompileStmt* stmt)
+{
+    if (stmt->funcArgs != NULL) {
+        RecompileFunctionWithArgs(stmt);
+        return;
+    }
+    int num = 0;
+    FuncCandidateList clist = NULL;
+    StringInfoData err_string;
+    initStringInfo(&err_string);
+    clist = FuncnameGetCandidates(stmt->objName, -1, NULL, false, false, false, false,
+                                  stmt->compileItem == COMPILE_FUNCTION ? 'f' : 'p');
+    if (clist == NULL) {
+        ReportRecompileFuncWarning(stmt);
+        return;
+    }
+    for (; clist; clist = clist->next) {
+        if (IsNeedRecompile(clist->oid) && !OidIsValid(gsplsql_get_pkg_oid_by_func_oid(clist->oid))) {
+            RecompileSingleFunction(clist->oid, stmt->compileItem == COMPILE_PROCEDURE);
+            num++;
+            appendStringInfoString(&err_string, format_procedure(clist->oid));
+            if (clist->next != NULL) {
+                appendStringInfoString(&err_string, ",");
+            } else {
+                appendStringInfoString(&err_string, ".");
+            }
+        }
+    }
+    if (num > 1) {
+        ereport(NOTICE,
+                (errcode(ERRCODE_AMBIGUOUS_FUNCTION),
+                 errmsg("Compile %d %s: %s", num,
+                        stmt->compileItem == COMPILE_FUNCTION ? "functions" : "procedure",
+                        err_string.data)));
+    }
+    FreeStringInfo(&err_string);
 }
 
 /*

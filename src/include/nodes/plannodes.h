@@ -194,6 +194,15 @@ typedef struct PlannedStmt {
     uint64 uniqueSQLId;
 
     uint32 cause_type; /* Possible Slow SQL Risks in the Plan. */
+#ifdef USE_SPQ
+    uint64 spq_session_id;
+    int current_id;
+    bool enable_adaptive_scan;
+    bool is_spq_optmized;
+    int	numSlices;
+    struct PlanSlice *slices;
+    int *subplan_sliceIds;
+#endif
 } PlannedStmt;
 
 typedef struct NodeGroupInfoContext {
@@ -366,6 +375,9 @@ typedef struct Plan {
      *     -> SeqScan->ndp_pushdown_condition save ndp condition
      * */
     Node* ndp_pushdown_condition;
+#ifdef USE_SPQ
+    bool spq_scan_partial;
+#endif
 } Plan;
 
 typedef struct NdpScanCondition { // for each scan node
@@ -635,6 +647,18 @@ typedef struct Scan {
  */
 typedef Scan SeqScan;
 
+#ifdef USE_SPQ
+/* ----------------
+ *		Spq scan node
+ * ----------------
+ */
+typedef struct SpqSeqScan {
+    SeqScan scan;
+    bool isFullTableScan;
+    bool isAdaptiveScan;
+    bool isDirectRead;
+} SpqSeqScan;
+#endif
 /*
  * ==========
  * Column Store Scan nodes
@@ -1059,6 +1083,10 @@ typedef struct Join {
     List* nulleqqual;
 
     uint32 skewoptimize;
+#ifdef USE_SPQ
+    bool prefetch_inner; /* to avoid deadlock in spq */
+    bool is_set_op_join;
+#endif
 } Join;
 
 /* ----------------
@@ -1107,6 +1135,9 @@ typedef struct MergeJoin {
     Oid* mergeCollations;  /* per-clause OIDs of collations */
     int* mergeStrategies;  /* per-clause ordering (ASC or DESC) */
     bool* mergeNullsFirst; /* per-clause nulls ordering */
+#ifdef USE_SPQ
+    bool unique_outer; /*CDB-OLAP true => outer is unique in merge key */
+#endif
 } MergeJoin;
 
 typedef struct VecMergeJoin : public MergeJoin {
@@ -1125,6 +1156,9 @@ typedef struct HashJoin {
     OpMemInfo mem_info; /* Memory info for inner hash table */
     double joinRows;
     List* hash_collations;
+#ifdef USE_SPQ
+    List *hashqualclauses;
+#endif
 } HashJoin;
 
 /* ----------------
@@ -1135,6 +1169,10 @@ typedef struct Material {
     Plan plan;
     bool materialize_all; /* if all data should be materialized at the first time */
     OpMemInfo mem_info;   /* Memory info for material */
+#ifdef USE_SPQ
+    bool spq_strict;
+    bool spq_shield_child_from_rescans;
+#endif
 } Material;
 
 typedef struct VecMaterial : public Material {
@@ -1233,6 +1271,9 @@ typedef enum SAggMethod {
 typedef struct Agg {
     Plan plan;
     AggStrategy aggstrategy;
+#ifdef USE_SPQ
+    AggSplit aggsplittype;		/* agg-splitting mode, see nodes.h */
+#endif
     int numCols;           /* number of grouping columns */
     AttrNumber* grpColIdx; /* their indexes in the target list */
     Oid* grpOperators;     /* equality operators to compare with */
@@ -1535,5 +1576,260 @@ typedef struct TrainModel {
     MemoryContext cxt;              // to store models
 } TrainModel;
 
+#ifdef USE_SPQ
+/* ----------------
+ *       Result node -
+ *              If no outer plan, evaluate a variable-free targetlist.
+ *              If outer plan, return tuples from outer plan (after a level of
+ *              projection as shown by targetlist).
+ *
+ * If resconstantqual isn't NULL, it represents a one-time qualification
+ * test (i.e., one that doesn't depend on any variables from the outer plan,
+ * so needs to be evaluated only once).
+ *
+ * If numHashFilterCols is non-zero, we compute a mpphash value based
+ * on the columns listed in hashFilterColIdx for each input row. If the
+ * target segment based on the hash doesn't match the current execution
+ * segment, the row is discarded.
+ * ----------------
+ */
+typedef struct Result {
+    Plan plan;
+    Node *resconstantqual;
+ 
+    int numHashFilterCols;
+    AttrNumber *hashFilterColIdx;
+    Oid *hashFilterFuncs;
+} Result;
+
+typedef struct SpqIndexScan {
+    IndexScan scan;
+} SpqIndexScan;
+
+typedef struct SpqIndexOnlyScan {
+    IndexOnlyScan scan;
+} SpqIndexOnlyScan;
+
+typedef struct SpqBitmapHeapScan {
+    BitmapHeapScan scan;
+} SpqBitmapHeapScan;
+
+typedef struct DirectDispatchInfo {
+    /**
+     * if true then this Slice requires an n-gang but the gang can be targeted to
+     *   fewer segments than the entire cluster.
+     *
+     * When true, directDispatchContentId and directDispathCount will combine to indicate
+     *   the content ids that need segments.
+     */
+    bool isDirectDispatch;
+    List *contentIds;
+
+    /* only used while planning, in createplan.c */
+    bool haveProcessedAnyCalculations;
+} DirectDispatchInfo;
+
+typedef enum GangType {
+    /* a root slice executed by the qDisp */
+    GANGTYPE_UNALLOCATED,
+    /* a 1-gang with read access to the entry db */
+    GANGTYPE_ENTRYDB_READER,
+    /* a 1-gang to read the segment dbs */
+    GANGTYPE_SINGLETON_READER,
+    /* a 1-gang or N-gang to read the segment dbs */
+    GANGTYPE_PRIMARY_READER,
+    /* the N-gang that can update the segment dbs */
+    GANGTYPE_PRIMARY_WRITER
+} GangType;
+
+/*
+ * PlanSlice represents one query slice, to be executed by a separate gang
+ * of executor processes.
+ */
+typedef struct PlanSlice {
+    int sliceIndex;
+    int parentIndex;
+
+    GangType gangType;
+
+    /* # of segments in the gang, for PRIMARY_READER/WRITER slices */
+    int numsegments;
+    /* segment to execute on, for SINGLETON_READER slices */
+    int worker_idx;
+
+    /* direct dispatch information, for PRIMARY_READER/WRITER slices */
+    DirectDispatchInfo directDispatch;
+} PlanSlice;
+
+/* -------------------------
+ *              motion node structs
+ * -------------------------
+ */
+typedef enum MotionType {
+    MOTIONTYPE_GATHER, /* Send tuples from N senders to one receiver */
+    MOTIONTYPE_GATHER_SINGLE, /* Execute subplan on N nodes, but only send the tuples from one */
+    MOTIONTYPE_HASH, /* Use hashing to select a worker_idx destination */
+    MOTIONTYPE_BROADCAST, /* Send tuples from one sender to a fixed set of worker_idxes */
+    MOTIONTYPE_EXPLICIT, /* Send tuples to the segment explicitly specified in their segid column */
+    MOTIONTYPE_OUTER_QUERY /* Gather or Broadcast to outer query's slice, don't know which one yet */
+} MotionType;
+ 
+/*
+ * Motion Node
+ */
+typedef struct Motion {
+    Plan plan;
+ 
+    MotionType motionType;
+    bool sendSorted; /* if true, output should be sorted */
+    int motionID; /* required by AMS  */
+ 
+    /* For Hash */
+    List *hashExprs; /* list of hash expressions */
+    Oid *hashFuncs; /* corresponding hash functions */
+    int numHashSegments; /* the module number of the hash function */
+ 
+    /* For Explicit */
+    AttrNumber segidColIdx; /* index of the segid column in the target list */
+ 
+    /* The following field is only used when sendSorted == true */
+    int numSortCols; /* number of sort-key columns */
+    AttrNumber *sortColIdx; /* their indexes in the target list */
+    Oid *sortOperators; /* OIDs of operators to sort them by */
+    Oid *collations; /* OIDs of collations */
+    bool *nullsFirst; /* NULLS FIRST/LAST directions */
+ 
+    /* sender slice info */
+    //PlanSlice *senderSliceInfo;
+} Motion;
+ 
+/*
+ * Sequence node
+ *   Execute a list of subplans in the order of left-to-right, and return
+ * the results of the last subplan.
+ */
+typedef struct Sequence {
+    Plan plan;
+    List *subplans;
+} Sequence;
+ 
+/*
+ * PartitionPruneInfo - Details required to allow the executor to prune
+ * partitions.
+ *
+ * Here we store mapping details to allow translation of a partitioned table's
+ * index as returned by the partition pruning code into subplan indexes for
+ * plan types which support arbitrary numbers of subplans, such as Append.
+ * We also store various details to tell the executor when it should be
+ * performing partition pruning.
+ *
+ * Each PartitionedRelPruneInfo describes the partitioning rules for a single
+ * partitioned table (a/k/a level of partitioning).  Since a partitioning
+ * hierarchy could contain multiple levels, we represent it by a List of
+ * PartitionedRelPruneInfos, where the first entry represents the topmost
+ * partitioned table and additional entries represent non-leaf child
+ * partitions, ordered such that parents appear before their children.
+ * Then, since an Append-type node could have multiple partitioning
+ * hierarchies among its children, we have an unordered List of those Lists.
+ *
+ * prune_infos                  List of Lists containing PartitionedRelPruneInfo nodes,
+ *                                              one sublist per run-time-prunable partition hierarchy
+ *                                              appearing in the parent plan node's subplans.
+ * other_subplans               Indexes of any subplans that are not accounted for
+ *                                              by any of the PartitionedRelPruneInfo nodes in
+ *                                              "prune_infos".  These subplans must not be pruned.
+ */
+typedef struct PartitionPruneInfo {
+    NodeTag type;
+    List *prune_infos;
+    Bitmapset *other_subplans;
+} PartitionPruneInfo;
+ 
+/* ----------------
+ * PartitionSelector node
+ *
+ * PartitionSelector performs partition pruning based on rows seen on
+ * the "other" side of a join. It performs partition pruning similar to
+ * run-time partition pruning in an Append node, but it is performed based
+ * on the rows seen, instead of executor params. The set of surviving
+ * partitions is made available to the Append node, by storing it in a
+ * special executor param, identified by 'paramid' field.
+ * ----------------
+ */
+typedef struct PartitionSelector {
+    Plan plan;
+ 
+    struct PartitionPruneInfo *part_prune_info;
+    int32 paramid;	/* result is stored here */
+} PartitionSelector;
+ 
+/* ----------------
+ *		shareinputscan node
+ * ----------------
+ */
+typedef struct ShareInputScan {
+    Scan scan;
+ 
+    bool cross_slice;
+    int share_id;
+ 
+    /*
+     * Slice that produces the tuplestore for this shared scan.
+     *
+     * As a special case, in a plan that has only one slice, this may be left
+     * to -1. The executor node ignores this when there is only one slice.
+     */
+    int producer_slice_id;
+ 
+    /*
+     * Slice id that this ShareInputScan node runs in. If it's
+     * different from current slice ID, this ShareInputScan is "alien"
+     * to the current slice and doesn't need to be executed at all (in
+     * this slice). It is used to skip IPC in alien nodes.
+     *
+     * Like producer_slice_id, this can be left to -1 if there is only one
+     * slice in the plan tree.
+     */
+    int this_slice_id;
+ 
+    /* Number of consumer slices participating, not including the producer. */
+    int nconsumers;
+ 
+    /* Discard the scan output? True for ORCA CTE producer, false otherwise. */
+    bool discard_output;
+
+    bool is_producer;
+} ShareInputScan;
+ 
+/*
+ * SplitUpdate Node
+ *
+ */
+typedef struct SplitUpdate {
+    Plan plan;
+    AttrNumber actionColIdx; /* index of action column into the target list */
+    AttrNumber tupleoidColIdx; /* index of tuple oid column into the target list */
+    AttrNumber ctidColIdx;
+    List *insertColIdx; /* list of columns to INSERT into the target list */
+    List *deleteColIdx; /* list of columns to DELETE into the target list */
+ 
+    /*
+     * Fields for calculating the target segment id.
+     *
+     * If the targetlist contains a 'gp_segment_id' field, these fields are
+     * used to compute the target segment id, for INSERT-action rows.
+     */
+    int numHashAttrs;
+    AttrNumber *hashAttnos;
+    Oid *hashFuncs; /* corresponding hash functions */
+    int numHashSegments; /* # of segs to use in hash computation */
+} SplitUpdate;
+ 
+typedef struct AssertOp {
+    Plan plan;
+    int errcode; /* SQL error code */
+    List *errmessage; /* error message */
+} AssertOp;
+#endif /* USE_SPQ */
 #endif /* PLANNODES_H */
 

@@ -209,6 +209,7 @@ static bool _equalParam(const Param* a, const Param* b)
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(tableOfIndexType);
     COMPARE_SCALAR_FIELD(recordVarTypOid);
+    COMPARE_SCALAR_FIELD(is_bind_param);
 
     return true;
 }
@@ -222,6 +223,9 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
     COMPARE_SCALAR_FIELD(agghas_collectfn);
     COMPARE_SCALAR_FIELD(aggstage);
 #endif /* PGXC */
+#ifdef USE_SPQ
+    COMPARE_SCALAR_FIELD(aggsplittype);
+#endif
     COMPARE_SCALAR_FIELD(aggcollid);
     COMPARE_SCALAR_FIELD(inputcollid);
     COMPARE_NODE_FIELD(aggdirectargs);
@@ -233,6 +237,8 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
     COMPARE_SCALAR_FIELD(aggkind);
     COMPARE_SCALAR_FIELD(agglevelsup);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_NODE_FIELD(aggargtypes);
+    COMPARE_SCALAR_FIELD(aggsplit);
 
     return true;
 }
@@ -1579,6 +1585,7 @@ static bool _equalRenameStmt(const RenameStmt* a, const RenameStmt* b)
     COMPARE_NODE_FIELD(objarg);
     COMPARE_STRING_FIELD(subname);
     COMPARE_STRING_FIELD(newname);
+    COMPARE_STRING_FIELD(newschema);
     COMPARE_SCALAR_FIELD(behavior);
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_NODE_FIELD(renameTargetList);
@@ -1890,6 +1897,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
     COMPARE_SCALAR_FIELD(uuid);
     COMPARE_SCALAR_FIELD(canCreateTempSeq);
     COMPARE_SCALAR_FIELD(is_large);
+    COMPARE_SCALAR_FIELD(missing_ok);
 
     return true;
 }
@@ -3477,6 +3485,15 @@ static bool _equalCharsetcollateOptions(const CharsetCollateOptions* a, const Ch
     return true;
 }
 
+static bool _equalCharsetClause(const CharsetClause* a, const CharsetClause* b)
+{
+    COMPARE_NODE_FIELD(arg);
+    COMPARE_SCALAR_FIELD(charset);
+    COMPARE_SCALAR_FIELD(is_binary);
+    COMPARE_LOCATION_FIELD(location);
+    return true;
+}
+
 static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
 {
     COMPARE_NODE_FIELD(arg);
@@ -4443,6 +4460,9 @@ bool equal(const void* a, const void* b)
             retval = _equalCharsetcollateOptions((const CharsetCollateOptions *)a,
                                                  (const CharsetCollateOptions *)b);
             break;
+        case T_CharsetClause:
+            retval = _equalCharsetClause((const CharsetClause*) a, (const CharsetClause*) b);
+            break;
         case T_PrefixKey:
             retval = _equalPrefixKey((PrefixKey *)a, (PrefixKey *)b);
             break;
@@ -4457,6 +4477,7 @@ bool equal(const void* a, const void* b)
             break;
         case T_ShowEventStmt:
             retval = node_equal_show_event_info((const ShowEventStmt *)a, (const ShowEventStmt *)b);
+            break;
         case T_IndexHintDefinition:
             retval = _equalIndexHintDefinition((IndexHintDefinition *)a, (IndexHintDefinition *)b);
             break;

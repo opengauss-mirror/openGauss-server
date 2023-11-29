@@ -82,6 +82,11 @@
 #include "replication/dcf_replication.h"
 #include "commands/verify.h"
 #include "storage/cfs/cfs_buffers.h"
+#include "ddes/dms/ss_txnstatus.h"
+
+#ifdef USE_SPQ
+#include "executor/node/nodeShareInputScan.h"
+#endif
 
 /* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
 pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -148,6 +153,9 @@ Size ComputeTotalSizeOfShmem()
         size = add_size(size, SInvalShmemSize());
         size = add_size(size, PMSignalShmemSize());
         size = add_size(size, ProcSignalShmemSize());
+#ifdef USE_SPQ
+        size = add_size(size, ShareInputShmemSize());
+#endif
         size = add_size(size, CheckpointerShmemSize());
         size = add_size(size, PageWriterShmemSize());
         size = add_size(size, AutoVacuumShmemSize());
@@ -319,6 +327,8 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
          * Set up predicate lock manager
          */
         InitPredicateLocks();
+
+        SSInitTxnStatusCache();
     }
 
     /*
@@ -351,7 +361,9 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      */
     PMSignalShmemInit();
     ProcSignalShmemInit();
-
+#ifdef USE_SPQ
+    ShareInputShmemInit();
+#endif
     {
         CheckpointerShmemInit();
         CBMShmemInit();
@@ -421,7 +433,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     InitSegSpcCache();
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         InitDisasterCache();
     }
 #endif
@@ -451,6 +463,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 
     if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
         OndemandRecoveryShmemInit();
+        OndemandXlogFileIdCacheInit();
     }
 
     if (g_instance.ckpt_cxt_ctl->prune_queue_lock == NULL) {

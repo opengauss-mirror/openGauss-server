@@ -128,769 +128,690 @@ insert into t_pruning_datatype_int32 values(-100,20,20,'a'),
 --1.1.2.1  =  -BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1=50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 = 50)
-               Selected Partitions:  1
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: (c1 = 50)
+   Selected Partitions:  1
+(3 rows)
 
 --1.1.2.2  =   BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 = 100)
-               Selected Partitions:  2
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: (c1 = 100)
+   Selected Partitions:  2
+(3 rows)
 
 --1.1.2.3  =  -BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1=250;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 = 250)
-               Selected Partitions:  3
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: (c1 = 250)
+   Selected Partitions:  3
+(3 rows)
 
 --1.1.2.6  =   BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1=500;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 = 500)
-               Selected Partitions:  NONE
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 = 500)
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.1.2.7  =  +BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1=550;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 = 550)
-               Selected Partitions:  NONE
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 = 550)
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.1.1.1  <  -BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 < 50)
-               Selected Partitions:  1
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: (c1 < 50)
+   Selected Partitions:  1
+(3 rows)
 
 --1.1.1.2  <= -BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<=50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 <= 50)
-               Selected Partitions:  1
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: (c1 <= 50)
+   Selected Partitions:  1
+(3 rows)
 
 --1.1.1.3  <   BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 < 100)
-               Selected Partitions:  1
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: (c1 < 100)
+   Selected Partitions:  1
+(3 rows)
 
 --1.1.1.4  <=  BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 <= 100)
-               Selected Partitions:  1..2
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 <= 100)
+         Selected Partitions:  1..2
+(5 rows)
 
 --1.1.1.5  <  -BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<150;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 < 150)
-               Selected Partitions:  1..2
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 < 150)
+         Selected Partitions:  1..2
+(5 rows)
 
 --1.1.1.7  <   BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<200;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 < 200)
-               Selected Partitions:  1..2
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 < 200)
+         Selected Partitions:  1..2
+(5 rows)
 
 --1.1.1.8  <=  BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<=200;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 <= 200)
-               Selected Partitions:  1..3
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 <= 200)
+         Selected Partitions:  1..3
+(5 rows)
 
 --1.1.1.11 <   BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<500;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 < 500)
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 < 500)
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.1.1.12 <=  BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<=500;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 <= 500)
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 <= 500)
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.1.1.13 <  +BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<700;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 < 700)
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 < 700)
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.1.1.14 <= +BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<=700;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 <= 700)
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 <= 700)
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.1.3.1  >  -BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 > 50)
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 > 50)
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.1.3.2  >= -BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 >= 50)
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 >= 50)
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.1.3.3  >   BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 > 100)
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 > 100)
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.1.3.4  >=  BD(1)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 >= 100)
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 >= 100)
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.1.3.5  >  -BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>150;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 > 150)
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 > 150)
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.1.3.6  >= -BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=150;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 >= 150)
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 >= 150)
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.1.3.7  >   BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>200;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 > 200)
-               Selected Partitions:  3..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 > 200)
+         Selected Partitions:  3..4
+(5 rows)
 
 --1.1.3.8  >=  BD(N)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=200;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 >= 200)
-               Selected Partitions:  3..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 >= 200)
+         Selected Partitions:  3..4
+(5 rows)
 
 --1.1.3.11 >   BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>500;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 > 500)
-               Selected Partitions:  NONE
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 > 500)
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.1.3.12 >=  BD(Z)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=500;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 >= 500)
-               Selected Partitions:  NONE
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 >= 500)
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.1.5 IN (ArrayExpr)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1 IN (230,330,350);
-                          QUERY PLAN                           
----------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (c1 = ANY ('{230,330,350}'::integer[]))
-               Selected Partitions:  3..4
-(6 rows)
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (c1 = ANY ('{230,330,350}'::integer[]))
+         Selected Partitions:  3..4
+(5 rows)
 
 --1.2.1  ITEM(<) AND ITEM(<)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 AND t_pruning_datatype_int32.c1<250;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) AND (c1 < 250))
-               Selected Partitions:  1
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: ((c1 < 50) AND (c1 < 250))
+   Selected Partitions:  1
+(3 rows)
 
 --1.2.2  ITEM(>) AND ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>50 AND t_pruning_datatype_int32.c1>=150;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 50) AND (c1 >= 150))
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 50) AND (c1 >= 150))
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.2.2  ITEM(>) AND ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>100 AND t_pruning_datatype_int32.c1>=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 100) AND (c1 >= 100))
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 100) AND (c1 >= 100))
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.2.3  ITEM(>) AND ITEM(<) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 AND t_pruning_datatype_int32.c1>0;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) AND (c1 > 0))
-               Selected Partitions:  1
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: ((c1 < 50) AND (c1 > 0))
+   Selected Partitions:  1
+(3 rows)
 
 --1.2.3  ITEM(>) AND ITEM(<) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=100 AND t_pruning_datatype_int32.c1<300;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 >= 100) AND (c1 < 300))
-               Selected Partitions:  2..3
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 >= 100) AND (c1 < 300))
+         Selected Partitions:  2..3
+(5 rows)
 
 --1.2.3  ITEM(>) AND ITEM(<) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=100 AND t_pruning_datatype_int32.c1<550;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 >= 100) AND (c1 < 550))
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 >= 100) AND (c1 < 550))
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.2.4  ITEM(>) AND ITEM(<) (NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 AND t_pruning_datatype_int32.c1>100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) AND (c1 > 100))
-               Selected Partitions:  NONE
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 < 50) AND (c1 > 100))
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.2.4  ITEM(>) AND ITEM(<) (NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>250 AND t_pruning_datatype_int32.c1<50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 250) AND (c1 < 50))
-               Selected Partitions:  NONE
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 250) AND (c1 < 50))
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.2.7  ITEM(=) AND ITEM(>) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=100 AND t_pruning_datatype_int32.c1=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 >= 100) AND (c1 = 100))
-               Selected Partitions:  2
-(6 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: ((c1 >= 100) AND (c1 = 100))
+   Selected Partitions:  2
+(3 rows)
 
 --1.2.10 ITEM(<) AND OTHER
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c4 IS NULL AND (t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250) AND (t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<t_pruning_datatype_int32.c2) AND (t_pruning_datatype_int32.c2<t_pruning_datatype_int32.c3 OR t_pruning_datatype_int32.c2>100);
-                                                           QUERY PLAN                                                           
---------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c4 IS NULL) AND (c1 > 300) AND (c1 < c2) AND ((c1 > 500) OR (c1 < 250)) AND ((c2 < c3) OR (c2 > 100)))
-               Selected Partitions:  NONE
-(6 rows)
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c4 IS NULL) AND (c1 > 300) AND (c1 < c2) AND ((c1 > 500) OR (c1 < 250)) AND ((c2 < c3) OR (c2 > 100)))
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.3.1  ITEM(<) OR ITEM(<)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 OR t_pruning_datatype_int32.c1<250;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) OR (c1 < 250))
-               Selected Partitions:  1..3
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 < 50) OR (c1 < 250))
+         Selected Partitions:  1..3
+(5 rows)
 
 --1.3.2  ITEM(>) OR ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>50 OR t_pruning_datatype_int32.c1>=150;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 50) OR (c1 >= 150))
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 50) OR (c1 >= 150))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.3.2  ITEM(>) OR ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>100 OR t_pruning_datatype_int32.c1>=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 100) OR (c1 >= 100))
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 100) OR (c1 >= 100))
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.3.3  ITEM(>) OR ITEM(<) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 OR t_pruning_datatype_int32.c1>0;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) OR (c1 > 0))
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 < 50) OR (c1 > 0))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.3.3  ITEM(>) OR ITEM(<) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=100 OR t_pruning_datatype_int32.c1<200;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 >= 100) OR (c1 < 200))
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 >= 100) OR (c1 < 200))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.3.4  ITEM(>) OR ITEM(<) (NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 OR t_pruning_datatype_int32.c1>100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) OR (c1 > 100))
-               Selected Partitions:  1..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 < 50) OR (c1 > 100))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.3.4  ITEM(>) OR ITEM(<) (NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 500) OR (c1 < 250))
-               Selected Partitions:  1..3
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 500) OR (c1 < 250))
+         Selected Partitions:  1..3
+(5 rows)
 
 --1.3.4  ITEM(>) OR ITEM(<) (NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>250 OR t_pruning_datatype_int32.c1<50;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 250) OR (c1 < 50))
-               Selected Partitions:  1,3..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 250) OR (c1 < 50))
+         Selected Partitions:  1,3..4
+(5 rows)
 
 --1.3.7  ITEM(=) OR ITEM(>) (NOT NULL)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=100 OR t_pruning_datatype_int32.c1=100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 >= 100) OR (c1 = 100))
-               Selected Partitions:  2..4
-(6 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 >= 100) OR (c1 = 100))
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.3.9  ITEM(<) OR OTHER
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c4 IS NULL OR (t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250) AND (t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<t_pruning_datatype_int32.c2) AND (t_pruning_datatype_int32.c2<t_pruning_datatype_int32.c3 OR t_pruning_datatype_int32.c2>100);
-                                                           QUERY PLAN                                                            
----------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c4 IS NULL) OR (((c1 > 500) OR (c1 < 250)) AND (c1 > 300) AND (c1 < c2) AND ((c2 < c3) OR (c2 > 100))))
-               Selected Partitions:  1..4
-(6 rows)
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c4 IS NULL) OR (((c1 > 500) OR (c1 < 250)) AND (c1 > 300) AND (c1 < c2) AND ((c2 < c3) OR (c2 > 100))))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.4.1 ITEM(<) AND ITEM(<) AND ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>100 AND t_pruning_datatype_int32.c1<=500 AND t_pruning_datatype_int32.c1>=100 AND t_pruning_datatype_int32.c1<500;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 100) AND (c1 <= 500) AND (c1 >= 100) AND (c1 < 500))
-               Selected Partitions:  2..4
-(6 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 100) AND (c1 <= 500) AND (c1 >= 100) AND (c1 < 500))
+         Selected Partitions:  2..4
+(5 rows)
 
 --1.4.1 ITEM(<) AND ITEM(<) AND ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>50 AND t_pruning_datatype_int32.c1>100 AND t_pruning_datatype_int32.c1>=100 AND t_pruning_datatype_int32.c1<250 AND t_pruning_datatype_int32.c1<=250 AND t_pruning_datatype_int32.c1=200;
-                                                   QUERY PLAN                                                   
-----------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 50) AND (c1 > 100) AND (c1 >= 100) AND (c1 < 250) AND (c1 <= 250) AND (c1 = 200))
-               Selected Partitions:  3
-(6 rows)
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_int32
+   Filter: ((c1 > 50) AND (c1 > 100) AND (c1 >= 100) AND (c1 < 250) AND (c1 <= 250) AND (c1 = 200))
+   Selected Partitions:  3
+(3 rows)
 
 --1.4.2 ITEM(>) AND ITEM(<) OR ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<170  AND ( t_pruning_datatype_int32.c1>600 OR t_pruning_datatype_int32.c1<150);
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 170) AND ((c1 > 600) OR (c1 < 150)))
-               Selected Partitions:  1..2
-(6 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 < 170) AND ((c1 > 600) OR (c1 < 150)))
+         Selected Partitions:  1..2
+(5 rows)
 
 --1.4.3 ITEM(>) OR  ITEM(<) OR ITEM(>) OR ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>100 OR t_pruning_datatype_int32.c1<=300 OR t_pruning_datatype_int32.c1>=100 OR t_pruning_datatype_int32.c1<300;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 100) OR (c1 <= 300) OR (c1 >= 100) OR (c1 < 300))
-               Selected Partitions:  1..4
-(6 rows)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 100) OR (c1 <= 300) OR (c1 >= 100) OR (c1 < 300))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.4.5 (ITEM(>) OR ITEM(<)) AND ITEM(<)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where (t_pruning_datatype_int32.c1<170 OR t_pruning_datatype_int32.c1<250)  AND ( t_pruning_datatype_int32.c1>600 OR t_pruning_datatype_int32.c1<150);
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (((c1 < 170) OR (c1 < 250)) AND ((c1 > 600) OR (c1 < 150)))
-               Selected Partitions:  1..2
-(6 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (((c1 < 170) OR (c1 < 250)) AND ((c1 > 600) OR (c1 < 150)))
+         Selected Partitions:  1..2
+(5 rows)
 
 --1.4.2 ITEM(>) AND ITEM(<) OR ITEM(>)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1<50 OR t_pruning_datatype_int32.c1>250 AND t_pruning_datatype_int32.c1<400;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 < 50) OR ((c1 > 250) AND (c1 < 400)))
-               Selected Partitions:  1,3..4
-(6 rows)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 < 50) OR ((c1 > 250) AND (c1 < 400)))
+         Selected Partitions:  1,3..4
+(5 rows)
 
 --1.4.4 ITEM(>) AND ITEM(<) OR ITEM(>) AND ITEM(<)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=-100 AND t_pruning_datatype_int32.c1<50 OR t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<700; 
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1,4
-(6 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1,4
+(5 rows)
 
 --1.4.4 ITEM(>) AND ITEM(<) OR ITEM(>) AND ITEM(<)
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where t_pruning_datatype_int32.c1>=-100 AND t_pruning_datatype_int32.c1<=100 OR t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<700; 
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: (((c1 >= (-100)) AND (c1 <= 100)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1..2,4
-(6 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: (((c1 >= (-100)) AND (c1 <= 100)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 --1.4.6 (ITEM(>) OR ITEM(<)) AND ((ITEM(>) OR ITEM(<)))
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where (t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250) AND (t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<t_pruning_datatype_int32.c2) AND (t_pruning_datatype_int32.c2<t_pruning_datatype_int32.c3 OR t_pruning_datatype_int32.c2>100) OR t_pruning_datatype_int32.c4 IS NULL;
-                                                           QUERY PLAN                                                            
----------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((((c1 > 500) OR (c1 < 250)) AND (c1 > 300) AND (c1 < c2) AND ((c2 < c3) OR (c2 > 100))) OR (c4 IS NULL))
-               Selected Partitions:  1..4
-(6 rows)
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((((c1 > 500) OR (c1 < 250)) AND (c1 > 300) AND (c1 < c2) AND ((c2 < c3) OR (c2 > 100))) OR (c4 IS NULL))
+         Selected Partitions:  1..4
+(5 rows)
 
 --1.4.6 (ITEM(>) OR ITEM(<)) AND ((ITEM(>) OR ITEM(<)))
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where (t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250) AND (t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<t_pruning_datatype_int32.c2) AND (t_pruning_datatype_int32.c2<t_pruning_datatype_int32.c3 OR t_pruning_datatype_int32.c2>100) AND t_pruning_datatype_int32.c4 IS NULL;
-                                                           QUERY PLAN                                                           
---------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c4 IS NULL) AND (c1 > 300) AND (c1 < c2) AND ((c1 > 500) OR (c1 < 250)) AND ((c2 < c3) OR (c2 > 100)))
-               Selected Partitions:  NONE
-(6 rows)
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c4 IS NULL) AND (c1 > 300) AND (c1 < c2) AND ((c1 > 500) OR (c1 < 250)) AND ((c2 < c3) OR (c2 > 100)))
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.4.8 composite
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where (t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250) AND (t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c4 IS NULL) AND (t_pruning_datatype_int32.c2<t_pruning_datatype_int32.c3 OR t_pruning_datatype_int32.c2>100);
-                                                    QUERY PLAN                                                    
-------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c4 IS NULL) AND (c1 > 300) AND ((c1 > 500) OR (c1 < 250)) AND ((c2 < c3) OR (c2 > 100)))
-               Selected Partitions:  NONE
-(6 rows)
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c4 IS NULL) AND (c1 > 300) AND ((c1 > 500) OR (c1 < 250)) AND ((c2 < c3) OR (c2 > 100)))
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.4.8 composite
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where (t_pruning_datatype_int32.c1>500 OR t_pruning_datatype_int32.c1<250) AND (t_pruning_datatype_int32.c1>300 AND t_pruning_datatype_int32.c1<t_pruning_datatype_int32.c2) AND (t_pruning_datatype_int32.c4 IS NULL OR t_pruning_datatype_int32.c2>100);
-                                                    QUERY PLAN                                                    
-------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_datatype_int32
-               Filter: ((c1 > 300) AND (c1 < c2) AND ((c4 IS NULL) OR (c2 > 100)) AND ((c1 > 500) OR (c1 < 250)))
-               Selected Partitions:  NONE
-(6 rows)
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_datatype_int32
+         Filter: ((c1 > 300) AND (c1 < c2) AND ((c4 IS NULL) OR (c2 > 100)) AND ((c1 > 500) OR (c1 < 250)))
+         Selected Partitions:  NONE
+(5 rows)
 
 --1.4.9 param(no pruning)
 set enable_hashjoin=off;
@@ -900,21 +821,19 @@ set enable_material=off;
 create index t_pruning_datatype_int32_i on t_pruning_datatype_int32(c1) local;
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int32 where c2 in (select c1 from t_pruning_datatype_int32);
-                                                 QUERY PLAN                                                 
-------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Nested Loop Semi Join
-         ->  Streaming(type: REDISTRIBUTE)
-               ->  Partition Iterator
-                     Iterations: 4
-                     ->  Partitioned Seq Scan on t_pruning_datatype_int32
-                           Selected Partitions:  1..4
-         ->  Partition Iterator
-               Iterations: 4
-               ->  Partitioned Index Only Scan using t_pruning_datatype_int32_i on t_pruning_datatype_int32
-                     Index Cond: (c1 = public.t_pruning_datatype_int32.c2)
-                     Selected Partitions:  1..4
-(12 rows)
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Nested Loop Semi Join
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on t_pruning_datatype_int32
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Only Scan using t_pruning_datatype_int32_i on t_pruning_datatype_int32
+               Index Cond: (c1 = public.t_pruning_datatype_int32.c2)
+               Selected Partitions:  1..4
+(10 rows)
 
 drop index t_pruning_datatype_int32_i;
 reset enable_hashjoin;
@@ -930,29 +849,26 @@ select * from t_pruning_datatype_int32 t1,
     (select c4, 3 as "3" from t_pruning_datatype_int32) t3
   ) t4
 where t1.c1 = t4."3";
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
- Streaming (type: GATHER)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Nested Loop
    ->  Hash Join
-         Hash Cond: ((3) = t1.c1)
-         ->  Nested Loop Left Join
+         Hash Cond: (t1.c1 = (3))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on t_pruning_datatype_int32 t1
+                     Selected Partitions:  1..4
+         ->  Hash
                ->  Partition Iterator
                      Iterations: 4
                      ->  Partitioned Seq Scan on t_pruning_datatype_int32
                            Selected Partitions:  1..4
-               ->  Materialize
-                     ->  Streaming(type: BROADCAST)
-                           ->  Partition Iterator
-                                 Iterations: 4
-                                 ->  Partitioned Seq Scan on t_pruning_datatype_int32
-                                       Selected Partitions:  1..4
-         ->  Hash
-               ->  Streaming(type: BROADCAST)
-                     ->  Partition Iterator
-                           Iterations: 4
-                           ->  Partitioned Seq Scan on t_pruning_datatype_int32 t1
-                                 Selected Partitions:  1..4
-(20 rows)
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on t_pruning_datatype_int32
+                     Selected Partitions:  1..4
+(17 rows)
 
 --4 datatype
 --4.1  int
@@ -966,27 +882,25 @@ partition by range(c1)
  partition p4 values less than(500));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int16 where c1>=-100 AND c1<50 OR c1>300 AND c1<700; 
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int16
-               Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1,4
-(6 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int16
+         Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int16 where c1 IN (150,250,500,600); 
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int16
-               Filter: (c1 = ANY ('{150,250,500,600}'::integer[]))
-               Selected Partitions:  2..3
-(6 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int16
+         Filter: (c1 = ANY ('{150,250,500,600}'::integer[]))
+         Selected Partitions:  2..3
+(5 rows)
 
 --4.3  integer
 --Done
@@ -1000,27 +914,25 @@ partition by range(c1)
  
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int64 where c1>=-100 AND c1<50 OR c1>300 AND c1<700; 
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int64
-               Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1,4
-(6 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int64
+         Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_int64 where c1 IN (150,250,500,600); 
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_int64
-               Filter: (c1 = ANY ('{150,250,500,600}'::bigint[]))
-               Selected Partitions:  2..3
-(6 rows)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_int64
+         Filter: (c1 = ANY ('{150,250,500,600}'::bigint[]))
+         Selected Partitions:  2..3
+(5 rows)
 
 --4.5  decimal
 create table t_pruning_datatype_decimal(c1 decimal,c2 int,c3 int,c4 text)
@@ -1031,39 +943,36 @@ partition by range(c1)
  partition p4 values less than(500.55));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_decimal where c1>=-100.11 AND c1<50.0 OR c1>300.33 AND c1<700; 
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_decimal
-               Filter: (((c1 >= (-100.11)) AND (c1 < 50.0)) OR ((c1 > 300.33) AND (c1 < 700::numeric)))
-               Selected Partitions:  1,4
-(6 rows)
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_decimal
+         Filter: (((c1 >= (-100.11)) AND (c1 < 50.0)) OR ((c1 > 300.33) AND (c1 < 700::numeric)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_decimal where c1 IN (100.11,250.0, 300.33,700); 
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_decimal
-               Filter: (c1 = ANY ('{100.11,250.0,300.33,700}'::numeric[]))
-               Selected Partitions:  2..4
-(6 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_decimal
+         Filter: (c1 = ANY ('{100.11,250.0,300.33,700}'::numeric[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_decimal where c1 IN (150,250,500,600);
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_decimal
-               Filter: (c1 = ANY ('{150,250,500,600}'::numeric[]))
-               Selected Partitions:  2..4
-(6 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_decimal
+         Filter: (c1 = ANY ('{150,250,500,600}'::numeric[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 --4.6  numeric
 create table t_pruning_datatype_numeric(c1 numeric,c2 int,c3 int,c4 text)
@@ -1074,39 +983,36 @@ partition by range(c1)
  partition p4 values less than(500.55));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_numeric where c1>=-100.11 AND c1<50.0 OR c1>300.33 AND c1<700; 
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_numeric
-               Filter: (((c1 >= (-100.11)) AND (c1 < 50.0)) OR ((c1 > 300.33) AND (c1 < 700::numeric)))
-               Selected Partitions:  1,4
-(6 rows)
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_numeric
+         Filter: (((c1 >= (-100.11)) AND (c1 < 50.0)) OR ((c1 > 300.33) AND (c1 < 700::numeric)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_numeric where c1 IN (100.11,250.0, 300.33,700); 
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_numeric
-               Filter: (c1 = ANY ('{100.11,250.0,300.33,700}'::numeric[]))
-               Selected Partitions:  2..4
-(6 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_numeric
+         Filter: (c1 = ANY ('{100.11,250.0,300.33,700}'::numeric[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_numeric where c1 IN (150,250,500,600);
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_numeric
-               Filter: (c1 = ANY ('{150,250,500,600}'::numeric[]))
-               Selected Partitions:  2..4
-(6 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_numeric
+         Filter: (c1 = ANY ('{150,250,500,600}'::numeric[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 drop table t_pruning_datatype_int32;
 drop table t_pruning_datatype_int16;

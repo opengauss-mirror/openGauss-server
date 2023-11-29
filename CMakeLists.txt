@@ -56,14 +56,23 @@ set(prefix_home $ENV{PREFIX_HOME})
 set(CMAKE_INSTALL_PREFIX ${prefix_home} CACHE INTERNAL "")
 if("$ENV{GCC_VERSION}" STREQUAL "")
     execute_process(COMMAND gcc --version OUTPUT_VARIABLE GCC_VERSION_INFO OUTPUT_STRIP_TRAILING_WHITESPACE)
-    string(REPLACE "\n" " " GCC_VERSION_INFO_TMP ${GCC_VERSION_INFO})
-    string(REPLACE " " ";" GCC_VERSION_INFO_LIST ${GCC_VERSION_INFO_TMP})
-    list(GET GCC_VERSION_INFO_LIST 2 GCC_VERSION)
+    string(REPLACE "\n" ";" GCC_VERSION_INFO_TMP ${GCC_VERSION_INFO})
+    list(GET GCC_VERSION_INFO_TMP 0 GCC_VERSION_INFO_FIRSTLINE)
+    string(REPLACE " " ";" GCC_VERSION_INFO_LIST ${GCC_VERSION_INFO_FIRSTLINE})
+    list(POP_BACK GCC_VERSION_INFO_LIST GCC_VERSION)
 else()
     set(GCC_VERSION $ENV{GCC_VERSION})
 endif()
+MESSAGE(STATUS "The current gcc version is: ${GCC_VERSION}")
 if("${GCC_VERSION}" STREQUAL "7.3.0")
     set(GCC_VERSION_LIT 7.3)
+    set(LIBSTD_SUB_VERSION 24)
+elseif("${GCC_VERSION}" STREQUAL "10.3.1")
+    set(GCC_VERSION_LIT 10.3)
+    set(LIBSTD_SUB_VERSION 28)
+elseif("${GCC_VERSION}" STREQUAL "10.3.0")
+    set(GCC_VERSION_LIT 10.3)
+    set(LIBSTD_SUB_VERSION 28)
 endif()
 
 if("$ENV{BUILD_TUPLE}" STREQUAL "")
@@ -102,16 +111,31 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin.control
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.1.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--3.0.sql
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.0.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.0--1.1.sql
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--1.0--1.1.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.1--1.0.sql
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--1.1--1.0.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.1--2.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--2.0--1.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--2.0--3.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--3.0--2.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--2.0--2.0.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--2.0.1--2.0.sql
         DESTINATION share/postgresql/extension/
     )
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/openGauss_expr_dolphin.ir

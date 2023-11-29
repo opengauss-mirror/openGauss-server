@@ -155,7 +155,8 @@ RETRY:
     }
 
     Assert(TransactionIdIsValid(xid));
-    if ((!IS_DISASTER_RECOVER_MODE) && (snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) && TransactionIdPrecedes(transactionId, xid)) {
+    if ((!IS_MULTI_DISASTER_RECOVER_MODE) && (snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) &&
+        TransactionIdPrecedes(transactionId, xid)) {
         result = GetCSNByCLog(transactionId, isCommit);
     } else {
         uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
@@ -171,7 +172,7 @@ RETRY:
         }
         PG_CATCH();
         {
-            if ((IS_CN_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE) &&
+            if ((IS_CN_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE) &&
                 t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED)
             {
                 (void)MemoryContextSwitchTo(old);
@@ -463,7 +464,8 @@ bool UHeapTransactionIdDidCommit(TransactionId transactionId)
         return true;
     }
     if (TransactionIdIsNormal(transactionId) &&
-        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid))) {
+        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid)) &&
+        !RecoveryInProgress()) {
         Assert(TransactionIdDidCommit(transactionId));
         return true;
     }

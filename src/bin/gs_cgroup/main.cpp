@@ -68,6 +68,7 @@ char* current_nodegroup = NULL;
  */
 static void usage(void)
 {
+#ifndef ENABLE_FINANCE_MODE
     fprintf(stdout,
         "\ngs_cgroup is used to manage the Gauss Cgroups on each node.\n"
         "Usage:\n gs_cgroup [OPTION]...\n\n"
@@ -152,6 +153,7 @@ static void usage(void)
         "\n");
 
     (void)fflush(stdout);
+#endif
 }
 /*
  * @Description: if more than one level of cgroup is specified, the reduntant groups are set to NULL
@@ -1132,6 +1134,10 @@ static int parse_options(int argc, char** argv)
  */
 int main(int argc, char** argv)
 {
+#ifdef ENABLE_FINANCE_MODE
+    fprintf(stderr, "ERROR: gs_cgroup is not work on finance mode. \n");
+#endif
+#ifndef ENABLE_FINANCE_MODE
     char* cpuset = NULL;
     int ret = 0;
 
@@ -1292,6 +1298,7 @@ error:
         (void)munmap(cgutil_vaddr[0], GSCGROUP_ALLNUM * sizeof(gscgroup_grp_t));
     write_log("gs_cgroup execution error.\n");
     exit(-1);
+#endif
 }
 
 #ifdef ENABLE_UT

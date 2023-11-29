@@ -25,6 +25,7 @@
 #include "miscadmin.h"
 #include "access/transam.h"
 #include "access/xlog.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "catalog/catalog.h"
 #include "portability/instr_time.h"
 #include "postmaster/bgwriter.h"
@@ -211,7 +212,7 @@ int openrepairfile(char* path, RelFileNodeForkNum filenode)
     ADIO_END();
     fd = DataFileIdOpenFile(temppath, filenode, (int)repair_flags, 0600);
     if (fd < 0) {
-        ereport(WARNING, (errmsg("[file repair] could not open repair file %s: %m", temppath)));
+        ereport(WARNING, (errmsg("[file repair] could not open repair file %s: %s", temppath, TRANSLATE_ERRNO)));
     }
     pfree(temppath);
     return fd;
@@ -712,7 +713,7 @@ static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior
             CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, 0)) {
             fd = openrepairfile(path, filenode);
             if (fd < 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file %s.repair: %m", path)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file %s.repair: %s", path, TRANSLATE_ERRNO)));
             } else {
                 ereport(LOG, (errmsg("[file repair] open repair file %s.repair", path)));
             }
@@ -1307,7 +1308,7 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
         } else {
             check_file_stat(FilePathName(v->mdfd_vfd));
             force_backtrace_messages = true;
-
+            extreme_rto_standby_read::dump_error_all_info(reln->smgr_rnode.node, forknum, blocknum);
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                             errmsg("could not read block %u in file \"%s\": read only %d of %d bytes", blocknum,
                                    FilePathName(v->mdfd_vfd), nbytes, BLCKSZ)));

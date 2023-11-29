@@ -158,6 +158,7 @@ typedef struct PlanTableEntry {
 #define OPTIONSLEN 256
 #define OBJECTLEN 31
 #define PROJECTIONLEN 4001
+#define SPQNODENAMELEN 256
 
 /* plan_table_data column defination. */
 typedef struct PlanTableData {
@@ -473,6 +474,9 @@ typedef struct ExplainState {
     bool is_explain_gplan;
     char* opt_model_name;
     ExplainFRSqlState es_frs;   /* explain state for remote sql of foreign scan. */
+#ifdef USE_SPQ
+    int current_id;
+#endif
 } ExplainState;
 
 /* Hook for plugins to get control in explain_get_index_name() */

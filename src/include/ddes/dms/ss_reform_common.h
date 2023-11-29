@@ -31,6 +31,8 @@
 #define REFORM_WAIT_LONG 100000 /* 0.1 sec */
 #define WAIT_REFORM_CTRL_REFRESH_TRIES 1000
 
+#define WAIT_PMSTATE_UPDATE_TRIES 100
+
 #define REFORM_CTRL_VERSION 1
 
 typedef struct SSBroadcastCancelTrx {
@@ -41,10 +43,13 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
     int readLen);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSGetRecoveryXlogPath();
-void SSSaveReformerCtrl(bool force = false);
+void SSDoradoGetXlogPathList();
+void SSUpdateReformerCtrl();
 void SSReadControlFile(int id, bool updateDmsCtx = false);
 void SSClearSegCache();
 int SSCancelTransactionOfAllStandby(SSBroadcastOp type);
 int SSProcessCancelTransaction(SSBroadcastOp type);
-int SSXLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);
+int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);
 void SSStandbySetLibpqswConninfo();
+void SSDoradoRefreshMode();
+void SSDoradoUpdateHAmode();

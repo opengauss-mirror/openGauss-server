@@ -260,7 +260,7 @@ void PolicyLabelItem::init(const PolicyLabelItem &arg)
     m_object = arg.m_object;
     errno_t rc = memset_s(m_column, sizeof(m_column), 0, sizeof(m_column));
     securec_check(rc, "\0", "\0");
-    if (arg.m_column != NULL && strlen(arg.m_column) > 0)
+    if (strlen(arg.m_column) > 0)
     {
         rc = snprintf_s(m_column, sizeof(m_column), strlen(arg.m_column), "%s", arg.m_column);
         securec_check_ss(rc, "\0", "\0");

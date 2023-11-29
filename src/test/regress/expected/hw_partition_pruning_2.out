@@ -7,63 +7,54 @@ partition by range(c1)
  partition p4 values less than(500.55));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_real where c1>=-100.11 AND c1<50.0 OR c1>300.33 AND c1<700; 
-                                                                             QUERY PLAN                                                                              
----------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_real
-               Filter: (((c1 >= (-100.11)::double precision) AND (c1 < 50::double precision)) OR ((c1 > 300.33::double precision) AND (c1 < 700::double precision)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_real
+         Filter: (((c1 >= (-100.11)::double precision) AND (c1 < 50::double precision)) OR ((c1 > 300.33::double precision) AND (c1 < 700::double precision)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_real where c1 = 100.11; 
-                         QUERY PLAN                          
--------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_real
-               Filter: (c1 = 100.11::double precision)
-               Selected Partitions:  1
-(6 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_real
+   Filter: (c1 = 100.11::double precision)
+   Selected Partitions:  1
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_real where c1 = 100.11::real; 
-                         QUERY PLAN                          
--------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_real
-               Filter: (c1 = 100.11::real)
-               Selected Partitions:  2
-(6 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_real
+   Filter: (c1 = 100.11::real)
+   Selected Partitions:  2
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_real where c1 IN (100.11,250.0, 300.33,700); 
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_real
-               Filter: (c1 = ANY ('{100.11,250,300.33,700}'::double precision[]))
-               Selected Partitions:  1,3..4
-(6 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_real
+         Filter: (c1 = ANY ('{100.11,250,300.33,700}'::double precision[]))
+         Selected Partitions:  1,3..4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_real where c1 IN (150,250,500,600); 
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_real
-               Filter: (c1 = ANY ('{150,250,500,600}'::real[]))
-               Selected Partitions:  2..4
-(6 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_real
+         Filter: (c1 = ANY ('{150,250,500,600}'::real[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 --4.8  double precision
 create table t_pruning_datatype_double(c1 double precision,c2 int,c3 int,c4 text)
@@ -75,39 +66,36 @@ partition by range(c1)
  
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_double where c1>=-100.11 AND c1<50.0 OR c1>300.33 AND c1<700; 
-                                                                             QUERY PLAN                                                                              
----------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_double
-               Filter: (((c1 >= (-100.11)::double precision) AND (c1 < 50::double precision)) OR ((c1 > 300.33::double precision) AND (c1 < 700::double precision)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_double
+         Filter: (((c1 >= (-100.11)::double precision) AND (c1 < 50::double precision)) OR ((c1 > 300.33::double precision) AND (c1 < 700::double precision)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_double where c1 IN (100.11,250.0, 300.33,700); 
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_double
-               Filter: (c1 = ANY ('{100.11,250,300.33,700}'::double precision[]))
-               Selected Partitions:  2..4
-(6 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_double
+         Filter: (c1 = ANY ('{100.11,250,300.33,700}'::double precision[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_double where c1 IN (150,250,500,600); 
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_double
-               Filter: (c1 = ANY ('{150,250,500,600}'::double precision[]))
-               Selected Partitions:  2..4
-(6 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_double
+         Filter: (c1 = ANY ('{150,250,500,600}'::double precision[]))
+         Selected Partitions:  2..4
+(5 rows)
 
 --4.9  smallserial
 create table t_pruning_datatype_smallserial(c1 smallserial,c2 int,c3 int,c4 text)
@@ -119,39 +107,36 @@ partition by range(c1)
 NOTICE:  CREATE TABLE will create implicit sequence "t_pruning_datatype_smallserial_c1_seq" for serial column "t_pruning_datatype_smallserial.c1"
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_smallserial where c1>=-100 AND c1<50 OR c1>300 AND c1<700; 
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_smallserial
-               Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1,4
-(6 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_smallserial
+         Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_smallserial where c1 IN (150,250,500,600); 
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_smallserial
-               Filter: (c1 = ANY ('{150,250,500,600}'::integer[]))
-               Selected Partitions:  2..3
-(6 rows)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_smallserial
+         Filter: (c1 = ANY ('{150,250,500,600}'::integer[]))
+         Selected Partitions:  2..3
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_smallserial where c1 IN (150,250,500,null); 
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_smallserial
-               Filter: (c1 = ANY ('{150,250,500,NULL}'::integer[]))
-               Selected Partitions:  2..3
-(6 rows)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_smallserial
+         Filter: (c1 = ANY ('{150,250,500,NULL}'::integer[]))
+         Selected Partitions:  2..3
+(5 rows)
 
 --4.10 serial
 create table t_pruning_datatype_serial(c1 serial,c2 int,c3 int,c4 text)
@@ -163,27 +148,25 @@ partition by range(c1)
 NOTICE:  CREATE TABLE will create implicit sequence "t_pruning_datatype_serial_c1_seq" for serial column "t_pruning_datatype_serial.c1"
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_serial where c1>=-100 AND c1<50 OR c1>300 AND c1<700; 
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_serial
-               Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1,4
-(6 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_serial
+         Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_serial where c1 IN (150,250,500,600); 
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_serial
-               Filter: (c1 = ANY ('{150,250,500,600}'::integer[]))
-               Selected Partitions:  2..3
-(6 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_serial
+         Filter: (c1 = ANY ('{150,250,500,600}'::integer[]))
+         Selected Partitions:  2..3
+(5 rows)
 
 --4.11 bigserial
 create table t_pruning_datatype_bigserial(c1 bigserial,c2 int,c3 int,c4 text)
@@ -195,27 +178,25 @@ partition by range(c1)
 NOTICE:  CREATE TABLE will create implicit sequence "t_pruning_datatype_bigserial_c1_seq" for serial column "t_pruning_datatype_bigserial.c1"
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_bigserial where c1>=-100 AND c1<50 OR c1>300 AND c1<700; 
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_bigserial
-               Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
-               Selected Partitions:  1,4
-(6 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_bigserial
+         Filter: (((c1 >= (-100)) AND (c1 < 50)) OR ((c1 > 300) AND (c1 < 700)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_bigserial where c1 IN (150,250,500,600); 
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_bigserial
-               Filter: (c1 = ANY ('{150,250,500,600}'::bigint[]))
-               Selected Partitions:  2..3
-(6 rows)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_bigserial
+         Filter: (c1 = ANY ('{150,250,500,600}'::bigint[]))
+         Selected Partitions:  2..3
+(5 rows)
 
 --4.12 character varying(n), varchar(n)
 create table t_pruning_datatype_varchar(c1 varchar,c2 int,c3 int,c4 text)
@@ -226,27 +207,25 @@ partition by range(c1)
  partition p4 values less than(MAXVALUE));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_varchar where c1>='abcd' AND c1<'cdef' OR c1>'qqqqqqqqqqqq' AND c1<'yyyyy'; 
-                                                                            QUERY PLAN                                                                            
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_varchar
-               Filter: ((((c1)::text >= 'abcd'::text) AND ((c1)::text < 'cdef'::text)) OR (((c1)::text > 'qqqqqqqqqqqq'::text) AND ((c1)::text < 'yyyyy'::text)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                                         QUERY PLAN                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_varchar
+         Filter: ((((c1)::text >= 'abcd'::text) AND ((c1)::text < 'cdef'::text)) OR (((c1)::text > 'qqqqqqqqqqqq'::text) AND ((c1)::text < 'yyyyy'::text)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_varchar where c1 IN ('abcd','dabc','hhcdddda','zzzz'); 
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_varchar
-               Filter: ((c1)::text = ANY ('{abcd,dabc,hhcdddda,zzzz}'::text[]))
-               Selected Partitions:  1..2,4
-(6 rows)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_varchar
+         Filter: ((c1)::text = ANY ('{abcd,dabc,hhcdddda,zzzz}'::text[]))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 --4.13 character(n), char(n)
 create table t_pruning_datatype_charn(c1 char(40),c2 int,c3 int,c4 text)
@@ -258,39 +237,36 @@ partition by range(c1)
  
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_charn where c1>='abcd' AND c1<'cdef' OR c1>'qqqqqqqqqqqq' AND c1<'yyyyy'; 
-                                                                QUERY PLAN                                                                
-------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_charn
-               Filter: (((c1 >= 'abcd'::bpchar) AND (c1 < 'cdef'::bpchar)) OR ((c1 > 'qqqqqqqqqqqq'::bpchar) AND (c1 < 'yyyyy'::bpchar)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_charn
+         Filter: (((c1 >= 'abcd'::bpchar) AND (c1 < 'cdef'::bpchar)) OR ((c1 > 'qqqqqqqqqqqq'::bpchar) AND (c1 < 'yyyyy'::bpchar)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_charn where c1 IN ('abcd','dabc','hhcdddda','zzzz'); 
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_charn
-               Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,zzzz}'::bpchar[]))
-               Selected Partitions:  1..2,4
-(6 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_charn
+         Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,zzzz}'::bpchar[]))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_charn where c1 IN ('abcd','dabc','hhcdddda',null); 
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_charn
-               Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,NULL}'::bpchar[]))
-               Selected Partitions:  1..2
-(6 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_charn
+         Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,NULL}'::bpchar[]))
+         Selected Partitions:  1..2
+(5 rows)
 
 --4.14 character.char
 create table t_pruning_datatype_char(c1 char,c2 int,c3 int,c4 text)
@@ -302,27 +278,25 @@ partition by range(c1)
  
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_char where c1>='b' AND c1<'h' OR c1>'q' AND c1<'y'; 
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_char
-               Filter: (((c1 >= 'b'::bpchar) AND (c1 < 'h'::bpchar)) OR ((c1 > 'q'::bpchar) AND (c1 < 'y'::bpchar)))
-               Selected Partitions:  1..2,4
-(6 rows)
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_char
+         Filter: (((c1 >= 'b'::bpchar) AND (c1 < 'h'::bpchar)) OR ((c1 > 'q'::bpchar) AND (c1 < 'y'::bpchar)))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_char where c1 IN ('a','d','h','z'); 
-                         QUERY PLAN                          
--------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_char
-               Filter: (c1 = ANY ('{a,d,h,z}'::bpchar[]))
-               Selected Partitions:  1..2,4
-(6 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_char
+         Filter: (c1 = ANY ('{a,d,h,z}'::bpchar[]))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 --4.15 text
 create table t_pruning_datatype_text(c1 text,c2 int,c3 int,c4 text)
@@ -334,27 +308,25 @@ partition by range(c1)
  
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_text where c1>='abcd' AND c1<'cdef' OR c1>'qqqqqqqqqqqq' AND c1<'yyyyy'; 
-                                                            QUERY PLAN                                                            
-----------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_text
-               Filter: (((c1 >= 'abcd'::text) AND (c1 < 'cdef'::text)) OR ((c1 > 'qqqqqqqqqqqq'::text) AND (c1 < 'yyyyy'::text)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_text
+         Filter: (((c1 >= 'abcd'::text) AND (c1 < 'cdef'::text)) OR ((c1 > 'qqqqqqqqqqqq'::text) AND (c1 < 'yyyyy'::text)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_text where c1 IN ('abcd','dabc','hhcdddda','zzzz'); 
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_text
-               Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,zzzz}'::text[]))
-               Selected Partitions:  1..2,4
-(6 rows)
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_text
+         Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,zzzz}'::text[]))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 --4.16 nvarchar2
 --4.17 name
@@ -367,27 +339,25 @@ partition by range(c1)
  
  explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_name where c1>='abcd' AND c1<'cdef' OR c1>'qqqqqqqqqqqqq' AND c1<'yyyyy'; 
-                                                            QUERY PLAN                                                             
------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_name
-               Filter: (((c1 >= 'abcd'::name) AND (c1 < 'cdef'::name)) OR ((c1 > 'qqqqqqqqqqqqq'::name) AND (c1 < 'yyyyy'::name)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_name
+         Filter: (((c1 >= 'abcd'::name) AND (c1 < 'cdef'::name)) OR ((c1 > 'qqqqqqqqqqqqq'::name) AND (c1 < 'yyyyy'::name)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_name where c1 IN ('abcd','dabc','hhcdddda','zzzz'); 
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_name
-               Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,zzzz}'::name[]))
-               Selected Partitions:  1..2,4
-(6 rows)
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_name
+         Filter: (c1 = ANY ('{abcd,dabc,hhcdddda,zzzz}'::name[]))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 --4.18 timestamp [ (p) ] [ without time zone ]
 create table t_pruning_datatype_timestamp(c1 timestamp,c2 int,c3 int,c4 text)
@@ -398,27 +368,25 @@ partition by range(c1)
  partition p4 values less than('2013-12-26'));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_timestamp where c1>=to_timestamp('2012-05-12','YYYY-MM-DD') AND c1<'2012-11-12' OR c1>'2013-06-12' AND c1<'2014-09-08'; 
-                                                                                                                                            QUERY PLAN                                                                                                                                            
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_timestamp
-               Filter: (((c1 >= to_timestamp('2012-05-12'::text, 'YYYY-MM-DD'::text)) AND (c1 < 'Mon Nov 12 00:00:00 2012'::timestamp without time zone)) OR ((c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone) AND (c1 < 'Mon Sep 08 00:00:00 2014'::timestamp without time zone)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                                                                                                         QUERY PLAN                                                                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_timestamp
+         Filter: (((c1 >= to_timestamp('2012-05-12'::text, 'YYYY-MM-DD'::text)) AND (c1 < 'Mon Nov 12 00:00:00 2012'::timestamp without time zone)) OR ((c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone) AND (c1 < 'Mon Sep 08 00:00:00 2014'::timestamp without time zone)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_timestamp where c1 IN ('2012-05-12','2012-12-23') OR c1>'2013-06-12'; 
-                                                                                           QUERY PLAN                                                                                            
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_timestamp
-               Filter: ((c1 = ANY ('{"Sat May 12 00:00:00 2012","Sun Dec 23 00:00:00 2012"}'::timestamp without time zone[])) OR (c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone))
-               Selected Partitions:  1..2,4
-(6 rows)
+                                                                                        QUERY PLAN                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_timestamp
+         Filter: ((c1 = ANY ('{"Sat May 12 00:00:00 2012","Sun Dec 23 00:00:00 2012"}'::timestamp without time zone[])) OR (c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 --4.19 timestamp [ (p) ] with time zone
 --4.20 date
@@ -430,39 +398,34 @@ partition by range(c1)
  partition p4 values less than('2013-12-26'));
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_date where c1>=to_date('2012-05-12','YYYY-MM-DD') AND c1<'2012-11-12' OR c1>'2013-06-12' AND c1<'2014-09-08';
-                                                                                                                                         QUERY PLAN                                                                                                                                          
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on t_pruning_datatype_date
-               Filter: (((c1 >= to_date('2012-05-12'::text, 'YYYY-MM-DD'::text)) AND (c1 < 'Mon Nov 12 00:00:00 2012'::timestamp without time zone)) OR ((c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone) AND (c1 < 'Mon Sep 08 00:00:00 2014'::timestamp without time zone)))
-               Selected Partitions:  1,4
-(6 rows)
+                                                                                                                                      QUERY PLAN                                                                                                                                       
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on t_pruning_datatype_date
+         Filter: (((c1 >= to_date('2012-05-12'::text, 'YYYY-MM-DD'::text)) AND (c1 < 'Mon Nov 12 00:00:00 2012'::timestamp without time zone)) OR ((c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone) AND (c1 < 'Mon Sep 08 00:00:00 2014'::timestamp without time zone)))
+         Selected Partitions:  1,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_date where c1 IN (to_date('2012-05-12','YYYY-MM-DD'),'2012-12-23') OR c1>'2013-06-12';
-                                                                                                       QUERY PLAN                                                                                                       
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_datatype_date
-               Filter: ((c1 = ANY (ARRAY[to_date('2012-05-12'::text, 'YYYY-MM-DD'::text), 'Sun Dec 23 00:00:00 2012'::timestamp without time zone])) OR (c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone))
-               Selected Partitions:  1..2,4
-(6 rows)
+                                                                                                    QUERY PLAN                                                                                                    
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_datatype_date
+         Filter: ((c1 = ANY (ARRAY[to_date('2012-05-12'::text, 'YYYY-MM-DD'::text), 'Sun Dec 23 00:00:00 2012'::timestamp without time zone])) OR (c1 > 'Wed Jun 12 00:00:00 2013'::timestamp without time zone))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_datatype_date where c1 = to_date('2012-05-12','YYYY-MM-DD')::text;
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_datatype_date
-               Filter: (c1 = ((to_date('2012-05-12'::text, 'YYYY-MM-DD'::text))::text)::timestamp without time zone)
-               Selected Partitions:  1
-(6 rows)
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Partitioned Seq Scan on t_pruning_datatype_date
+   Filter: (c1 = ((to_date('2012-05-12'::text, 'YYYY-MM-DD'::text))::text)::timestamp without time zone)
+   Selected Partitions:  1
+(3 rows)
 
 drop table t_pruning_datatype_real;
 drop table t_pruning_datatype_double;
@@ -495,51 +458,43 @@ partition by range (C_INT,C_NUMERIC,C_VARCHAR_3,C_TS_WITHOUT)
 );
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 SELECT * FROM pruning_partition_table_000 WHERE C_INT>=int4(10.5) and C_INT<=50;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on pruning_partition_table_000
-               Filter: ((c_int >= 11) AND (c_int <= 50))
-               Selected Partitions:  2..3
-(6 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on pruning_partition_table_000
+         Filter: ((c_int >= 11) AND (c_int <= 50))
+         Selected Partitions:  2..3
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 SELECT * FROM pruning_partition_table_000 WHERE  C_INT=int4(12.33);
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on pruning_partition_table_000
-               Filter: (c_int = 12)
-               Selected Partitions:  2
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partitioned Seq Scan on pruning_partition_table_000
+   Filter: (c_int = 12)
+   Selected Partitions:  2
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 SELECT * FROM pruning_partition_table_000 WHERE  C_INT<10;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on pruning_partition_table_000
-               Filter: (c_int < 10)
-               Selected Partitions:  1
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partitioned Seq Scan on pruning_partition_table_000
+   Filter: (c_int < 10)
+   Selected Partitions:  1
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 SELECT * FROM pruning_partition_table_000 WHERE  C_INT>10;
-                           QUERY PLAN                            
------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Seq Scan on pruning_partition_table_000
-               Filter: (c_int > 10)
-               Selected Partitions:  2..3
-(6 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Seq Scan on pruning_partition_table_000
+         Filter: (c_int > 10)
+         Selected Partitions:  2..3
+(5 rows)
 
 drop table pruning_partition_table_000;
 create table t_pruning_TESTTABLE_1(c1 int,c2 text)
@@ -551,65 +506,52 @@ partition by range(c1)
 );
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_1 where c1 IS NULL;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Seq Scan on t_pruning_testtable_1
-               Filter: (c1 IS NULL)
-               Selected Partitions:  NONE
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Seq Scan on t_pruning_testtable_1
+         Filter: (c1 IS NULL)
+         Selected Partitions:  NONE
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_1 where c1 IS NOT NULL;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_testtable_1
-               Filter: (c1 IS NOT NULL)
-               Selected Partitions:  1..3
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_testtable_1
+         Filter: (c1 IS NOT NULL)
+         Selected Partitions:  1..3
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_1 where c1=null;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Result
-         One-Time Filter: NULL::boolean
-         ->  Partition Iterator
-               Iterations: 3
-               ->  Partitioned Seq Scan on t_pruning_testtable_1
-                     Selected Partitions:  1..3
-(7 rows)
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_1 where c2=null;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Result
-         One-Time Filter: NULL::boolean
-         ->  Partition Iterator
-               Iterations: 3
-               ->  Partitioned Seq Scan on t_pruning_testtable_1
-                     Selected Partitions:  1..3
-(7 rows)
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_1 where c2 IS NULL;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_testtable_1
-               Filter: (c2 IS NULL)
-               Selected Partitions:  1..3
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_testtable_1
+         Filter: (c2 IS NULL)
+         Selected Partitions:  1..3
+(5 rows)
 
 drop table t_pruning_TESTTABLE_1;
 create table t_pruning_TESTTABLE_2(c1 int,c2 text)
@@ -622,102 +564,78 @@ partition by range(c1)
 );
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c1 IS NULL;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_testtable_2
-               Filter: (c1 IS NULL)
-               Selected Partitions:  4
-(6 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Partitioned Seq Scan on t_pruning_testtable_2
+   Filter: (c1 IS NULL)
+   Selected Partitions:  4
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c1 IS NOT NULL;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_testtable_2
-               Filter: (c1 IS NOT NULL)
-               Selected Partitions:  1..4
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_testtable_2
+         Filter: (c1 IS NOT NULL)
+         Selected Partitions:  1..4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c1=null;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Result
-         One-Time Filter: NULL::boolean
-         ->  Partition Iterator
-               Iterations: 4
-               ->  Partitioned Seq Scan on t_pruning_testtable_2
-                     Selected Partitions:  1..4
-(7 rows)
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where null=c1;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Result
-         One-Time Filter: NULL::boolean
-         ->  Partition Iterator
-               Iterations: 4
-               ->  Partitioned Seq Scan on t_pruning_testtable_2
-                     Selected Partitions:  1..4
-(7 rows)
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c2=null;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Result
-         One-Time Filter: NULL::boolean
-         ->  Partition Iterator
-               Iterations: 4
-               ->  Partitioned Seq Scan on t_pruning_testtable_2
-                     Selected Partitions:  1..4
-(7 rows)
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c2 IS NULL;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Seq Scan on t_pruning_testtable_2
-               Filter: (c2 IS NULL)
-               Selected Partitions:  1..4
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Seq Scan on t_pruning_testtable_2
+         Filter: (c2 IS NULL)
+         Selected Partitions:  1..4
+(5 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c1 IS NULL and c1>150;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on t_pruning_testtable_2
-               Filter: ((c1 IS NULL) AND (c1 > 150))
-               Selected Partitions:  4
-(6 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Partitioned Seq Scan on t_pruning_testtable_2
+   Filter: ((c1 IS NULL) AND (c1 > 150))
+   Selected Partitions:  4
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from t_pruning_TESTTABLE_2 where c1 IS NULL OR c1<150;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on t_pruning_testtable_2
-               Filter: ((c1 IS NULL) OR (c1 < 150))
-               Selected Partitions:  1..2,4
-(6 rows)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on t_pruning_testtable_2
+         Filter: ((c1 IS NULL) OR (c1 < 150))
+         Selected Partitions:  1..2,4
+(5 rows)
 
 drop table t_pruning_TESTTABLE_2;
 -- where condition has function
@@ -783,31 +701,20 @@ partition part1511 values less than ('2015-11-01 00:00:00'),
 partition part1512 values less than ('2015-12-01 00:00:00'),
 partition part1601 values less than ('2016-01-01 00:00:00')
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from wb_swry where swkssj >= to_date('2012-01-01 11:12:57', 'yyyy-mm-dd hh24:mi:ss') AND swkssj <= to_date('2012-01-31 11:13:02','yyyy-mm-dd hh24:mi:ss');
-                                                                                         QUERY PLAN                                                                                          
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on wb_swry
-               Filter: ((swkssj >= to_date('2012-01-01 11:12:57'::text, 'yyyy-mm-dd hh24:mi:ss'::text)) AND (swkssj <= to_date('2012-01-31 11:13:02'::text, 'yyyy-mm-dd hh24:mi:ss'::text)))
-               Selected Partitions:  1
-(6 rows)
-
+ERROR:  relation "wb_swry" does not exist on datanode1
+LINE 2: select * from wb_swry where swkssj >= to_date('2012-01-01 11...
+                      ^
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from wb_swry where swkssj >= '2012-01-01 11:12:57' AND swkssj <= '2012-01-31 11:13:02';
-                                                                             QUERY PLAN                                                                              
----------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on wb_swry
-               Filter: ((swkssj >= 'Sun Jan 01 11:12:57 2012'::timestamp without time zone) AND (swkssj <= 'Tue Jan 31 11:13:02 2012'::timestamp without time zone))
-               Selected Partitions:  1
-(6 rows)
-
+ERROR:  relation "wb_swry" does not exist on datanode1
+LINE 2: select * from wb_swry where swkssj >= '2012-01-01 11:12:57' ...
+                      ^
 drop table wb_swry;
+ERROR:  table "wb_swry" does not exist
 -- where condition is false
 create table test_where_condition_is_false (a int)
 partition by range (a)
@@ -818,88 +725,76 @@ partition by range (a)
 );
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on test_where_condition_is_false
-               Selected Partitions:  1..3
-(5 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on test_where_condition_is_false
+         Selected Partitions:  1..3
+(4 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where 1=1;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on test_where_condition_is_false
-               Selected Partitions:  1..3
-(5 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on test_where_condition_is_false
+         Selected Partitions:  1..3
+(4 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where 1=4;
---?.*
---?.*
+        QUERY PLAN        
+--------------------------
  Result
    One-Time Filter: false
 (2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where a<10;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on test_where_condition_is_false
-               Filter: (a < 10)
-               Selected Partitions:  1
-(6 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Partitioned Seq Scan on test_where_condition_is_false
+   Filter: (a < 10)
+   Selected Partitions:  1
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where a<10 and 1=1;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on test_where_condition_is_false
-               Filter: (a < 10)
-               Selected Partitions:  1
-(6 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Partitioned Seq Scan on test_where_condition_is_false
+   Filter: (a < 10)
+   Selected Partitions:  1
+(3 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where a<10 and 1=4;
---?.*
---?.*
+        QUERY PLAN        
+--------------------------
  Result
    One-Time Filter: false
 (2 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where a<10 or 1=1;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 3
-         ->  Partitioned Seq Scan on test_where_condition_is_false
-               Selected Partitions:  1..3
-(5 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Seq Scan on test_where_condition_is_false
+         Selected Partitions:  1..3
+(4 rows)
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
 select * from test_where_condition_is_false where a<10 or 1=4;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Seq Scan on test_where_condition_is_false
-               Filter: (a < 10)
-               Selected Partitions:  1
-(6 rows)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Partitioned Seq Scan on test_where_condition_is_false
+   Filter: (a < 10)
+   Selected Partitions:  1
+(3 rows)
 
 drop table test_where_condition_is_false;
 --create table partition_pruning_f2(f1 int)compress partition by range(f1) interval (1) 

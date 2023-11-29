@@ -593,6 +593,11 @@ update t_t_mutil_t1 a,multiview2 b,t_t_mutil_t3 c set a.col2 = 4, b.col2 = 5,c.c
 select * from t_t_mutil_t1;
 select * from t_t_mutil_t2;
 select * from t_t_mutil_t3;
+alter table t_t_mutil_t1 alter column col2 set default 999;
+update t_t_mutil_t1 a,multiview2 b,t_t_mutil_t3 c set a.col2 = default, b.col2 = 5,c.col2 = 6 where a.col1 = b.col1 and a.col1 = c.col1;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
 -- left join
 update multiview1 a left join multiview2 b on a.col1=b.col1 set a.col2=7,b.col2=8;
 select * from t_t_mutil_t1;
@@ -634,5 +639,16 @@ drop function trigger_func_update_multiview1();
 drop view multiview1;
 drop view multiview2;
 drop view multiview3;
+-- multi update with join
+CREATE TABLE t1 (f1 int);
+CREATE TABLE t2 (f1 int);
+INSERT INTO t2  VALUES (1);
+CREATE VIEW v1 AS SELECT * FROM t2;
+
+UPDATE t2 AS A NATURAL JOIN v1 B SET B.f1 = 1;
+drop table t1;
+drop view v1;
+drop table t2;
+
 \c regression
 drop database multiupdate;

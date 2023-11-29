@@ -1089,8 +1089,8 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
          * so we should also admit highest type conversion for operations
          * between different type categories
          */
-        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && !different_category &&
-            slot_category[i] != TYPCATEGORY_UNKNOWN) {
+        if ((u_sess->attr.attr_sql.sql_compatibility == C_FORMAT || u_sess->attr.attr_sql.transform_to_numeric_operators)
+            && !different_category && slot_category[i] != TYPCATEGORY_UNKNOWN) {
             if (current_category == TYPCATEGORY_INVALID)
                 current_category = slot_category[i];
             else if (slot_category[i] != current_category)

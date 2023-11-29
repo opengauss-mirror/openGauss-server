@@ -27,6 +27,10 @@
 #define PSORT_RESERVE_COLUMN	"tid"
 #define CHCHK_PSORT_RESERVE_COLUMN(attname)		(strcmp(PSORT_RESERVE_COLUMN, (attname)) == 0)
 
+#ifdef USE_SPQ
+extern HeapTuple heaptuple_from_pg_attribute(Relation pg_attribute_rel, Form_pg_attribute new_attribute);
+#endif
+
 typedef struct RawColumnDefault {
     AttrNumber attnum;         /* attribute to attach default to */
     Node      *raw_default;    /* default value (untransformed parse tree) */
@@ -135,7 +139,8 @@ extern Oid heap_create_with_catalog(const char *relname,
 						 List* ceLst = NULL,
 						 StorageType storage_type = HEAP_DISK,
 						 LOCKMODE partLockMode = AccessExclusiveLock,
-                         ObjectAddress *typaddress= NULL);
+                         ObjectAddress *typaddress= NULL,
+                         List* depend_extend = NIL);
 
 extern void heap_create_init_fork(Relation rel);
 
@@ -192,7 +197,7 @@ extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
 extern Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr,
     bool skip_dep = false);
-extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
+extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, Oid attcollation, char *attname,
     char generatedCol);
 extern void DeleteRelationTuple(Oid relid);
 extern void DeleteAttributeTuples(Oid relid);
@@ -261,4 +266,5 @@ extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 extern bool GetIndexVisibleStateByTuple(HeapTuple indexTuple);
 
 extern void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids);
+extern char* heap_serialize_row_attr(Oid rel_oid, bool* depend_undefined);
 #endif   /* HEAP_H */

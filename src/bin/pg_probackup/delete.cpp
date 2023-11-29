@@ -701,11 +701,11 @@ do_retention_wal(bool dry_run)
         * at least one backup and no file should be removed.
         * Unless wal-depth is enabled.
         */
-        if ((tlinfo->closest_backup) && instance_config.wal_depth <= 0)
+        if ((tlinfo->closest_backup) && instance_config.wal_depth == 0)
             continue;
 
         /* WAL retention keeps this timeline from purge */
-        if (instance_config.wal_depth >= 0 && tlinfo->anchor_tli > 0 &&
+        if (tlinfo->anchor_tli > 0 &&
             tlinfo->anchor_tli != tlinfo->tli)
             continue;
 
@@ -720,7 +720,7 @@ do_retention_wal(bool dry_run)
         */
         if (tlinfo->oldest_backup)
         {
-            if (instance_config.wal_depth >= 0 && !(XLogRecPtrIsInvalid(tlinfo->anchor_lsn)))
+            if (!(XLogRecPtrIsInvalid(tlinfo->anchor_lsn)))
             {
                 delete_walfiles_in_tli(tlinfo->anchor_lsn,
                     tlinfo, instance_config.xlog_seg_size, dry_run);
@@ -733,7 +733,7 @@ do_retention_wal(bool dry_run)
         }
         else
         {
-            if (instance_config.wal_depth >= 0 && !(XLogRecPtrIsInvalid(tlinfo->anchor_lsn)))
+            if (!(XLogRecPtrIsInvalid(tlinfo->anchor_lsn)))
                 delete_walfiles_in_tli(tlinfo->anchor_lsn,
                     tlinfo, instance_config.xlog_seg_size, dry_run);
             else
@@ -996,7 +996,7 @@ delete_walfiles_in_tli(XLogRecPtr keep_lsn, timelineInfo *tlinfo,
             join_path_components(wal_fullpath, instance_config.arclog_path, wal_file->file.name);
 
             /* save segment from purging */
-            if (instance_config.wal_depth >= 0 && wal_file->keep)
+            if (wal_file->keep)
             {
                 elog(VERBOSE, "Retain WAL segment \"%s\"", wal_fullpath);
                 continue;
@@ -1146,12 +1146,9 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
     }
 
     /* Inform about data size to free */
-    if (size_to_delete >= 0)
-    {
-        pretty_size(size_to_delete, size_to_delete_pretty, lengthof(size_to_delete_pretty));
-        elog(INFO, "Resident data size to free by delete of %i backups: %s",
-            n_deleted, size_to_delete_pretty);
-    }
+    pretty_size(size_to_delete, size_to_delete_pretty, lengthof(size_to_delete_pretty));
+    elog(INFO, "Resident data size to free by delete of %i backups: %s",
+        n_deleted, size_to_delete_pretty);
 
     /* delete selected backups */
     if (!dry_run && n_deleted > 0)

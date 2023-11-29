@@ -30,7 +30,7 @@ DROP TABLE alter_compress_params_schema.uncompress_astore_to_cbc_1_cdc_1;
 -- the new compression parameters is out of the value range
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5 (id int, value varchar);
 INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_5 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5 SET (compresstype = 3); -- fail
+ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5 SET (compresstype = 5); -- fail
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_5;
 
 CREATE TABLE alter_compress_params_schema.uncompress_astore_to_compresstype__1 (id int, value varchar);
@@ -88,6 +88,10 @@ INSERT INTO alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs
 ALTER TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2 SET (compresstype = 1, compress_chunk_size = 4096, compress_prealloc_chunks = 2); -- fail
 DROP TABLE alter_compress_params_schema.uncompress_astore_to_compresstype_1_ccs_4096_cpc_2;
 
+CREATE TABLE alter_compress_params_schema.uncompress_to_compresstype_3 (id int, value varchar);
+INSERT INTO alter_compress_params_schema.uncompress_to_compresstype_3 SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+ALTER TABLE alter_compress_params_schema.uncompress_to_compresstype_3 SET (compresstype = 3); -- fail
+DROP TABLE alter_compress_params_schema.uncompress_to_compresstype_3;
 -- set compressed options of column table
 CREATE TABLE alter_compress_params_schema.alter_column_table_compressed_options (id int, value varchar) WITH (ORIENTATION = column);
 INSERT INTO alter_compress_params_schema.alter_column_table_compressed_options SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';

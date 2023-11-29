@@ -32,7 +32,7 @@
 #include "utils/resowner.h"
 #include "pgstat.h"
 
-static BufferDesc *NvmStrategyGetBuffer(uint32 *buf_state);
+static BufferDesc *NvmStrategyGetBuffer(uint64 *buf_state);
 extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move);
 
 static const int MILLISECOND_TO_MICROSECOND = 1000;
@@ -57,12 +57,12 @@ static bool NvmPinBuffer(BufferDesc *buf, bool *migrate)
 {
     int b = BufferDescriptorGetBuffer(buf);
     bool result = false;
-    uint32 buf_state;
-    uint32 old_buf_state;
+    uint64 buf_state;
+    uint64 old_buf_state;
 
     *migrate = false;
 
-    old_buf_state = pg_atomic_read_u32(&buf->state);
+    old_buf_state = pg_atomic_read_u64(&buf->state);
     for (;;) {
         if (unlikely(old_buf_state & BM_IN_MIGRATE)) {
             *migrate = true;
@@ -82,7 +82,7 @@ static bool NvmPinBuffer(BufferDesc *buf, bool *migrate)
                 buf_state += BUF_USAGECOUNT_ONE;
             }
 
-            if (pg_atomic_compare_exchange_u32(&buf->state, &old_buf_state, buf_state)) {
+            if (pg_atomic_compare_exchange_u64(&buf->state, &old_buf_state, buf_state)) {
                 result = (buf_state & BM_VALID) != 0;
                 break;
             }
@@ -126,10 +126,10 @@ static bool NvmPinBufferFast(BufferDesc *buf)
  */
 static bool WaitUntilUnPin(BufferDesc *buf)
 {
-    uint32 old_buf_state;
+    uint64 old_buf_state;
     int waits = 0;
     for (;;) {
-        old_buf_state = pg_atomic_read_u32(&buf->state);
+        old_buf_state = pg_atomic_read_u64(&buf->state);
         if (BUF_STATE_GET_REFCOUNT(old_buf_state) == 1) {
             return true;
         } else {
@@ -150,15 +150,15 @@ static void WaitBufHdrUnMigrate(BufferDesc *buf)
 #ifndef ENABLE_THREAD_CHECK
     SpinDelayStatus delay_status = init_spin_delay(buf);
 #endif
-    uint32 buf_state;
+    uint64 buf_state;
 
-    buf_state = pg_atomic_read_u32(&buf->state);
+    buf_state = pg_atomic_read_u64(&buf->state);
 
     while (buf_state & BM_IN_MIGRATE) {
 #ifndef ENABLE_THREAD_CHECK
         perform_spin_delay(&delay_status);
 #endif
-        buf_state = pg_atomic_read_u32(&buf->state);
+        buf_state = pg_atomic_read_u64(&buf->state);
     }
 
 #ifndef ENABLE_THREAD_CHECK
@@ -169,10 +169,10 @@ static void WaitBufHdrUnMigrate(BufferDesc *buf)
 static bool SetBufferMigrateFlag(Buffer buffer)
 {
     BufferDesc *buf = GetBufferDescriptor(buffer - 1);
-    uint32 bufState;
-    uint32 oldBufState;
+    uint64 bufState;
+    uint64 oldBufState;
     for (;;) {
-        oldBufState = pg_atomic_read_u32(&buf->state);
+        oldBufState = pg_atomic_read_u64(&buf->state);
         if (oldBufState & BM_LOCKED) {
             oldBufState = WaitBufHdrUnlocked(buf);
         }
@@ -183,8 +183,8 @@ static bool SetBufferMigrateFlag(Buffer buffer)
 
         bufState = oldBufState;
         bufState |= BM_IN_MIGRATE;
-        ereport(DEBUG1, (errmsg("mark buffer %d migrate buffer stat %u.", buffer, bufState)));
-        if (pg_atomic_compare_exchange_u32(&buf->state, &oldBufState, bufState)) {
+        ereport(DEBUG1, (errmsg("mark buffer %d migrate buffer stat %lu.", buffer, bufState)));
+        if (pg_atomic_compare_exchange_u64(&buf->state, &oldBufState, bufState)) {
             return true;
         }
     }
@@ -193,17 +193,17 @@ static bool SetBufferMigrateFlag(Buffer buffer)
 static void UnSetBufferMigrateFlag(Buffer buffer)
 {
     BufferDesc *buf = GetBufferDescriptor(buffer - 1);
-    uint32 bufState;
-    uint32 oldBufState;
+    uint64 bufState;
+    uint64 oldBufState;
     for (;;) {
-        oldBufState = pg_atomic_read_u32(&buf->state);
+        oldBufState = pg_atomic_read_u64(&buf->state);
         if (oldBufState & BM_LOCKED) {
             oldBufState = WaitBufHdrUnlocked(buf);
         }
         bufState = oldBufState;
         bufState &= ~(BM_IN_MIGRATE);
-        ereport(DEBUG1, (errmsg("unmark buffer %d migrate buffer stat %u.", buffer, bufState)));
-        if (pg_atomic_compare_exchange_u32(&buf->state, &oldBufState, bufState)) {
+        ereport(DEBUG1, (errmsg("unmark buffer %d migrate buffer stat %lu.", buffer, bufState)));
+        if (pg_atomic_compare_exchange_u64(&buf->state, &oldBufState, bufState)) {
             break;
         }
     }
@@ -211,7 +211,7 @@ static void UnSetBufferMigrateFlag(Buffer buffer)
 
 static void NvmWaitBufferIO(BufferDesc *buf)
 {
-    uint32 buf_state;
+    uint64 buf_state;
 
     Assert(!t_thrd.storage_cxt.InProgressBuf);
 
@@ -219,8 +219,8 @@ static void NvmWaitBufferIO(BufferDesc *buf)
     if (t_thrd.storage_cxt.InProgressBuf) {
         ereport(PANIC, (errmsg("InProgressBuf not null: id %d flags %u, buf: id %d flags %u",
             t_thrd.storage_cxt.InProgressBuf->buf_id,
-            pg_atomic_read_u32(&t_thrd.storage_cxt.InProgressBuf->state) & BUF_FLAG_MASK,
-            buf->buf_id, pg_atomic_read_u32(&buf->state) & BUF_FLAG_MASK)));
+            pg_atomic_read_u64(&t_thrd.storage_cxt.InProgressBuf->state) & BUF_FLAG_MASK,
+            buf->buf_id, pg_atomic_read_u64(&buf->state) & BUF_FLAG_MASK)));
     }
 
     bool ioDone = false;
@@ -255,10 +255,10 @@ restart:
     return;
 }
 
-BufferDesc *NvmBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fork_num,
+BufferDesc *NvmBufferAlloc(const RelFileNode& rel_file_node, char relpersistence, ForkNumber fork_num,
     BlockNumber block_num, BufferAccessStrategy strategy, bool *found, const XLogPhyBlock *pblk)
 {
-    Assert(!IsSegmentPhysicalRelNode(smgr->smgr_rnode.node));
+    Assert(!IsSegmentPhysicalRelNode(rel_file_node));
 
     BufferTag new_tag;                 /* identity of requested block */
     uint32 new_hash;                   /* hash value for newTag */
@@ -266,17 +266,17 @@ BufferDesc *NvmBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fo
     BufferTag old_tag;                 /* previous identity of selected buffer */
     uint32 old_hash;                   /* hash value for oldTag */
     LWLock *old_partition_lock = NULL; /* buffer partition lock for it */
-    uint32 old_flags;
+    uint64 old_flags;
     int buf_id;
     BufferDesc *buf = NULL;
     BufferDesc *nvmBuf = NULL;
     bool valid = false;
-    uint32 buf_state, nvm_buf_state;
+    uint64 buf_state, nvm_buf_state;
     bool migrate = false;
     errno_t rc;
 
     /* create a tag so we can lookup the buffer */
-    INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, fork_num, block_num);
+    INIT_BUFFERTAG(new_tag, rel_file_node, fork_num, block_num);
 
     /* determine its hash code and partition lock ID */
     new_hash = BufTableHashCode(&new_tag);
@@ -803,10 +803,10 @@ static inline uint32 NvmClockSweepTick(void)
     return victim;
 }
 
-static BufferDesc* get_nvm_buf_from_candidate_list(uint32* buf_state)
+static BufferDesc* get_nvm_buf_from_candidate_list(uint64* buf_state)
 {
     BufferDesc* buf = NULL;
-    uint32 local_buf_state;
+    uint64 local_buf_state;
     int buf_id = 0;
     int list_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
@@ -840,11 +840,11 @@ static BufferDesc* get_nvm_buf_from_candidate_list(uint32* buf_state)
 }
 
 const int RETRY_COUNT = 3;
-static BufferDesc *NvmStrategyGetBuffer(uint32* buf_state)
+static BufferDesc *NvmStrategyGetBuffer(uint64* buf_state)
 {
     BufferDesc *buf = NULL;
     int try_counter = NVM_BUFFER_NUM * RETRY_COUNT;
-    uint32 local_buf_state = 0; /* to avoid repeated (de-)referencing */
+    uint64 local_buf_state = 0; /* to avoid repeated (de-)referencing */
 
     /* Check the Candidate list */
     if (ENABLE_INCRE_CKPT && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 1) {

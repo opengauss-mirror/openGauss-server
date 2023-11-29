@@ -155,7 +155,7 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId *subxid
         pageno = TransactionIdToCSNPage(subxids[offset]);
         xid = InvalidTransactionId;
     }
-    if (IS_DISASTER_RECOVER_MODE && COMMITSEQNO_IS_COMMITTED(csn)) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE && COMMITSEQNO_IS_COMMITTED(csn)) {
         UpdateXLogMaxCSN(csn);
     }
 }

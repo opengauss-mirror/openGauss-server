@@ -1437,6 +1437,10 @@ static void CommReceiverFlowerProcessMsg(struct sock_id* tFdId, struct FCMSG_T* 
             break;
 
         case CTRL_CONN_REGIST:
+#ifdef USE_SPQ
+        case CTRL_QE_BACKWARD:
+        case CTRL_BACKWARD_REGIST:
+#endif
         case CTRL_CONN_REGIST_CN:
             gs_accept_ctrl_conntion(tFdId, fcmsgr);
             break;
@@ -1482,8 +1486,11 @@ static void CommReceiverFlowerReceiveData(struct sock_id* tFdId)
         }
         LIBCOMM_PTHREAD_MUTEX_UNLOCK(&g_htab_fd_id_node_idx_lock);
 
-        if ((idx < 0) && !((fcmsgr.type == CTRL_CONN_REGIST || fcmsgr.type == CTRL_CONN_REGIST_CN) &&
-                             fcmsgr.extra_info == 0xEA)) {
+        if ((idx < 0) && !((fcmsgr.type == CTRL_CONN_REGIST || fcmsgr.type == CTRL_CONN_REGIST_CN
+#ifdef USE_SPQ
+                            || fcmsgr.type == CTRL_QE_BACKWARD
+#endif
+                            ) && fcmsgr.extra_info == 0xEA)) {
             fcmsgr.nodename[NAMEDATALEN - 1] = '\0';
             LIBCOMM_ELOG(WARNING,
                 "(r|flow ctrl)\tReveive fault message with socket[%d] for[%s], type[%d].",

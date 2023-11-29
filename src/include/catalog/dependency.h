@@ -20,7 +20,8 @@
 #include "catalog/objectaddress.h"
 #include "catalog/pg_directory.h"
 
-
+struct GsDependParamBody;
+struct GsDependObjDesc;
 /*
  * Precise semantics of a dependency relationship are specified by the
  * DependencyType code (which is stored in a "char" field in pg_depend,
@@ -163,6 +164,7 @@ typedef struct {
 typedef enum ObjectClass {
 	OCLASS_CLASS,            /* pg_class */
 	OCLASS_PROC,             /* pg_proc */
+	OCLASS_DEPENDENCIES_OBJ, /* gs_dependencies_obj */
 	OCLASS_TYPE,             /* pg_type */
 	OCLASS_CAST,             /* pg_cast */
 	OCLASS_COLLATION,        /* pg_collation */
@@ -280,12 +282,20 @@ extern void free_object_addresses(ObjectAddresses *addrs);
 /* in pg_depend.c */
 extern void recordDependencyOn(const ObjectAddress *depender,
                                const ObjectAddress *referenced,
-                               DependencyType behavior);
+                               DependencyType behavior, GsDependParamBody* gsdependParamBody = NULL);
 
 extern void recordMultipleDependencies(const ObjectAddress *depender,
                                        const ObjectAddress *referenced,
                                        int nreferenced,
-                                       DependencyType behavior);
+                                       DependencyType behavior, GsDependParamBody* gsdependParamBody = NULL);
+
+extern bool IsPinnedObject(Oid classOid, Oid objOid);
+
+extern void doRecordParamDefaultDependencies(bool* hasDependency, bool* hasUndefined, GsDependObjDesc* funcObjDesc,
+                                    const ObjectAddress* depender, const ObjectAddress* ref, int nref);
+
+extern void recordParamDefaultDependencies(bool* hasDependency, bool* hasUndefined, GsDependObjDesc* gsDependObjDesc,
+                                    const ObjectAddress* depender, Node* expr, List* rtable);
 
 extern void recordDependencyOnCurrentExtension(const ObjectAddress *object,
                                                bool isReplace);
@@ -331,6 +341,7 @@ extern Oid	get_index_constraint(Oid indexId);
 /* use for reindex concurrently */
 extern List *get_index_ref_constraints(Oid indexId);
 
+extern void DeletePgDependObject(const ObjectAddress* object, const ObjectAddress* ref_object);
 /* in pg_shdepend.c */
 extern void recordSharedDependencyOn(ObjectAddress *depender,
                                      ObjectAddress *referenced,

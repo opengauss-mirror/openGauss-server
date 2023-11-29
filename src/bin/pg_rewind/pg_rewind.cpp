@@ -22,6 +22,7 @@
 #include "fetch.h"
 #include "file_ops.h"
 #include "logging.h"
+#include "storage/file/fio_device.h"
 
 #include "access/xlog_internal.h"
 #include "catalog/catversion.h"
@@ -931,3 +932,136 @@ static BuildErrorCode TruncateAndRemoveXLog(XLogRecPtr endPtr, uint32 timeLine)
     return BUILD_SUCCESS;
 }
 
+BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term)
+{
+    TimeLineID lastcommontli;
+    XLogRecPtr chkptrec = InvalidXLogRecPtr;
+    TimeLineID chkpttli;
+    XLogRecPtr chkptredo = InvalidXLogRecPtr;
+    size_t size = 0;
+    char* buffer = NULL;
+    XLogRecPtr startrec;
+    errno_t errorno = EOK;
+    BuildErrorCode rv = BUILD_SUCCESS;
+    char controlFile[MAXPGPATH];
+
+    if (connstr_source == NULL) {
+        connstr_source = pg_strdup(connstr);
+    }
+
+    datadir_target = pg_strdup(pgdata);
+    if (datadir_target == NULL) {
+        pg_log(PG_WARNING, "%s: no target data directory specified (--target-pgdata)\n", progname);
+        pg_log(PG_WARNING, "Try \"%s --help\" for more information.\n", progname);
+        return BUILD_ERROR;
+    }
+
+    if (term > PG_UINT32_MAX) {
+        pg_log(PG_PROGRESS, "%s: unexpected term specified\n", progname);
+        pg_log(PG_PROGRESS, "Try \"%s --help\" for more information.\n", progname);
+        return BUILD_ERROR;
+    }
+
+    /*
+     * Don't allow pg_rewind to be run as root, to avoid overwriting the
+     * ownership of files in the data directory. We need only check for root
+     * -- any other user won't have sufficient permissions to modify files in
+     * the data directory.
+     */
+    if (geteuid() == 0) {
+        pg_log(PG_PROGRESS, "cannot be executed by \"root\"\n");
+        pg_log(PG_PROGRESS, "You must run %s as the PostgreSQL superuser.\n", progname);
+        exit(1);
+    }
+
+    /* Can't start new building until restore process success. */
+    if (is_in_restore_process(datadir_target)) {
+        pg_log(PG_PROGRESS,
+            "%s: last restore process hasn't completed, "
+            "can't start new building.\n",
+            progname);
+        return BUILD_ERROR;
+    }
+
+    /* Connect to remote server */
+    rv = libpqConnect(connstr_source);
+    PG_CHECKRETURN_AND_RETURN(rv);
+    rv = libpqGetParameters();
+    PG_CHECKRETURN_AND_RETURN(rv);
+    pg_log(PG_PROGRESS, "connect to primary success\n");
+
+    /*
+     * Ok, we have all the options and we're ready to start. Read in all the
+     * information we need from both clusters.
+     */
+    if (ss_instance_config.dss.enable_dss) {
+        buffer = slurpFile(ss_instance_config.dss.vgname, "pg_control", &size);
+    } else {
+        buffer = slurpFile(pgdata, "global/pg_control", &size);
+    }
+    PG_CHECKBUILD_AND_RETURN();
+    /* in share storage mode, all nodes's pg_control is in one file, we need offset BLCKSZ * id */
+    digestControlFile(&ControlFile_target, (const char*)(buffer + BLCKSZ * ss_instance_config.dss.instance_id));
+    pg_free(buffer);
+    buffer = NULL;
+    PG_CHECKBUILD_AND_RETURN();
+
+    pg_log(PG_PROGRESS,
+        "find last checkpoint at %X/%X and checkpoint redo at %X/%X from target control file\n",
+        (uint32)(ControlFile_target.checkPoint >> 32),
+        (uint32)(ControlFile_target.checkPoint),
+        (uint32)(ControlFile_target.checkPointCopy.redo >> 32),
+        (uint32)(ControlFile_target.checkPointCopy.redo));
+
+    if (ss_instance_config.dss.enable_dss) {
+        errorno = snprintf_s(controlFile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", ss_instance_config.dss.vgname);
+        securec_check_ss_c(errorno, "\0", "\0");
+        buffer = fetchFile(controlFile, &size);
+    } else {
+        buffer = fetchFile("global/pg_control", &size);
+    }
+    PG_CHECKBUILD_AND_RETURN();
+    digestControlFile(&ControlFile_source, buffer);
+    pg_free(buffer);
+    buffer = NULL;
+    PG_CHECKBUILD_AND_RETURN();
+    pg_log(PG_PROGRESS, "get primary pg_control success\n");
+
+    /* Check if rewind can be performed */
+    rv = sanityChecks();
+    PG_CHECKRETURN_AND_RETURN(rv);
+    pg_log(PG_PROGRESS, "sanityChecks success\n");
+
+    lastcommontli = ControlFile_target.checkPointCopy.ThisTimeLineID;
+
+    pg_log(PG_PROGRESS,
+        "find last checkpoint at %X/%X and checkpoint redo at %X/%X from source control file\n",
+        (uint32)(ControlFile_source.checkPoint >> 32),
+        (uint32)(ControlFile_source.checkPoint),
+        (uint32)(ControlFile_source.checkPointCopy.redo >> 32),
+        (uint32)(ControlFile_source.checkPointCopy.redo));
+
+    /* Find the common checkpoint locaiton */
+    startrec = ControlFile_source.checkPoint <= ControlFile_target.checkPoint ?
+        ControlFile_source.checkPoint : ControlFile_target.checkPoint;
+    rv = findCommonCheckpoint(datadir_target, lastcommontli, startrec, &chkptrec, &chkpttli, &chkptredo, term);
+    PG_CHECKRETURN_AND_RETURN(rv);
+    pg_log(PG_PROGRESS, "find diverge point success\n");
+
+    if (chkptrec == ControlFile_target.checkPoint) {
+        pg_log(PG_PROGRESS, "Build check result : needless build\n");
+    } else {
+        pg_log(PG_PROGRESS, "Build check result : incremental build\n");
+    }
+    /* Disconnect from remote server */
+    if (connstr_source != NULL) {
+        libpqDisconnect();
+    }
+
+    if (datadir_target != NULL) {
+        free(datadir_target);
+        datadir_target = NULL;
+    }
+
+    return BUILD_SUCCESS;
+}

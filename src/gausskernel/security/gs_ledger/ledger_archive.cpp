@@ -102,12 +102,21 @@ static uint64 ledger_copytable(CopyState cstate)
 
     /* For each column type, get its out function. */
     cstate->out_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    cstate->out_convert_funcs = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
+    cstate->attr_encodings = (int*)palloc(num_phys_attrs * sizeof(int));
     foreach (cur, cstate->attnumlist) {
         int attnum = lfirst_int(cur);
         Oid out_func_oid;
         bool isvarlena = false;
         getTypeOutputInfo(attr[attnum - 1].atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
+        /* set conversion functions */
+        cstate->attr_encodings[attnum - 1] = get_valid_charset_by_collation(attr[attnum - 1].attcollation);
+        construct_conversion_fmgr_info(cstate->attr_encodings[attnum - 1], cstate->file_encoding,
+            (void*)&cstate->out_convert_funcs[attnum - 1]);
+        if (cstate->attr_encodings[attnum - 1] != cstate->file_encoding) {
+            cstate->need_transcoding = true;
+        }
     }
 
     /*

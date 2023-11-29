@@ -125,7 +125,7 @@ Datum PLy_exec_function(FunctionCallInfo fcinfo, PLyProcedure* proc)
                 }
 
                 fcinfo->isnull = true;
-                return (Datum)NULL;
+                PG_TRY_RETURN((Datum)NULL);
             }
         }
 

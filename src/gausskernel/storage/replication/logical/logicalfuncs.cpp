@@ -45,6 +45,7 @@
 #include "access/xlog_internal.h"
 
 #include "storage/smgr/fd.h"
+#include "storage/file/fio_device.h"
 #define MAXPG_LSNCOMPONENT 8
 
 #define str_lsn_len 128
@@ -210,8 +211,8 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count,
                 }
                 securec_check_ss(nRet, "", "");
 
-                ereport(ERROR, (errcode_for_file_access(),
-                                errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek in log segment %s to offset %u: %s", 
+                                                                    path, startoff, TRANSLATE_ERRNO)));
             }
             t_thrd.logical_cxt.sendOff = startoff;
         }
@@ -449,7 +450,10 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
 
     CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
     ReplicationSlotAcquire(NameStr(*name), false);
-    rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap", NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
+
+    char replslot_path[MAXPGPATH];
+    GetReplslotPath(replslot_path);
+    rc = sprintf_s(path, sizeof(path), "%s/%s/snap", replslot_path, NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
     securec_check_ss(rc, "", "");
     if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
         if (!rmtree(path, true))
@@ -489,7 +493,7 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
             XLogRecord *record = NULL;
             char *errm = NULL;
 
-            record = XLogReadRecord(ctx->reader, startptr, &errm);
+            record = XLogReadRecord(ctx->reader, startptr, &errm, true, SS_XLOGDIR);
             if (errm != NULL)
                 ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
                                 errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",

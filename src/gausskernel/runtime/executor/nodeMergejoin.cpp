@@ -1514,6 +1514,13 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
                         errmsg("FULL JOIN is only supported with merge-joinable join conditions."),
                         errhint("Try other join methods like nestloop or hashjoin.")));
             break;
+#ifdef USE_SPQ
+        case JOIN_LASJ_NOTIN:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("LASJ NOTIN JOIN is not supported with merge-joinable join conditions.")));
+            break;
+#endif
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

@@ -133,6 +133,23 @@ typedef struct abort_callback_type {
 } abort_callback_type;
 #endif
 
+#ifdef USE_SPQ
+typedef struct SpqAdpScanPagesReq {
+    int plan_node_id;
+    int direction;
+    uint32 nblocks;
+    int64_t cur_scan_iter_no;
+} SpqAdpScanPagesReq;
+
+typedef struct SpqAdpScanPagesRes {
+    int32 success; /* 1: success, 0: failed */
+    BlockNumber page_start; /* where to start */
+    BlockNumber page_end; /* where to end */
+} SpqAdpScanPagesRes;
+
+void disconnect_qc_conn(PlannedStmt* plan);
+#endif
+
 static inline char* GetIndexNameForStat(Oid indid, char* relname)
 {
     char* indname = get_rel_name(indid);

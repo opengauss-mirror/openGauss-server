@@ -1,25 +1,25 @@
-create schema cstore_btree_index;
-set current_schema = cstore_btree_index;
 ---
 --case 1:  unsupported index test
 ---
+DROP TABLE if exists cstore_insert_t1;
+DROP TABLE if exists row_table;
 CREATE TABLE cstore_insert_t1(c1 int, c2 float, c3 text) WITH (orientation = column);
 COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
-CREATE UNIQUE INDEX unsupport1_idx ON cstore_insert_t1 using btree(c1);
-CREATE INDEX CONCURRENTLY unsupport2_idx ON cstore_insert_t1 using btree(c1);
-CREATE INDEX unsupport3_idx ON cstore_insert_t1 using btree(lower(c2));
-CREATE INDEX unsupport4_idx ON cstore_insert_t1 using btree(c1) where c1 > 1;
-CREATE INDEX unsupport5_idx ON cstore_insert_t1 using btree(c2 NULLS FIRST);
+CREATE UNIQUE INDEX unsupport1_idx ON cstore_insert_t1(c1);
+CREATE INDEX CONCURRENTLY unsupport2_idx ON cstore_insert_t1(c1);
+CREATE INDEX unsupport3_idx ON cstore_insert_t1(lower(c2));
+CREATE INDEX unsupport4_idx ON cstore_insert_t1(c1) where c1 > 1;
+CREATE INDEX unsupport5_idx ON cstore_insert_t1(c2 NULLS FIRST);
 CREATE INDEX unsupport6_idx ON cstore_insert_t1 USING hash (c1);
 CREATE INDEX unsupport7_idx ON cstore_insert_t1 USING gist (c1);
 CREATE INDEX unsupport9_idx ON cstore_insert_t1 USING spgist (c1);
 CREATE INDEX unsupport10_idx ON cstore_insert_t1 USING btree (c1);
 COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
-DROP TABLE cstore_insert_t1;
+DROP TABLE if exists cstore_insert_t1;
 
 CREATE TABLE row_table(c1 int, c2 float, c3 text);
 CREATE INDEX unsupport11_idx ON row_table USING psort (c1);
-DROP TABLE row_table;
+DROP TABLE if exists row_table;
 
 -----------
 ---case 2: partition table create index test
@@ -45,7 +45,7 @@ CREATE TABLE LINEITEM
   --, primary key (L_ORDERKEY, L_LINENUMBER)
 )
 with (orientation = column)
-distribute by hash(L_ORDERKEY)
+
 PARTITION BY RANGE(L_SHIPDATE)
 (
     PARTITION p1 VALUES LESS THAN('1993-01-01 00:00:00'),
@@ -57,51 +57,43 @@ PARTITION BY RANGE(L_SHIPDATE)
         PARTITION p7 VALUES LESS THAN('2030-01-01 00:00:00')
 );
 COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
-create index idx1 on lineitem using btree(L_ORDERKEY) local;
-create index idx2 on lineitem using btree(L_PARTKEY) local;
-create index idx3 on lineitem using btree(L_LINENUMBER, L_SHIPDATE) local;
-create index idx4 on lineitem using btree(L_RETURNFLAG) local;
-create index idx5 on lineitem using btree(L_LINESTATUS, L_SHIPINSTRUCT) local;
+create index idx1 on lineitem(L_ORDERKEY) local;
+create index idx2 on lineitem(L_PARTKEY) local;
+create index idx3 on lineitem(L_LINENUMBER, L_SHIPDATE) local;
+create index idx4 on lineitem(L_RETURNFLAG) local;
+create index idx5 on lineitem(L_LINESTATUS, L_SHIPINSTRUCT) local;
 COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 set enable_bitmapscan=off;
 set enable_seqscan=off;
 select count(*) from lineitem where L_ORDERKEY > 100 and L_ORDERKEY < 200;
 truncate table lineitem;
-drop index idx1;
-drop index idx2;
-drop index idx3;
-drop index idx4;
-drop index idx5;
-drop table lineitem;
+drop index if exists idx1;
+drop index if exists idx2;
+drop index if exists idx3;
+drop index if exists idx4;
+drop index if exists idx5;
+drop table if exists lineitem;
 
+----
+--case 3:  check reserve column
+----
+CREATE TABLE check_column(id int, tid int);
+CREATE TABLE check_column(id int, tid_test int, ti int);
+ALTER TABLE check_column ADD COLUMN tid int;
+drop table if exists check_column;
 
--------
---- case 8: index scan with none partition hit
--------
-CREATE TABLE partition_none (
-    a1 character varying(1000),
-    a2 integer,
-    a3 character varying(1000),
-    a4 integer,
-    a5 character varying(1000),
-    a6 integer,
-    a7 character varying(1000),
-    a8 integer,
-    a9 character varying(1000),
-    a10 integer
-)
-WITH (orientation=column)
-DISTRIBUTE BY HASH (a4)
-PARTITION BY RANGE (a2)
-(
-    PARTITION p1 VALUES LESS THAN (1),
-    PARTITION p50001 VALUES LESS THAN (50001),
-    PARTITION p100001 VALUES LESS THAN (100001),
-    PARTITION p150001 VALUES LESS THAN (150001),
-    PARTITION p200001 VALUES LESS THAN (200001),
-    PARTITION p250001 VALUES LESS THAN (250001));
-create index aii on partition_none using btree(a9) local;
-SELECT a1, a9 FROM /*TaRgET*/ partition_none  WHERE a5='ata l' AND 6793839=a2 AND a2=6159730 AND a9='da' ORDER BY a1, a9;
-drop table partition_none;
+-----
+--- case 6: truncate and delete cstore relation with index
+-----
+create table IDEX_PARTITION_TABLE_001(COL_INT int) with(orientation=column);
+CREATE INDEX STORAGE_IDEX_PARTITION_IDEX_001 ON IDEX_PARTITION_TABLE_001(COL_INT);
+insert into IDEX_PARTITION_TABLE_001 values(1000);
+truncate table IDEX_PARTITION_TABLE_001;
+select * from IDEX_PARTITION_TABLE_001;
 
-drop schema cstore_btree_index cascade;
+insert into IDEX_PARTITION_TABLE_001 values(1000);
+delete from IDEX_PARTITION_TABLE_001 where col_int=1000;
+select * from IDEX_PARTITION_TABLE_001 where col_int=1000;
+
+drop table if exists IDEX_PARTITION_TABLE_001;
+

@@ -667,7 +667,7 @@ static void count_usable_fds(int max_to_probe, int* usable_fds, int* already_ope
         if (thisfd < 0) {
             /* Expect EMFILE or ENFILE, else it's fishy */
             if (errno != EMFILE && errno != ENFILE) {
-                ereport(WARNING, (errmsg("dup(0) failed after %d successes: %m", used)));
+                ereport(WARNING, (errmsg("dup(0) failed after %d successes: %s", used, TRANSLATE_ERRNO)));
             }
             break;
         }
@@ -867,6 +867,50 @@ tryAgain:
     }
 
     return -1; /* failure */
+}
+
+
+/* 
+* When SS_REPLICATION_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
+* because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
+*/
+int SSErgodicOpenXlogFile(XLogSegNo segno, int fileFlags, int fileMode)
+{
+    char xlog_file_name[MAXPGPATH];
+    char xlog_file_full_path[MAXPGPATH];
+    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+    DIR* dir;
+    int fd;
+    struct dirent *entry;
+    errno_t errorno = EOK;
+
+    errorno = snprintf_s(xlog_file_name, MAXPGPATH, MAXPGPATH - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
+                         (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
+    securec_check_ss(errorno, "", "");
+
+    dir = opendir(dssdir);
+    if (dir == NULL) {
+        ereport(PANIC, (errcode_for_file_access(), errmsg("Error opening dssdir %s", dssdir)));                                                  
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
+            errorno = snprintf_s(xlog_file_full_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s", dssdir, entry->d_name, xlog_file_name);
+            securec_check_ss(errorno, "", "");
+
+            fd = BasicOpenFile(xlog_file_full_path, fileFlags, fileMode);
+            if (fd >= 0) {
+                return fd;
+            }
+        }
+    }
+
+    if (fd < 0) {
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open xlog file \"%s\" (log segment %s): %m", xlog_file_name,
+                                                          XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+    }
+
+    return fd;
 }
 
 #if defined(FDDEBUG)
@@ -1242,7 +1286,7 @@ static void DataFileIdCloseFile(Vfd* vfdP)
         if (close(vfdP->fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Local] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
+                     errmsg("[Local] File(%s) fd(%d) have been closed, %s", vfdP->fileName, vfdP->fd, TRANSLATE_ERRNO)));
         }
         return;
     }
@@ -1280,12 +1324,12 @@ static void DataFileIdCloseFile(Vfd* vfdP)
         if (close(fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Global] File(%s) fd(%d) have been closed, %m", vfdP->fileName, fd)));
+                     errmsg("[Global] File(%s) fd(%d) have been closed, %s", vfdP->fileName, fd, TRANSLATE_ERRNO)));
         }
         if (repaired_fd >= 0 && close(repaired_fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Global] File(%s) reapired_fd(%d) have been closed, %m", vfdP->fileName, repaired_fd)));
+                     errmsg("[Global] File(%s) reapired_fd(%d) have been closed, %s", vfdP->fileName, repaired_fd, TRANSLATE_ERRNO)));
         }
         return;
     }
@@ -2756,7 +2800,7 @@ int AllocateSocket(const char* ipaddr, int port)
     errno_t rc = EOK;
     int retrynum = 0;
 
-    DO_DB(ereport(LOG, (errmsg("AllocateFile: Allocated %d (%s)", u_sess->storage_cxt.numAllocatedDescs, name))));
+    DO_DB(ereport(LOG, (errmsg("AllocateFile: Allocated %d", u_sess->storage_cxt.numAllocatedDescs))));
 
     Assert(ipaddr != NULL);
 restart:

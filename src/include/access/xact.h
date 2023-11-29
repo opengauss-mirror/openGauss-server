@@ -521,7 +521,9 @@ extern void parseAndRemoveLibrary(char* library, int nlibrary);
 extern bool IsInLiveSubtransaction();
 extern void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId* sub_xids);
 extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
-extern void XactGetRelFiles(XLogReaderState* record, ColFileNode** xnodesPtr, int* nrelsPtr, bool* compress);
+extern void XactGetRelFiles(XLogReaderState* record, ColFileNode** xnodesPtr, int* nrelsPtr);
+extern bool xact_has_invalid_msg_or_delete_file(XLogReaderState *record);
+extern void send_delay_invalid_message();
 extern bool XactWillRemoveRelFiles(XLogReaderState *record);
 extern HTAB* relfilenode_hashtbl_create();
 extern CommitSeqNo getLocalNextCSN();
@@ -563,4 +565,6 @@ extern void BeginTxnForAutoCommitOff();
 extern void SetTxnInfoForSSLibpqsw(TransactionId xid, CommandId cid);
 extern void ClearTxnInfoForSSLibpqsw();
 extern bool IsTransactionInProgressState();
+extern void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay_ddl = false);
+void xact_redo_log_drop_segs(_in_ ColFileNode *xnodes, _in_ int nrels, XLogRecPtr lsn);
 #endif /* XACT_H */

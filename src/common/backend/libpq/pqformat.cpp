@@ -152,18 +152,18 @@ void pq_sendcountedtext(StringInfo buf, const char* str, int slen, bool countinc
     }
 }
 
-void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen)
+void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen, int src_encoding, void* convert_finfo)
 {
     char* p = (char*)str;
 
-    if (unlikely(u_sess->mb_cxt.DatabaseEncoding->encoding != u_sess->mb_cxt.ClientEncoding->encoding)) {
-        p = pg_server_to_client(str, slen);
+    if (unlikely(src_encoding != u_sess->mb_cxt.ClientEncoding->encoding)) {
+        p = pg_any_to_client(str, slen, src_encoding, convert_finfo);
     }
     if (unlikely(p != str)) { /* actual conversion has been done? */
         slen = strlen(p);
         enlargeStringInfo(buf, slen + sizeof(uint32));
         pq_writeint32(buf, (uint32)slen);
-        errno_t rc = memcpy_s(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), p, (size_t)slen);
+        errno_t rc = memcpy_sp(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), p, (size_t)slen);
         securec_check(rc, "\0", "\0");
         buf->len += slen;
         buf->data[buf->len] = '\0';
@@ -172,7 +172,7 @@ void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen)
     } else {
         enlargeStringInfo(buf, slen + sizeof(uint32));
         pq_writeint32(buf, (uint32)slen);
-        errno_t rc = memcpy_s(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), str, (size_t)slen);
+        errno_t rc = memcpy_sp(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), str, (size_t)slen);
         securec_check(rc, "\0", "\0");
         buf->len += slen;
         buf->data[buf->len] = '\0';
@@ -315,19 +315,6 @@ void pq_endmessage(StringInfo buf)
     /* no need to complain about any failure, since pqcomm.c already did */
     pfree(buf->data);
     buf->data = NULL;
-}
-
-/* --------------------------------
- *		pq_endmessage_reuse	- send the completed message to the frontend
- *
- * The data buffer is *not* freed, allowing to reuse the buffer with
- * pg_beginmessage_reuse.
- --------------------------------
- */
-void pq_endmessage_reuse(StringInfo buf)
-{
-    /* msgtype was saved in cursor field */
-    (void)pq_putmessage(buf->cursor, buf->data, buf->len);
 }
 
 /* --------------------------------

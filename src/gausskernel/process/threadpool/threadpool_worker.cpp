@@ -36,6 +36,7 @@
 #include "threadpool/threadpool.h"
 
 #include "access/xact.h"
+#include "access/multi_redo_api.h"
 #include "commands/prepare.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
@@ -81,6 +82,7 @@ ThreadPoolWorker::ThreadPoolWorker(uint idx, ThreadPoolGroup* group, pthread_mut
     m_group = group;
     m_tid = InvalidTid;
     m_threadStatus = THREAD_UNINIT;
+    m_thrd_idle_waiting = false;
     m_currentSession = NULL;
     m_mutex = mutex;
     m_cond = cond;
@@ -279,7 +281,8 @@ bool ThreadPoolWorker::WakeUpToPendingIfFree()
 {
     bool ans = false;
     pthread_mutex_lock(m_mutex);
-    if (m_threadStatus != THREAD_EXIT && m_threadStatus != THREAD_PENDING && m_currentSession == NULL) {
+    if (m_threadStatus != THREAD_EXIT && m_threadStatus != THREAD_PENDING && m_currentSession == NULL &&
+        m_thrd_idle_waiting) {
         m_threadStatus = THREAD_PENDING;
         pthread_cond_signal(m_cond);
         ans = true;
@@ -438,7 +441,9 @@ void ThreadPoolWorker::WaitNextSession()
                 if (unlikely(m_threadStatus == THREAD_PENDING || m_threadStatus == THREAD_EXIT)) {
                     break;
                 }
+                m_thrd_idle_waiting = true;
                 pthread_cond_wait(m_cond, m_mutex);
+                m_thrd_idle_waiting = false;
             }
             pthread_mutex_unlock(m_mutex);
             m_group->GetListener()->RemoveWorkerFromList(this);
@@ -534,6 +539,9 @@ void ThreadPoolWorker::CleanThread()
     thread_proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
 
     if (m_currentSession != NULL) {
+        if (IS_EXRTO_STANDBY_READ) {
+            AtEOXact_Snapshot(false);
+        }
         DetachSessionFromThread();
     }
 }

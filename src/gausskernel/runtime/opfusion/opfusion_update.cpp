@@ -27,6 +27,7 @@
 #include "access/tableam.h"
 #include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
+#include "opfusion/opfusion_indexscan.h"
 #include "parser/parse_coerce.h"
 
 UHeapTuple UpdateFusion::uheapModifyTuple(UHeapTuple tuple, Relation rel)
@@ -105,6 +106,61 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
     MemoryContextSwitchTo(old_context);
 }
 
+void UpdateFusion::InitBaseParam(List* targetList)
+{
+    ListCell* lc = NULL;
+    int i = 0;
+    FuncExpr* func = NULL;
+    TargetEntry* res = NULL;
+    Expr* expr = NULL;
+    OpExpr* opexpr = NULL;
+
+    foreach (lc, targetList) {
+        /* ignore ctid + tablebucketid or ctid at last */
+        if (i >= m_global->m_natts) {
+            break;
+        }
+
+        res = (TargetEntry*)lfirst(lc);
+        expr = res->expr;
+
+        while (IsA(expr, RelabelType)) {
+            expr = ((RelabelType*)expr)->arg;
+        }
+
+        m_c_global->m_targetConstLoc[i].constLoc = -1;
+        if (IsA(expr, Param)) {
+            Param* param = (Param*)expr;
+            m_c_global->m_targetParamLoc[m_c_global->m_targetParamNum].paramId = param->paramid;
+            m_c_global->m_targetParamLoc[m_c_global->m_targetParamNum++].scanKeyIndx = i;
+        } else if (IsA(expr, Const)) {
+            m_c_global->m_targetConstLoc[i].constValue = ((Const*)expr)->constvalue;
+            m_c_global->m_targetConstLoc[i].constIsNull = ((Const*)expr)->constisnull;
+            m_c_global->m_targetConstLoc[i].constLoc = i;
+        } else if (IsA(expr, Var)) {
+            Var* var = (Var*)expr;
+            m_c_global->m_targetVarLoc[m_c_global->m_varNum].varNo = var->varattno;
+            m_c_global->m_targetVarLoc[m_c_global->m_varNum++].scanKeyIndx = i;
+        } else if (IsA(expr, OpExpr)) {
+            opexpr = (OpExpr*)expr;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = opexpr->opfuncid;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = opexpr->args;
+            ++m_c_global->m_targetFuncNum;
+        } else if (IsA(expr, FuncExpr)) {
+            func = (FuncExpr*)expr;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = func->funcid;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = func->args;
+            ++m_c_global->m_targetFuncNum;
+        }
+        i++;
+    }
+    m_c_global->m_targetConstNum = i;
+}
+
 void UpdateFusion::InitGlobals()
 {
     int hash_col_num = 0;
@@ -148,56 +204,7 @@ void UpdateFusion::InitGlobals()
     m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
     m_c_global->m_varNum = 0;
 
-    int i = 0;
-    ListCell* lc = NULL;
-    OpExpr* opexpr = NULL;
-    FuncExpr* func = NULL;
-    Expr* expr = NULL;
-
-    foreach (lc, indexscan->scan.plan.targetlist) {
-        /* ignore ctid + tablebucketid or ctid at last */
-        if (i >= m_global->m_natts) {
-            break;
-        }
-
-        TargetEntry* res = (TargetEntry*)lfirst(lc);
-        expr = res->expr;
-
-        while (IsA(expr, RelabelType)) {
-            expr = ((RelabelType*)expr)->arg;
-        }
-
-        m_c_global->m_targetConstLoc[i].constLoc = -1;
-        if (IsA(expr, Param)) {
-            Param* param = (Param*)expr;
-            m_c_global->m_targetParamLoc[m_c_global->m_targetParamNum].paramId = param->paramid;
-            m_c_global->m_targetParamLoc[m_c_global->m_targetParamNum++].scanKeyIndx = i;
-        } else if (IsA(expr, Const)) {
-            m_c_global->m_targetConstLoc[i].constValue = ((Const*)expr)->constvalue;
-            m_c_global->m_targetConstLoc[i].constIsNull = ((Const*)expr)->constisnull;
-            m_c_global->m_targetConstLoc[i].constLoc = i;
-        } else if (IsA(expr, Var)) {
-            Var* var = (Var*)expr;
-            m_c_global->m_targetVarLoc[m_c_global->m_varNum].varNo = var->varattno;
-            m_c_global->m_targetVarLoc[m_c_global->m_varNum++].scanKeyIndx = i;
-        } else if (IsA(expr, OpExpr)) {
-            opexpr = (OpExpr*)expr;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = opexpr->opfuncid;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = opexpr->args;
-            ++m_c_global->m_targetFuncNum;
-        } else if (IsA(expr, FuncExpr)) {
-            func = (FuncExpr*)expr;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = func->funcid;
-            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = func->args;
-            ++m_c_global->m_targetFuncNum;
-        }
-        i++;
-    }
-    m_c_global->m_targetConstNum = i;
+    InitBaseParam(indexscan->scan.plan.targetlist);
 }
 
 void UpdateFusion::InitLocals(ParamListInfo params)
@@ -377,7 +384,7 @@ lreplace:
             temp_values = m_local.m_reslot->tts_values;
             m_local.m_reslot->tts_values = m_local.m_values;
             bool update_fix_result = ExecComputeStoredUpdateExpr(result_rel_info, m_c_local.m_estate, m_local.m_reslot,
-                                                                 tup, CMD_UPDATE, tupleid, InvalidOid, bucketid);
+                tup, CMD_UPDATE, tupleid, (part == NULL ? InvalidOid : part->pd_id), bucketid);
             if (!update_fix_result) {
                 if (tup != m_local.m_reslot->tts_tuple) {
                     tableam_tops_free_tuple(tup);
@@ -657,4 +664,44 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     u_sess->statement_cxt.current_row_count = nprocessed;
     u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
     return success;
+}
+
+/*
+ * reset InsertFusion for reuse：
+ * such as
+ * insert into t values (1, 'a');
+ * insert into t values (2, 'b');
+ * only need to replace the planstmt
+ */ 
+bool UpdateFusion::ResetReuseFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+{
+    PlannedStmt *curr_plan = (PlannedStmt *)linitial(plantree_list);
+    m_global->m_planstmt = curr_plan;
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    Plan *updatePlan = (Plan *)linitial(node->plans);
+    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(updatePlan);
+
+    List* targetList = indexscan->scan.plan.targetlist;
+
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetParamNum = 0;
+    m_c_global->m_varNum = 0;
+
+    InitBaseParam(targetList);
+
+    // init local
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
+
+    initParams(params);
+
+    if(IsA(indexscan, IndexScan)
+        && typeid(*(m_local.m_scan)) == typeid(IndexScanFusion)) {
+        ((IndexScanFusion *)m_local.m_scan)->ResetIndexScanFusion(indexscan, m_global->m_planstmt,
+                                                m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+    } else {
+        m_local.m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_global->m_planstmt,
+                                                m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+    }
+    return true;
 }

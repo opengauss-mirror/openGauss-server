@@ -123,6 +123,11 @@ typedef enum knl_thread_role {
     APPLY_LAUNCHER,
     APPLY_WORKER,
     STACK_PERF_WORKER,
+#ifdef USE_SPQ
+    SPQ_COORDINATOR,
+#endif
+    DMS_AUXILIARY_THREAD,
+    EXRTO_RECYCLER,
     BARRIER_PREPARSE,
     TS_COMPACTION,
     TS_COMPACTION_CONSUMER,
@@ -152,6 +157,15 @@ typedef enum knl_thread_role {
     SW_SENDER
 } knl_thread_role;
 
+#ifdef USE_SPQ
+typedef enum {
+    ROLE_UTILITY = 0,      /* Operating as a simple database engine */
+    ROLE_QUERY_COORDINTOR, /* Operating as the parallel query dispatcher */
+    ROLE_QUERY_EXECUTOR,   /* Operating as a parallel query executor */
+    ROLE_UNDEFINED         /* Should never see this role in use */
+} SpqRole;
+#endif
+
 /*
  * It is an 64bit identifier in Linux x64 system. There are many legacy
  * code assumes the original pid is 32 bit where we replace with threadId.
@@ -165,6 +179,9 @@ typedef struct knl_thread_arg {
     char* save_para;
     void* payload;
     void* t_thrd;
+#ifdef USE_SPQ
+    SpqRole spq_role;
+#endif
     union {
         struct syslog_thread {
             int syslog_handle;

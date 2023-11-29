@@ -57,7 +57,7 @@ typedef struct pgFile_t
     int      n_headers;        /* number of blocks in the data file in backup */
     pg_crc32 hdr_crc;        /* CRC value of header file: name_hdr */
     off_t    hdr_off;       /* offset in header map */
-    int      hdr_size;       /* offset in header map */
+    int      hdr_size;       /* the size of cpmpressed header */
     device_type_t type;      /* file device type */
 } pgFile;
 
@@ -250,6 +250,8 @@ struct pgBackup
 
     /* Size of data files in PGDATA at the moment of backup. */
     int64            pgdata_bytes;
+    /* Size of data files in vgdata(DSS) at the moment of backup. */
+    int64            dssdata_bytes;
 
     CompressAlg        compress_alg;
     int                compress_level;

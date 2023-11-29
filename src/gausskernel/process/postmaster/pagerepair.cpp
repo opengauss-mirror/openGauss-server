@@ -84,6 +84,7 @@ static void PushBadFileToRemoteHashTbl(RepairFileKey key);
 
 #define NOT_SUPPORT_PAGE_REPAIR \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY ||        \
+     g_instance.dms_cxt.SSReformerControl.clusterRunMode == RUN_MODE_STANDBY || \
      g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY || \
      t_thrd.xlog_cxt.is_hadr_main_standby || t_thrd.xlog_cxt.is_cascade_standby)
 
@@ -269,7 +270,7 @@ void CopyPageToRepairHashTbl(RepairBlockEntry *entry, char *page_content)
     XLogRecPtr page_lsn = PageGetLSN(page_content);
     errno_t rc = 0;
 
-    memcpy_s(entry->page_content, BLCKSZ, page_content, BLCKSZ);
+    rc = memcpy_s(entry->page_content, BLCKSZ, page_content, BLCKSZ);
     securec_check(rc, "", "");
 
     if (entry->error_type == CRC_CHECK_FAIL) {

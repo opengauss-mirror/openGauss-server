@@ -25,8 +25,8 @@
 #include "knl/knl_variable.h"
 #include "access/xlog.h"
 #include "storage/dorado_operation/dorado_fd.h"
+#include "miscadmin.h"
 
-const uint32 DORADO_CTL_WRITE_SIZE = 512;
 const uint32 DORADO_XLOG_START_POS = XLogSegSize;
 
 void DoradoWriteCtlInfo(const ShareStorageXLogCtl *ctlInfo);
@@ -112,7 +112,8 @@ void DoradoReadCtlInfo(ShareStorageXLogCtl *ctlInfo)
     }
 
     if (ctlInfo->magic != SHARE_STORAGE_CTL_MAGIC || ctlInfo->checkNumber != SHARE_STORAGE_CTL_CHCK_NUMBER) {
-        ereport(FATAL, (errmsg("dorado ctl info maybe damaged")));
+        ereport(FATAL, (errmsg("dorado ctl info maybe damaged, cltInfo->magic = %u, ctlInfo->checkNumber = %lu",
+                            ctlInfo->magic, ctlInfo->checkNumber)));
     }
 
     pg_crc32c crc = CalShareStorageCtlInfoCrc(ctlInfo);

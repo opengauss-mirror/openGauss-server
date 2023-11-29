@@ -35,6 +35,9 @@
 #define IsNvmBufferID(id) ((id) >= NvmBufferStartID && (id) < SegmentBufferStartID)
 #define IsNormalBufferID(id) ((id) >= 0 && (id) < NvmBufferStartID)
 
+#define ExrtoReadStartLSNBktId (-5)
+#define ExrtoReadEndLSNBktId (-6)
+
 #define USE_CKPT_THREAD_SYNC (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||  \
                                IsBootstrapProcessingMode() ||                               \
                                pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) < 1)
@@ -283,16 +286,17 @@ extern void UnlockReleaseBuffer(Buffer buffer);
 extern void MarkBufferDirty(Buffer buffer);
 extern void IncrBufferRefCount(Buffer buffer);
 extern Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber blockNum);
-void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock);
+void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLock);
 #ifdef USE_ASSERT_CHECKING
-void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags);
+void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags);
 #endif
-uint32 WaitBufHdrUnlocked(BufferDesc* buf);
+uint64 WaitBufHdrUnlocked(BufferDesc* buf);
 void WaitIO(BufferDesc *buf);
 void InvalidateBuffer(BufferDesc *buf);
 extern void ReservePrivateRefCountEntry(void);
 extern PrivateRefCountEntry* NewPrivateRefCountEntry(Buffer buffer);
 void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock);
+extern bool IsPageHitBufferPool(RelFileNode& node, ForkNumber forkNum, BlockNumber blockNum);
 
 extern void InitBufferPool(void);
 extern void pca_buf_init_ctx();
@@ -365,9 +369,9 @@ extern bool HoldingBufferPinThatDelaysRecovery(void);
 extern void AsyncUnpinBuffer(volatile void* bufHdr, bool forgetBuffer);
 extern void AsyncCompltrPinBuffer(volatile void* bufHdr);
 extern void AsyncCompltrUnpinBuffer(volatile void* bufHdr);
-extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint32 set_flag_bits);
+extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint64 set_flag_bits);
 
-extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint32 set_flag_bits);
+extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint64 set_flag_bits);
 extern void AsyncAbortBufferIO(void* buf, bool isForInput);
 extern void AsyncTerminateBufferIOByVacuum(void* buffer);
 extern void AsyncAbortBufferIOByVacuum(void* buffer);
@@ -422,4 +426,13 @@ extern void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf
     const XLogPhyBlock *pblk, Block bufBlock);
 extern BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
+extern Buffer standby_read_buf(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                        BufferAccessStrategy strategy);
+typedef struct SMgrRelationData *SMgrRelation;
+BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+                        BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
+Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+void buffer_in_progress_pop();
+void buffer_in_progress_push();
 #endif

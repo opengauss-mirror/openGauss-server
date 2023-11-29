@@ -118,7 +118,8 @@
 #include "utils/snapmgr.h"
 #include "datasource/datasource.h"
 #include "postmaster/rbcleaner.h"
-
+#include "catalog/gs_dependencies_fn.h"
+#include "catalog/gs_dependencies_obj.h"
 /*
  * This constant table maps ObjectClasses to the corresponding catalog OIDs.
  * See also getObjectClass().
@@ -126,6 +127,7 @@
 static const Oid object_classes[MAX_OCLASS] = {
     RelationRelationId,              /* OCLASS_CLASS */
     ProcedureRelationId,             /* OCLASS_PROC */
+    DependenciesObjRelationId,       /* OCLASS_GS_DEPENDENCIES */
     TypeRelationId,                  /* OCLASS_TYPE */
     CastRelationId,                  /* OCLASS_CAST */
     CollationRelationId,             /* OCLASS_COLLATION */
@@ -873,7 +875,6 @@ void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressS
                 subflags = 0; /* keep compiler quiet */
                 break;
         }
-
         findDependentObjects(&otherObject, subflags, &mystack, targetObjects, pendingObjects, depRel);
     }
 
@@ -1240,6 +1241,11 @@ static void doDeletion(const ObjectAddress* object, int flags)
             bool isTmpSequence = false;
             bool isTmpTable = false;
 
+            Oid mlogid = find_matview_mlog_table(object->objectId);
+            if (mlogid != 0 && !u_sess->attr.attr_sql.enable_cluster_resize) {
+                delete_matdep_table(mlogid);
+            }
+            
             if (relKind == RELKIND_INDEX || relKind == RELKIND_GLOBAL_INDEX) {
                 bool concurrent = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY) == PERFORM_DELETION_CONCURRENTLY);
                 bool concurrent_lock_mode = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY_LOCK) == PERFORM_DELETION_CONCURRENTLY_LOCK);
@@ -1279,11 +1285,6 @@ static void doDeletion(const ObjectAddress* object, int flags)
                  * is executed to drop this relation.If you reload relation after drop, it may
                  * cause other exceptions during the drop process
                  */
-            }
-
-            Oid mlogid = find_matview_mlog_table(object->objectId);
-            if (mlogid != 0 && !u_sess->attr.attr_sql.enable_cluster_resize) {
-                delete_matdep_table(mlogid);
             }
 
 #ifdef PGXC

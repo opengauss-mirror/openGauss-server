@@ -88,8 +88,6 @@
 /* Local function prototypes */
 static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
 static void SetTriggerFlags(TriggerDesc* trigdesc, const Trigger* trigger);
-HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot);
 static void ReleaseFakeRelation(Relation relation, Partition part, Relation* fakeRelation);
 static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trigger, TriggerEvent event,
     const Bitmapset* modifiedCols, HeapTuple oldtup, HeapTuple newtup);
@@ -547,10 +545,11 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         n->parameters = NULL;
         n->returnType = makeTypeName("trigger");
         const char* inlineProcessDesc = " return NEW;end";
-        size_t bodySrcTempSize = strlen(stmt->funcSource->bodySrc) + strlen(inlineProcessDesc);
+        size_t originBodyLen = strlen(stmt->funcSource->bodySrc);
+        size_t bodySrcTempSize = originBodyLen + strlen(inlineProcessDesc) + 1;
         char* bodySrcTemp = (char*)palloc(bodySrcTempSize);
         int last_end = -1;
-        for (int i = bodySrcTempSize - 3; i > 0; i--) {
+        for (int i = originBodyLen - 3; i > 0; i--) {
             if (pg_strncasecmp(stmt->funcSource->bodySrc + i, "end", strlen("end")) == 0) {
                 last_end = i;
                 break;
@@ -561,10 +560,10 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
                     errmsg("trigger function body has syntax error")));
         }
         ret = memcpy_s(bodySrcTemp, bodySrcTempSize, stmt->funcSource->bodySrc, last_end);
-        securec_check_c(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         bodySrcTemp[last_end] = '\0';
         ret = strcat_s(bodySrcTemp, bodySrcTempSize, inlineProcessDesc);
-        securec_check_c(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         n->options = lappend(n->options, makeDefElem("as", (Node*)list_make1(makeString(bodySrcTemp))));
         n->options = lappend(n->options, makeDefElem("language", (Node*)makeString("plpgsql")));
         n->withClause = NIL;
@@ -731,13 +730,13 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
                 }
             }
         } else {
-            values[Anum_pg_trigger_tgordername - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
-            values[Anum_pg_trigger_tgorder - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+            nulls[Anum_pg_trigger_tgordername - 1] = true;
+            nulls[Anum_pg_trigger_tgorder - 1] = true;
         }
     } else {
-        values[Anum_pg_trigger_tgordername - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
-        values[Anum_pg_trigger_tgorder - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
-        values[Anum_pg_trigger_tgtime - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+        nulls[Anum_pg_trigger_tgordername - 1] = true;
+        nulls[Anum_pg_trigger_tgorder - 1] = true;
+        nulls[Anum_pg_trigger_tgtime - 1] = true;
     }
     if (stmt->args) {
         ListCell* le = NULL;
@@ -1700,13 +1699,12 @@ void RelationBuildTriggers(Relation relation)
             char* trigname = DatumGetCString(DirectFunctionCall1(nameout, NameGetDatum(&pg_trigger->tgname)));
             char* tgordername = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgordername, tgrel->rd_att, &isnull));
             char* tgorder = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgorder, tgrel->rd_att, &isnull));
-            char* tgtime = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgtime, tgrel->rd_att, &isnull));
-            if (strcmp(tgorder, "follows") == 0) {
+            if (!isnull && strcmp(tgorder, "follows") == 0) {
                 tgNameInfo->follows_name = tgordername;
                 tgNameInfo->precedes_name = NULL;
                 is_has_follows = true;
             }
-            else if (strcmp(tgorder, "precedes") == 0) {
+            else if (!isnull && strcmp(tgorder, "precedes") == 0) {
                 tgNameInfo->follows_name = NULL;
                 tgNameInfo->precedes_name = tgordername;
                 is_has_follows = true;
@@ -1715,8 +1713,9 @@ void RelationBuildTriggers(Relation relation)
                 tgNameInfo->follows_name = NULL;
                 tgNameInfo->precedes_name = NULL;
             }
+            char* tgtime = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgtime, tgrel->rd_att, &isnull));
             tgNameInfo->trg_name = trigname;
-            tgNameInfo->time = tgtime;
+            tgNameInfo->time = isnull ? NULL:tgtime;
         }
         build = &(triggers[numtrigs]);
         build->tgoid = HeapTupleGetOid(htup);
@@ -1788,7 +1787,7 @@ void RelationBuildTriggers(Relation relation)
                 TriggerNameInfo temp = tgNameInfos[end+gap];
                 Trigger tgtmp = triggers[end+gap];
                 while (end >= 0) {
-                    if (strcmp(tmp, tgNameInfos[end].time)<0) {
+                    if (tmp != NULL && tgNameInfos[end].time != NULL && strcmp(tmp, tgNameInfos[end].time)<0) {
                         tgNameInfos[end+gap] = tgNameInfos[end];
                         triggers[end+gap] = triggers[end];
                         end -= gap;
@@ -2718,7 +2717,7 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
 #ifdef PGXC
     HeapTupleHeader datanode_tuphead,
 #endif
-    ItemPointer tupleid, TupleTableSlot* slot)
+    ItemPointer tupleid, TupleTableSlot* slot, TM_Result* result, TM_FailureData* tmfd)
 {
     TriggerDesc* trigdesc = get_and_check_trigdesc_value(relinfo->ri_TrigDesc);
     HeapTuple slottuple = ExecMaterializeSlot(slot);
@@ -2780,7 +2779,7 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
 #endif
         /* get a copy of the on-disk tuple we are planning to update */
         trigtuple = GetTupleForTrigger(estate, epqstate, relinfo, oldPartitionOid,
-            bucketid, tupleid, lockmode, &newSlot);
+            bucketid, tupleid, lockmode, &newSlot, result, tmfd);
         if (trigtuple == NULL)
             return NULL; /* cancel the update action */
 
@@ -3031,7 +3030,7 @@ void ExecASTruncateTriggers(EState* estate, ResultRelInfo* relinfo)
 }
 
 HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot)
+    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot, TM_Result* tmresultp, TM_FailureData* tmfdp)
 {
     Relation relation = relinfo->ri_RelationDesc;
     HeapTupleData tuple;
@@ -3203,6 +3202,13 @@ ltrmark:
                 &tmfd,
                 true,       // fake params below are for uheap implementation
                 false, false, NULL, NULL, false);
+
+            /* Let the caller know about the status of this operation */
+            if (tmresultp)
+                *tmresultp = test;
+            if (tmfdp)
+                *tmfdp = tmfd;
+
             switch (test) {
                 case TM_SelfUpdated:
                 case TM_SelfModified:
@@ -3214,12 +3220,7 @@ ltrmark:
 
                     /* treat it as deleted; do not process */
                     ReleaseBuffer(buffer);
-                    if (RELATION_IS_PARTITIONED(relation)) {
-                        partitionClose(relation, part, NoLock);
-                    }
-                    if (RELATION_OWN_BUCKET(relation)) {
-                        releaseDummyRelation(&fakeRelation);
-                    }
+                    ReleaseFakeRelation(relation, part, &fakeRelation);
                     return NULL;
                 case TM_SelfCreated:
                     ReleaseBuffer(buffer);
@@ -3236,6 +3237,17 @@ ltrmark:
                             (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                 errmsg("could not serialize access due to concurrent update")));
                     Assert(!ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+
+                    /*
+                     * Recheck the tuple using EPQ. For MERGE, we leave this
+                     * to the caller (it must do additional rechecking, and
+                     * might end up executing a different action entirely).
+                     */
+                    if (tmresultp && estate->es_plannedstmt->commandType == CMD_MERGE) {
+                        ReleaseFakeRelation(relation, part, &fakeRelation);
+                        return NULL;
+                    }
+
                     /* it was updated, so look at the updated version */
                     TupleTableSlot* epqslot = NULL;
 
@@ -3259,12 +3271,7 @@ ltrmark:
                      * if tuple was deleted or PlanQual failed for updated tuple -
                      * we must not process this tuple!
                      */
-                    if (RELATION_IS_PARTITIONED(relation)) {
-                        partitionClose(relation, part, NoLock);
-                    }
-                    if (RELATION_OWN_BUCKET(relation)) {
-                        releaseDummyRelation(&fakeRelation);
-                    }
+                    ReleaseFakeRelation(relation, part, &fakeRelation);
                     return NULL;
                 }
 

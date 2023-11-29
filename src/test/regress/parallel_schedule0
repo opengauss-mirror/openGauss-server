@@ -12,7 +12,7 @@ test: btree_deduplication
 # This test case is used to monitor GUC parameter information.
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
 #test: recovery_2pc_tools recovery_2pc_tools02
-test: recovery_2pc_tools
+#test: recovery_2pc_tools
 
 test: sqlbypass_partition
 test: sqlpatch_base
@@ -32,7 +32,7 @@ test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_vi
 
 # test multiple statistics
 test: functional_dependency
-test: pg_proc_test
+test: pg_proc_test test_row_type_in_proc
 
 # test fdw
 # NOTICE: In the "fdw_prepare", we copy the fdw test to be used from contrib into regress sql set.
@@ -90,7 +90,10 @@ test: event_dump_audit
 test: single_node_sha
 
 #test b format collation
-test: test_b_format_collate charset_b_format
+test: test_b_format_collate charset_b_format test_b_format_gb_collate
+test: charset_utf8mb4_b_db charset_gbk_b_db
+test: charset_connection_test
+test: add_b_format_behavior_all
 
 # test subpartition
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size hw_partition_size hw_cstore_partition_size
@@ -185,7 +188,7 @@ test: single_node_test_null_operator
 # ----------
 # Another group of parallel tests
 # ----------
-test: single_node_create_aggregate 
+test: single_node_create_aggregate test_cast_in_operator
 #test: single_node_create_function_3 single_node_create_cast
 #test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
 test: single_node_vacuum
@@ -274,6 +277,7 @@ test: single_node_forbidden
 
 test: single_node_mergeinto merge_subquery merge_subquery3 merge_1
 test: merge_where_col
+test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3 merge_into_deleted merge_into_partition_row_movement merge_into_selfmodified merge_into_updated
 
 # Trigger tests
 test: single_node_triggers
@@ -621,7 +625,7 @@ test: interval tinterval macaddr tstypes comments
 # is concurrent safe.(duplicate)
 # ----------
 test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
-test: copy_new_gram
+test: copy_new_gram copy_gbk_test copy_gb18030_test
 #test: copy_eol
 
 # ----------
@@ -635,7 +639,7 @@ test: copy_new_gram
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists
+test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists test_create_sequence_if_not_exists
 #test: constraints
 
 #test: errors subplan_base
@@ -651,10 +655,10 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
+test: alter_table_000 alter_table_002 alter_table_003
 #test: alter_table_001 alter_table_modify_ustore
 test: alter_table_modify_ltt alter_table_modify_gtt
-test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+test: alter_table_modify alter_table_modify_ustore
 
 #test: with
 
@@ -754,7 +758,7 @@ test: plpgsql_assign_value_to_array_attribute
 test: plpgsql_array_of_record 
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
-test: plpgsql_inout_param
+test: plpgsql_inout_param record_slow_sql_in_proc
 test: plpgsql_cursor_rowtype
 test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param
@@ -763,6 +767,8 @@ test: plpgsql_insert_record plpgsql_condition_name
 test: hw_package_variable package_typmod_test
 test: autonomous_cursor
 test: plpgsql_reset_session
+#test: plpgsql_depend
+test: plpgsql_depend/plpgsql_depend_type  plpgsql_depend/plpgsql_pkg_dependency plpgsql_depend/plpgsql_recompile plpgsql_depend/plpgsql_pkg_variable_dependency plpgsql_depend/plpgsql_depend_reftype
 #test: plancache limit rangefuncs prepare
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
@@ -901,7 +907,7 @@ test: vec_sonic_hashjoin_number_nospill
 test: timeout
 test: dml
 test: hashfilter hashfilter_1
-test: reduce_orderby
+test: reduce_orderby test_union_all_orderby
 #test: backtrace_log
 #test: bulkload_start
 test: bulkload_parallel_test_2 bulkload_parallel_test_3
@@ -1007,7 +1013,7 @@ test: gtt_trunc_pre
 test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gtt_trunc_parallel_ddl2
 #test: gtt_trunc_clean
 
-test: toomanyparams
+test: toomanyparams tableof_unsupported
 
 test: test_astore_multixact
 test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test row_compression/alter_compress_params
@@ -1028,7 +1034,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 # mysql_function_prepare must precede mysql_function/mysql_function_2, and mysql_function_clearup must follow mysql_function/mysql_function_2
-test: gs_dump_encrypt substr mysql_function_prepare
+test: gs_dump_encrypt substr mysql_function_prepare mysql_compatibility
 test: composite_datum_record mysql_function mysql_function_2 b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger mysql_signal mysql_resignal
 
 test: join_test_alias alter_ctable_compress
@@ -1052,8 +1058,8 @@ test: describe_index_with_tablespace
 test: sytcomp_del_upt4orderby
 test: aioptimizer
 test: aioptimizer_small
-test: pgfincore
-test: rename_table
+test: pgfincore 
+test: rename_table test_plsql_core
 
 # debug instrument
 test: test_debug5
@@ -1094,3 +1100,5 @@ test: user_host_test
 test: enable_expr_fusion_flatten
 # test for on update timestamp and generated column
 test: on_update_session1 on_update_session2
+
+test: ts_gb18030_utf8

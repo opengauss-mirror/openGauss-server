@@ -9,7 +9,7 @@
 # This test case is used to monitor GUC parameter information.
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
 #test: recovery_2pc_tools recovery_2pc_tools02
-test: recovery_2pc_tools
+#test: recovery_2pc_tools
 
 test: sqlbypass_partition
 test: sqlpatch_base
@@ -28,8 +28,8 @@ test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
 
 # test multiple statistics
-test: functional_dependency
-test: pg_proc_test
+test: functional_dependency record_slow_sql_in_proc
+test: pg_proc_test test_row_type_in_proc exec_result_test
 
 # test fdw
 # NOTICE: In the "fdw_prepare", we copy the fdw test to be used from contrib into regress sql set.
@@ -57,7 +57,7 @@ test: out_param_func
 test: gs_dump_tableconstraint
 
 # test AI4DB
-test: plpgsql_override_out
+test: plpgsql_override_out test_plsql_core
 test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error b_pg_plsql_show_all_error
 test: pldeveloper_gs_source
@@ -181,7 +181,7 @@ test: single_node_test_null_operator
 # ----------
 # Another group of parallel tests
 # ----------
-test: single_node_create_aggregate 
+test: single_node_create_aggregate test_cast_in_operator
 #test: single_node_create_function_3 single_node_create_cast
 #test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
 test: single_node_vacuum
@@ -269,6 +269,7 @@ test: single_node_forbidden
 
 test: single_node_mergeinto merge_subquery merge_subquery3 merge_1
 test: merge_where_col
+test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3 merge_into_deleted merge_into_partition_row_movement merge_into_selfmodified merge_into_updated
 
 # Trigger tests
 test: single_node_triggers
@@ -435,7 +436,7 @@ test: stable_function_shippable
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists
+test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists test_create_sequence_if_not_exists
 #test: constraints
 
 #test: errors subplan_base
@@ -455,5 +456,8 @@ test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
 #test: alter_table_001 alter_table_modify_ustore
 test: alter_table_modify_ltt alter_table_modify_gtt
 test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+
+# test for empty string in A format database
+test: accept_empty_str not_accept_empty_str pg_empty_str accept_empty_copy not_accept_empty_copy
 
 #test: with

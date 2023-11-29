@@ -35,6 +35,7 @@
 #include "utils/guc.h"
 #include "pg_trace.h"
 #include "replication/logical.h"
+#include "replication/ss_cluster_replication.h"
 #include "pgstat.h"
 #include "access/ustore/knl_upage.h"
 
@@ -94,8 +95,8 @@ void XLogBeginInsert(void)
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("XLogBeginInsert was already called")));
 
-    if (!SSXLogInsertAllowed()) {
-        ereport(LOG, (errmsg("SS standby cannot insert XLOG entries")));
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
+        ereport(LOG, (errmsg("SS dorado standby cluster cannot insert XLOG entries")));
         return;
     }
 

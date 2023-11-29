@@ -16,7 +16,7 @@
 
  <refsynopsisdiv>
 <synopsis>
-CREATE [ LARGE ] SEQUENCE <replaceable class="parameter">name</replaceable> [ INCREMENT [ BY ] <replaceable class="parameter">increment</replaceable> ]
+CREATE [ LARGE ] SEQUENCE [ IF NOT EXISTS ] <replaceable class="parameter">name</replaceable> [ INCREMENT [ BY ] <replaceable class="parameter">increment</replaceable> ]
     [ MINVALUE <replaceable class="parameter">minvalue</replaceable> | NO MINVALUE | NOMINVALUE] [ MAXVALUE <replaceable class="parameter">maxvalue</replaceable> | NO MAXVALUE | NOMAXVALUE]
     [ START [ WITH ] <replaceable class="parameter">start</replaceable> ] [ CACHE <replaceable class="parameter">cache</replaceable> ] [ [ NO ] CYCLE | NOCYCLE]
     [ OWNED BY { <replaceable class="parameter">table_name</replaceable>.<replaceable class="parameter">column_name</replaceable> | NONE } ];

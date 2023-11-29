@@ -56,6 +56,7 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "replication/shared_storage_walreceiver.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -206,6 +207,13 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  */
 SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
+    /* Check sync replication through XLogWaitFlush if uwal enabled.
+     * Fast exit.
+     */
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        return REPSYNCED;
+    }
+
     char *new_status = NULL;
     const char *old_status = NULL;
     int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;
@@ -247,8 +255,8 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         RESUME_INTERRUPTS();
         return REPSYNCED;
     }
-    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
-        !DelayIntoMostAvaSync(false)) {
+    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !DelayIntoMostAvaSync(false) &&
+        !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return STAND_ALONE;
@@ -2335,6 +2343,9 @@ void assign_synchronous_standby_names(const char *newval, void *extra)
 
         i++;
     }
+
+     list_free_deep(tcxt->SyncRepConfig);
+     tcxt->SyncRepConfig = NIL;
 
     (void)MemoryContextSwitchTo(old_context);
 }

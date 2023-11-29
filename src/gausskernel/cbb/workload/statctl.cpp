@@ -1182,6 +1182,8 @@ void WLMCleanUpNodeInternal(const Qid* qid)
 
         /* No threads already, remove the info from the hash table. */
         if (info->threadCount <= 0) {
+            pfree_ext(info->qband);
+            pfree_ext(info->statement);
             hash_search(g_instance.wlm_cxt->stat_manager.collect_info_hashtbl, qid, HASH_REMOVE, NULL);
         }
     }
@@ -1866,7 +1868,7 @@ void WLMReadjustUserSpaceByQuery(const char* username, List* database_name_list)
         errno_t rc = snprintf_s(conninfo,
             sizeof(conninfo),
             sizeof(conninfo) - 1,
-            "dbname=%s port=%d application_name='statctl'",
+            "dbname=%s port=%d application_name='statctl' connect_timeout=5",
             lfirst(cell),
             g_instance.attr.attr_network.PostPortNumber);
         securec_check_ss(rc, "\0", "\0");
@@ -4190,8 +4192,10 @@ bool WLMInsertCollectInfoIntoHashTable(void)
 
         USE_MEMORY_CONTEXT(g_instance.wlm_cxt->query_resource_track_mcxt);
         if (u_sess->attr.attr_resource.query_band) {
+            pfree_ext(pDNodeInfo->qband);
             pDNodeInfo->qband = pstrdup(u_sess->attr.attr_resource.query_band);
         }
+        pfree_ext(pDNodeInfo->statement);
 
         pDNodeInfo->statement = pstrdup(t_thrd.wlm_cxt.collect_info->sdetail.statement);
 
@@ -6846,6 +6850,7 @@ void WLMInitQueryPlan(QueryDesc* queryDesc, bool isQueryDesc)
 #else
     if (!StreamThreadAmI() &&
 #endif
+        !IS_SPQ_EXECUTOR &&
         u_sess->attr.attr_resource.enable_resource_track &&
         u_sess->exec_cxt.need_track_resource && t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan == NULL && isQueryDesc) {

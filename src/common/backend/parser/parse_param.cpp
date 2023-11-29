@@ -108,9 +108,14 @@ static Node* fixed_paramref_hook(ParseState* pstate, ParamRef* pref)
     param->paramid = paramno;
     param->paramtype = parstate->paramTypes[paramno - 1];
     param->paramtypmod = -1;
-    param->paramcollid = get_typcollation(param->paramtype);
+    if (OidIsValid(GetCollationConnection()) && IsSupportCharsetType(param->paramtype)) {
+        param->paramcollid = GetCollationConnection();
+    } else {
+        param->paramcollid = get_typcollation(param->paramtype);
+    }
     param->location = pref->location;
     param->tableOfIndexTypeList = NULL;
+    param->is_bind_param = true;
 
     return (Node*)param;
 }
@@ -164,9 +169,14 @@ static Node* variable_paramref_hook(ParseState* pstate, ParamRef* pref)
     param->paramid = paramno;
     param->paramtype = *pptype;
     param->paramtypmod = -1;
-    param->paramcollid = get_typcollation(param->paramtype);
+    if (OidIsValid(GetCollationConnection()) && IsSupportCharsetType(param->paramtype)) {
+        param->paramcollid = GetCollationConnection();
+    } else {
+        param->paramcollid = get_typcollation(param->paramtype);
+    }
     param->location = pref->location;
     param->tableOfIndexTypeList = NULL;
+    param->is_bind_param = true;
 
     return (Node*)param;
 }

@@ -39,10 +39,10 @@
 
 
 /*
- * for tuple uncommitted or being deleted, we dont sure it whether it will be committed or aborted,
- * so just store them into localcatcache, and invalid them by si msg
+ * for tuple uncommitted or being deleted, we don't sure whether it will be committed or aborted,
+ * so just store them into local cache, and invalid them by send message
  */
-inline bool CanTupleInertGSC(HeapTuple tuple)
+inline bool CanTupleInsertGSC(HeapTuple tuple)
 {
     if (tuple->t_tableOid == InvalidOid) {
         // this is a heapformtuple

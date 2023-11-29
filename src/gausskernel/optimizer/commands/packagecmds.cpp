@@ -228,6 +228,101 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
     }
 }
 
+static inline void clear_plsql_ctx_line_info()
+{
+    u_sess->plsql_cxt.procedure_first_line = 0;
+    u_sess->plsql_cxt.procedure_start_line = 0;
+    u_sess->plsql_cxt.package_first_line = 0;
+    u_sess->plsql_cxt.package_as_line = 0;
+}
+
+static void RecompileSinglePackage(Oid package_oid, bool is_spec)
+{
+    Oid* save_pseudo_current_user_id = u_sess->misc_cxt.Pseudo_CurrentUserId;
+    _PG_init();
+    PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
+    int save_compile_status = getCompileStatus();
+    bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
+    u_sess->plsql_cxt.isCreateFunction = false;
+    u_sess->plsql_cxt.compile_has_warning_info = false;
+    int save_searchpath_stack = list_length(u_sess->catalog_cxt.overrideStack);
+    PG_TRY();
+    {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_RECOMPILE;
+        if (GetPgObjectValid(package_oid, is_spec ? OBJECT_TYPE_PKGSPEC : OBJECT_TYPE_PKGBODY)) {
+            u_sess->plsql_cxt.need_create_depend = false;
+        } else {
+            u_sess->plsql_cxt.need_create_depend = true;
+        }
+        SetCurrCompilePgObjStatus(true);
+        (void)plpgsql_pkg_compile(package_oid, true, is_spec, false, true);
+        u_sess->misc_cxt.Pseudo_CurrentUserId = save_pseudo_current_user_id;
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        if (enable_plpgsql_gsdependency_guc()) {
+            u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_END;
+        }
+        SetCurrCompilePgObjStatus(true);
+    }
+    PG_CATCH();
+    {
+        if (enable_plpgsql_gsdependency_guc()) {
+            u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_END;
+        }
+        SetCurrCompilePgObjStatus(true);
+        u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        u_sess->plsql_cxt.compile_status = save_compile_status;
+        u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
+        u_sess->plsql_cxt.during_compile = false;
+        clearCompileContextList(save_compile_list_length);
+        u_sess->plsql_cxt.running_pkg_oid = InvalidOid;
+        clear_plsql_ctx_line_info();
+        u_sess->plsql_cxt.in_package_function_compile = false;
+        u_sess->misc_cxt.Pseudo_CurrentUserId = save_pseudo_current_user_id;
+        plpgsql_free_override_stack(save_searchpath_stack);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
+static inline void RecompilePackageByOid(Oid pkg_oid)
+{
+    bool is_null;
+    HeapTuple pkg_tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkg_oid));
+    if (!HeapTupleIsValid(pkg_tup)) {
+        ereport(ERROR,  (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errdetail("cache lookup failed for package %u, while recompile package.", pkg_oid)));
+        return;
+    }
+    SysCacheGetAttr(PACKAGEOID, pkg_tup, Anum_gs_package_pkgbodydeclsrc, &is_null);
+    if (is_null) {
+        ReleaseSysCache(pkg_tup);
+        RecompileSinglePackage(pkg_oid, true);
+        return;
+    }
+    ReleaseSysCache(pkg_tup);
+    RecompileSinglePackage(pkg_oid, false);
+}
+
+void RecompilePackage(CompileStmt* stmt)
+{
+    Oid pkg_oid = PackageNameListGetOid(stmt->objName, false, false);
+    if (IsSystemObjOid(pkg_oid)) {
+        return;
+    }
+    switch (stmt->compileItem) {
+        case COMPILE_PKG_SPECIFICATION:
+            RecompileSinglePackage(pkg_oid, true);
+            break;
+        case COMPILE_PKG_BODY:
+            RecompileSinglePackage(pkg_oid, false);
+            break;
+        default:
+            RecompilePackageByOid(pkg_oid);
+            break;
+    }
+}
+
 /*
  * Change package owner by name
  */
@@ -237,7 +332,7 @@ ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId)
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("package not supported in distributed database")));
 #endif
-    Oid pkgOid = PackageNameListGetOid(name, false);
+    Oid pkgOid = PackageNameListGetOid(name, false, false);
     Relation rel;
     HeapTuple tup;
     ObjectAddress address;

@@ -25,7 +25,7 @@
 #include "utils/sortsupport.h"
 #include "vecexecutor/vectorbatch.h"
 #include "utils/pg_locale.h"
-#include "catalog/gs_utf8_collation.h"
+#include "catalog/gs_collation.h"
 
 #include "miscadmin.h"
 
@@ -1036,10 +1036,10 @@ Datum hashbpchar(PG_FUNCTION_ARGS)
     keydata = VARDATA_ANY(key);
     keylen = bcTruelen(key);
 
-    if (!is_b_format_collation(collid)) {
-        result = hash_any((unsigned char*)keydata, keylen);
+    if (is_b_format_collation(collid)) {
+        result = hash_text_by_builtin_collations((unsigned char *)VARDATA_ANY(key), keylen, collid);
     } else {
-        result = hash_text_by_builtin_colltions((unsigned char *)VARDATA_ANY(key), keylen, collid);
+        result = hash_any((unsigned char*)keydata, keylen);
     }
 
     /* Avoid leaking memory for toasted inputs */
@@ -1595,7 +1595,7 @@ static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVecto
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !ACCEPT_EMPTY_STR && !RETURN_NS) {
         SET_NULL(pflagsRes[idx]);
     } else {
         VecRet->m_vals[idx] = PointerGetDatum(ret);

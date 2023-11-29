@@ -67,6 +67,7 @@ extern BuildErrorCode targetFilemapProcess(void);
 void recordReadTest(const char* datadir, XLogRecPtr ptr, TimeLineID tli);
 void openDebugLog(void);
 bool FindConfirmedLSN(const char* dataDir, XLogRecPtr *confirmedLsn);
+BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term);
 BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XLogRecPtr ckptRedo, XLogRecPtr confirmedLSN,
     uint32 term);
 bool CheckIfEanbedSaveSlots();

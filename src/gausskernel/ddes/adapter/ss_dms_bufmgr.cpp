@@ -26,6 +26,7 @@
 #include "storage/proc.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
+#include "replication/ss_cluster_replication.h"
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_reform_common.h"
@@ -54,6 +55,7 @@ void InitDmsBufCtrl(void)
             buf_ctrl->pblk_relno = InvalidOid;
             buf_ctrl->pblk_blkno = InvalidBlockNumber;
             buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
+            buf_ctrl->been_loaded = false;
         }
     }
 }
@@ -159,6 +161,8 @@ void ClearReadHint(int buf_id, bool buf_deleted)
     if (buf_deleted) {
         buf_ctrl->state = 0;
     }
+    buf_ctrl->seg_fileno = EXTENT_INVALID;
+    buf_ctrl->seg_blockno = InvalidBlockNumber;
 }
 
 /*
@@ -317,7 +321,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
 static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
 {
-    uint32 buf_state;
+    uint64 buf_state;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
 
     if (IsSegmentBufferID(buf_desc->buf_id)) {
@@ -331,7 +335,7 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
     }
 
     if (LockModeCompatible(buf_ctrl, mode)) {
-        if (!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_IN_PROGRESS)) {
+        if (!(pg_atomic_read_u64(&buf_desc->state) & BM_IO_IN_PROGRESS)) {
             return false;
         }
     }
@@ -451,7 +455,7 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
     return TerminateReadSegPage(buf_desc, read_mode);
 }
 
-Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool* with_io)
+Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, bool *with_io)
 {
     BufferDesc *buf_desc = GetBufferDescriptor(buffer - 1);
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -483,16 +487,8 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     }
 
     // standby node must notify primary node for prepare lastest page in ondemand recovery
-    if (SS_STANDBY_ONDEMAND_RECOVERY) {
-        while (!SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
-            SSReadControlFile(REFORM_CTRL_PAGE);
-            if (SS_STANDBY_ONDEMAND_NORMAL) {
-                break; // ondemand recovery finish, skip
-            } else if (SS_STANDBY_ONDEMAND_BUILD) {
-                return 0; // in new reform
-            }
-            // still need requset page
-        }
+    if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(buf_desc->tag)) {
+        return 0;
     }
 
     if (!StartReadPage(buf_desc, mode)) {
@@ -504,9 +500,11 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
 bool SSOndemandRequestPrimaryRedo(BufferTag tag)
 {
     dms_context_t dms_ctx;
-    int32 redo_status = ONDEMAND_REDO_INVALID;
+    int32 redo_status = ONDEMAND_REDO_TIMEOUT;
 
-    if (!SS_STANDBY_ONDEMAND_RECOVERY) {
+    if (unlikely(SS_STANDBY_ONDEMAND_BUILD)) {
+        return false;
+    } else if (SS_STANDBY_ONDEMAND_NORMAL || SS_PRIMARY_MODE) {
         return true;
     }
 
@@ -519,10 +517,11 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
     dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
     if (dms_reform_req_opengauss_ondemand_redo_buffer(&dms_ctx, &tag,
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
+        SSReadControlFile(REFORM_CTRL_PAGE);
         ereport(LOG,
             (errmodule(MOD_DMS),
-                errmsg("[on-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
-                    "redo statu %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
+                errmsg("[On-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
+                    "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
                     (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
         return false;
     }
@@ -681,7 +680,7 @@ void SSCheckBufferIfNeedMarkDirty(Buffer buf)
 
 void SSRecheckBufferPool()
 {
-    uint32 buf_state;
+    uint64 buf_state;
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
         /*
          * BUF_DIRTY_NEED_FLUSH was removed during mark buffer dirty and lsn_on_disk was set during sync buffer
@@ -691,7 +690,7 @@ void SSRecheckBufferPool()
          */
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         pg_memory_barrier();
-        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        buf_state = pg_atomic_read_u64(&buf_desc->state);
         if (!(buf_state & BM_VALID || buf_state & BM_TAG_VALID)) {
             continue;
         }
@@ -723,7 +722,7 @@ bool CheckPageNeedSkipInRecovery(Buffer buf)
     char pageid[DMS_PAGEID_SIZE];
     errno_t err = memcpy_s(pageid, DMS_PAGEID_SIZE, &(buf_desc->tag), sizeof(BufferTag));
     securec_check(err, "\0", "\0");
-    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip);
+    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip, false);
     if (ret != DMS_SUCCESS) {
         ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
     }
@@ -741,10 +740,10 @@ dms_session_e DMSGetProcType4RequestPage()
          * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
          * page in recovery state.
          */
-        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
-            return DMS_SESSION_RECOVER_HOT_STANDBY; 
+        if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
+            return DMS_SESSION_RECOVER_HOT_STANDBY;
         } else {
-            return DMS_SESSION_RECOVER;   
+            return DMS_SESSION_RECOVER;
         }
     } else {
         return DMS_SESSION_NORMAL;
@@ -784,7 +783,7 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
     BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
     bool ret = false;
 
-    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) && buf_desc->extra->seg_fileno != EXTENT_INVALID) {
+    if ((pg_atomic_read_u64(&buf_desc->state) & BM_VALID) && buf_desc->extra->seg_fileno != EXTENT_INVALID) {
         SMGR_READ_STATUS rdStatus;
         if (reln->seg_space == NULL) {
             reln->seg_space = spc_open(reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode, false);
@@ -798,6 +797,13 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
             .bucketNode = SegmentBktId,
             .opt = 0
         };
+
+        /* Check whether the physical location info match! */
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
+        if (buf_ctrl->seg_fileno != EXTENT_INVALID && (buf_ctrl->seg_fileno != buf_desc->extra->seg_fileno ||
+            buf_ctrl->seg_blockno != buf_desc->extra->seg_blockno)) {
+            ereport(PANIC, (errmsg("It seemd physical location of drc not match with buf desc!")));
+        }
 
         seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->extra->seg_blockno, (char *)buffer);
         if (PageIsVerified((Page)buffer, buf_desc->extra->seg_blockno)) {
@@ -889,7 +895,7 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         }
 
         XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-        if (!SS_IN_REFORM) {
+        if (!SS_IN_REFORM && !SS_IN_ONDEMAND_RECOVERY) {
             ereport(PANIC,
                 (errmsg("[SS] this buffer should not exist with BUF_DIRTY_NEED_FLUSH but not in reform, "
                 "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u",
@@ -943,5 +949,61 @@ long SSGetBufSleepTime(int retry_times)
     if (retry_times < ss_buf_retry_threshold) {
         return 5000L * retry_times;
     }
-    return 1000L * 1000 * 60;
+    return SS_BUF_MAX_WAIT_TIME;
+}
+
+bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
+{
+    bool get_lock = false;
+    int wait_tickets = 2000;
+    int cur_tickets = 0;
+
+    do {
+        get_lock = LWLockConditionalAcquire(lock, mode);
+        if (get_lock) {
+            break;
+        }
+
+        pg_usleep(1000L);
+        cur_tickets++;
+        if (cur_tickets >= wait_tickets) {
+            break;
+        }
+    } while (true);
+
+    if (!get_lock) {
+        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:2s",
+            lock, mode))));
+    }
+    return get_lock;
+}
+
+bool SSWaitIOTimeout(BufferDesc *buf)
+{
+    bool ret = false;
+    for (;;) {
+        uint64 buf_state;
+        buf_state = LockBufHdr(buf);
+        UnlockBufHdr(buf, buf_state);
+
+        if (!(buf_state & BM_IO_IN_PROGRESS)) {
+            ret = true;
+            break;
+        }
+        ret = SSLWLockAcquireTimeout(buf->io_in_progress_lock, LW_SHARED);
+        if (ret) {
+            LWLockRelease(buf->io_in_progress_lock);
+        } else {
+            break;
+        }
+    }
+
+    if (!ret) {
+        BufferTag *tag = &buf->tag;
+        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] SSWaitIOTimeout, "
+            "buf_id:%d, io_in_progress_lock:%p",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum, buf->buf_id, buf->io_in_progress_lock))));
+    }
+    return ret;
 }

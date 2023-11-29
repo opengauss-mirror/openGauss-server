@@ -30,6 +30,7 @@
 
 #include "storage/smgr/segment.h"
 #include "utils/palloc.h"
+#include "replication/ss_cluster_replication.h"
 
 /*
  * In segment-page storage, an atomic operation may cross multiple functions, touching multiple pages. For example,
@@ -396,8 +397,8 @@ void XLogAtomicOpStart()
                         errhint("cannot make new WAL entries during recovery")));
     }
 
-    if (!SSXLogInsertAllowed()) {
-        ereport(FATAL, (errmsg("SS standby cannot make new WAL entries")));
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
+        ereport(FATAL, (errmsg("SS dorado standby cluster cannot make new WAL entries")));
     }
 
     XLogAtomicOpMgr->XLogStart();

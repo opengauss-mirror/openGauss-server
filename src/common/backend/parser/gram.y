@@ -59,6 +59,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_type_fn.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
 #ifdef ENABLE_MULTIPLE_NODES
@@ -248,6 +249,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 static char *GetTargetFuncArgTypeName(char *typeString, TypeName* t);
 static char *FormatFuncArgType(core_yyscan_t yyscanner, char *argsString, List* parameters);
 static char *ParseFunctionArgSrc(core_yyscan_t yyscanner);
+static char *ParseFuncHeadSrc(core_yyscan_t yyscanner, bool isFunction = true);
 static void parameter_check_execute_direct(const char* query);
 static Node *make_node_from_scanbuf(int start_pos, int end_pos, core_yyscan_t yyscanner);
 static int64 SequenceStrGetInt64(const char *str);
@@ -370,7 +372,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 		DropForeignServerStmt DropUserMappingStmt ExplainStmt ExecDirectStmt FetchStmt
 		GetDiagStmt GrantStmt GrantRoleStmt GrantDbStmt IndexStmt InsertStmt ListenStmt LoadStmt
 		LockStmt NotifyStmt ExplainableStmt PreparableStmt
-		CreateFunctionStmt CreateEventStmt CreateProcedureStmt CreatePackageStmt CreatePackageBodyStmt  AlterFunctionStmt AlterProcedureStmt ReindexStmt RemoveAggrStmt
+		CreateFunctionStmt CreateEventStmt CreateProcedureStmt CreatePackageStmt CreatePackageBodyStmt  AlterFunctionStmt CompileStmt AlterProcedureStmt ReindexStmt RemoveAggrStmt
 		RemoveFuncStmt RemoveOperStmt RemovePackageStmt RenameStmt RevokeStmt RevokeRoleStmt RevokeDbStmt
 		RuleActionStmt RuleActionStmtOrEmpty RuleStmt
 		SecLabelStmt SelectStmt TimeCapsuleStmt TransactionStmt TruncateStmt CallFuncStmt
@@ -434,7 +436,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				start_opt preserve_opt rename_opt status_opt comments_opt action_opt
 				end_opt definer_name_opt
 
-%type <ival>	opt_lock lock_type cast_context opt_wait
+%type <ival>	opt_lock lock_type cast_context opt_wait compile_pkg_opt
 %type <ival>	vacuum_option_list vacuum_option_elem opt_verify_options
 %type <boolean>	opt_check opt_force opt_or_replace
 				opt_grant_grant_option opt_grant_admin_option
@@ -664,7 +666,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <keyword> character_set
 %type <ival>	charset opt_charset convert_charset default_charset
-%type <str>		collate opt_collate default_collate
+%type <str>		collate opt_collate default_collate set_names_collate
 %type <charsetcollateopt> CharsetCollate charset_collate optCharsetCollate
 
 %type <boolean> opt_varying opt_timezone opt_no_inherit
@@ -841,7 +843,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT UNDERSCORE_CHARSET
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
@@ -864,7 +866,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
 	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMN_NAME COLUMNS COMMENT COMMENTS COMMIT
-	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSISTENT CONSTANT CONSTRAINT CONSTRAINT_CATALOG CONSTRAINT_NAME CONSTRAINT_SCHEMA CONSTRAINTS
+	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPILE COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSISTENT CONSTANT CONSTRAINT CONSTRAINT_CATALOG CONSTRAINT_NAME CONSTRAINT_SCHEMA CONSTRAINTS
 	CONTENT_P CONTINUE_P CONTVIEW CONVERSION_P CONVERT_P CONNECT COORDINATOR COORDINATORS COPY COST CREATE
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
@@ -931,7 +933,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
-	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STACKED_P STANDALONE_P START STARTS STARTWITH
+	SIMILAR SIMPLE SIZE SKIP SLAVE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPECIFICATION SPILL SPLIT STABLE STACKED_P STANDALONE_P START STARTS STARTWITH
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBCLASS_ORIGIN SUBPARTITION SUBPARTITIONS SUBSCRIPTION SUBSTRING
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR STARTING SQL_P
 
@@ -1199,6 +1201,7 @@ stmt :
 			| ClosePortalStmt
 			| ClusterStmt
 			| CommentStmt
+			| CompileStmt
 			| ConstraintsSetStmt
 			| CopyStmt
 			| CreateAsStmt
@@ -2464,15 +2467,31 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| NAMES opt_encoding
+			| NAMES opt_encoding set_names_collate
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_VALUE;
-					n->name = "client_encoding";
-					if ($2 != NULL)
-						n->args = list_make1(makeStringConst($2, @2));
-					else
-						n->kind = VAR_SET_DEFAULT;
+					if ($3 != NULL) {
+						if ($2 == NULL) {
+							ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("cannot specify collation without character set"),
+								parser_errposition(@3)));
+						}
+						n->args = list_make2(makeStringConst($2, @2), makeStringConst($3, @3));
+						n->name = "set_names";
+					} else {
+						if ($2 != NULL) {
+							n->args = list_make1(makeStringConst($2, @2));
+						} else {
+							n->kind = VAR_SET_DEFAULT;
+						}
+						if (ENABLE_MULTI_CHARSET) {
+							n->name = "set_names";
+						} else {
+							n->name = "client_encoding";
+						}
+					}
 					$$ = n;
 				}
 			| ROLE ColId_or_Sconst
@@ -3009,6 +3028,7 @@ opt_boolean_or_string:
 			 * is the same, so we don't need to distinguish them here.
 			 */
 			| ColId_or_Sconst						{ $$ = $1; }
+			| BINARY								{ $$ = "binary";}
 		;
 
 /* Timezone values can be:
@@ -3082,6 +3102,8 @@ zone_value:
 
 opt_encoding:
 			Sconst									{ $$ = $1; }
+			| IDENT									{ $$ = $1; }
+			| BINARY								{ $$ = (char*)$1; }
 			| DEFAULT								{ $$ = NULL; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
@@ -7637,7 +7659,7 @@ master_key_elem:
             // len is not filled on purpose ??
             $$ = (Node*) n;
         }
-        | KEY_PATH '=' ColId
+        | KEY_PATH '=' ColId_or_Sconst
         {
             ClientLogicGlobalParam *n = makeNode (ClientLogicGlobalParam);
             n->key = ClientLogicGlobalProperty::CMK_KEY_PATH;
@@ -9843,6 +9865,34 @@ CreateSeqStmt:
 
 					n->sequence = $5;
 					n->options = $6;
+					n->missing_ok = false;
+					n->ownerId = InvalidOid;
+/* PGXC_BEGIN */
+					n->is_serial = false;
+/* PGXC_END */
+					n->uuid = 0;
+					n->canCreateTempSeq = false;
+					$$ = (Node *)n;
+				}
+			| CREATE OptTemp opt_large_seq SEQUENCE IF_P NOT EXISTS qualified_name OptSeqOptList
+				{
+					CreateSeqStmt *n = makeNode(CreateSeqStmt);
+					$8->relpersistence = $2;
+					n->is_large = $3;
+#ifdef ENABLE_MULTIPLE_NODES
+					if (n->is_large) {
+        				const char* message = "large sequence is not supported.";
+    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(ERROR,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("large sequence is not supported.")));
+					}
+#endif
+
+					n->sequence = $8;
+					n->options = $9;
+					n->missing_ok = true;
 					n->ownerId = InvalidOid;
 /* PGXC_BEGIN */
 					n->is_serial = false;
@@ -11796,7 +11846,7 @@ CreateTrigStmt:
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-							 	errmsg("syntax error.")));
+							 	errmsg("or replace is not supported here."), parser_errposition(@2)));
 					}
 					if ($3 != NULL)
 					{
@@ -11868,8 +11918,7 @@ CreateTrigStmt:
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("syntax error.")));
-					}
+							 	errmsg("or replace is not supported here."), parser_errposition(@2)));					}
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 					{
 						ereport(errstate,
@@ -11912,7 +11961,7 @@ CreateTrigStmt:
 					{
 						ereport(errstate,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("syntax error.")));
+							 	errmsg("or replace is not supported here."), parser_errposition(@2)));
 					}
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 					{
@@ -14838,6 +14887,11 @@ collate:
 			}
 		;
 
+set_names_collate:    COLLATE charset_collate_name		{ $$ = $2; }
+					| COLLATE DEFAULT					{ $$ = NULL; }
+					| /*EMPTY*/							{ $$ = NULL; }
+			;
+
 opt_collate:
 				collate								{ $$ = $1; }
 				| /*EMPTY*/							{ $$ = NULL; }
@@ -14949,6 +15003,7 @@ CreateFunctionStmt:
 			CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			RETURNS func_return createfunc_opt_list opt_definition
 				{
+					set_function_style_pg();
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					n->isOraStyle = false;
 					n->isPrivate = false;
@@ -14968,6 +15023,7 @@ CreateFunctionStmt:
 			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			  RETURNS TABLE '(' table_func_column_list ')' createfunc_opt_list opt_definition
 				{
+					set_function_style_pg();
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					n->isOraStyle = false;
 					n->isPrivate = false;
@@ -14988,6 +15044,7 @@ CreateFunctionStmt:
 			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			  createfunc_opt_list opt_definition
 				{
+					set_function_style_pg();
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					n->isOraStyle = false;
 					n->isPrivate = false;
@@ -15010,6 +15067,10 @@ CreateFunctionStmt:
 				  u_sess->parser_cxt.eaten_begin = false;
 				  pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
                   u_sess->parser_cxt.isCreateFuncOrProc = true;
+				  if (set_is_create_plsql_type()) {
+					set_create_plsql_type_start();
+					set_function_style_a();
+				  }
 			  } subprogram_body
 				{
 					int rc = 0;
@@ -15029,6 +15090,9 @@ CreateFunctionStmt:
 					n->funcname = $5;
 					n->parameters = $6;
 					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funSource->headerSrc, n->parameters);
+					if (enable_plpgsql_gsdependency_guc()) {
+						n->funcHeadSrc = ParseFuncHeadSrc(yyscanner);
+					}
 					n->returnType = $8;
 					n->options = $9;
 					n->options = lappend(n->options, makeDefElem("as",
@@ -15885,6 +15949,10 @@ CreateProcedureStmt:
 				u_sess->parser_cxt.eaten_begin = false;
 				pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
                 u_sess->parser_cxt.isCreateFuncOrProc = true;
+				if (set_is_create_plsql_type()) {
+					set_create_plsql_type_start();
+					set_function_style_a();
+				}
 			} subprogram_body
 				{
                                         int rc = 0;
@@ -15907,6 +15975,9 @@ CreateProcedureStmt:
 					n->funcname = $5;
 					n->parameters = $6;
 					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funSource->headerSrc, n->parameters);
+					if (enable_plpgsql_gsdependency_guc()) {
+						n->funcHeadSrc = ParseFuncHeadSrc(yyscanner, false);
+					}
 					n->returnType = NULL;
 					n->isProcedure = true;
 					if (0 == count)
@@ -15928,9 +15999,11 @@ CreateProcedureStmt:
 		;
 
 CreatePackageStmt:
-			CREATE opt_or_replace PACKAGE pkg_name invoker_rights as_is {pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;}
+			CREATE opt_or_replace PACKAGE pkg_name invoker_rights as_is {pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;set_function_style_a();}
 				{
-                    u_sess->plsql_cxt.package_as_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @6);
+                    set_create_plsql_type_start();
+					u_sess->plsql_cxt.need_create_depend = true;
+					u_sess->plsql_cxt.package_as_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @6);
                     CreatePackageStmt *n = makeNode(CreatePackageStmt);
 					char *pkgNameBegin = NULL;
 					char *pkgNameEnd = NULL;
@@ -16008,6 +16081,7 @@ CreatePackageStmt:
                             } else {
 								parser_yyerror("package spec is not ended correctly");
 							}
+							u_sess->plsql_cxt.isCreatePkg = false;
                         }
                         tok = YYLEX;
                     }
@@ -16345,8 +16419,10 @@ pkg_body_subprogram: {
             }
             ;
 CreatePackageBodyStmt:
-			CREATE opt_or_replace PACKAGE BODY_P pkg_name as_is {pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;} pkg_body_subprogram
+			CREATE opt_or_replace PACKAGE BODY_P pkg_name as_is {pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;set_function_style_a();} pkg_body_subprogram
 				{
+					set_create_plsql_type_start();
+					u_sess->plsql_cxt.need_create_depend = true;
 					char *pkgNameBegin = NULL;
 					char *pkgNameEnd = NULL;
                     char *pkgName = NULL;
@@ -16540,13 +16616,20 @@ param_name:	type_function_name
 func_return:
 			func_type
 				{
+					if (enable_plpgsql_gsdependency_guc()) {
+						pg_yyget_extra(yyscanner)->core_yy_extra.return_pos_end = yylloc;
+					}
 					/* We can catch over-specified results here if we want to,
 					 * but for now better to silently swallow typmod, etc.
 					 * - thomas 2000-03-22
 					 */
 					$$ = $1;
 				}
-			| func_type DETERMINISTIC
+			| func_type {
+				if (enable_plpgsql_gsdependency_guc()) {
+					pg_yyget_extra(yyscanner)->core_yy_extra.return_pos_end = yylloc;
+				}
+			} DETERMINISTIC
 				{
 					$$ = $1;
 				}
@@ -17047,6 +17130,69 @@ opt_restrict:
 			| /* EMPTY */
 		;
 
+compile_pkg_opt:
+			BODY_P		{$$ = COMPILE_PKG_BODY;}
+			| PACKAGE 	{$$ = COMPILE_PACKAGE;}
+			| SPECIFICATION {$$ = COMPILE_PKG_SPECIFICATION;}
+			| /* EMPTY */	{$$ = COMPILE_PACKAGE;}
+			;
+CompileStmt:
+			ALTER PROCEDURE function_with_argtypes COMPILE
+			{
+				u_sess->plsql_cxt.during_compile = true;
+				CompileStmt *n = makeNode(CompileStmt);
+				if (enable_plpgsql_gsdependency_guc()) {
+					n->objName = ((FuncWithArgs*)$3)->funcname;
+					n->funcArgs = ((FuncWithArgs*)$3)->funcargs;
+					n->compileItem = COMPILE_PROCEDURE;
+				}
+				$$ = (Node*)n;
+			}
+			| ALTER PROCEDURE func_name_opt_arg COMPILE
+			{
+				u_sess->plsql_cxt.during_compile = true;
+				CompileStmt *n = makeNode(CompileStmt);
+				if (enable_plpgsql_gsdependency_guc()) {
+					n->objName = $3;
+					n->funcArgs = NULL;
+					n->compileItem = COMPILE_PROCEDURE;
+				}
+				$$ = (Node*)n;
+			}
+			| ALTER FUNCTION function_with_argtypes COMPILE
+			{
+				u_sess->plsql_cxt.during_compile = true;
+				CompileStmt *n = makeNode(CompileStmt);
+				if (enable_plpgsql_gsdependency_guc()) {
+					n->objName = ((FuncWithArgs*)$3)->funcname;
+					n->funcArgs = ((FuncWithArgs*)$3)->funcargs;
+					n->compileItem = COMPILE_FUNCTION;
+				}
+				$$ = (Node*)n;
+			}
+			| ALTER FUNCTION func_name_opt_arg COMPILE
+			{
+				u_sess->plsql_cxt.during_compile = true;
+				CompileStmt *n = makeNode(CompileStmt);
+				if (enable_plpgsql_gsdependency_guc()) {
+					n->objName = $3;
+					n->funcArgs = NULL;
+					n->compileItem = COMPILE_FUNCTION;
+				}
+				$$ = (Node*)n;
+			}
+			| ALTER PACKAGE pkg_name COMPILE compile_pkg_opt
+			{
+				u_sess->plsql_cxt.during_compile = true;
+				CompileStmt *n = makeNode(CompileStmt);
+				if (enable_plpgsql_gsdependency_guc()) {
+					n->objName = $3;
+					n->funcArgs = NULL;
+					n->compileItem = (CompileEntry)$5;
+				}
+				$$ = (Node*)n;
+			}
+			;
 
 /*****************************************************************************
  *
@@ -17644,23 +17790,25 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-			| ALTER TABLE relation_expr RENAME TO name
+			| ALTER TABLE relation_expr RENAME TO qualified_name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TABLE;
 					n->relation = $3;
 					n->subname = NULL;
-					n->newname = $6;
+					n->newname = $6->relname;
+					n->newschema = $6->schemaname;
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
-			| ALTER TABLE IF_P EXISTS relation_expr RENAME TO name
+			| ALTER TABLE IF_P EXISTS relation_expr RENAME TO qualified_name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TABLE;
 					n->relation = $5;
 					n->subname = NULL;
-					n->newname = $8;
+					n->newname = $8->relname;
+					n->newschema = $8->schemaname;
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
@@ -18831,6 +18979,16 @@ AlterSubscriptionStmt:
 					n->options = list_make1(makeDefElem("enabled",
 											(Node *)makeInteger(TRUE)));
 					$$ = (Node *)n;
+				}
+			| ALTER SUBSCRIPTION name DISABLE_P
+				{
+					AlterSubscriptionStmt *n =
+						makeNode(AlterSubscriptionStmt);
+					n->refresh = false;
+					n->subname = $3;
+					n->options = list_make1(makeDefElem("enabled",
+											(Node *)makeInteger(FALSE)));
+					$$ = (Node *)n;
 				}		;
 
 /*****************************************************************************
@@ -19041,6 +19199,15 @@ TransactionStmt:
 				}
 			| START TRANSACTION WITH CONSISTENT SNAPSHOT
 				{
+					if (!DB_IS_CMPT(B_FORMAT)) {
+						const char* message = "WITH CONSISTENT SNAPSHOT is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("WITH CONSISTENT SNAPSHOT is supported only in B-format database."),
+								parser_errposition(@3)));
+					}
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_START;
 					n->options = NIL;
@@ -25277,7 +25444,7 @@ character_set:
 
 charset_collate_name:
 			ColId									{ $$ = $1; }
-			| BINARY								{ $$ = pstrdup($1); }
+			| BINARY								{ $$ = "binary"; }
 			| Sconst								{ $$ = $1; }
 		;
 
@@ -25523,6 +25690,7 @@ opt_evtime_unit:
 				$$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR) |
 												 INTERVAL_MASK(MONTH), @1));
 			}
+			;
 
 opt_interval:
 			YEAR_P
@@ -25778,6 +25946,7 @@ a_expr:		c_expr									{ $$ = $1; }
 							errmsg("@var_name := expr is not yet supported in distributed database.")));
 #endif
 					if (DB_IS_CMPT(B_FORMAT) && (u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES)) {
+						u_sess->parser_cxt.has_equal_uservar = true;
 						UserSetElem *n = makeNode(UserSetElem);
 						n->name = list_make1((Node *)$1);
 						n->val = (Expr *)$3;
@@ -28559,6 +28728,51 @@ AexprConst: Iconst
 					 */
 					$$ = makeBitStringConst($1, @1);
 				}
+			| UNDERSCORE_CHARSET Sconst
+				{
+					const char* encoding_name = $1;
+					char *original_str = pg_server_to_client($2, strlen($2));
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					A_Const *con = makeNode(A_Const);
+					con->val.type = T_String;
+					con->val.val.str = original_str;
+					con->location = @2;
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = (Node *)con;
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| UNDERSCORE_CHARSET BCONST
+				{
+					const char* encoding_name = $1;
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = makeBitStringConst($2, @2);
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| UNDERSCORE_CHARSET XCONST
+				{
+					const char* encoding_name = $1;
+					int encoding = pg_valid_server_encoding(encoding_name);
+					Assert(encoding >= 0);
+
+					CharsetClause *n = makeNode(CharsetClause);
+					n->arg = makeBitStringConst($2, @2);
+					n->charset = encoding;
+					n->is_binary = (strcmp(encoding_name, "binary") == 0);
+					n->location = @1;
+					$$ = (Node *) n;
+				}
 			| func_name Sconst
 				{
 					/* generic type 'literal' syntax */
@@ -28827,6 +29041,7 @@ unreserved_keyword:
 			| COMMITTED
 			| COMPATIBLE_ILLEGAL_CHARS
 			| COMPLETE
+			| COMPILE
 			| COMPLETION
 			| COMPRESS
 			| CONDITION
@@ -29168,6 +29383,7 @@ unreserved_keyword:
 			| SNAPSHOT
 			| SOURCE_P
 			| SPACE
+			| SPECIFICATION
 			| SPILL
 			| SPLIT
 			| SQL_P
@@ -29654,7 +29870,7 @@ makeStringConst(char *str, int location)
 
 	if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
 	{
-		if (NULL == str || 0 == strlen(str))
+		if (NULL == str || (0 == strlen(str) && !ACCEPT_EMPTY_STR))
 		{
 			n->val.type = T_Null;
 			n->val.val.str = str;
@@ -29670,8 +29886,12 @@ makeStringConst(char *str, int location)
 	else
 	{
 		n->val.type = T_String;
-		n->val.val.str = str;
 		n->location = location;
+		if (NULL == str) {
+			n->val.val.str = str;
+		} else {
+			n->val.val.str = pg_server_to_any(str, strlen(str), GetCharsetConnection());
+		}
 	}
 
 	return (Node *)n;
@@ -31239,7 +31459,12 @@ static char *GetTargetFuncArgTypeName(char *typeString, TypeName* t)
 	{
 		Type typtup;
 		Oid toid;
-		typtup = LookupTypeName(NULL, t, NULL, false);
+		TypeDependExtend* dependExtend = NULL;
+		if (enable_plpgsql_gsdependency()) {
+			InstanceTypeNameDependExtend(&dependExtend);
+		}
+		typtup = LookupTypeName(NULL, t, NULL, false, dependExtend);
+		pfree_ext(dependExtend);
 		if (typtup)
 		{
 			toid = typeTypeId(typtup);
@@ -31303,9 +31528,10 @@ static char *FormatFuncArgType(core_yyscan_t yyscanner, char *argsString, List* 
 	pfree(argsString);
 	proc_header_len = proc_header_len;
 
-	yyextra->core_yy_extra.func_param_begin = 0;
-	yyextra->core_yy_extra.func_param_end = 0;
-
+	if (!enable_plpgsql_gsdependency_guc()) {
+		yyextra->core_yy_extra.func_param_begin = 0;
+		yyextra->core_yy_extra.func_param_end = 0;
+	} 
 	return buf.data;
 }
 
@@ -31336,6 +31562,32 @@ static char *ParseFunctionArgSrc(core_yyscan_t yyscanner)
 	yyextra->core_yy_extra.include_ora_comment = false;
 
 	return proc_header_str;
+}
+
+static char *ParseFuncHeadSrc(core_yyscan_t yyscanner, bool is_function)
+{
+	base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+	int proc_header_src_end = 0;
+	char *proc_header_info = NULL;
+	if (is_function) {
+		proc_header_src_end = yyextra->core_yy_extra.return_pos_end - 1;
+	} else {
+		proc_header_src_end = yyextra->core_yy_extra.func_param_end + 1;
+	}
+	if (proc_header_src_end == 1) {
+		return proc_header_info;
+	}
+	yyextra->core_yy_extra.return_pos_end = 0;
+	yyextra->core_yy_extra.func_param_begin = 0;
+	yyextra->core_yy_extra.func_param_end = 0;
+	if (proc_header_src_end > 0) {
+		proc_header_info = (char*)palloc0(proc_header_src_end + 1);
+		errno_t rc = EOK;
+		rc = strncpy_s(proc_header_info, (proc_header_src_end + 1), yyextra->core_yy_extra.scanbuf, proc_header_src_end);
+		securec_check(rc, "\0", "\0");
+		proc_header_info[proc_header_src_end] = '\0';
+	}
+	return proc_header_info;
 }
 
 static void parameter_check_execute_direct(const char* query)
@@ -31661,11 +31913,15 @@ static void CheckPartitionExpr(Node* expr, int* colCount)
 	if (expr == NULL)
 		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The expr can't be NULL")));
 	if (expr->type == T_A_Expr) {
-		char* name = strVal(linitial(((A_Expr*)expr)->name));
+		A_Expr* a_expr = (A_Expr*)expr;
+		if (a_expr->name == NULL) {
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The expr is not supported for Partition Expr")));
+		}
+		char* name = strVal(linitial(a_expr->name));
 		if (strcmp(name, "+") != 0 && strcmp(name, "-") != 0 && strcmp(name, "*") != 0)
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s operator is not supported for Partition Expr", name)));
-		CheckPartitionExpr(((A_Expr*)expr)->lexpr, colCount);
-		CheckPartitionExpr(((A_Expr*)expr)->rexpr, colCount);
+		CheckPartitionExpr(a_expr->lexpr, colCount);
+		CheckPartitionExpr(a_expr->rexpr, colCount);
 	} else if (expr->type == T_FuncCall) {
 		char* validFuncName[MAX_SUPPORTED_FUNC_FOR_PART_EXPR] = {"abs","ceiling","datediff","day","dayofmonth","dayofweek","dayofyear","extract","floor","hour",
 		"microsecond","minute","mod","month","quarter","second","time_to_sec","to_days","to_seconds","unix_timestamp","weekday","year","yearweek","date_part","div"};

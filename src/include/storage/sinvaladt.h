@@ -34,7 +34,7 @@ extern void CleanupWorkSessionInvalidation(void);
 extern void SharedInvalBackendInit(bool sendOnly, bool worksession);
 extern PGPROC* BackendIdGetProc(int backendID);
 
-extern void SIInsertDataEntries(const SharedInvalidationMessage* data, int n);
+extern void SIInsertDataEntries(const SharedInvalidationMessage* data, int n, XLogRecPtr lsn = 0);
 extern int SIGetDataEntries(SharedInvalidationMessage* data, int datasize, bool worksession);
 extern void SICleanupQueue(bool callerHasWriteLock, int minFree);
 

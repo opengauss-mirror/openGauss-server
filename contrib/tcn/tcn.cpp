@@ -152,7 +152,7 @@ Datum triggered_change_notification(PG_FUNCTION_ARGS)
                     int colno = index->indkey.values[i];
 
                     appendStringInfoCharMacro(payload, ',');
-                    strcpy_quoted(payload, NameStr((tupdesc->attrs[colno - 1])->attname), '"');
+                    strcpy_quoted(payload, NameStr((tupdesc->attrs[colno - 1]).attname), '"');
                     appendStringInfoCharMacro(payload, '=');
                     strcpy_quoted(payload, SPI_getvalue(trigtuple, tupdesc, colno), '\'');
                 }

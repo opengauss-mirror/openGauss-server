@@ -572,9 +572,6 @@ void set_pglocale_pgservice(const char* argv0, const char* app)
     char path[MAXPGPATH];
     char my_exec_path[MAXPGPATH];
 
-    /* longer than PGLOCALEDIR */
-    char env_path[MAXPGPATH + sizeof("PGSYSCONFDIR=")];
-
     /* don't set LC_ALL in the backend */
     if (strcmp(app, PG_TEXTDOMAIN("gaussdb")) != 0) {
         (void)gs_setlocale_r(LC_ALL, "");
@@ -589,40 +586,14 @@ void set_pglocale_pgservice(const char* argv0, const char* app)
     bindtextdomain(app, path);
     textdomain(app);
 
-    if (gs_getenv_r("PGLOCALEDIR") == NULL) {
-        char* ptr = NULL;
-        /* set for libpq to use */
-        errno_t rc = snprintf_s(env_path, sizeof(env_path), sizeof(env_path) - 1, "PGLOCALEDIR=%s", path);
-        securec_check_ss_c(rc, "\0", "\0");
-        canonicalize_path(env_path + 12);
-#ifdef FRONTEND
-        ptr = strdup(env_path);
-#else
-        ptr = MemoryContextStrdup(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), env_path);
-#endif
-        if (ptr != NULL) {
-            gs_putenv_r(ptr);
-        }
-    }
+    gs_setnev_r("PGLOCALEDIR", path, 0);
 #endif
 
     if (gs_getenv_r("PGSYSCONFDIR") == NULL) {
-        char* ptr = NULL;
-
         get_etc_path(my_exec_path, path, sizeof(path));
 
         /* set for libpq to use */
-        errno_t rc = snprintf_s(env_path, sizeof(env_path), sizeof(env_path) - 1, "PGSYSCONFDIR=%s", path);
-        securec_check_ss_c(rc, "\0", "\0");
-        canonicalize_path(env_path + 13);
-#ifdef FRONTEND
-        ptr = strdup(env_path);
-#else
-        ptr = MemoryContextStrdup(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), env_path);
-#endif
-        if (ptr != NULL) {
-            gs_putenv_r(ptr);
-        }
+        gs_setenv_r("PGSYSCONFDIR", path, 0);
     }
 }
 

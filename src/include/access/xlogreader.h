@@ -42,6 +42,8 @@ extern void XLogReaderFree(XLogReaderState* state);
 /* Read the next XLog record. Returns NULL on end-of-WAL or failure */
 extern struct XLogRecord* XLogReadRecord(
     XLogReaderState* state, XLogRecPtr recptr, char** errormsg, bool doDecode = true, char* xlog_path = NULL);
+extern struct XLogRecord* XLogReadRecordFromAllDir(
+    char** xlogDirs, int xlogDirNum, XLogReaderState *xlogReader, XLogRecPtr curLsn, char** errorMsg);
 
 extern bool XLogRecGetBlockTag(XLogReaderState *record, uint8 block_id, RelFileNode *rnode, ForkNumber *forknum,
     BlockNumber *blknum, XLogPhyBlock *pblk = NULL);
@@ -56,8 +58,9 @@ extern void XLogRecGetVMPhysicalBlock(const XLogReaderState *record, uint8 block
 extern void XLogReaderInvalReadState(XLogReaderState* state);
 
 extern XLogRecPtr XLogFindNextRecord(XLogReaderState* state, XLogRecPtr RecPtr, XLogRecPtr *endPtr = NULL, char* xlog_path = NULL);
+extern XLogRecPtr SSFindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc, char** xlogDirs, int xlogDirNum);
 extern XLogRecPtr FindMaxLSN(char* workingpath, char* returnmsg, int msg_len, pg_crc32* maxLsnCrc, 
-    uint32 *maxLsnLen = NULL, TimeLineID *returnTli = NULL);
+    uint32 *maxLsnLen = NULL, TimeLineID *returnTli = NULL, char* xlog_path = NULL);
 extern XLogRecPtr FindMinLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *minLsnCrc);
 extern void CloseXlogFile(void);
 extern int SimpleXLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqLen,

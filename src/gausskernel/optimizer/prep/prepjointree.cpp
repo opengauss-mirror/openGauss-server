@@ -1358,6 +1358,12 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
                 case RTE_RESULT:
                 case RTE_REMOTE_DUMMY:
                     /* these can't contain any lateral references */
+#ifdef USE_SPQ
+                case RTE_NAMEDTUPLESTORE:
+                case RTE_TABLEFUNC: /* TableFunc(.., column list) */
+                case RTE_VOID: /* SPQ: deleted RTE */
+                case RTE_TABLEFUNCTION: /* SPQ: Functions over multiset input */
+#endif
                     break;
             }
         }
@@ -3581,6 +3587,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
                                 varno, varattno, exprType(node), exprTypmod(node), exprCollation(node), 0);
                         } else {
                             oldvar = (Node*)copyObject(retnode);
+                            oldvar = eval_const_expressions(root, oldvar);
                         }
                     } break;
                     default:
@@ -3858,9 +3865,13 @@ static bool is_safe_pull_up_sublink_having(PlannerInfo* root)
         subQuery = castNode(Query, sublink->subselect);
         level_up_varnos = pull_varnos((Node*)subQuery->jointree, 1, true);
         if (!bms_is_empty(level_up_varnos)) {
+            bms_free(level_up_varnos);
+            list_free_ext(sublinkList);
             return false;
         }
     }
- 
+
+    bms_free(level_up_varnos);
+    list_free_ext(sublinkList);
     return true;
 }

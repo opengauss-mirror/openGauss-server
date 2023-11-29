@@ -64,6 +64,9 @@ extern Oid select_common_type(ParseState* pstate, List* exprs, const char* conte
 extern bool check_all_in_whitelist(List* resultexprs);
 extern Node* coerce_to_common_type(ParseState* pstate, Node* node, Oid targetTypeId, const char* context);
 
+extern Node* coerce_to_settype(ParseState* pstate, Node* expr, Oid exprtype, Oid targettype, int32 targettypmod,
+    CoercionContext ccontext, CoercionForm cformat, int location, Oid collation);
+
 extern bool check_generic_type_consistency(Oid* actual_arg_types, Oid* declared_arg_types, int nargs);
 extern Oid enforce_generic_type_consistency(
     Oid* actual_arg_types, Oid* declared_arg_types, int nargs, Oid rettype, bool allow_poly);
@@ -74,9 +77,13 @@ extern CoercionPathType find_coercion_pathway(
 extern CoercionPathType find_typmod_coercion_function(Oid typeId, Oid* funcid);
 
 extern void expression_error_callback(void* arg);
-extern Node* coerce_to_target_charset(Node* expr, int target_charset, Oid targetTypeId);
+extern Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, int32 target_typmod, Oid target_collation,
+    bool eval_const = true);
 
 extern Node *transferConstToAconst(Node *node);
 
 extern Const* setValueToConstExpr(SetVariableExpr* set);
+#ifdef USE_SPQ
+extern bool get_cast_func(Oid oidSrc, Oid oidDest, bool *is_binary_coercible, Oid *oidCastFunc, CoercionPathType *pathtype);
+#endif
 #endif /* PARSE_COERCE_H */

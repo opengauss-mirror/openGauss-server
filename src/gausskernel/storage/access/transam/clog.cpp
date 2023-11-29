@@ -42,12 +42,15 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
+#include "access/extreme_rto/standby_read/standby_read_delay_ddl.h"
+#include "access/multi_redo_api.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "pg_trace.h"
 #include "storage/smgr/fd.h"
 #include "storage/proc.h"
 #include "storage/file/fio_device.h"
+#include "storage/procarray.h"
 #ifdef USE_ASSERT_CHECKING
 #include "utils/builtins.h"
 #endif /* USE_ASSERT_CHECKING */
@@ -1105,6 +1108,20 @@ static void WriteTruncateXlogRec(int64 pageno)
     XLogWaitFlush(recptr);
 }
 
+void clog_redo_truncate_cancel_conflicting_proc(TransactionId latest_removed_xid, XLogRecPtr lsn)
+{
+    const int max_check_times = 1000;
+    int check_times = 0;
+    bool conflict = true;
+    bool reach_max_check_times = false;
+    while (conflict && check_times < max_check_times) {
+        RedoInterruptCallBack();
+        check_times++;
+        reach_max_check_times = (check_times == max_check_times);
+        conflict = proc_array_cancel_conflicting_proc(latest_removed_xid, lsn, reach_max_check_times);
+    }
+}
+
 /*
  * CLOG resource manager's routines
  */
@@ -1130,17 +1147,28 @@ void clog_redo(XLogReaderState *record)
         Assert(!ClogCtl(pageno)->shared->page_dirty[slotno]);
 
         LWLockRelease(ClogCtl(pageno)->shared->control_lock);
+        g_instance.comm_cxt.predo_cxt.max_clog_pageno = pageno;
     } else if (info == CLOG_TRUNCATE) {
         int64 pageno;
 
         rc = memcpy_s(&pageno, sizeof(int64), XLogRecGetData(record), sizeof(int64));
         securec_check(rc, "", "");
 
+        if (IS_EXRTO_READ) {
+            update_delay_ddl_file_truncate_clog(record->ReadRecPtr, pageno);
+            return;
+        }
         /*
          * During XLOG replay, latest_page_number isn't set up yet; insert a
          * suitable value to bypass the sanity test in SimpleLruTruncate.
          */
         ClogCtl(pageno)->shared->latest_page_number = pageno;
+
+        TransactionId truncate_xid = (TransactionId)PAGE_TO_TRANSACTION_ID(pageno);
+        clog_redo_truncate_cancel_conflicting_proc(truncate_xid, InvalidXLogRecPtr);
+        if (TransactionIdPrecedes(g_instance.undo_cxt.hotStandbyRecycleXid, truncate_xid)) {
+            pg_atomic_write_u64(&g_instance.undo_cxt.hotStandbyRecycleXid, truncate_xid);
+        }
 
         SimpleLruTruncate(ClogCtl(0), pageno, NUM_CLOG_PARTITIONS);
         DeleteObsoleteTwoPhaseFile(pageno);
@@ -1301,3 +1329,4 @@ void SSCLOGShmemClear(void)
             CBufMappingPartitionLockByIndex(i), CLOGDIR);
     }
 }
+

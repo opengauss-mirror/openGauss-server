@@ -49,7 +49,11 @@ extern ObjectAddress ProcedureCreate(const char *procedureName,
                 bool  package,
                 bool  proIsProcedure,
                 const char *proargsrc,
-                bool  isPrivate = false);
+                bool  isPrivate = false,
+                TypeDependExtend* paramTypDependExt = NULL,
+                TypeDependExtend* retTypDependExt = NULL,
+                CreateFunctionStmt* stmt = NULL
+                );
 
 extern bool function_parse_error_transpose(const char *prosrc);
 

@@ -27,6 +27,9 @@ typedef enum WalSndState {
     WALSNDSTATE_STARTUP = 0,
     WALSNDSTATE_BACKUP,
     WALSNDSTATE_CATCHUP,
+    WALSNDSTATE_UWALCATCHUP,
+    WALSNDSTATE_UWALCATCHUP_MSGSENT,
+    WALSNDSTATE_UWALCATCHUP_END,
     WALSNDSTATE_STREAMING
 } WalSndState;
 
@@ -160,6 +163,8 @@ typedef struct WalSnd {
     TimestampTz lastWriteChangeTime;
     TimestampTz lastFlushChangeTime;
     TimestampTz lastApplyChangeTime;
+
+    char remote_application_name[NAMEDATALEN];
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;

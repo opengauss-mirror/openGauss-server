@@ -696,6 +696,24 @@ perform pck1.p1(a=>(1,'bb','11'),c=>var1,b=>'aa');--报错
 end;
 /
 
+create table test_table2 (coll int,col2 text);
+insert into test_table2 values (1, 'test');
+create or replace function test_function2(out rl refcursor, out r2 refcursor)
+returns refcursor as 
+$$
+begin
+open rl for select coll from test_table2;
+open r2 for select col2 from test_table2;
+return r2;
+end;
+$$
+LANGUAGE 'plpgsql';
+call test_function2('','');
+
 set plsql_compile_check_options='';
+drop package body if exists pck1;
+drop package body pck1;
+drop package body pck1;
+drop package body if exists pck1;
 drop package if exists pck1;
 drop schema if exists plpgsql_override_out cascade;

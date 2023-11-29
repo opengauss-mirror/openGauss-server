@@ -52,6 +52,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:common_backend_utils_cache>
     $<TARGET_OBJECTS:common_backend_utils_error>
     $<TARGET_OBJECTS:common_backend_utils_fmgr>
+    $<TARGET_OBJECTS:common_backend_utils_gsplsql>
     $<TARGET_OBJECTS:common_backend_utils_hash>
     $<TARGET_OBJECTS:common_backend_utils_init>
     $<TARGET_OBJECTS:common_backend_utils_mb>
@@ -179,6 +180,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_gin>
     $<TARGET_OBJECTS:gausskernel_storage_access_hbstore>
     $<TARGET_OBJECTS:gausskernel_storage_access_redo>
+    $<TARGET_OBJECTS:gausskernel_storage_access_redo_standby_read>
     $<TARGET_OBJECTS:gausskernel_storage_access_table>
     $<TARGET_OBJECTS:gausskernel_storage_bulkload>
     $<TARGET_OBJECTS:gausskernel_storage_replication_logical>
@@ -187,6 +189,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_replication>
     $<TARGET_OBJECTS:gausskernel_storage_buffer>
     $<TARGET_OBJECTS:gausskernel_storage_nvm>
+    $<TARGET_OBJECTS:gausskernel_storage_gs_uwal>
     $<TARGET_OBJECTS:gausskernel_storage_cmgr>
     $<TARGET_OBJECTS:gausskernel_storage_cstore_compression>
     $<TARGET_OBJECTS:gausskernel_storage_cstore>
@@ -378,6 +381,9 @@ if("${SUPPORT_HOTPATCH}" STREQUAL "yes")
     list(APPEND gaussdb_LINK_DIRS ${LIBHOTPATCH_LIB_PATH})
 endif()
 if(NOT "${ENABLE_UT}" STREQUAL "ON")
+    list(APPEND gaussdb_LINK_DIRS ${LIBUWAL_LINK_DIRS})
+    list(APPEND gaussdb_LINK_OPTIONS ${LIBUWAL_LINK_OPTIONS})
+
     add_executable(gaussdb ${gaussdb_objects})
     target_link_options(gaussdb PRIVATE ${gaussdb_LINK_OPTIONS})
     target_link_directories(gaussdb PRIVATE ${gaussdb_LINK_DIRS})

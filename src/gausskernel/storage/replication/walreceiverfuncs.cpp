@@ -36,6 +36,7 @@
 #include "replication/replicainternal.h"
 #include "replication/walreceiver.h"
 #include "replication/slot.h"
+#include "replication/ss_cluster_replication.h"
 #include "replication/dcf_replication.h"
 #include "replication/walsender_private.h"
 #include "storage/pmsignal.h"
@@ -259,7 +260,7 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         SpinLockRelease(&walrcv->mutex);
         ereport(LOG, (errmsg("wal receiver try to connect to %s index %d .", walrcv->conninfo, useIndex)));
         SpinLockAcquire(&hashmdata->mutex);
-        if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)
+        if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE)
             hashmdata->current_repl = useIndex;
         else
             hashmdata->current_repl = MAX_REPLNODE_NUM + useIndex;
@@ -297,6 +298,7 @@ void WalRcvShmemInit(void)
         t_thrd.walreceiverfuncs_cxt.WalRcv->dummyStandbyConnectFailed = false;
         t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage = false;
         t_thrd.walreceiverfuncs_cxt.WalRcv->shareStorageTerm = 1;
+        t_thrd.walreceiverfuncs_cxt.WalRcv->flagAlreadyNotifyCatchup = false;
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->mutex);
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->exitLock);
     }
@@ -416,7 +418,8 @@ static void set_rcv_slot_name(const char *slotname)
     SpinLockAcquire(&hashmdata->mutex);
     replIdx = hashmdata->current_repl;
     SpinLockRelease(&hashmdata->mutex);
-    if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && replIdx >= MAX_REPLNODE_NUM) {
+    if ((IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || SS_REPLICATION_MAIN_STANBY_NODE)       
+            && replIdx >= MAX_REPLNODE_NUM) {
         replIdx = replIdx - MAX_REPLNODE_NUM;
     }
     conninfo = GetRepConnArray(&replIdx);
@@ -788,6 +791,9 @@ bool WalRcvAllReplayIsDone()
 
 bool WalRcvIsDone()
 {
+    if (g_instance.attr.attr_storage.enable_uwal)
+        return true;
+
     if (g_instance.attr.attr_storage.enable_mix_replication)
         return DataQueueIsEmpty(t_thrd.dataqueue_cxt.DataWriterQueue);
     else
@@ -891,7 +897,7 @@ ReplConnInfo *GetRepConnArray(int *cur_idx)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid replication node index:%d", *cur_idx)));
     }
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE)
         replConnInfoArray = &t_thrd.postmaster_cxt.ReplConnArray[0];
     else
         replConnInfoArray = &t_thrd.postmaster_cxt.CrossClusterReplConnArray[0];

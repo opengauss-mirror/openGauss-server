@@ -394,6 +394,7 @@ static void SetEncordingInfo(Form_pg_database dbform, char* collate, char* ctype
     SetConfigOption("server_encoding", GetDatabaseEncodingName(), PGC_INTERNAL, PGC_S_OVERRIDE);
     /* If we have no other source of client_encoding, use server encoding */
     SetConfigOption("client_encoding", GetDatabaseEncodingName(), PGC_BACKEND, PGC_S_DYNAMIC_DEFAULT);
+    SetConfigOption("character_set_connection", GetDatabaseEncodingName(), PGC_BACKEND, PGC_S_DYNAMIC_DEFAULT);
 
     // if we are identical no bother to set that in thread pool settings.
     if (!IS_THREAD_POOL_WORKER || strcmp(NameStr(dbform->datcollate), NameStr(t_thrd.port_cxt.cur_datcollate)) != 0 ||
@@ -436,6 +437,17 @@ static void SetEncordingInfo(Form_pg_database dbform, char* collate, char* ctype
     }
 
     SetConfigOption("sql_compatibility", NameStr(dbform->datcompatibility), PGC_INTERNAL, PGC_S_OVERRIDE);
+
+    if (ENABLE_MULTI_CHARSET) {
+        Oid collid = get_default_collation_by_charset(GetDatabaseEncoding(), false);
+        SetConfigOption(
+            "collation_connection",
+            OidIsValid(collid) ? get_collation_name(collid) : "",
+            PGC_BACKEND,
+            PGC_S_DYNAMIC_DEFAULT);
+    } else {
+        SetConfigOption("collation_connection", "", PGC_BACKEND, PGC_S_DYNAMIC_DEFAULT);
+    }
     return;
 }
 
@@ -1242,6 +1254,8 @@ void PostgresInitializer::InitJobScheduler()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 }
 
@@ -1273,6 +1287,8 @@ void PostgresInitializer::InitJobExecuteWorker()
     }
 
     InitSettings();
+
+    InitExtensionVariable();
 
     FinishInit();
 }
@@ -1952,6 +1968,8 @@ void PostgresInitializer::InitWAL()
     InitPGXCPort();
 
     InitSettings();
+
+    InitExtensionVariable();
 
     FinishInit();
 }
@@ -2816,6 +2834,9 @@ void PostgresInitializer::InitExtensionVariable()
         (void**)MemoryContextAllocZero(u_sess->self_mem_cxt, (Size)(initExtArraySize * sizeof(void*)));
 
     DynamicFileList* file_scanner = NULL;
+    AutoMutexLock libraryLock(&file_list_lock);
+    libraryLock.lock();
+
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {
         /* 
         * If the library has a init_session_vars() function, call it for
@@ -2823,8 +2844,10 @@ void PostgresInitializer::InitExtensionVariable()
         */
         init_session_vars = (void(*)(void))pg_dlsym(file_scanner->handle, "init_session_vars");
         if (init_session_vars != NULL)
-            (*init_session_vars)();
+            (*init_session_vars)();   /*It is assumed that this does not cause a deadlock for the file_list_lock*/
     }
+
+    libraryLock.unLock();
     
     /* check whether the extension has been created 
     *  at most one will be true.

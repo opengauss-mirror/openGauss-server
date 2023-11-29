@@ -28,7 +28,7 @@
 #include "c.h"
 #include "storage/file/fio_device.h"
 
-
+g_dss_io_stat g_dss_io_stat_var;
 device_type_t fio_device_type(const char *name)
 {
     if (is_dss_file(name)) {
@@ -50,5 +50,5 @@ bool is_file_exist(int err)
 
 bool is_file_delete(int err)
 {
-    return (err == ENOENT || err == ERR_DSS_DIR_NOT_EXIST || err == ERR_DSS_FILE_NOT_EXIST);
+    return (err == ENOENT || err == ERR_DSS_FILE_NOT_EXIST);
 }

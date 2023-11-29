@@ -344,8 +344,8 @@ MemoryContext opt_AllocSetContextCreate(MemoryContext parent, const char* name, 
     block->endptr = ((char*)context) + firstBlockSize;
     block->allocSize = firstBlockSize;
     
-    context->totalSpace += firstBlockSize;
-    context->freeSpace += block->endptr - block->freeptr;
+    context->totalSpace = firstBlockSize;
+    context->freeSpace = block->endptr - block->freeptr;
     
     block->prev = NULL;
     block->next = NULL;
@@ -864,6 +864,8 @@ static void* opt_AllocSetRealloc(MemoryContext context, void* pointer, Size alig
     if (oldsize >= size) {
 #ifdef MEMORY_CONTEXT_CHECKING
         chunk->requested_size = size;
+        if (size < oldsize)
+            set_sentinel(pointer, size);
 #endif
         return pointer;
     }
@@ -914,6 +916,8 @@ static void* opt_AllocSetRealloc(MemoryContext context, void* pointer, Size alig
         chunk->size = chksize;
 #ifdef MEMORY_CONTEXT_CHECKING
         chunk->requested_size = size;
+        if (size < chunk->size)
+            set_sentinel(AllocChunkGetPointer(chunk), size);
 #endif
         return AllocChunkGetPointer(chunk);
     }

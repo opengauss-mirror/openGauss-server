@@ -93,6 +93,7 @@ typedef struct knl_session_attr_common {
     int backend_flush_after;
     int Log_RotationAge;
     int Log_RotationSize;
+    int LogMaxSize;
     int max_function_args;
     int max_user_defined_exception;
     int tcp_keepalives_idle;
@@ -112,6 +113,8 @@ typedef struct knl_session_attr_common {
     int64 group_concat_max_len;
     double ConnectionAlarmRate;
     char* client_encoding_string;
+    char* character_set_connection;
+    char* collation_connection;
     char* Log_line_prefix;
     char* safe_data_path;
     char* log_timezone_string;
@@ -242,6 +245,7 @@ typedef struct knl_session_attr_common {
     bool enable_indexscan_optimization;
     char* delimiter_name;
     bool b_compatibility_user_host_auth;
+    int time_record_level;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

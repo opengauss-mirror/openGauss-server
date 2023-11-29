@@ -77,7 +77,7 @@ typedef struct LogicalDecodingContext {
      * User-Provided callback for writing/streaming out data.
      */
     LogicalOutputPluginWriterPrepareWrite prepare_write;
-    LogicalOutputPluginWriterWrite write;
+    LogicalOutputPluginWriterWrite do_write;
 
     /*
      * Output buffer.
@@ -306,7 +306,7 @@ typedef struct DecodeOptionsDefault {
 
 extern LogicalDispatcher g_Logicaldispatcher[];
 extern bool firstCreateDispatcher;
-
+extern bool QuoteCheckOut(char* newval);
 extern void CheckLogicalDecodingRequirements(Oid databaseId);
 extern void ParallelReorderBufferQueueChange(ParallelReorderBuffer *rb, logicalLog *change, int slotId);
 extern void ParallelReorderBufferForget(ParallelReorderBuffer *rb, int slotId, ParallelReorderBufferTXN *txn);
@@ -358,5 +358,7 @@ extern void FreeLogicalLog(ParallelReorderBuffer *rb, logicalLog *logChange, int
 extern bool LogicalDecodeParseOptionsDefault(const char* defaultStr, void **options);
 extern DecodeOptionsDefault* LogicalDecodeGetOptionsDefault();
 template <typename T> void LogicalDecodeReportLostChanges(const T *iterstate);
+extern void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld,
+    bool printOid = false);
 
 #endif

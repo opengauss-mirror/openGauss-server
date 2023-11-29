@@ -33,6 +33,7 @@
 #include "storage/smgr/segment.h"
 #include "postmaster/postmaster.h"
 #include "storage/file/fio_device.h"
+#include "replication/ss_cluster_replication.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_reform_common.h"
@@ -50,8 +51,10 @@ int SSGetPrimaryInstId()
 
 void SSSavePrimaryInstId(int id)
 {
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.primaryInstId = id;
-    SSSaveReformerCtrl();
+    SSUpdateReformerCtrl();
+    LWLockRelease(ControlFileLock);
 }
 
 void SSWaitStartupExit()
@@ -125,7 +128,7 @@ bool SSRecoveryNodes()
          * recovery phase could be regarded successful in hot_standby thus set pmState = PM_HOT_STANDBY, which
          * indicate database systerm is ready to accept read only connections.
          */
-        if (SS_STANDBY_CLUSTER_MAIN_STANDBY && pmState == PM_HOT_STANDBY) {
+        if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
             result = true;
             break;
         }
@@ -146,7 +149,7 @@ bool SSRecoveryApplyDelay()
         return false;
     }
     
-    if (DORADO_STANDBY_CLUSTER) {
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
         return true;
     }
 
@@ -166,7 +169,8 @@ void SSInitReformerControlPages(void)
     /*
      * If already exists control file, reformer page must have been initialized
      */
-    if (dss_exist_file(XLOG_CONTROL_FILE)) {
+    struct stat st;
+    if (stat(XLOG_CONTROL_FILE, &st) == 0 && S_ISREG(st.st_mode)) {
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (g_instance.dms_cxt.SSReformerControl.list_stable != 0 ||
             g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
@@ -186,12 +190,13 @@ void SSInitReformerControlPages(void)
      * Initialize list_stable and primaryInstId
      * First node to initdb is chosen as primary for now, and for first-time cluster startup.
      */
-    Assert(!dss_exist_file(XLOG_CONTROL_FILE));
+    Assert(stat(XLOG_CONTROL_FILE, &st) != 0 || !S_ISREG(st.st_mode));
     g_instance.dms_cxt.SSReformerControl.list_stable = 0;
     g_instance.dms_cxt.SSReformerControl.primaryInstId = SS_MY_INST_ID;
     g_instance.dms_cxt.SSReformerControl.recoveryInstId = INVALID_INSTANCEID;
     g_instance.dms_cxt.SSReformerControl.version = REFORM_CTRL_VERSION;
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
+    g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
     (void)printf("[SS] Current node:%d initdb first, will become PRIMARY for first-time SS cluster startup.\n",
         SS_MY_INST_ID);
 

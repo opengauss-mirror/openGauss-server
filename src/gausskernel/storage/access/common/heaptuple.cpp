@@ -282,6 +282,9 @@ bool heap_attisnull_impl(HeapTuple tup, int attnum, TupleDesc tupDesc)
         case BucketIdAttributeNumber:
         case UidAttributeNumber:
 #endif
+#ifdef USE_SPQ
+        case RootSelfItemPointerAttributeNumber:
+#endif
             /* these are never null */
             break;
 
@@ -601,6 +604,11 @@ static FORCE_INLINE Datum heap_getsysattr_impl(HeapTuple tup, int attnum, TupleD
             break;
         case UidAttributeNumber:
             result = UInt64GetDatum(HeapTupleGetUid(tup));
+            break;
+#endif
+#ifdef USE_SPQ
+        case RootSelfItemPointerAttributeNumber:
+            result = spq_get_root_ctid(tup, InvalidBuffer, NULL);
             break;
 #endif
         default:
@@ -1577,8 +1585,13 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
      */
     /* internal error */
     if (tuple == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        /* tuple is null, now only happen in B mode, with sql_mode_full_group trun off. set all isnull to true */
+        int rc = memset_s(slot->tts_isnull, slot->tts_tupleDescriptor->natts * sizeof(bool),
+            true, slot->tts_tupleDescriptor->natts * sizeof(bool));
+        securec_check(rc, "\0", "\0");
+        slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
+        *isnull = true;
+        return (Datum) 0;
     }
 
     /*
@@ -1760,9 +1773,18 @@ void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
     }
 #endif
 
-    int attno = GetAttrNumber(slot, attnum);
+    int attno = attnum;
+    if (likely(slot->tts_tuple)) {
+        attno = GetAttrNumber(slot, attnum);
 
-    slot_deform_tuple(slot, attno);
+        slot_deform_tuple(slot, attno);
+    } else {
+        /* tuple is null, now only happen in B mode, with sql_mode_full_group trun off. set all isnull to true */
+        int rc = memset_s(slot->tts_isnull, slot->tts_tupleDescriptor->natts * sizeof(bool),
+            true, slot->tts_tupleDescriptor->natts * sizeof(bool));
+        securec_check(rc, "\0", "\0");
+        slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
+    }
 
     /* If tuple doesn't have all the atts indicated by tupleDesc, read the rest as null */
     if (unlikely(attno < attnum)) {
@@ -1773,7 +1795,7 @@ void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
              * example code: slot->tts_isnull[attno] = true;
              */
             slot->tts_values[attno] = heapGetInitDefVal(attno + 1, slot->tts_tupleDescriptor, &slot->tts_isnull[attno]);
-    }
+        }
         slot->tts_nvalid = attnum;
     }
 }

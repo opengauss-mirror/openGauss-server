@@ -665,7 +665,7 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
         relpath_parse_rnode(tmptoken, filenode);
     } else {
         pfree(parsepath);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid relation file path %s: %m", path)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid relation file path %s: %s", path, TRANSLATE_ERRNO)));
     }
 
     pfree(parsepath);

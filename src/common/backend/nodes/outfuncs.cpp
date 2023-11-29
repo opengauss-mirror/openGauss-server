@@ -578,7 +578,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_INT_FIELD(gather_count);
     WRITE_INT_FIELD(num_nodes);
 
-    if (t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0) {
+    if (t_thrd.proc->workingVersionNum < 92097 || node->num_streams > 0 || IS_SPQ_RUNNING) {
 	    for (int i = 0; i < node->num_nodes; i++) {
 	        /* Write the field name only one time and just append the value of each field */
 	        appendStringInfo(str, " :nodesDefinition[%d]", i);
@@ -641,6 +641,12 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     if (t_thrd.proc->workingVersionNum >= SLOW_SQL_VERSION_NUM) {
         WRITE_UINT_FIELD(cause_type);
     }
+#ifdef USE_SPQ
+    WRITE_UINT64_FIELD(spq_session_id);
+    WRITE_INT_FIELD(current_id);
+    WRITE_BOOL_FIELD(enable_adaptive_scan);
+    WRITE_BOOL_FIELD(is_spq_optmized);
+#endif
 }
 
 /*
@@ -701,6 +707,11 @@ static void _outPlanInfo(StringInfo str, Plan* node)
             WRITE_FLOAT_FIELD(pred_max_memory, "%ld");
         }
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        WRITE_BOOL_FIELD(spq_scan_partial);
+    }
+#endif
 }
 
 static void _outPruningResult(StringInfo str, PruningResult* node)
@@ -769,6 +780,72 @@ static void _outScanInfo(StringInfo str, Scan* node)
     }
 }
 
+template <typename T>
+static void _outCommonIndexScanPart(StringInfo str, T* node)
+{
+    _outScanInfo(str, (Scan*)node);
+    WRITE_OID_FIELD(indexid);
+#ifdef STREAMPLAN
+    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
+        appendStringInfo(str, " :indexname ");
+        _outToken(str, get_rel_name(node->indexid));
+        appendStringInfo(str, " :indexnamespace ");
+        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
+    }
+#endif  // STREAMPLAN
+    WRITE_NODE_FIELD(indexqual);
+    WRITE_NODE_FIELD(indexqualorig);
+    WRITE_NODE_FIELD(indexorderby);
+    WRITE_NODE_FIELD(indexorderbyorig);
+    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
+}
+
+static void _outIndexScanInfo(StringInfo str, IndexScan* node)
+{
+    _outCommonIndexScanPart<IndexScan>(str, node);
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_ustore);
+    }
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
+        WRITE_BOOL_FIELD(is_partial);
+    }
+}
+
+static void _outIndexOnlyScanInfo(StringInfo str, IndexOnlyScan* node)
+{
+    _outScanInfo(str, (Scan*)node);
+
+    WRITE_OID_FIELD(indexid);
+    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
+        /*
+         * For inherit table, the relname will be different
+         */
+        appendStringInfo(str, " :indexname ");
+        _outToken(str, get_rel_name(node->indexid));
+        appendStringInfo(str, " :indexnamespace ");
+        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
+    }
+    WRITE_NODE_FIELD(indexqual);
+    WRITE_NODE_FIELD(indexorderby);
+    WRITE_NODE_FIELD(indextlist);
+    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
+        WRITE_BOOL_FIELD(is_partial);
+    }
+}
+
+static void _outBitmapHeapScanInfo(StringInfo str, BitmapHeapScan* node)
+{
+    _outScanInfo(str, (Scan*)node);
+    WRITE_NODE_FIELD(bitmapqualorig);
+}
+
 /*
  * print the basic stuff of all nodes that inherit from Join
  */
@@ -784,6 +861,10 @@ static void _outJoinPlanInfo(StringInfo str, Join* node)
     WRITE_BOOL_FIELD(optimizable);
     WRITE_NODE_FIELD(nulleqqual);
     WRITE_UINT_FIELD(skewoptimize);
+#ifdef USE_SPQ
+    WRITE_BOOL_FIELD(prefetch_inner);
+    WRITE_BOOL_FIELD(is_set_op_join);
+#endif
 }
 
 static void _outPlan(StringInfo str, Plan* node)
@@ -1076,39 +1157,10 @@ static void _outSeqScan(StringInfo str, SeqScan* node)
     _outScanInfo(str, (Scan*)node);
 }
 
-template <typename T>
-static void _outCommonIndexScanPart(StringInfo str, T* node)
-{
-    _outScanInfo(str, (Scan*)node);
-    WRITE_OID_FIELD(indexid);
-#ifdef STREAMPLAN
-    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
-        appendStringInfo(str, " :indexname ");
-        _outToken(str, get_rel_name(node->indexid));
-        appendStringInfo(str, " :indexnamespace ");
-        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
-    }
-#endif  // STREAMPLAN
-    WRITE_NODE_FIELD(indexqual);
-    WRITE_NODE_FIELD(indexqualorig);
-    WRITE_NODE_FIELD(indexorderby);
-    WRITE_NODE_FIELD(indexorderbyorig);
-    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-}
-
 static void _outIndexScan(StringInfo str, IndexScan* node)
 {
     WRITE_NODE_TYPE("INDEXSCAN");
-    _outCommonIndexScanPart<IndexScan>(str, node);
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
-        WRITE_BOOL_FIELD(is_ustore);
-    }
-    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        if (u_sess->opt_cxt.out_plan_stat) {
-            WRITE_FLOAT_FIELD(selectivity, "%.4f");
-        }
-        WRITE_BOOL_FIELD(is_partial);
-    }
+    _outIndexScanInfo(str, node);
 }
 
 static void _outCStoreIndexScan(StringInfo str, CStoreIndexScan* node)
@@ -1143,6 +1195,9 @@ static void _outStream(StringInfo str, Stream* node)
     WRITE_INT_FIELD(stream_level);
     WRITE_NODE_FIELD(origin_consumer_nodes);
     WRITE_BOOL_FIELD(is_recursive_local);
+#ifdef USE_SPQ
+    WRITE_INT_FIELD(streamID);
+#endif
 }
 
 /*
@@ -1334,29 +1389,7 @@ static void _outExecNodes(StringInfo str, ExecNodes* node)
 static void _outIndexOnlyScan(StringInfo str, IndexOnlyScan* node)
 {
     WRITE_NODE_TYPE("INDEXONLYSCAN");
-
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_OID_FIELD(indexid);
-    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
-        /*
-         * For inherit table, the relname will be different
-         */
-        appendStringInfo(str, " :indexname ");
-        _outToken(str, get_rel_name(node->indexid));
-        appendStringInfo(str, " :indexnamespace ");
-        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
-    }
-    WRITE_NODE_FIELD(indexqual);
-    WRITE_NODE_FIELD(indexorderby);
-    WRITE_NODE_FIELD(indextlist);
-    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        if (u_sess->opt_cxt.out_plan_stat) {
-            WRITE_FLOAT_FIELD(selectivity, "%.4f");
-        }
-        WRITE_BOOL_FIELD(is_partial);
-    }
+    _outIndexOnlyScanInfo(str, node);
 }
 
 static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
@@ -1391,10 +1424,66 @@ static void _outBitmapHeapScan(StringInfo str, BitmapHeapScan* node)
 {
     WRITE_NODE_TYPE("BITMAPHEAPSCAN");
 
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_NODE_FIELD(bitmapqualorig);
+    _outBitmapHeapScanInfo(str, node);
 }
+
+#ifdef USE_SPQ
+static void _outSpqSeqScan(StringInfo str, SpqSeqScan* node)
+{
+    WRITE_NODE_TYPE("SPQSEQSCAN");
+
+    _outScanInfo(str, (Scan*)node);
+    WRITE_BOOL_FIELD(isFullTableScan);
+    WRITE_BOOL_FIELD(isAdaptiveScan);
+    WRITE_BOOL_FIELD(isDirectRead);
+}
+
+static void _outAssertOp(StringInfo str, const AssertOp *node)
+{
+    WRITE_NODE_TYPE("ASSERTOP");
+    _outPlanInfo(str, (Plan *) node);
+    WRITE_INT_FIELD(errcode);
+    WRITE_NODE_FIELD(errmessage);
+}
+
+static void _outShareInputScan(StringInfo str, const ShareInputScan *node)
+{
+    WRITE_NODE_TYPE("SHAREINPUTSCAN");
+
+    WRITE_BOOL_FIELD(cross_slice);
+    WRITE_INT_FIELD(share_id);
+    WRITE_INT_FIELD(producer_slice_id);
+    WRITE_INT_FIELD(this_slice_id);
+    WRITE_INT_FIELD(nconsumers);
+
+    _outPlanInfo(str, (Plan *) node);
+}
+
+static void _outSequence(StringInfo str, const Sequence *node)
+{
+    WRITE_NODE_TYPE("SEQUENCE");
+    _outPlanInfo(str, (Plan *)node);
+    WRITE_NODE_FIELD(subplans);
+}
+
+static void _outSpqIndexScan(StringInfo str, SpqIndexScan* node)
+{
+    WRITE_NODE_TYPE("SPQINDEXSCAN");
+    _outIndexScanInfo(str, &node->scan);
+}
+
+static void _outSpqIndexOnlyScan(StringInfo str, SpqIndexOnlyScan* node)
+{
+    WRITE_NODE_TYPE("SPQINDEXONLYSCAN");
+    _outIndexOnlyScanInfo(str, &node->scan);
+}
+
+static void _outSpqBitmapHeapScan(StringInfo str, SpqBitmapHeapScan* node)
+{
+    WRITE_NODE_TYPE("SPQBITMAPHEAPSCAN");
+    _outBitmapHeapScanInfo(str, &node->scan);
+}
+#endif
 
 static void _outCStoreIndexCtidScan(StringInfo str, CStoreIndexCtidScan* node)
 {
@@ -1673,7 +1762,7 @@ static void _outHashJoin(StringInfo str, HashJoin* node)
     WRITE_BOOL_FIELD(isSonicHash);
     out_mem_info(str, &node->mem_info);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_NODE_FIELD(hash_collations);
     }
 #endif
@@ -1702,6 +1791,9 @@ static void _outVecHashAgg(StringInfo str, VecAgg* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_ENUM_FIELD(aggstrategy, AggStrategy);
+#ifdef USE_SPQ
+    WRITE_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     WRITE_INT_FIELD(numCols);
 
     appendStringInfo(str, " :grpColIdx");
@@ -1736,6 +1828,9 @@ static void _outAgg(StringInfo str, Agg* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_ENUM_FIELD(aggstrategy, AggStrategy);
+#ifdef USE_SPQ
+    WRITE_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     WRITE_INT_FIELD(numCols);
 
     appendStringInfo(str, " :grpColIdx");
@@ -1745,7 +1840,7 @@ static void _outAgg(StringInfo str, Agg* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
@@ -1824,7 +1919,7 @@ static void _outGroup(StringInfo str, Group* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
@@ -1858,6 +1953,10 @@ static void _outMaterial(StringInfo str, Material* node)
     _outPlanInfo(str, (Plan*)node);
     WRITE_BOOL_FIELD(materialize_all);
     out_mem_info(str, &node->mem_info);
+#ifdef USE_SPQ
+    WRITE_BOOL_FIELD(spq_strict);
+    WRITE_BOOL_FIELD(spq_shield_child_from_rescans);
+#endif
 }
 
 static void _outSimpleSort(StringInfo str, SimpleSort* node)
@@ -1995,7 +2094,7 @@ static void _outUnique(StringInfo str, Unique* node)
 
     WRITE_GRPOP_FIELD(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(uniq_collations, numCols);
     }
 #endif
@@ -2054,7 +2153,7 @@ static void _outSetOp(StringInfo str, SetOp* node)
 
     WRITE_GRPOP_FIELD(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(dup_collations, numCols);
     }
 #endif
@@ -2344,6 +2443,9 @@ static void _outParam(StringInfo str, Param* node)
         WRITE_NODE_FIELD(tableOfIndexTypeList);
     }
 
+    if (t_thrd.proc->workingVersionNum >= PARAM_MARK_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_bind_param);
+    }
 }
 
 static void _outRownum(StringInfo str, const Rownum* node)
@@ -2405,6 +2507,9 @@ static void _outAggref(StringInfo str, Aggref* node)
     WRITE_BOOL_FIELD(agghas_collectfn);
     WRITE_INT_FIELD(aggstage);
 #endif /* PGXC */
+#ifdef USE_SPQ
+    WRITE_ENUM_FIELD(aggsplittype, AggSplit);
+#endif
     WRITE_OID_FIELD(aggcollid);
     WRITE_OID_FIELD(inputcollid);
     WRITE_NODE_FIELD(aggdirectargs);
@@ -2419,6 +2524,11 @@ static void _outAggref(StringInfo str, Aggref* node)
 
     WRITE_TYPEINFO_FIELD(aggtype);
     WRITE_TYPEINFO_FIELD(aggtrantype);
+    if (t_thrd.proc->workingVersionNum >= TIMESCALE_DB_VERSION_NUM){
+        WRITE_NODE_FIELD(aggargtypes);
+        WRITE_INT_FIELD(aggsplit);
+        WRITE_OID_FIELD(aggtranstype);
+    }
 }
 
 static void _outGroupingFunc(StringInfo str, const GroupingFunc* node)
@@ -3466,7 +3576,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_BITMAPSET_FIELD(lateral_relids);
     WRITE_NODE_FIELD(indexlist);
 #ifndef ENABLE_MULTIPLE_NODES
-    WRITE_NODE_FIELD(statlist);
+    if (!IS_SPQ_RUNNING) {
+        WRITE_NODE_FIELD(statlist);
+    }
 #endif
     WRITE_FLOAT_FIELD(pages, "%.0f");
     WRITE_FLOAT_FIELD(tuples, "%.0f");
@@ -3485,6 +3597,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_NODE_FIELD(joininfo);
     WRITE_BOOL_FIELD(has_eclass_joins);
     WRITE_UINT_FIELD(num_data_nodes);
+    if (t_thrd.proc->workingVersionNum >= TIMESCALE_DB_VERSION_NUM){
+        WRITE_NODE_FIELD(partial_pathlist);
+    }
 }
 
 static void _outIndexOptInfo(StringInfo str, IndexOptInfo* node)
@@ -3507,6 +3622,42 @@ static void _outIndexOptInfo(StringInfo str, IndexOptInfo* node)
     WRITE_BOOL_FIELD(unique);
     WRITE_BOOL_FIELD(immediate);
     WRITE_BOOL_FIELD(hypothetical);
+    if (t_thrd.proc->workingVersionNum >= TIMESCALE_DB_VERSION_NUM){
+        WRITE_NODE_FIELD(indrestrictinfo);
+    }
+}
+
+static void _outDependenciesProchead(StringInfo str, DependenciesProchead* node)
+{
+    WRITE_NODE_TYPE("DependenciesProchead");
+    WRITE_BOOL_FIELD(undefined);
+    WRITE_STRING_FIELD(proName);
+    WRITE_STRING_FIELD(proArgSrc);
+    WRITE_STRING_FIELD(funcHeadSrc);
+}
+
+static void _outDependenciesType(StringInfo str, DependenciesType* node)
+{
+    WRITE_NODE_TYPE("DependenciesType");
+    WRITE_CHAR_FIELD(typType);
+    WRITE_CHAR_FIELD(typCategory);
+    WRITE_STRING_FIELD(attrInfo);
+    WRITE_BOOL_FIELD(isRel);
+    WRITE_STRING_FIELD(elemTypName);
+    WRITE_STRING_FIELD(idxByTypName);
+}
+
+static void _outDependenciesVariable(StringInfo str, DependenciesVariable* node)
+{
+    WRITE_NODE_TYPE("DependenciesVariable");
+    WRITE_STRING_FIELD(typName);
+    WRITE_INT_FIELD(typMod);
+    WRITE_STRING_FIELD(extraInfo);
+}
+
+static void _outDependenciesUndefined(StringInfo str, DependenciesUndefined* node)
+{
+    WRITE_NODE_TYPE("DependenciesUndefined");
 }
 
 static void _outEquivalenceClass(StringInfo str, EquivalenceClass* node)
@@ -4262,6 +4413,14 @@ static void _outPLDebug_frame(StringInfo str, PLDebug_frame* node)
     WRITE_INT_FIELD(lineno);
     WRITE_STRING_FIELD(query);
     WRITE_INT_FIELD(funcoid);
+}
+
+static void _outPLDebug_codeline(StringInfo str, PLDebug_codeline* node)
+{
+    WRITE_NODE_TYPE("PLDEBUG_CODELINE");
+    WRITE_INT_FIELD(lineno);
+    WRITE_STRING_FIELD(code);
+    WRITE_BOOL_FIELD(canBreak);
 }
 
 /*
@@ -6036,6 +6195,15 @@ static void _outCharsetcollateOptions(StringInfo str, CharsetCollateOptions* nod
     WRITE_STRING_FIELD(collate);
 }
 
+static void _outCharsetClause(StringInfo str, CharsetClause* node)
+{
+    WRITE_NODE_TYPE("CHARSET");
+    WRITE_NODE_FIELD(arg);
+    WRITE_INT_FIELD(charset);
+    WRITE_BOOL_FIELD(is_binary);
+    WRITE_LOCATION_FIELD(location);
+}
+
 static void _outPrefixKey(StringInfo str, PrefixKey* node)
 {
     WRITE_NODE_TYPE("PREFIXKEY");
@@ -6071,6 +6239,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_Plan:
                 _outPlan(str, (Plan*)obj);
                 break;
+#ifdef USE_SPQ
+            case T_Result:
+#endif
             case T_BaseResult:
                 _outResult(str, (BaseResult*)obj);
                 break;
@@ -6113,6 +6284,29 @@ static void _outNode(StringInfo str, const void* obj)
             case T_SeqScan:
                 _outSeqScan(str, (SeqScan*)obj);
                 break;
+#ifdef USE_SPQ
+            case T_SpqSeqScan:
+                _outSpqSeqScan(str, (SpqSeqScan*)obj);
+                break;
+            case T_AssertOp:
+                _outAssertOp(str, (AssertOp*)obj);
+                break;
+            case T_ShareInputScan:
+                _outShareInputScan(str, (ShareInputScan*)obj);
+                break;
+            case T_Sequence:
+                _outSequence(str, (Sequence*)obj);
+                break;
+            case T_SpqIndexScan:
+                _outSpqIndexScan(str, (SpqIndexScan*)obj);
+                break;
+            case T_SpqIndexOnlyScan:
+                _outSpqIndexOnlyScan(str, (SpqIndexOnlyScan*)obj);
+                break;
+            case T_SpqBitmapHeapScan:
+                _outSpqBitmapHeapScan(str, (SpqBitmapHeapScan*)obj);
+                break;
+#endif
 #ifdef PGXC
             case T_RemoteQuery:
                 _outRemoteQuery(str, (RemoteQuery*)obj);
@@ -6465,6 +6659,18 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_IndexOptInfo:
                 _outIndexOptInfo(str, (IndexOptInfo*)obj);
+                break;
+            case T_DependenciesProchead:
+                _outDependenciesProchead(str, (DependenciesProchead*)obj);
+                break;
+            case T_DependenciesUndefined:
+                _outDependenciesUndefined(str, (DependenciesUndefined*)obj);
+                break;
+            case T_DependenciesType:
+                _outDependenciesType(str, (DependenciesType*)obj);
+                break;
+            case T_DependenciesVariable:
+                _outDependenciesVariable(str, (DependenciesVariable*)obj);
                 break;
             case T_EquivalenceClass:
                 _outEquivalenceClass(str, (EquivalenceClass*)obj);
@@ -6947,8 +7153,14 @@ static void _outNode(StringInfo str, const void* obj)
             case T_PLDebug_frame:
                 _outPLDebug_frame(str, (PLDebug_frame*) obj);
                 break;
+            case T_PLDebug_codeline:
+                _outPLDebug_codeline(str, (PLDebug_codeline*) obj);
+                break;
             case T_CharsetCollateOptions:
                 _outCharsetcollateOptions(str, (CharsetCollateOptions*)obj);
+                break;
+            case T_CharsetClause:
+                _outCharsetClause(str, (CharsetClause*)obj);
                 break;
             case T_AutoIncrement:
                 _outAutoIncrement(str, (AutoIncrement*)obj);

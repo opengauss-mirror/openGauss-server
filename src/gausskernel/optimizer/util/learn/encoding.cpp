@@ -48,7 +48,11 @@ typedef struct {
     char* strategy;
 } OperationInfo;
 
+#ifdef USE_SPQ
+const unsigned int G_MAX_OPERATION_NUMBER = 69;
+#else
 const unsigned int G_MAX_OPERATION_NUMBER = 65;
+#endif
 
 const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {
     {T_BaseResult,          TEXT_OPTNAME_RESULT,            ""},
@@ -71,6 +75,12 @@ const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {
     {T_VecHashJoin,         TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_HASH},
     {T_CStoreScan,          TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
     {T_SeqScan,             TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
+#ifdef USE_SPQ
+    {T_SpqSeqScan,          TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
+    {T_SpqIndexScan,        TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
+    {T_SpqIndexOnlyScan,    TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX_ONLY},
+    {T_SpqBitmapHeapScan,   TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_BITMAP_HEAP},
+#endif
     {T_IndexScan,           TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
     {T_CStoreIndexScan,     TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
     {T_IndexOnlyScan,       TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX_ONLY},

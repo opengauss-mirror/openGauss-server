@@ -24,6 +24,10 @@
 #include "executor/node/nodeBitmapHeapscan.h"
 #include "executor/node/nodeTidscan.h"
 
+#ifdef USE_SPQ
+#include "executor/node/nodeSpqSeqscan.h"
+#endif
+
 extern char* nodeTagToString(NodeTag type);
 
 PlanState* ExecInitNodeStubNorm(Plan* node, EState* estate, int eflags)
@@ -151,12 +155,29 @@ void ExecEndNodeStubScan(PlanState* node)
         case T_SeqScan:
             ExecEndSeqScan((SeqScanState*)node);
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScan: {
+            if (end_spqscan_hook) {
+                end_spqscan_hook((SpqSeqScanState *)node);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("spqscan hook init_spqscan_hook uninited.")));
+            }
+            break;
+        }
+        case T_SpqIndexScan:
+#endif
         case T_IndexScan:
             ExecEndIndexScan((IndexScanState*)node);
             break;
+#ifdef USE_SPQ
+        case T_SpqIndexOnlyScan:
+#endif
         case T_IndexOnlyScan:
             ExecEndIndexOnlyScan((IndexOnlyScanState*)node);
             break;
+#ifdef USE_SPQ
+        case T_SpqBitmapHeapScan:
+#endif
         case T_BitmapIndexScan:
             ExecEndBitmapIndexScan((BitmapIndexScanState*)node);
             break;

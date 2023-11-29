@@ -89,6 +89,7 @@ static void knl_u_analyze_init(knl_u_analyze_context* anl_cxt)
     anl_cxt->autoanalyze_process = NULL;
     anl_cxt->autoanalyze_timeinfo = NULL;
     anl_cxt->vac_strategy = (BufferAccessStrategyData*)palloc0(sizeof(BufferAccessStrategyData));
+    anl_cxt->DeclareCursorName = NULL;
 }
 
 static void knl_u_attr_init(knl_session_attr* attr)
@@ -505,6 +506,8 @@ static void knl_u_mb_init(knl_u_mb_context* mb_cxt)
     mb_cxt->ToClientConvProc = NULL;
     mb_cxt->ClientEncoding = &pg_enc2name_tbl[PG_SQL_ASCII];
     mb_cxt->DatabaseEncoding = &pg_enc2name_tbl[PG_SQL_ASCII];
+    mb_cxt->character_set_connection = &pg_enc2name_tbl[PG_SQL_ASCII];
+    mb_cxt->collation_connection = InvalidOid;
     mb_cxt->PlatformEncoding = NULL;
     mb_cxt->backend_startup_complete = false;
     mb_cxt->pending_client_encoding = PG_SQL_ASCII;
@@ -867,6 +870,14 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->cur_exception_cxt = NULL;
     plsql_cxt->pragma_autonomous = false;
     plsql_cxt->is_insert_gs_source = false;
+    plsql_cxt->CursorRecordTypeList = NIL;
+    plsql_cxt->need_create_depend = true;
+    plsql_cxt->createPlsqlType = CREATE_PLSQL_TYPE_END;
+    plsql_cxt->functionStyleType = FUNCTION_STYLE_TYPE_NONE;
+    plsql_cxt->is_pkg_compile = false;
+    plsql_cxt->isCreatePkg = false;
+    plsql_cxt->isCreatePkgFunction = false;
+    plsql_cxt->currCompilingObjStatus = true;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
@@ -912,6 +923,8 @@ static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
     size = sizeof(int64) * TOTAL_TIME_INFO_TYPES;
     stat_cxt->localTimeInfoArray = (int64*)palloc0(size);
     stat_cxt->localNetInfo = (uint64*)palloc0(sizeof(uint64) * TOTAL_NET_INFO_TYPES);
+    stat_cxt->og_record_stat = New(CurrentMemoryContext) OgRecordStat(stat_cxt->localTimeInfoArray,
+            stat_cxt->localNetInfo);
 
     stat_cxt->trackedMemChunks = 0;
     stat_cxt->trackedBytes = 0;
@@ -950,6 +963,9 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
 
     /* var in knl_uundofile.cpp */
     storage_cxt->UndoFileCxt = NULL;
+
+    /* var in storage_exrto_file.cpp */
+    storage_cxt->exrto_standby_read_file_cxt = NULL;
 
     /* var in sync.cpp */
     storage_cxt->pendingUnlinks = NIL;
@@ -1031,6 +1047,7 @@ static void knl_u_unique_sql_init(knl_u_unique_sql_context* unique_sql_cxt)
     Assert(unique_sql_cxt != NULL);
 
     unique_sql_cxt->unique_sql_id = 0;
+    unique_sql_cxt->parent_unique_sql_id = 0;
     unique_sql_cxt->unique_sql_user_id = InvalidOid;
     unique_sql_cxt->unique_sql_cn_id = InvalidOid;
     unique_sql_cxt->unique_sql_start_time = 0;
@@ -1373,6 +1390,34 @@ void knl_u_mot_init(knl_u_mot_context* mot_cxt)
 }
 #endif
 
+#ifdef USE_SPQ
+static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
+{
+    Assert(spq_cxt != NULL);
+    spq_cxt->dxl_memory_manager = NULL;
+    spq_cxt->pmpXerces = NULL;
+    spq_cxt->pmpDXL = NULL;
+    spq_cxt->m_ulpInitDXL = 0;
+    spq_cxt->m_ulpShutdownDXL = 0;
+    spq_cxt->m_pstrmap = NULL;
+    spq_cxt->m_pxmlszmap = NULL;
+    spq_cxt->m_mp = NULL;
+    spq_cxt->m_token_parse_handler_func_map = NULL;
+    spq_cxt->m_xform_mp = NULL;
+    spq_cxt->m_memory_pool_mgr = NULL;
+    spq_cxt->m_worker_pool_manager = NULL;
+    spq_cxt->m_pcache = NULL;
+    spq_cxt->m_ullCacheQuota = 0;
+    spq_cxt->spq_node_all_configs_size = 0;
+    spq_cxt->spq_node_configs_size = 0;
+    spq_cxt->spq_worker_context = NULL;
+    spq_cxt->spq_max_tuple_chunk_size = 0;
+    spq_cxt->s_tupSerMemCtxt = NULL;
+    spq_cxt->spq_opt_initialized = false;
+    spq_cxt->remoteQuerys = NIL;
+}
+#endif
+
 static void knl_u_clientConnTime_init(knl_u_clientConnTime_context* clientConnTime_cxt)
 {
     Assert(clientConnTime_cxt != NULL);
@@ -1480,6 +1525,9 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_ledger_init(&sess_cxt->ledger_cxt);
 #ifdef ENABLE_MOT
     knl_u_mot_init(&sess_cxt->mot_cxt);
+#endif
+#ifdef USE_SPQ
+    knl_u_spq_init(&sess_cxt->spq_cxt);
 #endif
     knl_u_libsw_init(&sess_cxt->libsw_cxt);
     KnlURepOriginInit(&sess_cxt->reporigin_cxt);
@@ -1700,4 +1748,107 @@ bool enable_out_param_override()
     }
     return u_sess->attr.attr_sql.sql_compatibility == A_FORMAT
                 && PROC_OUTPARAM_OVERRIDE;
+}
+
+bool enable_plpgsql_undefined_not_check_nspoid()
+{
+    return enable_plpgsql_gsdependency() &&
+           (u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID);
+}
+
+bool enable_plpgsql_gsdependency_guc()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return false;
+#endif
+    if (unlikely(IsInitdb || t_thrd.proc->workingVersionNum < SUPPORT_GS_DEPENDENCY_VERSION_NUM)) {
+        return false;
+    }
+    int save_compile_status = u_sess->plsql_cxt.compile_status;
+    if (save_compile_status != COMPILIE_ANON_BLOCK && PLPGSQL_DEPENDENCY &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+        (!u_sess->is_autonomous_session || u_sess->plsql_cxt.during_compile)) {
+        return true;
+    }
+    return false;
+}
+
+bool enable_plpgsql_gsdependency()
+{
+    if (u_sess->plsql_cxt.is_pkg_compile) {
+        return enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.need_create_depend;
+    }
+    if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_A) {
+        return enable_plpgsql_gsdependency_guc();
+    } else if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_PG) {
+        return false;
+    } else {
+        return enable_plpgsql_gsdependency_guc() && u_sess->plsql_cxt.need_create_depend;
+    }
+}
+
+bool enable_plpgsql_undefined()
+{
+    return enable_plpgsql_gsdependency() &&
+           (u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_START ||
+            u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_RECORD_DEPENDENCE ||
+            u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_RECOMPILE ||
+            u_sess->plsql_cxt.createPlsqlType == CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID);
+}
+
+void set_create_plsql_type_not_check_nsp_oid()
+{
+    if (enable_plpgsql_undefined()) {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_NOT_CHECK_NSPOID;
+    }
+}
+
+void set_create_plsql_type_start()
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_START;
+    }
+}
+
+void set_create_plsql_type_end()
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        u_sess->plsql_cxt.createPlsqlType = CREATE_PLSQL_TYPE_END;
+    }
+}
+
+void set_create_plsql_type(CreatePlsqlType type)
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        u_sess->plsql_cxt.createPlsqlType = type;
+    }
+}
+
+void set_function_style_none()
+{
+    u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_NONE;
+}
+
+void set_function_style_a()
+{
+    u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_A;
+}
+
+void set_function_style_pg()
+{
+    u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_PG;
+}
+
+bool set_is_create_plsql_type()
+{
+    if (enable_plpgsql_gsdependency_guc()) {
+        if (u_sess->plsql_cxt.isCreatePkgFunction == true &&
+            u_sess->plsql_cxt.isCreatePkgFunction == false) {
+            return false;
+        }
+        if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_REFRESH_HEAD) {
+            return false;
+        }
+    }
+    return true;
 }

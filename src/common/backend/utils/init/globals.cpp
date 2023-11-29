@@ -75,16 +75,24 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92902;
+const uint32 GRAND_VERSION_NUM = 92919;
+
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 SUPPORT_GS_DEPENDENCY_VERSION_NUM = 92916;
+const uint32 SPQ_VERSION_NUM = 92915;
+const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION = 92913;
+const uint32 PAGE_DIST_VERSION_NUM = 92912;
+const uint32 NODE_REFORM_INFO_VERSION_NUM = 92911;
+const uint32 GB18030_2022_VERSION_NUM = 92908;
+const uint32 PARAM_MARK_VERSION_NUM = 92907;
+const uint32 TIMESCALE_DB_VERSION_NUM = 92904;
+const uint32 MULTI_CHARSET_VERSION_NUM = 92903;
 const uint32 NBTREE_INSERT_OPTIMIZATION_VERSION_NUM = 92902;
 const uint32 NBTREE_DEDUPLICATION_VERSION_NUM = 92902;
-const uint32 ONDEMAND_REDO_VERSION_NUM = 92901;
-
 const uint32 SRF_FUSION_VERSION_NUM = 92847;
 const uint32 INDEX_HINT_VERSION_NUM = 92845;
 const uint32 INNER_UNIQUE_VERSION_NUM = 92845;

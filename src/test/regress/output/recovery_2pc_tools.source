@@ -78,6 +78,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  backtrace_min_messages                           | enum    |      |           | 
  backwrite_quantity                               | integer | 8kB  | 128       | 131072
  basebackup_timeout                               | integer | s    | 0         | 2147483647
+ base_page_saved_interval                         | integer |      | 5         | 2000
  bbox_blanklist_items                             | string  |      |           | 
  bbox_dump_count                                  | integer |      | 1         | 20
  bbox_dump_path                                   | string  |      |           | 
@@ -99,6 +100,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  candidate_buf_percent_target                     | real    |      | 0.1       | 0.85
  catchup2normal_wait_time                         | integer | ms   | -1        | 10000
  cgroup_name                                      | string  |      |           | 
+ character_set_connection                         | string  |      |           | 
  check_function_bodies                            | bool    |      |           | 
  check_implicit_conversions                       | bool    |      |           | 
  checkpoint_completion_target                     | real    |      | 0         | 1
@@ -109,13 +111,24 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  checkpoint_warning                               | integer | s    | 0         | 2147483647
  client_encoding                                  | string  |      |           | 
  client_min_messages                              | enum    |      |           | 
- cluster_run_mode                                 | enum    |      |           | 
  cn_send_buffer_size                              | integer | kB   | 8         | 128
  codegen_cost_threshold                           | integer |      | 0         | 2147483647
  codegen_strategy                                 | enum    |      |           | 
+ collation_connection                             | string  |      |           | 
+ comm_control_port                                | integer |      | 0         | 65535
  commit_delay                                     | integer |      | 0         | 100000
  commit_siblings                                  | integer |      | 0         | 1000
+ comm_max_datanode                                | integer |      | 1         | 8192
+ comm_max_receiver                                | integer |      | 1         | 50
+ comm_max_stream                                  | integer |      | 1         | 60000
+ comm_memory_pool                                 | integer | kB   | 102400    | 1073741823
+ comm_memory_pool_percent                         | integer |      | 0         | 100
  comm_proxy_attr                                  | string  |      |           | 
+ comm_quota_size                                  | integer | kB   | 0         | 2048000
+ comm_sctp_port                                   | integer |      | 0         | 65535
+ comm_sender_buffer_size                          | integer |      | 1         | 1024
+ comm_stat_mode                                   | bool    |      |           |
+ comm_usable_memory                               | integer | kB   | 102400    | 1073741823
  config_file                                      | string  |      |           | 
  connection_alarm_rate                            | real    |      | 0         | 1
  connection_info                                  | string  |      |           | 
@@ -224,6 +237,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_auto_clean_unique_sql                     | bool    |      |           | 
  enable_auto_explain                              | bool    |      |           | 
  enable_availablezone                             | bool    |      |           | 
+ enable_batch_dispatch                            | bool    |      |           | 
  enable_bbox_dump                                 | bool    |      |           | 
  enable_beta_features                             | bool    |      |           | 
  enable_beta_opfusion                             | bool    |      |           | 
@@ -323,15 +337,19 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sonic_optspill                            | bool    |      |           | 
  enable_sort                                      | bool    |      |           | 
  enable_sortgroup_agg                             | bool    |      |           | 
+ ss_enable_dorado                                 | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 
  enable_tde                                       | bool    |      |           | 
  enable_thread_pool                               | bool    |      |           | 
  enable_tidscan                                   | bool    |      |           | 
+ enable_time_report                               | bool    |      |           | 
+ enable_union_all_subquery_orderby                | bool    |      |           | 
  enable_upgrade_merge_lock_mode                   | bool    |      |           | 
  enable_user_metric_persistent                    | bool    |      |           | 
  enable_ustore                                    | bool    |      |           | 
+ enable_uwal                                      | bool    |      |           | 
  enable_valuepartition_pruning                    | bool    |      |           | 
  enable_vector_engine                             | bool    |      |           | 
  enable_vector_targetlist                         | bool    |      |           | 
@@ -461,6 +479,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_compile_functions                            | integer |      | 1         | 2147483647
  max_concurrent_autonomous_transactions           | integer |      | 0         | 1024
  max_connections                                  | integer |      | 10        | 262143
+ max_coordinators                                 | integer |      | 2         | 1024
  max_error_count                                  | integer |      | 0         | 65535
  max_files_per_process                            | integer |      | 25        | 2147483647
  max_function_args                                | integer |      | 8192      | 8192
@@ -475,7 +494,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_pred_locks_per_transaction                   | integer |      | 10        | 2147483647
  max_prepared_transactions                        | integer |      | 0         | 262143
  max_process_memory                               | integer | kB   | 2097152   | 2147483647
- max_query_retry_times                            | integer |      | 0         | 20
  max_recursive_times                              | integer |      | 0         | 2147483647
  max_redo_log_size                                | integer | kB   | 163840    | 2147483647
  max_replication_slots                            | integer |      | 0         | 1024
@@ -483,6 +501,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_size_for_xlog_prune                          | integer | kB   | 0         | 2147483647
  max_stack_depth                                  | integer | kB   | 100       | 2147483647
  max_standby_archive_delay                        | integer | ms   | -1        | 2147483647
+ max_standby_base_page_size                       | int64   |      | 0         | 576460752303423487
+ max_standby_lsn_info_size                        | int64   |      | 0         | 576460752303423487
  max_standby_streaming_delay                      | integer | ms   | -1        | 2147483647
  max_sync_workers_per_subscription                | integer |      | 0         | 262143
  max_undo_workers                                 | integer |      | 1         | 100
@@ -511,6 +531,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  opfusion_debug_mode                              | enum    |      |           | 
  pagewriter_sleep                                 | integer | ms   | 0         | 3600000
  pagewriter_thread_num                            | integer |      | 1         | 16
+ parallel_recovery_batch                          | integer |      | 1         | 100000
+ parallel_recovery_timeout                        | integer | ms   | 1         | 1000
  partition_iterator_elimination                   | bool    |      |           | 
  partition_lock_upgrade_timeout                   | integer |      | -1        | 3000
  partition_max_cache_size                         | integer | kB   | 4096      | 1073741823
@@ -540,6 +562,9 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  plog_merge_age                                   | integer | ms   | 0         | 2147483647
  plsql_compile_check_options                      | string  |      |           | 
  plsql_show_all_error                             | bool    |      |           | 
+ pooler_cancel_timeout                            | integer | s    | 0         | 7200
+ pooler_connect_timeout                           | integer | s    | 0         | 7200
+ pooler_timeout                                   | integer | s    | 0         | 7200
  port                                             | integer |      | 1         | 65535
  post_auth_delay                                  | integer | s    | 0         | 2147
  pre_auth_delay                                   | integer | s    | 0         | 60
@@ -617,6 +642,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_dss_conn_path                                 | string  |      |           | 
  ss_dss_vg_name                                   | string  |      |           | 
  ss_enable_aio                                    | bool    |      |           | 
+ ss_enable_bcast_snapshot                         | bool    |      |           | 
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 
@@ -650,12 +676,18 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_scrlock_server_port                           | integer |      | 0         | 65535
  ss_scrlock_worker_bind_core                      | string  |      |           | 
  ss_scrlock_worker_count                          | integer |      | 2         | 16
+ ss_txnstatus_cache_size                          | integer |      | 0         | 524288
  ss_work_thread_count                             | integer |      | 16        | 128
  standard_conforming_strings                      | bool    |      |           | 
+ standby_force_recyle_ratio                       | real    |      | 0         | 1
+ standby_max_query_time                           | integer | s    | 0         | 86400
+ standby_recycle_interval                         | integer | s    | 0         | 86400
  standby_shared_buffers_fraction                  | real    |      | 0.1       | 1
  statement_timeout                                | integer | ms   | 0         | 2147483647
  stats_temp_directory                             | string  |      |           | 
+ stream_cluster_run_mode                          | enum    |      |           | 
  string_hash_compatible                           | bool    |      |           | 
+ subscription_conflict_resolution                 | enum    |      |           | 
  support_batch_bind                               | bool    |      |           | 
  support_extended_features                        | bool    |      |           | 
  sync_config_strategy                             | enum    |      |           | 
@@ -678,6 +710,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  temp_tablespaces                                 | string  |      |           | 
  thread_pool_attr                                 | string  |      |           | 
  thread_pool_stream_attr                          | string  |      |           | 
+ time_record_level                                | integer |      | 0         | 10
  time_to_target_rpo                               | integer |      | 0         | 3600
  TimeZone                                         | string  |      |           | 
  timezone_abbreviations                           | string  |      |           | 
@@ -703,6 +736,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  transaction_pending_time                         | integer |      | -1        | 1073741823
  transaction_read_only                            | bool    |      |           | 
  transform_null_equals                            | bool    |      |           | 
+ transform_to_numeric_operators                   | bool    |      |           | 
  transparent_encrypted_string                     | string  |      |           | 
  transparent_encrypt_kms_region                   | string  |      |           | 
  transparent_encrypt_kms_url                      | string  |      |           | 
@@ -726,6 +760,21 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  user_metric_retention_time                       | integer |      | 0         | 3650
  use_workload_manager                             | bool    |      |           | 
  ustore_attr                                      | string  |      |           | 
+ uwal_batch_io_size                               | integer |      | 8192      | 2097152
+ uwal_devices_path                                | string  |      |           | 
+ uwal_disk_block_size                             | int64   |      | 0         | 9223372036854775807
+ uwal_disk_size                                   | int64   |      | 0         | 9223372036854775807
+ uwal_ip                                          | string  |      |           | 
+ uwal_log_path                                    | string  |      |           | 
+ uwal_nodeid                                      | integer |      | 0         | 7
+ uwal_port                                        | integer |      | 9000      | 65535
+ uwal_protocol                                    | string  |      |           | 
+ uwal_rpc_compression_switch                      | bool    |      |           | 
+ uwal_rpc_flowcontrol_switch                      | bool    |      |           | 
+ uwal_rpc_flowcontrol_value                       | integer |      | 0         | 65535
+ uwal_rpc_rndv_switch                             | bool    |      |           | 
+ uwal_rpc_timeout                                 | integer |      | 0         | 65535
+ uwal_rpc_worker_thread_num                       | integer |      | 0         | 65535
  vacuum_cost_delay                                | integer | ms   | 0         | 100
  vacuum_cost_limit                                | integer |      | 1         | 10000
  vacuum_cost_page_dirty                           | integer |      | 0         | 10000

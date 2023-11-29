@@ -59,6 +59,7 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "replication/dcf_replication.h"
+#include "replication/ss_cluster_replication.h"
 #include "storage/copydir.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -66,6 +67,7 @@
 #include "storage/copydir.h"
 #include "storage/procarray.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
+#include "storage/gs_uwal/gs_uwal.h"
 #include "utils/guc.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -124,6 +126,10 @@ const char *g_reserve_param[] = {
     "ssl_ciphers",
     "ssl_crl_file",
     "ssl_key_file",
+ #ifdef USE_TASSL
+    "ssl_enc_cert_file",
+    "ssl_enc_key_file",
+ #endif
     "ssl_renegotiation_limit",
     "ssl_cert_notify_time",
     "synchronous_standby_names",
@@ -157,7 +163,24 @@ const char *g_reserve_param[] = {
     NULL,
 #endif
     "enable_huge_pages",
-    "huge_page_size"
+    "huge_page_size",
+    "exrto_standby_read_opt",
+    "huge_page_size",
+    "uwal_ip",
+    "enable_uwal",
+    "uwal_batch_io_size",
+    "uwal_nodeid",
+    "uwal_port",
+    "uwal_protocol",
+    "uwal_disk_size",
+    "uwal_devices_path",
+    "uwal_log_path",
+    "uwal_rpc_worker_thread_num",
+    "uwal_rpc_timeout",
+    "uwal_rpc_rndv_switch",
+    "uwal_rpc_compression_switch",
+    "uwal_rpc_flowcontrol_switch",
+    "uwal_rpc_flowcontrol_value"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);
@@ -245,6 +268,20 @@ static void DisableWalRcvImmediateExit(void)
 
 void wakeupWalRcvWriter()
 {
+    if (g_instance.wal_cxt.walReceiverStats->isEnableStat) {
+        SpinLockAcquire(&g_instance.wal_cxt.walReceiverStats->mutex);
+        volatile bool recheck = g_instance.wal_cxt.walReceiverStats->isEnableStat;
+        if (recheck) {
+            g_instance.wal_cxt.walReceiverStats->wakeWriterTimes++;
+            TimestampTz time = GetCurrentTimestamp();
+            if (g_instance.wal_cxt.walReceiverStats->firstWakeTime == 0) {
+                g_instance.wal_cxt.walReceiverStats->firstWakeTime = time;
+            }
+            g_instance.wal_cxt.walReceiverStats->lastWakeTime = time;
+        }
+        SpinLockRelease(&g_instance.wal_cxt.walReceiverStats->mutex);
+    }
+
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
@@ -271,6 +308,7 @@ static void walRcvCtlBlockInit()
     securec_check_c(rc, "\0", "\0");
 
     t_thrd.walreceiver_cxt.walRcvCtlBlock = (WalRcvCtlBlock *)buf;
+    g_instance.wal_cxt.walReceiverStats->walRcvCtlBlock = t_thrd.walreceiver_cxt.walRcvCtlBlock;
     if (BBOX_BLACKLIST_WALREC_CTL_BLOCK) {
         bbox_blacklist_add(WALRECIVER_CTL_BLOCK, t_thrd.walreceiver_cxt.walRcvCtlBlock, len);
     }
@@ -283,7 +321,7 @@ static void walRcvCtlBlockFini()
     if (BBOX_BLACKLIST_WALREC_CTL_BLOCK) {
         bbox_blacklist_remove(WALRECIVER_CTL_BLOCK, t_thrd.walreceiver_cxt.walRcvCtlBlock);
     }
-
+    g_instance.wal_cxt.walReceiverStats->walRcvCtlBlock = nullptr;
     pfree(t_thrd.walreceiver_cxt.walRcvCtlBlock);
     t_thrd.walreceiver_cxt.walRcvCtlBlock = NULL;
 }
@@ -382,7 +420,8 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         }
     }
 
-    if (!WalRcvWriterInProgress())
+    /* walrec in dorado replication mode not need walrecwrite */
+    if (!SS_REPLICATION_MAIN_STANBY_NODE && !WalRcvWriterInProgress())
         ereport(FATAL, (errmsg("terminating walreceiver process due to the death of walrcvwriter")));
 #ifndef ENABLE_MULTIPLE_NODES
     /* For Paxos, receive wal should be done by send log callback function */
@@ -434,9 +473,11 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         */
         TimestampTz nowtime = GetCurrentTimestamp();
         bool requestReply = WalRecCheckTimeOut(nowtime, *last_recv_timestamp, *ping_sent);
-        if (requestReply) {
+        if (requestReply || get_walrcv_reply_dueto_commit()) {
             *ping_sent = true;
             *last_recv_timestamp = nowtime;
+            requestReply = true;
+            set_walrcv_reply_dueto_commit(false);
         }
 
         XLogWalRcvSendReply(requestReply, requestReply);
@@ -462,9 +503,7 @@ void WalReceiverMain(void)
     int nRet = 0;
     errno_t rc = 0;
 
-    if (ENABLE_DSS && t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE &&
-        g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY &&
-        g_instance.attr.attr_storage.xlog_file_path != 0) {
+    if (SS_REPLICATION_MAIN_STANBY_NODE) {
         ereport(LOG, (errmsg("walreceiver thread started for main standby")));
     } else {
         Assert(ENABLE_DSS == false);    
@@ -571,7 +610,7 @@ void WalReceiverMain(void)
             int walreplindex = hashmdata->current_repl;
             SpinLockRelease(&hashmdata->mutex);
 
-            if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
+            if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE) {
                 replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[walreplindex];
             } else if (walreplindex >= MAX_REPLNODE_NUM) {
                 replConnInfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[walreplindex - MAX_REPLNODE_NUM];
@@ -841,6 +880,10 @@ bool HasBuildReason()
 
 static void rcvAllXlog()
 {
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        return;
+    }
+
     if (HasBuildReason() || t_thrd.walreceiver_cxt.checkConsistencyOK == false) {
         ereport(LOG, (errmsg("rcvAllXlog no need copy xlog buildreason:%d, check flag:%d",
             (int)t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl],
@@ -878,7 +921,7 @@ static void WalRcvDie(int code, Datum arg)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if (IS_SHARED_STORAGE_MODE && !t_thrd.walreceiver_cxt.termChanged) {
+    if ((IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) && !t_thrd.walreceiver_cxt.termChanged) {
         SpinLockAcquire(&walrcv->mutex);
         walrcv->walRcvState = WALRCV_STOPPING;
         SpinLockRelease(&walrcv->mutex);
@@ -943,6 +986,10 @@ static void WalRcvDie(int code, Datum arg)
                          0, sizeof(walrcv->conn_channel));
     securec_check_c(rc, "\0", "\0");
 
+    ereport(LOG, (errmsg("walreceiver has been shut down, start notify changed")));
+    if (g_instance.attr.attr_storage.enable_uwal && GsUwalWalReceiverNotify(false) != 0) {
+        ereport(FATAL, (errmsg("uwal standby notify for WalRcvDie() failed.")));
+    }
     ereport(LOG, (errmsg("walreceiver thread shut down")));
 }
 
@@ -1121,9 +1168,11 @@ static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len)
         case 'm': /* config file */
         {
 #ifndef ENABLE_MULTIPLE_NODES
-            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER) {
+            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER
+                || SS_REPLICATION_DORADO_CLUSTER) {
 #else
-            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER || AM_HADR_CN_WAL_RECEIVER) {
+            if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || AM_HADR_WAL_RECEIVER 
+                || SS_REPLICATION_DORADO_CLUSTER || AM_HADR_CN_WAL_RECEIVER) {
 #endif
                 break;
             }
@@ -1351,7 +1400,7 @@ static void ProcessReplyFlags(void)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         SpinLockAcquire(&walrcv->mutex);
         if (walrcv->isPauseByTargetBarrier) {
             t_thrd.walreceiver_cxt.reply_message->replyFlags |= IS_PAUSE_BY_TARGET_BARRIER;
@@ -1388,6 +1437,7 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
     char *walrecvbuf = NULL;
     XLogRecPtr startptr;
     int recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+    bool isSameFull = false;
 
     while (nbytes > 0) {
         int segbytes;
@@ -1425,6 +1475,10 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
         }
 
         if (endPoint == walfreeoffset) {
+            if (g_instance.wal_cxt.walReceiverStats->isEnableStat && !isSameFull) {
+                g_instance.wal_cxt.walReceiverStats->bufferFullTimes++;
+                isSameFull = true;
+            }
             if (WalRcvWriterInProgress()) {
                 wakeupWalRcvWriter();
                 /* Process any requests or signals received recently */
@@ -1437,6 +1491,7 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
             continue;
         }
 
+        isSameFull = false;
         segbytes = (walfreeoffset + (int)nbytes > endPoint) ? endPoint - walfreeoffset : nbytes;
 
         /* Need to seek in the buffer? */
@@ -1540,11 +1595,13 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     if (!force && u_sess->attr.attr_storage.wal_receiver_status_interval <= 0)
         return;
 
-    SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-    receivePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr;
-    writePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->writePtr;
-    flushPtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr;
-    SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+    if (!g_instance.attr.attr_storage.enable_uwal) {
+        SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+        receivePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr;
+        writePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->writePtr;
+        flushPtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr;
+        SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+    }
 
     /* In shared storage, standby receivePtr equal dorado insertHead */
     if (IS_SHARED_STORAGE_STANBY_MODE) {
@@ -1552,6 +1609,11 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
         ReadShareStorageCtlInfo(ctlInfo);
         receivePtr = ctlInfo->insertHead;
         AlignFreeShareStorageCtl(ctlInfo);
+    } else if (SS_REPLICATION_DORADO_CLUSTER) {
+        ReadSSDoradoCtlInfoFile();
+        receivePtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        writePtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
+        flushPtr = g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead;
     }
     /* Get current timestamp. */
     now = GetCurrentTimestamp();
@@ -1597,7 +1659,7 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     t_thrd.walreceiver_cxt.reply_message->replyRequested = requestReply;
 
     SpinLockAcquire(&hashmdata->mutex);
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE)
         t_thrd.walreceiver_cxt.reply_message->peer_role = hashmdata->current_mode;
     else
         t_thrd.walreceiver_cxt.reply_message->peer_role = STANDBY_CLUSTER_MODE;
@@ -1630,6 +1692,19 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     securec_check(rc, "\0", "\0");
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(StandbyReplyMessage) + 1);
     WalRcvRefreshPercentCountStartLsn(sndFlushPtr, flushPtr);
+}
+
+void UWalCatchupEndRcvSendReply() {
+    char buf[sizeof(UwalCatchEndMessage) + 1] = {0};
+    UwalCatchEndMessage uwalCatchEndMessage;
+
+    /* Prepend with the message type and send it. */
+    buf[0] = 'w';
+    int rc = memcpy_s(&buf[1], sizeof(UwalCatchEndMessage), &uwalCatchEndMessage,
+                  sizeof(uwalCatchEndMessage));
+    securec_check(rc, "\0", "\0");
+    (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(UwalCatchEndMessage) + 1);
+    ereport(LOG, (errmsg("send uwal catchup end message.")));
 }
 
 /*
@@ -1685,6 +1760,9 @@ static void XLogWalRcvSendHSFeedback(void)
     }
     t_thrd.pgxact->xmin = InvalidTransactionId;
 
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     /*
      * Always send feedback message.
      */
@@ -1783,11 +1861,43 @@ static void ProcessKeepaliveMessage(PrimaryKeepaliveMessage *keepalive)
     SpinLockAcquire(&walrcv->mutex);
     walrcv->peer_role = keepalive->peer_role;
     walrcv->peer_state = keepalive->peer_state;
+    
+    bool uwal_update_lsn = (g_instance.attr.attr_storage.enable_uwal &&
+                            walrcv->sender_sent_location < keepalive->walEnd && walrcv->flagAlreadyNotifyCatchup);
+    if (uwal_update_lsn) {
+        walrcv->sender_write_location = keepalive->walEnd;
+        walrcv->sender_flush_location = keepalive->walEnd;
+        walrcv->sender_replay_location = keepalive->walEnd;
+        walrcv->receiver_received_location = keepalive->walEnd;
+        walrcv->receiver_write_location = keepalive->walEnd;
+        walrcv->receiver_flush_location = keepalive->walEnd;
+        walrcv->receivedUpto = keepalive->walEnd;
+        walrcv->needCatchup = keepalive->need_catchup;
+    }
     walrcv->sender_sent_location = keepalive->walEnd;
     walrcv->lastMsgSendTime = keepalive->sendTime;
     walrcv->lastMsgReceiptTime = lastMsgReceiptTime;
     SpinLockRelease(&walrcv->mutex);
-    wal_catchup = keepalive->catchup;
+
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        wal_catchup = keepalive->catchup || keepalive->uwal_catchup;
+    } else {
+        wal_catchup = keepalive->catchup;
+    }
+
+    if (g_instance.attr.attr_storage.enable_uwal && keepalive->uwal_catchup && !walrcv->flagAlreadyNotifyCatchup) {
+        walrcv->flagAlreadyNotifyCatchup = true;
+        if (GsUwalWalReceiverNotify() != 0) {
+            ereport(FATAL, (errmsg("uwal standby notify failed.")));
+            proc_exit(1);
+        }
+        UWalCatchupEndRcvSendReply();
+    }
+
+    // wake up the startup thread to redo
+    if (uwal_update_lsn) {
+        WakeupRecovery();
+    }
 
     if (log_min_messages <= DEBUG2) {
         MakeDebugLog(keepalive->sendTime, lastMsgReceiptTime, "wal receive keep alive data sendtime %s receipttime %s");
@@ -2275,6 +2385,19 @@ Datum pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
             sendLocFix = ctlInfo->insertHead;
         }
         AlignFreeShareStorageCtl(ctlInfo);
+        sndSent = sendLocFix;
+        sndWrite = sendLocFix;
+        sndFlush = sendLocFix;
+        sndReplay = sendLocFix;
+    }
+
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        ReadSSDoradoCtlInfoFile();
+        XLogRecPtr sendLocFix = rcvReceived;
+        ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.ssReplicationXLogCtl;
+        if (XLByteLT(sendLocFix, ctlInfo->insertHead)) {
+            sendLocFix = ctlInfo->insertHead;
+        }
         sndSent = sendLocFix;
         sndWrite = sendLocFix;
         sndFlush = sendLocFix;

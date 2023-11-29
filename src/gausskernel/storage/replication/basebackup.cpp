@@ -19,6 +19,7 @@
 
 #include "access/xlog_internal.h" /* for pg_start/stop_backup */
 #include "access/cbmparsexlog.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_type.h"
 #include "gs_thread.h"
@@ -30,6 +31,7 @@
 #include "replication/dcf_data.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
+#include "replication/ss_cluster_replication.h"
 #include "replication/slot.h"
 #include "access/xlog.h"
 #include "storage/cfs/cfs_converter.h"
@@ -662,6 +664,8 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     SetPaxosIndex(&consensusPaxosIdx);
 #endif
     SendXlogRecPtrResult(endptr, consensusPaxosIdx);
+    elog(WARNING, "Sleep 10s");
+    sleep(10);
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
     XlogCopyStartPtr = InvalidXLogRecPtr;
     LWLockRelease(FullBuildXlogCopyStartPtrLock);
@@ -1215,6 +1219,9 @@ bool IsSkipDir(const char * dirName)
     /* Skip temporary files */
     if (strncmp(dirName, PG_TEMP_FILE_PREFIX, strlen(PG_TEMP_FILE_PREFIX)) == 0)
         return true;
+    if (strncmp(dirName, EXRTO_FILE_DIR, strlen(EXRTO_FILE_DIR)) == 0) {
+        return true;
+    }
 
     /*
      * If there's a backup_label file, it belongs to a backup started by
@@ -1442,7 +1449,14 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_key_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_ca_file) == 0 ||
                 strcmp(de->d_name, g_instance.attr.attr_security.ssl_crl_file) == 0 ||
-                strcmp(de->d_name, ssl_cipher_file) == 0 || strcmp(de->d_name, ssl_rand_file) == 0) {
+                strcmp(de->d_name, ssl_cipher_file) == 0 || strcmp(de->d_name, ssl_rand_file) == 0 
+ #ifdef USE_TASSL              
+                || strcmp(de->d_name, g_instance.attr.attr_security.ssl_enc_cert_file) == 0 ||
+                strcmp(de->d_name, g_instance.attr.attr_security.ssl_enc_key_file) == 0 ||
+                strcmp(de->d_name, ssl_enc_cipher_file) == 0 || strcmp(de->d_name, ssl_enc_rand_file) == 0
+#endif
+                ) 
+            {
                 continue;
             }
 
@@ -1519,8 +1533,10 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
          * WAL archive anyway. But include it as an empty directory anyway, so
          * we get permissions right.
          */
+
+        /* when ss dorado replication enabled, "+data/pg_replication/" also need to copy when backup */
         int pathNameLen = strlen("+data/pg_xlog");
-        if (strcmp(pathbuf, "./pg_xlog") == 0 || strncmp(pathbuf, "+data/pg_xlog", pathNameLen) == 0) {
+        if (strcmp(pathbuf, "./pg_xlog") == 0 || strncmp(pathbuf, "+data/pg_xlog", pathNameLen) == 0 || strcmp(pathbuf, "+data/pg_replication") == 0) {
             if (!sizeonly) {
                 /* If pg_xlog is a symlink, write it as a directory anyway */
 #ifndef WIN32
@@ -1766,6 +1782,24 @@ static bool check_data_filename(char *filename, int *segNo)
 
     token = strtok_r(filename, "_", &tmptoken);
     if ('\0' == tmptoken[0]) {
+        uint dot_count = 0;
+        int filename_idx = static_cast<int>(strlen(filename) - 1);
+        // check the last word must be num
+        if (isdigit(filename[filename_idx]) == false) {
+            *segNo = 0;
+            return false;
+        }
+        while (filename_idx >= 0) {
+            if (filename[filename_idx] == '.') {
+                dot_count++;
+            }
+            /* if the char is not num/'.' or dot_count > 1, then break */
+            if ((isdigit(filename[filename_idx]) == false && filename[filename_idx] != '.') || dot_count > 1) {
+                *segNo = 0;
+                return false;
+            }
+            filename_idx--;
+        }
         /* MAIN_FORK */
         nmatch = sscanf_s(filename, "%u.%d", &relNode, segNo);
         return (nmatch == 1 || nmatch == 2);
@@ -2211,7 +2245,7 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", readfilename)));
             }
         }
-        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck) {
+        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck && !SS_REPLICATION_DORADO_CLUSTER) {
             uint32 segSize;
             GET_SEG_SIZE(undoFileType, segSize);
             /* len and cnt must be integer multiple of BLCKSZ. */

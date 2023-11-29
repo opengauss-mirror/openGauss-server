@@ -30,6 +30,7 @@ extern void pgwin32_unsetenv(const char*);
 
 int gs_putenv_r(char* envvar);
 char* gs_getenv_r(const char* name);
+int gs_setenv_r(const char* name, const char* envvar, int overwrite);
 int gs_unsetenv_r(const char* name);
 #endif
 
@@ -46,6 +47,15 @@ char* gs_getenv_r(const char* name)
 {
     (void)syscalllockAcquire(&env_lock);
     char* ret = getenv(name);
+    (void)syscalllockRelease(&env_lock);
+    return ret;
+}
+
+int gs_setenv_r(const char* name, const char* envvar, int overwrite)
+{
+    int ret;
+    (void)syscalllockAcquire(&env_lock);
+    ret = setenv(name, envvar, overwrite);
     (void)syscalllockRelease(&env_lock);
     return ret;
 }

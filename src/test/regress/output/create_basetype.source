@@ -1,22 +1,22 @@
 create type complex;
 CREATE FUNCTION complex_in(cstring)
     RETURNS complex
-    AS '@libdir@/regress@DLSUFFIX@','complex_in'
+    AS '/usr3/data1/jiangyan/openGauss-server/src/test/regress/regress.so','complex_in'
     LANGUAGE C IMMUTABLE STRICT not fenced;
 NOTICE:  return type complex is only a shell
 CREATE FUNCTION complex_out(complex)
     RETURNS cstring
-    AS '@libdir@/regress@DLSUFFIX@','complex_out'
+    AS '/usr3/data1/jiangyan/openGauss-server/src/test/regress/regress.so','complex_out'
     LANGUAGE C IMMUTABLE STRICT not fenced;
 NOTICE:  argument type complex is only a shell
 CREATE FUNCTION complex_recv(internal)
    RETURNS complex
-   AS '@libdir@/regress@DLSUFFIX@','complex_recv'
+   AS '/usr3/data1/jiangyan/openGauss-server/src/test/regress/regress.so','complex_recv'
    LANGUAGE C IMMUTABLE STRICT not fenced;
 NOTICE:  return type complex is only a shell
 CREATE FUNCTION complex_send(complex)
    RETURNS bytea
-   AS '@libdir@/regress@DLSUFFIX@','complex_send'
+   AS '/usr3/data1/jiangyan/openGauss-server/src/test/regress/regress.so','complex_send'
    LANGUAGE C IMMUTABLE STRICT not fenced;
 NOTICE:  argument type complex is only a shell
 CREATE TYPE complex (
@@ -139,6 +139,11 @@ CREATE TYPE name (
 )
 
 CREATE TYPE name
+
+CREATE TYPE name AS ENUM
+    ( [ 'lable' [, ... ] ] )
+
+CREATE TYPE name AS TABLE OF data_type
 
 \h alter type
 Command:     ALTER TYPE

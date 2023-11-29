@@ -26,6 +26,8 @@
 #include "catalog/catalog.h"
 #include "PageCompression.h"
 #include "catalog/pg_type.h"
+#include "storage/file/fio_device.h"
+#include "access/extreme_rto/standby_read/standby_read_base.h"
 
 PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};
@@ -122,6 +124,8 @@ BuildErrorCode libpqGetParameters(void)
     }
     str2 = run_simple_query("SHOW enable_incremental_checkpoint");
     if (str2 == NULL) {
+        pg_free(str);
+        str = NULL;
         return BUILD_FATAL;
     }
     if (strcmp(str, "on") != 0 && strcmp(str2, "on") != 0) {
@@ -300,6 +304,9 @@ BuildErrorCode fetchSourceFileList()
             continue;
         if (NULL != strstr(path, "disable_conn_file"))
             continue;
+        if (NULL != strstr(path, EXRTO_FILE_DIR)) {
+            continue;
+        }
 
         if (PQgetisnull(res, 0, 1)) {
             /*

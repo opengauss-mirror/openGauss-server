@@ -387,7 +387,7 @@ void DataCacheMgr::TerminateVerifyCU()
         Assert(m_cache_mgr->CstoreIOLockHeldByMe(t_thrd.storage_cxt.CacheBlockInProgressIO));
         AbortCU(t_thrd.storage_cxt.CacheBlockInProgressIO);
         HOLD_INTERRUPTS();  /* match the upcoming RESUME_INTERRUPTS */
-        m_cache_mgr->RealeseCstoreIOLock(t_thrd.storage_cxt.CacheBlockInProgressIO);
+        m_cache_mgr->ReleaseCstoreIOLock(t_thrd.storage_cxt.CacheBlockInProgressIO);
     }
     if (IsValidCacheSlotID(t_thrd.storage_cxt.CacheBlockInProgressUncompress)) {
         /* invalid this block slot, and don't care IO state or lock owner */
@@ -397,7 +397,7 @@ void DataCacheMgr::TerminateVerifyCU()
         CU* cuPtr = GetCUBuf(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
         cuPtr->FreeSrcBuf();
         HOLD_INTERRUPTS();  /* match the upcoming RESUME_INTERRUPTS */
-        m_cache_mgr->RealeseCompressLock(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
+        m_cache_mgr->ReleaseCompressLock(t_thrd.storage_cxt.CacheBlockInProgressUncompress);
     }
 
     /* clear record */
@@ -431,19 +431,19 @@ CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
          * the CU is being reloading by remote read thread,
          * return CU_RELOADING and retry to load CU.
          */
-        m_cache_mgr->RealeseCompressLock(slotId);
+        m_cache_mgr->ReleaseCompressLock(slotId);
         return CU_RELOADING;
     }
 
     if (!cuPtr->m_cache_compressed) {
-        /* another therad have decompressed this CU data */
-        m_cache_mgr->RealeseCompressLock(slotId);
+        /* another thread have decompressed this CU data */
+        m_cache_mgr->ReleaseCompressLock(slotId);
         return CU_OK;
     }
 
     if (cuPtr->m_adio_error) {
         /* IO error */
-        this->m_cache_mgr->RealeseCompressLock(slotId);
+        this->m_cache_mgr->ReleaseCompressLock(slotId);
         return CU_ERR_ADIO;
     }
 
@@ -453,12 +453,12 @@ CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
 
     if (cuPtr->CheckCrc() == false) {
         /* CRC check failed */
-        m_cache_mgr->RealeseCompressLock(slotId);
+        m_cache_mgr->ReleaseCompressLock(slotId);
         return CU_ERR_CRC;
     }
 
     if (cuPtr->CheckMagic(cuDescPtr->magic) == false) {
-        m_cache_mgr->RealeseCompressLock(slotId);
+        m_cache_mgr->ReleaseCompressLock(slotId);
         return CU_ERR_MAGIC;
     }
 
@@ -486,7 +486,7 @@ CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
      */
     int cu_uncompress_size = cuPtr->GetUncompressBufSize();
     m_cache_mgr->AdjustCacheMem(slotId, cuDescPtr->cu_size, cu_uncompress_size);
-    m_cache_mgr->RealeseCompressLock(slotId);
+    m_cache_mgr->ReleaseCompressLock(slotId);
 
     TerminateCU(false);
     return CU_OK;
@@ -511,7 +511,7 @@ int64 DataCacheMgr::GetCurrentMemSize()
  * If awakened while waiting, release the lock and check again.
  * This method is based upon WaitIO() for rowstore.
  * @Param[IN] slotId: slot id
- * @Return: true, means error happen in preftech
+ * @Return: true, means error happen in prefetch
  * @See also:
  */
 bool DataCacheMgr::DataBlockWaitIO(CacheSlotId_t slotId)
@@ -522,7 +522,7 @@ bool DataCacheMgr::DataBlockWaitIO(CacheSlotId_t slotId)
 /*
  * @Description: DataBlockCompleteIO
  * When an I/O is finished mark the CU as not busy and wake the next waiter.
- * this method is simmilar to the column store TerminateBufferIO
+ * this method is similar to the column store TerminateBufferIO
  * @Param[IN] slotId: slot id
  * @See also:
  */
@@ -724,9 +724,9 @@ void DataCacheMgr::AcquireCompressLock(CacheSlotId_t slotId)
  * @IN slotId: slot id
  * @See also:
  */
-void DataCacheMgr::RealeseCompressLock(CacheSlotId_t slotId)
+void DataCacheMgr::ReleaseCompressLock(CacheSlotId_t slotId)
 {
-    return m_cache_mgr->RealeseCompressLock(slotId);
+    return m_cache_mgr->ReleaseCompressLock(slotId);
 }
 
 /*
@@ -812,7 +812,7 @@ void ReleaseORCBlock(CacheSlotId_t slot)
  * @IN/OUT found: whether found or not slot
  * @IN/OUT found: whether found or not  error
  * @Return: orc data slot id
- * @See also: we do not want to ereport(error) when found error, becasue this function called by
+ * @See also: we do not want to ereport(error) when found error, because this function called by
  * liborc(orc.HdfsCacheFileInputStream.read)
  */
 CacheSlotId_t ORCCacheAllocBlock(
@@ -877,7 +877,7 @@ bool OBSCacheRenewBlock(CacheSlotId_t slotID)
  * @IN/OUT found: whether found or not slot
  * @IN/OUT found: whether found or not  error
  * @Return: orc data slot id
- * @See also: we do not want to ereport(error) when found error, becasue this function called by
+ * @See also: we do not want to ereport(error) when found error, because this function called by
  * liborc(orc.HdfsCacheFileInputStream.read)
  */
 CacheSlotId_t OBSCacheAllocBlock(const char* hostName, const char* bucketName, const char* prefixName, uint64 offset,

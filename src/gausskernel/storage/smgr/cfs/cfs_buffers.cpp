@@ -299,7 +299,7 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
                            location.headerNum * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_READ);
     if (nbytes != BLCKSZ) {
         item->load_status = CTRL_PAGE_LOADED_ERROR;
-        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
+        ereport(DEBUG5, (errcode(ERRCODE_DATA_CORRUPTED),
             errmsg("Failed to pca_buf_load_page %s, headerNum: %u.", FilePathName(location.fd), location.headerNum)));
         return;
     }

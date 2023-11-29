@@ -20,6 +20,8 @@ CREATE [ UNLOGGED ] TABLE table_name
     AS query
     [ WITH [ NO ] DATA ];
 NOTICE: [data_type] is only available in CENTRALIZED mode and B-format database.
+NOTICE: DISTRIBUTE BY is only avaliable in DISTRIBUTED mode.
+NOTICE: TO {...} is only avaliable in DISTRIBUTED mode.
 </synopsis>
 </refsynopsisdiv>
 </refentry>

@@ -221,9 +221,8 @@ static char remove_member_file[MAXPGPATH];
 static char change_role_file[MAXPGPATH];
 static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
-static int get_instance_id(void);
-static int ss_get_primary_id(void);
-static bool ss_read_dorado_config(void);
+static int ss_get_inter_node_nums(const char* interconn_url);
+bool ss_read_config(void);
 static unsigned int vote_num = 0;
 static unsigned int xmode = 2;
 static char postport_lock_file[MAXPGPATH];
@@ -273,6 +272,12 @@ char ssl_ca_file[MAXPGPATH];
 char ssl_crl_file[MAXPGPATH];
 char* ssl_cipher_file = "server.key.cipher";
 char* ssl_rand_file = "server.key.rand";
+#ifdef USE_TASSL
+char ssl_enc_cert_file[MAXPGPATH];
+char ssl_enc_key_file[MAXPGPATH];
+char *ssl_enc_cipher_file = "server_enc.key.cipher";
+char *ssl_enc_rand_file = "server_enc.key.rand";
+#endif
 
 char pgxc_node_name[MAXPGPATH];
 
@@ -357,7 +362,7 @@ static void set_build_pid(pgpid_t pid);
 static void close_connection(void);
 static PGconn* get_connectionex(void);
 static ServerMode get_runmode(void);
-static void freefile(char** lines);
+void freefile(char** lines);
 static char* get_localrole_string(ServerMode mode);
 static bool do_actual_build(uint32 term = 0);
 static bool do_incremental_build(uint32 term = 0);
@@ -368,9 +373,10 @@ static void do_overwrite(void);
 static void do_full_restore(void);
 static void kill_proton_force(void);
 static void SigAlarmHandler(int arg);
+static bool DoBuildCheck(uint32 term);
 int ExecuteCmd(const char* command, struct timeval timeout);
 
-static int find_guc_optval(const char** optlines, const char* optname, char* optval);
+int find_guc_optval(const char** optlines, const char* optname, char* optval);
 static void read_ssl_confval(void);
 static char* get_string_by_sync_mode(bool syncmode);
 static void free_ctl();
@@ -776,7 +782,7 @@ static ServerMode get_runmode(void)
     return UNKNOWN_MODE;
 }
 
-static void freefile(char** lines)
+void freefile(char** lines)
 {
     char** line = NULL;
     if (lines == NULL)
@@ -1933,7 +1939,7 @@ static void do_stop(bool force)
                 break;
         }
 
-        if (pid != 0) { /* pid file still exists */
+        if ((pid = get_pgpid()) != 0) { /* pid file still exists */
             if (force || (shutdown_mode == IMMEDIATE_MODE)) {
                 kill_proton_force();
 
@@ -2196,7 +2202,7 @@ static void do_failover(uint32 term)
         exit(1);
     }
     /* failover executed only in standby server */
-    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE) {
+    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE && run_mode != MAIN_STANDBY_MODE) {
         pg_log(PG_WARNING,
             _(" cannot failover server; "
               "server is not in standby or cascade standby mode\n"));
@@ -3763,7 +3769,7 @@ static void do_help(void)
     printf(_("  -b,  --mode=MODE	 the mode of building the datanode or coordinator."
              "MODE can be \"full\", \"incremental\", "
              "\"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", "
-             "\"cross_cluster_incremental\", \"cross_cluster_standby_full\"\n"));
+             "\"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
     printf(_("  -s, --silent           only print errors, no informational messages\n"));
     printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
@@ -4373,6 +4379,10 @@ static void do_build(uint32 term)
     else if (build_mode == COPY_SECURE_FILES_BUILD) {
         buildSuccess = DoCopySecureFileBuild(term);
     }
+    /* check need we build and can we do inc build */
+    else if (build_mode == BUILD_CHECK) {
+        buildSuccess = DoBuildCheck(term);
+    }
 
     if (!buildSuccess) {
         exit(1);
@@ -4805,6 +4815,117 @@ static bool GetRemoteNodeName()
 
     return true;
 }
+
+/*
+ * @@GaussDB@@
+ * Brief            : the check need to build
+ * Description        :
+ * Notes            :
+ */
+bool build_check_main(uint32 term)
+{
+    BuildErrorCode status = BUILD_SUCCESS;
+    PGresult* res = NULL;
+    errno_t errorno = EOK;
+    char* sysidentifier = NULL;
+    uint32 timeline;
+    char connstrSource[MAXPGPATH] = {0};
+    g_inc_fail_reason = DEFAULT_REASON;
+
+    CheckBuildParameter();
+    check_nested_pgconf();
+
+    /* 
+     * Save connection info from command line or openGauss file.
+     */
+    get_conninfo(pg_conf_file);
+
+    /* Find a available connection. */
+    streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
+    if (streamConn == NULL) {
+        pg_log(PG_WARNING, _("could not connect to server.\n"));
+        g_inc_fail_reason = CONN_PRIMARY_FAIL;
+        return false;
+    }
+
+    /* Concate connection str to primary host for performing rewind. */
+    errorno = sprintf_s(connstrSource,
+        sizeof(connstrSource),
+        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5 rw_timeout=600",
+        (streamConn->pghost != NULL) ? streamConn->pghost : streamConn->pghostaddr,
+        streamConn->pgport);
+    securec_check_ss_c(errorno, "\0", "\0");
+
+    /*
+     * Run IDENTIFY_SYSTEM so we can get sys identifier and timeline.
+     */
+    res = PQexec(streamConn, "IDENTIFY_SYSTEM");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        pg_log(PG_WARNING, _("could not identify system: %s"), PQerrorMessage(streamConn));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        PQclear(res);
+        return false;
+    }
+    if (PQntuples(res) != 1 || PQnfields(res) != 4) {
+        pg_log(PG_WARNING, _("could not identify system, got %d rows and %d fields\n"), PQntuples(res), PQnfields(res));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        PQclear(res);
+        return false;
+    }
+    sysidentifier = pg_strdup(PQgetvalue(res, 0, 0));
+    timeline = atoi(PQgetvalue(res, 0, 1));
+    PQclear(res);
+
+    if (streamConn != NULL) {
+        PQfinish(streamConn);
+        streamConn = NULL;
+    }
+
+    /* Pretend to be gs_rewind and perform rewind. */
+    progname = "gs_rewind";
+    status = do_build_check(pg_data, connstrSource, sysidentifier, timeline, term);
+
+    libpqDisconnect();
+
+    if (sysidentifier != NULL) {
+        pg_free(sysidentifier);
+        sysidentifier = NULL;
+    }
+
+    return (status == BUILD_SUCCESS); 
+}
+
+/*
+ * build_mode:
+ *		check: check we are or not need to build
+ */
+static bool DoBuildCheck(uint32 term)
+{
+    bool buildSuccess = false;
+    char cwd[MAXPGPATH];
+
+    if (getcwd(cwd, MAXPGPATH) == NULL) {
+        pg_fatal(_("could not identify current directory: %s"), gs_strerror(errno));
+        exit(1);
+    }
+    pg_log(PG_WARNING, _("current workdir is (%s).\n"), cwd);
+
+    check_nested_pgconf();
+    
+    replconn_num = get_replconn_number(pg_conf_file);
+
+    buildSuccess = build_check_main(term);
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, _("Build check result : full build\n"));
+        pg_log(PG_WARNING, _("%s failed(%s).\n"), BuildModeToString(build_mode), pg_data);
+    } else {
+        pg_log(PG_WARNING, _("%s completed(%s).\n"), BuildModeToString(build_mode), pg_data);
+    }
+    return buildSuccess;
+}
+
 /*
  * build_mode:
  *		AUTO_BUILD: do gs_rewind first, after failed 3 times, do full
@@ -4953,7 +5074,7 @@ static bool do_incremental_build(uint32 term)
  * Description		:
  * Notes			:
  */
-static int find_guc_optval(const char** optlines, const char* optname, char* optval)
+int find_guc_optval(const char** optlines, const char* optname, char* optval)
 {
     int offset = 0;
     int len = 0;
@@ -4962,18 +5083,18 @@ static int find_guc_optval(const char** optlines, const char* optname, char* opt
     int ret;
     errno_t rc = EOK;
 
-    lineno = find_gucoption(optlines, (const char*)optname, NULL, NULL, &offset, &len);
+    lineno = find_gucoption(optlines, (const char*)optname, NULL, NULL, &offset, &len, '\'');
     if (lineno != INVALID_LINES_IDX) {
-        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset + 1, (size_t)(Min(len - 1, MAX_VALUE_LEN) - 1));
+        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset, (size_t)(Min(len, MAX_VALUE_LEN)));
         securec_check_c(rc, "", "");
         return lineno;
     }
 
-    ret = snprintf_s(def_optname, sizeof(def_optname), sizeof(def_optname) - 1, "#%s", optname);
+    ret = snprintf_s(def_optname, sizeof(def_optname), sizeof(def_optname) - 1, "#%s", optname, '\'');
     securec_check_ss_c(ret, "\0", "\0");
     lineno = find_gucoption(optlines, (const char*)def_optname, NULL, NULL, &offset, &len);
     if (lineno != INVALID_LINES_IDX) {
-        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset + 1, (size_t)(Min(len - 1, MAX_VALUE_LEN) - 1));
+        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset, (size_t)(Min(len, MAX_VALUE_LEN)));
         securec_check_c(rc, "", "");
         return lineno;
     }
@@ -4999,6 +5120,10 @@ static void read_ssl_confval(void)
 
     (void)find_guc_optval((const char**)optlines, "ssl_cert_file", ssl_cert_file);
     (void)find_guc_optval((const char**)optlines, "ssl_key_file", ssl_key_file);
+#ifdef USE_TASSL
+    (void)find_guc_optval((const char**)optlines, "ssl_enc_cert_file", ssl_enc_cert_file);
+    (void)find_guc_optval((const char**)optlines, "ssl_enc_key_file", ssl_enc_key_file);
+#endif
     (void)find_guc_optval((const char**)optlines, "ssl_ca_file", ssl_ca_file);
     (void)find_guc_optval((const char**)optlines, "ssl_crl_file", ssl_crl_file);
 
@@ -5074,6 +5199,8 @@ const char *BuildModeToString(BuildMode mode)
             break;
         case COPY_SECURE_FILES_BUILD:
             return "copy secure files build";
+        case BUILD_CHECK:
+            return "build check";
         default:
             return "unkwon";
             break;
@@ -6358,6 +6485,8 @@ int main(int argc, char** argv)
                     } else if (strcmp(optarg, "copy_upgrade_file") == 0) {
                         build_mode = COPY_SECURE_FILES_BUILD;
                         need_copy_upgrade_file = true;
+                    } else if (strcmp(optarg, "check") == 0) {
+                        build_mode = BUILD_CHECK;
                     }
                     break;
                 }
@@ -6685,15 +6814,6 @@ int main(int argc, char** argv)
                     }
                     break;
                 }
-                case 'g':
-                    check_input_for_security(optarg);
-                    if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
-                        pg_log(PG_WARNING, _("unexpected node id specified, valid range is %d - %d.\n"),
-                               MIN_INSTANCEID, MAX_INSTANCEID );
-                        goto Error;
-                    }
-                    instance_config.dss.instance_id = atoi(optarg);
-                    break;
                 case 1:
                     clear_backup_dir = true;
                     break;
@@ -6723,11 +6843,11 @@ int main(int argc, char** argv)
                     
                     FREE_AND_RESET(vgname);
                     FREE_AND_RESET(vgdata);
-                    FREE_AND_RESET(vgdata);
+                    FREE_AND_RESET(vglog);
                     parse_vgname_args(optarg);
-                    instance_config.dss.vgname = xstrdup(vgname);
-                    instance_config.dss.vgdata = xstrdup(vgdata);
-                    instance_config.dss.vglog = xstrdup(vglog);
+                    ss_instance_config.dss.vgname = xstrdup(vgname);
+                    ss_instance_config.dss.vgdata = xstrdup(vgdata);
+                    ss_instance_config.dss.vglog = xstrdup(vglog);
                     break;
                 }
                 case 6:{
@@ -6737,11 +6857,11 @@ int main(int argc, char** argv)
                         goto Error;
                     }
                     socketpath = xstrdup(optarg);
-                    instance_config.dss.socketpath = xstrdup(optarg);
+                    ss_instance_config.dss.socketpath = xstrdup(optarg);
                     break;
                 }
                 case 7:
-                    instance_config.dss.enable_dss = true;
+                    ss_instance_config.dss.enable_dss = true;
                     break;
                 case 8:{
                     check_input_for_security(optarg);
@@ -6918,21 +7038,25 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
-    if (instance_config.dss.enable_dss) {
+    enable_dss = ss_read_config();
+    if (ss_instance_config.dss.enable_dss) {
         // dss device init
-        if (dss_device_init(instance_config.dss.socketpath,
-            instance_config.dss.enable_dss) != DSS_SUCCESS) {
+        if (dss_device_init(ss_instance_config.dss.socketpath,
+            ss_instance_config.dss.enable_dss) != DSS_SUCCESS) {
             pg_log(PG_WARNING, _("failed to init dss device\n"));
             goto Error;
         }
 
         /* Prepare some g_datadir parameters */
-        g_datadir.instance_id = instance_config.dss.instance_id;
+        g_datadir.instance_id = ss_instance_config.dss.instance_id;
 
-        errno_t rc = strcpy_s(g_datadir.dss_data, strlen(instance_config.dss.vgdata) + 1, instance_config.dss.vgdata);
+        errno_t rc = strcpy_s(g_datadir.dss_data, strlen(ss_instance_config.dss.vgname) + 1, ss_instance_config.dss.vgname);
         securec_check_c(rc, "\0", "\0");
 
-        rc = strcpy_s(g_datadir.dss_log, strlen(instance_config.dss.vglog) + 1, instance_config.dss.vglog);
+        if (ss_instance_config.dss.vglog == NULL) {
+            ss_instance_config.dss.vglog = ss_instance_config.dss.vgname;
+        }
+        rc = strcpy_s(g_datadir.dss_log, strlen(ss_instance_config.dss.vglog) + 1, ss_instance_config.dss.vglog);
         securec_check_c(rc, "\0", "\0");
         
         /* The default of XLogSegmentSize was set 16M during configure, we reassign 1G to XLogSegmentSize
@@ -6940,7 +7064,7 @@ int main(int argc, char** argv)
         XLogSegmentSize = DSS_XLOG_SEG_SIZE;
     }
 
-    initDataPathStruct(instance_config.dss.enable_dss);
+    initDataPathStruct(ss_instance_config.dss.enable_dss);
     
     SetConfigFilePath();
 
@@ -7057,6 +7181,11 @@ int main(int argc, char** argv)
                         _("gs_ctl copy secure files from remote build ,datadir is %s,conn_str is \'%s\'\n"),
                         pg_data,
                         conn_str);
+                } else if (build_mode == BUILD_CHECK) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl build check ,datadir is %s,conn_str is \'%s\'\n"),
+                        pg_data,
+                        conn_str);
                 } else {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl incremental build ,datadir is %s,conn_str is \'%s\'\n"),
@@ -7075,6 +7204,10 @@ int main(int argc, char** argv)
                 } else if (g_is_obsmode) {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl full backup to obs ,datadir is %s\n"),
+                        pg_data);
+                } else if (build_mode == BUILD_CHECK) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl build check ,datadir is %s\n"),
                         pg_data);
                 } else {
                     pg_log(PG_PROGRESS,
@@ -7199,120 +7332,50 @@ static void free_ctl()
     FREE_AND_RESET(register_password);
     FREE_AND_RESET(pgha_str);
     FREE_AND_RESET(pgha_opt);
+    FREE_AND_RESET(exec_path);
+    FREE_AND_RESET(pg_data);
+    FREE_AND_RESET(pg_config);
+    FREE_AND_RESET(pgxcCommand);
+    FREE_AND_RESET(ss_instance_config.dss.vgname);
+    FREE_AND_RESET(ss_instance_config.dss.vgdata);
 }
 
-static int get_instance_id(void)
+static int ss_get_inter_node_nums(const char* interconn_url)
 {
-    PGconn* conn = NULL;
-    PGresult* res = NULL;
-    const char* sql_string = "show ss_instance_id;";
-    char* instid = NULL;
-
-    conn = get_connectionex();
-    if (PQstatus(conn) != CONNECTION_OK) {
-        pg_log(PG_WARNING, _("could not connect to server: %s"), PQerrorMessage(conn));
-        return -1;
+    errno_t rc;
+    int nodeNum = 0;
+    char* next_token = NULL;
+    char* token = NULL;
+    const char* delim = ",";
+    if (interconn_url == NULL || interconn_url[0] == '\0') {
+        pg_log(PG_WARNING, _("can not contain interconnect nodes.\n"));
+        return nodeNum;
     }
 
-    /* Get local role from the local server. */
-    res = PQexec(conn, sql_string);
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        PQclear(res);
-        pg_log(PG_WARNING, _("could not get local role from the local server: %s"), PQerrorMessage(conn));
-        close_connection();
-        conn = NULL;
-        return -1;
-    }
+    char* strs = (char*)palloc(strlen(interconn_url) + 1);
+    rc = strncpy_s(strs, strlen(interconn_url) + 1, interconn_url, strlen(interconn_url));
+    securec_check_c(rc, "\0", "\0");
 
-    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
-        int ntuples = PQntuples(res);
-        int nfields = PQnfields(res);
-
-        PQclear(res);
-        pg_log(PG_WARNING,
-            _("invalid response from primary server: "
-              "Expected 1 tuple with 1 fields, got %d tuples with %d fields."),
-            ntuples,
-            nfields);
-        close_connection();
-        conn = NULL;
-        return -1;
-    }
-
-    instid = PQgetvalue(res, 0, 0);
-
-    PQclear(res);
-    close_connection();
-    conn = NULL;
-
-    return atoi(instid);
+    token = strtok_s(strs, delim, &next_token);
+    do {
+        nodeNum++;
+        token = strtok_s(NULL, delim, &next_token);
+    } while (token != NULL);
+    pfree(strs);
+    return nodeNum;
 }
 
-static int ss_get_primary_id(void)
-{
-    if (instance_config.dss.socketpath == NULL) {
-        return -1;
-    }
-
-    if (instance_config.dss.vgname == NULL) {
-        return -1;
-    }
-
-    int fd = -1;
-    int len = 0;
-    int err = 0;
-    struct stat statbuf;
-    char control_file_path[MAXPGPATH];
-
-    err = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
-    securec_check_c(err, "\0", "\0");
-    err = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", instance_config.dss.vgname);
-    securec_check_ss_c(err, "\0", "\0");
-
-    if (dss_device_init(instance_config.dss.socketpath, true) != DSS_SUCCESS) {
-        pg_log(PG_WARNING, _("failed to init dss device\n"));
-        exit(1);
-    }
-
-    fd = open(control_file_path, O_RDONLY | PG_BINARY, 0);
-    if(fd < 0) {
-        pg_log(PG_WARNING, _("failed to open pg_contol\n"));
-        close(fd);
-        fd = -1;
-        exit(1);
-    }
-
-    if (stat(control_file_path, &statbuf) < 0) {
-        pg_log(PG_WARNING, _("failed to stat pg_contol\n"));
-        close(fd);
-        fd = -1;
-        exit(1);
-    }
-
-    len = statbuf.st_size;
-    char* tmpBuffer = (char*)malloc(len + 1);
-
-    if ((read(fd, tmpBuffer, len)) != len) {
-        close(fd);
-        fd = -1;
-        pg_log(PG_WARNING, _("failed to read pg_contol\n"));
-        exit(1);
-    }
-
-    ss_reformer_ctrl_t* reformerCtrl;
-
-    /* Calculate the offset to obtain the primary_id of the last page */
-    reformerCtrl = (ss_reformer_ctrl_t*)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
-    return reformerCtrl->primaryInstId;
-}
 
 /*
-* read dorado config, if it is dorado standby cluster,
-* we will get ss_dss_conn_path and ss_dss_vg_name.
+* read ss config, return enable_dss 
+* we will get ss_enable_dss, ss_dss_conn_path and ss_dss_vg_name.
 */
-static bool ss_read_dorado_config(void)
+bool ss_read_config(void)
 {
     char config_file[MAXPGPATH] = {0};
+    char enable_dss[MAXPGPATH] = {0};
+    char inst_id[MAXPGPATH] = {0};
+    char interconnect_url[MAXPGPATH] = {0};
     char** optlines = NULL;
     int ret = EOK;
 
@@ -7320,19 +7383,27 @@ static bool ss_read_dorado_config(void)
     securec_check_ss_c(ret, "\0", "\0");
     config_file[MAXPGPATH - 1] = '\0';
     optlines = readfile(config_file);
-    char cluster_run_mode[MAXPGPATH] = {0};
 
-    (void)find_guc_optval((const char**)optlines, "cluster_run_mode", cluster_run_mode);
+    (void)find_guc_optval((const char**)optlines, "ss_enable_dss", enable_dss);
 
-    /* this is not dorado cluster_standby, wo do not need to do anythiny else */
-    if(strncmp(cluster_run_mode, "cluster_standby", sizeof("cluster_standby")) != 0) {
+    /* this is not enable_dss, wo do not need to do anythiny else */
+    if(strcmp(enable_dss, "on") != 0) {
+        freefile(optlines);
+        optlines = NULL;
         return false;
     }
 
-    instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
-    instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", instance_config.dss.socketpath);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", (char*)instance_config.dss.vgname);
+    ss_instance_config.dss.enable_dss = true;
+    ss_instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
+    ss_instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", ss_instance_config.dss.socketpath);
+    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", ss_instance_config.dss.vgname);
+    (void)find_guc_optval((const char**)optlines, "ss_instance_id", inst_id);
+    ss_instance_config.dss.instance_id = atoi(inst_id);
+
+    (void)find_guc_optval((const char**)optlines, "ss_interconnect_url", interconnect_url);
+    ss_instance_config.dss.interNodeNum = ss_get_inter_node_nums(interconnect_url);
+
     freefile(optlines);
     optlines = NULL;
     return true;

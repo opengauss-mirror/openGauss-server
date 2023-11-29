@@ -31,6 +31,8 @@
 #include "access/ustore/undo/knl_uundoxlog.h"
 #include "access/ustore/knl_undorequest.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "access/multi_redo_api.h"
+#include "access/extreme_rto/page_redo.h"
 #include "gssignal/gs_signal.h"
 #include "knl/knl_thread.h"
 #include "storage/ipc.h"
@@ -42,6 +44,7 @@
 #include "utils/postinit.h"
 #include "utils/gs_bitmap.h"
 #include "pgstat.h"
+#include "access/ustore/knl_uvisibility.h"
 
 #define TRANS_PARTITION_LINEAR_SPARE_TIME(degree) \
     (degree > 3000 ? 3000 : degree)
@@ -368,7 +371,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
         if (undoRecycled) {
             Assert(TransactionIdIsValid(recycleXid) && (zone->GetRecycleXid() < recycleXid));
             zone->LockUndoZone();
-            if (!zone->CheckRecycle(startUndoPtr, endUndoPtr)) {
+            if (!zone->CheckRecycle(startUndoPtr, endUndoPtr, false)) {
                 ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d recycle start %lu >= recycle end %lu."),
                         zone->GetZoneId(), startUndoPtr, endUndoPtr)));
             }
@@ -528,6 +531,201 @@ static void RecycleWaitIfNotUsed()
     }
 }
 
+void exrto_standby_release_space(UndoZone *zone, TransactionId recycle_xid, UndoRecPtr start_undo_ptr,
+    UndoRecPtr end_undo_ptr, UndoSlotPtr recycle_exrto)
+{
+    UndoRecPtr oldest_end_undo_ptr = end_undo_ptr;
+    Assert(TransactionIdIsValid(recycle_xid) && (zone->get_recycle_xid_exrto() < recycle_xid));
+    zone->LockUndoZone();
+    if (!zone->CheckRecycle(start_undo_ptr, end_undo_ptr, true)) {
+        ereport(PANIC, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("zone %d recycle start %lu >= recycle end %lu."),
+            zone->GetZoneId(), start_undo_ptr, end_undo_ptr)));
+    }
+    if (IS_VALID_UNDO_REC_PTR(oldest_end_undo_ptr)) {
+        int start_zid = UNDO_PTR_GET_ZONE_ID(start_undo_ptr);
+        int end_zid = UNDO_PTR_GET_ZONE_ID(oldest_end_undo_ptr);
+        if (unlikely(start_zid != end_zid)) {
+            oldest_end_undo_ptr = MAKE_UNDO_PTR(start_zid, UNDO_LOG_MAX_SIZE);
+        }
+        zone->set_discard_urec_ptr_exrto(oldest_end_undo_ptr);
+    }
+
+    ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
+                     errmsg("exrto_standby_release_space: zone %d recycle_xid %lu recycle start "
+                            "%lu recycle end %lu recycle_tslot %lu.",
+                            zone->GetZoneId(), recycle_xid, start_undo_ptr, end_undo_ptr, recycle_exrto)));
+    zone->set_recycle_xid_exrto(recycle_xid);
+    zone->set_force_discard_urec_ptr_exrto(end_undo_ptr);
+    zone->set_recycle_tslot_ptr_exrto(recycle_exrto);
+    zone->UnlockUndoZone();
+    zone->ReleaseSpace(start_undo_ptr, end_undo_ptr, &g_forceRecycleSize);
+    zone->ReleaseSlotSpace(0, recycle_exrto, &g_forceRecycleSize);
+}
+
+bool is_undo_slot_exist(UndoSlotPtr slot_ptr)
+{
+    bool ret = false;
+    RelFileNode rnode;
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slot_ptr, UNDO_SLOT_DB_OID);
+    SMgrRelation reln = smgropen(rnode, InvalidBackendId);
+    if (smgrexists(reln, UNDO_FORKNUM, (BlockNumber)UNDO_PTR_GET_BLOCK_NUM(slot_ptr))) {
+        ret = true;
+    }
+    smgrclose(reln);
+    return ret;
+}
+
+bool exrto_standby_recycle_space(UndoZone *zone, TransactionId recycle_xmin)
+{
+    UndoSlotPtr recycle_exrto = zone->get_recycle_tslot_ptr_exrto();
+    UndoSlotPtr recycle_primary = zone->GetRecycleTSlotPtr();
+    undo::TransactionSlot *slot = NULL;
+    UndoRecPtr end_undo_ptr = INVALID_UNDO_REC_PTR;
+    TransactionId recycle_xid = InvalidTransactionId;
+    bool undo_recycled = false;
+    bool result = false;
+    UndoSlotPtr start = INVALID_UNDO_SLOT_PTR;
+    ereport(DEBUG1, (errmodule(MOD_UNDO),
+        errmsg(UNDOFORMAT("exrto_standby_recycle_space zone_id:%d, recycle_xmin:%lu, recycle_exrto:%lu, "
+            "recycle_primary:%lu."),
+            zone->GetZoneId(), recycle_xmin, recycle_exrto, recycle_primary)));
+ 
+    while (recycle_exrto < recycle_primary) {
+        uint64 start_segno = (uint)((UNDO_PTR_GET_OFFSET(recycle_exrto)) / UNDO_META_SEGMENT_SIZE);
+        uint64 end_segno = (uint)((UNDO_PTR_GET_OFFSET(recycle_exrto)) / UNDO_META_SEGMENT_SIZE + 1);
+        if (!is_undo_slot_exist(recycle_exrto)) {
+            zone->ForgetUndoBuffer(
+                start_segno * UNDO_META_SEGMENT_SIZE, end_segno * UNDO_META_SEGMENT_SIZE, UNDO_DB_OID);
+            ereport(WARNING,
+                (errmodule(MOD_UNDO),
+                    errmsg(UNDOFORMAT("exrto_standby_recycle_space zone_id:%d, recycle_xmin:%lu, recycle_exrto:%lu, "
+                                      "recycle_primary:%lu, undo slot not exist."),
+                        zone->GetZoneId(),
+                        recycle_xmin,
+                        recycle_exrto,
+                        recycle_primary)));
+            recycle_exrto = GetNextSlotPtr(recycle_exrto);
+            continue;
+        }
+
+        UndoSlotBuffer& slot_buf = g_slotBufferCache->FetchTransactionBuffer(recycle_exrto);
+        UndoRecPtr start_undo_ptr = INVALID_UNDO_REC_PTR;
+        start = recycle_exrto;
+        slot_buf.PrepareTransactionSlot(recycle_exrto);
+        undo_recycled = false;
+        Assert(slot_buf.BufBlock() == UNDO_PTR_GET_BLOCK_NUM(recycle_exrto));
+        while (slot_buf.BufBlock() == UNDO_PTR_GET_BLOCK_NUM(recycle_exrto) && (recycle_exrto < recycle_primary)) {
+            slot = slot_buf.FetchTransactionSlot(recycle_exrto);
+            if (!TransactionIdIsValid(slot->XactId())) {
+                break;
+            }
+            if (slot->StartUndoPtr() == INVALID_UNDO_REC_PTR) {
+                break;
+            }
+ 
+            if (TransactionIdFollowsOrEquals(slot->XactId(), recycle_xmin)) {
+                break;
+            }
+            ereport(DEBUG1, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("recycle zone %d, exrto transaction slot %lu xid %lu start ptr %lu end ptr %lu."),
+                    zone->GetZoneId(), recycle_exrto, slot->XactId(),
+                    slot->StartUndoPtr(), slot->EndUndoPtr())));
+            if (!start_undo_ptr) {
+                start_undo_ptr = slot->StartUndoPtr();
+            }
+            end_undo_ptr = slot->EndUndoPtr();
+            recycle_xid = slot->XactId();
+            undo_recycled = true;
+            recycle_exrto = GetNextSlotPtr(recycle_exrto);
+            /* if next recycle_exrto is in different slot_buf, release current slot_buf. */
+            if (slot_buf.BufBlock() != UNDO_PTR_GET_BLOCK_NUM(recycle_exrto)) {
+                g_slotBufferCache->RemoveSlotBuffer(start);
+                slot_buf.Release();
+            }
+        }
+        if (undo_recycled) {
+            exrto_standby_release_space(zone, recycle_xid, start_undo_ptr, end_undo_ptr, recycle_exrto);
+            result = true;
+        } else {
+            /* zone has nothing to recycle. */
+            break;
+        }
+    }
+    return result;
+}
+ 
+bool exrto_standby_recycle_undo_zone()
+{
+    uint32 idx = 0;
+    bool recycled = false;
+    if (g_instance.undo_cxt.uZoneCount == 0 || g_instance.undo_cxt.uZones == NULL) {
+        return recycled;
+    }
+    TransactionId recycle_xmin = exrto_calculate_recycle_xmin_for_undo();
+    for (idx = 0; idx < PERSIST_ZONE_COUNT && !t_thrd.undorecycler_cxt.shutdown_requested; idx++) {
+        UndoZone *zone = (UndoZone *)g_instance.undo_cxt.uZones[idx];
+        if (zone == NULL) {
+            continue;
+        }
+        if (zone->Used_exrto()) {
+            if (exrto_standby_recycle_space(zone, recycle_xmin)) {
+                recycled = true;
+            }
+        }
+    }
+    smgrcloseall();
+    return recycled;
+}
+ 
+/* recycle residual_undo_file which may be leftover by exrto read in standby */
+void exrto_recycle_residual_undo_file(char *FuncName)
+{
+    uint32 idx = 0;
+    uint64 record_file_cnt = 0;
+    uint64 slot_file_cnt = 0;
+    (void)LWLockAcquire(ExrtoRecycleResidualUndoLock, LW_EXCLUSIVE);
+    if (g_instance.undo_cxt.is_exrto_residual_undo_file_recycled) {
+        LWLockRelease(ExrtoRecycleResidualUndoLock);
+        ereport(LOG, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file skip, FuncName:%s."), FuncName)));
+        return;
+    }
+    g_instance.undo_cxt.is_exrto_residual_undo_file_recycled = true;
+    LWLockRelease(ExrtoRecycleResidualUndoLock);
+    ereport(LOG, (errmodule(MOD_UNDO),
+        errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file begin uZoneCount is %u, FuncName:%s."),
+            g_instance.undo_cxt.uZoneCount, FuncName)));
+    if (g_instance.undo_cxt.uZoneCount == 0 || g_instance.undo_cxt.uZones == NULL) {
+        g_instance.undo_cxt.is_exrto_residual_undo_file_recycled = true;
+        ereport(LOG, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file uZoneCount is zero or uZones is null."))));
+        return;
+    }
+    for (idx = 0; idx < PERSIST_ZONE_COUNT && !t_thrd.undorecycler_cxt.shutdown_requested; idx++) {
+        UndoZone *zone = (UndoZone *)g_instance.undo_cxt.uZones[idx];
+        if (zone == NULL) {
+            continue;
+        }
+        record_file_cnt += zone->release_residual_record_space();
+        slot_file_cnt += zone->release_residual_slot_space();
+    }
+    smgrcloseall();
+    ereport(LOG, (errmodule(MOD_UNDO),
+        errmsg(UNDOFORMAT("exrto_recycle_residual_undo_file release record_file_cnt:%lu, "
+            "slot_file_cnt:%lu."), record_file_cnt, slot_file_cnt)));
+}
+ 
+void recycle_wait(bool recycled, uint64 *non_recycled)
+{
+    if (!recycled) {
+        *non_recycled += UNDO_RECYCLE_TIMEOUT_DELTA;
+        WaitRecycleThread(*non_recycled);
+    } else {
+        *non_recycled = 0;
+    }
+}
+
 void UndoRecycleMain() 
 {
     sigjmp_buf localSigjmpBuf;
@@ -641,12 +839,24 @@ void UndoRecycleMain()
     pg_usleep(10000000L);
     ereport(LOG, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("sleep 10s, ensure  the snapcapturer can give the undorecyclemain a valid recycleXmin."))));
+    exrto_recycle_residual_undo_file("recycle_main");
+    t_thrd.undorecycler_cxt.is_recovery_in_progress = RecoveryInProgress();
     while (true) {
         if (t_thrd.undorecycler_cxt.got_SIGHUP) {
             t_thrd.undorecycler_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
         }
-        if (!RecoveryInProgress()) {
+        if (t_thrd.undorecycler_cxt.shutdown_requested) {
+            ShutDownRecycle(recycleMaxXIDs);
+        }
+        bool is_in_progress = RecoveryInProgress();
+        if (is_in_progress != t_thrd.undorecycler_cxt.is_recovery_in_progress) {
+            ereport(LOG, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("recycle_main: stop undo recycler because recovery_in_progress change "
+                    "from %u to %u."), t_thrd.undorecycler_cxt.is_recovery_in_progress, is_in_progress)));
+            ShutDownRecycle(recycleMaxXIDs);
+        }
+        if (!t_thrd.undorecycler_cxt.is_recovery_in_progress) {
             TransactionId recycleXmin = InvalidTransactionId;
             TransactionId oldestXmin = GetOldestXminForUndo(&recycleXmin);
             if (!TransactionIdIsValid(recycleXmin) ||
@@ -751,15 +961,10 @@ void UndoRecycleMain()
                     pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, oldestXidHavingUndo);
                 }
             }
-            if (!recycled) {
-                nonRecycled += UNDO_RECYCLE_TIMEOUT_DELTA;
-                WaitRecycleThread(nonRecycled);
-            } else {
-                nonRecycled = 0;
-            }
-        } else {
-            WaitRecycleThread(nonRecycled);
+        } else if (IS_EXRTO_STANDBY_READ) {
+            recycled = exrto_standby_recycle_undo_zone();
         }
+        recycle_wait(recycled, &nonRecycled);
     }
     ShutDownRecycle(recycleMaxXIDs);
 }

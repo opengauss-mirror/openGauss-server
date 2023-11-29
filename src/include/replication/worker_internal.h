@@ -46,6 +46,8 @@ typedef struct LogicalRepWorker
     TimestampTz last_recv_time;
     XLogRecPtr reply_lsn;
     TimestampTz reply_time;
+
+    bool needCheckConflict;
 } LogicalRepWorker;
 
 typedef struct ApplyLauncherShmStruct {

@@ -1264,5 +1264,16 @@ set enable_bitmapscan = off;
 explain (costs off) UPDATE ro_view1 SET a = a + b;
 UPDATE ro_view1 SET a = a + b;
 
+create table default_t (a int, b varchar default 'table default');
+insert into default_t values (1, 'dec');
+create view default_v as select b, a from default_t;
+
+update default_v set b = default where a = 1;
+select * from default_v;
+
+alter view default_v alter column b set default 'view default';
+update default_v set b = default where a = 1;
+select * from default_v;
+
 \c regression
 drop database updatable_views_db;

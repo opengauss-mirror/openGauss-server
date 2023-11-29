@@ -450,9 +450,9 @@ pgFileCompareRelPathWithExternal(const void *f1, const void *f2)
     res = strcmp(f1p->rel_path, f2p->rel_path);
     if (res == 0)
     {
-        if (f1p->external_dir_num > f2p->external_dir_num)
+        if (f1p->external_dir_num > f2p->external_dir_num || f1p->type > f2p->type)
             return 1;
-        else if (f1p->external_dir_num < f2p->external_dir_num)
+        else if (f1p->external_dir_num < f2p->external_dir_num || f1p->type < f2p->type)
             return -1;
         else
             return 0;
@@ -691,16 +691,21 @@ dir_check_file(pgFile *file, bool backup_logs, bool backup_replslots)
         Oid tblspcOid;
         char    tmp_rel_path[MAXPGPATH];
 
+        if (in_tablespace && IsDssMode())
+            return CHECK_FALSE;
         /*
         * Valid path for the tablespace is
         * pg_tblspc/tblsOid/TABLESPACE_VERSION_DIRECTORY
         */
-        if (!path_is_prefix_of_path(PG_TBLSPC_DIR, file->rel_path))
-            return CHECK_FALSE;
-        sscanf_res = sscanf_s(file->rel_path, PG_TBLSPC_DIR "/%u/%s",
+        if (!IsDssMode())
+        {
+            if (!in_tablespace)
+                return CHECK_FALSE;
+            sscanf_res = sscanf_s(file->rel_path, PG_TBLSPC_DIR "/%u/%s",
                                         &tblspcOid, tmp_rel_path, MAXPGPATH);
-        if (sscanf_res == 0)
-            return CHECK_FALSE;
+            if (sscanf_res == 0)
+                return CHECK_FALSE;
+        }
     }
 
     /* skip other instance files in dss mode */
@@ -760,7 +765,7 @@ static char check_in_dss(pgFile *file, int include_id)
 
 static char check_in_tablespace(pgFile *file, bool in_tablespace)
 {
-if (in_tablespace)
+    if (in_tablespace)
     {
         int  sscanf_res;
         char tmp_rel_path[MAXPGPATH];
@@ -1235,7 +1240,7 @@ opt_externaldir_map(ConfigOption *opt, const char *arg)
  */
 void
 create_data_directories(parray *dest_files, const char *data_dir, const char *backup_dir,
-                                                bool extract_tablespaces, bool incremental, fio_location location)
+                                                bool extract_tablespaces, bool incremental, fio_location location, bool is_restore)
 {
     size_t     i = 0;
     parray      *links = NULL;
@@ -1312,10 +1317,19 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
         if (dir->external_dir_num != 0)
             continue;
 
-        if (is_dss_type(dir->type) && is_ss_xlog(dir->rel_path)) {
-            ss_createdir(dir->rel_path, instance_config.dss.vgdata, 
-                         instance_config.dss.vglog);
-            continue;
+        if (is_dss_type(dir->type) && is_restore) {
+            if (is_ss_xlog(dir->rel_path)) {
+                ss_createdir(dir->rel_path, instance_config.dss.vgdata, instance_config.dss.vglog);
+                continue;
+            }
+
+            if (ss_create_if_doublewrite(dir, instance_config.dss.vgdata, instance_config.dss.instance_id)) {
+                continue;
+            }
+
+            if (ss_create_if_pg_replication(dir, instance_config.dss.vgdata, instance_config.dss.vglog)) {
+                continue;
+            }
         }
 
         /* tablespace_map exists */
@@ -1339,7 +1353,7 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
                 {
                     const char *linked_path = get_tablespace_mapping((*link)->linked);
 
-                    if (!is_absolute_path(linked_path))
+                    if (!is_absolute_path(linked_path) && !ss_is_absolute_path(linked_path))
                         elog(ERROR, "Tablespace directory is not an absolute path: %s\n",
                             linked_path);
 
@@ -1490,7 +1504,7 @@ check_tablespace_mapping(pgBackup *backup, bool incremental, bool *tblspaces_are
                 break;
             }
 
-        if (!is_absolute_path(linked_path))
+        if (!is_absolute_path(linked_path) && !ss_is_absolute_path(linked_path))
             elog(ERROR, "tablespace directory is not an absolute path: %s\n",
                 linked_path);
 
@@ -1542,6 +1556,9 @@ check_external_dir_mapping(pgBackup *backup, bool incremental)
 
             if (strcmp(cell->old_dir, external_dir) == 0)
             {
+                if (is_dss_file(cell->new_dir))
+                    elog(ERROR, "New external directory path \"%s\" "
+                        "contains dss path, which is not allow.", cell->new_dir);
                 /* Swap new dir name with old one, it is used by 2-nd step */
                 parray_set(external_dirs_to_restore, i,
                    pgut_strdup(cell->new_dir));
@@ -1957,7 +1974,7 @@ make_external_directory_list(const char *colon_separated_dirs, bool remap)
         char    *external_path = pg_strdup(p);
 
         canonicalize_path(external_path);
-        if (is_absolute_path(external_path))
+        if (is_absolute_path(external_path) || ss_is_absolute_path(external_path))
         {
             if (remap)
             {

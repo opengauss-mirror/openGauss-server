@@ -160,6 +160,15 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
 #include "executor/node/nodeTrainModel.h"
+#ifdef USE_SPQ
+#include "executor/node/nodeSpqSeqscan.h"
+#include "executor/node/nodeAssertOp.h"
+#include "executor/node/nodeShareInputScan.h"
+#include "executor/node/nodeSequence.h"
+#include "executor/node/nodeSpqIndexscan.h"
+#include "executor/node/nodeSpqIndexonlyscan.h"
+#include "executor/node/nodeSpqBitmapHeapscan.h"
+#endif
 #define NODENAMELEN 64
 static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
 static TupleTableSlot *ExecProcNodeInstr(PlanState *node);
@@ -253,6 +262,9 @@ static inline bool BmHeapScanNodeIsStub(BitmapHeapScanState* bm_heap_scan)
 PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
 {
     switch (nodeTag(node)) {
+#ifdef USE_SPQ
+        case T_Result:
+#endif
         case T_BaseResult:
             return (PlanState*)ExecInitResult((BaseResult*)node, estate, eflags);
         case T_ProjectSet:
@@ -273,6 +285,42 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitBitmapOr((BitmapOr*)node, estate, eflags);
         case T_SeqScan:
             return (PlanState*)ExecInitSeqScan((SeqScan*)node, estate, eflags);
+#ifdef USE_SPQ
+        case T_SpqSeqScan:
+            if (init_spqscan_hook) {
+                return (PlanState*)init_spqscan_hook((SpqSeqScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqscan hook init_spqscan_hook uninited.")));
+            }
+	    case T_AssertOp:
+ 		    return (PlanState *) ExecInitAssertOp((AssertOp *) node, estate, eflags);
+        case T_ShareInputScan:
+            return (PlanState *)ExecInitShareInputScan((ShareInputScan *)node, estate, eflags);
+        case T_Sequence:
+            return (PlanState *)ExecInitSequence((Sequence *)node, estate, eflags);
+        case T_SpqIndexScan:
+            if (init_indexscan_hook) {
+                return (PlanState*)init_indexscan_hook((SpqIndexScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqindexscan hook init_spqindexscan_hook uninited.")));
+            }
+        case T_SpqIndexOnlyScan:
+            if (init_indexonlyscan_hook) {
+                return (PlanState*)init_indexonlyscan_hook((SpqIndexOnlyScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqindexonlyscan hook init_spqindexonlyscan_hook uninited.")));
+            }
+        case T_SpqBitmapHeapScan:
+            if (init_bitmapheapscan_hook) {
+                return (PlanState*)init_bitmapheapscan_hook((SpqBitmapHeapScan*)node, estate, eflags);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqbitmapheapscan hook init_spqbitmapheapscan_hook uninited.")));
+            }
+#endif
         case T_IndexScan:
             return (PlanState*)ExecInitIndexScan((IndexScan*)node, estate, eflags);
         case T_IndexOnlyScan:
@@ -556,7 +604,23 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
             result->instrument = InstrAlloc(1, estate->es_instrument);
         }
 #else
-        if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
+        if (IS_SPQ_RUNNING) {
+            if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
+                IS_SPQ_COORDINATOR && StreamTopConsumerAmI()) {
+                /* on compute pool */
+                result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
+                    node->plan_node_id, node->parent_node_id, result->plan, estate);
+            } else if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
+                (IS_SPQ_EXECUTOR ||
+                IS_SPQ_COORDINATOR && node->exec_type == EXEC_ON_COORDS)) {
+                /* plannode(exec on cn)or dn */
+                result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
+                    node->plan_node_id, node->parent_node_id, result->plan, estate);
+            } else {
+                result->instrument = InstrAlloc(1, estate->es_instrument);
+            }
+        }
+        else if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
             (!StreamTopConsumerAmI() ||
             u_sess->instr_cxt.global_instr->get_planIdOffsetArray()[node->plan_node_id - 1] == 0)) {
             result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
@@ -1047,6 +1111,27 @@ static void ExecEndNodeByType(PlanState* node)
         case T_SeqScanState:
             ExecEndSeqScan((SeqScanState*)node);
             break;
+#ifdef USE_SPQ
+        case T_SpqSeqScanState:
+            if (end_spqscan_hook) {
+                end_spqscan_hook((SpqSeqScanState*)node);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("spqscan hook init_spqscan_hook uninited.")));
+            }
+            break;
+ 
+        case T_AssertOpState:
+            ExecEndAssertOp((AssertOpState *) node);
+            break;
+ 
+        case T_ShareInputScanState:
+            ExecEndShareInputScan((ShareInputScanState *) node);
+            break;
+ 
+        case T_SequenceState:
+            ExecEndSequence((SequenceState *) node);
+            break;
+#endif
         case T_CStoreScanState:
             ExecEndCStoreScan((CStoreScanState*)node, false);
             break;

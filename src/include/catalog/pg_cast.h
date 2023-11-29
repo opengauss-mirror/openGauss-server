@@ -202,19 +202,22 @@ DATA(insert (	16	1700	6433 i f _null_));
 DATA(insert (	23	1042 3192 i f _null_));
 
 /* numeric ->interval */
-DATA(insert (	1700	1186 3842 i f _null_));
+DATA(insert (	1700	1186 4226 i f _null_));
 
 /* float8-> interval */
-DATA(insert (   701         1186 4229 i f _null_));
+DATA(insert (   701         1186 4230 i f _null_));
 
 /* int1 ->interval */
-DATA(insert (	5545	1186 3189 i f _null_));
+DATA(insert (	5545	1186 4223 i f _null_));
 
 /* int2 ->interval */
-DATA(insert (	21	1186 3190 i f _null_));
+DATA(insert (	21	1186 4224 i f _null_));
 
 /* int4 ->interval */
-DATA(insert (	23	1186 3191 i f _null_));
+DATA(insert (	23	1186 4225 i f _null_));
+
+/* text ->interval */
+DATA(insert ( 25 1186 4211 i f _null_));
 
 /*
  * OID category: allow implicit conversion from any integral type (including

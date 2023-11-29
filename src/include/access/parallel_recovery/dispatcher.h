@@ -64,6 +64,7 @@ typedef struct LogDispatcher {
     uint64 pprCostTime;
     uint32 maxItemNum;
     uint32 curItemNum;
+    TimestampTz lastDispatchTime; /* last time we dispatch record list to works */
 
     uint32* chosedWorkerIds;
     uint32 chosedWorkerCount;
@@ -75,6 +76,7 @@ typedef struct LogDispatcher {
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoTimeCost *startupTimeCost;
     DispatchFix dispatchFix;
+    bool full_sync_dispatch;
 } LogDispatcher;
 
 extern LogDispatcher* g_dispatcher;
@@ -121,7 +123,7 @@ uint32 GetWorkerId(const RelFileNode& node, BlockNumber block, ForkNumber forkNu
 XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState = false);
 void FreeAllocatedRedoItem();
 void GetReplayedRecPtrFromWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
-void GetReplayedRecPtrFromWorkers(XLogRecPtr *endPtr);
+void GetReplayingRecPtrFromWorkers(XLogRecPtr *endPtr);
 void GetReplayedRecPtrFromUndoWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 List* CheckImcompleteAction(List* imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
@@ -140,7 +142,7 @@ extern void CopyDataFromOldReader(XLogReaderState *newReaderState, XLogReaderSta
 
 bool TxnQueueIsEmpty(TxnRedoWorker* worker);
 void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
-
+bool in_full_sync_dispatch(void);
 }
 
 #endif

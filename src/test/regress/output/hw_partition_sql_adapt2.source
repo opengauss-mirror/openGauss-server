@@ -960,9 +960,9 @@ comment on column test_comment.a is 'a is a column of test_comment';
 --------+---------+-----------+---------+--------------+-------------------------------
  a      | integer |           | plain   |              | a is a column of test_comment
 Indexes:
-    "test_comment_index" btree (a) LOCAL(PARTITION test_comment_p1_a_idx, PARTITION test_comment_p2_a_idx, PARTITION test_comment_p3_a_idx)  TABLESPACE pg_default
-Range partition by(a)
-Number of partition: 3 (View pg_partition to check each partition range.)
+    "test_comment_index" btree (a) LOCAL TABLESPACE pg_default
+Partition By RANGE(a)
+Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
@@ -1061,9 +1061,9 @@ drop user temp_user;
 drop table test_partition_foreign_key;
 ----------------------
 -- test alter table set tablespace on ordinary table
-\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
-\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
-create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+\! rm -fr '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+\! mkdir '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '/data2/jiangyan/openGauss-server/src/test/regress/testtablespace/hw_partition_sql_adapt_ts1';
 create table test_tablespace (a int) tablespace hw_partition_sql_adapt_ts1;
 select tablename, tablespace from pg_tables where tablename = 'test_tablespace';
     tablename    |         tablespace         

@@ -5,6 +5,7 @@ export LD_LIBRARY_PATH=${GAUSSHOME}/lib:${GAUSSHOME}/add-ons:$LD_LIBRARY_PATH
 curr_path=`dirname $(readlink -f $0)`
 curr_filename=`basename $(readlink -f $0)`
 os_user=`whoami`
+
 file_user=`ls -l ${curr_path}"/${curr_filename}" | awk '{print $3}'`
 
 if [ ${file_user} != ${os_user} ]; then
@@ -12,7 +13,10 @@ if [ ${file_user} != ${os_user} ]; then
     exit 1
 fi 
 
-GSDB_BIN=${GAUSSHOME}/bin/gaussdb
+GSDB_BIN=gaussdb
+GSDB_BIN_FULL=${GAUSSHOME}/bin/gaussdb
+DSS_BIN=dssserver
+DSS_BIN_FULL=${GAUSSHOME}/bin/dssserver
 BIN_PATH=${GAUSSHOME}/bin
 SCRIPT_NAME=$0
 
@@ -45,7 +49,7 @@ fi
 log()
 {
     time=`date "+%Y-%m-%d %H:%M:%S"`
-    echo "$time $1"
+    echo "[$time][DSS]$1" >> ${startdss_log} 2>&1
 }
 
 assert_empty()
@@ -57,15 +61,41 @@ assert_nonempty()
 {
     if [[ -z ${2} ]]
     then
-        log "The ${1} parameter is empty."
+        log "[SCRIPT]The ${1} parameter is empty."
         exit 1
     fi
 }
 
 program_pid()
 {
-    pid=`ps -f f -u \`whoami\` | grep ${1} | grep ${2} | grep -v grep | grep -v ${SCRIPT_NAME} | awk '{print $2}'`
+    pid=`ps -f f -u \`whoami\` | grep -w ${1} | grep ${2} | grep -v grep | grep -v ${SCRIPT_NAME} | awk '{print $2}' | tail -1`
     echo ${pid}
+}
+
+program_pid2()
+{
+    pid=`ps -f f -u \`whoami\` | grep -w ${1} | grep -v grep | grep -v ${SCRIPT_NAME} | awk '{print $2}'`
+    echo ${pid}
+}
+
+program_status()
+{
+    pid=`program_pid $1 $2`
+    if [[ -z ${pid} ]]; then
+        echo ""
+        return
+    fi
+
+    pstatus_file="/proc/"${pid}"/status"
+    cat ${pstatus_file} | while read line
+    do
+        if [[ "${line}" =~ ^State.* ]]; then
+            echo ${line} | awk -F ":" '{print $2}' | awk -F " " '{print $1}'
+            return
+        fi
+    done
+
+    echo ""
 }
 
 kill_program()
@@ -75,39 +105,30 @@ kill_program()
     pid=`program_pid $1 $2`
     if [[ -z ${pid} ]]
     then
-        log "${1} is already dead."
+        log "[KILL]${1} is already dead."
         return
     fi
 
     kill -9 ${pid}
-    sleep 3
-    ps -f -p "${pid}" | grep ${1}
-    if [ $? = 0 ]
+    if [ $? -ne 0 ]
     then
-        log "ERROR! ${1} with pid:${pid} is not killed..."
-        exit 0
-    fi
-}
-
-check_dss_start()
-{
-    started=0
-    for (( i=1; i<30; i++ ))
-    do
-        pid=`program_pid dssserver ${1}`
-        if [[ ! -z ${pid} ]]
-        then
-            started=1
-            break
-        fi
-        sleep 1
-    done
-
-    if [[ ${started} -eq 0 ]]
-    then
-        log "ERROR! start dssserver in dir ${1} failed"
+        log "[KILL]ERROR! ${1} with pid:${pid} is not killed..."
         exit 1
     fi
+    for ((i=0; i < 30; i++))
+    do
+        ps -f -p "${pid}" | grep ${1}
+        if [ $? -eq 0 ]
+        then
+            sleep 0.1
+        else
+            log "[KILL]SUCCESS!"
+            return
+        fi
+    done
+
+    log "[KILL]ERROR! ${1} with pid:${pid} is not killed..."
+    exit 1
 }
 
 function clear_script_log
@@ -119,13 +140,13 @@ function clear_script_log
     if [ -L ${_log_dir} ]; then
         typeset log_num=`find -L "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | wc -l`
         if [ ${log_num} -ge ${_max_log_backup} ];then
-            find -L "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | xargs ls -t {} 2>/dev/null | tail -n $(expr ${log_num} - ${_max_log_backup}) | xargs -i rm -f {}
+            find -L "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | xargs ls -t {} 2>/dev/null | tail -n $(expr ${log_num} - ${_max_log_backup}) | xargs -i rm -f {} 
         fi
     else
-        typeset log_num=$(find "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | wc -l)
+        typeset log_num=`find -L "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | wc -l`
         if [ ${log_num} -ge ${_max_log_backup} ];then
-            find "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | xargs ls -t {} 2>/dev/null | tail -n $(expr ${log_num} - ${_max_log_backup}) | xargs -i rm -f {}
-        fi
+            find "${_log_dir}" -maxdepth 1 -type f -name "${_log_name}*" | xargs ls -t {} 2>/dev/null | tail -n $(expr ${log_num} - ${_max_log_backup}) | xargs -i rm -f {} 
+        fi   
     fi
 }
 
@@ -140,7 +161,7 @@ check_log_file()
     log_file_size=$(ls -l ${log_file} |awk '{print $5}')
     if [ -f ${log_file} ];then
         if [ ${log_file_size} -ge ${MAX_LOG_SIZE} ];then
-            mv -f ${log_file} "${log_path}/${operation}-`date +%Y-%m-%d_%H%M%S`.log" 2>/dev/null
+            mv -f ${log_file} "${log_path}/${operation} - `date +%Y-%m-%d_%H%M%S`.log" 2>/dev/null
             clear_script_log "${log_path}" "${operation}-" $MAX_LOG_BACKUP
         fi
     fi
@@ -152,6 +173,7 @@ touch_logfile()
     if [ ! -f $log_file ]
     then
         touch $log_file
+        chmod 600 $log_file
     fi
 }
 
@@ -165,32 +187,48 @@ INSTANCE_ID=${2}
 export DSS_HOME=${3}
 GSDB_HOME=${4}
 CONN_PATH=UDS:${DSS_HOME}/.dss_unix_d_socket
+startdss_log=${DSS_HOME}/startdss.log
 
 function check_dss_config()
 {
-    log "Checking dss_inst.ini before start dss..."
+    log "[START]Checking dss_inst.ini before start dss..."
     if [[ ! -e ${DSS_HOME}/cfg/dss_inst.ini ]]
     then
-        log "${DSS_HOME}/cfg/dss_inst.ini must exist"
+        log "[START]${DSS_HOME}/cfg/dss_inst.ini must exist"
         exit 1
     fi
 
-    log "Checking dss_vg_conf.ini before start dss..."
+    log "[START]Checking dss_vg_conf.ini before start dss..."
     if [[ ! -e ${DSS_HOME}/cfg/dss_vg_conf.ini ]]
     then
-        log "${DSS_HOME}/cfg/dss_vg_conf.ini must exist"
+        log "[START]${DSS_HOME}/cfg/dss_vg_conf.ini must exist"
         exit 1
     fi
 
-    LSNR_PATH=`awk '/LSNR_PATH/{print}' ${DSS_HOME}/cfg/dss_inst.ini | awk -F= '{print $2}' | xargs`
+    LSNR_PATH=`cat ${DSS_HOME}/cfg/dss_inst.ini | sed s/[[:space:]]//g |grep -Eo "^LSNR_PATH=.*" | awk -F '=' '{print $2}'`
     if [[ -z ${LSNR_PATH} ]]
     then
-        log "can't find lsnr path. Aborting."
+        log "[START]can't find lsnr path. Aborting."
         exit 1
     fi
     CONN_PATH=UDS:${LSNR_PATH}/.dss_unix_d_socket
 }
 
+get_startdss_log()
+{
+    LOG_HOME=`cat ${DSS_HOME}/cfg/dss_inst.ini | sed s/[[:space:]]//g |grep -Eo "^LOG_HOME=.*" | awk -F '=' '{print $2}'`
+    if [[ ! -z ${LOG_HOME} ]]
+    then
+        startdss_log=${LOG_HOME}/startdss.log
+    fi
+
+    if [[ -z ${DSS_HOME} ]]
+    then
+        startdss_log=/dev/null
+    else
+        touch_logfile $startdss_log
+    fi
+}
 function ScandCheck()
 {
     groups=`groups`
@@ -209,49 +247,52 @@ function ScandCheck()
     done
 }
 
+kill_dss_and_perctrl()
+{
+    pid=$(program_pid dssserver ${DSS_HOME})
+    if [[ -z ${pid} ]]
+    then
+        log "[${1}]dssserver not exist."
+    fi
+    kill_program dssserver ${DSS_HOME}
+    log "[${1}]Success to kill dssserver."
+
+    pid=$(program_pid2 perctrl)
+    for perctrl_pid in ${pid}
+    do
+        if [[ -z ${perctrl_pid} ]]
+        then
+            log "[${1}]perctrl not exist."
+        fi
+        kill_program ${perctrl_pid} perctrl
+        log "[${1}]kill perctrl ${perctrl_pid} success."
+    done
+}
+
 # 1st step: if database exists, kill it
 # 2nd step: if dssserver no exists, start it
 function Start()
 {
     check_dss_config
-
-    startdss_log=${DSS_HOME}/startdss.log
-    db_start_log=${GSDB_HOME}/DBstart.log
     check_log_file ${DSS_HOME} $startdss_log startdss
-    check_log_file ${GSDB_HOME} $db_start_log DBstart
-    if [[ -z "${DSS_HOME}" ]]
-    then
-        startdss_log=/dev/null
-    else
-        touch_logfile $startdss_log
-        chmod 600 $startdss_log
-    fi
-
-    if [[ -z "${GSDB_HOME}" ]]
-    then
-        db_start_log=/dev/null
-    else
-        touch_logfile $db_start_log
-        chmod 600 $db_start_log
-    fi
-
-    pid=`program_pid dssserver ${DSS_HOME}`
+    pid=`program_pid ${DSS_BIN_FULL} ${DSS_HOME}`
     if [[ ! -z ${pid} ]]
     then
-        log "dssserver already started in dir ${DSS_HOME}..."
+        log "[START]dssserver already started in dir ${DSS_HOME}..."
     else
-        log "Starting dssserver..."
-        pid=`program_pid ${GSDB_BIN} ${GSDB_HOME}`
+        log "[START]Starting dssserver..."
+        pid=`program_pid ${GSDB_BIN_FULL} ${GSDB_HOME}`
         if [[ ! -z ${pid} ]]
         then
-            kill_program ${GSDB_BIN} ${GSDB_HOME}
+            log "[START]kill ${GSDB_BIN} before start dssserver"
+            kill_program ${GSDB_BIN_FULL} ${GSDB_HOME}
         else
-            log "${GSDB_BIN} is offline in dir ${GSDB_HOME}..."
+            log "[START]${GSDB_BIN} is offline in dir ${GSDB_HOME}..."
         fi
+        log "[START]dssserver"
         ScandCheck
-        nohup dssserver -D ${DSS_HOME} >> ${startdss_log} 2>&1  &
-        check_dss_start ${DSS_HOME}
-        log "start dss in ${DSS_HOME} success."
+        nohup ${DSS_BIN_FULL} -D ${DSS_HOME} >> ${startdss_log} 2>&1  &
+        log "[START]start dssserver in ${DSS_HOME} is starting."
     fi
 }
 
@@ -262,94 +303,71 @@ function Start()
 # 5rd step: if fail to stop dssserver in 2nd step, then kill dssserver
 function Stop()
 {
-    log "stop ${GSDB_BIN}..."
+    check_log_file ${DSS_HOME} $startdss_log startdss
+
+    log "[STOP]stop ${GSDB_BIN}..."
     db_flag_file=instance_manual_start_$(expr $INSTANCE_ID + 6001)
-    echo "db_flag_file=$db_flag_file"
+    log "[STOP]db_flag_file=$db_flag_file"
 
     if [[ -f $GAUSSHOME/bin/$db_flag_file ]];
     then
-        log "$GAUSSHOME/bin/$db_flag_file is exist"
+        log "[STOP]$GAUSSHOME/bin/$db_flag_file is exist"
     else
         touch $GAUSSHOME/bin/$db_flag_file
     fi
 
-    pid=$(program_pid ${GSDB_BIN} ${GSDB_HOME})
-    if [[ -z ${pid} ]]
+    pid=$(program_pid ${GSDB_BIN_FULL} ${GSDB_HOME})
+    if [[ ! -z ${pid} ]]
     then
-        log "stop dssserver if running..."
-        nohup dsscmd stopdss -U ${CONN_PATH} >> /dev/null 2>&1
-        sleep 2
-
-        pid=`program_pid dssserver ${DSS_HOME}`
-        if [[ -z ${pid} ]]
-        then
-            log "dssserver stopped in dir ${DSS_HOME}..."
-            exit 0
-        fi
-        log "Killing dssserver if running..."
-        kill_program dssserver ${DSS_HOME}
-    else
-        log "stop ${GSDB_BIN}..."
-        ${BIN_PATH}/gs_ctl stop -D ${GSDB_HOME}
-        sleep 5
-
-        pid=`program_pid ${GSDB_BIN} ${GSDB_HOME}`
-        if [[ -z ${pid} ]]
-        then
-            log "${GSDB_BIN} stopped in dir ${GSDB_HOME}..."
-        else
-            log "Killing ${GSDB_BIN} if running..."
-            kill_program ${GSDB_BIN} ${GSDB_HOME}
-        fi
-
-        log "stop dssserver if running..."
-        nohup dsscmd stopdss -U ${CONN_PATH} >> /dev/null 2>&1
-        sleep 2
-        pid=`program_pid dssserver ${DSS_HOME}`
-        if [[ -z ${pid} ]]
-        then
-            log "dssserver stopped in dir ${DSS_HOME}..."
-            exit 0
-        fi
-        log "Killing dssserver if running..."
-        kill_program dssserver ${DSS_HOME}
+        log "[STOP] kill ${GSDB_BIN} before stop dssserver"
+        kill_program ${GSDB_BIN_FULL} ${GSDB_HOME}
     fi
+
+    kill_dss_and_perctrl "STOP"
 }
 
 # 1st step: check dssserver if exists
+
+
+
 function Check()
 {
-    pid=$(program_pid dssserver ${DSS_HOME})
-    if [[ -z ${pid} ]]
+    dss_status=$(program_status dssserver ${DSS_HOME})
+    if [[ -z ${dss_status} ]]
     then
-        log "check dssserver in ${DSS_HOME} fail."
+        log "[CHECK]dssserver is offline."
         exit 1
     fi
+    if [[ "${dss_status}" == "D" || "${dss_status}" == "T" || "${dss_status}" == "Z" ]]
+    then
+        log "[CHECK]dssserver is dead."
+        exit 3
+    fi
 
-    log "check dss in ${DSS_HOME} success."
+    pid=$(program_pid2 perctrl)
+    for perctrl_pid in ${pid}
+    do
+        perctrl_status=$(program_status ${perctrl_pid} perctrl)
+        if [[ "${perctrl_status}" == "D" || "${perctrl_status}" == "T" || "${perctrl_status}" == "Z" ]]
+        then
+            log "[CHECK]perctrl is dead."
+            exit 3
+        fi
+    done
 }
-
 # 1st step: kill database
 # 2nd step: stop dssserver by using dsscmd
 # 3rd step: if fail to stop dssserver in 2nd step, then kill dssserver
 function Clean()
 {
-    log "stop ${GSDB_BIN}..."
-    kill_program ${GSDB_BIN} ${GSDB_HOME}
-    sleep 3
-
-    log "stop dssserver if running..."
-    nohup dsscmd stopdss -U ${CONN_PATH} >> /dev/null 2>&1
-    sleep 2
-
-    pid=`program_pid dssserver ${DSS_HOME}`
-    if [[ -z ${pid} ]]
+    check_log_file ${DSS_HOME} $startdss_log startdss
+    pid=$(program_pid ${GSDB_BIN_FULL} ${GSDB_HOME})
+    if [[ ! -z ${pid} ]]
     then
-        log "dssserver stopped in dir ${DSS_HOME}..."
-        exit 0
+        log "[CLEAN]kill ${GSDB_BIN} before kill dssserver"
+        kill_program ${GSDB_BIN_FULL} ${GSDB_HOME}
     fi
-    log "Killing dssserver if running..."
-    kill_program dssserver ${DSS_HOME}
+    kill_dss_and_perctrl "CLEAN"
     dsscmd clean_vglock -D ${DSS_HOME} >> /dev/null 2>&1
 }
 
@@ -359,16 +377,16 @@ function Reg()
     LOCAL_INSTANCE_ID=`awk '/INST_ID/{print}' ${DSS_HOME}/cfg/dss_inst.ini | awk -F= '{print $2}' | xargs`
     if [[ -z ${LOCAL_INSTANCE_ID} ]]
     then
-        log "can't find inst id. Aborting."
+        log "[REG]can't find inst id. Aborting."
         exit 1
     fi
     dsscmd reghl -D ${DSS_HOME} >> /dev/null 2>&1
     if [[ $? != 0 ]]
     then
-        log "dsscmd reghl -D ${DSS_HOME} fail."
+        log "[REG]dsscmd reghl -D ${DSS_HOME} fail."
         exit 1
     fi
-    log "register success."
+    log "[REG]register success."
 }
 
 function Unreg()
@@ -376,7 +394,7 @@ function Unreg()
     LOCAL_INSTANCE_ID=`awk '/INST_ID/{print}' ${DSS_HOME}/cfg/dss_inst.ini | awk -F= '{print $2}' | xargs`
     if [[ -z ${LOCAL_INSTANCE_ID} ]]
     then
-        log "can't find inst id. Aborting."
+        log "[UNREG]can't find inst id. Aborting."
         exit 1
     fi
     if [[ ${LOCAL_INSTANCE_ID} == ${INSTANCE_ID} ]]
@@ -386,7 +404,7 @@ function Unreg()
         pid=$(program_pid dssserver ${DSS_HOME})
         if [[ -z ${pid} ]]
         then
-            log "dssserver is not running."
+            log "[UNREG]dssserver is not running."
             exit 1
         fi
         dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} >> /dev/null 2>&1
@@ -394,10 +412,10 @@ function Unreg()
 
     if [[ $? != 0 ]]
     then
-        log "dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} fail, or dsscmd unreghl -D ${DSS_HOME} fail."
+        log "[UNREG]dsscmd kickh -i ${INSTANCE_ID} -D ${DSS_HOME} fail, or dsscmd unreghl -D ${DSS_HOME} fail."
         exit 1
     fi
-    log "unregister ${INSTANCE_ID} success."
+    log "[UNREG]unregister ${INSTANCE_ID} success."
 }
 
 function Isreg()
@@ -406,9 +424,13 @@ function Isreg()
     result=$?
     if [[ ${result} == 255 ]]
     then
-        log "dsscmd inq_reg -i ${INSTANCE_ID} -D ${DSS_HOME} fail."
+        log "[ISREG]dsscmd inq_reg -i ${INSTANCE_ID} -D ${DSS_HOME} fail."
         exit -1
     fi
+    if [[ ${result} != 2 ]]
+    then
+        log "[ISREG]result: ${result}"
+    fi 
     exit ${result}
 }
 
@@ -436,7 +458,7 @@ function Main()
         Isreg
         exit 0
     else
-        echo "Please confirm the input parameters."
+        echo "[SCRIPT]Please confirm the input parameters."
         exit 1
     fi
 }

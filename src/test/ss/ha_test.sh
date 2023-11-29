@@ -131,7 +131,7 @@ function db_start_wait
         if [ ${temp} -eq 0 ]; then
             print "wait node $1 start ${wait_time}s"
         fi
-        if [ ${wait_time} -gt 600 ]; then
+        if [ ${wait_time} -gt 300 ]; then
             print "wait node $1 start ${wait_time}s, db start failed"
             exit 1
         fi
@@ -277,6 +277,43 @@ function switchover_4times
     function_leave
 }
 
+function full_clean
+{
+    function_enter
+    db_kill 1
+    sh ${CURPATH}/cm_ctl.sh set BITMAP_ONLINE 1
+    db_start_wait 0
+    db_role_get 0
+    db_role_check 0 Primary
+    print 'cluster now has one node'
+
+    sh ${CURPATH}/cm_ctl.sh set BITMAP_ONLINE 3
+    db_start 1
+    sleep 2
+    db_kill 1
+    db_start 1
+    sleep 2
+    db_kill 1
+
+    print 'expect perform full_clean reform'
+    sh ${CURPATH}/cm_ctl.sh set BITMAP_ONLINE 1
+    db_start_wait 0
+    db_role_get 0 
+    db_role_check 0 Primary
+
+    sh ${CURPATH}/cm_ctl.sh set BITMAP_ONLINE 3
+    db_start 1
+    db_start_wait 1
+    function_leave
+}
+
+function change_pg_log
+{
+    dn_home=$1
+    pg_log_path=$2
+    echo "log_directory = '${pg_log_path}'" >> ${dn_home}/postgresql.conf
+}
+
 function deploy_two_inst
 {
     source ${CURPATH}/build_ss_database_common.sh
@@ -291,11 +328,16 @@ function deploy_two_inst
     set_gaussdb_port ${SS_DATA}/dn1 ${PGPORT[1]}
 
     assign_hatest_parameter ${SS_DATA}/dn0 ${SS_DATA}/dn1
+    ha_test_init
+    change_pg_log ${SS_DATA}/dn0 ${GAUSSLOG_TMP[0]}/pg_log/dn_6001
+    change_pg_log ${SS_DATA}/dn1 ${GAUSSLOG_TMP[1]}/pg_log/dn_6002
 
     export DSS_HOME=${SS_DATA}/dss_home0
-    start_gaussdb ${SS_DATA}/dn0
+    db_start 0 
     export DSS_HOME=${SS_DATA}/dss_home1
-    start_gaussdb ${SS_DATA}/dn1
+    db_start 1
+    db_start_wait 0
+    db_start_wait 1
 }
 
 function deploy_dual_cluster
@@ -348,6 +390,7 @@ function testcase()
     restart_all
     delete_add_standby
     delete_add_primary
+    full_clean
     failover_alive
     failover_restart
     switchover_4times

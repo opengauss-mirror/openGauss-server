@@ -1889,6 +1889,10 @@ TableScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int 
 
     initscan(scan, key, false);
 
+#ifdef USE_SPQ
+    scan->spq_scan = NULL;
+#endif
+
     return (TableScanDesc)scan;
 }
 
@@ -2431,7 +2435,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
 
         /* check for bogus TID */
         if (offnum < FirstOffsetNumber || offnum > PageGetMaxOffsetNumber(dp)) {
-            break;
+            return false;
         }
 
         lp = PageGetItemId(dp, offnum);
@@ -2445,7 +2449,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
                 continue;
             }
             /* else must be end of chain */
-            break;
+            return false;
         }
 
         /*
@@ -2468,7 +2472,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          * Shouldn't see a HEAP_ONLY tuple at chain start.
          */
         if (at_chain_start && HeapTupleIsHeapOnly(heap_tuple)) {
-            break;
+            return false;
         }
 
         /*
@@ -2476,7 +2480,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          * broken.
          */
         if (TransactionIdIsValid(prev_xmax) && !TransactionIdEquals(prev_xmax, HeapTupleGetRawXmin(heap_tuple))) {
-            break;
+            return false;
         }
 
         /*
@@ -2557,7 +2561,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
             at_chain_start = false;
             prev_xmax = HeapTupleGetUpdateXid(heap_tuple);
         } else {
-            break; /* end of chain */
+            return false; /* end of chain */
         }
     }
     return false;
@@ -6082,7 +6086,7 @@ static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitm
  * on the relation associated with the tuple).	Any failure is reported
  * via ereport().
  */
-void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
+void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup, bool allow_update_self)
 {
     TM_Result result;
     TM_FailureData tmfd;
@@ -6095,6 +6099,15 @@ void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
                 errmsg("All built-in functions are hard coded, and they should not be updated.")));
     }
 
+    /* All attribute of system table columns are hard coded, and thus they should not be updated */
+    if (u_sess->attr.attr_common.IsInplaceUpgrade == false && IsAttributeRelation(relation)) {
+        Oid attrelid = ((Form_pg_attribute)GETSTRUCT(tup))->attrelid;
+        if (IsSystemObjOid(attrelid)) {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("All attribute of system table columns are hard coded, and they should not be updated.")));
+        }
+    }
+
     result = heap_update(relation,
         NULL,
         otid,
@@ -6104,7 +6117,7 @@ void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
         true /* wait for commit */,
         &tmfd,
         &lockmode,
-        false);
+        allow_update_self);
     switch (result) {
         case TM_SelfModified:
             /* Tuple was already updated in current command? */
@@ -8728,6 +8741,10 @@ static void heap_xlog_cleanup_info(XLogReaderState* record)
     RelFileNode tmp_node;
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
+    if (IsExtremeRedo()) {
+        return;
+    }
+
     if (InHotStandby && g_supportHotStandby) {
         XLogRecPtr lsn = record->EndRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
@@ -10316,3 +10333,28 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
     return NULL;
 }
 
+#ifdef USE_SPQ
+/* ----------------
+ * 		try_table_open - open a heap relation by relation OID
+ *
+ * 		As above, but relation return NULL for relation-not-found
+ * ----------------
+ */
+Relation try_table_open(Oid relationId, LOCKMODE lockmode)
+{
+    Relation r;
+ 
+    r = try_relation_open(relationId, lockmode);
+ 
+    if (!RelationIsValid(r))
+        return NULL;
+ 
+    if (r->rd_rel->relkind == RELKIND_INDEX)
+        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is an index", RelationGetRelationName(r))));
+    else if (r->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is a composite type", RelationGetRelationName(r))));
+ 
+    return r;
+}
+#endif

@@ -43,12 +43,13 @@
 #define PackageRelation_Rowtype_Id 9745
 extern Oid PackageNameGetOid(const char* pkgname, Oid namespaceId = InvalidOid);
 extern PLpgSQL_package* PackageInstantiation(Oid packageOid);
-extern void PackageInit(PLpgSQL_package* pkg, bool isCreate=false);
+extern void PackageInit(PLpgSQL_package* pkg, bool isCreate=false, bool isSpec = false,
+    bool isNeedCompileFunc = true);
 extern Oid SysynonymPkgNameGetOid(const char* pkgname, Oid namespaceId);
 extern Oid saveCallFromPkgOid(Oid pkgOid);
 extern void restoreCallFromPkgOid(Oid pkgOid);
-extern NameData* GetPackageName(Oid packageOid);
-extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok=false);
+extern char* GetPackageName(Oid packageOid);
+extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok=false, bool isPkgBody = false);
 extern Oid GetPackageNamespace(Oid packageOid);
 extern bool IsExistPackageName(const char* pkgname);
 extern void BuildSessionPackageRuntimeForAutoSession(uint64 sessionId, uint64 parentSessionId,

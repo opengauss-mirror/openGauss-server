@@ -43,10 +43,16 @@
 
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_collation.h"
+#include "catalog/pg_proc.h"
+#include "catalog/gs_collation.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parse_collate.h"
+#include "parser/parse_utilcmd.h"
+#include "parser/parse_coerce.h"
+#include "parser/parse_type.h"
 #include "utils/lsyscache.h"
+#include "lib/string.h"
 
 /*
  * Collation strength (the SQL standard calls this "derivation").  Order is
@@ -60,6 +66,20 @@ typedef enum {
     COLLATE_EXPLICIT  /* collation was derived explicitly */
 } CollateStrength;
 
+/* Derivation of collation for B compatibility. The smaller the value, the higher the priority */
+typedef enum {
+    DERIVATION_IMPLICIT,
+    DERIVATION_SYSCONST,
+    DERIVATION_COERCIBLE,
+    DERIVATION_IGNORABLE
+} CollateDerivation;
+
+typedef enum {
+    UNKNONWN_CHARSET,
+    SINGLE_CHARSET,
+    MULTI_CHARSET
+} CharsetStatus;
+
 typedef struct {
     ParseState* pstate;       /* parse state (for error reporting) */
     Oid collation;            /* OID of current collation, if any */
@@ -68,15 +88,29 @@ typedef struct {
     /* Remaining fields are only valid when strength == COLLATE_CONFLICT */
     Oid collation2; /* OID of conflicting collation */
     int location2;  /* location of expr that set collation2 */
+    CollateDerivation derivation; /* Collation priority for B compatibility, only used when strength is COLLATE_IMPLICIT. */
+    CharsetStatus charset_status; /* for B compatibility */
 } assign_collations_context;
 
 static bool assign_query_collations_walker(Node* node, ParseState* pstate);
 static bool assign_collations_walker(Node* node, assign_collations_context* context);
-static void merge_collation_state(Oid collation, CollateStrength strength, int location, Oid collation2, int location2,
-    assign_collations_context* context);
+static void merge_collation_state(Oid collation, CollateStrength strength, int location, CollateDerivation derivation,
+    Oid collation2, int location2, assign_collations_context* context);
 static void assign_aggregate_collations(Aggref* aggref, assign_collations_context* loccontext);
 static void assign_ordered_set_collations(Aggref* aggref, assign_collations_context* loccontext);
+static void assign_expression_charset(Node* node, Oid target_collation);
+static void merge_rowcompareexpr_arg_charsets(RowCompareExpr *rcexpr);
+static void update_charset_status(assign_collations_context* context, Oid collation);
+static void check_collate_expr_charset(ParseState *pstate, CollateExpr *cexpr, Oid arg_collation);
+static void merge_same_charset_collation(Oid collation, CollateStrength strength, int location,
+    CollateDerivation derivation, assign_collations_context* context);
+static void merge_diff_charset_collation(Oid collation, CollateStrength strength, int location,
+    CollateDerivation derivation, int charset, int context_charset, assign_collations_context* context);
+static void deal_expr_collation_b_compatibility(
+    Node* node, Oid expr_type, assign_collations_context* context, int location);
 
+#define TYPE_IS_COLLATABLE_B_FORMAT(type_oid) \
+    (IsSupportCharsetType(type_oid) || (type_oid) == UNKNOWNOID || IsBinaryType(type_oid))
 /*
  * @Description: set appropriate collation, strength and location
  * according to the type collation.
@@ -87,16 +121,30 @@ static void assign_ordered_set_collations(Aggref* aggref, assign_collations_cont
  * @in collatable: represent if the input is collatable
  * @in context: collation state
  */
-FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& strength, int& location, Oid typcollation,
-    bool collatable, const Node* node, assign_collations_context context)
+FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& strength, int& location, CollateDerivation &derivation,
+    Oid typcollation, bool collatable, const Node* node, assign_collations_context context)
 {
     if (OidIsValid(typcollation)) {
         /* typllation (comes from a node) is collatable; what about its input? */
         if (collatable) {
-            /* Collation state bubbles up from children. */
-            collation = context.collation;
+            if (context.collation == BINARY_COLLATION_OID && typcollation != context.collation) {
+                collation = OidIsValid(GetCollationConnection()) ? GetCollationConnection() : typcollation;
+            } else {
+                /* Collation state bubbles up from children. */
+                collation = context.collation;
+            }
             strength = context.strength;
             location = context.location;
+            derivation = context.derivation;
+        } else if (ENABLE_MULTI_CHARSET &&
+            context.strength == COLLATE_NONE &&
+            (OidIsValid(GetCollationConnection()) || context.derivation == DERIVATION_SYSCONST)) {
+            /* collation of version() is UTF8_GENERAL_CI */
+            collation = (context.derivation == DERIVATION_SYSCONST) ?
+                UTF8_GENERAL_CI_COLLATION_OID : GetCollationConnection();
+            strength = COLLATE_IMPLICIT;
+            location = exprCollation(node);
+            derivation = (context.derivation == DERIVATION_IGNORABLE) ? DERIVATION_COERCIBLE : context.derivation;
         } else {
             /*
              * Collatable output produced without any collatable
@@ -107,12 +155,14 @@ FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& st
             collation = typcollation;
             strength = COLLATE_IMPLICIT;
             location = exprCollation(node);
+            derivation = context.derivation;
         }
     } else {
         /* Node's result type isn't collatable. */
         collation = InvalidOid;
         strength = COLLATE_NONE;
         location = -1; /* won't be used */
+        derivation = context.derivation;
     }
 }
 
@@ -203,6 +253,8 @@ void assign_expr_collations(ParseState* pstate, Node* expr)
     context.collation = InvalidOid;
     context.strength = COLLATE_NONE;
     context.location = -1;
+    context.derivation = DERIVATION_IGNORABLE;
+    context.charset_status = UNKNONWN_CHARSET;
 
     /* and away we go */
     (void)assign_collations_walker(expr, &context);
@@ -233,6 +285,8 @@ Oid select_common_collation(ParseState* pstate, List* exprs, bool none_ok)
     context.collation = InvalidOid;
     context.strength = COLLATE_NONE;
     context.location = -1;
+    context.derivation = DERIVATION_IGNORABLE;
+    context.charset_status = UNKNONWN_CHARSET;
 
     /* and away we go */
     (void)assign_collations_walker((Node*)exprs, &context);
@@ -244,7 +298,8 @@ Oid select_common_collation(ParseState* pstate, List* exprs, bool none_ok)
         }
         ereport(ERROR,
             (errcode(ERRCODE_COLLATION_MISMATCH),
-                errmsg("collation mismatch between implicit collations \"%s\" and \"%s\"",
+                errmsg("collation mismatch between%scollations \"%s\" and \"%s\"",
+                    (ENABLE_MULTI_CHARSET ? " " : " implicit "),
                     get_collation_name(context.collation),
                     get_collation_name(context.collation2)),
                 errhint("You can choose the collation by applying the COLLATE clause to one or both expressions."),
@@ -273,7 +328,9 @@ Oid select_common_collation(ParseState* pstate, List* exprs, bool none_ok)
 static bool assign_collations_walker(Node* node, assign_collations_context* context)
 {
     Oid collation = InvalidOid;
+    Oid type_oid = InvalidOid;
     CollateStrength strength = COLLATE_NONE;
+    CollateDerivation derivation = DERIVATION_IGNORABLE;
     int location = -1;
 
     /* Need do nothing for empty subexpressions */
@@ -292,6 +349,8 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
     loccontext.location = -1;
     loccontext.collation2 = InvalidOid;
     loccontext.location2 = -1;
+    loccontext.derivation = DERIVATION_IGNORABLE;
+    loccontext.charset_status = UNKNONWN_CHARSET;
 
     /*
      * Recurse if appropriate, then determine the collation for this node.
@@ -309,6 +368,9 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             CollateExpr* expr = (CollateExpr*)node;
 
             (void)expression_tree_walker(node, (bool (*)())assign_collations_walker, (void*)&loccontext);
+            if (ENABLE_MULTI_CHARSET) {
+                check_collate_expr_charset(loccontext.pstate, expr, loccontext.collation);
+            }
 
             collation = expr->collOid;
             AssertEreport(OidIsValid(collation), MOD_OPT, "The OID of collation is invalid.");
@@ -334,12 +396,18 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 collation = expr->resultcollid;
                 strength = COLLATE_IMPLICIT;
                 location = exprLocation(node);
+            } else if (ENABLE_MULTI_CHARSET && IsBinaryType(expr->resulttype)) {
+                /* Node's result type isn't collatable. */
+                collation = BINARY_COLLATION_OID;
+                strength = COLLATE_IMPLICIT;
+                location = exprLocation(node);
             } else {
                 /* Node's result type isn't collatable. */
                 collation = InvalidOid;
                 strength = COLLATE_NONE;
                 location = -1; /* won't be used */
             }
+            derivation = loccontext.derivation;
         } break;
         case T_RowExpr: {
             /*
@@ -357,6 +425,10 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
              * impact on the collation of its parent.
              */
             return false; /* done */
+        }
+        case T_SelectIntoVarList: {
+            SubLink* sublink = ((SelectIntoVarList*)node)->sublink;
+            return assign_collations_walker((Node *)sublink, context);
         }
         case T_RowCompareExpr: {
             /*
@@ -380,7 +452,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 colls = lappend_oid(colls, coll);
             }
             expr->inputcollids = colls;
-
+            merge_rowcompareexpr_arg_charsets(expr);
             /*
              * Since the result is always boolean and therefore never has
              * a collation, we can just stop here: this node has no impact
@@ -399,13 +471,16 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
              */
             CoerceToDomain* expr = (CoerceToDomain*)node;
             Oid typcollation = get_typcollation(expr->resulttype);
-
+            if (ENABLE_MULTI_CHARSET && IsBinaryType(expr->resulttype)) {
+                typcollation = BINARY_COLLATION_OID;
+            }
             /* ... but first, recurse */
             (void)expression_tree_walker(node, (bool (*)())assign_collations_walker, (void*)&loccontext);
 
             get_valid_collation(collation,
                 strength,
                 location,
+                derivation,
                 typcollation,
                 (typcollation == DEFAULT_COLLATION_OID) ? true : false,
                 node,
@@ -417,6 +492,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
              */
             Oid collation_oid = (strength == COLLATE_CONFLICT) ? InvalidOid : collation;
             exprSetCollation(node, collation_oid);
+            derivation = loccontext.derivation;
         } break;
         case T_TargetEntry:
             (void)expression_tree_walker(node, (bool (*)())assign_collations_walker, (void*)&loccontext);
@@ -429,6 +505,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             collation = loccontext.collation;
             strength = loccontext.strength;
             location = loccontext.location;
+            derivation = loccontext.derivation;
 
             /*
              * Throw error if the collation is indeterminate for a TargetEntry
@@ -446,7 +523,8 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             if (strength == COLLATE_CONFLICT && ((TargetEntry*)node)->ressortgroupref != 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_COLLATION_MISMATCH),
-                        errmsg("collation mismatch between implicit collations \"%s\" and \"%s\"",
+                        errmsg("collation mismatch between%scollations \"%s\" and \"%s\"",
+                            (ENABLE_MULTI_CHARSET ? " " : " implicit "),
                             get_collation_name(loccontext.collation),
                             get_collation_name(loccontext.collation2)),
                         errhint(
@@ -485,8 +563,13 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             AssertEreport(IsA(tent, TargetEntry), MOD_OPT, "not the target entry");
             AssertEreport((!tent->resjunk), MOD_OPT, "the target entry is junk");
             collation = exprCollation((Node*)tent->expr);
+            type_oid = exprType((Node*)tent->expr);
+            if (ENABLE_MULTI_CHARSET && IsBinaryType(type_oid)) {
+                collation = BINARY_COLLATION_OID;
+            }
             /* collation doesn't change if it's converted to array */
             strength = COLLATE_IMPLICIT;
+            derivation = DERIVATION_COERCIBLE;
             location = exprLocation((Node*)tent->expr);
         } break;
         case T_List:
@@ -499,6 +582,8 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             collation = loccontext.collation;
             strength = loccontext.strength;
             location = loccontext.location;
+            derivation = loccontext.derivation;
+            context->charset_status = Max(context->charset_status, loccontext.charset_status);
             break;
 
         case T_Var:
@@ -508,8 +593,8 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
         case T_CaseTestExpr:
         case T_SetToDefault:
         case T_CurrentOfExpr:
-        case T_PrefixKey:
         case T_UserVar:
+        case T_UserSetElem:
         case T_SetVariableExpr:
 
             /*
@@ -533,6 +618,23 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 strength = COLLATE_NONE;
             }
             location = exprLocation(node);
+            /* B compatibility */
+            if (ENABLE_MULTI_CHARSET && strength == COLLATE_NONE) {
+                type_oid = exprType(node);
+                collation = IsBinaryType(type_oid) ? BINARY_COLLATION_OID : collation;
+                strength = IsBinaryType(type_oid) ? COLLATE_IMPLICIT : strength;
+            }
+            if (IsA(node, Const)) {
+                derivation = ((Const*)node)->constisnull ? DERIVATION_IGNORABLE : DERIVATION_COERCIBLE;
+            } else if (IsA(node, Param)) {
+                /*
+                 * We set bind param DERIVATION_COERCIBLE to make "column = $1" and  "column = 'string'"
+                 * use the same collation to compare.
+                 */
+                derivation = (((Param*)node)->is_bind_param) ? DERIVATION_COERCIBLE : DERIVATION_IMPLICIT;
+            } else {
+                derivation = DERIVATION_IMPLICIT;
+            }
             break;
 
         default: {
@@ -601,15 +703,22 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             /*
              * Now figure out what collation to assign to this node.
              */
-            typcollation = get_typcollation(exprType(node));
+            type_oid = exprType(node);
+            if (ENABLE_MULTI_CHARSET) {
+                deal_expr_collation_b_compatibility(node, type_oid, &loccontext, location);
+                typcollation = IsBinaryType(type_oid) ? BINARY_COLLATION_OID : get_typcollation(type_oid);
+            } else {
+                typcollation = get_typcollation(type_oid);
+            }
+
             get_valid_collation(collation,
                 strength,
                 location,
+                derivation,
                 typcollation,
                 (loccontext.strength > COLLATE_NONE) ? true : false,
                 node,
                 loccontext);
-
             /*
              * Save the result collation into the expression node. If the
              * state is COLLATE_CONFLICT, we'll set the collation to
@@ -627,13 +736,17 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
             } else {
                 exprSetInputCollation(node, loccontext.collation);
             }
+
+            if (loccontext.charset_status == MULTI_CHARSET) {
+                assign_expression_charset(node, loccontext.collation);
+            }
         } break;
     }
 
     /*
      * Now, merge my information into my parent's state.
      */
-    merge_collation_state(collation, strength, location, loccontext.collation2, loccontext.location2, context);
+    merge_collation_state(collation, strength, location, derivation, loccontext.collation2, loccontext.location2, context);
 
     return false;
 }
@@ -641,9 +754,12 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
 /*
  * Merge collation state of a subexpression into the context for its parent.
  */
-static void merge_collation_state(Oid collation, CollateStrength strength, int location, Oid collation2, int location2,
+static void merge_collation_state(Oid collation, CollateStrength strength, int location, CollateDerivation derivation, Oid collation2, int location2,
     assign_collations_context* context)
 {
+    if (DB_IS_CMPT(B_FORMAT)) {
+        update_charset_status(context, collation);
+    }
     /*
      * If the collation strength for this node is different from what's
      * already in *context, then this node either dominates or is dominated by
@@ -654,6 +770,7 @@ static void merge_collation_state(Oid collation, CollateStrength strength, int l
         context->collation = collation;
         context->strength = strength;
         context->location = location;
+        context->derivation = derivation;
         /* Bubble up error info if applicable */
         if (strength == COLLATE_CONFLICT) {
             context->collation2 = collation2;
@@ -666,6 +783,35 @@ static void merge_collation_state(Oid collation, CollateStrength strength, int l
                 /* Nothing + nothing is still nothing */
                 break;
             case COLLATE_IMPLICIT:
+                if (ENABLE_MULTI_CHARSET) {
+                    if (context->collation == collation) {
+                        if (derivation < context->derivation) {
+                            context->location = location;
+                            context->derivation = derivation;
+                        }
+                        return;
+                    }
+
+                    /* smaller derivation has precedence */
+                    if (derivation < context->derivation) {
+                        context->collation = collation;
+                        context->strength = strength;
+                        context->location = location;
+                        context->derivation = derivation;
+                        return;
+                    } else if (derivation > context->derivation) {
+                        return;
+                    }
+
+                    int charset = get_valid_charset_by_collation(collation);
+                    int context_charset = get_valid_charset_by_collation(context->collation);
+                    if (charset == context_charset) {
+                        return merge_same_charset_collation(collation, strength, location, derivation, context);
+                    }
+                    return merge_diff_charset_collation(
+                        collation, strength, location, derivation, charset, context_charset, context);
+                }
+                
                 if (collation != context->collation) {
                     /*
                      * Non-default implicit collation always beats default.
@@ -694,6 +840,14 @@ static void merge_collation_state(Oid collation, CollateStrength strength, int l
                 break;
             case COLLATE_EXPLICIT:
                 if (collation != context->collation) {
+                    if (ENABLE_MULTI_CHARSET && context->collation != BINARY_COLLATION_OID) {
+                        int charset = get_valid_charset_by_collation(collation);
+                        int context_charset = get_valid_charset_by_collation(context->collation);
+                        if (charset != context_charset) {
+                            return merge_diff_charset_collation(
+                                collation, strength, location, derivation, charset, context_charset, context);
+                        }
+                    }
                     /*
                      * Ooops, we have a conflict of explicit COLLATE clauses.
                      * Here we choose to throw error immediately; that is what
@@ -710,6 +864,129 @@ static void merge_collation_state(Oid collation, CollateStrength strength, int l
                 break;
             default:
                 break;
+        }
+    }
+}
+
+static void merge_same_charset_collation(Oid collation, CollateStrength strength, int location,
+    CollateDerivation derivation, assign_collations_context* context)
+{
+    bool is_bin_collation = COLLATION_HAS_BIN_SUFFIX(collation);
+    bool context_is_bin_collation = COLLATION_HAS_BIN_SUFFIX(context->collation);
+
+    /* Conflict if both collation are *_bin */
+    if (is_bin_collation && context_is_bin_collation) {
+        context->strength = COLLATE_CONFLICT;
+        context->collation2 = collation;
+        context->location2 = location;
+        return;
+    }
+
+    /* *_bin collation has precedence */
+    if (is_bin_collation) {
+        context->collation = collation;
+        context->strength = strength;
+        context->location = location;
+        context->derivation = derivation;
+        return;
+    } else if (context_is_bin_collation) {
+        return;
+    }
+
+    /* DEFAULT collation last */
+    if (context->collation == DEFAULT_COLLATION_OID) {
+        /* Override previous parent state */
+        context->collation = collation;
+        context->strength = strength;
+        context->location = location;
+        context->derivation = derivation;
+        return;
+    } else if (collation == DEFAULT_COLLATION_OID) {
+        return;
+    }
+    context->strength = COLLATE_CONFLICT;
+    context->collation2 = collation;
+    context->location2 = location;
+}
+
+static void merge_diff_charset_collation(Oid collation, CollateStrength strength, int location,
+    CollateDerivation derivation, int charset, int context_charset, assign_collations_context* context)
+{
+    /* binary collation has precedence */
+    if (collation == BINARY_COLLATION_OID) {
+        context->collation = BINARY_COLLATION_OID;
+        context->strength = strength;
+        context->location = location;
+        context->derivation = derivation;
+        return;
+    } else if (context->collation == BINARY_COLLATION_OID) {
+        return;
+    }
+    
+    /* unicode charset has precedence */
+    if (IS_UNICODE_ENCODING(charset)){
+        context->collation = collation;
+        context->strength = strength;
+        context->location = location;
+        context->derivation = derivation;
+        return;
+    } else if (IS_UNICODE_ENCODING(context_charset)) {
+        return;
+    }
+    context->strength = COLLATE_CONFLICT;
+    context->collation2 = collation;
+    context->location2 = location;
+}
+
+static void deal_expr_collation_b_compatibility(Node* node, Oid expr_type,
+    assign_collations_context* context, int location)
+{
+    int db_charset = GetDatabaseEncoding();
+    int arg_charset = get_valid_charset_by_collation(context->collation);
+    if (arg_charset != db_charset) {
+        check_type_supports_multi_charset(expr_type, true);
+    }
+
+    if (IsA(node, FuncExpr)) {
+        FuncExpr* func = (FuncExpr*)node;
+        if (IsSystemObjOid(func->funcid)) {
+            if (func->funcid == VERSIONFUNCOID ||
+                func->funcid == OPENGAUSSVERSIONFUNCOID) {
+                context->derivation = DERIVATION_SYSCONST;
+            } else if ((func->funcid == CONVERTTOFUNCOID ||
+                func->funcid == CONVERTTONOCASEFUNCOID) &&
+                arg_charset != GetDatabaseEncoding()) {
+                /* convert_to argument string encoding must be server_encoding */
+                ereport(ERROR,
+                    (errcode(ERRCODE_COLLATION_MISMATCH),
+                        errmsg("the character set of convert_to function arguments must be server_encoding"),
+                        parser_errposition(context->pstate, location)));
+            }
+        } else if (PROC_IS_PRO(get_func_prokind(func->funcid))) {
+            /* the charset for arguments of procedure should be server_encoding in B compatibility */
+            context->collation = get_default_collation_by_charset(db_charset);
+            if (context->charset_status == SINGLE_CHARSET) {
+                context->charset_status = MULTI_CHARSET; /* try to convert argument charset to server_encoding */
+            }
+            if (context->strength == COLLATE_CONFLICT) {
+                context->strength = COLLATE_EXPLICIT; /* avoid InvalidOid collation */
+            }
+        }
+    }
+
+    /*
+    * When CONFLICT, final collation will be InvalidOid.
+    * We must ensure that the charset retrieved by the collation is the same as the actual charset.
+    */
+    if (context->strength == COLLATE_CONFLICT) {
+        if (arg_charset != get_valid_charset_by_collation(context->collation2) ||
+            arg_charset != GetDatabaseEncoding()) {
+            ereport(ERROR,
+                (errcode(ERRCODE_COLLATION_MISMATCH),
+                    errmsg("collation mismatch between collations \"%s\" and \"%s\"",
+                        get_collation_name(context->collation),
+                        get_collation_name(context->collation2)),
+                    parser_errposition(context->pstate, context->collation)));
         }
     }
 }
@@ -787,6 +1064,311 @@ static void assign_ordered_set_collations(Aggref* aggref, assign_collations_cont
             (void)assign_collations_walker((Node*)tle, loccontext);
         } else {
             assign_expr_collations(loccontext->pstate, (Node*)tle);
+        }
+    }
+}
+
+/* In B compatibility, the encoding of expression can be different form server_encoding. */
+static void check_collate_expr_charset(ParseState *pstate, CollateExpr *cexpr, Oid arg_collation)
+{
+    if (cexpr->collOid == arg_collation) {
+        return;
+    }
+
+    if (arg_collation == BINARY_COLLATION_OID) {
+        const char* coll_name = get_collation_name(cexpr->collOid);
+        ereport(ERROR,
+            (errmsg("COLLATION \"%s\" is not valid for CHARACTER SET \"binary\"", coll_name ? coll_name : "NULL"),
+                parser_errposition(pstate, cexpr->location)));
+    }
+
+    Oid argtype = exprType((Node*)cexpr->arg);
+    if (cexpr->collOid == BINARY_COLLATION_OID &&
+        (argtype == BITOID || argtype == VARBITOID || IsBinaryType(argtype))) {
+        return;
+    }
+
+    if (!type_is_collatable(argtype) && argtype != UNKNOWNOID) {
+        return;
+    }
+
+    int argcharset = get_charset_by_collation(arg_collation);
+    int newcharset = get_charset_by_collation(cexpr->collOid);
+    if (newcharset == argcharset) {
+        return;
+    }
+    if (newcharset == PG_INVALID_ENCODING) {
+        /* 
+         * eg: _utf8mb4 'string' COLLATE "C" or
+         *     'string' COLLATE 'utf8mb4_unicode_ci' COLLATE "C" or
+         *     'string' COLLATE "zh_CN.utf8" COLLATE "C"
+         * Keep the syntax compatible with previous versions.
+         */
+        if (argcharset == GetDatabaseEncoding()) {
+            return;
+        }
+        /* If arg expression has a different encoding, throw error. */
+        const char* coll_name = get_collation_name(cexpr->collOid);
+        const char* encoding_name = pg_encoding_to_char(argcharset);
+        ereport(ERROR,
+            (errmsg("COLLATION \"%s\" is not valid for CHARACTER SET \"%s\" which is different from server_encoding",
+                    coll_name ? coll_name : "NULL", encoding_name ? encoding_name : "NULL"),
+                parser_errposition(pstate, cexpr->location)));
+    }
+
+    argcharset = (argcharset == PG_INVALID_ENCODING) ? GetDatabaseEncoding() : argcharset;
+    if (newcharset != argcharset) {
+        const char* coll_name = get_collation_name(cexpr->collOid);
+        const char* encoding_name = pg_encoding_to_char(argcharset);
+        ereport(ERROR,
+            (errcode(ERRCODE_COLLATION_MISMATCH),
+                errmsg("COLLATION \"%s\" is not valid for CHARACTER SET \"%s\"",
+                    coll_name ? coll_name : "NULL", encoding_name ? encoding_name : "NULL"),
+                parser_errposition(pstate, cexpr->location)));
+    }
+}
+
+static void update_charset_status(assign_collations_context* context, Oid collation)
+{
+    if (!OidIsValid(collation)) {
+        return;
+    }
+
+    if (context->charset_status == MULTI_CHARSET) {
+        return;
+    }
+
+    if (context->charset_status == UNKNONWN_CHARSET) {
+        context->charset_status = SINGLE_CHARSET;
+        return;
+    }
+
+    if (collation == BINARY_COLLATION_OID || context->collation == BINARY_COLLATION_OID) {
+        return;
+    }
+
+    if (context->strength == COLLATE_NONE && !OidIsValid(context->collation)) {
+        return;
+    }
+
+    int charset = get_valid_charset_by_collation(collation);
+    int context_charset = get_valid_charset_by_collation(context->collation);
+
+    if (charset != context_charset) {
+        context->charset_status = MULTI_CHARSET;
+        if (!ENABLE_MULTI_CHARSET) {
+            ereport(ERROR, (errcode(ERRCODE_COLLATION_MISMATCH),
+                errmsg("different character set data is not allowed when parameter "
+                    "b_format_behavior_compat_options does not contain 'enable_multi_charset' option")));
+        }
+    }
+}
+
+Node *convert_arg_charset(Node *arg_expr, int target_charset, Oid target_collation)
+{
+    Oid type_oid = exprType(arg_expr);
+    if (exprCollation(arg_expr) == BINARY_COLLATION_OID) {
+        return arg_expr;
+    }
+
+    return coerce_to_target_charset(arg_expr, target_charset, type_oid, exprTypmod(arg_expr), target_collation);
+}
+
+void merge_arg_charsets(Oid target_collation, List *args)
+{
+    if (target_collation == BINARY_COLLATION_OID) {
+        return;
+    }
+
+    int target_charset = get_valid_charset_by_collation(target_collation);
+    foreach_cell(item, args) {
+        Node *arg_expr = (Node*)lfirst(item);
+        lfirst(item) = (void*)convert_arg_charset(arg_expr, target_charset, target_collation);
+    }
+}
+
+static void merge_aggregate_charsets(Aggref* aggref, Oid target_collation)
+{
+    if (target_collation == BINARY_COLLATION_OID) {
+        return;
+    }
+
+    int target_charset = get_valid_charset_by_collation(target_collation);
+    foreach_cell (lc, aggref->args) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        Assert(IsA(tle, TargetEntry));
+        if (!tle->resjunk) {
+            tle->expr = (Expr*)convert_arg_charset((Node*)tle->expr, target_charset, target_collation);
+        }
+    }
+}
+
+static void merge_ordered_set_charsets(Aggref* aggref, Oid target_collation)
+{
+    if (target_collation == BINARY_COLLATION_OID) {
+        return;
+    }
+
+    merge_arg_charsets(target_collation, aggref->aggdirectargs);
+
+    bool merge_sort_collations = (list_length(aggref->args) == 1 &&
+        get_func_variadictype(aggref->aggfnoid) == InvalidOid);
+    int target_charset = get_valid_charset_by_collation(target_collation);
+    foreach_cell (lc, aggref->args) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        Assert(IsA(tle, TargetEntry));
+        if (merge_sort_collations) {
+            tle->expr = (Expr*)convert_arg_charset((Node*)tle->expr, target_charset, target_collation);
+        }
+    }
+}
+
+static void merge_aggref_charsets(Aggref* aggref, Oid target_collation)
+{
+    switch (aggref->aggkind) {
+        case AGGKIND_NORMAL:
+            merge_aggregate_charsets(aggref, target_collation);
+            break;
+        case AGGKIND_ORDERED_SET:
+            merge_ordered_set_charsets(aggref, target_collation);
+            break;
+        default:
+            merge_aggregate_charsets(aggref, target_collation);
+            break;
+    }
+}
+
+void merge_rowcompareexpr_arg_charsets(RowCompareExpr *rcexpr)
+{
+    ListCell *left_item = NULL;
+    ListCell *right_item = NULL;
+    ListCell *coll_item = NULL;
+    forthree(left_item, rcexpr->largs, right_item, rcexpr->rargs, coll_item, rcexpr->inputcollids) {
+        Node *left_expr = (Node*)lfirst(left_item);
+        Node *right_expr = (Node*)lfirst(right_item);
+        Oid collation = lfirst_oid(coll_item);
+        if (collation == BINARY_COLLATION_OID) {
+            continue;
+        }
+
+        int charset = get_valid_charset_by_collation(collation);
+        lfirst(left_item) = (void*)convert_arg_charset(left_expr, charset, collation);
+        lfirst(right_item) = (void*)convert_arg_charset(right_expr, charset, collation);
+    }
+}
+
+void merge_caseexpr_arg_charsets(Oid target_collation, CaseExpr *caseexpr)
+{
+    if (target_collation == BINARY_COLLATION_OID) {
+        return;
+    }
+
+    int target_charset = get_valid_charset_by_collation(target_collation);
+    foreach_cell(item, caseexpr->args) {
+        CaseWhen* when = (CaseWhen*)lfirst(item);
+        Assert(IsA(when, CaseWhen));
+        when->result = (Expr*)convert_arg_charset((Node*)when->result, target_charset, target_collation);
+    }
+    caseexpr->defresult = (Expr*)convert_arg_charset((Node*)caseexpr->defresult, target_charset, target_collation);
+}
+
+void merge_scalararrayopexpr_arg_charsets(Oid target_collation, ScalarArrayOpExpr *sexpr)
+{
+    if (target_collation == BINARY_COLLATION_OID) {
+        return;
+    }
+    Assert(list_length(sexpr->args) == 2);
+
+    Node *col_expr = (Node*)linitial(sexpr->args);
+    Node *array_expr = (Node*)lsecond(sexpr->args);
+    int target_charset = get_valid_charset_by_collation(target_collation);
+    linitial(sexpr->args) = (void*)convert_arg_charset(col_expr, target_charset, target_collation);
+    assign_expression_charset(array_expr, target_collation);
+}
+
+static void assign_expression_charset(Node* node, Oid target_collation)
+{
+    if (!DB_IS_CMPT(B_FORMAT) || node == NULL || target_collation == BINARY_COLLATION_OID) {
+        return;
+    }
+
+    check_stack_depth();
+    switch (nodeTag(node)) {
+        case T_Aggref: {
+            merge_aggref_charsets((Aggref*)node, target_collation);
+        } break;
+        case T_WindowFunc: {
+            merge_arg_charsets(target_collation, ((WindowFunc*)node)->args);
+        } break;
+        case T_FuncExpr: {
+            merge_arg_charsets(target_collation, ((FuncExpr*)node)->args);
+        } break;
+        case T_OpExpr: {
+            merge_arg_charsets(target_collation, ((OpExpr*)node)->args);
+        } break;
+        case T_NullIfExpr: {
+            merge_arg_charsets(target_collation, ((NullIfExpr*)node)->args);
+        } break;
+        case T_ScalarArrayOpExpr: {
+            merge_scalararrayopexpr_arg_charsets(target_collation, (ScalarArrayOpExpr*)node);
+        } break;
+        case T_BoolExpr: {
+            merge_arg_charsets(target_collation, ((BoolExpr*)node)->args);
+        } break;
+        case T_CaseExpr: {
+            merge_caseexpr_arg_charsets(target_collation, (CaseExpr*)node);
+        } break;
+        case T_CoalesceExpr: {
+            merge_arg_charsets(target_collation, ((CoalesceExpr*)node)->args);
+        } break;
+        case T_MinMaxExpr: {
+            merge_arg_charsets(((MinMaxExpr*)node)->inputcollid, ((MinMaxExpr*)node)->args);
+        } break;
+        case T_XmlExpr: {
+            merge_arg_charsets(target_collation, ((XmlExpr*)node)->named_args);
+            merge_arg_charsets(target_collation, ((XmlExpr*)node)->args);
+        } break;
+        case T_ArrayCoerceExpr: {
+            assign_expression_charset((Node*)((ArrayCoerceExpr*)node)->arg, target_collation);
+            exprSetCollation(node, target_collation);
+        } break;
+        case T_ArrayExpr: {
+            merge_arg_charsets(target_collation, ((ArrayExpr*)node)->elements);
+        } break;
+        case T_RowCompareExpr:
+        case T_RelabelType:
+        case T_CoerceViaIO: {
+            // have been merged in assign_collations_walker
+        } break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                    errmsg("unrecognized node type: %d during merge expression charsets", (int)nodeTag(node))));
+            break;
+    }
+
+    return;
+}
+
+void check_duplicate_value_by_collation(List* vals, Oid collation, char type)
+{
+    if (!is_b_format_collation(collation)) {
+        return ;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, vals) {
+        ListCell* next_cell = lc->next;
+        char* lab = strVal(lfirst(lc));
+        while(next_cell != NULL) {
+            char* next_lab = strVal(lfirst(next_cell));
+            if (varstr_cmp_by_builtin_collations(lab, strlen(lab), next_lab, strlen(next_lab), collation) == 0) {
+                const char* type_name = NULL;
+                type_name = (type == TYPTYPE_SET) ? "set" : "enum";
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                    errmsg("%s has duplicate key value \"%s\" = \"%s\"", type_name, lab, next_lab)));
+            }
+            next_cell = lnext(next_cell);
         }
     }
 }

@@ -198,6 +198,7 @@ typedef struct {
     MemoryContext mxct;
     List *tuples;
     Oid *atttypids;   /* for sublink in user-defined variables */
+    Oid *collids;      /* for variables collation ids*/
     bool *isnulls;     /* for sublink in user-defined variables */
 } StmtResult;
 

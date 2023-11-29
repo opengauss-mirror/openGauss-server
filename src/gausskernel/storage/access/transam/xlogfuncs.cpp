@@ -1532,7 +1532,7 @@ Datum gs_get_local_barrier_status(PG_FUNCTION_ARGS)
     // archive_LSN max archive xlog LSN 
     // flush_LSN max flush xlog LSN 
 
-    if (IS_OBS_DISASTER_RECOVER_MODE || IS_CN_OBS_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE) {
+    if (IS_OBS_DISASTER_RECOVER_MODE || IS_CN_OBS_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE) {
         SpinLockAcquire(&walrcv->mutex);
         rc = strncpy_s((char *)barrierId, MAX_BARRIER_ID_LENGTH,
                        (char *)walrcv->lastRecoveredBarrierId, MAX_BARRIER_ID_LENGTH - 1);
@@ -2046,6 +2046,23 @@ Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+    int dr_sender_num = 0;
+
+    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+        ReplConnInfo *replConnInfo = NULL;
+        replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+
+        /* Number of DR replconninfo */
+        if (replConnInfo != NULL && replConnInfo->isCrossRegion) {
+            dr_sender_num++;
+        }
+    }
+    if (IS_PGXC_COORDINATOR) {
+        g_instance.streaming_dr_cxt.hadrWalSndNum = dr_sender_num;
+    } else {
+        g_instance.streaming_dr_cxt.hadrWalSndNum = dr_sender_num > 0 ? 1 : 0;
+    }
+
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
@@ -2057,7 +2074,6 @@ Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
             SpinLockAcquire(&walsnd->mutex);
             if (walsnd->interactiveState == SDRS_DEFAULT) {
                 walsnd->interactiveState = SDRS_INTERACTION_BEGIN;
-                g_instance.streaming_dr_cxt.hadrWalSndNum++;
             }
             SpinLockRelease(&walsnd->mutex);
         }
@@ -2417,6 +2433,10 @@ Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
 
 Datum gs_get_standby_cluster_barrier_status(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
+
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     XLogRecPtr barrierLsn = InvalidXLogRecPtr;
     char lastestbarrierId[MAX_BARRIER_ID_LENGTH] = {0};
@@ -2496,6 +2516,10 @@ Datum gs_get_standby_cluster_barrier_status(PG_FUNCTION_ARGS)
 
 Datum gs_set_standby_cluster_target_barrier_id(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
+
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     text *barrier = PG_GETARG_TEXT_P(0);
     char *barrierstr = NULL;
@@ -2542,6 +2566,10 @@ Datum gs_set_standby_cluster_target_barrier_id(PG_FUNCTION_ARGS)
 
 Datum gs_query_standby_cluster_barrier_id_exist(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
+
     text *barrier = PG_GETARG_TEXT_P(0);
     char *barrierstr = NULL;
     CommitSeqNo *hentry = NULL;
@@ -2586,4 +2614,83 @@ Datum gs_query_standby_cluster_barrier_id_exist(PG_FUNCTION_ARGS)
         found = true;
     }
     PG_RETURN_BOOL(found);
+}
+
+Datum gs_xlog_keepers(PG_FUNCTION_ARGS)
+{
+#define PG_GET_XLOG_KEEPERS_COLS 3
+    FuncCallContext     *funcctx = NULL;
+    XlogKeeper          *xlogkeeper = NULL;
+    int                 loop = 0;
+    WalKeeperPriv       *privdata = NULL;
+    static WalKeeperDesc wkdesc[WALKEEPER_MAX] = {
+            {WALKEEPER_BASECHECK, "Base Keep", "base on redo lsn of recently checkpoint for primary or current working segment on standby"},
+            {WALKEEPER_SEGMENT_KEEP, "Segments Keep", "base on wal_keep_segments GUC"},
+            {WALKEEPER_SLOTS, "Slots Keep", "base on physical or logical slots"},
+            {WALKEEPER_BASEBACKUP, "Basebackup Keep", "a basebackup operator keep all wal segments"},
+            {WALKEEPER_BUILD, "Build Keep", "a build operator keep all wal segments"},
+            {WALKEEPER_INVALIDSEND, "Unactived Wal Send Keep", "a wal sender unactived keep all wal segments"},
+            {WALKEEPER_DUMMYSTANDBY, "Dummystandby Keep", "Dummystandby keep all wal segments"},
+            {WALKEEPER_INVALIDSLOT, "Invalid Slot Keep", "an invalid slot keep all wal segments"},
+            {WALKEEPER_CBM, "CBM Keep", "CBM feature keep wal segments"},
+            {WALKEEPER_CHECKPOINT, "Standby Checkpoint Keep", "base on redo lsn of recently checkpoint on standby"},
+            {WALKEEPER_ARCHIVE, "Archive Keep", "base on wal archive"},
+            {WALKEEPER_RESISTARCHIVE, "Resist Archive", "resist OBS archive keeper due to max_size_for_xlog_prune"},
+            {WALKEEPER_COODRECYCLE, "Other keep", "base on recycle xlog for Coordinator"}
+    };
+
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext       oldcontext = NULL;
+        TupleDesc           resultTupleDesc = NULL;
+        
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        resultTupleDesc = CreateTemplateTupleDesc(PG_GET_XLOG_KEEPERS_COLS, false);
+        TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, "keeptype", TEXTOID, -1, 0);
+        TupleDescInitEntry(resultTupleDesc, (AttrNumber)2, "keepsegment", TEXTOID, -1, 0);
+        TupleDescInitEntry(resultTupleDesc, (AttrNumber)3, "describe", TEXTOID, -1, 0);
+
+        privdata =  (WalKeeperPriv*)palloc0(sizeof(WalKeeperPriv));
+        privdata->keeper = generate_xlog_keepers();
+        funcctx->user_fctx = (void*)privdata;
+        funcctx->attinmeta = TupleDescGetAttInMetadata(resultTupleDesc);
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    privdata = (WalKeeperPriv*)funcctx->user_fctx;
+    loop = privdata->loop++;
+    xlogkeeper = privdata->keeper;
+
+    while (loop < WALKEEPER_MAX) {
+        char        **values = NULL;
+        char        xlogFile[MAXFNAMELEN] = {0};
+
+        if(xlogkeeper[loop].valid) {
+            HeapTuple   tuple = NULL;
+            Datum       result;
+
+            memset_s(xlogFile, MAXFNAMELEN, 0, MAXFNAMELEN);
+            if(1 != xlogkeeper[loop].segno)
+                XLogFileName(xlogFile, MAXFNAMELEN, t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID, xlogkeeper[loop].segno);
+            else {
+                int nRet = 0;                   
+                nRet = snprintf_s(xlogFile, MAXFNAMELEN, MAXFNAMELEN - 1, "ALL");
+                securec_check_ss(nRet, "\0", "\0"); 
+            }
+            values = (char**)palloc(PG_GET_XLOG_KEEPERS_COLS * sizeof(char*));
+            values[0] = wkdesc[loop].keeper_name;
+            values[1] = xlogFile;
+            values[2] = wkdesc[loop].keeper_desc;
+            tuple = BuildTupleFromCStrings(funcctx->attinmeta, values);
+
+            result = HeapTupleGetDatum(tuple);
+            SRF_RETURN_NEXT(funcctx, result);
+        }
+        loop = privdata->loop++;
+    }
+    if (xlogkeeper)
+        pfree(xlogkeeper);
+    SRF_RETURN_DONE(funcctx);
 }

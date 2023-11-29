@@ -1,0 +1,590 @@
+\c regression
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ 
+(1 row)
+
+select 'aa' = 'AA';
+ ?column? 
+----------
+ f
+(1 row)
+
+set names utf8;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ 
+(1 row)
+
+select 'aa' = 'AA';
+ ?column? 
+----------
+ f
+(1 row)
+
+-- error case
+set names utf8 collate gbk_bin;
+ERROR:  collation "gbk_bin" for encoding "UTF8" does not exist
+create database charset_connection_test dbcompatibility 'b';
+\c charset_connection_test
+-- show encoding settings
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ 
+(1 row)
+
+select 'aa' = 'AA';
+ ?column? 
+----------
+ f
+(1 row)
+
+set names utf8;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ 
+(1 row)
+
+select 'aa' = 'AA';
+ ?column? 
+----------
+ f
+(1 row)
+
+-- expect error cases
+SET NAMES utf8mb4 COLLATE utf8mb4_general_ci;
+ERROR:  character_set_connection can be changed when b_format_behavior_compat_options contains enable_multi_charset option
+SET NAMES utf8 collate = 'utf8_bin';
+ERROR:  syntax error at or near "="
+LINE 1: SET NAMES utf8 collate = 'utf8_bin';
+                               ^
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='all'" >/dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\c
+-- show encoding settings
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+select 'aa' = 'AA';
+ ?column? 
+----------
+ t
+(1 row)
+
+--error cases
+SET NAMES 'utf8' COLLATE DEFAULT;
+SET NAMES 'gbk' COLLATE 'utf8mb4_bin';
+ERROR:  collation "utf8mb4_bin" for encoding "GBK" does not exist
+SET NAMES utf8 COLLATE gbk_bin;
+ERROR:  collation "gbk_bin" for encoding "UTF8" does not exist
+SET NAMES COLLATE 'utf8mb4_bin';
+ERROR:  cannot specify collation without character set
+LINE 1: SET NAMES COLLATE 'utf8mb4_bin';
+                  ^
+SET NAMES gbk;
+show client_encoding;
+ client_encoding 
+-----------------
+ GBK
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ GBK
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ gbk_chinese_ci
+(1 row)
+
+select '高斯aa' = '高斯AA';
+ ?column? 
+----------
+ t
+(1 row)
+
+select '高斯aa' = '高斯AA' collate 'utf8mb4_bin'; --error case
+ERROR:  COLLATION "utf8mb4_bin" is not valid for CHARACTER SET "GBK"
+LINE 1: select '高斯aa' = '高斯AA' collate 'utf8mb4_bin';
+                                       ^
+select '高斯aa' = '高斯AA' collate 'gbk_bin';
+ ?column? 
+----------
+ f
+(1 row)
+
+set collation_connection = utf8mb4_bin;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_bin
+(1 row)
+
+select 'aa' = 'AA';
+ ?column? 
+----------
+ f
+(1 row)
+
+set character_set_connection = gbk;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ GBK
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ gbk_chinese_ci
+(1 row)
+
+select '高斯aa' = '高斯AA';
+ ?column? 
+----------
+ t
+(1 row)
+
+SET NAMES DEFAULT;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+select '高斯aa' = '高斯AA';
+ ?column? 
+----------
+ t
+(1 row)
+
+SET NAMES;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+select '高斯aa' = '高斯AA';
+ ?column? 
+----------
+ t
+(1 row)
+
+-- test default
+set names gbk;
+set names utf8 collate default;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+set names gbk;
+set names utf8 collate 'default';
+ERROR:  invalid value for parameter "collation_connection": "default"
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ GBK
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ gbk_chinese_ci
+(1 row)
+
+set names gbk;
+set collation_connection = default;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+-- test charset = -1
+set collation_connection = 'C';
+ERROR:  invalid value for parameter "collation_connection": "C"
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+set collation_connection = 'default';
+ERROR:  invalid value for parameter "collation_connection": "default"
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+set collation_connection = 'POSIX';
+ERROR:  invalid value for parameter "collation_connection": "POSIX"
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ utf8mb4_general_ci
+(1 row)
+
+set collation_connection = "binary";
+set collation_connection = binary;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ SQL_ASCII
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ binary
+(1 row)
+
+set names utf8;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\c
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ UTF8
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ 
+(1 row)
+
+select '高斯aa' = '高斯AA'; --false
+ ?column? 
+----------
+ f
+(1 row)
+
+set b_format_behavior_compat_options = 'ALL';
+set @aa = '高斯aa';
+set @bb = (select '高斯aa');
+select @cc := '高斯aa';
+ ?column? 
+----------
+ 高斯aa
+(1 row)
+
+select @dd := (select '高斯aa');
+ ?column? 
+----------
+ 高斯aa
+(1 row)
+
+select '高斯aa' into @ee;
+select @aa,@bb,@cc,@dd,@ee;
+  @aa   |  @bb   |  @cc   |  @dd   |  @ee   
+--------+--------+--------+--------+--------
+ 高斯aa | 高斯aa | 高斯aa | 高斯aa | 高斯aa
+(1 row)
+
+select collation for(@aa), collation for(@bb), collation for(@cc), collation for(@dd), collation for(@ee);
+ pg_collation_for | pg_collation_for | pg_collation_for | pg_collation_for | pg_collation_for 
+------------------+------------------+------------------+------------------+------------------
+ "default"        | "default"        | "default"        | "default"        | "default"
+(1 row)
+
+set names gbk;
+set @aa = '高斯aa';
+set @bb = (select '高斯aa');
+select @cc := '高斯aa';
+ ?column? 
+----------
+ 高斯aa
+(1 row)
+
+select @dd := (select '高斯aa');
+ ?column? 
+----------
+ 高斯aa
+(1 row)
+
+select '高斯aa' into @ee;
+select @aa,@bb,@cc,@dd,@ee;
+   @aa    |   @bb    |   @cc    |   @dd    |   @ee    
+----------+----------+----------+----------+----------
+ 高斯aa | 高斯aa | 高斯aa | 高斯aa | 高斯aa
+(1 row)
+
+select collation for(@aa), collation for(@bb), collation for(@cc), collation for(@dd), collation for(@ee);
+ pg_collation_for | pg_collation_for | pg_collation_for | pg_collation_for | pg_collation_for 
+------------------+------------------+------------------+------------------+------------------
+ gbk_chinese_ci   | gbk_chinese_ci   | gbk_chinese_ci   | gbk_chinese_ci   | gbk_chinese_ci
+(1 row)
+
+set @aa = '高斯aa' collate utf8mb4_unicode_ci;
+ERROR:  COLLATION "utf8mb4_unicode_ci" is not valid for CHARACTER SET "GBK"
+LINE 1: set @aa = '高斯aa' collate utf8mb4_unicode_ci;
+                             ^
+set @bb = (select '高斯aa' collate utf8mb4_unicode_ci);
+ERROR:  COLLATION "utf8mb4_unicode_ci" is not valid for CHARACTER SET "GBK"
+LINE 1: set @bb = (select '高斯aa' collate utf8mb4_unicode_ci);
+                                     ^
+select @cc := '高斯aa' collate utf8mb4_unicode_ci;
+ERROR:  COLLATION "utf8mb4_unicode_ci" is not valid for CHARACTER SET "GBK"
+LINE 1: select @cc := '高斯aa' collate utf8mb4_unicode_ci;
+                                 ^
+select @dd := (select '高斯aa' collate utf8mb4_unicode_ci);
+ERROR:  COLLATION "utf8mb4_unicode_ci" is not valid for CHARACTER SET "GBK"
+LINE 1: select @dd := (select '高斯aa' collate utf8mb4_unicode_ci)...
+                                         ^
+select '高斯aa' collate utf8mb4_unicode_ci into @ee;
+ERROR:  COLLATION "utf8mb4_unicode_ci" is not valid for CHARACTER SET "GBK"
+LINE 1: select '高斯aa' collate utf8mb4_unicode_ci into @ee;
+                          ^
+set client_encoding = utf8mb4;
+select @aa,@bb,@cc,@dd,@ee;
+   @aa    |   @bb    |   @cc    |   @dd    |   @ee    
+----------+----------+----------+----------+----------
+ 楂樻柉aa | 楂樻柉aa | 楂樻柉aa | 楂樻柉aa | 楂樻柉aa
+(1 row)
+
+set names utf8;
+set @aa = '高斯aa' collate utf8mb4_unicode_ci;
+set @bb = (select '高斯aa' collate utf8mb4_unicode_ci);
+select @cc := '高斯aa' collate utf8mb4_unicode_ci;
+ ?column? 
+----------
+ 高斯aa
+(1 row)
+
+select @dd := (select '高斯aa' collate utf8mb4_unicode_ci);
+ ?column? 
+----------
+ 高斯aa
+(1 row)
+
+select '高斯aa' collate utf8mb4_unicode_ci into @ee;
+select @aa,@bb,@cc,@dd,@ee;
+  @aa   |  @bb   |  @cc   |  @dd   |  @ee   
+--------+--------+--------+--------+--------
+ 高斯aa | 高斯aa | 高斯aa | 高斯aa | 高斯aa
+(1 row)
+
+select collation for(@aa), collation for(@bb), collation for(@cc), collation for(@dd), collation for(@ee);
+  pg_collation_for  |  pg_collation_for  |  pg_collation_for  |  pg_collation_for  |  pg_collation_for  
+--------------------+--------------------+--------------------+--------------------+--------------------
+ utf8mb4_unicode_ci | utf8mb4_unicode_ci | utf8mb4_unicode_ci | utf8mb4_unicode_ci | utf8mb4_unicode_ci
+(1 row)
+
+set names gbk;
+create table t(a text collate utf8mb4_bin, b text collate utf8mb4_unicode_ci);
+insert into t values('高斯aa', '高斯bb');
+select * from t into @a,@b;
+select @a,@b;
+    @a    |    @b    
+----------+----------
+ 高斯aa | 高斯bb
+(1 row)
+
+select collation for(@a), collation for(@b);
+ pg_collation_for |  pg_collation_for  
+------------------+--------------------
+ utf8mb4_bin      | utf8mb4_unicode_ci
+(1 row)
+
+select * from t where a = 'c' into @a,@b;
+select @a,@b;
+ @a | @b 
+----+----
+    | 
+(1 row)
+
+select collation for(@a), collation for(@b);
+ pg_collation_for |  pg_collation_for  
+------------------+--------------------
+ utf8mb4_bin      | utf8mb4_unicode_ci
+(1 row)
+
+create database charset_gbk dbcompatibility 'b' encoding 'gbk' lc_ctype = 'C' lc_collate = 'C';
+\c charset_gbk
+set client_encoding = utf8;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ GBK
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ 
+(1 row)
+
+create table t1(a text charset gbk collate gbk_bin);
+insert into t1 values('高斯');
+select * from t1;
+  a   
+------
+ 高斯
+(1 row)
+
+create database latin1_db dbcompatibility 'b' encoding 'latin1' lc_ctype = 'C' lc_collate = 'C';
+\c latin1_db
+select '高斯aa' = '高斯AA';
+ ?column? 
+----------
+ f
+(1 row)
+
+\c regression

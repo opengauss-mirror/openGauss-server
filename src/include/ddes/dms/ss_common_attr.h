@@ -35,10 +35,14 @@
 #define ENABLE_DMS false
 #define ENABLE_REFORM false
 #define ENABLE_VERIFY_PAGE_VERSION false
+#define ENABLE_SS_TXNSTATUS_CACHE false
+#define ENABLE_SS_BCAST_SNAPSHOT false
 #else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_REFORM (g_instance.attr.attr_storage.dms_attr.enable_reform)
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
+#define ENABLE_SS_TXNSTATUS_CACHE (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size > 0)
+#define ENABLE_SS_BCAST_SNAPSHOT (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot)
 #endif
 
 #define SS_REFORM_REFORMER                                                  \
@@ -71,6 +75,9 @@
 
 #define SS_STANDBY_FAILOVER (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
 
+#define SS_PRIMARY_NORMAL_REFORM \
+    (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
+
 #define SS_PERFORMING_SWITCHOVER \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL && \
     g_instance.dms_cxt.SSClusterState != NODESTATE_STANDBY_FAILOVER_PROMOTING))
@@ -91,67 +98,18 @@
 
 /* Mode in dorado hyperreplication and dms enabled as follow */
 
-/* main standby in standby cluster */
-#define SS_STANDBY_CLUSTER_MAIN_STANDBY                                    \
-    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
-    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* standby mode in primary or standby cluster */
-#define SS_PRIMARY_STANDBY_CLUSTER_STANDBY                                    \
-    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
-    t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* standby mode in primary cluster */
-#define SS_PRIMARY_CLUSTER_STANDBY                                    \
-    (ENABLE_DMS && (t_thrd.xlog_cxt.server_mode == NORMAL_MODE || \
-    t_thrd.postmaster_cxt.HaShmData->current_mode ==  NORMAL_MODE) && \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* arbitrary mode when dorado hyperreplication and dms enabled */
-#define SS_PRIMARY_STANDBY_CLUSTER_NORMAL                                   \
-    (ENABLE_DMS && ((g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) || \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY)) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* primary mode in primary cluster, after reform done and primary id has been determined */
-#define SS_PRIMARY_CLUSTER_NORMAL_PRIMARY                                    \
-    (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE || \
-    t_thrd.postmaster_cxt.HaShmData->current_mode ==  PRIMARY_MODE) && \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_PRIMARY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* main standby in standby cluster, after reform done and primary id has been determined */
-#define SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY                                    \
-    (SS_NORMAL_PRIMARY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
-    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* standby mode in standby cluster, after reform done and primary id has been determined */
-#define SS_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
-    (SS_NORMAL_STANDBY && (t_thrd.xlog_cxt.server_mode == STANDBY_MODE || \
-    t_thrd.postmaster_cxt.HaShmData->current_mode ==  STANDBY_MODE) && \
-    (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY) && \
-    (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-/* standby mode in primary or standby, after reform done and primary id has been determined */
-#define SS_PRIMARY_STANDBY_CLUSTER_NORMAL_STANDBY                                    \
-    (SS_NORMAL_STANDBY && (g_instance.attr.attr_storage.xlog_file_path != 0))
-
-#define SS_CLUSTER_NOT_NORAML (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus != CLUSTER_NORMAL))
+#define SS_CLUSTER_ONDEMAND_NOT_NORAML \
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status != CLUSTER_NORMAL))
 #define SS_CLUSTER_ONDEMAND_BUILD \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_BUILD))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status == CLUSTER_IN_ONDEMAND_BUILD))
 #define SS_CLUSTER_ONDEMAND_RECOVERY \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_IN_ONDEMAND_RECOVERY))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status == CLUSTER_IN_ONDEMAND_REDO))
 #define SS_CLUSTER_ONDEMAND_NORMAL \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSReformerControl.clusterStatus == CLUSTER_NORMAL))
+    (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status == CLUSTER_NORMAL))
 #define SS_STANDBY_ONDEMAND_BUILD (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_BUILD)
 #define SS_STANDBY_ONDEMAND_RECOVERY (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_RECOVERY)
 #define SS_STANDBY_ONDEMAND_NORMAL (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_NORMAL)
+#define SS_STANDBY_ONDEMAND_NOT_NORMAL (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_NOT_NORAML)
 
 /* DMS_BUF_NEED_LOAD */
 #define BUF_NEED_LOAD           0x1
@@ -180,9 +138,21 @@
 #define SS_ACQUIRE_LOCK_DO_NOT_WAIT 0
 #define SS_ACQUIRE_LOCK_RETRY_INTERVAL (50)   // 50ms
 
+#define DMS_MSG_MAX_WAIT_TIME (10 * 1000) // 10s
+#define SS_REFORM_WAIT_TIME (5000) // 5ms
+
+/* length of segment filename like '/1' */
+#define SEG_MAINFORK_FILENAME_LEN   2
+/* length of segment vm filename like '1_vm' */
+#define SEG_VMFORK_FILENAME_LEN     4
+/* length of segment fsm filename like '1_fsm' */
+#define SEG_FSMFORK_FILENAME_LEN    5
+
+/* max length of max int range as char */
+#define MAX_LEN_OF_MAXINTRANGE      12
+
 typedef enum SSBroadcastOp {
-    BCAST_GET_XMIN = 0,
-    BCAST_CANCEL_TRX_FOR_SWITCHOVER,
+    BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
     BCAST_SI,
     BCAST_SEGDROPTL,
     BCAST_DROP_REL_ALL_BUFFER,
@@ -194,12 +164,13 @@ typedef enum SSBroadcastOp {
     BCAST_DDLLOCKRELEASE,
     BCAST_DDLLOCKRELEASE_ALL,
     BCAST_CHECK_DB_BACKENDS,
+    BCAST_SEND_SNAPSHOT,
+    BCAST_RELOAD_REFORM_CTRL_PAGE,
     BCAST_END
 } SSBroadcastOp;
 
 typedef enum SSBroadcastOpAck {
-    BCAST_GET_XMIN_ACK = 0,
-    BCAST_CANCEL_TRX_ACK,
+    BCAST_CANCEL_TRX_ACK = 0,
     BCAST_CHECK_DB_BACKENDS_ACK,
     BCAST_ACK_END
 } SSBroadcastOpAck;
@@ -208,21 +179,9 @@ typedef struct SSBroadcastCmdOnly {
     SSBroadcastOp type; // must be first
 } SSBroadcastCmdOnly;
 
-typedef enum SSReformType {
-    DMS_REFORM_TYPE_FOR_NORMAL = 0,
-    DMS_REFORM_TYPE_FOR_BUILD,
-    DMS_REFORM_TYPE_FOR_FAILOVER,
-    DMS_REFORM_TYPE_FOR_SWITCHOVER,
-    DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS,
-    DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS,
-    DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS,
-    DMS_REFORM_TYPE_FOR_FULL_CLEAN,
-    DMS_REFORM_TYPE_FOR_MAINTAIN
-} SSReformType;
-
 typedef enum SSGlobalClusterState {
     CLUSTER_IN_ONDEMAND_BUILD = 0,
-    CLUSTER_IN_ONDEMAND_RECOVERY,
+    CLUSTER_IN_ONDEMAND_REDO,
     CLUSTER_NORMAL
 } SSGlobalClusterState;
 
@@ -230,8 +189,18 @@ typedef enum SSOndemandRequestRedoStatus {
     ONDEMAND_REDO_DONE = 0,
     ONDEMAND_REDO_SKIP,
     ONDEMAND_REDO_FAIL,
-    ONDEMAND_REDO_INVALID
+    ONDEMAND_REDO_TIMEOUT
 } SSOndemandRequestRedoStatus;
 
+/* consider DFX stats reset were node role to change */
+typedef struct ss_dfx_stats_t {
+    uint64 txnstatus_varcache_gets;
+    uint64 txnstatus_hashcache_gets;
+    uint64 txnstatus_network_io_gets;
+    uint64 txnstatus_total_niogets_time;
+    uint64 txnstatus_total_hcgets_time;
+    uint64 txnstatus_total_evictions;
+    uint64 txnstatus_total_eviction_refcnt;
+} ss_dfx_stats_t;
 
 #endif

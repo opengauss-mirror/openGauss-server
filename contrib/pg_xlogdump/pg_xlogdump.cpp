@@ -35,6 +35,7 @@
 #include "storage/page_compression.h"
 #include "storage/dss/dss_adaptor.h"
 #include "storage/file/fio_device.h"
+#include "tool_common.h"
 
 static const char* progname;
 
@@ -85,7 +86,7 @@ static void XLogDumpXLogRead(char* directory, TimeLineID timeline_id, XLogRecPtr
 static int XLogDumpReadPage(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetPtr,
     char* readBuff, TimeLineID* curFileTLI, char* xlog_path = NULL);
 static void XLogDumpCountRecord(XLogDumpConfig* config, XLogDumpStats* stats, XLogReaderState* record);
-static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record);
+void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record);
 static void XLogDumpStatsRow(const char* name, uint64 n, uint64 total_count, uint64 rec_len, uint64 total_rec_len,
     uint64 fpi_len, uint64 total_fpi_len, uint64 tot_len, uint64 total_len);
 static void XLogDumpDisplayStats(XLogDumpConfig* config, XLogDumpStats* stats);
@@ -534,7 +535,7 @@ static const char* XLogGetForkNames(ForkNumber forknum)
 /*
  * Print a record to stdout
  */
-static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record)
+void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record)
 {
     const RmgrDescData* desc = &RmgrDescTable[XLogRecGetRmid(record)];
     RelFileNode rnode;
@@ -577,7 +578,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
         XLogRecGetPhysicalBlock(record, block_id, &seg_fileno, &seg_blockno);
         
         // output format: ", blkref #%u: rel %u/%u/%u/%d storage %s fork %s blk %u (phy loc %u/%u) lastlsn %X/%X"
-        printf(", blkref #%d: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
+        printf(", blkref #%d: rel %u/%u/%u/%d/%d, forknum:%d", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode,
+               rnode.bucketNode, rnode.opt, forknum);
         if (IsBucketFileNode(rnode)) {
             printf("/%d", rnode.bucketNode);
         }
@@ -999,6 +1001,20 @@ int main(int argc, char** argv)
             default:
                 goto bad_argument;
         }
+    }
+
+    if (!dumpprivate.enable_dss) {
+        if (dumpprivate.inpath != NULL && dumpprivate.inpath[0] == '+') {
+            dumpprivate.enable_dss = true;
+        } else {
+            if (dumpprivate.inpath == NULL && argv[optind] != NULL and argv[optind][0] == '+') {
+                dumpprivate.enable_dss = true;
+            }
+        }
+    }
+
+    if (dumpprivate.enable_dss && dumpprivate.socketpath == NULL) {
+        dumpprivate.socketpath = getSocketpathFromEnv();
     }
 
     if ((optind + 2) < argc) {

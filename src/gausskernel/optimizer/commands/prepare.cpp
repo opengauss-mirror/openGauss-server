@@ -32,6 +32,7 @@
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_type.h"
+#include "pgstat.h"
 #include "rewrite/rewriteHandler.h"
 #include "tcop/pquery.h"
 #include "tcop/utility.h"
@@ -164,6 +165,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         stmt->name,
 #endif
         CreateCommandTag(stmt->query));
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(stmt->query);
 
     /* Transform list of TypeNames to array of type OIDs */
     nargs = list_length(stmt->argtypes);
@@ -314,6 +316,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     /* Look it up in the hash table */
     entry = FetchPreparedStatement(stmt->name, true, true);
     psrc = entry->plansource;
+    t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
 
     /* Shouldn't find a non-fixed-result cached plan */
     if (!entry->plansource->fixed_result)
@@ -383,6 +386,10 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
 
     /* Copy the plan's saved query string into the portal's memory */
     query_string = MemoryContextStrdup(PortalGetHeapMemory(portal), entry->plansource->query_string);
+
+    if (!intoClause) {
+        psrc->cursor_options |= CURSOR_OPT_SPQ_OK;
+    }
 
     /* Replan if needed, and increment plan refcount for portal */
     if (ENABLE_CACHEDPLAN_MGR) {
@@ -494,6 +501,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     ParamListInfo paramLI;
     List* exprstates = NIL;
     ListCell* l = NULL;
+    Oid param_collation;
+    int param_charset;
     int i;
 
     if (nparams != num_params)
@@ -515,6 +524,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     pstate = make_parsestate(NULL);
     pstate->p_sourcetext = queryString;
 
+    param_collation = GetCollationConnection();
+    param_charset = GetCharsetConnection();
     i = 0;
     foreach (l, params) {
         Node* expr = (Node*)lfirst(l);
@@ -550,6 +561,12 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
 
         /* Take care of collations in the finished expression. */
         assign_expr_collations(pstate, expr);
+
+        /* Try convert expression to target parameter charset. */
+        if (OidIsValid(param_collation) && IsSupportCharsetType(expected_type_id)) {
+            /* convert charset only, expression will be evaluated below */
+            expr = coerce_to_target_charset(expr, param_charset, expected_type_id, -1, param_collation, false);
+        }
 
         lfirst(l) = expr;
         i++;
@@ -620,8 +637,19 @@ void InitQueryHashTable(void)
     hash_ctl.keysize = NAMEDATALEN;
     hash_ctl.entrysize = sizeof(PreparedStatement);
     hash_ctl.hcxt = u_sess->cache_mem_cxt;
-
-    u_sess->pcache_cxt.prepared_queries = hash_create("Prepared Queries", 32, &hash_ctl, HASH_ELEM | HASH_CONTEXT);
+    
+    PG_TRY();
+    {
+        (void)syscalllockAcquire(&u_sess->pcache_cxt.pstmt_htbl_lock);
+        u_sess->pcache_cxt.prepared_queries = hash_create("Prepared Queries", 32, &hash_ctl, HASH_ELEM | HASH_CONTEXT);
+        (void)syscalllockRelease(&u_sess->pcache_cxt.pstmt_htbl_lock);
+    }
+    PG_CATCH();
+    {
+        (void)syscalllockRelease(&u_sess->pcache_cxt.pstmt_htbl_lock);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR) {
@@ -635,9 +663,59 @@ void InitQueryHashTable(void)
         u_sess->pcache_cxt.datanode_queries = hash_create("Datanode Queries", 64, &hash_ctl, HASH_ELEM | HASH_CONTEXT);
     }
 #endif
+    Assert(u_sess->pcache_cxt.prepared_queries);
+
+    if (!ENABLE_THREAD_POOL) {
+        Assert(t_thrd.shemem_ptr_cxt.MyBEEntry->my_prepared_queries == NULL);
+        t_thrd.shemem_ptr_cxt.MyBEEntry->my_prepared_queries = u_sess->pcache_cxt.prepared_queries;
+        t_thrd.shemem_ptr_cxt.MyBEEntry->my_pstmt_htbl_lock = &u_sess->pcache_cxt.pstmt_htbl_lock;
+    }
+}
+
+
+static void InsertIntoQueryHashTable(const char* stmt_name, CachedPlanSource* plansource, bool from_sql, bool* found)
+{
+    PreparedStatement* entry = NULL;
+    PG_TRY();
+    {
+        (void)syscalllockAcquire(&u_sess->pcache_cxt.pstmt_htbl_lock);
+        entry = (PreparedStatement*)hash_search(u_sess->pcache_cxt.prepared_queries, stmt_name, HASH_ENTER, found);
+        (void)syscalllockRelease(&u_sess->pcache_cxt.pstmt_htbl_lock);
+    }
+    PG_CATCH();
+    {
+        (void)syscalllockRelease(&u_sess->pcache_cxt.pstmt_htbl_lock);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (!(*found)) {
+        entry->plansource = plansource;
+        entry->from_sql = from_sql;
+        entry->prepare_time = GetCurrentStatementStartTimestamp();
+        entry->has_prepare_dn_stmt = false;
+    }
+    Assert(entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
+}
+
+static void DropFromQueryHashTable(const char* stmt_name)
+{
+    PG_TRY();
+    {
+        (void)syscalllockAcquire(&u_sess->pcache_cxt.pstmt_htbl_lock);
+        hash_search(u_sess->pcache_cxt.prepared_queries, stmt_name, HASH_REMOVE, NULL);
+        (void)syscalllockRelease(&u_sess->pcache_cxt.pstmt_htbl_lock);
+    }
+    PG_CATCH();
+    {
+        (void)syscalllockRelease(&u_sess->pcache_cxt.pstmt_htbl_lock);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }
 
 #ifdef PGXC
+
 /*
  * Assign the statement name for all the RemoteQueries in the plan tree, so
  * they use Datanode statements
@@ -787,8 +865,7 @@ void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *planso
         InitQueryHashTable();
 
     /* Add entry to hash table */
-    PreparedStatement* entry = (PreparedStatement*)hash_search(u_sess->pcache_cxt.prepared_queries, stmt_name,
-                                                               HASH_ENTER, &found);
+    InsertIntoQueryHashTable(stmt_name, plansource, from_sql, &found);
     CN_GPC_LOG("entry preparedstatement", plansource, stmt_name);
 
     /* Shouldn't get a duplicate entry */
@@ -801,12 +878,6 @@ void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *planso
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_PSTATEMENT), errmsg("prepared statement \"%s\" already exists", stmt_name)));
     }
-    /* Fill in the hash table entry */
-    entry->plansource = plansource;
-    entry->from_sql = from_sql;
-    entry->prepare_time = cur_ts;
-    entry->has_prepare_dn_stmt = false;
-    Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
 
     /* Now it's safe to move the CachedPlanSource to permanent memory */
     if (!is_share) {
@@ -843,21 +914,16 @@ void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource,
     bool found = false;
 
     /* Initialize the hash table, if necessary */
-    if (!u_sess->pcache_cxt.prepared_queries)
+    if (unlikely(!u_sess->pcache_cxt.prepared_queries))
         InitQueryHashTable();
 
     /* Add entry to hash table */
-    entry = (PreparedStatement*)hash_search(u_sess->pcache_cxt.prepared_queries, stmt_name, HASH_ENTER, &found);
+    InsertIntoQueryHashTable(stmt_name, plansource, from_sql, &found);
 
     /* Shouldn't get a duplicate entry */
     if (found)
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_PSTATEMENT), errmsg("prepared statement \"%s\" already exists", stmt_name)));
-
-    /* Fill in the hash table entry */
-    entry->plansource = plansource;
-    entry->from_sql = from_sql;
-    entry->prepare_time = cur_ts;
 
     /* Now it's safe to move the CachedPlanSource to permanent memory */
     SaveCachedPlan(plansource);
@@ -1056,7 +1122,7 @@ void DropPreparedStatement(const char* stmt_name, bool showError)
         }
         CN_GPC_LOG("remove prepare statment", 0, entry->stmt_name);
         /* Now we can remove the hash table entry */
-        hash_search(u_sess->pcache_cxt.prepared_queries, entry->stmt_name, HASH_REMOVE, NULL);
+        DropFromQueryHashTable(entry->stmt_name);
     }
 
     if (NULL == originalOwner && t_thrd.utils_cxt.CurrentResourceOwner) {
@@ -1159,7 +1225,7 @@ void DropAllPreparedStatements(void)
         }
 
         /* Now we can remove the hash table entry */
-        hash_search(u_sess->pcache_cxt.prepared_queries, entry->stmt_name, HASH_REMOVE, NULL);
+        DropFromQueryHashTable(entry->stmt_name);
     }
     ReleaseTempResourceOwner();
     CN_GPC_LOG("remove prepare statment all", 0, 0);
@@ -1347,6 +1413,10 @@ void ExplainExecuteQuery(
 
     u_sess->attr.attr_sql.explain_allow_multinode = true;
 
+    if (!into) {
+        psrc->cursor_options |= CURSOR_OPT_SPQ_OK;
+    }
+
     if (ENABLE_CACHEDPLAN_MGR) {
         cplan = GetWiseCachedPlan(psrc, paramLI, true);
     } else {
@@ -1486,6 +1556,138 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
     return (Datum)0;
 }
 
+Datum pg_prepared_statement_global(PG_FUNCTION_ARGS)
+{
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "pg_prepared_statements");
+    }
+
+    uint64 sessionid = (uint64)PG_GETARG_INT64(0);
+    ReturnSetInfo *rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    TupleDesc tupdesc;
+    Tuplestorestate* tupstore = NULL;
+    MemoryContext per_query_ctx;
+    MemoryContext oldcontext;
+
+    /* check to see if caller supports us returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("set-valued function called in context that cannot accept a set")));
+    if (!(rsinfo->allowedModes & SFRM_Materialize))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialize mode required, but it is not "
+                       "allowed in this context")));
+
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+    /*
+     * build tupdesc for result tuples. This must match the definition of the
+     * pg_prepared_statements view in system_views.sql
+     */
+    tupdesc = CreateTemplateTupleDesc(7, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "sessionid", INT8OID, -1, 0 );
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "username", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "statement", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "prepare_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "parameter_types", REGTYPEARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "from_sql", BOOLOID, -1, 0);
+
+     /*
+     * We put all the tuples into a tuplestore in one scan of the hashtable.
+     * This avoids any issue of the hashtable possibly changing between calls.
+     */
+    tupstore =
+        tuplestore_begin_heap(rsinfo->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
+
+    /* generate junk in short-term context */
+    MemoryContextSwitchTo(oldcontext);
+
+    /* total number of tuples to be returned */
+    if (ENABLE_THREAD_POOL) {
+        g_threadPoolControler->GetSessionCtrl()->GetSessionPreparedStatements(tupstore, tupdesc, sessionid);
+    } else {
+        GetThreadPreparedStatements(tupstore, tupdesc, sessionid);
+    }
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(tupstore);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+
+    return (Datum)0;
+}
+
+void GetPreparedStatements(HTAB* htbl, Tuplestorestate* tupStore, TupleDesc tupDesc, uint64 sessionId, char* userName)
+{
+    HASH_SEQ_STATUS hash_seq;
+    PreparedStatement *prep_stmt = NULL;
+    hash_seq_init(&hash_seq, htbl);
+    while ((prep_stmt = (PreparedStatement*)hash_seq_search(&hash_seq)) != NULL) {
+        Datum values[7];
+        bool nulls[7];
+
+        errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+        values[0] = UInt64GetDatum(sessionId);
+        values[1] = CStringGetTextDatum(userName);
+        values[2] = CStringGetTextDatum(prep_stmt->stmt_name);
+        char* maskquery = maskPassword(prep_stmt->plansource->query_string);
+        const char* query = (maskquery == NULL) ? prep_stmt->plansource->query_string : maskquery;
+        values[3] = CStringGetTextDatum(query);
+        if (query != maskquery)
+            pfree_ext(maskquery);
+        values[4] = TimestampTzGetDatum(prep_stmt->prepare_time);
+        values[5] = build_regtype_array(prep_stmt->plansource->param_types, prep_stmt->plansource->num_params);
+        values[6] = BoolGetDatum(prep_stmt->from_sql);
+        
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+    }
+}
+
+void GetThreadPreparedStatements(Tuplestorestate* tupStore, TupleDesc tupDesc, uint64 sessionId)
+{
+    Assert(!ENABLE_THREAD_POOL);    
+    PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray;
+    char* userName = NULL;
+
+    PG_TRY();
+    {
+        for(int i = 0; i < BackendStatusArray_size; i++){
+            HTAB* htbl = beentry->my_prepared_queries;
+            
+	    if (beentry->my_pstmt_htbl_lock != NULL)   
+              if ((beentry->st_procpid > 0 || beentry -> st_sessionid > 0) && 
+                  (beentry->st_sessionid == sessionId || sessionId == 0)) {
+                  Oid userid = beentry->st_userid;
+                  userName = GetUserNameFromId(userid);
+                  if (htbl) {
+                      (void)syscalllockAcquire(beentry->my_pstmt_htbl_lock);
+                       GetPreparedStatements(htbl, tupStore, tupDesc, beentry->st_sessionid, userName);
+                      (void)syscalllockRelease(beentry->my_pstmt_htbl_lock);            
+                } 
+            }
+    
+              pfree_ext(userName);
+
+              beentry++;
+        }
+    }
+    PG_CATCH();
+    {
+        (void)syscalllockRelease(beentry->my_pstmt_htbl_lock);
+        pfree_ext(userName);
+        PG_RE_THROW();	
+    }
+     PG_END_TRY();
+}
+
 /*
  * This utility function takes a C array of Oids, and returns a Datum
  * pointing to a one-dimensional Postgres array of regtypes. An empty
@@ -1556,6 +1758,7 @@ void DropDatanodeStatement(const char* stmt_name)
         (void*)hash_search(u_sess->pcache_cxt.datanode_queries, entry->stmt_name, HASH_REMOVE, NULL);
         if (!ENABLE_CN_GPC)
             ExecCloseRemoteStatement(stmt_name, nodelist);
+        list_free_ext(nodelist);
     }
 }
 
@@ -1750,6 +1953,7 @@ void RePrepareQuery(ExecuteStmt* stmt)
      */
     foreach (parsetree_item, parseTree_list) {
         Node* parsetree = (Node*)lfirst(parsetree_item);
+        t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
         List* planTree_list = NIL;
 
         queryTree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
@@ -1859,6 +2063,7 @@ static Node* substitute_const_with_parameters_mutator(Node* node, substitute_con
         param->paramtypmod = con->consttypmod;
         param->paramcollid = con->constcollid;
         param->location = con->location;
+        param->is_bind_param = true;
         if (*context->args) {
             *context->args = (Oid*)repalloc(*context->args, param->paramid * sizeof(Oid));
         } else {

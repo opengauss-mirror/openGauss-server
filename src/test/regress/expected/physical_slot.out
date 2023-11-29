@@ -18,8 +18,6 @@ select * from pg_get_replication_slots();
 (1 row)
 
 select * from pg_drop_replication_slot('test_slot');
-WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
-WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
  pg_drop_replication_slot 
 --------------------------
  
