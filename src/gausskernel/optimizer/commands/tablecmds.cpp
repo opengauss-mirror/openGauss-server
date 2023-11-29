@@ -2865,8 +2865,12 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
     if (!IsInitdb && (relkind == RELKIND_RELATION) && !IsSystemNamespace(namespaceId) &&
         !IsCStoreNamespace(namespaceId) && (pg_strcasecmp(storeChar, ORIENTATION_ROW) == 0) &&
         (stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT) && !u_sess->attr.attr_storage.enable_recyclebin) {
-        if (u_sess->attr.attr_storage.enable_segment || bucketinfo != NULL) {
+        bool isSegmentType = (storage_type == SEGMENT_PAGE);
+        if (!isSegmentType && (u_sess->attr.attr_storage.enable_segment || bucketinfo != NULL)) {
             storage_type = SEGMENT_PAGE;
+            DefElem *storage_def = makeDefElem("segment", (Node *)makeString("on"));
+            stmt->options = lappend(stmt->options, storage_def);
+            reloptions = transformRelOptions((Datum)0, stmt->options, NULL, validnsps, true, false);
         }
     } else if (storage_type == SEGMENT_PAGE) {
         if (u_sess->attr.attr_storage.enable_recyclebin) {
@@ -2907,6 +2911,12 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 "Foreign table, matview, temp table or unlogged table is not supported.\nCompression is not "
                 "supported.")));
         }
+    }
+
+    if (!IsInitdb && u_sess->attr.attr_storage.enable_segment && storage_type == SEGMENT_PAGE &&
+        !CheckSegmentStorageOption(stmt->options)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Only support segment storage type while parameter enable_segment is ON.")));
     }
 
     /*
