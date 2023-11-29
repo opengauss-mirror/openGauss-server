@@ -173,7 +173,8 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
      * return true.
      */
     if (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync ||
-        u_sess->attr.attr_storage.catchup2normal_wait_time < 0) {
+        u_sess->attr.attr_storage.catchup2normal_wait_time < 0 ||
+        pg_atomic_read_u32(&g_instance.noNeedWaitForCatchup) == 1) {
         return true;
     }
 
@@ -948,6 +949,7 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
     num_standbys = SyncRepGetSyncStandbys(&sync_standbys, &catchup_standbys);
     /* Skip here if there is at lease one sync standby, or no standby in catchup. */
     if (check_sync_standbys_num(sync_standbys, num_standbys) != STANDBIES_EMPTY || list_length(catchup_standbys) == 0) {
+        pg_atomic_exchange_u32(&g_instance.noNeedWaitForCatchup, 1);
         pfree(sync_standbys);
         list_free(catchup_standbys);
         return false;
