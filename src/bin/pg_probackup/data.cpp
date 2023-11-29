@@ -1932,7 +1932,10 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
         PageState   page_st;
 
         if (interrupted || thread_interrupted)
+        {
+            fclose(in);
             elog(ERROR, "Interrupted during data file validation");
+        }
 
         /* newer backups have page headers in separate storage */
         if (headers)
@@ -1957,8 +1960,11 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
             if (cur_pos_in != headers[n_hdr].pos)
             {
                 if (fio_fseek(in, headers[n_hdr].pos) < 0)
+                {
+                    fclose(in);
                     elog(ERROR, "Cannot seek block %u of \"%s\": %s",
                         blknum, fullpath, strerror(errno));
+                }
                 else
                     elog(INFO, "Seek to %u", headers[n_hdr].pos);
 
@@ -2046,6 +2052,7 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
                 }
                 elog(WARNING, "Page %u of file \"%s\" uncompressed to %d bytes. != BLCKSZ",
                     blknum, fullpath, uncompressed_size);
+                fclose(in);
                 return false;
             }
 
