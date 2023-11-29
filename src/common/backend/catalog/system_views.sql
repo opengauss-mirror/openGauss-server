@@ -3588,12 +3588,16 @@ SELECT * FROM pg_catalog.pv_thread_memory_detail() WHERE contextname LIKE '%Loca
 
 CREATE VIEW pg_publication_tables AS
     SELECT
-        P.pubname AS pubname,
+        gpt.pubname AS pubname,
         N.nspname AS schemaname,
         C.relname AS tablename
-    FROM pg_publication P, pg_class C
+    FROM (SELECT
+         P.pubname,
+         pg_catalog.pg_get_publication_tables(P.pubname) relid
+         FROM pg_publication P) gpt,
+         pg_class C
          JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.oid IN (SELECT relid FROM pg_catalog.pg_get_publication_tables(P.pubname));
+    WHERE C.oid = gpt.relid;
 
 CREATE VIEW pg_stat_subscription AS
     SELECT
