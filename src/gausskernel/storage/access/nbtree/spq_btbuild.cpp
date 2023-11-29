@@ -344,10 +344,7 @@ void spq_build_main(const BgWorkerContext *bwc)
     LOCKMODE heapLockmode = NoLock;
     LOCKMODE indexLockmode = NoLock;
 
-    if (!shared->isconcurrent) {
-        heapLockmode = ShareLock;
-        indexLockmode = AccessExclusiveLock;
-    } else {
+    if (shared->isconcurrent) {
         heapLockmode = ShareUpdateExclusiveLock;
         indexLockmode = RowExclusiveLock;
     }
