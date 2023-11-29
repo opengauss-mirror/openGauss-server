@@ -153,6 +153,7 @@ static void opt_show_format(ConfigOption *opt, const char *arg);
 
 static void compress_init(void);
 static void dss_init(void);
+static int ss_get_primary_id(void);
 
 /*
  * Short name should be non-printable ASCII character.
@@ -940,6 +941,52 @@ compress_init(void)
     }
 }
 
+static int ss_get_primary_id(void)
+{
+    int fd = -1;
+    int len = 0;
+    int primary_id = -1;
+    errno_t rc = 0;
+    struct stat statbuf;
+    char control_file_path[MAXPGPATH];
+
+    rc = memset_s(control_file_path, MAXPGPATH, 0, MAXPGPATH);
+    securec_check_c(rc, "\0", "\0");
+    rc = snprintf_s(control_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", instance_config.dss.vgdata);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    fd = open(control_file_path, O_RDONLY | PG_BINARY, 0);
+    if (fd < 0) {
+        pg_log(PG_WARNING, _("failed to open pg_contol\n"));
+        close(fd);
+        exit(1);
+    }
+
+    if (stat(control_file_path, &statbuf) < 0) {
+        pg_log(PG_WARNING, _("failed to stat pg_contol\n"));
+        close(fd);
+        exit(1);
+    }
+
+    len = statbuf.st_size;
+    char *tmpBuffer = (char*)malloc(len + 1);
+
+    if ((read(fd, tmpBuffer, len)) != len) {
+        close(fd);
+        free(tmpBuffer);
+        pg_log(PG_WARNING, _("failed to read pg_contol\n"));
+        exit(1);
+    }
+
+    ss_reformer_ctrl_t* reformerCtrl;
+
+    /* Calculate the offset to obtain the primary_id of the last page */
+    reformerCtrl = (ss_reformer_ctrl_t*)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
+    primary_id = reformerCtrl->primaryInstId;
+    free(tmpBuffer);
+    return primary_id;
+}
+
 static void dss_init(void)
 {
     if (IsDssMode()) {
@@ -982,6 +1029,13 @@ static void dss_init(void)
         if (id < MIN_INSTANCEID || id > MAX_INSTANCEID) {
             elog(ERROR, "Instance id must be specified in dss mode, valid range is %d - %d.",
                 MIN_INSTANCEID, MAX_INSTANCEID);
+        }
+
+        int primary_instance_id = ss_get_primary_id();
+        if (id != primary_instance_id)
+        {
+            elog(ERROR, "backup only support on primary in dss mode, primary instance id: %d, backup instance id: %d",
+                primary_instance_id, id);
         }
 
         if (backup_subcmd != RESTORE_CMD) {
