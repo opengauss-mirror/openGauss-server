@@ -93,4 +93,7 @@ select 0\; copy test3 from stdin\; copy test3 from stdin\; select 1; -- 1
 2
 \.
 select * from test3 order by 1;
+
+set query_dop=1004;
+copy (select * from test3 order by 1 limit 1) to stdout header csv;
 drop table test3;
