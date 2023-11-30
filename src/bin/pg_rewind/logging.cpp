@@ -212,10 +212,5 @@ void progress_report(bool force)
     else
         g_state.build_info.estimated_time = -1;
     UpdateDBStateFile(gaussdb_state_file, &g_state);
-
-    if (print) {
-        print = false;
-        pg_log(PG_PROGRESS, "receiving and unpacking files...\n");
-    }
 }
 

@@ -81,7 +81,11 @@ select usename from pg_user where  usesysid = (select proowner from pg_proc wher
 --dump  test
 -- dump function
 \! @abs_bindir@/gs_dump mysqltest -p @portstring@  -f @abs_bindir@/mysql_function_back.sql
+Begin scanning database. 
+Finish scanning database. 
 --? .*
+Start dumping objects 
+Finish dumping objects 
 --? .*
 --? .*
 --? .*
