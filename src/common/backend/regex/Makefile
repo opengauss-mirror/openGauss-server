@@ -19,7 +19,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = regcomp.o regerror.o regexec.o regfree.o regprefix.o
+OBJS = regcomp.o regerror.o regexec.o regfree.o regprefix.o regexport.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 
