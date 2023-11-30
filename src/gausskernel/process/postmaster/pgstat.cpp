@@ -3324,7 +3324,8 @@ static void clear_backend_entry(volatile PgBackendStatus* beentry)
     beentry->globalSessionId.sessionId = 0;
     beentry->globalSessionId.nodeId = 0;
     beentry->globalSessionId.seq = 0;
-
+    beentry->my_prepared_queries = NULL;
+    beentry->my_pstmt_htbl_lock = NULL;
     /*
      * make sure st_changecount is an even before release it.
      *
