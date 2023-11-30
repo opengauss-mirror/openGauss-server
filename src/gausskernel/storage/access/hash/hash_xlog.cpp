@@ -350,7 +350,7 @@ static void hash_xlog_move_page_contents(XLogReaderState *record)
          */
         if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
             PageSetLSN(bucketbuf.pageinfo.page, lsn);
-            MarkBufferDirty(writebuf.buf);
+            MarkBufferDirty(bucketbuf.buf);
         }
 
         action = XLogReadBufferForRedo(record, 1, &writebuf);
@@ -431,7 +431,7 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
          */
         if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
             PageSetLSN(bucketbuf.pageinfo.page, lsn);
-            MarkBufferDirty(writebuf.buf);
+            MarkBufferDirty(bucketbuf.buf);
         }
 
         action = XLogReadBufferForRedo(record, 1, &writebuf);
