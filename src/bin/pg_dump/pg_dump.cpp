@@ -23496,7 +23496,7 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 
             char idxopt[posoffset + 1] = {0};
             /* Write the storage mode in the condef. */
-            errno_t rc = memcpy_s(idxopt, posoffset + 1, usingpos, posoffset + 1);
+            errno_t rc = memcpy_s(idxopt, posoffset + 1, usingpos, posoffset);
             securec_check_c(rc, "\0", "\0");
             appendPQExpBuffer(buf, "USING %s", idxopt);
         }
