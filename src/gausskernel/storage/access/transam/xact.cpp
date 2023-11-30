@@ -1396,7 +1396,7 @@ void XLogInsertStandbyCSNCommitting(TransactionId xid, CommitSeqNo csn, Transact
     }
 #endif
 
-    if (!XLogStandbyInfoActive()) {
+    if (!XLogStandbyInfoActive() || SS_SINGLE_CLUSTER) {
         return;
     }
     XLogBeginInsert();

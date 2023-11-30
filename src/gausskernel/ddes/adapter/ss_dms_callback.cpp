@@ -470,10 +470,6 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
         Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == (int)primary_id);
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS %s] set current instance:%d as primary.",
             SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", primary_id)));
-        if (g_instance.dms_cxt.SSClusterState == NODESTATE_NORMAL) {
-            /* only send to standby recoveried or new joined */
-            SSLockAcquireAll();
-        }
         ret = DMS_SUCCESS;
     } else { /* we are on standby */
         LWLockRelease(ControlFileLock);

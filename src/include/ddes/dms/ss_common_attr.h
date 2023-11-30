@@ -43,6 +43,7 @@
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
 #define ENABLE_SS_TXNSTATUS_CACHE (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size > 0)
 #define ENABLE_SS_BCAST_SNAPSHOT (ENABLE_DMS && g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot)
+#define SS_SINGLE_CLUSTER (ENABLE_DMS && !g_instance.attr.attr_storage.ss_enable_dorado)
 #endif
 
 #define SS_REFORM_REFORMER                                                  \
