@@ -13740,7 +13740,8 @@ static void XLogReportParameters(void)
          * values in pg_control either if wal_level=minimal, but seems better
          * to keep them up-to-date to avoid confusion.
          */
-        if (g_instance.attr.attr_storage.wal_level != t_thrd.shemem_ptr_cxt.ControlFile->wal_level || XLogIsNeeded()) {
+        if ((g_instance.attr.attr_storage.wal_level != t_thrd.shemem_ptr_cxt.ControlFile->wal_level || XLogIsNeeded())
+                && !SS_REPLICATION_STANDBY_CLUSTER) {
             xl_parameter_change xlrec;
             XLogRecPtr recptr;
 
