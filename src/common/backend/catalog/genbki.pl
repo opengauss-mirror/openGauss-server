@@ -392,7 +392,8 @@ sub emit_pgattr_row
 		attfdwoptions => '_null_',
 		# new fileld attinitdefval of pg_attribute
 		attinitdefval => '_null_',
-		attkvtype     => '0'
+		attkvtype     => '0',
+		attdroppedname => '_null_'
     );
 	return { %PGATTR_DEFAULTS, %row };
 }
@@ -426,6 +427,7 @@ sub emit_schemapg_row
 	delete $row->{attfdwoptions};
 	# new fileld attinitdefval of pg_attribute
 	delete $row->{attinitdefval};
+	delete $row->{attdroppedname};
 
 	# Expand booleans from 'f'/'t' to 'false'/'true'.
 	# Some values might be other macros (eg FLOAT4PASSBYVAL), don't change.

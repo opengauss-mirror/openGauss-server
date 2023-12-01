@@ -1509,6 +1509,7 @@ HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute a
     values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(attr->attinhcount);
     values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(attr->attcollation);
     values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(attr->attkvtype);
+    values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&(attr->attdroppedname));
 
     /* start out with empty permissions and empty options */
     isnull[Anum_pg_attribute_attacl - 1] = true;

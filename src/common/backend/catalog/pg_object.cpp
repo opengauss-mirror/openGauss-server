@@ -447,6 +447,9 @@ PgObjectType GetPgObjectTypePgClass(char relkind)
         case RELKIND_GLOBAL_INDEX:
             objectType = OBJECT_TYPE_INDEX;
             break;
+        case RELKIND_MATVIEW:
+            objectType = OBJECT_TYPE_MATVIEW;
+            break;
         default:
             objectType = OBJECT_TYPE_INVALID;
             break;
@@ -530,14 +533,15 @@ bool SetPgObjectValid(Oid oid, PgObjectType objectType, bool valid)
         return false;
     }
     bool isNull;
+    bool oldValid;
     Datum oldValidDatum = SysCacheGetAttr(PGOBJECTID, tuple, Anum_pg_object_valid, &isNull);
+    
     if (isNull) {
-        ReleaseSysCache(tuple);
-        heap_close(relation, RowExclusiveLock);
-        return false;
+        oldValid = false;
+    } else {
+        oldValid = DatumGetBool(oldValidDatum);
     }
-    bool oldValid = DatumGetBool(oldValidDatum);
-    if (oldValid == valid) {
+    if (!isNull && oldValid == valid) {
         ReleaseSysCache(tuple);
         heap_close(relation, RowExclusiveLock);
         return oldValid;

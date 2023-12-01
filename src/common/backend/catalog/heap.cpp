@@ -1007,6 +1007,7 @@ void InsertPgAttributeTuple(Relation pg_attribute_rel, Form_pg_attribute new_att
 
     /* at default, new fileld attinitdefval of pg_attribute is null. */
     nulls[Anum_pg_attribute_attinitdefval - 1] = true;
+    nulls[Anum_pg_attribute_attdroppedname - 1] = true;
 
     tup = heap_form_tuple(RelationGetDescr(pg_attribute_rel), values, nulls);
 
@@ -3381,6 +3382,13 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
     Form_pg_attribute attStruct;
     char newattname[NAMEDATALEN];
     bool isRedisDropColumn = false;
+    Datum values[Natts_pg_attribute] = { 0 };
+    bool nulls[Natts_pg_attribute] = { 0 };
+    bool replaces[Natts_pg_attribute] = { 0 };
+    const int keyNum = 2;
+    ScanKeyData key[keyNum];
+    SysScanDesc scan;
+    HeapTuple newatttuple;
 
     /*
      * Grab an exclusive lock on the target table, which we will NOT release
@@ -3393,7 +3401,10 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
 
     attr_rel = heap_open(AttributeRelationId, RowExclusiveLock);
 
-    atttuple = SearchSysCacheCopy2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
+    ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
+    ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum));
+    scan = systable_beginscan(attr_rel, AttributeRelidNumIndexId, true, SnapshotSelf, keyNum, key);
+    atttuple = systable_getnext(scan);
     if (!HeapTupleIsValid(atttuple)) /* shouldn't happen */
     {
         Assert(0);
@@ -3401,7 +3412,6 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for attribute %d of relation %u", attnum, relid)));
     }
-    attStruct = (Form_pg_attribute)GETSTRUCT(atttuple);
 
     if (RelationIsRedistributeDest(rel) && (attnum > 0 && attnum == rel->rd_att->natts))
         isRedisDropColumn = true;
@@ -3413,9 +3423,10 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
     } else {
         errno_t rc;
         /* Dropping user attributes is lots harder */
+        attStruct = (Form_pg_attribute)GETSTRUCT(atttuple);
 
         /* Mark the attribute as dropped */
-        attStruct->attisdropped = true;
+        values[Anum_pg_attribute_attisdropped - 1] = BoolGetDatum(true);
 
         /*
          * Set the type OID to invalid.  A dropped attribute's type link
@@ -3426,27 +3437,39 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
          * atttypid to zero here as a means of catching code that incorrectly
          * expects it to be valid.
          */
-        attStruct->atttypid = InvalidOid;
+        values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(InvalidOid);
 
         /* Remove any NOT NULL constraint the column may have */
-        attStruct->attnotnull = false;
+        values[Anum_pg_attribute_attnotnull - 1] = BoolGetDatum(false);
 
         /* We don't want to keep stats for it anymore */
-        attStruct->attstattarget = 0;
+        values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(0);
+        
+        values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&(attStruct->attname));
 
         /*
          * Change the column name to something that isn't likely to conflict
          */
+
         rc =
             snprintf_s(newattname, sizeof(newattname), sizeof(newattname) - 1, "........pg.dropped.%d........", attnum);
         securec_check_ss(rc, "\0", "\0");
-        (void)namestrcpy(&(attStruct->attname), newattname);
+        values[Anum_pg_attribute_attname - 1] = NameGetDatum(newattname);
+        replaces[Anum_pg_attribute_attisdropped - 1] = true;
+        replaces[Anum_pg_attribute_atttypid - 1] = true;
+        replaces[Anum_pg_attribute_attnotnull - 1] = true;
+        replaces[Anum_pg_attribute_attstattarget - 1] = true;
+        replaces[Anum_pg_attribute_attdroppedname - 1] = true;
+        replaces[Anum_pg_attribute_attname - 1] = true;
 
-        simple_heap_update(attr_rel, &atttuple->t_self, atttuple);
+        newatttuple = heap_modify_tuple(atttuple, RelationGetDescr(attr_rel), values, nulls, replaces);
+        simple_heap_update(attr_rel, &newatttuple->t_self, newatttuple);
 
         /* keep the system catalog indexes current */
-        CatalogUpdateIndexes(attr_rel, atttuple);
+        CatalogUpdateIndexes(attr_rel, newatttuple);
+        heap_freetuple_ext(newatttuple);
     }
+    systable_endscan(scan);
 
     /*
      * Because updating the pg_attribute row will trigger a relcache flush for
@@ -8299,6 +8322,7 @@ HeapTuple heaptuple_from_pg_attribute(Relation pg_attribute_rel,
 
     /* at default, new fileld attinitdefval of pg_attribute is null. */
     nulls[Anum_pg_attribute_attinitdefval - 1] = true;
+    nulls[Anum_pg_attribute_attdroppedname - 1] = true;
 
     return heap_form_tuple(RelationGetDescr(pg_attribute_rel), values, nulls);
 }
