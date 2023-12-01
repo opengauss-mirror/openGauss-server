@@ -539,7 +539,7 @@ typedef struct _SubscriptionInfo {
 /* global decls */
 extern bool force_quotes; /* double-quotes for identifiers flag */
 extern bool g_verbose;    /* verbose flag */
-
+extern int g_curStep;       /* used for progress */
 /* placeholders for comment starting and ending delimiters */
 extern char g_comment_start[10];
 extern char g_comment_end[10];

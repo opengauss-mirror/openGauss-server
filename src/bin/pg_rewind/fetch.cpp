@@ -59,6 +59,12 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* path, process
 static void get_slot_name_by_app_name(void);
 static BuildErrorCode CheckResultSet(PGresult* pgResult);
 static void get_log_directory_guc(void);
+static void *ProgressReportIncrementalBuild(void *arg);
+
+static volatile bool g_progressFlag = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 BuildErrorCode libpqConnect(const char* connstr)
 {
     PGresult* res = NULL;
@@ -376,6 +382,10 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         return BUILD_FATAL;
     }
 
+    fprintf(stderr, "Begin fetching files \n");
+    pthread_t progressThread;
+    pthread_create(&progressThread, NULL, ProgressReportIncrementalBuild, NULL);
+
     while ((res = PQgetResult(conn)) != NULL) {
         char* filename = NULL;
         int filenamelen;
@@ -491,6 +501,15 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         }
         PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
     }
+
+    g_progressFlag = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, NULL);
+
+    fprintf(stderr, "Finish fetching files \n");
+
     return BUILD_SUCCESS;
 }
 
@@ -1306,3 +1325,35 @@ bool checkDummyStandbyConnection(void)
     return ret;
 }
 
+/*
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
+ */
+static void *ProgressReportIncrementalBuild(void *arg)
+{
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(fetch_done * 100 / fetch_size);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%dKB). fetch files \r",
+            progressBar, percent, fetch_done, fetch_size);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((fetch_done < fetch_size) && !g_progressFlag);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%dKB). fetch files \n",
+            progressBar, percent, fetch_done, fetch_size);
+}

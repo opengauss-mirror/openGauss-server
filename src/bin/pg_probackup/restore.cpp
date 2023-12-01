@@ -20,8 +20,19 @@
 #include "common/fe_memutils.h"
 #include "catalog/catalog.h"
 #include "storage/file/fio_device.h"
+#include "logger.h"
 
 #define RESTORE_ARRAY_LEN 100
+
+/* Progress Counter */
+static int g_directoryFiles = 0;
+static int g_doneFiles = 0;
+static int g_totalFiles = 0;
+static int g_syncFiles = 0;
+static volatile bool g_progressFlag = false;
+static volatile bool g_progressFlagSync = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct
 {
@@ -60,7 +71,7 @@ static void restore_chain(pgBackup *dest_backup, parray *parent_chain,
                           pgRestoreParams *params, const char *pgdata_path,
                           const char *dssdata_path, bool no_sync);
 static void check_incremental_compatibility(const char *pgdata, uint64 system_identifier,
-                                            IncrRestoreMode incremental_mode);                               
+                                            IncrRestoreMode incremental_mode);
 static pgBackup *find_backup_range(parray *backups,
                                    time_t target_backup_id,
                                    pgRecoveryTarget *rt,
@@ -108,6 +119,8 @@ static void parse_other_options(pgRecoveryTarget *rt,
                                 const char *target_stop,
                                 const char *target_action);
 
+static void *ProgressReportRestore(void *arg);
+static void *ProgressReportSyncRestoreFile(void *arg);
 /*
  * Iterate over backup list to find all ancestors of the broken parent_backup
  * and update their status to BACKUP_STATUS_ORPHAN
@@ -818,7 +831,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     /*
      * Restore dest_backup internal directories.
      */
-    
+
     create_data_directories(dest_files, instance_config.pgdata,
                             dest_backup->root_dir, true,
                             params->incremental_mode != INCR_NONE,
@@ -1048,6 +1061,68 @@ static char check_in_dss_instance(pgFile *file, int include_id)
     return CHECK_TRUE;
 }
 
+/*
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
+ */
+static void *ProgressReportRestore(void *arg)
+{
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(g_doneFiles * 100 / g_totalFiles);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \r",
+            progressBar, percent, g_doneFiles, g_totalFiles);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }        
+    } while (((g_doneFiles + g_directoryFiles) < g_totalFiles) && g_progressFlag);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \n",
+        progressBar, percent, g_totalFiles, g_totalFiles);
+}
+
+static void *ProgressReportSyncRestoreFile(void *arg)
+{
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(g_syncFiles * 100 / g_totalFiles);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync restore file \r",
+            progressBar, percent, g_syncFiles, g_totalFiles);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((g_syncFiles < g_totalFiles) && !g_progressFlagSync);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync restore file \n",
+        progressBar, percent, g_totalFiles, g_totalFiles);
+}
+
 static void remove_redundant_files(const char *pgdata_path,
                                    const char *dssdata_path,
                                    parray *pgdata_and_dssdata_files,
@@ -1139,6 +1214,11 @@ static void threads_handle(pthread_t *threads,
     time(&start_time);
     thread_interrupted = false;
 
+    g_totalFiles = (unsigned long) parray_num(dest_files);
+    elog(INFO, "Begin restore file");
+    pthread_t progressThread;
+    pthread_create(&progressThread, nullptr, ProgressReportRestore, nullptr);
+
     /* Restore files into target directory */
     for (i = 0; i < num_threads; i++)
     {
@@ -1159,9 +1239,6 @@ static void threads_handle(pthread_t *threads,
         /* By default there are some error */
         threads_args[i].ret = 1;
 
-        /* Useless message TODO: rewrite */
-        elog(LOG, "Start thread %i", i + 1);
-
         pthread_create(&threads[i], NULL, restore_files, arg);
     }
 
@@ -1176,6 +1253,15 @@ static void threads_handle(pthread_t *threads,
     }
 
     time(&end_time);
+    
+    g_progressFlag = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, nullptr);
+
+    elog(INFO, "Finish restore file");
+
     pretty_time_interval(difftime(end_time, start_time),
                          pretty_time, lengthof(pretty_time));
     pretty_size(total_bytes, pretty_total_bytes, lengthof(pretty_total_bytes));
@@ -1202,13 +1288,15 @@ static void sync_restored_files(parray *dest_files,
     char        pretty_time[20];
     time_t      start_time, end_time;
     
-    elog(INFO, "Syncing restored files to disk");
+    elog(INFO, "Start Syncing restored files to disk");
+    pthread_t progressThread;
+    pthread_create(&progressThread, nullptr, ProgressReportSyncRestoreFile, nullptr);
     time(&start_time);
-
     for (size_t i = 0; i < parray_num(dest_files); i++)
     {
         char        to_fullpath[MAXPGPATH];
         pgFile       *dest_file = (pgFile *)parray_get(dest_files, i);
+        g_syncFiles++;
 
         if (S_ISDIR(dest_file->mode))
             continue;
@@ -1245,6 +1333,12 @@ static void sync_restored_files(parray *dest_files,
     time(&end_time);
     pretty_time_interval(difftime(end_time, start_time),
                          pretty_time, lengthof(pretty_time));
+    g_progressFlagSync = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, nullptr);
+    elog(INFO, "Finish Syncing restored files.");
     elog(INFO, "Restored backup files are synced, time elapsed: %s", pretty_time);
 }
 
@@ -1282,6 +1376,7 @@ restore_files(void *arg)
     char       *out_buf = (char *)pgut_malloc(STDIO_BUFSIZE);
     fio_location out_location;
 
+    int directoryFilesLocal = 0;
     restore_files_arg *arguments = (restore_files_arg *) arg;
 
     n_files = (unsigned long) parray_num(arguments->dest_files);
@@ -1294,19 +1389,22 @@ restore_files(void *arg)
         pgFile    *dest_file = (pgFile *)parray_get(arguments->dest_files, i);
 
         /* Directories were created before */
-        if (S_ISDIR(dest_file->mode))
+        if (S_ISDIR(dest_file->mode)) {
+            directoryFilesLocal++;
             continue;
+        }
 
         if (!pg_atomic_test_set_flag(&dest_file->lock))
             continue;
 
+        pg_atomic_add_fetch_u32((volatile uint32*) &g_doneFiles, 1);
         /* check for interrupt */
         if (interrupted || thread_interrupted)
             elog(ERROR, "Interrupted during restore");
 
         if (progress)
-            elog(INFO, "Progress: (%d/%lu). Restore file \"%s\"",
-                 i + 1, n_files, dest_file->rel_path);
+            elog_file(INFO, "Progress: (%d/%lu). Restore file \"%s\"",
+                i + 1, n_files, dest_file->rel_path);
 
         /* Do not restore tablespace_map file */
         if ((dest_file->external_dir_num == 0) &&
@@ -1443,6 +1541,7 @@ done:
         pg_free(checksum_map);
     }
 
+    pg_atomic_write_u32((volatile uint32*) &g_directoryFiles, directoryFilesLocal);
     free(out_buf);
 
     /* ssh connection to longer needed */

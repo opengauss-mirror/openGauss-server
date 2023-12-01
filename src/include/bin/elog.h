@@ -34,4 +34,5 @@ extern void write_log(const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTR
 extern void init_log(char* prefix_name);
 extern void check_env_value_c(const char* input_env_value);
 extern void check_env_name_c(const char* input_env_value);
+extern void GenerateProgressBar(int percent, char* progressBar);
 #endif /* COMMON_H */

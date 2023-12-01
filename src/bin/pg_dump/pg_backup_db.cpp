@@ -623,8 +623,6 @@ void EndDBCopyMode(ArchiveHandle* AH, TocEntry* te)
         PQclear(res);
 
         AH->pgCopyIn = false;
-
-        write_msg(NULL, "table %s complete data imported !\n", te->tag);
     }
 }
 

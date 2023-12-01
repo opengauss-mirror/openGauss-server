@@ -103,6 +103,12 @@ static char paxos_index_file[MAXPGPATH] = {0};
 /* Progress counters */
 static uint64 totalsize = 0;
 static uint64 totaldone = 0;
+static int g_curTableSpace;
+static int g_totalTableSpace;
+static int g_progressFlag = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void *ProgressReportFullBuild(void *arg);
 
 /* Pipe to communicate with background wal receiver process */
 #ifndef WIN32
@@ -715,11 +721,6 @@ static void progress_report(int tablespacenum, const char* filename, bool force)
     else
         g_state.build_info.estimated_time = -1;
     UpdateDBStateFile(gaussdb_state_file, &g_state);
-
-    if (print) {
-        print = false;
-        pg_log(PG_WARNING, _("receiving and unpacking files...\n"));
-    }
 }
 
 static bool GetCurrentPath(char *currentPath, PGresult *res, int rownum)
@@ -1554,10 +1555,17 @@ static bool BaseBackup(const char* dirname, uint32 term)
 
     show_full_build_process("begin receive tar files");
 
+    /* Print the progress of the tool execution through a new thread. */
+    g_totalTableSpace = PQntuples(res);
+    fprintf(stderr, "Begin Receiving files \n");
+    pthread_t progressThread = NULL;
+    pthread_create(&progressThread, NULL, ProgressReportFullBuild, NULL);
+
     /*
      * Start receiving chunks, Loop over all tablespaces
      */
-    for (i = 0; i < PQntuples(res); i++) {
+    for (i = 0; i < g_totalTableSpace; i++) {
+        g_curTableSpace = i + 1;
         bool getFileSuccess = ReceiveAndUnpackTarFile(streamConn, res, i);
         if (!getFileSuccess) {
             DisconnectConnection();
@@ -1565,13 +1573,18 @@ static bool BaseBackup(const char* dirname, uint32 term)
             return false;
         }
     }
+    g_progressFlag = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, NULL);
+    
+    fprintf(stderr, "Finish Receiving files \n");
 
     if (showprogress) {
         progress_report(PQntuples(res), NULL, true);
     }
     PQclear(res);
-
-    show_full_build_process("finish receive tar files");
 
     /*
      * Get the stop position
@@ -2782,6 +2795,38 @@ bool RenameTblspcDir(char *dataDir)
     pg_log(PG_WARNING, _("rename table space dir success.\n"));
 
     return true;
+}
+
+/*
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
+ */
+static void *ProgressReportFullBuild(void *arg) {
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)((totaldone / 1024) * 100 / totalsize);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%dKB). (%d/%d)tablespaces. Receive files \r",
+            progressBar, percent, (totaldone / 1024), totalsize, g_curTableSpace, g_totalTableSpace);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while (((totaldone / 1024) < totalsize) && !g_progressFlag);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%dKB). (%d/%d)tablespaces. Receive files \n",
+            progressBar, percent, totalsize, totalsize, g_curTableSpace, g_totalTableSpace);
 }
 
 static void BeginGetXlogbyStream(char* xlogstart, uint32 timeline, char* sysidentifier, char* xlog_location, uint term, PGresult* res)

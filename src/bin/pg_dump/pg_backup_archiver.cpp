@@ -32,6 +32,7 @@
 #include <sys/wait.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "bin/elog.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -132,6 +133,12 @@ typedef struct _outputContext {
 
 /* translator: this is a module name */
 static const char* modulename = gettext_noop("archiver");
+/* Progress Counter */
+static int g_totalEntries = 0;
+static int g_restoredEntries = 0;
+static volatile bool g_progressFlag = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode);
 static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* AH);
@@ -390,6 +397,43 @@ static void out_drop_stmt(ArchiveHandle* AH, const TocEntry* te)
         }
     }
 }
+
+/*
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
+ */
+static void *ProgressReportRestore(void *arg)
+{
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    return nullptr;
+#endif
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(g_restoredEntries * 100 / g_totalEntries);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \r",
+            progressBar, percent, g_restoredEntries, g_totalEntries);
+                pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((g_restoredEntries  < g_totalEntries) && !g_progressFlag);
+        percent = 100;
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
+                progressBar, percent, g_restoredEntries, g_totalEntries);
+}
+
 /* Public */
 void RestoreArchive(Archive* AHX)
 {
@@ -402,6 +446,7 @@ void RestoreArchive(Archive* AHX)
     errno_t rc = 0;
     AH->stage = STAGE_INITIALIZING;
 
+    g_totalEntries = AH->tocCount;
     /*
      * Check for nonsensical option combinations.
      *
@@ -615,29 +660,28 @@ void RestoreArchive(Archive* AHX)
      *
      * In parallel mode, turn control over to the parallel-restore logic.
      */
+    pthread_t progressThread;
+    if (RestoringToDB(AH)) {
+            write_msg(NULL, "start restore operation ...\n");
+            pthread_create(&progressThread, NULL, ProgressReportRestore, NULL);
+    }
     if (parallel_mode) {
         restore_toc_entries_parallel(AH);
     } else {
-        int sqlCnt = 0;
-        if (RestoringToDB(AH)) {
-            write_msg(NULL, "start restore operation ...\n");
-        }
-
         for (te = AH->toc->next; te != AH->toc; te = te->next) {
             (void)restore_toc_entry(AH, te, ropt, false);
-
-            sqlCnt++;
-            if (RestoringToDB(AH) && (sqlCnt != 0) && ((sqlCnt % RESTORE_READ_CNT) == 0)) {
-                write_msg(NULL, "%d SQL statements read in !\n", sqlCnt);
-            }
-        }
-
-        if (RestoringToDB(AH)) {
-            write_msg(NULL, "Finish reading %d SQL statements!\n", sqlCnt);
-            write_msg(NULL, "end restore operation ...\n");
+            g_restoredEntries++;
         }
     }
-
+    if (RestoringToDB(AH)) {
+        g_progressFlag = true;
+        pthread_mutex_lock(&g_mutex);
+        pthread_cond_signal(&g_cond);
+        pthread_mutex_unlock(&g_mutex);
+        pthread_join(progressThread, NULL);
+        write_msg(NULL, "end restore operation ...\n");
+    }
+    
     /*
      * Scan TOC again to output ownership commands and ACLs
      */
@@ -3709,7 +3753,6 @@ static void restore_toc_entries_parallel(ArchiveHandle* AH)
      */
     skipped_some = false;
 
-    int sqlCnt = 0;
     if (RestoringToDB(AH)) {
         write_msg(NULL, "start restore operation ...\n");
     }
@@ -3738,10 +3781,7 @@ static void restore_toc_entries_parallel(ArchiveHandle* AH)
 
         (void)restore_toc_entry(AH, next_work_item, ropt, false);
 
-        sqlCnt++;
-        if (RestoringToDB(AH) && (sqlCnt != 0) && ((sqlCnt % RESTORE_READ_CNT) == 0)) {
-            write_msg(NULL, "%d SQL statements read in !\n", sqlCnt);
-        }
+        g_restoredEntries++;
 
         /* there should be no touch of ready_list here, so pass NULL */
         reduce_dependencies(AH, next_work_item, NULL);
@@ -3855,10 +3895,7 @@ static void restore_toc_entries_parallel(ArchiveHandle* AH)
                 /* run the step in a worker child */
                 thandle child = spawn_restore(args);
 
-                sqlCnt++;
-                if ((ropt->useDB) && (sqlCnt != 0) && ((sqlCnt % RESTORE_READ_CNT) == 0)) {
-                    write_msg(NULL, "%d SQL statements read in !\n", sqlCnt);
-                }
+                g_restoredEntries++;
 
                 slots[next_slot].child_id = child;
                 slots[next_slot].args = args;
@@ -3915,14 +3952,10 @@ static void restore_toc_entries_parallel(ArchiveHandle* AH)
         ahlog(AH, 1, "processing missed item %d %s %s\n", te->dumpId, te->desc, te->tag);
         (void)restore_toc_entry(AH, te, ropt, false);
 
-        sqlCnt++;
-        if (RestoringToDB(AH) && (sqlCnt != 0) && ((sqlCnt % RESTORE_READ_CNT) == 0)) {
-            write_msg(NULL, "%d SQL statements read in !\n", sqlCnt);
-        }
+        g_restoredEntries++;
     }
 
     if (RestoringToDB(AH)) {
-        write_msg(NULL, "Finish reading %d SQL statements!\n", sqlCnt);
         write_msg(NULL, "end restore operation ...\n");
     }
 

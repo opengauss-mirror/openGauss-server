@@ -17,6 +17,7 @@
 #include "pg_backup_archiver.h"
 #include "catalog/pg_class.h"
 #include "dumpmem.h"
+#include "pg_dump.h"
 
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
@@ -103,6 +104,7 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading schemas\n");
     nspinfo = getNamespaces(fout, &numNamespaces);
     nspinfoindex = buildIndexArray(nspinfo, numNamespaces, sizeof(NamespaceInfo));
+    g_curStep++;
 
     /*
      * getTables should be done as soon as possible, so as to minimize the
@@ -114,6 +116,7 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading user-defined tables\n");
     tblinfo = getTables(fout, &numTables);
     tblinfoindex = buildIndexArray(tblinfo, numTables, sizeof(TableInfo));
+    g_curStep++;
 
     /* Do this after we've built tblinfoindex */
     getOwnedSeqs(fout, tblinfo, numTables);
@@ -121,84 +124,103 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     if (g_verbose)
         write_msg(NULL, "reading extensions\n");
     extinfo = getExtensions(fout, &numExtensions);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined functions\n");
     funinfo = getFuncs(fout, &numFuncs);
     funinfoindex = buildIndexArray(funinfo, numFuncs, sizeof(FuncInfo));
+    g_curStep++;
 
     /* this must be after getTables and getFuncs */
     if (g_verbose)
         write_msg(NULL, "reading user-defined types\n");
     typinfo = getTypes(fout, &numTypes);
     typinfoindex = buildIndexArray(typinfo, numTypes, sizeof(TypeInfo));
+    g_curStep++;
 
     /* this must be after getFuncs, too */
     if (g_verbose)
         write_msg(NULL, "reading procedural languages\n");
     getProcLangs(fout, &numProcLangs);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined aggregate functions\n");
     getAggregates(fout, &numAggregates);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined operators\n");
     oprinfo = getOperators(fout, &numOperators);
     oprinfoindex = buildIndexArray(oprinfo, numOperators, sizeof(OprInfo));
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined operator classes\n");
     getOpclasses(fout, &numOpclasses);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined operator families\n");
     getOpfamilies(fout, &numOpfamilies);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined text search parsers\n");
     getTSParsers(fout, &numTSParsers);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined text search templates\n");
     getTSTemplates(fout, &numTSTemplates);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined text search dictionaries\n");
     getTSDictionaries(fout, &numTSDicts);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined text search configurations\n");
     getTSConfigurations(fout, &numTSConfigs);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined foreign-data wrappers\n");
     getForeignDataWrappers(fout, &numForeignDataWrappers);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined foreign servers\n");
     getForeignServers(fout, &numForeignServers);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading default privileges\n");
     getDefaultACLs(fout, &numDefaultACLs);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined collations\n");
     collinfo = getCollations(fout, &numCollations);
     collinfoindex = buildIndexArray(collinfo, numCollations, sizeof(CollInfo));
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined conversions\n");
     getConversions(fout, &numConversions);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading type casts\n");
     getCasts(fout, &numCasts);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading table inheritance information\n");
     inhinfo = getInherits(fout, &numInherits);
+    g_curStep++;
 
     /*
      * Identify extension member objects and mark them as not to be dumped.
@@ -208,27 +230,33 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     if (g_verbose)
         write_msg(NULL, "finding extension members\n");
     getExtensionMembership(fout, extinfo, numExtensions);
+    g_curStep++;
 
     /* Link tables to parents, mark parents of target tables interesting */
     if (g_verbose)
         write_msg(NULL, "finding inheritance relationships\n");
     flagInhTables(tblinfo, numTables, inhinfo, numInherits);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading column info for interesting tables\n");
     getTableAttrs(fout, tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "flagging inherited columns in subtables\n");
     flagInhAttrs(tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading indexes\n");
     getIndexes(fout, tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading constraints\n");
     getConstraints(fout, tblinfo, numTables);
+    g_curStep++;
 
     /*
      * @hdfs
@@ -237,24 +265,29 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     if (g_verbose)
         write_msg(NULL, "reading constraints about foregin table\n");
     getConstraintsOnForeignTable(fout, tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading triggers\n");
     getTriggers(fout, tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose) {
         write_msg(NULL, "reading events\n");
     }
     getEvents(fout, &numEvents);
-    
+    g_curStep++;
+
     /*Open-source-fix: Fix ordering of obj id for Rules and EventTriggers*/
     if (g_verbose)
         write_msg(NULL, "reading rewrite rules\n");
     getRules(fout, &numRules);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading row level security policies\n");
     getRlsPolicies(fout, tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose)
         write_msg(NULL, "reading user-defined packages\n");
@@ -262,26 +295,32 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     if (packageinfo!=NULL) {
         packageinfoindex = buildIndexArray(packageinfo, numPackages, sizeof(PkgInfo));
     }
+    g_curStep++;
 
     if (g_verbose) {
         write_msg(NULL, "reading publications\n");
     }
     getPublications(fout);
+    g_curStep++;
 
     if (g_verbose) {
         write_msg(NULL, "reading publication membership\n");
     }
     getPublicationTables(fout, tblinfo, numTables);
+    g_curStep++;
 
     if (g_verbose) {
         write_msg(NULL, "reading subscriptions\n");
     }
     getSubscriptions(fout);
+    g_curStep++;
+
     if (g_verbose) {
         write_msg(NULL, "reading event triggers\n");
     }
     getEventTriggers(fout, &numEventTriggers);
-
+    g_curStep++;
+    
     *numTablesPtr = numTables;
     GS_FREE(inhinfo);
     return tblinfo;

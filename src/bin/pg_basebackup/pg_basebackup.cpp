@@ -70,7 +70,8 @@ char* basedir = NULL;
 static TablespaceList tablespacee_dirs = {NULL, NULL};
 char format = 'p'; /* p(lain)/t(ar) */
 char *label = "gs_basebackup base backup";
-bool showprogress = false;
+/* We hope always print progress here. To maitain compatibility, we don't remove this parameter. */
+bool showprogress = true;
 int verbose = 0;
 int compresslevel = 0;
 bool includewal = true;
@@ -88,6 +89,10 @@ extern int standby_message_timeout; /* 10 sec = default */
 /* Progress counters */
 static uint64 totalsize;
 static uint64 totaldone;
+static int g_tablespacenum;
+static volatile bool g_progressFlag = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int standby_message_timeout_local = 10 ; /* 10 sec = default */
 
@@ -112,7 +117,7 @@ static volatile LONG has_xlogendptr = 0;
 static void usage(void);
 static void GsTarUsage(void);
 static void verify_dir_is_empty_or_create(char* dirname);
-static void progress_report(int tablespacenum, const char* filename);
+static void *ProgressReport(void *arg);
 
 static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum);
 static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum);
@@ -564,66 +569,76 @@ static void verify_dir_is_empty_or_create(char *dirname)
     }
 }
 
+
 /*
- * Print a progress report based on the global variables. If verbose output
- * is enabled, also print the current file name.
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
  */
-static void progress_report(int tablespacenum, const char *filename)
+static void *ProgressReport(void *arg)
 {
-    int percent = (int)((totaldone / 1024) * 100 / totalsize);
+    char progressBar[52];
     char totaldone_str[32];
     char totalsize_str[32];
     errno_t errorno = EOK;
-
-    /*
-     * Avoid overflowing past 100% or the full size. This may make the total
-     * size number change as we approach the end of the backup (the estimate
-     * will always be wrong if WAL is included), but that's better than having
-     * the done column be bigger than the total.
-     */
-    if (percent > 100) {
-        percent = 100;
-    }
-
-    if (totaldone / 1024 > totalsize) {
-        totalsize = totaldone / 1024;
-    }
-
-    /*
-     * Separate step to keep platform-dependent format code out of
-     * translatable strings.  And we only test for INT64_FORMAT availability
-     * in snprintf, not fprintf.
-     */
-    errorno =
-        snprintf_s(totaldone_str, sizeof(totalsize_str), sizeof(totaldone_str) - 1, INT64_FORMAT, totaldone / 1024);
-    securec_check_ss_c(errorno, "", "");
-
-    errorno = snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
-    securec_check_ss_c(errorno, "", "");
-
-    if (verbose) {
-        if (NULL == filename) {
-            /*
-             * No filename given, so clear the status line (used for last
-             * call)
-             */
-            fprintf(stderr,
-                ngettext("%s/%s kB (100%%), %d/%d tablespace %35s", "%s/%s kB (100%%), %d/%d tablespaces %35s",
-                tblspaceCount),
-                totaldone_str, totalsize_str, tablespacenum, tblspaceCount, "");
-        } else {
-            fprintf(stderr,
-                ngettext("%s/%s kB (%d%%), %d/%d tablespace (%-30.30s)",
-                "%s/%s kB (%d%%), %d/%d tablespaces (%-30.30s)", tblspaceCount),
-                totaldone_str, totalsize_str, percent, tablespacenum, tblspaceCount, filename);
+    int percent;
+    do {
+        percent = (int)((totaldone / 1024) * 100 / totalsize);
+        /*
+        * Avoid overflowing past 100% or the full size. This may make the total
+        * size number change as we approach the end of the backup (the estimate
+        * will always be wrong if WAL is included), but that's better than having
+        * the done column be bigger than the total.
+        */
+        if (percent > 100) {
+            percent = 100;
         }
-    } else {
-        fprintf(stderr,
-            ngettext("%s/%s kB (%d%%), %d/%d tablespace", "%s/%s kB (%d%%), %d/%d tablespaces", tblspaceCount),
-            totaldone_str, totalsize_str, percent, tablespacenum, tblspaceCount);
-    }
+        GenerateProgressBar(percent, progressBar);
 
-    fprintf(stderr, "\r");
+        if (totaldone / 1024 > totalsize) {
+            totalsize = totaldone / 1024;
+        }
+
+        /*
+        * Separate step to keep platform-dependent format code out of
+        * translatable strings.  And we only test for INT64_FORMAT availability
+        * in snprintf, not fprintf.
+        */
+        errorno =
+            snprintf_s(totaldone_str, sizeof(totalsize_str), sizeof(totaldone_str) - 1, INT64_FORMAT, totaldone / 1024);
+        securec_check_ss_c(errorno, "", "");
+
+        errorno =
+            snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
+        securec_check_ss_c(errorno, "", "");
+
+        fprintf(stderr,
+            ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\r",
+            "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\r", tblspaceCount),
+            progressBar, totaldone_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
+
+        /* print it per second */
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while (((totaldone / 1024) < totalsize) && !g_progressFlag);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    errorno =
+        snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
+        securec_check_ss_c(errorno, "", "");
+    fprintf(stderr,
+        ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\n",
+        "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\n", tblspaceCount),
+        progressBar, totalsize_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
 }
 
 /*
@@ -822,8 +837,6 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
             }
         }
         totaldone += r;
-        if (showprogress)
-            progress_report(rownum, filename);
     } /* while (1) */
 
 #ifdef HAVE_LIBZ
@@ -1152,8 +1165,6 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
                 disconnect_and_exit(1);
             }
             totaldone += r;
-            if (showprogress)
-                progress_report(rownum, filename);
 
             current_len_left -= r;
             if (current_len_left == 0 && current_padding == 0) {
@@ -1391,21 +1402,30 @@ static void BaseBackup(void)
     PQfreemem(sysidentifier);
     sysidentifier = NULL;
 
+    fprintf(stderr, "Start receiving chunks\n");
+    /* Print the progress of the tool execution through a new thread. */
+    pthread_t progressThread;
+    pthread_create(&progressThread, NULL, ProgressReport, NULL);
+
+
     /*
      * Start receiving chunks
      */
     for (i = 0; i < PQntuples(res); i++) {
+        g_tablespacenum = i + 1;
         if (format == 't')
             ReceiveTarFile(conn, res, i);
         else
             ReceiveAndUnpackTarFile(conn, res, i);
     } /* Loop over all tablespaces */
 
-    if (showprogress) {
-        progress_report(PQntuples(res), NULL);
-        fprintf(stderr, "\n"); /* Need to move to next line */
-    }
     PQclear(res);
+    g_progressFlag = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, NULL);
+    fprintf(stderr, "Finish receiving chunks\n");
 
     /*
      * Get the stop position

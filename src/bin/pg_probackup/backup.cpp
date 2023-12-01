@@ -28,6 +28,7 @@
 #include "file.h"
 #include "common/fe_memutils.h"
 #include "storage/file/fio_device.h"
+#include "logger.h"
 
 
 /* list of dirs which will not to be backuped
@@ -50,6 +51,15 @@ static uint32 stream_stop_timeout = 0;
 static time_t stream_stop_begin = 0;
 
 static const uint32 archive_timeout_deno = 5;
+
+/* Progress Counter */
+static int g_doneFiles = 0;
+static int g_totalFiles = 0;
+static int g_syncFiles = 0;
+static volatile bool g_progressFlag = false;
+static volatile bool g_progressFlagSync = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //const char *progname = "pg_probackup";
 
@@ -124,6 +134,10 @@ static void set_cfs_datafiles(parray *files, const char *root, char *relative, s
 static bool PathContainPath(const char* path1, const char* path2);
 static bool IsPrimary(PGconn* conn);
 
+/* Progress report */
+static void *ProgressReportProbackup(void *arg);
+static void *ProgressReportSyncBackupFile(void *arg);
+
 static void
 backup_stopbackup_callback(bool fatal, void *userdata)
 {
@@ -138,6 +152,7 @@ backup_stopbackup_callback(bool fatal, void *userdata)
     }
 }
 
+
 static void run_backup_threads(char *external_prefix, char *database_path, char *dssdata_path,
                                parray *prev_backup_filelist, parray *external_dirs, 
                                PGNodeInfo *nodeInfo, XLogRecPtr	prev_backup_start_lsn)
@@ -149,8 +164,9 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
     time_t  start_time, end_time;
     char    pretty_time[20];
     backup_files_arg *threads_args = NULL;
-
-    for (i = 0; i < (int)parray_num(backup_files_list); i++)
+    g_totalFiles = (int)parray_num(backup_files_list);
+    
+    for (i = 0; i < g_totalFiles; i++)
     {
         pgFile	   *file = (pgFile *) parray_get(backup_files_list, i);
 
@@ -174,6 +190,7 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
 
             elog(VERBOSE, "Create directory '%s'", dirpath);
             fio_mkdir(dirpath, DIR_PERMISSION, FIO_BACKUP_HOST);
+            g_doneFiles++;
         }
 
         /* setup threads */
@@ -228,8 +245,12 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
 
     /* Run threads */
     thread_interrupted = false;
-    elog(INFO, "Start transferring data files");
+    elog(INFO, "Start backing up files");
     time(&start_time);
+
+    /* Create the thread for progress report */
+    pthread_t progressThread;
+    pthread_create(&progressThread, nullptr, ProgressReportProbackup, nullptr);
     for (i = 0; i < num_threads; i++)
     {
         backup_files_arg *arg = &(threads_args[i]);
@@ -237,7 +258,7 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
         elog(VERBOSE, "Start thread num: %i", i);
         pthread_create(&threads[i], NULL, backup_files, arg);
     }
-
+    
     /* Wait threads */
     for (i = 0; i < num_threads; i++)
     {
@@ -247,6 +268,14 @@ static void run_backup_threads(char *external_prefix, char *database_path, char 
     }
 
     time(&end_time);
+    g_progressFlag = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, nullptr);
+
+    elog(INFO, "Finish backuping file");
+
     pretty_time_interval(difftime(end_time, start_time),
                                         pretty_time, lengthof(pretty_time));
     if (backup_isok)
@@ -575,13 +604,15 @@ static void sync_files(parray *database_map, const char *database_path, parray *
     else
     {
         elog(INFO, "Syncing backup files to disk");
+        pthread_t progressThread;
+        pthread_create(&progressThread, nullptr, ProgressReportSyncBackupFile, nullptr);
         time(&start_time);
 
         for (int i = 0; i < (int)parray_num(backup_files_list); i++)
         {
             char    to_fullpath[MAXPGPATH];
             pgFile *file = (pgFile *) parray_get(backup_files_list, i);
-
+            g_syncFiles++;
             /* TODO: sync directory ? */
             if (S_ISDIR(file->mode))
                 continue;
@@ -610,6 +641,12 @@ static void sync_files(parray *database_map, const char *database_path, parray *
         time(&end_time);
         pretty_time_interval(difftime(end_time, start_time),
             pretty_time, lengthof(pretty_time));
+        g_progressFlagSync = true;
+        pthread_mutex_lock(&g_mutex);
+        pthread_cond_signal(&g_cond);
+        pthread_mutex_unlock(&g_mutex);
+        pthread_join(progressThread, nullptr);
+        elog(INFO, "Finish Syncing backup files.");
         elog(INFO, "Backup files are synced, time elapsed: %s", pretty_time);
     }
 }
@@ -2105,6 +2142,68 @@ void check_interrupt()
 }
 
 /*
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
+ */
+static void *ProgressReportProbackup(void *arg)
+{
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(g_doneFiles * 100 / g_totalFiles);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \r",
+            progressBar, percent, g_doneFiles, g_totalFiles);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((g_doneFiles < g_totalFiles) && !g_progressFlag);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \n",
+            progressBar, percent, g_doneFiles, g_totalFiles);
+}
+
+static void *ProgressReportSyncBackupFile(void *arg)
+{
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(g_syncFiles * 100 / g_totalFiles);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync backup file \r",
+            progressBar, percent, g_syncFiles, g_totalFiles);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((g_syncFiles < g_totalFiles) && !g_progressFlagSync);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync backup file \n",
+        progressBar, percent, g_totalFiles, g_totalFiles);
+}
+
+/*
  * Take a backup of the PGDATA at a file level.
  * Copy all directories and files listed in backup_files_list.
  * If the file is 'datafile' (regular relation's main fork), read it page by page,
@@ -2132,8 +2231,9 @@ backup_files(void *arg)
         pgFile  *prev_file = NULL;
 
         /* We have already copied all directories */
-        if (S_ISDIR(file->mode))
+        if (S_ISDIR(file->mode)) {
             continue;
+        }
 
         if (arguments->thread_num == 1)
         {
@@ -2156,8 +2256,10 @@ backup_files(void *arg)
         check_interrupt();
 
         if (progress)
-            elog(INFO, "Progress: (%d/%d). Process file \"%s\"",
-                 i + 1, n_backup_files_list, file->rel_path);
+            elog_file(INFO, "Progress: (%d/%d). Process file \"%s\"",
+                i + 1, n_backup_files_list, file->rel_path);
+        /* update done_files */
+        pg_atomic_add_fetch_u32((volatile uint32*) &g_doneFiles, 1);
 
         /* Handle zero sized files */
         if (file->size == 0)
@@ -2238,7 +2340,6 @@ backup_files(void *arg)
 
  
     }
-
     /* ssh connection to longer needed */
     fio_disconnect();
 

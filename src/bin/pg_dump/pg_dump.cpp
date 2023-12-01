@@ -158,6 +158,54 @@ const int MAX_CMK_STORE_SIZE = 64;
 #define  BEGIN_P_STR      " BEGIN_B_PROC " /* used in dolphin type proc body*/
 #define  BEGIN_P_LEN      14
 #define  BEGIN_N_STR      "    BEGIN     " /* BEGIN_P_STR to same length*/
+/* used for progress report */
+int g_curStep = 0;
+int g_totalObjNums = 0;
+int g_dumpObjNums = 0;
+const char *g_progressDetails[] = {
+    "reading schemas",
+    "reading user-defined tables",
+    "reading extensions",
+    "reading user-defined functions",
+    "reading user-defined types",
+    "reading procedural languages",
+    "reading user-defined aggregate functions",
+    "reading user-defined operators",
+    "reading user-defined operator classes",
+    "reading user-defined operator families",
+    "reading user-defined text search parsers",
+    "reading user-defined text search templates",
+    "reading user-defined text search dictionaries",
+    "reading user-defined text search configurations",
+    "reading user-defined foreign-data wrappers",
+    "reading user-defined foreign servers",
+    "reading default privileges",
+    "reading user-defined collations",
+    "reading user-defined conversions",
+    "reading type casts",
+    "reading table inheritance information",
+    "finding extension members",
+    "finding inheritance relationships",
+    "reading column info for interesting tables",
+    "flagging inherited columns in subtables",
+    "reading indexes",
+    "reading constraints",
+    "reading constraints about foregin table",
+    "reading triggers",
+    "reading events",
+    "reading rewrite rules",
+    "reading row level security policies",
+    "reading user-defined packages",
+    "reading publications",
+    "reading publication membership",
+    "reading subscriptions",
+    "reading event triggers"
+};
+int g_totalSteps = sizeof(g_progressDetails) / sizeof(g_progressDetails[0]);
+static volatile bool g_progressFlagScan = false;
+static volatile bool g_progressFlagDump = false;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Database Security: Data importing/dumping support AES128. */
 #include "utils/aes.h"
@@ -505,6 +553,8 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool IsPlainFormat();
 static bool needIgnoreSequence(TableInfo* tbinfo);
+static void *ProgressReportDump(void *arg);
+static void *ProgressReportScanDatabase(void *arg);
 inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
@@ -546,8 +596,6 @@ int main(int argc, char** argv)
     static int use_setsessauth = 0;
     errno_t rc = 0;
     int nRet = 0;
-    int totalObjNums = 0;
-    int dumpObjNums = 0;
     char *errorMessages = NULL;
 
     static struct option long_options[] = {{"data-only", no_argument, NULL, 'a'},
@@ -980,7 +1028,19 @@ int main(int argc, char** argv)
      * Now scan the database and create DumpableObject structs for all the
      * objects we intend to dump.
      */
+    fprintf(stderr, "Begin scanning database. \n");
+    pthread_t progressThread;
+    pthread_create(&progressThread, NULL, ProgressReportScanDatabase, NULL);
+
     tblinfo = getSchemaData(fout, &numTables);
+
+    g_progressFlagScan = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, NULL);
+
+    fprintf(stderr, "Finish scanning database. \n");
 
     if (fout->remoteVersion < 80400)
         guessConstraintInheritance(tblinfo, numTables);
@@ -1050,23 +1110,33 @@ int main(int argc, char** argv)
         for (i = 0; i < numObjs; i++) {
             if (dobjs[i]->dump && dobjs[i]->objType != DO_DUMMY_TYPE && dobjs[i]->objType != DO_PRE_DATA_BOUNDARY &&
                 dobjs[i]->objType != DO_POST_DATA_BOUNDARY)
-                totalObjNums++;
+                g_totalObjNums++;
         }
-        write_msg(NULL, "The total objects number is %d.\n", totalObjNums);
+        write_msg(NULL, "The total objects number is %d.\n", g_totalObjNums);
     }
+    fprintf(stderr, "Start dumping objects \n");
+    pthread_t progressThreadDumpProgress = NULL;
+    pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
+
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
         if (!dataOnly && dobjs[i]->dump && dobjs[i]->objType != DO_DUMMY_TYPE &&
             dobjs[i]->objType != DO_PRE_DATA_BOUNDARY && dobjs[i]->objType != DO_POST_DATA_BOUNDARY) {
-            dumpObjNums++;
-            if (dumpObjNums % OUTPUT_OBJECT_NUM == 0)
+            g_dumpObjNums++;
+            if (g_dumpObjNums % OUTPUT_OBJECT_NUM == 0)
                 write_msg(NULL,
                     "[%6.2lf%%] %d objects have been dumped.\n",
-                    float((float(dumpObjNums * 100.0)) / totalObjNums),
-                    dumpObjNums);
+                    float((float(g_dumpObjNums * 100.0)) / g_totalObjNums),
+                    g_dumpObjNums);
         }
         dumpDumpableObject(fout, dobjs[i]);
     }
+    g_progressFlagDump = true;
+    pthread_mutex_lock(&g_mutex);
+    pthread_cond_signal(&g_cond);
+    pthread_mutex_unlock(&g_mutex);
+    pthread_join(progressThread, NULL);
+    fprintf(stderr, "Finish dumping objects \n");
 
     /*
      * Synonym now only support for table/view/function/procedure. When dump all object, it will be dumped.
@@ -1075,7 +1145,7 @@ int main(int argc, char** argv)
         dumpSynonym(fout);
     }
     if (!dataOnly)
-        write_msg(NULL, "[100.00%%] %d objects have been dumped.\n", totalObjNums);
+        write_msg(NULL, "[100.00%%] %d objects have been dumped.\n", g_totalObjNums);
 
     /*
      * Set up options info to ensure we dump what we want.
@@ -23574,6 +23644,74 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
         }
     }
     return false;
+}
+
+/*
+ * Print a progress report based on the global variables.
+ * Execute this function in another thread and print the progress periodically.
+ */
+static void *ProgressReportDump(void *arg)
+{
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    return nullptr;
+#endif
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(100 * g_dumpObjNums / g_totalObjNums);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \r",
+            progressBar, percent, g_dumpObjNums, g_totalObjNums);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((g_dumpObjNums < g_totalObjNums) && !g_progressFlagDump);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \n",
+            progressBar, percent, g_dumpObjNums, g_totalObjNums);
+}
+
+static void *ProgressReportScanDatabase(void *arg)
+{
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    return nullptr;
+#endif
+    char progressBar[52];
+    int percent;
+    do {
+        /* progress report */
+        percent = (int)(g_curStep * 100 / g_totalSteps);
+        GenerateProgressBar(percent, progressBar);
+        fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). %s \r",
+            progressBar, percent, g_curStep, g_totalSteps, g_progressDetails[g_curStep]);
+        pthread_mutex_lock(&g_mutex);
+        timespec timeout;
+        timeval now;
+        gettimeofday(&now, nullptr);
+        timeout.tv_sec = now.tv_sec + 1;
+        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        pthread_mutex_unlock(&g_mutex);
+        if (ret == ETIMEDOUT) {
+            continue;
+        } else {
+            break;
+        }
+    } while ((g_curStep < g_totalSteps) && !g_progressFlagScan);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). finish scanning database                       \n",
+            progressBar, percent, g_curStep, g_totalSteps);
 }
 
 bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName)
