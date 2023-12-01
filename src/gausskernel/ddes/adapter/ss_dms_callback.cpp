@@ -1671,8 +1671,6 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     dms_role_t new_dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover]begin to set currrent DSS as primary")));
-        /* standby of standby cluster need to set mode to STANDBY_MODE in dual cluster*/
-        SSDoradoUpdateHAmode();
         while (dss_set_server_status_wrapper() != GS_SUCCESS) {
             pg_usleep(REFORM_WAIT_LONG);
             ereport(WARNING, (errmodule(MOD_DMS),
@@ -1855,7 +1853,9 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
         ReformCleanBackends();
     }
 
-    SSDoradoUpdateHAmode();
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        SSDoradoUpdateHAmode();
+    }
 }
 
 static int CBReformDoneNotify(void *db_handle)
@@ -1867,9 +1867,6 @@ static int CBReformDoneNotify(void *db_handle)
                 g_instance.attr.attr_storage.dms_attr.instance_id)));
         }
     }
-    
-    /* After reform done, primary of master cluster need to set mode to PRIMARY_MODE in dual cluster. */
-    SSDoradoUpdateHAmode();
    
     /* SSClusterState and in_reform must be set atomically */
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;

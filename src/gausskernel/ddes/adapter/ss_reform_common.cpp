@@ -437,6 +437,40 @@ void SSStandbySetLibpqswConninfo()
     return;
 }
 
+static void SSReadClusterRunMode()
+{
+    int fd = -1;
+    char *fname = NULL;
+    int read_size = 0;
+    int len = sizeof(ss_reformer_ctrl_t);
+    fname = XLOG_CONTROL_FILE;
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+
+    fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        LWLockRelease(ControlFileLock);
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
+    }
+
+    off_t seekpos = (off_t)BLCKSZ * REFORM_CTRL_PAGE;
+
+    read_size = (int)BUFFERALIGN(len);
+    char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
+    if (pread(fd, buffer, read_size, seekpos) != read_size) {
+        (void)close(fd);
+        LWLockRelease(ControlFileLock);
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
+    }
+    
+    g_instance.dms_cxt.SSReformerControl.clusterRunMode = ((ss_reformer_ctrl_t*)buffer)->clusterRunMode;
+
+    if (close(fd) < 0) {
+        LWLockRelease(ControlFileLock);
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+    }
+    LWLockRelease(ControlFileLock);
+}
+
 void SSDoradoRefreshMode()
 {
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
@@ -448,8 +482,8 @@ void SSDoradoRefreshMode()
 
 void SSDoradoUpdateHAmode() 
 {
-    SSReadControlFile(REFORM_CTRL_PAGE);
-    if (SS_REFORM_REFORMER) {
+    SSReadClusterRunMode();
+    if (SS_REFORM_REFORMER && SS_REPLICATION_DORADO_CLUSTER) {
         if (SS_REPLICATION_PRIMARY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
         } else if (SS_REPLICATION_STANDBY_CLUSTER) {
