@@ -109,6 +109,7 @@ typedef int (*cmp_func)(const void*, const void*);
 typedef struct {
     int64 fileSize;
     time_t mTime;
+    time_t cTime;
     char fileName[FLEXIBLE_ARRAY_MEMBER];
 } LogInfo;
 
@@ -165,10 +166,11 @@ static void PLogCtlInit(void);
 static void slow_query_logfile_rotate(bool time_based_rotation, int size_rotation_for);
 static void asp_logfile_rotate(bool time_based_rotation, int size_rotation_for);
 static void RemoveOldestLog(const char* path, int64* totalSize, int64 curSize);
-static int LogInfoCmpByModifyTime(const void* v1, const void* v2);
+static int LogInfoCmp(const void* v1, const void* v2);
 static void MakeSortedLogInfoList(List* list, cmp_func cmp);
 static inline int64 GetUpdateSize(FILE* fh, const char* filename);
 static inline void CheckTotalLogSize(FILE* fh, bool hasCsvFormat, char* currentLogDir, int64* totalSize);
+static void RotateLogFile(int& sizeRotationFor);
 
 /*
  * Main entry point for syslogger process
@@ -457,16 +459,13 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
             }
         }
 
-        if (!t_thrd.logger.rotation_requested && LOG_MAX_SIZE > 0) {
-            if (t_thrd.logger.syslogFile != NULL && ftell(t_thrd.logger.syslogFile) >= LOG_MAX_SIZE) {
-                t_thrd.logger.rotation_requested = true;
-                size_rotation_for |= LOG_DESTINATION_STDERR;
-            } else {
-                CheckTotalLogSize(t_thrd.logger.syslogFile,
-                                    true,
-                                    currentLogDir,
-                                    &t_thrd.logger.total_syslogs_size);
-            }
+        if (LOG_MAX_SIZE > 0) {
+            CheckTotalLogSize(t_thrd.logger.syslogFile,
+                                true,
+                                currentLogDir,
+                                &t_thrd.logger.total_syslogs_size);
+
+            RotateLogFile(size_rotation_for);
         }
 
         /*
@@ -2175,11 +2174,15 @@ void init_instr_log_directory(bool include_nodename, const char* logid)
     }
 }
 
-static int LogInfoCmpByModifyTime(const void* v1, const void* v2)
+static int LogInfoCmp(const void* v1, const void* v2)
 {
     const LogInfo* l1 = *(LogInfo**)v1;
     const LogInfo* l2 = *(LogInfo**)v2;
-    return l1->mTime - l2->mTime;
+    int result = l1->mTime - l2->mTime;
+    if (result == 0) {
+        return l1->cTime - l2->cTime;
+    }
+    return result;
 }
 
 static void MakeSortedLogInfoList(List* list, cmp_func cmp)
@@ -2252,17 +2255,13 @@ static void RemoveOldestLog(const char* path, int64* totalSize, int64 curSize)
             continue;
         }
 
-        if ((t_thrd.logger.last_file_name != NULL && strcmp(pathname, t_thrd.logger.last_file_name) == 0) ||
-            (t_thrd.logger.last_csv_file_name != NULL && strcmp(pathname, t_thrd.logger.last_csv_file_name) == 0)) {
-            continue;
-        }
-
         /*
          * The feature of flexible arrays is used here to facilitate memory release of the logInfoList at the end
          */
         Size dirLen = strlen(dirEntry->d_name);
         LogInfo* logInfo = (LogInfo*)palloc(sizeof(LogInfo) + dirLen + 1);
         logInfo->mTime = fst.st_mtime;
+        logInfo->cTime = fst.st_ctime;
         rc = snprintf_s(logInfo->fileName, dirLen + 1, dirLen, "%s", dirEntry->d_name);
         securec_check_ss(rc, "\0", "\0");
         logInfo->fileSize = fst.st_size;
@@ -2278,13 +2277,15 @@ static void RemoveOldestLog(const char* path, int64* totalSize, int64 curSize)
         return;
     }
 
+    *totalSize -= curSize;
+
     /* 
      * Perform a secondary judgment on the total number of logs. If the latest log space size does not meet
      * the conditions for deleting logs, there is no need to delete them, which means there is no need to sort
      * the log files in chronological order
      */
     if (NEED_ELIMINATE_LOG(*totalSize + curSize)) {
-        MakeSortedLogInfoList(logInfoList, LogInfoCmpByModifyTime);
+        MakeSortedLogInfoList(logInfoList, LogInfoCmp);
     }
 
     ListCell* cell = NULL;
@@ -2326,4 +2327,24 @@ static inline int64 GetUpdateSize(FILE* fh, const char* filename)
         result -= fst.st_size;
     }
     return result;
+}
+
+static void RotateLogFile(int& sizeRotationFor)
+{
+    if (t_thrd.logger.rotation_disabled) {
+        return;
+    }
+
+    if (t_thrd.logger.last_file_name != NULL &&
+        !file_exists(t_thrd.logger.last_file_name)) {
+        t_thrd.logger.rotation_requested = true;
+        sizeRotationFor |= LOG_DESTINATION_STDERR;
+    }
+
+    if (t_thrd.logger.csvlogFile != NULL &&
+        t_thrd.logger.last_csv_file_name != NULL &&
+        !file_exists(t_thrd.logger.last_csv_file_name)) {
+        t_thrd.logger.rotation_requested = true;
+        sizeRotationFor |= LOG_DESTINATION_CSVLOG;
+    }
 }
