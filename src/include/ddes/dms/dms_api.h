@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           113
+#define DMS_LOCAL_VERSION           119
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -697,6 +697,7 @@ typedef struct st_stat_drc_info {
 typedef enum en_broadcast_scope {
     DMS_BROADCAST_OLDIN_LIST = 0,    // default value
     DMS_BROADCAST_ONLINE_LIST = 1,
+    DMS_BROADCAST_TYPE_COUNT,
 } dms_broadcast_scope_e;
 
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
@@ -788,6 +789,7 @@ typedef int(*dms_get_opengauss_page_status)(void *db_handle, dms_opengauss_relfi
 typedef void (*dms_log_output)(dms_log_id_t log_type, dms_log_level_t log_level, const char *code_file_name,
     unsigned int code_line_num, const char *module_name, const char *format, ...);
 typedef int (*dms_log_flush)(void *db_handle, unsigned long long *lsn);
+typedef int (*dms_log_conditional_flush)(void *db_handle, unsigned long long lfn, unsigned long long *lsn);
 typedef int(*dms_process_edp)(void *db_handle, dms_edp_info_t *pages, unsigned int count);
 typedef void (*dms_clean_ctrl_edp)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
 typedef char *(*dms_display_pageid)(char *display_buf, unsigned int count, char *pageid);
@@ -951,6 +953,7 @@ typedef struct st_dms_callback {
     dms_get_opengauss_page_status get_opengauss_page_status;
     dms_log_output log_output;
     dms_log_flush log_flush;
+    dms_log_conditional_flush log_conditional_flush;
     dms_process_edp ckpt_edp;
     dms_process_edp clean_edp;
     dms_ckpt_session ckpt_session;
@@ -1007,8 +1010,10 @@ typedef struct st_dms_callback {
 typedef struct st_dms_instance_net_addr {
     unsigned int inst_id;
     char ip[DMS_MAX_IP_LEN];
+    char secondary_ip[DMS_MAX_IP_LEN];
     unsigned short port;
-    unsigned char reserved[2];
+    unsigned char need_connect;
+    unsigned char reserved[1];
 } dms_instance_net_addr_t;
 
 typedef struct st_dms_profile {
