@@ -1226,15 +1226,19 @@ static int32 CBDrcBufRebuildInternal(int begin, int len, unsigned char thread_in
     Assert(begin >= 0 && len > 0 && (begin + len) <= TOTAL_BUFFER_NUM);
     for (int i = begin; i < begin + len; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
+        bool need_rebuild = true;
         if (LWLockConditionalAcquire(buf_desc->content_lock, LW_EXCLUSIVE)) {
             buf_state = LockBufHdr(buf_desc);
-            if (buf_state & BM_VALID) {
+            if ((buf_state & BM_VALID) && !(buf_state & BM_DIRTY)) {
                 dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
                 buf_ctrl->lock_mode = DMS_LOCK_NULL;
+                need_rebuild = false;
             }
             UnlockBufHdr(buf_desc, buf_state);
             LWLockRelease(buf_desc->content_lock);
-        } else {
+        } 
+        
+        if (need_rebuild) {
             buf_state = LockBufHdr(buf_desc);
             if (SSCheckBufferIfCanGoRebuild(buf_desc, buf_state)) {
                 int ret = SSRebuildBuf(buf_desc, thread_index);
