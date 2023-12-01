@@ -12415,7 +12415,7 @@ void CreateCheckPoint(int flags)
      * recovery we don't need to write running xact data.
      */
 
-    if (!shutdown && XLogStandbyInfoActive()) {
+    if (!SS_SINGLE_CLUSTER && !shutdown && XLogStandbyInfoActive()) {
         LogStandbySnapshot();
     }
 

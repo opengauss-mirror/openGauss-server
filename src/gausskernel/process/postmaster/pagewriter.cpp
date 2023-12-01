@@ -1602,7 +1602,7 @@ static void SetupPageWriterSignalHook(void)
 
 static void logSnapshotForLogicalDecoding()
 {
-    if (XLogLogicalInfoActive() && !RecoveryInProgress()) {
+    if (!SS_SINGLE_CLUSTER && XLogLogicalInfoActive() && !RecoveryInProgress()) {
         TimestampTz timeout = 0;
         TimestampTz currentTime = GetCurrentTimestamp();
         timeout = TimestampTzPlusMilliseconds(g_last_snapshot_ts, LOG_SNAPSHOT_INTERVAL_MS);
