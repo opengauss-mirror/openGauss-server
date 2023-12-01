@@ -1600,7 +1600,9 @@ void spq_do_query(RemoteQueryState* node)
 		need_stream_sync = step->num_stream > 0 ? true : false;
 	}
 #endif
- 
+    if (node->rqs_num_params) {
+        step->sql_statement = node->serializedPlan;
+    }
     /*
      *	Send begin statement to all datanodes for RW transaction parallel.
      *  Current it should be RO transaction

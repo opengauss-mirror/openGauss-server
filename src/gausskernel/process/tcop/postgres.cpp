@@ -3214,7 +3214,7 @@ static void exec_plan_with_params(StringInfo input_message)
     }
 
     if (paramTypeNames != NULL) {
-        if (IsConnFromCoord() || (IS_PGXC_COORDINATOR && planstmt->in_compute_pool)) {
+        if (IS_SPQ_EXECUTOR || IsConnFromCoord() || (IS_PGXC_COORDINATOR && planstmt->in_compute_pool)) {
             int cnt_param;
             for (cnt_param = 0; cnt_param < numParams; cnt_param++)
                 parseTypeString(paramTypeNames[cnt_param], &paramTypes[cnt_param], NULL);
@@ -3460,6 +3460,9 @@ static void exec_plan_with_params(StringInfo input_message)
     }
 
     finish_xact_command();
+    if (planstmt->enable_adaptive_scan) {
+        disconnect_qc_conn(planstmt);
+    }
 }
 #endif
 
@@ -8988,7 +8991,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'Y': /* plan with params */
             {
-                if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)
+                t_thrd.spq_ctx.spq_role = ROLE_QUERY_EXECUTOR;
+                if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && (!IS_SPQ_EXECUTOR))
                     ereport(ERROR,
                         (errcode(ERRCODE_PROTOCOL_VIOLATION),
                             errmsg("invalid frontend message type '%c'.", firstchar)));
