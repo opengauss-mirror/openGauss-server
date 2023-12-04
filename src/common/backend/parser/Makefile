@@ -95,9 +95,8 @@ hint_gram.o keywords.o parser.o: hint_gram.hpp  submake-kwlist
 
 # gram.cpp, gram.hpp, and scan.inc are in the distribution tarball, so they
 # are not cleaned here.
-clean distclean maintainer-clean:
+clean distclean maintainer-clean: submake-kwlist-clean
 	rm -f lex.backup hint_gram.cpp
-	rm -f kwlist_d.h
 
 
 maintainer-check:

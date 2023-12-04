@@ -1125,7 +1125,12 @@ submake-pagecompression:
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
-submake-kwlist:
+submake-kwlist: $(top_srcdir)/src/include/parser/kwlist_d.h
+
+submake-kwlist-clean:
+	rm $(top_srcdir)/src/include/parser/kwlist_d.h
+
+$(top_srcdir)/src/include/parser/kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
 
 .PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression submake-kwlist
