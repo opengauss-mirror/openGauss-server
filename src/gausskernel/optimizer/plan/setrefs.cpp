@@ -2375,27 +2375,6 @@ void extract_query_dependencies(
     *hasHdfs = glob.vectorized;
 }
 
-static List *get_partition_indexoid_list(List *partitionOidList)
-{
-    if (partitionOidList == NULL) {
-        return NULL;
-    }
-    ListCell *cell = NULL;
-    List *indexOidList = NIL;
-    foreach (cell, partitionOidList) {
-        Oid partOid = (Oid)lfirst_oid(cell);
-        List *partIndexlist = searchPartitionIndexesByblid(partOid);
-        ListCell *indexCell = NULL;
-        foreach (indexCell, partIndexlist) {
-            HeapTuple partIndexTuple = (HeapTuple)lfirst(indexCell);
-            Oid indexOid = HeapTupleGetOid(partIndexTuple);
-            indexOidList = lappend_oid(indexOidList, indexOid);
-        }
-        freePartList(partIndexlist);
-    }
-    return indexOidList;
-}
-
 /*
  * Tree walker for extract_query_dependencies.
  *
@@ -2439,39 +2418,6 @@ static bool extract_query_dependencies_walker(Node* node, PlannerInfo* context)
                 /* use glob.vectorized here to mark if we contain hdfs table */
                 if (REL_PAX_ORIENTED == rte->orientation)
                     context->glob->vectorized = true;
-
-                /* To partition table, need append all partition Oids to relationOids.
-                 * When partition tables are altered, partitionId will be append to transInvalInfo in
-                 * function RegisterPartcacheInvalidation.
-                 * On transaction start, if this table has been altered. Plansource->is_valid will be set
-                 * to false.
-                 */
-                if (rte->ispartrel) {
-                    List *partitionOid = getPartitionObjectIdList(rte->relid, PART_OBJ_TYPE_TABLE_PARTITION);
-                    Relation partTableRel = relation_open(rte->relid, AccessShareLock);
-                    if (RelationIsSubPartitioned(partTableRel)) {
-                        ListCell *cell = NULL;
-                        foreach (cell, partitionOid) {
-                            Oid partOid = (Oid)lfirst_oid(cell);
-                            List *subPartitionOidList =
-                                getPartitionObjectIdList(partOid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
-                            List *subPartIndexOidList = get_partition_indexoid_list(subPartitionOidList);
-                            // add subpartition index oid
-                            context->glob->relationOids = list_concat(context->glob->relationOids, subPartIndexOidList);
-                            // add subpartition oid
-                            context->glob->relationOids = list_concat(context->glob->relationOids, subPartitionOidList);
-                        }
-                        // add partition oid
-                        context->glob->relationOids = list_concat(context->glob->relationOids, partitionOid);
-                    } else {
-                        List *partIndexOidList = get_partition_indexoid_list(partitionOid);
-                        // add partition index oid
-                        context->glob->relationOids = list_concat(context->glob->relationOids, partIndexOidList);
-                        // add partition oid
-                        context->glob->relationOids = list_concat(context->glob->relationOids, partitionOid);
-                    }
-                    relation_close(partTableRel, AccessShareLock);
-                }
             }
         }
 
