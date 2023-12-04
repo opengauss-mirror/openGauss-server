@@ -8881,6 +8881,14 @@ static void sqlcmd_alter_exec_convert_charset(AlteredTableInfo* tab, Relation re
     heap_close(attrelation, RowExclusiveLock);
 }
 
+static bool sqlcmd_partition_index_ddl_cmd(AlterTableType cmd)
+{
+    /* AT_UnusableAllIndexOnSubPartition is not supported */
+    return ((cmd) == AT_UnusableIndexPartition || (cmd) == AT_UnusableAllIndexOnPartition ||
+            (cmd) == AT_UnusableIndex || (cmd) == AT_AddIndex || (cmd) == AT_ReAddIndex ||
+            (cmd) == AT_AddIndexConstraint);
+}
+
 static void ATCreateColumComments(Oid relOid, ColumnDef* columnDef)
 {
     List *columnOptions = columnDef->columnOptions;
@@ -8905,10 +8913,17 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
     elog(ES_LOGLEVEL, "[ATExecCmd] cmd subtype: %d", cmd->subtype);
 
     if (PARTITION_DDL_CMD(cmd->subtype) && RELATION_IS_PARTITIONED(rel)) {
+        /* Register invalidation of the relation's relcache entry. */
+        CacheInvalidateRelcache(rel);
         int partitionno = -GetCurrentPartitionNo(RelOidGetPartitionTupleid(rel->rd_id));
         if (!PARTITIONNO_IS_VALID(partitionno)) {
             RelationResetPartitionno(rel->rd_id, ShareUpdateExclusiveLock);
         }
+    }
+    
+    if (sqlcmd_partition_index_ddl_cmd(cmd->subtype) && RelationIsIndex(rel)) {
+        Oid rel_id = IndexGetRelation(rel->rd_id, false);
+        CacheInvalidateRelcacheByRelid(rel_id);
     }
 
     switch (cmd->subtype) {
