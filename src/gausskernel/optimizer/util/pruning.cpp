@@ -542,7 +542,7 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     context->GetPartitionMap = GetRelPartitionMap;
     context->pruningType = PruningPartition;
 
-    bool isnull = PartExprKeyIsNull(rel, NULL);
+    bool isnull = PartExprKeyIsNull(rel);
     if (isnull) {
         if (rel->partMap != NULL && (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH)) {
             // for List/Hash partitioned table

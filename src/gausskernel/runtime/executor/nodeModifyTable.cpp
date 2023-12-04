@@ -908,7 +908,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
 
         if (RelationIsSubPartitioned(resultRelationDesc)) {
             int subpartitionno = INVALID_PARTITION_NO;
-            bool subpartExprKeyIsNull = PartExprKeyIsNull(heaprel, NULL, NULL);
+            bool subpartExprKeyIsNull = PartExprKeyIsNull(heaprel, NULL);
             subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno, false, false, subpartExprKeyIsNull);
             searchFakeReationForPartitionOid(estate->esfRelations,
                 estate->es_query_cxt,
@@ -1460,7 +1460,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                         /* get subpartititon oid for insert the record */
                         char* subpartExprKeyStr = NULL;
-                        bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, NULL, &subpartExprKeyStr);
+                        bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, &subpartExprKeyStr);
                         if (!subpartExprKeyIsNull) {
                             Datum newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
                             subPartitionId = heapTupleGetPartitionId(partRel, (void *)newsubval, &subpartitionno, false,
@@ -2497,7 +2497,7 @@ lreplace:
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
                             char* subpartExprKeyStr = NULL;
                             Datum newsubval = 0;
-                            bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, NULL, &subpartExprKeyStr);
+                            bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, &subpartExprKeyStr);
                             if (!subpartExprKeyIsNull) {
                                 newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
                                 partitionRoutingForTuple(partRel, (void*)newsubval, u_sess->exec_cxt.route, can_ignore, false);
@@ -3337,7 +3337,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
                                              RowExclusiveLock);
 
             if (RelationIsSubPartitioned(targetrel)) {
-                bool subpartExprKeyIsNull = PartExprKeyIsNull(heaprel, NULL, NULL);
+                bool subpartExprKeyIsNull = PartExprKeyIsNull(heaprel, NULL);
                 subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno, false, false, subpartExprKeyIsNull);
                 searchFakeReationForPartitionOid(estate->esfRelations,
                                                  estate->es_query_cxt,
@@ -4366,7 +4366,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         char* partExprKeyStr = NULL;
         ResultRelInfo* currentRelInfo = mt_state->resultRelInfo + relIndex;
         if (RelationIsPartitioned(currentRelInfo->ri_RelationDesc))
-            PartExprKeyIsNull(currentRelInfo->ri_RelationDesc, NULL, &partExprKeyStr);
+            PartExprKeyIsNull(currentRelInfo->ri_RelationDesc, &partExprKeyStr);
         mt_state->partExprKeyStrArray[relIndex] = partExprKeyStr;
     }
 

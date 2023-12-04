@@ -5763,13 +5763,7 @@ static Oid get_role_oid_or_public(const char* rolname)
 bool is_role_independent(Oid roleid)
 {
     HeapTuple rtup = NULL;
-    bool isNull = false;
     bool flag = false;
-
-    Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
-
-    TupleDesc pg_authid_dsc = RelationGetDescr(relation);
-
     /* Look up the information in pg_authid. */
     rtup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
     if (HeapTupleIsValid(rtup)) {
@@ -5777,18 +5771,11 @@ bool is_role_independent(Oid roleid)
          * For upgrade reason,  we must get field value through heap_getattr function
          * although it is a char type value.
          */
-        Datum authidrolkindDatum = heap_getattr(rtup, Anum_pg_authid_rolkind, pg_authid_dsc, &isNull);
-
-        if (DatumGetChar(authidrolkindDatum) == ROLKIND_INDEPENDENT)
-            flag = true;
-        else
-            flag = false;
-
+        bool isNull = false;
+        Datum authidrolkindDatum = SysCacheGetAttr(AUTHOID, rtup, Anum_pg_authid_rolkind, &isNull);
+        flag = !isNull && DatumGetChar(authidrolkindDatum) == ROLKIND_INDEPENDENT;
         ReleaseSysCache(rtup);
     }
-
-    heap_close(relation, AccessShareLock);
-
     return flag;
 }
 
