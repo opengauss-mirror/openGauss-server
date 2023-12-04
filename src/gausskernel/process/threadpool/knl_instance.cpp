@@ -848,6 +848,7 @@ void knl_instance_init()
     knl_g_streaming_dr_init(&g_instance.streaming_dr_cxt);
     knl_g_csn_barrier_init(&g_instance.csn_barrier_cxt);
     knl_g_audit_init(&g_instance.audit_cxt);
+    g_instance.noNeedWaitForCatchup = 0;
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

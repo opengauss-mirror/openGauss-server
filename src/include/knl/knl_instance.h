@@ -1242,6 +1242,7 @@ typedef struct knl_instance_context {
 #ifndef ENABLE_MULTIPLE_NODES
     void *raw_parser_hook[DB_CMPT_MAX];
     void *plsql_parser_hook[DB_CMPT_MAX];
+    uint32 noNeedWaitForCatchup;
 #endif
     pg_atomic_uint32 extensionNum;
     knl_g_audit_context audit_cxt;
