@@ -1977,6 +1977,20 @@ ObjectAddress RenameFunction(List* name, List* argtypes, const char* newname)
     if (aclresult != ACLCHECK_OK)
         aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
+    if (enable_plpgsql_gsdependency_guc()) {
+        const char* old_func_format = format_procedure_no_visible(procOid);
+        const char* old_func_name = strVal(llast(name));
+        bool is_null = false;
+        Datum package_oid_datum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &is_null);
+        Oid pkg_oid = DatumGetObjectId(package_oid_datum);
+        if (gsplsql_exists_func_obj(namespaceOid, pkg_oid, old_func_format, old_func_name)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("The rename operator of %s is not allowed, because it is referenced by the other object.",
+                        NameStr(procForm->proname))));
+        }
+    }
+
     /* rename */
     (void)namestrcpy(&(procForm->proname), newname);
     simple_heap_update(rel, &tup->t_self, tup);
@@ -3232,6 +3246,20 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
         }
     }    
 #endif
+    if (enable_plpgsql_gsdependency_guc()) {
+        const char* old_func_format = format_procedure_no_visible(procOid);
+        const char* old_func_name = NameStr(proc->proname);
+        bool is_null = false;
+        Datum package_oid_datum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &is_null);
+        Oid pkg_oid = DatumGetObjectId(package_oid_datum);
+        if (gsplsql_exists_func_obj(oldNspOid, pkg_oid, old_func_format, old_func_name)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("The set schema operator of %s is not allowed, "
+                           "because it is referenced by the other object.",
+                        NameStr(proc->proname))));
+        }
+    }
     /* OK, modify the pg_proc row */
     /* tup is a copy, so we can scribble directly on it */
     proc->pronamespace = nspOid;

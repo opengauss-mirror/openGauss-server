@@ -387,13 +387,91 @@ INFO:  call xxx: (1,aaa,aaaaa,,,), yyy: (2,bbb,bbbbb,,,), p_in: (1,zhang,M,1,2,3
  
 (1 row)
 
+-- test 6
+drop type if exists r1;
+drop table if exists stu;
+create table stu(sno int, name varchar, sex varchar, cno int);
+create type r1 as (a int, c stu%RowType);
+create schema plpgsql_recompile_new;
+create or replace procedure test_proc(p_in r1)
+is
+declare
+v1 stu%RowType;
+begin        
+RAISE INFO 'call p_in: %', p_in;
+end;
+/
+call test_proc((1,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ test_proc 
+-----------
+ 
+(1 row)
+
+-- rename report error
+ALTER TYPE r1 RENAME to r1_rename;
+ERROR:  The rename operator of r1 is not allowed, because it is referenced by the other object.
+ALTER TYPE r1 RENAME ATTRIBUTE a TO new_a;
+ERROR:  cannot rename attribute of the type because it is dependent on another object.
+ALTER TABLE stu RENAME  TO stu_rename;
+ERROR:  The rename operator on stu is not allowed, because it is dependent on another object.
+ALTER TABLE stu RENAME COLUMN cno TO new_cno;
+ERROR:  cannot rename attribute of the type because it is dependent on another object.
+ALTER PROCEDURE test_proc(r1) RENAME TO test_proc_rename;
+ERROR:  The rename operator of test_proc is not allowed, because it is referenced by the other object.
+ALTER SCHEMA plpgsql_recompile RENAME TO plpgsql_recompile_rename;
+ERROR:  The rename operator of plpgsql_recompile is not allowed, because it is referenced by the other object.
+call test_proc((1.0,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ test_proc 
+-----------
+ 
+(1 row)
+
+-- set schema report error
+ALTER TYPE r1 SET SCHEMA plpgsql_recompile_new;
+ERROR:  The set schema operator of r1 is not allowed, because it is referenced by the other object.
+ALTER TABLE stu SET SCHEMA plpgsql_recompile_new;
+ERROR:  The set schema operator of stu is not allowed, because it is referenced by another object.
+ALTER PROCEDURE test_proc(r1) SET SCHEMA plpgsql_recompile_new;
+ERROR:  The set schema operator of test_proc is not allowed, because it is referenced by the other object.
+call test_proc((1.0,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ test_proc 
+-----------
+ 
+(1 row)
+
+-- drop and recreate
+drop type r1;
+drop table stu;
+drop procedure test_proc;
+create table stu(sno int, name varchar, sex varchar, cno int);
+create type r1 as (a int, c stu%RowType);
+create or replace procedure test_proc(p_in r1)
+is
+declare
+v1 stu%RowType;
+begin        
+RAISE INFO 'call p_in: %', p_in;
+end;
+/
+call test_proc((1,(1,'zhang','M',1)));
+INFO:  call p_in: (1,"(1,zhang,M,1)")
+ test_proc 
+-----------
+ 
+(1 row)
+
+drop type r1;
+drop table stu;
+drop procedure test_proc;
 -- clean
+drop schema plpgsql_recompile_new cascade;
 drop schema plpgsql_recompile cascade;
-NOTICE:  drop cascades to 7 other objects
+--?.*
 DETAIL:  drop cascades to type s_type
 drop cascades to function type_alter(s_type)
-drop cascades to table stu
-drop cascades to type r1
 drop cascades to function test_subtype_proc()
 --?.*
 drop cascades to function plpgsql_recompile.proc1(s_type)

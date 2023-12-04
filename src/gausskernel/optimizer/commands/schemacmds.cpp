@@ -41,6 +41,7 @@
 #include "utils/snapmgr.h"
 #include "gs_ledger/ledger_utils.h"
 #include "gs_ledger/userchain.h"
+#include "catalog/gs_dependencies_fn.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -587,6 +588,13 @@ ObjectAddress RenameSchema(const char* oldname, const char* newname)
                 errmsg("It is not supported to rename schema \"%s\" which includes timeseries table \"%s\".",
                     oldname,
                     existTimeSeriesTbl->data)));
+    }
+
+    if (enable_plpgsql_gsdependency_guc() && gsplsql_exists_schema_name(oldname)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                errmsg("The rename operator of %s is not allowed, because it is referenced by the other object.",
+                    oldname)));
     }
 
     /* Before rename schema (with blockchain) rename related ledger tables first */

@@ -21,29 +21,6 @@
 *
 * ---------------------------------------------------------------------------------------
  */
-/*
-* Copyright (c) 2021 Huawei Technologies Co.,Ltd.
-*
-* openGauss is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-* See the Mulan PSL v2 for more details.
-* ---------------------------------------------------------------------------------------
-*
-* gsobject_gsdependencies.cpp
-*
-*
-* IDENTIFICATION
-*        src/common/backend/utils/gsplsql/gsobject_gsdependencies.cpp
-*
-* ---------------------------------------------------------------------------------------
- */
 
 #include "utils/plpgsql.h"
 #include "catalog/gs_dependencies_fn.h"
@@ -1086,10 +1063,6 @@ static bool gsplsql_update_proc_header(CreateFunctionStmt *stmt, Oid funcid)
         prorettype = VOIDOID;
         returnsSet = false;
     }
-    if (has_undefined) {
-        ereport(
-            LOG, (errmsg("the function header has an unknown dependency. function oid is %u", funcid)));
-    }
     char* parameter_defaults_str = NULL;
     if (parameter_defaults != NIL) {
         parameter_defaults_str = nodeToString(parameter_defaults);
@@ -1139,8 +1112,6 @@ static bool gsplsql_update_proc_header(CreateFunctionStmt *stmt, Oid funcid)
     CacheInvalidateFunction(funcid, InvalidOid);
     if (!is_proc_info_changed(funcid, parameter_types, all_parameter_types, parameter_defaults_str,
                               prorettype, returnsSet)) {
-        ereport(LOG, (errcode(ERRCODE_PLPGSQL_ERROR),
-                      errmsg("The header of function %u does not need to be modified.", funcid)));
         pfree_ext(parameter_defaults_str);
         return has_undefined;
     }
@@ -1252,7 +1223,7 @@ static bool is_proc_info_changed(Oid funcid, oidvector *new_parameter_types, Arr
             }
             size_tmp = allpara_count * sizeof(Oid);
             Oid *p_argtypes = (Oid *)palloc(size_tmp);
-            rc = memcpy_s(p_argtypes, size_tmp, ARR_DATA_PTR(new_all_parameter_types), size_tmp);
+            rc = memcpy_s(p_argtypes, size_tmp, ARR_DATA_PTR(arr), size_tmp);
             securec_check(rc, "\0", "\0");
             oidvector *allpara_type = buildoidvector(p_argtypes, allpara_count);
             if (!DatumGetBool(DirectFunctionCall2(oidvectoreq, PointerGetDatum(allpara_type),
@@ -1485,8 +1456,6 @@ static void gsplsql_delete_dependencies_object_by_oid(Oid oid)
     if (!HeapTupleIsValid(tuple)) {
         systable_endscan(scan);
         heap_close(dep_rel, RowExclusiveLock);
-        ereport(LOG,  (errcode(ERRCODE_UNDEFINED_OBJECT),
-                        errmsg("dependencies object %u does not exist.", oid)));
         return;
     }
     simple_heap_delete(dep_rel, &tuple->t_self, 0, true);
