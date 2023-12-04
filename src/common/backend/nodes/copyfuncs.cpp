@@ -7762,6 +7762,7 @@ void* copyObject(const void* from)
             break;
         case T_SpqIndexOnlyScan:
             retval = _copySpqIndexOnlyScan((SpqIndexOnlyScan*)from);
+            break;
         case T_SpqBitmapHeapScan:
             retval = _copySpqBitmapHeapScan((SpqBitmapHeapScan*)from);
             break;
