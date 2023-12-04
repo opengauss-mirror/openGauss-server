@@ -285,6 +285,7 @@ typedef struct knl_session_attr_storage {
     bool uwal_enable_flowcontrol;
     int uwal_flowthreshold;
     char* uwal_path;
+    bool handle_toast_in_autovac;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

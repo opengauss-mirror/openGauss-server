@@ -392,6 +392,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  hadr_recovery_time_target                        | integer |      | 0         | 3600
  hadr_super_user_record_path                      | string  |      |           | 
  ha_module_debug                                  | bool    |      |           | 
+ handle_toast_in_autovac                          | bool    |      |           | 
  hashagg_table_size                               | integer |      | 0         | 1073741823
  hba_file                                         | string  |      |           | 
  hll_default_expthresh                            | int64   |      | -1        | 7
