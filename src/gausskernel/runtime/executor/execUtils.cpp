@@ -54,6 +54,7 @@
 #include "executor/exec/execdebug.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parsetree.h"
+#include "parser/parse_expr.h"
 #include "storage/lmgr.h"
 #include "storage/tcap.h"
 #include "utils/memutils.h"
@@ -2661,6 +2662,9 @@ void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr)
  */
 Datum GetTypeZeroValue(Form_pg_attribute att_tup)
 {
+    if (u_sess->hook_cxt.getTypeZeroValueHook != NULL) {
+        return ((getTypeZeroValueFunc)(u_sess->hook_cxt.getTypeZeroValueHook))(att_tup);
+    }
     Datum result;
     switch (att_tup->atttypid) {
         case TIMESTAMPOID: {
