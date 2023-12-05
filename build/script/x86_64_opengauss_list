@@ -1322,6 +1322,7 @@
 ./jre/lib/tzdb.dat
 ./jre/LICENSE
 ./jre/THIRD_PARTY_README
+./lib/libreadline.so*
 [client]
 ./bin/gsql
 ./bin/gs_dump
@@ -1399,6 +1400,8 @@
 ./lib/libcom_err_gauss.so
 ./lib/libcom_err_gauss.so.3
 ./lib/libcom_err_gauss.so.3.0
+./lib/libcjson.so*
+./lib/libreadline.so*
 [libpq]
 ./lib/libpq.a
 ./lib/libpq.so
