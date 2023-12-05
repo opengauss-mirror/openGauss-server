@@ -6767,6 +6767,10 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
                     }
 
+                    if (g_instance.pid_cxt.CBMWriterPID != 0) {
+                        signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
+                    }
+
                     ereport(LOG, (errmsg("[SS switchover] primary demoting: "
                         "killed threads, waiting for backends die")));
                     pmState = PM_WAIT_BACKENDS;
@@ -10361,6 +10365,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
         }
 
+        if (g_instance.pid_cxt.CBMWriterPID != 0) {
+            signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
+        }
+
         pmState = PM_WAIT_BACKENDS;
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
@@ -10433,6 +10441,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
         }
 
+        if (g_instance.pid_cxt.CBMWriterPID != 0) {
+            signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
+        }
+
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] terminate backends success")));
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
@@ -10479,6 +10491,9 @@ static void sigusr1_handler(SIGNAL_ARGS)
          */
         if (g_instance.pid_cxt.WalWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+
+        if (g_instance.pid_cxt.CBMWriterPID != 0)
+            signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
