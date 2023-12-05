@@ -11319,9 +11319,11 @@ void CheckRecoveryConsistency(void)
         return;
     /*
      * Have we reached the point where our base backup was completed?
+     * backupStartPoint may clear when XLOG_BACKUP_END redo
      */
     if (!XLogRecPtrIsInvalid(t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint) &&
-        !XLogRecPtrIsInvalid(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint) &&
+        (!t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired || 
+         !XLogRecPtrIsInvalid(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint)) &&
         XLByteLE(t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint, lastReplayedEndRecPtr)) {
         /*
          * We have reached the end of base backup, as indicated by pg_control.
@@ -14148,8 +14150,7 @@ void xlog_redo(XLogReaderState *record)
         rc = memcpy_s(&startpoint, sizeof(startpoint), XLogRecGetData(record), sizeof(startpoint));
         securec_check(rc, "", "");
 
-        if (XLByteEQ(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint, startpoint) &&
-            t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired) {
+        if (XLByteEQ(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint, startpoint)) {
             /*
              * We have reached the end of base backup, the point where
              * pg_stop_backup() was done. The data on disk is now consistent.
@@ -16739,8 +16740,6 @@ static bool read_backup_label(XLogRecPtr *checkPointLoc, bool *backupEndRequired
      */
     if (fscanf_s(lfp, "BACKUP METHOD: %19s\n", backuptype, sizeof(backuptype)) == 1) {
         if (strcmp(backuptype, "streamed") == 0) {
-            *backupEndRequired = true;
-        } else if (strcmp(backuptype, "pg_start_backup") == 0) {
             *backupEndRequired = true;
         }
     }

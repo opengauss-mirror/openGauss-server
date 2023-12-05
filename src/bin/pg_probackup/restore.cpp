@@ -1660,17 +1660,7 @@ create_recovery_conf(time_t backup_id,
     /* construct restore_command */
     if (pitr_requested)
     {
-        char *timestamp = NULL;
-        const char *oldtime = NULL;
-        timestamp = (char *)pg_malloc(RESTORE_ARRAY_LEN);
-        time2iso(timestamp, RESTORE_ARRAY_LEN, backup->end_time);
-        oldtime = rt->time_string;
-        if (rt->time_string) {
-            rt->time_string = timestamp;
-        }
         construct_restore_cmd(fp, rt, restore_command_provided, target_immediate);
-        rt->time_string = oldtime;
-        free(timestamp);
     }
 
     if (fio_fflush(fp) != 0 ||
@@ -1752,10 +1742,17 @@ static void construct_restore_cmd(FILE *fp, pgRecoveryTarget *rt,
         fio_fprintf(fp, "recovery_target_timeline = 'current'\n");
 #endif
     }
-    if (instance_config.archive.host) {
-        elog(LOG, "archive host specified, input restore command manually.");
+    
+    if (restore_command_provided)
+    {
+        char restore_command_guc[16384];
+        errno_t rc = sprintf_s(restore_command_guc, sizeof(restore_command_guc), "%s", instance_config.restore_command);
+        securec_check_ss_c(rc, "\0", "\0");
+        fio_fprintf(fp, "restore_command = '%s\n", restore_command_guc);
+        elog(LOG, "Setting restore command to '%s'", restore_command_guc);
     } else {
-        fprintf(fp, "restore_command = 'cp %s/%%f %%p'\n", arclog_path);
+        elog(WARNING, "you need to input restore command manually.");
+        
     }
 }
 
