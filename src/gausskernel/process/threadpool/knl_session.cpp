@@ -1415,6 +1415,7 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->s_tupSerMemCtxt = NULL;
     spq_cxt->spq_opt_initialized = false;
     spq_cxt->remoteQuerys = NIL;
+    spq_cxt->snapshot = (SnapshotData*)palloc0(sizeof(SnapshotData));
 }
 #endif
 

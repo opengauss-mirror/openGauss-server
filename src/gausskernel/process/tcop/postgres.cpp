@@ -1812,7 +1812,7 @@ void exec_simple_plan(PlannedStmt* plan)
         /*
          * Start the portal.  No parameters here.
          */
-        PortalStart(portal, NULL, 0, InvalidSnapshot);
+        PortalStart(portal, NULL, 0, u_sess->spq_cxt.snapshot);
 
         /*
          * Select the appropriate output format: text unless we are doing a
@@ -3412,7 +3412,7 @@ static void exec_plan_with_params(StringInfo input_message)
          */
         PortalDefineQuery(portal, NULL, "DUMMY", commandTag, lappend(NULL, planstmt), NULL);
 
-        PortalStart(portal, params, 0, InvalidSnapshot);
+        PortalStart(portal, params, 0, u_sess->spq_cxt.snapshot);
 
         PortalSetResultFormat(portal, numRFormats, rformats);
 
@@ -10000,10 +10000,30 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 pq_getmsgend(&input_message);
             } break;
-
+#endif
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 's': /* snapshot */
             {
+#ifdef USE_SPQ
                 errno_t rc = EOK;
+                Snapshot cursnap = u_sess->spq_cxt.snapshot;
+                int satisfies;
+                rc = memcpy_s(&satisfies, sizeof(int),
+                                  pq_getmsgbytes(&input_message, sizeof(int)), sizeof(int));
+                    securec_check(rc,"\0","\0");
+                cursnap->satisfies = (SnapshotSatisfiesMethod)satisfies;
+                rc = memcpy_s(&cursnap->xmin, sizeof(TransactionId),
+                                  pq_getmsgbytes(&input_message, sizeof(TransactionId)), sizeof(TransactionId));
+                    securec_check(rc,"\0","\0");
+                rc = memcpy_s(&cursnap->xmax, sizeof(TransactionId),
+                                  pq_getmsgbytes(&input_message, sizeof(TransactionId)), sizeof(TransactionId));
+                    securec_check(rc,"\0","\0");
+                rc = memcpy_s(&cursnap->snapshotcsn, sizeof(CommitSeqNo),
+                                  pq_getmsgbytes(&input_message, sizeof(CommitSeqNo)), sizeof(CommitSeqNo));
+                    securec_check(rc,"\0","\0");
+                break;
+            }
+#else
                 int gtm_snapshot_type = -1;
 
                 if (GTM_LITE_MODE) { /* gtm lite mode */
@@ -10053,7 +10073,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                             u_sess->attr.attr_common.xc_maintenance_mode ? "on" : "off")));
                 break;
             }
-
+#endif
+#endif
+#ifdef ENABLE_MULTIPLE_NODES
             case 't': /* timestamp */
                 /* Set statement_timestamp() */
                 gtmstart_timestamp = (TimestampTz)pq_getmsgint64(&input_message);

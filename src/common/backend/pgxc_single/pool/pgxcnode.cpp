@@ -4799,10 +4799,45 @@ int
 pgxc_node_send_snapshot(PGXCNodeHandle *handle, Snapshot snapshot, int max_push_sqls)
 {
 #ifdef USE_SPQ
-	if (handle->state != DN_CONNECTION_STATE_IDLE)
-		return EOF;
- 
-	return 0;
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        return EOF;
+    if (snapshot == NULL) {
+        return EOF;
+    }
+    int msglen;
+    int nval;
+    errno_t ss_rc;
+    msglen = 4 + sizeof(int) + sizeof(TransactionId) + sizeof(TransactionId) + sizeof(CommitSeqNo);
+    /* msgType + msgLen */
+    ensure_out_buffer_capacity(1 + msglen, handle);
+    Assert(handle->outBuffer != NULL);
+    handle->outBuffer[handle->outEnd++] = 's';
+    msglen = htonl(msglen);
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += 4;
+
+    nval = htonl(int(snapshot->satisfies));
+    ss_rc = memcpy_s(
+        handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &nval, sizeof(int));
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += sizeof(int);
+
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd,
+        &(snapshot->xmin), sizeof(TransactionId));
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += sizeof(TransactionId);
+
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd,
+        &(snapshot->xmax), sizeof(TransactionId));
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += sizeof(TransactionId);
+
+    ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd,
+        &(snapshot->snapshotcsn), sizeof(CommitSeqNo));
+    securec_check(ss_rc, "\0", "\0");
+    handle->outEnd += sizeof(CommitSeqNo);
+    return 0;
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);
