@@ -48,6 +48,14 @@ THR_LOCAL PGDLLIMPORT needs_fmgr_hook_type needs_fmgr_hook = NULL;
 THR_LOCAL PGDLLIMPORT fmgr_hook_type fmgr_hook = NULL;
 extern void InitFuncCallUDFInfo(FunctionCallInfoData* fcinfo, int argN, bool setFuncPtr);
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+/* for dolphin and whale plugin */
+int a_fmgr_nbuiltins = -1;
+int b_fmgr_nbuiltins = -1;
+FmgrBuiltin *a_fmgr_builtins = NULL;
+FmgrBuiltin *b_fmgr_builtins = NULL;
+#endif
+
 /*
  * Declaration for old-style function pointer type.  This is now used only
  * in fmgr_oldstyle() and is no longer exported.
@@ -191,14 +199,27 @@ const FmgrBuiltin* fmgr_isbuiltin(Oid id)
  */
 static const FmgrBuiltin* fmgr_lookupByName(const char* name)
 {
+    int nbuiltins = fmgr_nbuiltins;
+    const FmgrBuiltin *builtinfunc = fmgr_builtins;
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    if (CUR_THR_IS_WORKER() && IsNormalProcessingMode()) {
+        if (a_fmgr_nbuiltins > 0 && DB_IS_CMPT(A_FORMAT)) {
+            nbuiltins = a_fmgr_nbuiltins;
+            builtinfunc = a_fmgr_builtins;
+        } else if (b_fmgr_nbuiltins > 0 && DB_IS_CMPT(B_FORMAT)) {
+            nbuiltins = b_fmgr_nbuiltins;
+            builtinfunc = b_fmgr_builtins;
+        }
+    }
+#endif
     int low = 0;
-    int high = fmgr_nbuiltins - 1;
+    int high = nbuiltins - 1;
     int ret;
     while (low <= high) {
         int i = (high + low) / 2;
-        ret = strcmp(name, fmgr_builtins[i].funcName);
+        ret = strcmp(name, builtinfunc[i].funcName);
         if (ret == 0) {
-            return fmgr_builtins + i;
+            return builtinfunc + i;
         } else if (ret > 0) {
             low = i + 1;
         } else {
@@ -403,6 +424,15 @@ static PGFunction load_plpgsql_function(char* funcname)
         sizeof(b_plpgsql_function_table) / sizeof(b_plpgsql_function_table[0]),
         sizeof(RegExternFunc),
         ExternFuncComp);
+<<<<<<< HEAD
+=======
+    } else if (u_sess->attr.attr_sql.whale) {
+        search_result = (RegExternFunc*)bsearch(&tmp_key,
+        a_plpgsql_function_table,
+        sizeof(a_plpgsql_function_table) / sizeof(a_plpgsql_function_table[0]),
+        sizeof(RegExternFunc),
+        ExternFuncComp);
+>>>>>>> 440afce16... Fix builtin func bug in plugin.
     }
     if (search_result == NULL) {
         search_result = (RegExternFunc*)bsearch(&tmp_key,
