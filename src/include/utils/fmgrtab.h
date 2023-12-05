@@ -210,7 +210,20 @@ static_assert(sizeof(NULL) == sizeof(void*), "NULL must be a 8 byte-length point
         }                                                                     \
     }
 
+#define CUR_THR_IS_WORKER() (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER ||\
+    t_thrd.role == STREAM_WORKER || t_thrd.role == THREADPOOL_STREAM || t_thrd.role == WAL_DB_SENDER||\
+    t_thrd.role == PARALLEL_DECODE || t_thrd.role == JOB_WORKER)
+
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+/* for dolphin and whale plugin */
+extern int a_fmgr_nbuiltins;
+extern int b_fmgr_nbuiltins;
+extern FmgrBuiltin *a_fmgr_builtins;
+extern FmgrBuiltin *b_fmgr_builtins;
+#endif
+
 extern const FmgrBuiltin fmgr_builtins[];
+
 extern const FmgrBuiltin* fmgr_isbuiltin(Oid id);
 
 extern const int fmgr_nbuiltins; /* number of entries in table */
