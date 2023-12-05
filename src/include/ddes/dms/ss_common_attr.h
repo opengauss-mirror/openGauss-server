@@ -80,8 +80,8 @@
     (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
 
 #define SS_PERFORMING_SWITCHOVER \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL && \
-    g_instance.dms_cxt.SSClusterState != NODESTATE_STANDBY_FAILOVER_PROMOTING))
+    (ENABLE_DMS && SS_IN_REFORM && \
+    (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS))
 
 #define SS_STANDBY_PROMOTING \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING))

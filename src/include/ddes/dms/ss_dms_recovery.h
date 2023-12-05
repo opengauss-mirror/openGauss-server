@@ -64,6 +64,7 @@ typedef struct st_reform_info {
     dms_role_t dms_role;
     dms_reform_type_t reform_type;
     unsigned long long bitmap_nodes;
+    unsigned long long bitmap_reconnect;
     timeval reform_start_time;
     timeval reform_end_time;
     uint64 old_bitmap;      // Save the cluster nodes bitmap before REFORM

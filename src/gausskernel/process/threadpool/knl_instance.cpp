@@ -229,6 +229,8 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
         xmin_info->global_oldest_xmin_active = false;
         SpinLockInit(&xmin_info->bitmap_active_nodes_lock);
         xmin_info->bitmap_active_nodes = 0;
+        SpinLockInit(&xmin_info->snapshot_available_lock);
+        xmin_info->snapshot_available = false;
     }
     dms_cxt->latest_snapshot_xmin = 0;
     dms_cxt->latest_snapshot_xmax = 0;

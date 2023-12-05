@@ -80,6 +80,10 @@ void SSWakeupRecovery(void)
 static int CBGetUpdateXid(void *db_handle, unsigned long long xid, unsigned int t_infomask, unsigned int t_infomask2,
     unsigned long long *uxid)
 {
+    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
+        return DMS_ERROR;
+    }
+
     int result = DMS_SUCCESS;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
 
@@ -172,6 +176,10 @@ static CommitSeqNo TransactionWaitCommittingCSN(dms_opengauss_xid_csn_t *xid_csn
 
 static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_opengauss_csn_result_t *csn_res)
 {
+    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
+        return DMS_ERROR;
+    }
+
     int ret;
 	uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
@@ -203,6 +211,10 @@ static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_
 {   
     /* SS_REPLICATION_MAIN_STANBY_NODE always is in recovery progress, but it can acquire snapshot*/
     if (RecoveryInProgress() && !(SS_NORMAL_PRIMARY && SS_REPLICATION_MAIN_STANBY_NODE)) {
+        return DMS_ERROR;
+    }
+
+    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
         return DMS_ERROR;
     }
 
@@ -243,6 +255,10 @@ static int CBGetTxnSwinfo(void *db_handle, dms_opengauss_txn_sw_info_t *txn_swin
         return DMS_ERROR;
     }
 
+    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
+        return DMS_ERROR;
+    }
+
     int retCode = DMS_SUCCESS;
     uint32 slot = txn_swinfo->server_proc_slot;
     PGXACT* pgxact = &g_instance.proc_base_all_xacts[slot];
@@ -258,6 +274,10 @@ static int CBGetTxnSwinfo(void *db_handle, dms_opengauss_txn_sw_info_t *txn_swin
 
 static int CBGetTxnStatus(void *db_handle, unsigned long long xid, unsigned char type, unsigned char *result)
 {
+    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
+        return DMS_ERROR;
+    }
+
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
@@ -1781,16 +1801,21 @@ static void SSXminInfoPrepare()
             item->notify_oldest_xmin = MaxTransactionId;
             SpinLockRelease(&item->item_lock);
         }
+
+        if (!SSPerformingStandbyScenario()) {
+            SpinLockAcquire(&xmin_info->snapshot_available_lock);
+            xmin_info->snapshot_available = false;
+            SpinLockRelease(&xmin_info->snapshot_available_lock);
+        }
     }
     xmin_info->bitmap_active_nodes = 0;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type,
-    unsigned long long bitmap_nodes)
+static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_cxt)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->is_hashmap_constructed = false;
-    reform_info->reform_type = (dms_reform_type_t)reform_type;
+    reform_info->reform_type = rs_cxt->reform_type;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
@@ -1799,7 +1824,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     if (reform_info->reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
-        if (role == DMS_ROLE_REFORMER) {
+        if (rs_cxt->role == DMS_ROLE_REFORMER) {
             g_instance.dms_cxt.dw_init = false;
             // variable set order: SharedRecoveryInProgress -> failover_ckpt_status -> dms_role
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
@@ -1818,15 +1843,17 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     }
     INSTR_TIME_SET_CURRENT(reform_info->reform_start_time);
 
-    reform_info->bitmap_nodes = bitmap_nodes;
-    reform_info->dms_role = role;
-    reform_info->in_reform = true;
+    reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
+    reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
+    reform_info->dms_role = rs_cxt->role;
     SSXminInfoPrepare();
+    reform_info->in_reform = true;
 
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
-        errmsg("[SS reform] dms reform start, role:%d, reform type:%s", role, reform_type_str)));
+        errmsg("[SS reform] dms reform start, role:%d, reform type:%s, standby scenario:%d",
+            reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario())));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         while (dss_set_server_status_wrapper() != GS_SUCCESS) {
             pg_usleep(REFORM_WAIT_LONG);
@@ -1845,7 +1872,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
 
     if (SS_STANDBY_FAILOVER) {
         AliveFailoverCleanBackends();
-    } else {
+    } else if (!SSPerformingStandbyScenario()) {
         ReformCleanBackends();
     }
 
@@ -1879,6 +1906,7 @@ static int CBReformDoneNotify(void *db_handle)
                        g_instance.attr.attr_storage.dms_attr.instance_id)));
 
     /* reform success indicates that reform of primary and standby all complete, then update gaussdb.state */
+    g_instance.dms_cxt.dms_status = (dms_status_t)DMS_STATUS_IN;
     SendPostmasterSignal(PMSIGNAL_DMS_REFORM_DONE);
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSReformInfo.in_reform = false;

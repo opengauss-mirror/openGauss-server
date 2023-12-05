@@ -56,6 +56,8 @@ typedef struct st_ss_xmin_info {
     bool global_oldest_xmin_active;
     slock_t bitmap_active_nodes_lock;
     uint64 bitmap_active_nodes;
+    slock_t snapshot_available_lock;
+    bool snapshot_available;
 } ss_xmin_info_t;
 
 #define SSSnapshotXminHashPartition(hashcode) ((hashcode) % NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS)
