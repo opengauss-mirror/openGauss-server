@@ -1558,7 +1558,7 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
 
 Datum pg_prepared_statement_global(PG_FUNCTION_ARGS)
 {
-    if (!superuser()) {
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "pg_prepared_statements");
     }
 
