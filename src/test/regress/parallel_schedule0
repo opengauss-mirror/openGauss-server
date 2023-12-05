@@ -14,6 +14,7 @@ test: btree_deduplication
 #test: recovery_2pc_tools recovery_2pc_tools02
 #test: recovery_2pc_tools
 
+test: vacuum_full_cstore_table
 test: sqlbypass_partition
 test: sqlpatch_base
 test: sqlpatch_func

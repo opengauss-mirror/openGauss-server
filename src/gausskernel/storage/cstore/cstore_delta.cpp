@@ -271,32 +271,24 @@ void BuildIndexOnNewDeltaTable(Oid oldRelOid, Oid newRelOid, Oid parentOid)
     Relation oldRel = NULL;
     Relation newRel = NULL;
     Relation parentRel = NULL;
+    Partition partition = NULL;
     Oid oldDeltaOid = InvalidOid;
     Oid newDeltaOid = InvalidOid;
 
     oldRel = heap_open(oldRelOid, AccessShareLock);
     oldDeltaOid = oldRel->rd_rel->reldeltarelid;
-    heap_close(oldRel, NoLock);
 
     if (OidIsValid(parentOid)) {
         /* For partitioned table. */
         parentRel = heap_open(parentOid, AccessShareLock);
-        heap_close(parentRel, NoLock);
-        Partition partition = partitionOpen(parentRel, newRelOid, AccessShareLock);
+        partition = partitionOpen(parentRel, newRelOid, AccessShareLock);
         newRel = partitionGetRelation(parentRel, partition);
-        partitionClose(parentRel, partition, NoLock);
     } else {
         /* For non partitioned table. */
         newRel = heap_open(newRelOid, AccessShareLock);
     }
 
     newDeltaOid = newRel->rd_rel->reldeltarelid;
-
-    if (OidIsValid(parentOid)) {
-        releaseDummyRelation(&newRel);
-    } else {
-        heap_close(newRel, NoLock);
-    }
 
     /* Apply AccssShareLock because we only get information from old delta. */
     Relation oldDelta = heap_open(oldDeltaOid, AccessShareLock);
@@ -321,7 +313,6 @@ void BuildIndexOnNewDeltaTable(Oid oldRelOid, Oid newRelOid, Oid parentOid)
         Oid idxOid = lfirst_oid(cell);
         bool isPartition = OidIsValid(parentOid);
         Relation idxRel = index_open(idxOid, AccessShareLock);
-        index_close(idxRel, NoLock);
 
         if (idxRel->rd_index != NULL && idxRel->rd_index->indisunique) {
             Oid CUIdxOid = GetCUIdxFromDeltaIdx(idxRel, isPartition);
@@ -339,14 +330,25 @@ void BuildIndexOnNewDeltaTable(Oid oldRelOid, Oid newRelOid, Oid parentOid)
             indexObject.classId = RelationRelationId;
             indexObject.objectId = idxOid;
             indexObject.objectSubId = 0;
+            index_close(idxRel, NoLock);
             performDeletion(&indexObject, DROP_RESTRICT, 0);
-
             DefineDeltaUniqueIndex(newRelOid, indexStmt, CUIdxOid, parentRel);
+        } else {
+            index_close(idxRel, NoLock);
         }
     }
 
     heap_close(newDelta, NoLock);
+    heap_close(oldRel, NoLock);
 
+    if (OidIsValid(parentOid)) {
+        releaseDummyRelation(&newRel);
+        partitionClose(parentRel, partition, NoLock);
+        heap_close(parentRel, NoLock);
+    } else {
+        heap_close(newRel, NoLock);
+    }
+    
     pfree_ext(attmap);
     list_free_ext(indexIds);
 }
@@ -365,9 +367,7 @@ void ReindexDeltaIndex(Oid indexId, Oid indexPartId)
 
     /* We get AccessShareLock on CU table because we will build index on delta table. */
     Relation heapRelation = heap_open(heapId, AccessShareLock);
-
-    /* Close CU table, but keep locks. */
-    heap_close(heapRelation, NoLock);
+    
 
     Oid deltaIdxOid = InvalidOid;
 
@@ -385,7 +385,6 @@ void ReindexDeltaIndex(Oid indexId, Oid indexPartId)
             List* indexPartOidList = NIL;
             ListCell* partCell = NULL;
             Relation iRel = index_open(indexId, AccessShareLock);
-            index_close(iRel, NoLock);
 
             indexPartOidList = indexGetPartitionOidList(iRel);
             foreach (partCell, indexPartOidList) {
@@ -395,8 +394,11 @@ void ReindexDeltaIndex(Oid indexId, Oid indexPartId)
             }
 
             releasePartitionOidList(&indexPartOidList);
+            index_close(iRel, NoLock);
         }
     }
+    /* Close CU table, but keep locks. */
+    heap_close(heapRelation, NoLock);
 }
 
 /*
