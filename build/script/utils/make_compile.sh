@@ -190,11 +190,11 @@ function install_gaussdb()
                 echo "configure -D__USE_NUMA -D__ARM_LSE with arm single mode"
                 GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
             fi
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" CC=g++  $extra_config_opt --enable-finance-mode >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot CC=g++  $extra_config_opt --enable-finance-mode >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "memcheck"x ]; then
-            ./configure $shared_opt CFLAGS='-O0' --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt --enable-finance-mode >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS='-O0' --enable-mot --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt --enable-finance-mode >> "$LOG_FILE" 2>&1
         else
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-finance-mode>> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-finance-mode>> "$LOG_FILE" 2>&1
         fi
     fi
 
