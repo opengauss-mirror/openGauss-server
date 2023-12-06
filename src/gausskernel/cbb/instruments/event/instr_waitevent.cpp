@@ -399,6 +399,9 @@ static void set_io_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, i
 
 static bool set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
 {
+    if (!ENABLE_DMS) {
+        return false;
+    }
     values[++i] = CStringGetTextDatum("DMS_EVENT");
     values[++i] = CStringGetTextDatum(pgstat_get_wait_dms(WaitEventDMS(eventId + PG_WAIT_DMS)));
 
@@ -422,8 +425,10 @@ static bool set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, 
 
 static bool set_dms_cmd_tuple_value(WaitInfo *gsInstrWaitInfo, Datum *values, int i, uint32 eventId)
 {
+    if (!ENABLE_DMS) {
+        return false;
+    }
     values[++i] = CStringGetTextDatum("DMS_CMD");
-
     if (!g_instance.dms_cxt.dmsInited) {
         ereport(WARNING, (errmsg("[SS] dms not init!")));
         return false;
