@@ -614,6 +614,7 @@ endif
 	cp -d $(ZLIB_LIB_PATH)/libz* '$(DESTDIR)$(libdir)/'
 	cp -d $(XGBOOST_LIB_PATH)/libxgboost* '$(DESTDIR)$(libdir)/'
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
+	cp -d /usr/lib64/libreadline.so* '$(DESTDIR)$(libdir)/'
 
 ifneq ($(with_openeuler_os), yes)
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
