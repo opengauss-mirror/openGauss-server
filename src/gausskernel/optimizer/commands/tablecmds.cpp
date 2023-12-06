@@ -24798,6 +24798,8 @@ static void ATExecUnusableIndexPartition(Relation rel, const char* partition_nam
         AccessExclusiveLock);  // lock on heap partition
     // call the internal function
     ATExecSetIndexUsableState(PartitionRelationId, indexPartOid, false);
+    /* Invoke cache invalidation to refresh index relation data */
+    CacheInvalidateRelcache(rel);
 }
 
 static void ATUnusableGlobalIndex(Relation rel)
@@ -24910,6 +24912,8 @@ static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partitio
         // close index and it's partition
         partitionClose(parentIndex, indexPart, NoLock);
         index_close(parentIndex, NoLock);
+        /* Invoke cache invalidation to refresh index relation data */
+        CacheInvalidateRelcacheByRelid(parentIndId);
     }
 
     freePartList(partIndexlist);
