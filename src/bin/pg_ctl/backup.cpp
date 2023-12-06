@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/time.h>
+#include <sys/prctl.h>
 
 #ifdef HAVE_LIBZ
 #include "zlib.h"
@@ -568,7 +569,11 @@ bool StartLogStreamer(
     fflush(stderr);
     bgchild = fork();
     if (bgchild == 0) {
-        /* in child process */
+        /*
+         * In child process.
+         * Receive SIGKILL when main process exits.
+         */
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
         exit(LogStreamerMain(param));
     } else if (bgchild < 0) {
         pg_log(PG_WARNING, _(" could not create background process: %s.\n"), strerror(errno));
