@@ -82,6 +82,8 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
 #include "ddes/dms/ss_dms_recovery.h"
+#include "utils/json.h"
+#include "utils/jsonapi.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -15144,7 +15146,7 @@ int compute_copy_insts_count(uint64 bitmap)
 
 /* this struct is used to control the iteration during query_page_distribution_info */
 typedef struct st_dms_iterate {
-    stat_drc_info_t *drc_info;
+    dv_drc_buf_info *drc_info;
     uint8 iterate_idx;
 } dms_iterate_t;
 
@@ -15170,7 +15172,7 @@ Datum query_page_distribution_info_internal(text* relname, ForkNumber fork, Bloc
 
         funcctx = SRF_FIRSTCALL_INIT();
         MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-        stat_drc_info_t *drc_info = (stat_drc_info_t*)palloc0(sizeof(stat_drc_info_t));
+        dv_drc_buf_info *drc_info = (dv_drc_buf_info*)palloc0(sizeof(dv_drc_buf_info));
         InitDmsBufContext(&drc_info->dms_ctx, tag);
         drc_info->claimed_owner = CM_INVALID_ID8;
         drc_info->buf_info[0] = buf_info;
@@ -15262,4 +15264,175 @@ Datum query_page_distribution_info(PG_FUNCTION_ARGS)
     ForkNumber fork = PG_GETARG_INT64(1);
     BlockNumber blockno = PG_GETARG_INT64(2);
     return query_page_distribution_info_internal(relname, fork, blockno, fcinfo);
+}
+
+#define REFORM_INFO_ROW_NUM 27
+TupleDesc create_query_node_reform_info_from_dms_tupdesc()
+{
+    int column = 2;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "NAME", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "DESCRIPTION", TEXTOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+typedef struct RecordsetState {
+    JsonLexContext *lex;
+    Datum row_info[REFORM_INFO_ROW_NUM][2];
+    int row_id;
+    int cur_row_id;
+    char *saved_scalar;
+} RecordsetState;
+
+static void recordset_object_field_end(void *state, char *fname, bool isnull)
+{
+    RecordsetState *_state = (RecordsetState *)state;
+
+    if (_state->row_id >= REFORM_INFO_ROW_NUM) {
+        ereport(ERROR, (errmsg("the row number returned from dms exceeds max row number")));
+    }
+    _state->row_info[_state->row_id][0] = CStringGetTextDatum(fname);
+    _state->row_info[_state->row_id][1] = CStringGetTextDatum(_state->saved_scalar);
+    _state->row_id++;
+}
+
+static void recordset_scalar(void *state, char *token, JsonTokenType tokentype)
+{
+    RecordsetState *_state = (RecordsetState *)state;
+
+    if (_state->saved_scalar != NULL) {
+        pfree(_state->saved_scalar);
+    }
+    _state->saved_scalar = token;
+}
+
+Datum query_node_reform_info_from_dms(PG_FUNCTION_ARGS)
+{
+    dms_info_id_e reform_info_id =
+        PG_GETARG_INT64(0) == 0 ? dms_info_id_e::DMS_INFO_REFORM_LAST : dms_info_id_e::DMS_INFO_REFORM_CURRENT;
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        char *json = (char *)palloc0(4096 * sizeof(char));  // 4k is enough
+        json[0] = '\0';
+        if (!dms_info(json, 4096, reform_info_id) == GS_SUCCESS) {
+            ereport(ERROR, (errmsg("[SS] get reform infomation from dms fail!")));
+        }
+        if (json[0] == '\0') {
+            ereport(WARNING, (errmsg("[SS] dms not init!")));
+            SRF_RETURN_DONE(funcctx);
+        }
+
+        RecordsetState *state = (RecordsetState *)palloc0(sizeof(RecordsetState));
+        state->row_id = 0;
+        JsonLexContext *lex = makeJsonLexContext(cstring_to_text(json), true);
+        pfree(json);
+        JsonSemAction *sem = (JsonSemAction *)palloc0(sizeof(JsonSemAction));
+        sem->semstate = (void *)state;
+        sem->scalar = recordset_scalar;
+        sem->object_field_end = recordset_object_field_end;
+        state->lex = lex;
+        pg_parse_json(lex, sem);
+
+        state->cur_row_id = 0;
+        funcctx->user_fctx = (void *)state;
+        funcctx->tuple_desc = create_query_node_reform_info_from_dms_tupdesc();
+        MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+
+    RecordsetState *state = (RecordsetState *)funcctx->user_fctx;
+    if (state->cur_row_id < state->row_id) {
+        bool nulls[2] = {false};
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, state->row_info[state->cur_row_id], nulls);
+        state->cur_row_id++;
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    pfree_ext(state);
+    SRF_RETURN_DONE(funcctx);
+}
+
+TupleDesc create_query_all_drc_info_tupdesc()
+{
+    int column = 18;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "RESOURCE_ID", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "MASTER_ID", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "COPY_INSTS", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "CLAIMED_OWNER", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "LOCK_MODE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "LAST_EDP", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "TYPE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "IN_RECOVERY", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "COPY_PROMOTE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "PART_ID", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)11, "EDP_MAP", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)12, "LSN", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "LEN", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)14, "RECOVERY_SKIP", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)15, "RECYCLING", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)16, "CONVERTING_INST_ID", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)17, "CONVERTING_CURR_MODE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)18, "CONVERTING_REQ_MODE", INT4OID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+void fill_drc_info_to_values(dv_drc_buf_info *drc_info, Datum *values)
+{
+    values[0] = CStringGetTextDatum(drc_info->data);
+    values[1] = UInt32GetDatum((uint32)drc_info->master_id);
+    values[2] = UInt64GetDatum(drc_info->copy_insts);
+    values[3] = UInt32GetDatum((uint32)drc_info->claimed_owner);
+    values[4] = UInt32GetDatum((uint32)drc_info->lock_mode);
+    values[5] = UInt32GetDatum((uint32)drc_info->last_edp);
+    values[6] = UInt32GetDatum((uint32)drc_info->type);
+    values[7] = UInt32GetDatum((uint32)drc_info->in_recovery);
+    values[8] = UInt32GetDatum((uint32)drc_info->copy_promote);
+    values[9] = UInt16GetDatum(drc_info->part_id);
+    values[10] = UInt64GetDatum(drc_info->edp_map);
+    values[11] = UInt64GetDatum(drc_info->lsn);
+    values[12] = UInt16GetDatum(drc_info->len);
+    values[13] = UInt32GetDatum((uint32)drc_info->recovery_skip);
+    values[14] = UInt32GetDatum((uint32)drc_info->recycling);
+    values[15] = UInt32GetDatum((uint32)drc_info->converting_req_info_inst_id);
+    values[16] = UInt32GetDatum((uint32)drc_info->converting_req_info_curr_mod);
+    values[17] = UInt32GetDatum((uint32)drc_info->converting_req_info_req_mod);
+}
+
+Datum query_all_drc_info(PG_FUNCTION_ARGS)
+{
+    int type = PG_GETARG_INT64(0) == 0 ? en_drc_res_type::DRC_RES_PAGE_TYPE : en_drc_res_type::DRC_RES_LOCK_TYPE;
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        funcctx->tuple_desc = create_query_all_drc_info_tupdesc();
+        MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+
+    dv_drc_buf_info drc_info = {0};
+    unsigned long long rowid = funcctx->call_cntr;
+    dms_get_buf_res(&rowid, &drc_info, type);
+    Datum values[18];
+    bool nulls[18] = {false};
+    if (drc_info.is_valid) {
+        fill_drc_info_to_values(&drc_info, values);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
 }
