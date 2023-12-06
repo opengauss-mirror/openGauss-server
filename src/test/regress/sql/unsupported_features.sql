@@ -103,3 +103,13 @@ select position_type_desc, count(*) from uschema2_ix.position_type
 group by case when length(position_type_cd)>5 then (length(position_type_desc)-20, length(position_type_cd)+1)
 else (length(position_type_desc)-10, length(position_type_cd)+2) end, 1;
 drop schema uschema2_ix cascade;
+
+create schema create_resource;
+set current_schema='create_resource';
+create table tab(a text);
+create resource label name;
+alter resource label name add column(tab.a);
+
+drop table tab;
+reset current_schema;
+drop schema create_resource CASCADE;
