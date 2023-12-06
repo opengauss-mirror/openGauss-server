@@ -53,6 +53,10 @@ static XLogRecPtr lastFlushPosition = InvalidXLogRecPtr;
 extern char* basedir;
 extern int standby_message_timeout;
 
+#define HEART_BEAT_INIT 0
+#define HEART_BEAT_RUN 1
+#define HEART_BEAT_STOP 2
+
 /*
  * The max size for single data file. copy from custorage.cpp.
  */
@@ -64,7 +68,7 @@ const int HEART_BEAT = 5;
 PGconn* xlogconn = NULL;
 pthread_t hearbeatTimerId;
 volatile uint32 timerFlag = 0;
-volatile uint32 heartbeatRunning = 0;
+volatile uint32 heartbeatRunning = HEART_BEAT_INIT;
 pthread_mutex_t heartbeatMutex;
 pthread_mutex_t heartbeatQuitMutex;
 pthread_cond_t heartbeatQuitCV;
@@ -235,8 +239,9 @@ void* heartbeatTimerHandler(void* data)
     if (xlogconn == NULL) {
         return NULL;
     }
-    heartbeatRunning = 1;
-    while (heartbeatRunning) {
+    uint32 expected = HEART_BEAT_INIT;
+    (void)pg_atomic_compare_exchange_u32(&heartbeatRunning, &expected, HEART_BEAT_RUN);
+    while (pg_atomic_read_u32(&heartbeatRunning) == HEART_BEAT_RUN) {
         pthread_mutex_lock(&heartbeatMutex);
         (void)checkForReceiveTimeout(xlogconn);
         ping_sent = false;
@@ -280,7 +285,7 @@ void suspendHeartBeatTimer(void)
 
 void closeHearBeatTimer(void)
 {
-    heartbeatRunning = 0;
+    pg_atomic_write_u32(&heartbeatRunning, HEART_BEAT_STOP);
     pthread_mutex_unlock(&heartbeatMutex);
     pthread_mutex_lock(&heartbeatQuitMutex);
     pthread_cond_signal(&heartbeatQuitCV);

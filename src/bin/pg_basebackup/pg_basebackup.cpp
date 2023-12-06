@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 
 #include "tool_common.h"
 #include "getopt_long.h"
@@ -461,7 +462,11 @@ static void StartLogStreamer(const char *startpos, uint32 timeline, char *syside
 #ifndef WIN32
     bgchild = fork();
     if (bgchild == 0) {
-        /* in child process */
+        /*
+         * In child process.
+         * Receive SIGKILL when main process exits.
+         */
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
         exit(LogStreamerMain(g_childParam));
     } else if (bgchild < 0) {
         fprintf(stderr, _("%s: could not create background process: %s\n"), progname, strerror(errno));
