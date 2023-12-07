@@ -1128,7 +1128,7 @@ submake-libalarmclient:
 submake-kwlist: $(top_srcdir)/src/include/parser/kwlist_d.h
 
 submake-kwlist-clean:
-	rm $(top_srcdir)/src/include/parser/kwlist_d.h
+	rm $(top_srcdir)/src/include/parser/kwlist_d.h -f
 
 $(top_srcdir)/src/include/parser/kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
