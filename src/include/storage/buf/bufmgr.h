@@ -262,6 +262,9 @@ static inline Buffer BlockGetBuffer(const char *block)
 
 void shared_buffer_write_error_callback(void *arg);
 
+/* DMS max try eliminate buffer ctrl times in once*/
+#define TRY_ELIMINATE_BUF_TIMES 5
+
 /*
  * prototypes for functions in bufmgr.c
  */
@@ -435,4 +438,5 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
 void buffer_in_progress_pop();
 void buffer_in_progress_push();
+void SSTryEliminateBuf(uint64 times);
 #endif

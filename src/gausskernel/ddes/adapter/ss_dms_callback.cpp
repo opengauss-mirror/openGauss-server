@@ -48,6 +48,7 @@
 #include "storage/file/fio_device.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/buf/buf_internals.h"
+#include "storage/buf/bufmgr.h"
 
 /*
  * Wake up startup process to replay WAL, or to notice that
@@ -2098,6 +2099,11 @@ void CBGetBufInfo(char* resid, stat_buf_info_t *buf_info)
     buftag_get_buf_info(tag, buf_info);
 }
 
+static void CBBufCtrlRecycle(void *db_handle)
+{
+    SSTryEliminateBuf(TRY_ELIMINATE_BUF_TIMES);
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2164,4 +2170,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->update_node_oldest_xmin = CBUpdateNodeOldestXmin;
 
     callback->get_buf_info = CBGetBufInfo;
+    callback->buf_ctrl_recycle = CBBufCtrlRecycle;
 }

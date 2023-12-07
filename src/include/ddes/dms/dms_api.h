@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           121
+#define DMS_LOCAL_VERSION           122
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -869,6 +869,7 @@ typedef int (*dms_end_xa)(void *db_handle, void *knl_xa_xid, unsigned long long 
 typedef unsigned char (*dms_xa_inuse)(void *db_handle, void *knl_xa_xid);
 typedef int (*dms_get_part_changed)(void *db_handle, char* resid);
 typedef void (*dms_edpp_func_t)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
+typedef void (*dms_buf_ctrl_recycle)(void *db_handle);
 typedef struct st_dms_callback {
     // used in reform
     dms_get_list_stable get_list_stable;
@@ -1017,6 +1018,7 @@ typedef struct st_dms_callback {
     dms_get_part_changed get_part_changed;
 
     dms_edpp_func_t cache_page;
+    dms_buf_ctrl_recycle buf_ctrl_recycle;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
