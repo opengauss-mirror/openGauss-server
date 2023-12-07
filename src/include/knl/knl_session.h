@@ -2878,6 +2878,7 @@ typedef struct knl_u_hook_context {
     void *pluginSpiExecuteMultiResHook;
     void *pluginMultiResExceptionHook;
     void *getTypeZeroValueHook;
+    void *deparseQueryHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

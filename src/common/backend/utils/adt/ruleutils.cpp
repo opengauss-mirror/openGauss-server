@@ -5806,6 +5806,11 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
 void deparse_query(Query* query, StringInfo buf, List* parentnamespace, bool finalise_aggs, bool sortgroup_colno,
     void* parserArg, bool qrw_phase, bool is_fqs)
 {
+    if (u_sess->hook_cxt.deparseQueryHook != NULL) {
+        ((deparse_query_func)(u_sess->hook_cxt.deparseQueryHook))(query, buf, parentnamespace,
+            finalise_aggs, sortgroup_colno, parserArg, qrw_phase, is_fqs);
+        return;
+    }
     OverrideSearchPath* tmp_search_path = NULL;
     List* schema_list = NIL;
     ListCell* schema = NULL;
