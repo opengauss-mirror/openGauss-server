@@ -2160,6 +2160,7 @@ static void *ProgressReportProbackup(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -2172,6 +2173,7 @@ static void *ProgressReportProbackup(void *arg)
     GenerateProgressBar(percent, progressBar);
     fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \n",
             progressBar, percent, g_doneFiles, g_totalFiles);
+    return nullptr;
 }
 
 static void *ProgressReportSyncBackupFile(void *arg)
@@ -2189,6 +2191,7 @@ static void *ProgressReportSyncBackupFile(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -2201,6 +2204,7 @@ static void *ProgressReportSyncBackupFile(void *arg)
     GenerateProgressBar(percent, progressBar);
     fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync backup file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
+    return nullptr;
 }
 
 /*

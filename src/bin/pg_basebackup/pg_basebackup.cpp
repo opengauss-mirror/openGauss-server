@@ -622,6 +622,7 @@ static void *ProgressReport(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -639,6 +640,7 @@ static void *ProgressReport(void *arg)
         ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\n",
         "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\n", tblspaceCount),
         progressBar, totalsize_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
+    return nullptr;
 }
 
 /*

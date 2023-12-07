@@ -419,6 +419,7 @@ static void *ProgressReportRestore(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -427,10 +428,11 @@ static void *ProgressReportRestore(void *arg)
             break;
         }
     } while ((g_restoredEntries  < g_totalEntries) && !g_progressFlag);
-        percent = 100;
-        GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
-                progressBar, percent, g_restoredEntries, g_totalEntries);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
+            progressBar, percent, g_restoredEntries, g_totalEntries);
+    return nullptr;
 }
 
 /* Public */
