@@ -144,7 +144,7 @@ function install_gaussdb()
         echo "WARNING: do not separate symbol in debug mode!"
     fi
 
-    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" ]; then
+    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" -a "$product_mode" != "finance" ]; then
         die "the product mode can only be opengauss, lite!"
     fi
 
