@@ -2746,6 +2746,7 @@ typedef struct knl_u_hook_context {
     void *plpgsqlParserSetHook;
     void *coreYYlexHook;
     void *getTypeZeroValueHook;
+    void *deparseQueryHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
