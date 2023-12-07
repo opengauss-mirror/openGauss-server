@@ -2823,6 +2823,13 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     relation->rd_exclstrats = NULL;
     relation->rd_amcache = NULL;
     relation->rd_rootcache = InvalidBuffer;
+    
+    /* check usability status if partitioned index */
+    if (RelationIsPartitioned(relation)) {
+        relation->rd_ind_partition_all_usable = PartCheckPartitionedIndexAllUsable(relation);
+    } else {
+        relation->rd_ind_partition_all_usable = true; /* trivial for non-partitioned index */
+    }
 }
 
 /*
@@ -3513,6 +3520,13 @@ void RelationReloadIndexInfo(Relation relation)
         ReleaseSysCache(tuple);
     }
 
+    /* check usability status if partitioned index */
+    if (RelationIsPartitioned(relation)) {
+        relation->rd_ind_partition_all_usable = PartCheckPartitionedIndexAllUsable(relation);
+    } else {
+        relation->rd_ind_partition_all_usable = true; /* trivial for non-partitioned index */
+    }
+    
     /* Okay, now it's valid again */
     relation->rd_isvalid = true;
 }

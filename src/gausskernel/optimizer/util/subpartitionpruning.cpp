@@ -205,9 +205,14 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
     /* cannot lock heap in case deadlock, we need process invalid messages here */
     AcceptInvalidationMessages();
 
+    indexRel = relation_open(indexOid, NoLock);
+    if (indexRel->rd_ind_partition_all_usable) {
+        relation_close(indexRel, NoLock);
+        return true;
+    }
+    
     heapRelOid = IndexGetRelation(indexOid, false);
     heapRel = relation_open(heapRelOid, NoLock);
-    indexRel = relation_open(indexOid, NoLock);
     if (RelationIsGlobalIndex(indexRel)) {
         partitionIndexUnusable = indexRel->rd_index->indisusable;
         relation_close(heapRel, NoLock);
@@ -594,6 +599,12 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
         return ret;
     }
 
+    if (indexRel->rd_ind_partition_all_usable) {
+        relation_close(heapRel, NoLock);
+        relation_close(indexRel, NoLock);
+        return INDEXES_FULL_USABLE;
+    }
+    
     if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel)) {
         ereport(ERROR, (errmodule(MOD_OPT),
                 errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),

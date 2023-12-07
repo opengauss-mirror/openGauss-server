@@ -106,5 +106,6 @@ extern void PartitionSetAllEnabledClean(Oid parentOid);
 extern void PartitionGetAllInvisibleParts(Oid parentOid, OidRBTree** invisibleParts);
 extern bool PartitionMetadataDisabledClean(Relation pgPartition);
 extern void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTuple, bool enable, bool inplace);
+extern bool PartCheckPartitionedIndexAllUsable(Relation indexRelation);
 
 #endif /* RELCACHE_H */

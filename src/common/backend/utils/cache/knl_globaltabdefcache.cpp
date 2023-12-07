@@ -500,6 +500,7 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
     newrel->sliceMap = CopyRelationSliceMap(rel);
 
     newrel->entry = NULL;
+    newrel->rd_ind_partition_all_usable = rel->rd_ind_partition_all_usable;
     return newrel;
 }
 
