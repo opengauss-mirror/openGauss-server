@@ -2751,6 +2751,9 @@ typedef struct knl_u_spq_context {
     spqos::CWorkerPoolManager* m_worker_pool_manager;
     /* mdcache */
     spqos::CCache<spqmd::IMDCacheObject *, spqopt::CMDKey *> *m_pcache;
+    bool mdcache_invalidation_counter_registered;
+    int64 mdcache_invalidation_counter;
+    int64 last_mdcache_invalidation_counter;
     /* cache factory */
     spqos::CCacheFactory* m_factory;
     spqos::CMessageRepository *m_repository;
