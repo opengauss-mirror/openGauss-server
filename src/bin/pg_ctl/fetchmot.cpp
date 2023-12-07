@@ -59,6 +59,7 @@ static void* ProgressReportMot(void* arg)
         fprintf(stderr, "MOT Process: %dKB files have been received\n", totaldone);
         sleep(1);
     } while (!g_isReceiveDone);
+    return nullptr;
 }
 
 static char* GenerateChpktHeader(const char* chkptName) 

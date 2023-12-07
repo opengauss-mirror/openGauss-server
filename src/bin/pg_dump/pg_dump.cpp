@@ -205,6 +205,7 @@ int g_totalSteps = sizeof(g_progressDetails) / sizeof(g_progressDetails[0]);
 static volatile bool g_progressFlagScan = false;
 static volatile bool g_progressFlagDump = false;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_condDump = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Database Security: Data importing/dumping support AES128. */
@@ -1115,7 +1116,7 @@ int main(int argc, char** argv)
         write_msg(NULL, "The total objects number is %d.\n", g_totalObjNums);
     }
     fprintf(stderr, "Start dumping objects \n");
-    pthread_t progressThreadDumpProgress = NULL;
+    pthread_t progressThreadDumpProgress;
     pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
 
     /* Now the rearrangeable objects. */
@@ -1133,9 +1134,9 @@ int main(int argc, char** argv)
     }
     g_progressFlagDump = true;
     pthread_mutex_lock(&g_mutex);
-    pthread_cond_signal(&g_cond);
+    pthread_cond_signal(&g_condDump);
     pthread_mutex_unlock(&g_mutex);
-    pthread_join(progressThread, NULL);
+    pthread_join(progressThreadDumpProgress, NULL);
     fprintf(stderr, "Finish dumping objects \n");
 
     /*
@@ -23668,7 +23669,8 @@ static void *ProgressReportDump(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
-        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        timeout.tv_nsec = 0;
+        int ret = pthread_cond_timedwait(&g_condDump, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
             continue;
@@ -23680,6 +23682,7 @@ static void *ProgressReportDump(void *arg)
     GenerateProgressBar(percent, progressBar);
     fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \n",
             progressBar, percent, g_dumpObjNums, g_totalObjNums);
+    return nullptr;
 }
 
 static void *ProgressReportScanDatabase(void *arg)
@@ -23700,6 +23703,7 @@ static void *ProgressReportScanDatabase(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -23712,6 +23716,7 @@ static void *ProgressReportScanDatabase(void *arg)
     GenerateProgressBar(percent, progressBar);
     fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). finish scanning database                       \n",
             progressBar, percent, g_curStep, g_totalSteps);
+    return nullptr;
 }
 
 bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName)

@@ -68,6 +68,7 @@ static void *ProgressReportValidate(void *arg)
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -80,6 +81,7 @@ static void *ProgressReportValidate(void *arg)
     GenerateProgressBar(percent, progressBar);
     fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
+    return nullptr;
 }
 
 bool pre_check_backup(pgBackup *backup)
