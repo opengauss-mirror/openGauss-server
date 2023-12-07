@@ -1698,6 +1698,7 @@ static AlterTableStmt* _readAlterTableStmt(void)
 {
     READ_LOCALS(AlterTableStmt);
     READ_NODE_FIELD(relation);
+    READ_BOOL_FIELD(fromReplace);
 
     READ_DONE();
 }

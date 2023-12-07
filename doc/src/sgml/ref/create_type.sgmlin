@@ -16,7 +16,7 @@
 
  <refsynopsisdiv>
 <synopsis>
-CREATE TYPE <replaceable class="parameter">name</replaceable> AS
+CREATE [ OR REPLACE ] TYPE <replaceable class="parameter">name</replaceable> AS
     ( [ <replaceable class="parameter">attribute_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [, ... ] ] )
 
 CREATE TYPE <replaceable class="parameter">name</replaceable> AS ENUM
@@ -48,7 +48,7 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
 CREATE TYPE name AS ENUM
     ( [ 'lable' [, ... ] ] )
 
-CREATE TYPE name AS TABLE OF data_type
+CREATE [ OR REPLACE ] TYPE name AS TABLE OF data_type
 </synopsis>
  </refsynopsisdiv>
 </refentry>

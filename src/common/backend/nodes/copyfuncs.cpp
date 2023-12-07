@@ -5070,6 +5070,7 @@ static AlterTableStmt* _copyAlterTableStmt(const AlterTableStmt* from)
     COPY_SCALAR_FIELD(relkind);
     COPY_SCALAR_FIELD(missing_ok);
     COPY_SCALAR_FIELD(fromCreate);
+    COPY_SCALAR_FIELD(fromReplace);
 
     return newnode;
 }
@@ -5678,6 +5679,7 @@ static CompositeTypeStmt* _copyCompositeTypeStmt(const CompositeTypeStmt* from)
 {
     CompositeTypeStmt* newnode = makeNode(CompositeTypeStmt);
 
+    COPY_SCALAR_FIELD(replace);
     COPY_NODE_FIELD(typevar);
     COPY_NODE_FIELD(coldeflist);
 
@@ -5688,6 +5690,7 @@ static TableOfTypeStmt* _copyTableOfTypeStmt(const TableOfTypeStmt* from)
 {
     TableOfTypeStmt* newnode = makeNode(TableOfTypeStmt);
 
+    COPY_SCALAR_FIELD(replace);
     COPY_NODE_FIELD(typname);
     COPY_NODE_FIELD(reftypname);
 

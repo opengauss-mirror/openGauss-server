@@ -1102,6 +1102,7 @@ static bool _equalAlterTableStmt(const AlterTableStmt* a, const AlterTableStmt* 
     COMPARE_NODE_FIELD(cmds);
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(fromCreate);
 
     return true;
 }
@@ -1666,6 +1667,7 @@ static bool _equalTransactionStmt(const TransactionStmt* a, const TransactionStm
 
 static bool _equalCompositeTypeStmt(const CompositeTypeStmt* a, const CompositeTypeStmt* b)
 {
+    COMPARE_SCALAR_FIELD(replace);
     COMPARE_NODE_FIELD(typevar);
     COMPARE_NODE_FIELD(coldeflist);
 
@@ -1674,6 +1676,7 @@ static bool _equalCompositeTypeStmt(const CompositeTypeStmt* a, const CompositeT
 
 static bool _equalTableOfTypeStmt(const TableOfTypeStmt* a, const TableOfTypeStmt* b)
 {
+    COMPARE_SCALAR_FIELD(replace);
     COMPARE_NODE_FIELD(typname);
     COMPARE_NODE_FIELD(reftypname);
 

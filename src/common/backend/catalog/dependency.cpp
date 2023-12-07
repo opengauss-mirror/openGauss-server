@@ -3490,6 +3490,47 @@ Datum pg_describe_object(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(description));
 }
 
+void ReplaceTypeCheckRef(const ObjectAddress* object)
+{
+    ObjectAddresses* targetObjects = NULL;
+    Relation depRel;
+    targetObjects = new_object_addresses();
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+
+    findDependentObjects(object,
+        DEPFLAG_ORIGINAL,
+        NULL, /* empty stack */
+        targetObjects,
+        NULL, /* no pendingObjects */
+        &depRel);
+    
+    heap_close(depRel, RowExclusiveLock);
+
+    for (int i = targetObjects->numrefs - 1; i >= 0; i--) {
+        const ObjectAddress* refobj = &targetObjects->refs[i];
+        switch (getObjectClass(refobj)) {
+            case OCLASS_CLASS:
+                if (refobj->objectSubId != 0) {
+                    ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                        errmsg("cannot replace type because table %u depends on it", refobj->objectId)));
+                }
+                break;
+
+            case OCLASS_PROC:
+            case OCLASS_PACKAGE:
+                ereport(NOTICE, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("%s depends on this type", format_procedure(refobj->objectId))));
+                break;
+            
+            default:
+                break;
+        }
+    }
+
+    /* clean up */
+    free_object_addresses(targetObjects);
+}
+
 #ifdef ENABLE_MULTIPLE_NODES
 
 namespace Tsdb {
