@@ -547,28 +547,55 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
     int readLen = -1;
     pg_atomic_write_u64(&g_dispatcher->rtoXlogBufState.targetRecPtr, targetRecPtr);
     xlogreader->readBuf = g_dispatcher->rtoXlogBufState.readBuf;
+    errno_t errorno = EOK;
 
     for (;;) {
         uint32 readSource = pg_atomic_read_u32(&(g_recordbuffer->readSource));
-        if (readSource & XLOG_FROM_STREAM) {
+        if (readSource & XLOG_FROM_STREAM && !SS_REPLICATION_DORADO_CLUSTER) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
             if (ENABLE_DMS && ENABLE_DSS) {
+                /*
+                 * when ss_enable_dorado = on, traversing xlog directory to read xlog record.
+                 * Loop doesn't quit until it find valid xlog record.
+                 */
                 if (SS_REPLICATION_DORADO_CLUSTER) {
                     for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
                         if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
                             break;
                         }
+
+                        char *curPath = g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i];
                         readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
-                            xlogreader->readBuf, readTLI, g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i]);
-                        
-                        if(readLen > 0) {
+                            xlogreader->readBuf, readTLI, curPath);
+
+                        /* read success, exchange index */
+                        if (readLen > 0) {
+                            /* exchange index if xlog_list[0] is not current xlog path */
+                            if (i != 0) {
+                                char exPath[MAXPGPATH];
+                                errorno = snprintf_s(exPath, MAXPGPATH, MAXPGPATH - 1, curPath);
+                                securec_check_ss(errorno, "", "");
+                                errorno = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, MAXPGPATH - 1,
+                                g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0]);
+                                securec_check_ss(errorno, "", "");
+                                errorno = snprintf_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0], MAXPGPATH, MAXPGPATH - 1, exPath);
+                                securec_check_ss(errorno, "", "");
+                            }
                             break;
                         }
-                        if(t_thrd.xlog_cxt.readFile >= 0) {
+                        
+                        if (t_thrd.xlog_cxt.readFile >= 0) {
                             close(t_thrd.xlog_cxt.readFile);
                             t_thrd.xlog_cxt.readFile = -1;
                         }
+
+                        /* If record which is read from file is NULL, when preReadStartPtr is not set InvalidXlogPreReadStartPtr
+                        * then exhchanging file, due to preread 64M now RecPtr < preReadStartPtr, so record still is got from 
+                        * preReadBuf and record still is bad. Therefore, preReadStartPtr need to set InvalidXlogPreReadStartPtr
+                        * so that record is read from next file on disk instead of preReadBuf.
+                        */
+                        xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;    
                     }
                 } else {
                     readLen = SSXLogPageRead(xlogreader, targetPagePtr, reqLen, targetRecPtr,
@@ -986,7 +1013,11 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
         } else {
             if (SS_REPLICATION_DORADO_CLUSTER) {
                 t_thrd.xlog_cxt.ssXlogReadFailedTimes++;
+
+                /* In SS_REPLICATION_DORADO_CLUSTER mode, loop back to retry. */
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
             }
+           
             /* No valid record available from this source */
             t_thrd.xlog_cxt.failedSources |= t_thrd.xlog_cxt.readSource;
 

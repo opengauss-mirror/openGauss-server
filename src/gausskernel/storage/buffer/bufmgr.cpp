@@ -74,6 +74,7 @@
 #include "utils/evp_cipher.h"
 #include "replication/walsender_private.h"
 #include "replication/walsender.h"
+#include "replication/ss_cluster_replication.h"
 #include "workload/workload.h"
 #include "utils/builtins.h"
 #include "catalog/pg_namespace.h"
@@ -1715,8 +1716,10 @@ Buffer buffer_read_extended_internal(Relation reln, ForkNumber fork_num, BlockNu
  */
 Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                           BufferAccessStrategy strategy)
-{
-    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker()) {
+{   
+    /* In ss replication dorado cluster mode, it is not supported that standby read in extreme rto. */
+    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker() &&
+        !SS_REPLICATION_DORADO_CLUSTER) {
         return standby_read_buf(reln, fork_num, block_num, mode, strategy);
     } else {
         return buffer_read_extended_internal(reln, fork_num, block_num, mode, strategy);
@@ -2652,7 +2655,7 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLoc
 #ifdef USE_ASSERT_CHECKING
 void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags)
 {
-    if (SS_REFORM_REFORMER) {
+    if (SS_REFORM_REFORMER || SS_REPLICATION_MAIN_STANBY_NODE) {
         return;
     }
 
