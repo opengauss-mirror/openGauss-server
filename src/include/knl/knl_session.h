@@ -2770,6 +2770,7 @@ typedef struct knl_u_spq_context {
     int32 spq_max_tuple_chunk_size;
     bool spq_opt_initialized;
     List *remoteQuerys;
+    List *adp_connections;
     struct SnapshotData* snapshot;
 } knl_u_spq_context;
 #endif

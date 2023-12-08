@@ -705,7 +705,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     pmailbox->state = MAIL_READY;
     pmailbox->bufCAP = 0;
     pmailbox->stream_key = libcomm_addrinfo->streamKey;
-    pmailbox->query_id = DEBUG_QUERY_ID;
+    pmailbox->query_id = IS_SPQ_COORDINATOR ? libcomm_addrinfo->streamKey.queryId : DEBUG_QUERY_ID;
     pmailbox->local_thread_id = 0;
     pmailbox->peer_thread_id = 0;
     pmailbox->close_reason = 0;
@@ -747,7 +747,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     // and cmailbox will save as cmailbox->remote_version.
     fcmsgs.version = version;
     fcmsgs.stream_key = libcomm_addrinfo->streamKey;
-    fcmsgs.query_id = DEBUG_QUERY_ID;
+    fcmsgs.query_id = IS_SPQ_COORDINATOR ? libcomm_addrinfo->streamKey.queryId : DEBUG_QUERY_ID;
     cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
     ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");

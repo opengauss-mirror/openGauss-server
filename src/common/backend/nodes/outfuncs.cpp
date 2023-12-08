@@ -1765,7 +1765,7 @@ static void _outHashJoin(StringInfo str, HashJoin* node)
     WRITE_BOOL_FIELD(isSonicHash);
     out_mem_info(str, &node->mem_info);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_NODE_FIELD(hash_collations);
     }
 #endif
@@ -1922,7 +1922,7 @@ static void _outGroup(StringInfo str, Group* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
@@ -2097,7 +2097,7 @@ static void _outUnique(StringInfo str, Unique* node)
 
     WRITE_GRPOP_FIELD(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(uniq_collations, numCols);
     }
 #endif
@@ -2156,7 +2156,7 @@ static void _outSetOp(StringInfo str, SetOp* node)
 
     WRITE_GRPOP_FIELD(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(dup_collations, numCols);
     }
 #endif
@@ -3579,9 +3579,7 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_BITMAPSET_FIELD(lateral_relids);
     WRITE_NODE_FIELD(indexlist);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING) {
-        WRITE_NODE_FIELD(statlist);
-    }
+    WRITE_NODE_FIELD(statlist);
 #endif
     WRITE_FLOAT_FIELD(pages, "%.0f");
     WRITE_FLOAT_FIELD(tuples, "%.0f");

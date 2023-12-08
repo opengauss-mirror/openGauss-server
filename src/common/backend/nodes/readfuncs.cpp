@@ -4099,7 +4099,7 @@ static Unique* _readUnique(Unique* local_node)
     READ_ATTR_ARRAY(uniqColIdx, numCols);
     READ_OPERATOROID_ARRAY(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(uniq_collations, numCols);
     }
 #endif
@@ -4484,7 +4484,7 @@ static Group* _readGroup(Group* local_node)
     READ_ATTR_ARRAY(grpColIdx, numCols);
     READ_OPERATOROID_ARRAY(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(grp_collations, numCols);
     }
 #endif
@@ -4550,7 +4550,7 @@ static HashJoin* _readHashJoin(HashJoin* local_node)
     read_mem_info(&local_node->mem_info);
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_NODE_FIELD(hash_collations);
     }
 #endif
@@ -4855,7 +4855,7 @@ static SetOp* _readSetOp(SetOp* local_node)
     READ_ATTR_ARRAY(dupColIdx, numCols);
     READ_OPERATOROID_ARRAY(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(dup_collations, numCols);
     }
 #endif

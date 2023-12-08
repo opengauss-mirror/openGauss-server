@@ -1359,8 +1359,6 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
                 case RTE_REMOTE_DUMMY:
                     /* these can't contain any lateral references */
 #ifdef USE_SPQ
-                case RTE_NAMEDTUPLESTORE:
-                case RTE_TABLEFUNC: /* TableFunc(.., column list) */
                 case RTE_VOID: /* SPQ: deleted RTE */
                 case RTE_TABLEFUNCTION: /* SPQ: Functions over multiset input */
 #endif
@@ -2032,6 +2030,9 @@ static void replace_vars_in_jointree(Node* jtnode, pullup_replace_vars_context* 
                                                          context);
                         break;
                     case RTE_FUNCTION:
+#ifdef USE_SPQ
+                    case RTE_TABLEFUNCTION:
+#endif
                         rte->funcexpr =
                             pullup_replace_vars(rte->funcexpr,
                                                 context);
@@ -2045,6 +2046,9 @@ static void replace_vars_in_jointree(Node* jtnode, pullup_replace_vars_context* 
                     case RTE_JOIN:
                     case RTE_CTE:
                     case RTE_RESULT:
+#ifdef USE_SPQ
+                    case RTE_VOID:
+#endif
                         /* these shouldn't be marked LATERAL */
                         Assert(false);
                         break;

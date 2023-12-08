@@ -3460,9 +3460,6 @@ static void exec_plan_with_params(StringInfo input_message)
     }
 
     finish_xact_command();
-    if (planstmt->enable_adaptive_scan) {
-        disconnect_qc_conn(planstmt);
-    }
 }
 #endif
 
@@ -8978,9 +8975,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 exec_simple_plan(planstmt);
 
-                if (planstmt->enable_adaptive_scan) {
-                    disconnect_qc_conn(planstmt);
-                }
                 MemoryContextSwitchTo(old_cxt);
 
                 // After query done, producer container is not usable anymore.

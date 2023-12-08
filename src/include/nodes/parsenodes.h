@@ -214,8 +214,6 @@ typedef enum RTEKind {
                       * RTEs are added by the planner, they're not
                       * present during parsing or rewriting */
 #ifdef USE_SPQ
-    RTE_NAMEDTUPLESTORE,
-    RTE_TABLEFUNC, /* TableFunc(.., column list) */
     RTE_VOID, /* CDB: deleted RTE */
     RTE_TABLEFUNCTION /* CDB: Functions over multiset input */
 #endif
@@ -383,9 +381,6 @@ typedef struct RangeTblEntry {
                                  * Select * from table_name subpartition (subpartition_name);
                                  * or delete from table_name partition (partition_name, ...)
                                  */
-#ifdef USE_SPQ
-    bool forceDistRandom;
-#endif
 } RangeTblEntry;
 
 /*

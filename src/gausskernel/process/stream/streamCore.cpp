@@ -936,6 +936,9 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
     if (StreamTopConsumerAmI() == false)
         return;
 
+#ifdef USE_SPQ
+    disconnect_qc_conn();
+#endif
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
     // lock the same thread mutex can't be conflict in one thread.
     ResourceOwnerReleaseAllXactPthreadMutex();
