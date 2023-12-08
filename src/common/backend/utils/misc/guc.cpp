@@ -4035,8 +4035,7 @@ static void InitConfigureNamesString()
 #else
             NULL,
             NULL,
-            NULL},
-            
+            NULL},          
 #endif /* ENABLE_BBOX */
 
         {{"track_stmt_stat_level",

@@ -49,7 +49,8 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 #else
 FORCE_INLINE
 
-uint32 __crc32cw_normal(uint32 seed, int32 key){
+uint32 __crc32cw_normal(uint32 seed, int32 key)
+{
     return pg_comp_crc32c_sb8(seed, (const unsigned char *)&key, 4);
 }
 
