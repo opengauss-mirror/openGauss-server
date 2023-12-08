@@ -225,6 +225,11 @@ int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSourc
                         (errcode(ERRCODE_DUPLICATE_ALIAS), errmsg("table name \"%s\" specified more than once",
                             relRv->alias->aliasname)));
                 } else if (relRv->alias == NULL && strcmp(rte1->eref->aliasname, relRv->relname) == 0) {
+                    if (rte1->rtekind != RTE_RELATION) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                                errmsg("The target table \"%s\" of the DELETE is not updatable", relRv->relname)));
+                    }
                     if (list_member_ptr(pstate->p_target_rangetblentry, rte1)) {
                         ereport(ERROR,
                             (errcode(ERRCODE_DUPLICATE_ALIAS), errmsg("table name \"%s\" specified more than once",
