@@ -151,7 +151,7 @@ Node* MultiExecHash(HashState* node)
             hashtable->totalTuples += 1;
         }
 #ifdef USE_SPQ
-        if (hashkeys_null) {
+        if (IS_SPQ_RUNNING && hashkeys_null) {
             node->hs_hashkeys_null = true;
             if (node->hs_quit_if_hashkeys_null) {
                 ExecEndNode(outerNode);

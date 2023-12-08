@@ -295,9 +295,9 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
     AllocSetContext* set = (AllocSetContext*)(estate->es_query_cxt);
     set->maxSpaceSize = operator_mem * 1024L + SELF_GENRIC_MEMCTX_LIMITATION;
 #ifdef USE_SPQ
-    if (node->spq_strict)
+    if (IS_SPQ_RUNNING && node->spq_strict)
         eflags |= EXEC_FLAG_REWIND;
-    if (node->spq_shield_child_from_rescans || IsA(outerPlan((Plan *) node), Stream))
+    if (IS_SPQ_RUNNING && (node->spq_shield_child_from_rescans || IsA(outerPlan((Plan *) node), Stream)))
         eflags |= EXEC_FLAG_REWIND;
 #endif
 

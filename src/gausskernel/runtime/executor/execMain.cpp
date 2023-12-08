@@ -143,6 +143,9 @@ extern bool CodeGenThreadObjectReady();
 extern void CodeGenThreadRuntimeCodeGenerate();
 extern void CodeGenThreadTearDown();
 extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
+#ifdef USE_SPQ
+extern void build_backward_connection(PlannedStmt *planstmt);
+#endif
 
 /*
  * Note that GetUpdatedColumns() also exists in commands/trigger.c.  There does
@@ -324,6 +327,9 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 
 #ifdef USE_SPQ
     estate->es_sharenode = nullptr;
+    if (IS_SPQ_EXECUTOR && StreamTopConsumerAmI()) {
+        build_backward_connection(queryDesc->plannedstmt);
+    }
 #endif
 
     /*

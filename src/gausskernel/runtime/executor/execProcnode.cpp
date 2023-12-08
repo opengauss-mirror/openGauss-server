@@ -612,7 +612,7 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
                     node->plan_node_id, node->parent_node_id, result->plan, estate);
             } else if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
                 (IS_SPQ_EXECUTOR ||
-                IS_SPQ_COORDINATOR && node->exec_type == EXEC_ON_COORDS)) {
+                (IS_SPQ_COORDINATOR && node->exec_type == EXEC_ON_COORDS))) {
                 /* plannode(exec on cn)or dn */
                 result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
                     node->plan_node_id, node->parent_node_id, result->plan, estate);

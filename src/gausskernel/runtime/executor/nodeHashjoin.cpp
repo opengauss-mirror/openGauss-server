@@ -124,7 +124,7 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                  */
                 Assert(hashtable == NULL);
 #ifdef USE_SPQ
-                if (node->prefetch_inner) {
+                if (IS_SPQ_RUNNING && node->prefetch_inner) {
                     node->hj_FirstOuterTupleSlot = NULL;
                     goto CREATE_HASH_TABLE;
                 }
@@ -184,8 +184,9 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                     node->hj_FirstOuterTupleSlot = NULL;
 #ifdef USE_SPQ
 CREATE_HASH_TABLE:
-                bool keepNulls = false;
-                keepNulls = HJ_FILL_INNER(node) || hashNode->hs_keepnull;
+                bool keepNulls = (IS_SPQ_RUNNING) ?
+                    (HJ_FILL_INNER(node) || hashNode->hs_keepnull):
+                    (HJ_FILL_INNER(node) || node->js.nulleqqual != NIL);
 #endif
                 /*
                  * create the hash table, sometimes we should keep nulls
@@ -208,7 +209,9 @@ CREATE_HASH_TABLE:
                 
                 node->hj_HashTable = hashtable;
 #ifdef USE_SPQ
-                hashNode->hs_quit_if_hashkeys_null = (node->js.jointype == JOIN_LASJ_NOTIN);
+                if (IS_SPQ_RUNNING) {
+                    hashNode->hs_quit_if_hashkeys_null = (node->js.jointype == JOIN_LASJ_NOTIN);
+                }
 #endif
                 /*
                  * execute the Hash node, to build the hash table
@@ -226,7 +229,7 @@ CREATE_HASH_TABLE:
                     " is built at node %d, memory used %d MB.",
                     (node->js.ps.plan)->plan_node_id, getSessionMemoryUsageMB()));
 #ifdef USE_SPQ
-                if (node->js.jointype == JOIN_LASJ_NOTIN && hashNode->hs_hashkeys_null)
+                if (IS_SPQ_RUNNING && node->js.jointype == JOIN_LASJ_NOTIN && hashNode->hs_hashkeys_null)
                     return NULL;
 #endif
                 /*
@@ -248,7 +251,9 @@ CREATE_HASH_TABLE:
                     return NULL;
                 }
 #ifdef USE_SPQ
+            if (IS_SPQ_RUNNING) {
                 node->hj_InnerEmpty = (hashtable->totalTuples == 0);
+            }
 #endif
                 /*
                  * need to remember whether nbatch has increased since we
@@ -324,7 +329,7 @@ CREATE_HASH_TABLE:
                 /* fall through */
             case HJ_SCAN_BUCKET:
 #ifdef USE_SPQ
-                if (node->js.jointype == JOIN_LASJ_NOTIN && !node->hj_InnerEmpty &&
+                if (IS_SPQ_RUNNING && node->js.jointype == JOIN_LASJ_NOTIN && !node->hj_InnerEmpty &&
                     IsJoinExprNull(node->hj_OuterHashKeys, econtext)) {
                     node->hj_MatchedOuter = true;
                     node->hj_JoinState = HJ_NEED_NEW_OUTER;
@@ -376,7 +381,7 @@ CREATE_HASH_TABLE:
                         /* Anti join: we never return a matched tuple */
 #ifdef USE_SPQ
                         if (jointype == JOIN_ANTI || jointype == JOIN_LEFT_ANTI_FULL ||
-                            jointype == JOIN_LASJ_NOTIN) {
+                            (IS_SPQ_RUNNING && jointype == JOIN_LASJ_NOTIN)) {
 #else
                         if (jointype == JOIN_ANTI || jointype == JOIN_LEFT_ANTI_FULL) {
 #endif
@@ -600,16 +605,18 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     }
 
 #ifdef USE_SPQ
-    if (JOIN_LASJ_NOTIN == node->join.jointype && node->hashqualclauses != nullptr) {
-        hjstate->hj_nonequijoin = true;
-    } else {
-        hjstate->hj_nonequijoin = false;
-    }
- 
-    hjstate->prefetch_inner = node->join.prefetch_inner;
- 
-    if (node->join.is_set_op_join) {
-        hjstate->hj_nonequijoin = true;
+    if (IS_SPQ_RUNNING) {
+        if (JOIN_LASJ_NOTIN == node->join.jointype && node->hashqualclauses != nullptr) {
+            hjstate->hj_nonequijoin = true;
+        } else {
+            hjstate->hj_nonequijoin = false;
+        }
+
+        hjstate->prefetch_inner = node->join.prefetch_inner;
+
+        if (node->join.is_set_op_join) {
+            hjstate->hj_nonequijoin = true;
+        }
     }
 #endif
 
@@ -627,7 +634,9 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     innerPlanState(hjstate) = ExecInitNode((Plan*)hashNode, estate, eflags);
 
 #ifdef USE_SPQ
-    ((HashState *)innerPlanState(hjstate))->hs_keepnull = hjstate->hj_nonequijoin;
+    if (IS_SPQ_RUNNING) {
+        ((HashState *)innerPlanState(hjstate))->hs_keepnull = hjstate->hj_nonequijoin;
+    }
 #endif
 
     /*

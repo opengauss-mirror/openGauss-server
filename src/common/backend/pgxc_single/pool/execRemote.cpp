@@ -1018,7 +1018,7 @@ static void ExecInitPlanState(PlanState* plan_state, EState* estate, RemoteQuery
     ExecAssignResultTypeFromTL(&remotestate->ss.ps);
 }
 
-bool adp_disconnect_walker(Node* plan, void* cxt)
+bool backward_connection_walker(Node *plan, void *cxt)
 {
     if (plan == nullptr) return false;
     if (IsA(plan, SpqSeqScan)) {
@@ -1032,24 +1032,71 @@ bool adp_disconnect_walker(Node* plan, void* cxt)
         QCConnEntry *entry;
         pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
         entry = (QCConnEntry *)hash_search(g_instance.spq_cxt.adp_connects, (void *)&key, HASH_FIND, &found);
-        if (found) {
-            ereport(LOG, (errmsg("disconnect from queryid: %lu, nodeid: %d", key.query_id, key.plan_node_id)));
-            gs_close_gsocket(&entry->backward);
+        if (!found) {
+            pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+            ereport(ERROR, ((errmsg("spq forward direction not found"))));
         }
-        hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_REMOVE, &found);
+        // connection from qc already here, try build backward connection
+        if (entry->forward.idx == 0) {
+            BackConnInfo fcmsg;
+            fcmsg.node_idx = entry->backward.idx;
+            fcmsg.version = entry->backward.ver;
+            fcmsg.streamcap = entry->streamcap;
+            fcmsg.query_id = u_sess->debug_query_id;
+            fcmsg.stream_key = {
+                .queryId = entry->key.query_id,
+                .planNodeId = entry->key.plan_node_id,
+                .producerSmpId = 0,
+                .consumerSmpId = 0,
+            };
+            fcmsg.backward = &entry->backward;
+            int error = gs_r_build_reply_connection(&fcmsg, entry->backward.ver, &entry->forward.sid);
+            if (error != 0) {
+                gs_close_gsocket(&entry->forward);
+                pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+                ereport(ERROR, ((errmsg("spq try build dual channel backward direction failed"))));
+            }
+            entry->forward.idx = entry->backward.idx;
+            entry->forward.ver = entry->backward.ver;
+            entry->forward.type = GSOCK_PRODUCER;
+        }
         pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+        if (entry->backward.idx == 0) {
+            gs_close_gsocket(&entry->backward);
+            ereport(ERROR, ((errmsg("spq try build dual channel forward direction failed"))));
+        }
+        u_sess->spq_cxt.adp_connections = lappend(u_sess->spq_cxt.adp_connections, entry);
     }
-    return plan_tree_walker(plan, (MethodWalker)adp_disconnect_walker, cxt);
+    return plan_tree_walker(plan, (MethodWalker)backward_connection_walker, cxt);
 }
 
-void disconnect_qc_conn(PlannedStmt* planstmt)
+void build_backward_connection(PlannedStmt *planstmt)
 {
-    if (!planstmt) return;
+    if (!planstmt || !planstmt->enable_adaptive_scan) return;
+    if (!u_sess->stream_cxt.stream_runtime_mem_cxt) return;
+    AutoContextSwitch switcher(u_sess->stream_cxt.stream_runtime_mem_cxt);
     MethodPlanWalkerContext cxt;
     cxt.base.init_plans = NIL;
     cxt.base.traverse_flag = NULL;
     exec_init_plan_tree_base(&cxt.base, planstmt);
-    adp_disconnect_walker((Node*)planstmt->planTree, &cxt);
+    backward_connection_walker((Node *)planstmt->planTree, &cxt);
+}
+
+void disconnect_qc_conn()
+{
+    if (u_sess->spq_cxt.adp_connections == NIL) return;
+    if (!StreamTopConsumerAmI()) return;
+    ListCell *cell;
+    foreach (cell, u_sess->spq_cxt.adp_connections) {
+        QCConnEntry *entry = (QCConnEntry *)lfirst(cell);
+        bool found;
+        pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        gs_close_gsocket(&entry->backward);
+        hash_search(g_instance.spq_cxt.adp_connects, (void *)entry, HASH_REMOVE, &found);
+        pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+    }
+    list_free(u_sess->spq_cxt.adp_connections);
+    u_sess->spq_cxt.adp_connections = NIL;
 }
 
 bool build_connections(Node* plan, void* cxt)
