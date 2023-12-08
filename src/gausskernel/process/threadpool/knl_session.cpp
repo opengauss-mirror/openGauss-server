@@ -1416,6 +1416,9 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->spq_opt_initialized = false;
     spq_cxt->remoteQuerys = NIL;
     spq_cxt->snapshot = (SnapshotData*)palloc0(sizeof(SnapshotData));
+    spq_cxt->mdcache_invalidation_counter_registered = false;
+    spq_cxt->mdcache_invalidation_counter = 0;
+    spq_cxt->last_mdcache_invalidation_counter = 0;
 }
 #endif
 
