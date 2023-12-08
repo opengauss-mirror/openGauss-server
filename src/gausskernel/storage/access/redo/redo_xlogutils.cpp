@@ -1712,10 +1712,11 @@ void ExtremeRtoFlushBuffer(RedoBufferInfo *bufferinfo, bool updateFsm)
     } else {
         if (bufferinfo->pageinfo.page != NULL) {
             BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
-            /* backends may mark buffer dirty already */
-            if (!(bufDesc->state & BM_DIRTY) &&
-                (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page)))) {
-                MarkBufferDirty(bufferinfo->buf);
+            if (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page))) {
+                /* backends may mark buffer dirty already */
+                if (!(bufDesc->state & BM_DIRTY)) {
+                    MarkBufferDirty(bufferinfo->buf);
+                }
                 if (!bufferinfo->dirtyflag && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
                     int mode = WARNING;
 #ifdef USE_ASSERT_CHECKING
