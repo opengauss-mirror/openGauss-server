@@ -28,6 +28,7 @@
 SSInstanceConfig ss_instance_config = {
     .dss = {
         .enable_dss = false,
+        .enable_dorado = false,
         .instance_id = 0,
         .primaryInstId = -1,
         .interNodeNum = 0,
