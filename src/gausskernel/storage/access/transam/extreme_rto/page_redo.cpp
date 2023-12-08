@@ -263,7 +263,7 @@ void DestroyPageRedoWorker(PageRedoWorker *worker)
 void SetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr)
 {
     volatile PageRedoWorker *tmpWk = worker;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u exchange;
     uint128_u current;
     uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr);
@@ -292,7 +292,7 @@ loop:
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
 {
     volatile PageRedoWorker *tmpWk = worker;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr);
     Assert(sizeof(tmpWk->lastReplayedReadRecPtr) == 8);
     Assert(sizeof(tmpWk->lastReplayedEndRecPtr) == 8);

@@ -144,7 +144,7 @@ function install_gaussdb()
     echo "Begin configure." >> "$LOG_FILE" 2>&1
     chmod 755 configure
 
-    if [ "$product_mode"x == "opengauss"x ]; then
+    if [ "$product_mode"x == "opengauss"x -a "$PLATFORM_ARCH"x != "loongarch64"x ]; then
         enable_readline="--with-readline"
     else
         enable_readline="--without-readline"
@@ -158,6 +158,17 @@ function install_gaussdb()
     
     shared_opt="--gcc-version=${gcc_version}.${gcc_sub_version} --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} ${with_tassl} --without-zlib"
     if [ "$product_mode"x == "opengauss"x ]; then
+            GAUSSDB_EXTRA_FLAGS=" "
+
+        if [[ "$PLATFORM_ARCH"x == "x86_64"x || "$PLATFORM_ARCH"x == "aarch64"x ]] ; then
+            extra_config_opt+=" --enable-mot "
+        fi
+        
+        if [ "$PLATFORM_ARCH"x = "loongarch64"x ] ; then
+            GAUSSDB_EXTRA_FLAGS+=" -D__USE_SPINLOCK"
+            extra_config_opt+=" --enable-llvm=no --disable-jemalloc "
+        fi
+
         if [ "$version_mode"x == "release"x ]; then
             # configure -D__USE_NUMA -D__ARM_LSE with arm opengauss mode
             if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
@@ -165,15 +176,15 @@ function install_gaussdb()
                 GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
             fi
 
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}"  CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "memcheck"x ]; then
-            ./configure $shared_opt CFLAGS="-O0" --enable-mot --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0"  --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiurelease"x ]; then
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}"  --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiudebug"x ]; then
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}"  --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}"  --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         fi
     elif [ "$product_mode"x == "lite"x ]; then
         shared_opt="--gcc-version=${gcc_version}.${gcc_sub_version} --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline}  ${with_tassl}  --without-zlib  --without-gssapi --without-krb5"

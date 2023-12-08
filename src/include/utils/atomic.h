@@ -563,6 +563,7 @@ static inline uint64 pg_atomic_barrier_read_u64(volatile uint64* ptr)
  * @IN newval: new value, should be 128bit(16bytes) aligned
  * @Return: old value
  */
+#if (defined(__x86_64__) || defined(__aarch64__)) && !defined(__USE_SPINLOCK)
 static inline uint128_u atomic_compare_and_swap_u128(
     volatile uint128_u* ptr, 
     uint128_u oldval = uint128_u{0}, 
@@ -576,6 +577,7 @@ static inline uint128_u atomic_compare_and_swap_u128(
     return ret;
 #endif
 }
+#endif /* (defined(__x86_64__) || defined(__aarch64__)) && !defined(__USE_SPINLOCK) */
 #endif
 
 #endif /* ATOMIC_H */

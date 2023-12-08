@@ -30,8 +30,10 @@
 #include "utils/dynahash.h"
 #ifdef __aarch64__
 #include <arm_acle.h>
-#else
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #include <nmmintrin.h>
+#else
+#include "port/pg_crc32c.h"
 #endif
 
 extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
@@ -42,8 +44,15 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 
 #ifdef __aarch64__
 #define HASH_INT32_CRC(c, k) __crc32cw(c, k)
-#else
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #define HASH_INT32_CRC(c, k) _mm_crc32_u32(c, k)
+#else
+FORCE_INLINE
+uint32 __crc32cw_normal(uint32 seed, int32 key){
+	return pg_comp_crc32c_sb8(seed, (const unsigned char *)&key, 4);
+}
+
+#define HASH_INT32_CRC(c, k) __crc32cw_normal(c, k)
 #endif
 
 #define HASH_CRC_SEED 0xFFFFFFFF
@@ -53,12 +62,12 @@ extern Datum hash_bi_key(Numeric key);
 FORCE_INLINE
 uint32 hashquickany(uint32 seed, register const unsigned char* data, register int len)
 {
-    const unsigned char* p = data;
-    const unsigned char* pend = p + len;
-
     uint32 crc = seed;
 
 #ifdef __aarch64__
+    const unsigned char* p = data;
+    const unsigned char* pend = p + len;
+
     while (p + 8 <= pend) {
         crc = (uint32)__crc32d(crc, *((const uint64*)p));
         p += 8;
@@ -75,7 +84,9 @@ uint32 hashquickany(uint32 seed, register const unsigned char* data, register in
         crc = __crc32cb(crc, *p);
         p++;
     }
-#else
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+    const unsigned char* p = data;
+    const unsigned char* pend = p + len;
     while (p + 8 <= pend) {
         crc = (uint32)_mm_crc32_u64(crc, *((const uint64*)p));
         p += 8;
@@ -92,6 +103,8 @@ uint32 hashquickany(uint32 seed, register const unsigned char* data, register in
         crc = _mm_crc32_u8(crc, *p);
         p++;
     }
+#else
+    crc = pg_comp_crc32c_sb8(seed, data, len);
 #endif
     return crc;
 }

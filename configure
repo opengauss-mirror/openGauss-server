@@ -756,6 +756,7 @@ enable_multiple_nodes
 enable_lite_mode
 enable_finance_mode
 enable_mot
+enable_bbox
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
@@ -843,6 +844,7 @@ enable_multiple_nodes
 enable_lite_mode
 enable_finance_mode
 enable_mot
+enable_bbox
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
@@ -2464,7 +2466,10 @@ fi
 # Add non-standard directories to the library search path
 #
 
-
+PLATFORM_ARCH=$(uname -p)
+if [ "$PLATFORM_ARCH"X == "unknown"X ]; then
+  PLATFORM_ARCH=$(uname -m)
+fi
 
 # Check whether --with-libraries was given.
 if test "${with_libraries+set}" = set; then
@@ -3268,6 +3273,10 @@ else
 
 fi
 
+if [ "$PLATFORM_ARCH"X = "loongarch64"X ]; then
+    enable_mot=no
+fi
+
 if test "$enable_multiple_nodes" = yes; then
 
   enable_mot=no
@@ -3282,6 +3291,34 @@ if test "$enable_mot" = yes; then
 
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_MOT 1
+_ACEOF
+
+fi
+
+# Check whether --enable-bbox was given.
+if test "${enable_bbox+set}" = set; then
+  enableval=$enable_bbox;
+  case $enableval in 
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      enable_bbox=no
+      ;;
+  esac
+
+else
+  enable_bbox=no
+
+fi
+
+if test "$enable_bbox" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_BBOX 1
 _ACEOF
 
 fi
@@ -5934,14 +5971,13 @@ if test "${enable_llvm+set}" = set; then
 if test "$enable_lite_mode" = yes; then
 { $as_echo "$as_me:$LINENO: enable_lite_mode is open, llvm will close" >&5
 $as_echo "$as_me: enable_lite_mode is open, llvm will close" >&2;}
+enable_llvm=no
 else
-cat >>confdefs.h <<\_ACEOF
-#define ENABLE_LLVM_COMPILE 1
-_ACEOF
+enable_llvm=yes
 fi
       ;;
     no)
-      :
+enable_llvm=no
       ;;
     *)
       { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-llvm option" >&5
@@ -5954,13 +5990,17 @@ else
 if test "$enable_lite_mode" = yes; then
 { $as_echo "$as_me:$LINENO: enable_lite_mode is open, llvm will close" >&5
 $as_echo "$as_me: enable_lite_mode is open, llvm will close" >&2;}
+enable_llvm=no
 else
-cat >>confdefs.h <<\_ACEOF
-#define ENABLE_LLVM_COMPILE 1
-_ACEOF
+enable_llvm=yes
 fi
 
 fi
+
+if test "$enable_llvm" = yes; then
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_LLVM_COMPILE 1
+_ACEOF
 
 llvm_version_str='10.0.0'
 if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$enable_lite_mode" != yes ]]; then
@@ -5973,6 +6013,7 @@ cat >>confdefs.h <<_ACEOF
 #define LLVM_MAJOR_VERSION $llvm_major_version
 #define LLVM_MINOR_VERSION $llvm_minor_version
 _ACEOF
+fi
 
 #
 # Enable ut 

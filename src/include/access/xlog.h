@@ -424,7 +424,7 @@ typedef struct XLogCtlInsert {
     uint32 PrevByteSize;
     int32 CurrLRC;
 
-#if (!defined __x86_64__) && (!defined __aarch64__)
+#if ((!defined __x86_64__) && (!defined __aarch64__)) || defined(__USE_SPINLOCK)
     slock_t insertpos_lck; /* protects CurrBytePos and PrevBytePos */
 #endif
     /*

@@ -87,12 +87,14 @@ static inline uint64 rdtsc(void)
     asm volatile("isb; mrs %0, cntvct_el0" : "=r"(cval) : : "memory");
 
     return cval;
-#else
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
     uint32 hi = 0;
     uint32 lo = 0;
     asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
 
     return ((uint64)lo) | (((uint64)hi) << 32);
+#else
+    return clock();
 #endif
 }
 #else

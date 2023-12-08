@@ -42,7 +42,9 @@
 #ifdef ENABLE_WHITEBOX
 #include "access/ustore/knl_whitebox_test.h"
 #endif
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
@@ -1679,7 +1681,11 @@ static void InitConfigureNamesBool()
             &u_sess->attr.attr_common.enable_bbox_dump,
             true,
             NULL,
+#ifdef ENABLE_BBOX
             assign_bbox_coredump,
+#else
+            NULL,
+#endif /* ENABLE_BBOX */
             NULL},
         {{"enable_default_index_deduplication",
             PGC_POSTMASTER,
@@ -3750,9 +3756,15 @@ static void InitConfigureNamesString()
             NULL},
             &u_sess->attr.attr_common.bbox_dump_path,
             "",
+#ifdef ENABLE_BBOX
             check_bbox_corepath,
             assign_bbox_corepath,
             show_bbox_dump_path},
+#else
+            NULL,
+            NULL,
+            NULL},
+#endif /* ENABLE_BBOX */
 
         {{"alarm_component",
             PGC_POSTMASTER,
@@ -4016,9 +4028,15 @@ static void InitConfigureNamesString()
             GUC_LIST_INPUT},
             &g_instance.attr.attr_common.bbox_blacklist_items,
             "",
+#ifdef ENABLE_BBOX
             check_bbox_blacklist,
             assign_bbox_blacklist,
             show_bbox_blacklist},
+#else
+            NULL,
+            NULL,
+            NULL},
+#endif /* ENABLE_BBOX */
 
         {{"track_stmt_stat_level",
             PGC_USERSET,

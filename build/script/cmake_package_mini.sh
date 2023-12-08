@@ -48,6 +48,8 @@ elif [ X"$kernel" == X"centos" ]; then
     dist_version="CentOS"
 elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="openEuler"
+elif [ X"$kernel" == X"kylin" ]; then
+    dist_version="kylin"
 else
     dist_version="Platform"
 fi
@@ -271,6 +273,13 @@ read_mpp_version
 
 if [ "$gcc_version" == "7.3.0" ]; then
     gcc_version=${gcc_version:0:3}
+elif [ "$gcc_version" == "8.3.0" ]; then
+    if [ $PLATFORM_ARCH == "loongarch64" ];then 
+        gcc_version=${gcc_version:0:3}
+    else
+        echo "Only loongarch model use gcc8.3"
+        exit 1
+    fi 
 elif [ "$gcc_version" == "10.3.0" ] || [ "$gcc_version" == "10.3.1" ]; then
     gcc_version=${gcc_version:0:4}
 else
@@ -463,6 +472,11 @@ function install_gaussdb()
     if [[ -e "/etc/openEuler-release" && "$(cat /etc/openEuler-release | awk '{print $3}')" == "22.03" ]]; then
         CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON"
     fi
+
+    if [ "${PLATFORM_ARCH}"x == "loongarch64"x ]; then
+       CMAKE_OPT="$CMAKE_OPT -DENABLE_BBOX=OFF -DENABLE_JEMALLOC=OFF"
+    fi
+    
     echo "CMAKE_OPT----> $CMAKE_OPT"
     echo "Begin run cmake for gaussdb server" >> "$LOG_FILE" 2>&1
     echo "CMake options: ${CMAKE_OPT}" >> "$LOG_FILE" 2>&1
