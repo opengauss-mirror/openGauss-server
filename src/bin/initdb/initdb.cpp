@@ -1604,6 +1604,10 @@ static void setup_config(void)
         nRet = strcpy_s(repltok, sizeof(repltok), "ss_enable_dorado = on");
         securec_check_c(nRet, "\0", "\0");
         conflines = replace_token(conflines, "#ss_enable_dorado = off", repltok);
+
+        nRet = strcpy_s(repltok, sizeof(repltok), "wal_buffers = 1GB");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#wal_buffers = 16MB", repltok);
     }
 
     nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
