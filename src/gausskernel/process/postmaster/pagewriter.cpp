@@ -478,8 +478,8 @@ bool push_pending_flush_queue(Buffer buffer)
 #else
     SpinLockAcquire(&g_instance.ckpt_cxt_ctl->queue_lock);
 
-    if ((uint64)(g_instance.ckpt_cxt_ctl->dirty_page_queue_tail 
-                  - g_instance.ckpt_cxt_ctl->dirty_page_queue_head 
+    if ((uint64)(g_instance.ckpt_cxt_ctl->dirty_page_queue_tail
+                  - g_instance.ckpt_cxt_ctl->dirty_page_queue_head
                   + PAGE_QUEUE_SLOT_MIN_RESERVE_NUM) >=
         g_instance.ckpt_cxt_ctl->dirty_page_queue_size) {
         SpinLockRelease(&g_instance.ckpt_cxt_ctl->queue_lock);

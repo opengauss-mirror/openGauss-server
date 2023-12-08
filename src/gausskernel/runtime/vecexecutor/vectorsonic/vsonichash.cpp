@@ -48,8 +48,9 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 #define HASH_INT32_CRC(c, k) _mm_crc32_u32(c, k)
 #else
 FORCE_INLINE
+
 uint32 __crc32cw_normal(uint32 seed, int32 key){
-	return pg_comp_crc32c_sb8(seed, (const unsigned char *)&key, 4);
+    return pg_comp_crc32c_sb8(seed, (const unsigned char *)&key, 4);
 }
 
 #define HASH_INT32_CRC(c, k) __crc32cw_normal(c, k)

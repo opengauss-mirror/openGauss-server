@@ -897,7 +897,7 @@ static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, ui
      * because the usable byte position doesn't include any headers, reserving
      * X bytes from WAL is almost as simple as "CurrBytePos += X".
      */
-#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK) 
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     union Union128 compare;
     union Union128 exchange;
     union Union128 current;
@@ -947,7 +947,7 @@ loop1:
     if (unlikely(Insert->CurrLRC == WAL_COPY_SUSPEND)) {
         SpinLockRelease(&Insert->insertpos_lck);
         goto loop1;
-    } 
+    }
 
     *currlrc_ptr = Insert->CurrLRC;
     *StartBytePos = Insert->CurrBytePos;
@@ -959,7 +959,6 @@ loop1:
 
     SpinLockRelease(&Insert->insertpos_lck);
 #endif /* __x86_64__ || __aarch64__ */
-
 }
 
 /*
@@ -1471,7 +1470,7 @@ loop1:
         SpinLockRelease(&Insert->insertpos_lck);
         pg_usleep(1);
         goto loop1;
-    }        
+    }
     *currlrc_ptr = Insert->CurrLRC;
     *PrevPtr = XLogBytePosToRecPtr(Insert->CurrBytePos - Insert->PrevByteSize);
     *StartPos = XLogBytePosToRecPtr(Insert->CurrBytePos);
@@ -1661,7 +1660,7 @@ loop:
      */
     *lastlrc_ptr = currlrc;
 
-    Insert->CurrLRC = WAL_COPY_SUSPEND;  
+    Insert->CurrLRC = WAL_COPY_SUSPEND;
 
     SpinLockRelease(&Insert->insertpos_lck);
 #endif /* __x86_64__ || __aarch64__ */

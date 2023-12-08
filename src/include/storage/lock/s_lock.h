@@ -616,33 +616,33 @@ typedef unsigned int slock_t;
 static __inline__ int
 tas(volatile slock_t *lock)
 {
-       register volatile slock_t *_l = lock;
-       register int _res;
-       register int _tmp;
+    register volatile slock_t *_l = lock;
+    register int _res;
+    register int _tmp;
 
-       __asm__ __volatile__(
-               "       ll.w    %0, %2      \n"
-               "       ori     %1, %0, 1   \n"
-               "       sc.w    %1, %2      \n"
-               "       xori    %1, %1, 1   \n"
-               "       or      %0, %0, %1  \n"
-               "       dbar    0           \n"
+    __asm__ __volatile__(
+            "       ll.w    %0, %2      \n"
+            "       ori     %1, %0, 1   \n"
+            "       sc.w    %1, %2      \n"
+            "       xori    %1, %1, 1   \n"
+            "       or      %0, %0, %1  \n"
+            "       dbar    0           \n"
 :              "=&r" (_res), "=&r" (_tmp), "+R" (*_l)
 :              /* no inputs */
 :              "memory");
-       return _res;
+    return _res;
 }
 
 /* MIPS S_UNLOCK is almost standard but requires a "sync" instruction */
 #define S_UNLOCK(lock) \
 do \
 { \
-       __asm__ __volatile__( \
-               "  dbar  0 \n" \
+    __asm__ __volatile__( \
+            "  dbar  0 \n" \
 :              /* no outputs */ \
 :              /* no inputs */ \
 :              "memory"); \
-       *((volatile slock_t *) (lock)) = 0; \
+    *((volatile slock_t *) (lock)) = 0; \
 } while (0)
 
 #endif /* loongarch */

@@ -3414,7 +3414,7 @@ static void InitConfigureNamesString()
             NULL,
             NULL},
             
-         {{"thread_pool_stream_attr",
+        {{"thread_pool_stream_attr",
             PGC_POSTMASTER,
             NODE_ALL,
             CLIENT_CONN,
@@ -4036,6 +4036,7 @@ static void InitConfigureNamesString()
             NULL,
             NULL,
             NULL},
+            
 #endif /* ENABLE_BBOX */
 
         {{"track_stmt_stat_level",
