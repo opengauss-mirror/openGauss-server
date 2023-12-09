@@ -172,7 +172,7 @@ test: boolean name oid bit txid uuid numeric_hide_tailing_zero rawlike
 # The second group of parallel tests
 # ----------
 #test: lseg box path polygon circle date time timetz timestamptz abstime reltime inet
-test: interval tinterval macaddr tstypes comments
+test: interval tinterval macaddr tstypes comments ignore_double_quotes
 #test: point timestamp
 
 # ----------

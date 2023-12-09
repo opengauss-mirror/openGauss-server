@@ -143,7 +143,7 @@ test: single_node_numerology
 # ----------
 # The second group of parallel tests
 # ----------
-test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz 
+test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz ignore_double_quotes
 #test: single_node_interval 
 test: single_node_abstime single_node_reltime 
 #test: single_node_tinterval 

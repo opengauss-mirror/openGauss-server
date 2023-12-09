@@ -284,6 +284,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_hdfs_predicate_pushdown                   | bool    |      |           | 
  enable_huge_pages                                | bool    |      |           | 
  enable_hypo_index                                | bool    |      |           | 
+ enable_ignore_case_in_dquotes                    | bool    |      |           | 
  enable_incremental_catchup                       | bool    |      |           | 
  enable_incremental_checkpoint                    | bool    |      |           | 
  enable_index_nestloop                            | bool    |      |           | 

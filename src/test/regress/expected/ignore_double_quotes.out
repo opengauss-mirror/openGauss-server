@@ -1,0 +1,354 @@
+DROP SCHEMA sch_ignore_quote_01 CASCADE;
+ERROR:  schema "sch_ignore_quote_01" does not exist
+CREATE SCHEMA sch_ignore_quote_01;
+SET CURRENT_SCHEMA TO sch_ignore_quote_01;
+-- test tables with the same name but different case already exists in the database
+-- table
+create table "TeSt" ("A" int);
+select * from test;
+ERROR:  relation "test" does not exist on datanode1
+LINE 1: select * from test;
+                      ^
+select * from "TeSt";
+ A 
+---
+(0 rows)
+
+create table test ("A" int, "a" int);
+insert into test("A","a") values(1,2);
+select * from test;
+ A | a 
+---+---
+ 1 | 2
+(1 row)
+
+-- view
+CREATE VIEW test_view AS SELECT * FROM test;
+CREATE VIEW "TeSt_view" AS SELECT * FROM "TeSt";
+select * from test_view;
+ A | a 
+---+---
+ 1 | 2
+(1 row)
+
+select * from "TeSt_view";
+ A 
+---
+(0 rows)
+
+-- materialized view
+CREATE MATERIALIZED VIEW m_test_view AS SELECT * FROM test;
+CREATE MATERIALIZED VIEW "M_teSt_view" AS SELECT * FROM "TeSt";
+select * from m_test_view;
+ A | a 
+---+---
+ 1 | 2
+(1 row)
+
+select * from "M_teSt_view";
+ A 
+---
+(0 rows)
+
+-- index
+CREATE INDEX i1 ON test USING btree(a);
+CREATE INDEX "I1" ON "TeSt" USING btree("A");
+drop index "I1";
+-- Chinese characters
+create table "￥" ("￥" int, "$" int);
+create table "啊啊" ("，" int, "," int);
+select * from "￥";
+ ￥ | $ 
+----+---
+(0 rows)
+
+select * from ￥;
+ ￥ | $ 
+----+---
+(0 rows)
+
+select * from "$"; -- errors
+ERROR:  relation "$" does not exist on datanode1
+LINE 1: select * from "$";
+                      ^
+select * from "啊啊";
+ ， | , 
+----+---
+(0 rows)
+
+insert into ￥("￥","$") values(1,2);
+insert into ￥(￥,"$") values(4,3);
+insert into "啊啊"("，",",") values(1,2);
+-- function
+create function f1(b int) returns int
+as $$
+begin
+    return b;
+end;
+$$language plpgsql;
+create function "F1"(b int) returns int
+as $$
+begin
+    b=b+1;
+	  return b;
+end;
+$$language plpgsql;
+call f1(8);
+ f1 
+----
+  8
+(1 row)
+
+call "F1"(8);
+ F1 
+----
+  9
+(1 row)
+
+-- procedure
+create procedure p1() is
+begin
+    insert into test("A","a") values(5,9);
+end;
+/
+create procedure "P1"() is
+begin
+	  insert into "TeSt"("A") values(10);
+end;
+/
+call p1();
+ p1 
+----
+ 
+(1 row)
+
+select * from test;
+ A | a 
+---+---
+ 1 | 2
+ 5 | 9
+(2 rows)
+
+call "P1"();
+ P1 
+----
+ 
+(1 row)
+
+select * from "TeSt";
+ A  
+----
+ 10
+(1 row)
+
+-- type
+CREATE TYPE compfoo AS (f1 int, f2 text);
+CREATE TYPE "CompFoo" AS (f3 text, f4 int, f5 int);
+CREATE TABLE t1_compfoo(a int, b compfoo);
+CREATE TABLE t2_compfoo(a int, b "CompFoo");
+INSERT INTO t1_compfoo values(1,(1,'demo1'));
+INSERT INTO t2_compfoo values(2,('demo2', 3, 5));
+select * from t1_compfoo;
+ a |     b     
+---+-----------
+ 1 | (1,demo1)
+(1 row)
+
+select * from t2_compfoo;
+ a |      b      
+---+-------------
+ 2 | (demo2,3,5)
+(1 row)
+
+-- sequence
+CREATE SEQUENCE s1 START 101 CACHE 20;
+CREATE SEQUENCE "S1" START 801 CACHE 90;
+drop sequence "S1";
+-- test enable_ignore_case_in_dquotes=on
+set enable_ignore_case_in_dquotes=on;
+WARNING:  if tables with the same name but different case already
+exists in the database, this will result in only being able to
+manipulate tables with table names that are entirely lowercase.
+create table test1 ("A" int, 'a' int);-- error
+ERROR:  syntax error at or near "'a'"
+LINE 1: create table test1 ("A" int, 'a' int);
+                                     ^
+insert into test("A","a") values(2,3);-- error
+ERROR:  column "a" specified more than once
+LINE 1: insert into test("A","a") values(2,3);
+                             ^
+select * from test;
+ A | a 
+---+---
+ 1 | 2
+ 5 | 9
+(2 rows)
+
+select * from test_view;
+ A | a 
+---+---
+ 1 | 2
+ 5 | 9
+(2 rows)
+
+select * from "TeSt_view";-- lowcase
+ A | a 
+---+---
+ 1 | 2
+ 5 | 9
+(2 rows)
+
+select * from m_test_view;
+ A | a 
+---+---
+ 1 | 2
+(1 row)
+
+select * from "M_teSt_view";-- lowcase
+ A | a 
+---+---
+ 1 | 2
+(1 row)
+
+call f1(8);
+ f1 
+----
+  8
+(1 row)
+
+call "F1"(8); -- lowcase
+ f1 
+----
+  8
+(1 row)
+
+call p1(8);
+ERROR:  function "p1" with 1 parameters doesn't exist 
+call "P1"(8); -- lowcase
+ERROR:  function "p1" with 1 parameters doesn't exist 
+CREATE TABLE t3_compfoo(a int, b "CompFoo");
+CREATE INDEX "I1" ON "TeSt" USING btree("A");
+ERROR:  relation "i1" already exists
+INSERT INTO t3_compfoo values(2,('demo2', 3, 5));-- error
+ERROR:  invalid input syntax for integer: "demo2"
+LINE 1: INSERT INTO t3_compfoo values(2,('demo2', 3, 5));
+                                         ^
+CONTEXT:  referenced column: b
+INSERT INTO t3_compfoo values(1,(1,'demo1'));
+select * from t3_compfoo;
+ a |     b     
+---+-----------
+ 1 | (1,demo1)
+(1 row)
+
+CREATE SEQUENCE "S1" START 801 CACHE 90;-- error
+ERROR:  relation "s1" already exists in schema "sch_ignore_quote_01"
+DETAIL:  creating new table with existing name in the same schema
+call p1();
+ p1 
+----
+ 
+(1 row)
+
+select * from test;
+ A | a 
+---+---
+ 1 | 2
+ 5 | 9
+ 5 | 9
+(3 rows)
+
+call "P1"();
+ p1 
+----
+ 
+(1 row)
+
+select * from "TeSt";
+ A | a 
+---+---
+ 1 | 2
+ 5 | 9
+ 5 | 9
+ 5 | 9
+(4 rows)
+
+create table "SCH_ignore_quote_01"."TAB_quote"("A" int);
+insert into tab_quote (a) values (4);
+insert into "SCH_IGNORE_QUOTE_01"."TAB_QUOTE" ("A") values (5);
+select a from tab_quote;
+ a 
+---
+ 4
+ 5
+(2 rows)
+
+select t.a from sch_ignore_quote_01.tab_quote t;
+ a 
+---
+ 4
+ 5
+(2 rows)
+
+select t."A" from "SCH_IGNORE_QUOTE_01"."TAB_QUOTE" t;
+ a 
+---
+ 4
+ 5
+(2 rows)
+
+create table "￥￥" ("￥" int, "$" int);
+create table "$" ("，" int, "," int);
+select * from "￥";
+ ￥ | $ 
+----+---
+  1 | 2
+  4 | 3
+(2 rows)
+
+select * from ￥;
+ ￥ | $ 
+----+---
+  1 | 2
+  4 | 3
+(2 rows)
+
+select * from "$";
+ ， | , 
+----+---
+(0 rows)
+
+select * from "啊啊";
+ ， | , 
+----+---
+  1 | 2
+(1 row)
+
+insert into ￥("￥","$") values(5,6);
+insert into ￥(￥,"$") values(7,8);
+insert into "啊啊"("，",",") values(10,11);
+-- clean
+drop table TAB_quote;
+set enable_ignore_case_in_dquotes=off;
+drop materialized view m_test_view;
+drop materialized view "M_teSt_view";
+drop index i1;
+drop view test_view;
+drop view "TeSt_view";
+drop table test;
+drop table "TeSt";
+drop table "￥￥";
+drop table "$";
+drop table ￥;
+drop table "啊啊";
+drop function f1;
+drop function "F1";
+drop procedure p1;
+drop procedure "P1";
+drop table t1_compfoo;
+drop table t2_compfoo;
+drop table t3_compfoo;
+drop type compfoo;
+drop type "CompFoo";
+drop sequence s1;
+drop schema sch_ignore_quote_01;
