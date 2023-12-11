@@ -189,7 +189,7 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
     }
 
     /* setup threads */
-    for (i = 0; (size_t)i < g_totalFiles; i++)
+    for (i = 0; i < g_totalFiles; i++)
     {
         pgFile       *file = (pgFile *) parray_get(files, i);
         pg_atomic_clear_flag(&file->lock);
