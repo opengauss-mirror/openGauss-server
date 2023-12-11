@@ -303,7 +303,7 @@ test: hw_to_timestamp hw_view_privilege
 test: hw_identifier
 #test: hw_hashint1 hw_smalldatetime_hash hw_rawtype_hash
 #test: hw_nvarchar2_hash cmpr_smallint cmpr_prefix_150left cmpr_uint32_oid
-test: oidjoins opr_sanity_2 regex regex2
+test: oidjoins opr_sanity_2 regex regex2 regex.linux.utf8
 #test: opr_sanity_1
 
 test: pmk
