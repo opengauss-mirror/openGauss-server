@@ -653,6 +653,7 @@ function set_environment()
         gaussdata=$(cd ${data_path}; pwd)
         sed -i "/.*export\\s*GAUSSDATA=/d" ${env_file}
         echo "export GAUSSDATA=${gaussdata}" >> ${env_file}
+        echo "export PGDATA=${gaussdata}" >> ${env_file}
         info "[set GAUSSDATA environment variables success.]"
     elif [ "$2" = "log" ]
     then
