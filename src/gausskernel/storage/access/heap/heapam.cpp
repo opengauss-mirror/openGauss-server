@@ -3462,7 +3462,7 @@ void heap_invalid_invisible_tuple(HeapTuple tuple)
 
     Assert(!HeapTupleIsHotUpdated(tuple));
 
-    ereport(LOG, (errmsg("Dead and invisible tuple: t_ctid = { ip_blkid = { bi_hi = %hu, bi_lo = %hu }, "
+    ereport(DEBUG2, (errmsg("Dead and invisible tuple: t_ctid = { ip_blkid = { bi_hi = %hu, bi_lo = %hu }, "
         "ip_posid = %hu }, t_xmin = %u, xmax = %u, infomask = %hu",
         tuple->t_data->t_ctid.ip_blkid.bi_hi,
         tuple->t_data->t_ctid.ip_blkid.bi_lo,
