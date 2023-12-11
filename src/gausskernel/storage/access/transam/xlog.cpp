@@ -424,7 +424,8 @@ static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr *StartPos, XLogRec
 static bool ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr);
 static void StartSuspendWalInsert(int32 *const lastlrc_ptr);
 static void StopSuspendWalInsert(int32 lastlrc);
-
+void ResetRecoveryDelayLatch();
+void WaitRecoveryDelayLatch(long waitTime);
 template <bool isGroupInsert>
 static char *GetXLogBuffer(XLogRecPtr ptr, PGPROC *proc = NULL);
 static XLogRecPtr XLogBytePosToRecPtr(uint64 bytepos);
@@ -6739,6 +6740,11 @@ void XLOGShmemInit(void)
     InitSharedLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
     InitSharedLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->dataRecoveryLatch);
 
+    /* recovery_min_apply_delay is SIGHUP level, so init recoveryWakeupDelayLatch if extremeRto mode*/
+    if (IsExtremeRedo()) {
+        InitSharedLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch);
+    }
+
     /*
      * If we are not in bootstrap mode, pg_control should already exist. Read
      * and validate it immediately (see comments in ReadControlFile() for the
@@ -8156,7 +8162,7 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     }
 
     while (true) {
-        ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+        ResetRecoveryDelayLatch();
 
         /* might change the trigger file's location */
         RedoInterruptCallBack();
@@ -8178,7 +8184,7 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
 
         /* delay 1s every time */
         waitTime = (secs >= 1) ? 1000 : (microsecs / 1000);
-        (void)WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch, WL_LATCH_SET | WL_TIMEOUT, waitTime);
+        WaitRecoveryDelayLatch(waitTime);
     }
     return true;
 }
@@ -9454,6 +9460,9 @@ void StartupXLOG(void)
     if (t_thrd.xlog_cxt.StandbyModeRequested) {
         OwnLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
         OwnLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->dataRecoveryLatch);
+        if (IsExtremeRedo()) {
+            OwnLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch);
+        }
     }
 
     /* Set up XLOG reader facility */
@@ -10585,6 +10594,9 @@ void StartupXLOG(void)
             DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
         }
         DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->dataRecoveryLatch);
+        if (IsExtremeRedo()) {
+            DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch);
+        }
     }
 
     /*
@@ -18302,6 +18314,9 @@ bool CheckSwitchoverTimeoutSignal(void)
 void WakeupRecovery(void)
 {
     SetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+    if (IsExtremeRedo() && u_sess->attr.attr_storage.recovery_min_apply_delay > 0) {
+        SetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch);
+    }
 }
 
 void WakeupDataRecovery(void)
@@ -18929,6 +18944,28 @@ void GetRecoveryLatch()
 void ReLeaseRecoveryLatch()
 {
     DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+}
+
+/**
+ * Reset latch before startup process delay recovery.
+ */
+void ResetRecoveryDelayLatch() {
+    if (IsExtremeRedo()) {
+        ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch);
+    } else {
+        ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+    }
+}
+
+/**
+ * Let startup process wait for a while until waitTime ms or other threads set latch.
+ */
+void WaitRecoveryDelayLatch(long waitTime) {
+    if (IsExtremeRedo()) {
+        (void)WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch, WL_LATCH_SET | WL_TIMEOUT, waitTime);
+    } else {
+        (void)WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch, WL_LATCH_SET | WL_TIMEOUT, waitTime);
+    }
 }
 
 XLogRecPtr mpfl_get_max_lsn_from_buf(char *buf)
