@@ -15132,8 +15132,8 @@ void InitShmemForDmsCallBack()
 
 const char *GetSSServerMode(ServerMode mode)
 {
-    if (IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
-        if (SS_OFFICIAL_PRIMARY && (mode == PRIMARY_MODE || mode == NORMAL_MODE)) { 
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        if (SS_OFFICIAL_PRIMARY && mode == PRIMARY_MODE) { 
             return "Primary";
         }
         

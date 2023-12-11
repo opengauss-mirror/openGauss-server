@@ -2192,21 +2192,35 @@ static void do_failover(uint32 term)
     }
 
     origin_run_mode = run_mode = get_runmode();
-    if (run_mode == PRIMARY_MODE) {
-        pg_log(PG_WARNING, _(" failover completed (%s)\n"), pg_data);
-        return;
-    } else if (run_mode == UNKNOWN_MODE) {
-        pg_log(PG_WARNING,
-            _(" cannot failover server:"
-              "server mode is unknown\n"));
-        exit(1);
-    }
-    /* failover executed only in standby server */
-    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE && run_mode != MAIN_STANDBY_MODE) {
-        pg_log(PG_WARNING,
-            _(" cannot failover server; "
-              "server is not in standby or cascade standby mode\n"));
-        exit(1);
+    if (ss_instance_config.dss.enable_dorado) {
+        if (run_mode == PRIMARY_MODE) {
+            pg_log(PG_WARNING,
+                _(" failover completed; "
+                "server is primary node yet\n"));
+            return;
+        } else if (run_mode != MAIN_STANDBY_MODE) {
+            pg_log(PG_WARNING,
+                _(" cannot failover server; "
+                "server is not main standby node in ss dorado cluster\n"));
+            exit(1);
+        }
+    } else {
+        if (run_mode == PRIMARY_MODE) {
+            pg_log(PG_WARNING, _(" failover completed (%s)\n"), pg_data);
+            return;
+        } else if (run_mode == UNKNOWN_MODE) {
+            pg_log(PG_WARNING,
+                _(" cannot failover server:"
+                "server mode is unknown\n"));
+            exit(1);
+        }
+        /* failover executed only in standby server */
+        else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE && run_mode != MAIN_STANDBY_MODE) {
+            pg_log(PG_WARNING,
+                _(" cannot failover server; "
+                "server is not in standby or cascade standby mode\n"));
+            exit(1);
+        }
     }
 
     if (g_dcfEnabled) {
@@ -2271,8 +2285,9 @@ static void do_failover(uint32 term)
     }
 
     if ((origin_run_mode == STANDBY_MODE && get_runmode() != PRIMARY_MODE) ||
+        (origin_run_mode == MAIN_STANDBY_MODE && get_runmode() != PRIMARY_MODE) ||
         (origin_run_mode == CASCADE_STANDBY_MODE && get_runmode() != STANDBY_MODE)) {
-        pg_log(PG_WARNING, _(" failed\n"));
+        pg_log(PG_WARNING, _(" \nfailover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
         pg_log(PG_WARNING, _(" failover failed (%s)\n"), pg_data);
         exit(1);
     }
@@ -7374,6 +7389,7 @@ bool ss_read_config(void)
 {
     char config_file[MAXPGPATH] = {0};
     char enable_dss[MAXPGPATH] = {0};
+    char enable_dorado[MAXPGPATH] = {0};
     char inst_id[MAXPGPATH] = {0};
     char interconnect_url[MAXPGPATH] = {0};
     char** optlines = NULL;
@@ -7391,6 +7407,11 @@ bool ss_read_config(void)
         freefile(optlines);
         optlines = NULL;
         return false;
+    }
+
+    (void)find_guc_optval((const char**)optlines, "ss_enable_dorado", enable_dorado);
+    if(strcmp(enable_dorado, "on") == 0) {
+        ss_instance_config.dss.enable_dorado = true;
     }
 
     ss_instance_config.dss.enable_dss = true;
