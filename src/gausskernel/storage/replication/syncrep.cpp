@@ -221,6 +221,16 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         !SyncStandbysDefined() || (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
         return NOT_REQUEST;
 
+    int trytime = 10;
+    XLogRecPtr lsn = 0;
+    while (trytime-- > 0) {
+        lsn = pg_atomic_barrier_read_u64(&t_thrd.walsender_cxt.WalSndCtl->lsn[mode]);
+        if (XLByteLE(XactCommitLSN, lsn)) {
+            return REPSYNCED;
+        }
+        pg_usleep(1);
+    }
+
     Assert(SHMQueueIsDetached(&(t_thrd.proc->syncRepLinks)));
     Assert(t_thrd.walsender_cxt.WalSndCtl != NULL);
 
@@ -242,11 +252,6 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return NOT_SET_STANDBY_DEFINED;
-    }
-    if (XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode])) {
-        LWLockRelease(SyncRepLock);
-        RESUME_INTERRUPTS();
-        return REPSYNCED;
     }
     if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
         !DelayIntoMostAvaSync(false)) {
@@ -682,18 +687,22 @@ void SyncRepReleaseWaiters(void)
      */
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_RECEIVE], receivePtr)) {
         walsndctl->lsn[SYNC_REP_WAIT_RECEIVE] = receivePtr;
+        pg_write_barrier();
         numreceive = SyncRepWakeQueue(false, SYNC_REP_WAIT_RECEIVE);
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_WRITE], writePtr)) {
         walsndctl->lsn[SYNC_REP_WAIT_WRITE] = writePtr;
+        pg_write_barrier();
         numwrite = SyncRepWakeQueue(false, SYNC_REP_WAIT_WRITE);
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_FLUSH], flushPtr)) {
         walsndctl->lsn[SYNC_REP_WAIT_FLUSH] = flushPtr;
+        pg_write_barrier();
         numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_FLUSH);
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_APPLY], replayPtr)) {
         walsndctl->lsn[SYNC_REP_WAIT_APPLY] = replayPtr;
+        pg_write_barrier();
         numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
     }
 
