@@ -1337,7 +1337,7 @@ static void *ProgressReportIncrementalBuild(void *arg)
         /* progress report */
         percent = (int)(fetch_done * 100 / fetch_size);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%dKB). fetch files \r",
+        fprintf(stderr, "Progress: %s %d%% (%lu/%luKB). fetch files \r",
             progressBar, percent, fetch_done, fetch_size);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -1355,7 +1355,7 @@ static void *ProgressReportIncrementalBuild(void *arg)
     } while ((fetch_done < fetch_size) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%dKB). fetch files \n",
+    fprintf(stderr, "Progress: %s %d%% (%lu/%luKB). fetch files \n",
             progressBar, percent, fetch_done, fetch_size);
     return nullptr;
 }

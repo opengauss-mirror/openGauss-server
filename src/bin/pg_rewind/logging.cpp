@@ -159,7 +159,6 @@ void progress_report(bool force)
     GaussState g_state;
     int elapsed_secs = 0;
     int caculate_secs = 0;
-    static bool print = true;
 
     now = (pg_time_t)time(NULL);
     percent = fetch_size ? (int)((fetch_done)*100 / fetch_size) : 0;

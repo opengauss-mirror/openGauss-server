@@ -676,7 +676,6 @@ static void progress_report(int tablespacenum, const char* filename, bool force)
     pg_time_t now = 0;
     int elapsed_secs = 0;
     int caculate_secs = 0;
-    static bool print = true;
 
     /*
      * report and cacluate speed for every report_timeout or the sync percent changed.
@@ -1563,7 +1562,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     /* Print the progress of the tool execution through a new thread. */
     g_totalTableSpace = PQntuples(res);
     fprintf(stderr, "Begin Receiving files \n");
-    pthread_t progressThread = NULL;
+    pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReportFullBuild, NULL);
 
     /*
@@ -2813,7 +2812,7 @@ static void *ProgressReportFullBuild(void *arg) {
         /* progress report */
         percent = (int)((totaldone / 1024) * 100 / totalsize);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%dKB). (%d/%d)tablespaces. Receive files \r",
+        fprintf(stderr, "Progress: %s %d%% (%lu/%luKB). (%d/%d)tablespaces. Receive files \r",
             progressBar, percent, (totaldone / 1024), totalsize, g_curTableSpace, g_totalTableSpace);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -2831,7 +2830,7 @@ static void *ProgressReportFullBuild(void *arg) {
     } while (((totaldone / 1024) < totalsize) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%dKB). (%d/%d)tablespaces. Receive files \n",
+    fprintf(stderr, "Progress: %s %d%% (%lu/%luKB). (%d/%d)tablespaces. Receive files \n",
             progressBar, percent, totalsize, totalsize, g_curTableSpace, g_totalTableSpace);
     return nullptr;
 }
