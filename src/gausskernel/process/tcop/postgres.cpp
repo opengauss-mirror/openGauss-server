@@ -291,6 +291,7 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
 static void ForceModifyExpiredPwd(const char* queryString, const List* parsetreeList);
 #if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
 static void InitGlobalNodeDefinition(PlannedStmt* planstmt);
+extern void SetRemoteDestTupleReceiverParams(DestReceiver *self);
 #endif
 static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params);
 extern void CancelAutoAnalyze();
@@ -1829,6 +1830,10 @@ void exec_simple_plan(PlannedStmt* plan)
         receiver = CreateDestReceiver(dest);
         if (dest == DestRemote)
             SetRemoteDestReceiverParams(receiver, portal);
+#ifdef USE_SPQ
+        if (IS_SPQ_RUNNING && dest == DestRemote)
+            SetRemoteDestTupleReceiverParams(receiver);
+#endif
 
         /*
          * Switch back to transaction context for execution.
@@ -3423,6 +3428,10 @@ static void exec_plan_with_params(StringInfo input_message)
         if (dest == DestRemote) {
             SetRemoteDestReceiverParams(receiver, portal);
         }
+#ifdef USE_SPQ
+        if (IS_SPQ_RUNNING && dest == DestRemote)
+            SetRemoteDestTupleReceiverParams(receiver);
+#endif
 
         if (max_rows <= 0) {
             max_rows = FETCH_ALL;
