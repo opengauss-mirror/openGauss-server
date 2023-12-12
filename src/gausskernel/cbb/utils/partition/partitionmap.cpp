@@ -1354,58 +1354,46 @@ void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen)
 
 void DestroyPartitionMap(PartitionMap* partMap)
 {
-    Assert(PointerIsValid(partMap));
+    Assert (PointerIsValid(partMap) && PartitionMapTypeIsValid(partMap));
+
+    /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
+    int2vector *partKeyAttrArray = partMap->partitionKey;
+    Oid        *partKeyTypeArray = partMap->partitionKeyDataType;
+
+    Assert (partKeyTypeArray != NULL && partKeyAttrArray != NULL);
+    pfree_ext(partKeyAttrArray);
+    pfree_ext(partKeyTypeArray);
 
     /* partitioned relation, destroy the partition map */
     if (partMap->type == PART_TYPE_RANGE || partMap->type == PART_TYPE_INTERVAL) {
-        RangePartitionMap* range_map = ((RangePartitionMap*)(partMap));
+        RangePartitionMap* rangePartMap = ((RangePartitionMap*)(partMap));
 
-        /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
-        if (range_map->base.partitionKey) {
-            pfree_ext(range_map->base.partitionKey);
+        if (rangePartMap->intervalValue) {
+            pfree_ext(rangePartMap->intervalValue);
         }
-        if (range_map->base.partitionKeyDataType) {
-            pfree_ext(range_map->base.partitionKeyDataType);
+        if (rangePartMap->intervalTablespace) {
+            pfree_ext(rangePartMap->intervalTablespace);
         }
-        if (range_map->intervalValue) {
-            pfree_ext(range_map->intervalValue);
-        }
-        if (range_map->intervalTablespace) {
-            pfree_ext(range_map->intervalTablespace);
-        }
-        if (range_map->rangeElements) {
-            partitionMapDestroyRangeArray(range_map->rangeElements, range_map->rangeElementsNum);
+        if (rangePartMap->rangeElements) {
+            partitionMapDestroyRangeArray(rangePartMap->rangeElements, rangePartMap->rangeElementsNum);
         }
     } else if (partMap->type == PART_TYPE_LIST) {
-        ListPartitionMap* list_map = (ListPartitionMap*)(partMap);
-        if (list_map->base.partitionKey) {
-            pfree_ext(list_map->base.partitionKey);
-            list_map->base.partitionKey = NULL;
-        }
-        if (list_map->base.partitionKeyDataType) {
-            pfree_ext(list_map->base.partitionKeyDataType);
-            list_map->base.partitionKeyDataType = NULL;
-        }
-        if (list_map->listElements) {
-            DestroyListElements(list_map->listElements, list_map->listElementsNum);
-            list_map->listElements = NULL;
+        ListPartitionMap* listPartMap = (ListPartitionMap*)(partMap);
+
+        if (listPartMap->listElements) {
+            DestroyListElements(listPartMap->listElements, listPartMap->listElementsNum);
+            listPartMap->listElements = NULL;
         }
     } else if (partMap->type == PART_TYPE_HASH) {
-        HashPartitionMap* hash_map = (HashPartitionMap*)(partMap);
-        if (hash_map->base.partitionKey) {
-            pfree_ext(hash_map->base.partitionKey);
-            hash_map->base.partitionKey = NULL;
-        }
-        if (hash_map->base.partitionKeyDataType) {
-            pfree_ext(hash_map->base.partitionKeyDataType);
-            hash_map->base.partitionKeyDataType = NULL;
-        }
-        if (hash_map->hashElements) {
-            PartitionMapDestroyHashArray(hash_map->hashElements, hash_map->hashElementsNum);
-            hash_map->hashElements = NULL;
+        HashPartitionMap* hashPartMap = (HashPartitionMap*)(partMap);
+
+        if (hashPartMap->hashElements) {
+            PartitionMapDestroyHashArray(hashPartMap->hashElements, hashPartMap->hashElementsNum);
+            hashPartMap->hashElements = NULL;
         }
     }
     pfree_ext(partMap);
+
     return;
 }
 
@@ -2235,183 +2223,6 @@ Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, b
     return (*t_thrd.utils_cxt.partId).partitionId;
 }
 
-/*
- * @@GaussDB@@
- * Brief		:
- * Description	:give the tuple, return oid of the corresponding partition
- * Notes		:
- */
-Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32* partSeq, bool topClosed)
-{
-    RangeElement* rangeElementIterator = NULL;
-    RangePartitionMap* rangePartMap = NULL;
-    Oid result = InvalidOid;
-    int keyNums;
-    int hit = -1;
-    int min_part_id = 0;
-    int max_part_id = 0;
-    int local_part_id = 0;
-    int compare = 0;
-    Const** boundary = NULL;
-
-    Assert(PointerIsValid(partitionmap));
-    Assert(PointerIsValid(partKeyValue));
-
-    incre_partmap_refcount(partitionmap);
-    rangePartMap = (RangePartitionMap*)(partitionmap);
-
-    keyNums = rangePartMap->base.partitionKey->dim1;
-    max_part_id = rangePartMap->rangeElementsNum - 1;
-    boundary = rangePartMap->rangeElements[max_part_id].boundary;
-    partitonKeyCompareForRouting(partKeyValue, boundary, (uint32)keyNums, compare);
-
-    if (compare == 0) {
-        if (topClosed) {
-            hit = -1;
-        } else {
-            hit = max_part_id;
-        }
-    } else if (compare > 0) {
-        hit = -1;
-    } else {
-        /* semi-seek */
-        while (max_part_id > min_part_id) {
-            local_part_id = (uint32)(max_part_id + min_part_id) >> 1;
-            rangeElementIterator = &(rangePartMap->rangeElements[local_part_id]);
-
-            boundary = rangeElementIterator->boundary;
-            partitonKeyCompareForRouting(partKeyValue, boundary, (uint32)keyNums, compare);
-
-            if (compare == 0) {
-                hit = local_part_id;
-
-                if (topClosed) {
-                    hit += 1;
-                }
-                break;
-            } else if (compare > 0) {
-                min_part_id = local_part_id + 1;
-            } else {
-                max_part_id = local_part_id;
-            }
-        }
-        /* get it */
-        if (max_part_id == min_part_id) {
-            hit = max_part_id;
-        }
-    }
-
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = rangePartMap->rangeElements[hit].partitionOid;
-    }
-
-    decre_partmap_refcount(partitionmap);
-    return result;
-}
-
-Oid getListPartitionOid(PartitionMap* partMap, Const** partKeyValue, int partKeyCount, int32* partSeq, bool topClosed)
-{
-    ListPartitionMap* listPartMap = NULL;
-    Oid result = InvalidOid;
-    int hit = -1;
-    PartitionKey partKey;
-    PartitionKey* boundary = NULL;
-    Oid defaultPartitionOid = InvalidOid;
-    bool existDefaultPartition = false;
-    int defaultPartitionHit = -1;
-
-    Assert(PointerIsValid(partMap));
-    Assert(PointerIsValid(partKeyValue));
-
-    incre_partmap_refcount(partMap);
-    listPartMap = (ListPartitionMap*)(partMap);
-    partKey.values = partKeyValue;
-    partKey.count = partKeyCount;
-    
-    int i = 0;
-    while (i < listPartMap->listElementsNum && hit < 0) {
-        boundary = listPartMap->listElements[i].boundary;
-        int list_len = listPartMap->listElements[i].len;
-        if (list_len == 1 && ((Const*)boundary[0].values[0])->ismaxvalue) {
-            defaultPartitionOid = listPartMap->listElements[i].partitionOid;
-            existDefaultPartition = true;
-            defaultPartitionHit = i;
-        }
-        int j = 0;
-        while (j < list_len) {
-            if (ListPartKeyCompare(&partKey, &boundary[j]) == 0) {
-                hit = i;
-                break;
-            }
-            j++;
-        }
-        i++;
-    }
-
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = listPartMap->listElements[hit].partitionOid;
-    } else if (existDefaultPartition) {
-        result = defaultPartitionOid;
-        *partSeq = defaultPartitionHit;
-    }
-
-    decre_partmap_refcount(partMap);
-    return result;
-}
-
-Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* partSeq, bool topClosed)
-{
-    HashPartitionMap* hashPartMap = NULL;
-    Oid result = InvalidOid;
-    int keyNums = 0;
-    int hit = -1;
-
-    Assert(PointerIsValid(partMap));
-    Assert(PointerIsValid(partKeyValue));
-
-    incre_partmap_refcount(partMap);
-    hashPartMap = (HashPartitionMap*)(partMap);
-
-    keyNums = hashPartMap->base.partitionKey->dim1;
-    
-    int i = 0;
-    uint32 hash_value = 0;
-    while (i < keyNums) {
-        if (partKeyValue[i]->constisnull) {
-            if (PointerIsValid(partSeq)) {
-                *partSeq = hit;
-            }
-            decre_partmap_refcount(partMap);
-            return result;
-        }
-        hash_value = hashValueCombination(hash_value, partKeyValue[i]->consttype, partKeyValue[i]->constvalue,
-            false, LOCATOR_TYPE_HASH, partKeyValue[i]->constcollid);
-        i++;
-    }
-
-    hit = hash_value % (uint32)(hashPartMap->hashElementsNum);
-    hit = hashPartMap->hashElementsNum - hit - 1;
-
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = hashPartMap->hashElements[hit].partitionOid;
-    }
-
-    decre_partmap_refcount(partMap);
-    return result;
-}
-
 Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm)
 {
     int16 typLen;
@@ -2491,7 +2302,7 @@ int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Inte
     Assert(partition->len == 1);
     int compare = 0;
     Const* lowBoundary = CalcLowBoundary(partition->boundary[0], intervalValue);
-    partitonKeyCompareForRouting(partKeyValue, &lowBoundary, (uint32)(partition->len), compare);
+    partitionKeyCompareForRouting(partKeyValue, &lowBoundary, (uint32)(partition->len), compare);
     pfree(lowBoundary);
     return compare;
 }
@@ -3073,12 +2884,6 @@ bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Rel
     }
 
     return true;
-}
-
-int2vector* PartitionmapGetPartKeyArray(PartitionMap *pm)
-{
-    Assert (pm != NULL);
-    return pm->partitionKey;
 }
 
 /* Transform the Const value into the target type of partkey column, do nothing if the type is same.

@@ -7581,10 +7581,10 @@ Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTabl
     Oid targetOid = InvalidOid;
     bool partExprKeyIsNull = PartExprKeyIsNull(rel, &partExprKeyStr);
     if (partExprKeyIsNull) {
-        targetOid = heapTupleGetPartitionId(rel, tuple, partitionno, isDDL, canIgnore);
+        targetOid = heapTupleGetPartitionOid(rel, tuple, partitionno, isDDL, canIgnore);
     } else {
         Datum newval = ComputePartKeyExprTuple(rel, estate, slot, NULL, partExprKeyStr);
-        targetOid = heapTupleGetPartitionId(rel, (void*)newval, partitionno, isDDL, canIgnore, false);
+        targetOid = heapTupleGetPartitionOid(rel, (void*)newval, partitionno, isDDL, canIgnore, false);
     }
     pfree_ext(partExprKeyStr);
     return targetOid;
@@ -7598,9 +7598,9 @@ Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTabl
  * Description	:
  * Notes		:
  */
-Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL, bool canIgnore, bool partExprKeyIsNull)
+Oid heapTupleGetPartitionOid(Relation rel, void *tuple, int *partitionno, bool isDDL, bool canIgnore, bool partExprKeyIsNull)
 {
-    Oid partitionid = InvalidOid;
+    Oid partitionOid = InvalidOid;
 
     /* get routing result */
     partitionRoutingForTuple(rel, tuple, u_sess->catalog_cxt.route, canIgnore, partExprKeyIsNull);
@@ -7608,11 +7608,11 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool is
     /* if the partition exists, return partition's oid */
     if (u_sess->catalog_cxt.route->fileExist) {
         Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
-        partitionid = u_sess->catalog_cxt.route->partitionId;
+        partitionOid = u_sess->catalog_cxt.route->partitionId;
         if (PointerIsValid(partitionno)) {
             *partitionno = GetPartitionnoFromSequence(rel->partMap, u_sess->catalog_cxt.route->partSeq);
         }
-        return partitionid;
+        return partitionOid;
     }
 
     /*
@@ -7624,19 +7624,11 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool is
         /*
          * If it is a range partition, give error report
          */
-        case PART_AREA_RANGE: {
-            ereport(
-                level,
-                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
-        } break;
         case PART_AREA_INTERVAL: {
             return AddNewIntervalPartition(rel, tuple, partitionno, isDDL);
         } break;
-        case PART_AREA_LIST: {
-            ereport(
-                level,
-                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
-        } break;
+        case PART_AREA_RANGE:
+        case PART_AREA_LIST:
         case PART_AREA_HASH: {
             ereport(
                 level,
@@ -7651,10 +7643,10 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool is
         } break;
     }
 
-    return partitionid;
+    return partitionOid;
 }
 
-Oid heapTupleGetSubPartitionId(Relation rel, void *tuple)
+Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple)
 {
     Oid partitionId = InvalidOid;
     Oid subPartitionId = InvalidOid;
@@ -7662,11 +7654,11 @@ Oid heapTupleGetSubPartitionId(Relation rel, void *tuple)
     Partition part = NULL;
     Relation partRel = NULL;
     /* get partititon oid for the record */
-    partitionId = heapTupleGetPartitionId(rel, tuple, &partitionno);
+    partitionId = heapTupleGetPartitionOid(rel, tuple, &partitionno);
     part = PartitionOpenWithPartitionno(rel, partitionId, partitionno, RowExclusiveLock);
     partRel = partitionGetRelation(rel, part);
     /* get subpartititon oid for the record */
-    subPartitionId = heapTupleGetPartitionId(partRel, tuple, NULL);
+    subPartitionId = heapTupleGetPartitionOid(partRel, tuple, NULL);
 
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, RowExclusiveLock);

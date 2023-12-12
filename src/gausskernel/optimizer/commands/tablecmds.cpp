@@ -7069,7 +7069,7 @@ ObjectAddress renamePartition(RenameStmt* stmt)
         rangePartDef->boundary = stmt->object;
 
         transformPartitionValue(pstate, (Node*)rangePartDef, false);
-        partKeyArray = PartitionmapGetPartKeyArray(rel->partMap);
+        partKeyArray = PartitionMapGetPartKeyArray(rel->partMap);
         rangePartDef->boundary = transformConstIntoTargetType(
             rel->rd_att->attrs, partKeyArray, rangePartDef->boundary);
 
@@ -16411,7 +16411,7 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
      * data type of a partitioned table's partition key can not be changed
      */
     if (RELATION_IS_PARTITIONED(rel) && is_partition_column(rel, attnum)) {
-        int2vector* partKey = PartitionmapGetPartKeyArray(rel->partMap);
+        int2vector* partKey = PartitionMapGetPartKeyArray(rel->partMap);
         int i = 0;
 
         for (; i < partKey->dim1; i++) {
@@ -25120,7 +25120,7 @@ List* GetPartitionBoundary(Relation partTableRel, Node *PartDef)
                     erraction("Check the table type.")));
             break;
     }
-    partitionKey = PartitionmapGetPartKeyArray(partTableRel->partMap);
+    partitionKey = PartitionMapGetPartKeyArray(partTableRel->partMap);
     boundary = transformConstIntoTargetType(partTableRel->rd_att->attrs, partitionKey, boundary);
     return boundary;
 }
@@ -27556,7 +27556,7 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
                 int2 bucketId = InvalidBktId;
 
                 // get right partition oid for the tuple
-                targetPartOid = heapTupleGetPartitionId(partTableRel, (HeapTuple)tuple, NULL, true);
+                targetPartOid = heapTupleGetPartitionOid(partTableRel, (HeapTuple)tuple, NULL, true);
 
                 searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partTableRel, targetPartOid,
                     INVALID_PARTITION_NO, partRel, part, RowExclusiveLock);
@@ -29576,11 +29576,11 @@ static void readTuplesAndInsertInternal(Relation tempTableRel, Relation partTabl
 
         /* tableam_tops_copy_tuple is not ready so we add UStore hack path */
         copyTuple = tableam_tops_copy_tuple(tuple);
-        targetPartOid = heapTupleGetPartitionId(partTableRel, (void *)tuple, &partitionno, true);
+        targetPartOid = heapTupleGetPartitionOid(partTableRel, (void *)tuple, &partitionno, true);
         searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partTableRel, targetPartOid, partitionno,
             partRel, part, RowExclusiveLock);
         if (RelationIsSubPartitioned(partTableRel)) {
-            targetSubPartOid = heapTupleGetPartitionId(partRel, (void *)tuple, &subpartitionno, true);
+            targetSubPartOid = heapTupleGetPartitionOid(partRel, (void *)tuple, &subpartitionno, true);
             searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partRel, targetSubPartOid,
                 subpartitionno, subPartRel, subPart, RowExclusiveLock);
             partRel = subPartRel;
@@ -29738,11 +29738,8 @@ void addToastTableForNewPartition(Relation relation, Oid newPartId, bool isForSu
     /* create toast table */
     firstPartitionId = ((RangePartitionMap*)relation->partMap)->rangeElements[0].partitionOid;
     firstPartition = partitionOpen(relation, firstPartitionId, NoLock);
-    if (PartitionMapIsRange(relation->partMap) || PartitionMapIsInterval(relation->partMap)) {
-        firstPartitionId = ((RangePartitionMap *)relation->partMap)->rangeElements[0].partitionOid;
-    } else {
-        firstPartitionId = ((HashPartitionMap *)relation->partMap)->hashElements[0].partitionOid;
-    }
+    firstPartitionToastId = firstPartition->pd_part->reltoastrelid;
+    
     
     if (OidIsValid(firstPartitionToastId)) {
         reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(firstPartitionToastId));
@@ -31293,7 +31290,7 @@ bool is_partition_column(Relation rel, AttrNumber att_no)
             }
         }
     } else if (RelationIsCommonPartitioned(rel)) {
-        int2vector* part_key = PartitionmapGetPartKeyArray(rel->partMap);
+        int2vector* part_key = PartitionMapGetPartKeyArray(rel->partMap);
         for (int i = 0; i < part_key->dim1; i++) {
             if (att_no == part_key->values[i]) {
                 is_part_col = true;
@@ -31301,7 +31298,7 @@ bool is_partition_column(Relation rel, AttrNumber att_no)
             }
         }
     } else if (RelationIsSubPartitioned(rel)) {
-        int2vector* partKey = PartitionmapGetPartKeyArray(rel->partMap);
+        int2vector* partKey = PartitionMapGetPartKeyArray(rel->partMap);
         for (int i = 0; i < partKey->dim1; i++) {
             if (att_no == partKey->values[i]) {
                 return true;
@@ -31311,7 +31308,7 @@ bool is_partition_column(Relation rel, AttrNumber att_no)
         Oid partOid = linitial_oid(partOidList);
         Partition part = partitionOpen(rel, partOid, NoLock);
         Relation partRel = partitionGetRelation(rel, part);
-        int2vector* subPartKey = PartitionmapGetPartKeyArray(partRel->partMap);
+        int2vector* subPartKey = PartitionMapGetPartKeyArray(partRel->partMap);
         for (int i = 0; i < subPartKey->dim1; i++) {
             if (att_no == subPartKey->values[i]) {
                 is_part_col = true;

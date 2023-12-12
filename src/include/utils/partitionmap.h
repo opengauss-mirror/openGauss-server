@@ -78,17 +78,32 @@ typedef struct PartitionKey {
 void incre_partmap_refcount(PartitionMap* map);
 void decre_partmap_refcount(PartitionMap* map);
 
-#define PartitionMapGetKey(partmap) (((RangePartitionMap*)(partmap))->partitionKey)
+/* macro to check type of partition type */
+#define PartitionMapIsRange(partMap)    (((PartitionMap *)partMap)->type == PART_TYPE_RANGE)
+#define PartitionMapIsList(partMap)     (((PartitionMap *)partMap)->type == PART_TYPE_LIST)
+#define PartitionMapIsHash(partMap)     (((PartitionMap *)partMap)->type == PART_TYPE_HASH)
+#define PartitionMapIsInterval(partMap) (((PartitionMap *)partMap)->type == PART_TYPE_INTERVAL)
 
-#define PartitionMapGetType(partmap) (((RangePartitionMap*)(partmap))->partitionKeyDataType)
+#define PartitionMapTypeIsValid(partMap) (  \
+    PartitionMapIsRange(partMap) ||         \
+    PartitionMapIsList(partMap)  ||         \
+    PartitionMapIsHash(partMap)  ||         \
+    PartitionMapIsInterval(partMap)         \
+)
 
-#define PartitionMapIsRange(partmap) (PART_TYPE_RANGE == ((RangePartitionMap*)(partmap))->base.type)
+inline int2vector* PartitionMapGetPartKeyArray(PartitionMap *partMap)
+{
+    Assert (partMap != NULL && PartitionMapTypeIsValid(partMap));
+    return partMap->partitionKey;
+}
 
-#define PartitionMapIsList(partmap) (PART_TYPE_LIST == ((ListPartitionMap*)(partmap))->base.type)
+inline int PartitionMapGetPartKeyNum(PartitionMap *partMap)
+{
+    Assert (partMap != NULL && PartitionMapTypeIsValid(partMap));
+    return partMap->partitionKey->dim1;
+}
 
-#define PartitionMapIsHash(partmap) (PART_TYPE_HASH == ((HashPartitionMap*)(partmap))->base.type)
-
-#define PartitionMapIsInterval(partmap) (PART_TYPE_INTERVAL == ((RangePartitionMap*)(partmap))->base.type)
+#define constIsMaxValue(value) ((value)->ismaxvalue)
 
 #define FAKERELATIONCACHESIZE 100
 
@@ -107,7 +122,6 @@ void decre_partmap_refcount(PartitionMap* map);
 #define PruningResultIsSubset(pruningRes) (PointerIsValid(pruningRes) && (pruningRes)->state == PRUNING_RESULT_SUBSET)
 
 extern void RelationInitPartitionMap(Relation relation, bool isSubPartition = false);
-extern int2vector *PartitionmapGetPartKeyArray(PartitionMap *pm);
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
 extern Oid getListPartitionOid(
     PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex, bool topClosed);

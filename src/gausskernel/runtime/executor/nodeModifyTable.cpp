@@ -892,7 +892,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     RangeTblEntry *rte = exec_rt_fetch(resultRelInfo->ri_RangeTableIndex, estate);
     if (RelationIsPartitioned(resultRelationDesc)) {
         int partitionno = INVALID_PARTITION_NO;
-        partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple, &partitionno, false, false, !partExprKeyStr);
+        partitionid = heapTupleGetPartitionOid(resultRelationDesc, tuple, &partitionno, false, false, !partExprKeyStr);
         bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
             estate->es_query_cxt,
             resultRelationDesc,
@@ -909,7 +909,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
         if (RelationIsSubPartitioned(resultRelationDesc)) {
             int subpartitionno = INVALID_PARTITION_NO;
             bool subpartExprKeyIsNull = PartExprKeyIsNull(heaprel, NULL);
-            subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno, false, false, subpartExprKeyIsNull);
+            subPartitionId = heapTupleGetPartitionOid(heaprel, tuple, &subpartitionno, false, false, subpartExprKeyIsNull);
             searchFakeReationForPartitionOid(estate->esfRelations,
                 estate->es_query_cxt,
                 heaprel,
@@ -1236,9 +1236,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 Oid targetOid = InvalidOid;
                 if (is_partition_rel) {
                     if (RelationIsSubPartitioned(result_relation_desc)) {
-                        targetOid = heapTupleGetSubPartitionId(result_relation_desc, tuple);
+                        targetOid = heapTupleGetSubPartitionOid(result_relation_desc, tuple);
                     } else {
-                        targetOid = heapTupleGetPartitionId(result_relation_desc, tuple, NULL, false, false, !partExprKeyStr);
+                        targetOid = heapTupleGetPartitionOid(result_relation_desc, tuple, NULL, false, false, !partExprKeyStr);
                     }
                 } else {
                     targetOid = RelationGetRelid(result_relation_desc);
@@ -1370,10 +1370,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         int partitionno = INVALID_PARTITION_NO;
                         if (partExprKeyStr) {
                             Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
-                            partition_id = heapTupleGetPartitionId(result_relation_desc, (void *)newval, &partitionno,
+                            partition_id = heapTupleGetPartitionOid(result_relation_desc, (void *)newval, &partitionno,
                                 false, estate->es_plannedstmt->hasIgnore, false);
                         } else {
-                            partition_id = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno, false,
+                            partition_id = heapTupleGetPartitionOid(result_relation_desc, tuple, &partitionno, false,
                                 estate->es_plannedstmt->hasIgnore, true);
                         }
                         /* if cannot find valid partition oid and sql has keyword ignore, return and don't insert */
@@ -1436,10 +1436,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         /* get partititon oid for insert the record */
                         if (partExprKeyStr) {
                             Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
-                            partitionId = heapTupleGetPartitionId(result_relation_desc, (void *)newval, &partitionno,
+                            partitionId = heapTupleGetPartitionOid(result_relation_desc, (void *)newval, &partitionno,
                                 false, estate->es_plannedstmt->hasIgnore, false);
                         } else {
-                            partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno, false,
+                            partitionId = heapTupleGetPartitionOid(result_relation_desc, tuple, &partitionno, false,
                                 estate->es_plannedstmt->hasIgnore, true);
                         }
 
@@ -1463,10 +1463,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, &subpartExprKeyStr);
                         if (!subpartExprKeyIsNull) {
                             Datum newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
-                            subPartitionId = heapTupleGetPartitionId(partRel, (void *)newsubval, &subpartitionno, false,
+                            subPartitionId = heapTupleGetPartitionOid(partRel, (void *)newsubval, &subpartitionno, false,
                                 estate->es_plannedstmt->hasIgnore, false);
                         } else {
-                            subPartitionId = heapTupleGetPartitionId(partRel, tuple, &subpartitionno, false,
+                            subPartitionId = heapTupleGetPartitionOid(partRel, tuple, &subpartitionno, false,
                                 estate->es_plannedstmt->hasIgnore, true);
                         }
                         if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
@@ -3326,7 +3326,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         heaprel = targetrel;
         tuple = tableam_tslot_get_tuple_from_slot(targetrel, slot);
         if (RelationIsPartitioned(targetrel)) {
-            partitionid = heapTupleGetPartitionId(targetrel, tuple, &partitionno, false, false, !partExprKeyStr);
+            partitionid = heapTupleGetPartitionOid(targetrel, tuple, &partitionno, false, false, !partExprKeyStr);
             searchFakeReationForPartitionOid(estate->esfRelations,
                                              estate->es_query_cxt,
                                              targetrel,
@@ -3338,7 +3338,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
 
             if (RelationIsSubPartitioned(targetrel)) {
                 bool subpartExprKeyIsNull = PartExprKeyIsNull(heaprel, NULL);
-                subPartitionId = heapTupleGetPartitionId(heaprel, tuple, &subpartitionno, false, false, subpartExprKeyIsNull);
+                subPartitionId = heapTupleGetPartitionOid(heaprel, tuple, &subpartitionno, false, false, subpartExprKeyIsNull);
                 searchFakeReationForPartitionOid(estate->esfRelations,
                                                  estate->es_query_cxt,
                                                  heaprel,

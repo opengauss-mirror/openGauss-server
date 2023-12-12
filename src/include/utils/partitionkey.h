@@ -65,7 +65,7 @@ extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, Par
 extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
 
 /* the 2nd parameter must be partition boundary */
-#define partitonKeyCompareForRouting(partkey_value, partkey_bound, len, compare)                                 \
+#define partitionKeyCompareForRouting(partkey_value, partkey_bound, len, compare)                                 \
     do {                                                                                                         \
         uint32 i = 0;                                                                                            \
         Const *kv = NULL;                                                                                        \
@@ -116,7 +116,6 @@ extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
 #endif
 
 #define constIsNull(x) ((x)->constisnull)
-#define constIsMaxValue(x) ((x)->ismaxvalue)
 
 int ConstCompareWithNull(Const *c1, Const *c2, Oid collation);
 int ListPartKeyCompare(PartitionKey* k1, PartitionKey* k2);
