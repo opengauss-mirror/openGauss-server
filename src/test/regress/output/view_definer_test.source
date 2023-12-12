@@ -89,7 +89,7 @@ CREATE TABLE tab_1107262 (
 )
 WITH (orientation=row, compression=no);
 ALTER TABLE public.tab_1107262 OWNER TO "Root_Test";
-COPY tab_1107262 (id, c1) FROM stdin;
+COPY public.tab_1107262 (id, c1) FROM stdin;
 \.
 ;
 \! @abs_bindir@/gs_dump test_db -p @portstring@ -F c -f @abs_bindir@/definer_view_dump.dmp
