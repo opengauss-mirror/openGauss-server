@@ -629,7 +629,7 @@ char *ParsePage(char *path, int64 blocknum, char *relation_type, bool read_memor
         blockNum = blocknum;
         block_endpoint = blocknum;
     } else { /* blocknum == -1, parse all blocks */
-        block_endpoint = maxBlockNum;
+        block_endpoint = maxBlockNum + 1;
     }
     /* if not declare a single block, then loop all blocks */
     while (blockNum <= block_endpoint) {
