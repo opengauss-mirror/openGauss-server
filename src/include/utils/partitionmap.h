@@ -35,6 +35,33 @@
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 
+/*
+ * ---------------------------------------------------------------------------------------
+ *
+ * Table partitioning related defines
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+
+/* ALL types partition allows 4 columns at most */
+#define MAX_PARTKEY_NUMS           16
+
+/* range-partition allows 4 columns at most */
+#define MAX_RANGE_PARTKEY_NUMS     16
+
+/* interval-partition allows 1 columns at most */
+#define MAX_INTERVAL_PARTKEY_NUMS  1
+
+/* list-partition allows 1 columns at most */
+#define MAX_LIST_PARTKEY_NUMS      16
+
+/* hash-partition allows 1 columns at most */
+#define MAX_HASH_PARTKEY_NUMS      1
+
+/* value-partition allows 4 columns at most */
+#define MAX_VALUE_PARTKEY_NUMS     4
+
+/* describe table partition type */
 typedef enum PartitionType {
     PART_TYPE_NONE = 0,
     PART_TYPE_RANGE,
@@ -44,7 +71,7 @@ typedef enum PartitionType {
     PART_TYPE_VALUE
 } PartitionType;
 
-// describe abstract partition map
+/* describe abstract PartitionMap class */
 typedef struct PartitionMap {
     PartitionType type;
     int refcount;
@@ -59,16 +86,6 @@ typedef struct PartitionKey {
     int count;      /* partition key values count */
     Const **values;
 } PartitionKey;
-
-// describe range partition
-#define RANGE_PARTKEYMAXNUM 16
-#define PARTITION_PARTKEYMAXNUM 16
-#define VALUE_PARTKEYMAXNUM 4
-#define INTERVAL_PARTKEYMAXNUM 1
-
-#define LIST_PARTKEYMAXNUM 16
-
-#define HASH_PARTKEYMAXNUM 1
 
 #define PartitionLogicalExist(partitionIdentifier) ((partitionIdentifier)->partSeq >= 0)
 

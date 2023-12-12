@@ -71,7 +71,7 @@ typedef struct SliceConstInfo {
     char* sliceName;
     int sliceNum;
     List* sliceBoundary;
-    Const* sliceBoundaryValue[RANGE_PARTKEYMAXNUM];
+    Const* sliceBoundaryValue[MAX_RANGE_PARTKEY_NUMS];
 } SliceConstInfo;
 
 extern Relation heap_create(const char *relname,

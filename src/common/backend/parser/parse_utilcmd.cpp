@@ -2577,7 +2577,7 @@ static void transformTableLikePartitionKeys(
                     RelationGetRelationName(relation))));
     }
 
-    AssertEreport(n_key_column <= RANGE_PARTKEYMAXNUM, MOD_OPT, "");
+    AssertEreport(n_key_column <= MAX_RANGE_PARTKEY_NUMS, MOD_OPT, "");
 
     /* Get int2 array of partition key column numbers */
     attnums = (int16*)ARR_DATA_PTR(partkey_columns);
@@ -5720,11 +5720,11 @@ void checkPartitionSynax(CreateStmt* stmt)
     }
 
     /* check partition key number for none value-partition table */
-    if (!value_partition && stmt->partTableState->partitionKey->length > PARTITION_PARTKEYMAXNUM) {
+    if (!value_partition && stmt->partTableState->partitionKey->length > MAX_PARTKEY_NUMS) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("too many partition keys for partitioned table"),
-                errhint("Partittion key columns can not be more than %d", PARTITION_PARTKEYMAXNUM)));
+                errhint("Partittion key columns can not be more than %d", MAX_PARTKEY_NUMS)));
     }
 
     /* check PARTITIONS clause */

@@ -146,8 +146,8 @@ void partitionRoutingForTuple(Relation rel, void *tuple, PartitionIdentifier *pa
     TupleDesc tuple_desc = NULL;
     int2vector *partkey_column = NULL;
     int partkey_column_n = 0;
-    static THR_LOCAL Const consts[PARTITION_PARTKEYMAXNUM];
-    static THR_LOCAL Const *values[PARTITION_PARTKEYMAXNUM];
+    static THR_LOCAL Const consts[MAX_PARTKEY_NUMS];
+    static THR_LOCAL Const *values[MAX_PARTKEY_NUMS];
     bool isnull = false;
     bool is_ustore = RelationIsUstoreFormat(rel);
     Datum column_raw;
@@ -178,7 +178,7 @@ void partitionRoutingForTuple(Relation rel, void *tuple, PartitionIdentifier *pa
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("inserted partition key does not map to any partition"),
                         errdetail("inserted partition key cannot be NULL for interval-partitioned table")));
     }
-    partitionRoutingForValue((rel), values, partkey_column_n, true, false, (partIdentfier));
+    partitionRoutingForValue((rel), values, partkey_column_n, true, false, partIdentfier);
 }
 
 void partitionRoutingForValue(Relation rel, Const **keyValue, int valueLen, bool topClosed, bool missIsOk,
@@ -216,7 +216,7 @@ void partitionRoutingForValue(Relation rel, Const **keyValue, int valueLen, bool
         }
     } else if ((rel)->partMap->type == PART_TYPE_HASH) {
         (result)->partArea = PART_AREA_HASH;
-        (result)->partitionId = getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq));
+        (result)->partitionId = getHashPartitionOid(rel->partMap, keyValue, &result->partSeq);
         if ((result)->partSeq < 0) {
             (result)->fileExist = false;
         } else {
@@ -308,52 +308,43 @@ Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32
 
 Oid getListPartitionOid(PartitionMap *partMap, Const **partKeyValue, int partKeyCount, int32 *partSeq)
 {
-    ListPartitionMap *listPartMap = NULL;
-    Oid result = InvalidOid;
-    int hit = -1;
-    PartitionKey partKey;
-    PartitionKey *boundary = NULL;
-    Oid defaultPartitionOid = InvalidOid;
-    bool existDefaultPartition = false;
-    int defaultPartitionHit = -1;
-
     Assert(PointerIsValid(partMap));
     Assert(PointerIsValid(partKeyValue));
-
+    
+    ListPartitionMap* listMap = (ListPartitionMap *)partMap;
+    Oid result = InvalidOid;
+    
     incre_partmap_refcount(partMap);
-    listPartMap = (ListPartitionMap *)(partMap);
-    partKey.values = partKeyValue;
-    partKey.count = partKeyCount;
 
-    int i = 0;
-    while (i < listPartMap->listElementsNum && hit < 0) {
-        boundary = listPartMap->listElements[i].boundary;
-        int list_len = listPartMap->listElements[i].len;
-        if (list_len == 1 && ((Const *)boundary[0].values[0])->ismaxvalue) {
-            defaultPartitionOid = listPartMap->listElements[i].partitionOid;
-            existDefaultPartition = true;
-            defaultPartitionHit = i;
-        }
-        int j = 0;
-        while (j < list_len) {
-            if (ListPartKeyCompare(&partKey, &boundary[j]) == 0) {
-                hit = i;
+    PartEntryKey key;
+    key.parentRelOid = listMap->base.relOid;
+    key.partKey.values = partKeyValue;
+    key.partKey.count = partKeyCount;
+    bool found = false;
+    PartElementHashEntry *entry = (PartElementHashEntry *)hash_search(listMap->ht, &key, HASH_FIND, &found);
+
+    if (found) {
+        /* found targe value from the hash bucket list */
+        while (entry != NULL) {
+            if (ListPartKeyCompare(&key.partKey, &entry->key.partKey) == 0) {
                 break;
             }
-            j++;
+
+            entry = entry->next;
         }
-        i++;
-    }
 
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = listPartMap->listElements[hit].partitionOid;
-    } else if (existDefaultPartition) {
-        result = defaultPartitionOid;
-        *partSeq = defaultPartitionHit;
+        /* found the target partition othewise set the value */
+        if (entry != NULL) {
+            *partSeq = entry->partSeq;
+            result = entry->partRelOid;
+        } else {
+            *partSeq = listMap->defaultPartSeqNo;
+            result = listMap->defaultPartRelOid;
+        }
+    } else {
+        /* target partition is not found case check if we have default partition */
+        *partSeq = listMap->defaultPartSeqNo;
+        result = listMap->defaultPartRelOid;
     }
 
     decre_partmap_refcount(partMap);

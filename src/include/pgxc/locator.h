@@ -145,7 +145,7 @@ typedef struct SliceBoundary {
     NodeTag type;
     int nodeIdx;
     int len;
-    Const *boundary[RANGE_PARTKEYMAXNUM];
+    Const *boundary[MAX_RANGE_PARTKEY_NUMS];
 } SliceBoundary;
 
 typedef struct ExecBoundary {

@@ -60,8 +60,8 @@ typedef struct PartitionIdentifier {
     int partSeq;
     bool fileExist;
     Oid partitionId;
-    Const consts[PARTITION_PARTKEYMAXNUM];
-    Const *values[PARTITION_PARTKEYMAXNUM];
+    Const consts[MAX_PARTKEY_NUMS];
+    Const *values[MAX_PARTKEY_NUMS];
 } PartitionIdentifier;
 
 /*
@@ -74,7 +74,7 @@ typedef struct RangeElement {
     Oid partitionOid;                        /* the oid of partition */
     int partitionno;                         /* the partitionno of partition */
     int len;                                 /* the length of partition key number */
-    Const* boundary[RANGE_PARTKEYMAXNUM];    /* upper bond of partition */
+    Const* boundary[MAX_RANGE_PARTKEY_NUMS];    /* upper bond of partition */
     bool isInterval;                         /* is interval partition */
 } RangeElement;
 
@@ -108,8 +108,28 @@ typedef struct RangePartitionMap {
     oidvector* intervalTablespace; /* valid for interval partition */
 } RangePartitionMap;
 
-bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Interval* intervalValue, bool topClosed);
-extern int2vector* GetPartitionKey(const PartitionMap* partMap);
+#define IS_NULL_CONST(x) (x->constisnull)
+
+typedef struct PartEntryKey {
+    Oid parentRelOid;
+    PartitionKey partKey;
+} PartEntryKey;
+
+typedef struct PartElementHashEntry {
+    /* hash table's KEY part */
+    PartEntryKey key;
+
+    /* value part */
+    Oid rootRelOid; /* Oid entry in pg_class, equal to key.parentRelOid in none-subpartition case */
+    Oid partRelOid;
+    int partSeq;
+
+    /* confilct case to lookup party entry */
+    struct PartElementHashEntry *next;
+} ListElementHashEntry;
+
+#define INVALID_PARTREL_OID   InvalidOid
+#define INVALID_PARTREL_SEQNO -1
 extern Const **transformConstIntoPartkeyType(FormData_pg_attribute* attrs, int2vector* partitionKey, Const **boundary,
     int len);
 
@@ -118,6 +138,11 @@ typedef struct ListPartitionMap {
     /* section 1: list partition specific */
     int listElementsNum;          /* the number of list partition */
     ListPartElement* listElements;   /* array of listElement */
+
+    /* list value to partRelOid */
+    HTAB *ht;
+    Oid   defaultPartRelOid;
+    int   defaultPartSeqNo;
 } ListPartitionMap;
 
 typedef struct HashPartitionMap {
@@ -134,6 +159,10 @@ typedef struct HashPartitionMap {
         }                                                                              \
     } while (0)
 
+extern bool IsDefaultValueListPartition(ListPartitionMap *listMap, ListPartElement *partElem);
+char *PartKeyGetCstring(PartitionKey* partkeys);
+extern bool ConstEqual(Const *c1, Const *c2);
+extern char *PartKeyGetCstring(Const* c);
 void partitionRoutingForTuple(Relation rel, void *tuple, PartitionIdentifier *partIdentfier, bool canIgnore,
                               bool partExprKeyIsNull);
 void partitionRoutingForValue(Relation rel, Const **keyValue, int valueLen, bool topClosed, bool missIsOk,
@@ -405,6 +434,10 @@ typedef struct PruningResult {
     bool isPbeSinlePartition = false;
 } PruningResult;
 
+extern bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Interval* intervalValue,
+    bool topClosed);
+extern int2vector* GetPartitionKey(const PartitionMap* partMap);
+
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
 extern PartitionIdentifier* partOidGetPartID(Relation rel, Oid partOid);
 
@@ -437,5 +470,9 @@ extern void DestroyPartitionMap(PartitionMap* partMap);
 /* search fake relation with partOid, if no need partitionno, just input 0 */
 extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
     int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
+
+/* partitoin map copy functions */
+extern ListPartitionMap *CopyListPartitionMap(ListPartitionMap *src_lpm);
+/* more! other hash/range and its underlaying element data structores will add here later */
 
 #endif /* PARTITIONMAP_GS_H_ */

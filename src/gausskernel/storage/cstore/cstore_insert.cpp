@@ -2486,8 +2486,8 @@ void CStorePartitionInsert::MoveBatchRowToPartitionValueCache(int partitionidx)
 void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nulls, _in_ int options)
 {
     Relation partitionedRel = m_relation;
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* partKeyValues[RANGE_PARTKEYMAXNUM] = {};
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* partKeyValues[MAX_RANGE_PARTKEY_NUMS] = {};
     PartitionIdentifier matchPartition;
 
     CHECK_FOR_INTERRUPTS();
@@ -2496,7 +2496,7 @@ void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nul
     int2vector* partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->base.partitionKey;
     int partkeyColNum = partKeyColumn->dim1;
 
-    Assert(partkeyColNum <= RANGE_PARTKEYMAXNUM);
+    Assert(partkeyColNum <= MAX_RANGE_PARTKEY_NUMS);
     for (int i = 0; i < partkeyColNum; i++) {
         int col_location = partKeyColumn->values[i];
         partKeyValues[i] = transformDatum2Const(

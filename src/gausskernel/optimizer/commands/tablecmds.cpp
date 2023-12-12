@@ -1526,11 +1526,11 @@ static void validateDfsTableDef(CreateStmt* stmt, bool isDfsTbl)
             ereport(ERROR,
                 (errcode(ERRCODE_PARTITION_ERROR),
                     errmsg("Num of partition keys in value-partitioned table should not be zeror")));
-        } else if (list_length(stmt->partTableState->partitionKey) > VALUE_PARTKEYMAXNUM) {
+        } else if (list_length(stmt->partTableState->partitionKey) > MAX_VALUE_PARTKEY_NUMS) {
             ereport(ERROR,
                 (errcode(ERRCODE_PARTITION_ERROR),
                     errmsg("Num of partition keys in value-partitioned table exceeds max allowed num:%d",
-                        RANGE_PARTKEYMAXNUM)));
+                        MAX_RANGE_PARTKEY_NUMS)));
         }
 
         /* Partition stragegy check */
@@ -27735,8 +27735,8 @@ static void checkValidationForExchangeCStore(Relation partTableRel, Relation ord
     bool* nulls = NULL;
     FormData_pg_attribute* attrs = ordTableRel->rd_att->attrs;
 
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* partKeyValues[RANGE_PARTKEYMAXNUM];
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* partKeyValues[MAX_RANGE_PARTKEY_NUMS];
     bool isInPart = false;
 
     const int tididx = 1;       // junk column for cstore delete
@@ -28728,7 +28728,7 @@ static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation par
     RangePartitionMap* partMap = NULL;
     ParseState* pstate = NULL;
     ListCell* cell = NULL;
-    Const* partKeyValueArr[RANGE_PARTKEYMAXNUM] = {NULL};
+    Const* partKeyValueArr[MAX_RANGE_PARTKEY_NUMS] = {NULL};
     int i = 0;
     int partKeyNum = 0;
     int compareSrcPart = 0;
@@ -28820,7 +28820,7 @@ static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefLis
         RangePartitionDefState* rangePartDef = (RangePartitionDefState*)lfirst(cell);
         List* partKeyValueList = NIL;
         ListCell* otherCell = NULL;
-        Const** partKeyValueArr = (Const**)palloc0(sizeof(Const*) * RANGE_PARTKEYMAXNUM);
+        Const** partKeyValueArr = (Const**)palloc0(sizeof(Const*) * MAX_RANGE_PARTKEY_NUMS);
         int i = 0;
 
         partKeyValueList = transformConstIntoTargetType(partTableRel->rd_att->attrs,

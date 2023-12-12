@@ -902,7 +902,7 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
     utils_cxt->ContextUsedCount = 0;
 
     int rc = memset_s(
-        utils_cxt->valueItemArr, PARTITION_PARTKEYMAXNUM * sizeof(Const*), 0, PARTITION_PARTKEYMAXNUM * sizeof(Const*));
+        utils_cxt->valueItemArr, MAX_PARTKEY_NUMS * sizeof(Const*), 0, MAX_PARTKEY_NUMS * sizeof(Const*));
     securec_check(rc, "\0", "\0");
     utils_cxt->CurrentResourceOwner = NULL;
     utils_cxt->STPSavedResourceOwner = NULL;

@@ -6196,10 +6196,10 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
     if (!PointerIsValid(newPartDef->boundary)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("boundary not defined for new partition")));
     }
-    if (newPartDef->boundary->length > PARTITION_PARTKEYMAXNUM) {
+    if (newPartDef->boundary->length > MAX_PARTKEY_NUMS) {
         ereport(ERROR,
             (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                errmsg("too many partition keys, allowed is %d", PARTITION_PARTKEYMAXNUM)));
+                errmsg("too many partition keys, allowed is %d", MAX_PARTKEY_NUMS)));
     }
 
     /*new partition name check*/
@@ -7035,10 +7035,10 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
         RangePartitionDefState* lastPartition = NULL;
         lastPartition = (RangePartitionDefState*)lfirst(partTableState->partitionList->tail);
 
-        if (lastPartition->boundary->length > PARTITION_PARTKEYMAXNUM) {
+        if (lastPartition->boundary->length > MAX_PARTKEY_NUMS) {
             ereport(ERROR,
                 (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                    errmsg("number of partition key columns MUST less or equal than %d", PARTITION_PARTKEYMAXNUM)));
+                    errmsg("number of partition key columns MUST less or equal than %d", MAX_PARTKEY_NUMS)));
         }
     }
 
@@ -7993,7 +7993,7 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
     n_key_column = ARR_DIMS(partkey_columns)[0];
 
     /*CHECK: the ArrayType of partition key is valid*/
-    if (ARR_NDIM(partkey_columns) != 1 || n_key_column < 0 || n_key_column > RANGE_PARTKEYMAXNUM ||
+    if (ARR_NDIM(partkey_columns) != 1 || n_key_column < 0 || n_key_column > MAX_RANGE_PARTKEY_NUMS ||
         ARR_HASNULL(partkey_columns) || ARR_ELEMTYPE(partkey_columns) != INT2OID) {
         relation_close(pgPartRel, AccessShareLock);
         ereport(ERROR,
@@ -8002,7 +8002,7 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
                        "type.",
                     RelationGetRelationName(partTableRel))));
     }
-    Assert(n_key_column <= RANGE_PARTKEYMAXNUM);
+    Assert(n_key_column <= MAX_RANGE_PARTKEY_NUMS);
     /* Get int2 array of partition key column numbers*/
     attnums = (int16*)ARR_DATA_PTR(partkey_columns);
 

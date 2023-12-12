@@ -81,8 +81,8 @@ static bool checkTupleIsInListPartition(Relation partTableRel, int partSeq, Tupl
     int2vector* partkeyColumns = NULL;
     int partkeyColumnNum = 0;
     int i = 0;
-    Const* tuplePartKeyValues[LIST_PARTKEYMAXNUM];
-    Const consts[LIST_PARTKEYMAXNUM];
+    Const* tuplePartKeyValues[MAX_LIST_PARTKEY_NUMS];
+    Const consts[MAX_LIST_PARTKEY_NUMS];
     Datum tuplePartKeyValue;
     bool isNull = false;
     bool isInPartition = false;
@@ -117,8 +117,8 @@ static bool checkTupleIsInHashPartition(Relation partTableRel, int partSeq, Tupl
     int2vector* partkeyColumns = NULL;
     int partkeyColumnNum = 0;
     int i = 0;
-    Const* tuplePartKeyValues[HASH_PARTKEYMAXNUM];
-    Const consts[HASH_PARTKEYMAXNUM];
+    Const* tuplePartKeyValues[MAX_HASH_PARTKEY_NUMS];
+    Const consts[MAX_HASH_PARTKEY_NUMS];
     Datum tuplePartKeyValue;
     bool isNull = false;
     bool isInPartition = false;
@@ -152,8 +152,8 @@ static bool checkTupleIsInRangePartition(Relation partTableRel, int partSeq, Tup
     int2vector* partkeyColumns = NULL;
     int partkeyColumnNum = 0;
     int i = 0;
-    Const* tuplePartKeyValues[RANGE_PARTKEYMAXNUM];
-    Const consts[RANGE_PARTKEYMAXNUM];
+    Const* tuplePartKeyValues[MAX_RANGE_PARTKEY_NUMS];
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
     Datum tuplePartKeyValue;
     bool isNull = false;
     bool isInPartition = false;

@@ -348,17 +348,7 @@ PartitionMap *CopyPartitionMap(PartitionMap *oldmap)
             return (PartitionMap *)CopyRangePartitionMap((RangePartitionMap *)oldmap);
         }
         case PART_TYPE_LIST: {
-            ListPartitionMap *dst_lpm = (ListPartitionMap *)palloc(sizeof(ListPartitionMap));
-            ListPartitionMap *src_lpm = (ListPartitionMap *)oldmap;
-            *dst_lpm = *src_lpm;
-            dst_lpm->base.partitionKey = int2vectorCopy(src_lpm->base.partitionKey);
-            size_t key_len = sizeof(Oid) * src_lpm->base.partitionKey->dim1;
-            dst_lpm->base.partitionKeyDataType = (Oid *)palloc(key_len);
-            errno_t rc = memcpy_s(dst_lpm->base.partitionKeyDataType, key_len,
-                src_lpm->base.partitionKeyDataType, key_len);
-            securec_check(rc, "", "");
-            dst_lpm->listElements = CopyListElements(src_lpm->listElements, src_lpm->listElementsNum);
-            return (PartitionMap *)dst_lpm;
+            return (PartitionMap *)CopyListPartitionMap((ListPartitionMap *)oldmap);
         }
         case PART_TYPE_HASH: {
             HashPartitionMap *dst_hpm = (HashPartitionMap *)palloc(sizeof(HashPartitionMap));

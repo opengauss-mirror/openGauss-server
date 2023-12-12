@@ -62,6 +62,11 @@
 #include "utils/datum.h"
 #include "utils/knl_relcache.h"
 
+static void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo);
+static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap);
+static uint32 PartKeyHashFunc(const void *key, Size keysize);
+static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize);
+
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
 #define overFlowCheck(arg)                                                                \
     do {                                                                                  \
@@ -337,9 +342,9 @@ static inline void BuildRangeElement(RangeElement *elem, RangePartitionMap *rmap
     Assert(PointerIsValid(elem));
     Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKey));
     Assert(PointerIsValid(tuple) && PointerIsValid(desc));
-    Assert(base->partitionKey->dim1 <= RANGE_PARTKEYMAXNUM);
+    Assert(base->partitionKey->dim1 <= MAX_RANGE_PARTKEY_NUMS);
     Assert(base->partitionKey->dim1 == (base->partitionKey->dim1));
-    unserializePartitionStringAttribute(elem->boundary, RANGE_PARTKEYMAXNUM, (base->partitionKeyDataType),
+    unserializePartitionStringAttribute(elem->boundary, MAX_RANGE_PARTKEY_NUMS, (base->partitionKeyDataType),
                                         (base->partitionKey->dim1), (relOid), (base->partitionKey), (tuple),
                                         Anum_pg_partition_boundaries, (desc));
     elem->partitionOid = HeapTupleGetOid(tuple);
@@ -371,7 +376,7 @@ static inline void buildHashElement(HashPartElement *elem, HashPartitionMap *hma
     Assert(PointerIsValid(elem));
     Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKeyDataType));
     Assert(PointerIsValid(tuple) && PointerIsValid(desc));
-    unserializeHashPartitionAttribute((elem)->boundary, RANGE_PARTKEYMAXNUM, (relOid), (base->partitionKey), (tuple),
+    unserializeHashPartitionAttribute((elem)->boundary, MAX_HASH_PARTKEY_NUMS, (relOid), (base->partitionKey), (tuple),
                                       Anum_pg_partition_boundaries, (desc));
     (elem)->partitionOid = HeapTupleGetOid(tuple);
     (elem)->partitionno = (partitionNo);
@@ -472,7 +477,7 @@ void unserializePartitionStringAttribute(Const** outMaxValue, int outMaxValueLen
     boundary = untransformPartitionBoundary(attribute_raw_value);
 
     Assert(boundary->length == partKeyAttrNo->dim1);
-    Assert(boundary->length <= RANGE_PARTKEYMAXNUM);
+    Assert(boundary->length <= MAX_RANGE_PARTKEY_NUMS);
 
     /* Now, for each max value item, call it's typin function, save it in datum */
     counter = 0;
@@ -714,7 +719,7 @@ int2vector* getPartitionKeyAttrNo(
     /* Get int2 array of partition key column numbers */
     attnums = (int16*)ARR_DATA_PTR(partkey_columns);
 
-    Assert(n_key_column <= RANGE_PARTKEYMAXNUM);
+    Assert(n_key_column <= MAX_RANGE_PARTKEY_NUMS);
 
     /* Initialize int2verctor structure for attribute number array of partition key */
     partkey = buildint2vector(NULL, n_key_column);
@@ -1276,6 +1281,36 @@ void DestroyListElements(ListPartElement* src, int elementNum)
     pfree_ext(src);
 }
 
+ListPartitionMap *CopyListPartitionMap(ListPartitionMap *src_lpm)
+{
+    ListPartitionMap *dst_lpm = (ListPartitionMap *)palloc0(sizeof(ListPartitionMap));
+    *dst_lpm = *src_lpm;
+
+    /* copy base class */
+    dst_lpm->base.partitionKey = int2vectorCopy(src_lpm->base.partitionKey);
+    size_t key_len = sizeof(Oid) * (unsigned)src_lpm->base.partitionKey->dim1;
+    dst_lpm->base.partitionKeyDataType = (Oid *)palloc0(key_len);
+    errno_t rc = memcpy_s(dst_lpm->base.partitionKeyDataType, key_len,
+        src_lpm->base.partitionKeyDataType, key_len);
+    securec_check(rc, "", "");
+
+    /* copy list partition speciall part */
+    dst_lpm->defaultPartRelOid = INVALID_PARTREL_OID;
+    dst_lpm->defaultPartSeqNo = INVALID_PARTREL_SEQNO;
+    dst_lpm->listElementsNum = src_lpm->listElementsNum;
+    dst_lpm->listElements = CopyListElements(src_lpm->listElements, src_lpm->listElementsNum);
+
+    /* copy part key hash-table */
+    dst_lpm->ht = BuildPartKeyHashTable(dst_lpm);
+    for (int partSeq = 0; partSeq < dst_lpm->listElementsNum; partSeq++) {
+        ListPartElement *lpe = &(dst_lpm->listElements[partSeq]);
+        InsertPartKeyHashTable(dst_lpm, lpe, partSeq);
+    }
+
+    return dst_lpm;
+}
+
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -1635,10 +1670,190 @@ static void BuildElementForPartKeyExpr(void* element, HeapTuple partTuple, int p
     heap_close(typeRel, RowExclusiveLock);
 }
 
+/*
+ * List partition routing improvements!
+ *
+ * Here we bulid a per-partmap level hash search table to hold all partition refs under one
+ * ListPartitionMap, where we gains O(1) search efficiency, it consists of following routines
+ *    - PartKeyHashFunc()
+ *    - PartKeyMatchFunc()
+ *    - BuildPartKeyHashTable()
+ *    - InsertPartKeyHashTable()
+ */
+static uint32 PartKeyHashFunc(const void *key, Size keysize)
+{
+    Assert (keysize == sizeof(PartEntryKey));
+    PartitionKey *pk = &((PartEntryKey *)key)->partKey;
+    Const **c = pk->values;
+    /*
+     * we just take value of key's const val as hashkey, for MaxValue (a.w.k default) we return 0
+     *
+     * Note: hash table is created at current partition map level, for sub-partiting we may have
+     * more than one hashtable.
+     */
+    uint32 hashval = 0;
+    for (int i = 0; i <pk->count; i++) {
+        if (constIsNull(c[i]) || constIsMaxValue(c[i])) {
+            continue;
+        }
+        hashval = hashValueCombination(hashval, c[i]->consttype, c[i]->constvalue, c[i]->constisnull, LOCATOR_TYPE_HASH,
+                                       c[i]->constcollid);
+    }
+
+    return hashval;
+}
+
+static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize)
+{
+    Assert(keysize == sizeof(PartEntryKey));
+    PartEntryKey *c1 = (PartEntryKey *)key1;
+    PartEntryKey *c2 = (PartEntryKey *)key2;
+    int ret = 1;
+
+    /*
+     * 1st check if baseRelOid is equal
+     */
+    if (c1->parentRelOid != c2->parentRelOid || c1->partKey.count != c2->partKey.count) {
+        return 1;
+    }
+
+    for (int i=0; i < c1->partKey.count;i++) {
+        ret = ConstCompareWithNull(c1->partKey.values[i], c2->partKey.values[i], c2->partKey.values[i]->constcollid);
+        if (ret != 0) {
+            break;
+        }
+    }
+    return ret;
+}
+
+static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap)
+{
+    HASHCTL hashCtl;
+    errno_t rc;
+    StringInfoData si;
+
+    /* Create the hash table */
+    rc = memset_s(&hashCtl, sizeof(hashCtl), '\0', sizeof(hashCtl));
+    securec_check(rc, "", "");
+    initStringInfo(&si);
+    appendStringInfo(&si, "list_hash_entry_%u", listMap->base.relOid);
+
+    hashCtl.keysize = sizeof(PartEntryKey);
+    hashCtl.entrysize = sizeof(PartElementHashEntry);
+    hashCtl.hash = PartKeyHashFunc;
+    hashCtl.match = PartKeyMatchFunc;
+    listMap->ht = hash_create(si.data, 1024L, &hashCtl, HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+
+    return listMap->ht;
+}
+
+static inline void DeepCopyPartKey(PartitionKey* src, PartitionKey* dst)
+{
+    dst->count = src->count;
+    dst->values = (Const**)palloc0(sizeof(Const*) * dst->count);
+    for (int i = 0; i < dst->count; i++) {
+        dst->values[i] = (Const *)copyObject(src->values[i]);
+    }
+}
+
+static void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo)
+{
+    Assert (listMap != NULL && partElem != NULL);
+
+    if (!PartitionMapIsList(listMap)) {
+        /* fall back to base class */
+        PartitionMap *pm = (PartitionMap *)listMap;
+        ereport(ERROR,
+            (errcode(ERRCODE_PARTITION_ERROR),
+                errmsg("\"only list partition is allowed to create part hash entry internally baseRelOid:%u\"",
+                pm->relOid)));
+    }
+
+    /* check the default value case, if so we assign default partRelOid and partSeqNo */
+    int partListLen = partElem->len;
+    if (IsDefaultValueListPartition(listMap, partElem)) {
+        Assert (listMap->defaultPartRelOid == INVALID_PARTREL_OID &&
+            listMap->defaultPartSeqNo == INVALID_PARTREL_SEQNO);
+        listMap->defaultPartRelOid = partElem->partitionOid;
+        listMap->defaultPartSeqNo = partSeqNo;
+        return;
+    }
+
+    MemoryContext old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
+    for (int n = 0; n < partListLen; n++) {
+        PartitionKey* newPartKey = &partElem->boundary[n];
+        PartEntryKey key;
+        key.parentRelOid = listMap->base.relOid;
+        key.partKey.values = newPartKey->values;
+        key.partKey.count = newPartKey->count;
+        PartElementHashEntry *entry = NULL;
+        bool found = false;
+
+        entry = (PartElementHashEntry *)hash_search(listMap->ht, &key, HASH_ENTER, &found);
+        if (!found) {
+            Assert (entry != NULL);
+            /* need to keep all in local my db context */
+            entry->key.parentRelOid = listMap->base.relOid;
+            DeepCopyPartKey(newPartKey, &entry->key.partKey);
+            entry->rootRelOid = listMap->base.relOid;
+            entry->partRelOid = partElem->partitionOid;
+            entry->partSeq = partSeqNo;
+            entry->next = NULL;
+        } else {
+            /*
+             * Note!!!, hash conflict we its a rare case where list element runs out of
+             * hash bucket and results in hash conflict, we still try to append it to tail
+             * of hash bucket list onec just hash conflict but not duplicate value
+             */
+            ereport(NOTICE,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("\"insert list element fail in partRelOid:%u partRelName:%s keyVal:%s\"",
+                    listMap->base.relOid, PartitionOidGetName(partElem->partitionOid),
+                    PartKeyGetCstring(newPartKey))));
+
+            /*
+             * find the first element for the conflict list bucket and append the new
+             * element to the tail of list
+             */
+            entry = (PartElementHashEntry *)hash_search(listMap->ht, &key, HASH_FIND, &found);
+            while (entry->next != NULL) {
+                if(ListPartKeyCompare(newPartKey, &entry->key.partKey) == 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_PARTITION_ERROR),
+                            errmsg("\"list element is found duplicate in partRelOid:%u partRelName:%s keyVal:%s\"",
+                            listMap->base.relOid, PartitionOidGetName(partElem->partitionOid),
+                            PartKeyGetCstring(&entry->key.partKey))));
+                }
+
+                entry = entry->next;
+            }
+
+            /* hash key confict bue can still inert into hash table by append its value to tail of bucket list */
+            PartElementHashEntry *newEntry = (PartElementHashEntry *)palloc0(sizeof(PartElementHashEntry));
+            newEntry->key.parentRelOid = listMap->base.relOid;
+            DeepCopyPartKey(newPartKey, &entry->key.partKey);
+            newEntry->rootRelOid = listMap->base.relOid;
+            newEntry->partRelOid = partElem->partitionOid;
+            newEntry->partSeq = partSeqNo;
+            newEntry->next = NULL;
+            entry->next = newEntry;
+
+            ereport(NOTICE,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("\"conflict with rootRelOid:%u partRelOid:%u partRelName:%s keyVal:%s\"",
+                    entry->rootRelOid, partElem->partitionOid, PartitionOidGetName(partElem->partitionOid),
+                    PartKeyGetCstring(newPartKey))));
+        }
+    }
+
+    (void)MemoryContextSwitchTo(old_context);
+
+}
+
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list)
 {
-    int list_itr = 0;
+    int partSeq = 0;
     ListPartitionMap* list_map = NULL;
     ListPartElement* list_eles = NULL;
     Form_pg_partition partition_form = NULL;
@@ -1655,6 +1870,9 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     list_map->base.type = PART_TYPE_LIST;
     list_map->base.relOid = RelationGetRelid(relation);
     list_map->listElementsNum = partition_list->length;
+    list_map->ht = NULL;
+    list_map->defaultPartRelOid = INVALID_PARTREL_OID;
+    list_map->defaultPartSeqNo = INVALID_PARTREL_SEQNO;
 
     /* get attribute NO. which is a member of partitionkey */
     partitionKey = getPartitionKeyAttrNo(
@@ -1672,6 +1890,10 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
     securec_check(rc, "\0", "\0");
+
+    /* build list partition mapping hashtable */
+    list_map->ht = BuildPartKeyHashTable(list_map);
+
     (void)MemoryContextSwitchTo(old_context);
 
     /* allocate range element array */
@@ -1683,7 +1905,6 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     Oid rootPartitionOid = GetRootPartitionOid(relation);
 
     /* iterate partition tuples, build RangeElement for per partition tuple */
-    list_itr = 0;
     char* partkeystr = CheckPartExprKey(partitioned_tuple, pg_partition);
     foreach (tuple_cell, partition_list) {
         partition_tuple = (HeapTuple)lfirst(tuple_cell);
@@ -1718,21 +1939,32 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
         PARTITIONNO_VALID_ASSERT(partitionno);
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
-            buildListElement(&(list_eles[list_itr]),
+            buildListElement(&(list_eles[partSeq]),
                 list_map,
                 rootPartitionOid,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
         } else {
-            BuildElementForPartKeyExpr(&(list_eles[list_itr]), partition_tuple, partitionno,
+            BuildElementForPartKeyExpr(&(list_eles[partSeq]), partition_tuple, partitionno,
                 RelationGetDescr(pg_partition), partkeystr, PART_STRATEGY_LIST);
         }
 
-        list_itr++;
+        /* skip temp partition (Reminding!) */
+
+        /* count for part seq */
+        partSeq++;
     }
 
     qsort(list_eles, list_map->listElementsNum, sizeof(ListPartElement), ListElementCmp);
+
+    for (partSeq = 0; partSeq < list_map->listElementsNum; partSeq++) {
+        /* if the partition map is built during DDL operation, an add-temporary-partition action may occur */
+        if (partSeq > 0 && ListPartKeyCompare(list_eles[partSeq].boundary, list_eles[partSeq - 1].boundary) == 0) {
+            continue;
+        }
+        InsertPartKeyHashTable(list_map, &(list_eles[partSeq]), partSeq);
+    }
 
     /* list element array back in RangePartitionMap */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
@@ -2637,7 +2869,7 @@ int rangeElementCmp(const void* a, const void* b)
     const RangeElement* reb = (const RangeElement*)b;
 
     Assert(rea->len == reb->len);
-    Assert(rea->len <= RANGE_PARTKEYMAXNUM);
+    Assert(rea->len <= MAX_RANGE_PARTKEY_NUMS);
 
     return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, rea->len);
 }
