@@ -2921,7 +2921,7 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
         /* Dump/restore using COPY */
         dumpFn = dumpTableData_copy;
         /* must use 2 steps here 'cause fmtId is nonreentrant */
-        appendPQExpBuffer(copyBuf, "COPY %s ", fmtId(tbinfo->dobj.name));
+        appendPQExpBuffer(copyBuf, "COPY %s.%s ", tbinfo->dobj.nmspace->dobj.name, fmtId(tbinfo->dobj.name));
         appendPQExpBuffer(copyBuf,
             "%s %sFROM stdin;\n",
             fmtCopyColumnList(tbinfo),
