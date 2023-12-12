@@ -2255,7 +2255,7 @@ static bool checkJoinColumnForPWJ(PlannerInfo* root, Index varno, AttrNumber var
     partitionmap = (RangePartitionMap*)(relation->partMap);
 
     /* get the position for the special attribute in partitionkey */
-    keypos = varIsInPartitionKey(varattno, partitionmap->partitionKey, partitionmap->partitionKey->dim1);
+    keypos = varIsInPartitionKey(varattno, partitionmap->base.partitionKey, partitionmap->base.partitionKey->dim1);
     heap_close(relation, NoLock);
 
     /* if keypos = -1, join_column is not a subset of the partitionkey */
@@ -2437,11 +2437,12 @@ static List* getPartitionkeyDataType(PlannerInfo* root, RelOptInfo* rel)
 
     /* get partitionekey datatype's oid as a list */
     partitionmap = (RangePartitionMap*)(relation->partMap);
-    AssertEreport(PointerIsValid(partitionmap->partitionKeyDataType), MOD_OPT_JOIN, "Partition key data type is NULL");
-    AssertEreport(PointerIsValid(partitionmap->partitionKey), MOD_OPT_JOIN, "Partition key is NULL");
+    AssertEreport(PointerIsValid(partitionmap->base.partitionKeyDataType), MOD_OPT_JOIN,
+        "Partition key data type is NULL");
+    AssertEreport(PointerIsValid(partitionmap->base.partitionKey), MOD_OPT_JOIN, "Partition key is NULL");
 
-    for (counter = 0; counter < partitionmap->partitionKey->dim1; counter++) {
-        result = lappend_oid(result, partitionmap->partitionKeyDataType[counter]);
+    for (counter = 0; counter < partitionmap->base.partitionKey->dim1; counter++) {
+        result = lappend_oid(result, partitionmap->base.partitionKeyDataType[counter]);
     }
 
     heap_close(relation, NoLock);
@@ -2504,15 +2505,15 @@ static void getBoundaryFromBaseRel(PlannerInfo* root, PartIteratorPath* itrpath)
      */
     incre_partmap_refcount(relation->partMap);
     map = (RangePartitionMap*)(relation->partMap);
-    AssertEreport(map->partitionKey->dim1 == 1, MOD_OPT_JOIN, "partition key dim1 is incorrect");
+    AssertEreport(map->base.partitionKey->dim1 == 1, MOD_OPT_JOIN, "partition key dim1 is incorrect");
 
-    tuple = SearchSysCache2((int)ATTNUM, ObjectIdGetDatum(partitionedtableid), Int16GetDatum(map->partitionKey->values[0]));
+    tuple = SearchSysCache2((int)ATTNUM, ObjectIdGetDatum(partitionedtableid), Int16GetDatum(map->base.partitionKey->values[0]));
     if (!HeapTupleIsValid(tuple)) {
         decre_partmap_refcount(relation->partMap);
         ereport(ERROR,
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for attribute %d of relation %u",
-                    map->partitionKey->values[0], partitionedtableid)));
+                    map->base.partitionKey->values[0], partitionedtableid)));
     }
     att = (Form_pg_attribute)GETSTRUCT(tuple);
 

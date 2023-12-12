@@ -2493,7 +2493,7 @@ void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nul
     CHECK_FOR_INTERRUPTS();
     // Step 1: We need know this batchrow should be which partition and then
     // store into m_batchrows for each partition
-    int2vector* partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->partitionKey;
+    int2vector* partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->base.partitionKey;
     int partkeyColNum = partKeyColumn->dim1;
 
     Assert(partkeyColNum <= RANGE_PARTKEYMAXNUM);

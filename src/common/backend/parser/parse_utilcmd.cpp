@@ -6771,8 +6771,8 @@ static void get_rel_partition_info(Relation partTableRel, List** pos, Const** up
         return; /* nothing to do */
 
     partMap = (RangePartitionMap*)partTableRel->partMap;
-    partitionKey = partMap->partitionKey;
-    partKeyNum = partMap->partitionKey->dim1;
+    partitionKey = partMap->base.partitionKey;
+    partKeyNum = partMap->base.partitionKey->dim1;
 
     /* get position of the partition key */
     if (pos != NULL) {
@@ -6871,7 +6871,7 @@ static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* s
     } else {
         Assert(PointerIsValid(splitState->partition_for_values));
         splitState->partition_for_values = transformConstIntoTargetType(
-            partTableRel->rd_att->attrs, partMap->partitionKey, splitState->partition_for_values);
+            partTableRel->rd_att->attrs, partMap->base.partitionKey, splitState->partition_for_values);
         srcPartOid = PartitionValuesGetPartitionOid(
             partTableRel, splitState->partition_for_values, AccessExclusiveLock, true, false, false);    }
 

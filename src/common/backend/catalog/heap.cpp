@@ -6653,7 +6653,7 @@ Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
     } else {
         columnRaw = TimestampGetDatum(ts);
     }
-    int2vector* partKeyColumn = partMap->partitionKey;
+    int2vector* partKeyColumn = partMap->base.partitionKey;
     Assert(partKeyColumn->dim1 == 1);
 
     (void)transformDatum2Const(rel->rd_att, partKeyColumn->values[0], columnRaw, false, &consts);
@@ -6666,9 +6666,9 @@ Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
 Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
 {
     RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
-    int2vector* partKeyColumn = partMap->partitionKey;
+    int2vector* partKeyColumn = partMap->base.partitionKey;
     Assert(partKeyColumn->dim1 == 1);
-    Assert(partMap->type.type == PART_TYPE_INTERVAL);
+    Assert(partMap->base.type == PART_TYPE_INTERVAL);
     Assert(partMap->rangeElementsNum >= 1);
 
     Const* lastPartBoundary = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0];

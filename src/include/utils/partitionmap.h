@@ -49,6 +49,10 @@ typedef struct PartitionMap {
     PartitionType type;
     int refcount;
     bool isDirty;
+
+    Oid relOid;                /* oid of partitioned table a.w.k the pg_class.oid */
+    int2vector *partitionKey;  /* partition key */
+    Oid *partitionKeyDataType; /* the data type of partition key */
 } PartitionMap;
 
 typedef struct PartitionKey {
@@ -78,13 +82,13 @@ void decre_partmap_refcount(PartitionMap* map);
 
 #define PartitionMapGetType(partmap) (((RangePartitionMap*)(partmap))->partitionKeyDataType)
 
-#define PartitionMapIsRange(partmap) (PART_TYPE_RANGE == ((RangePartitionMap*)(partmap))->type.type)
+#define PartitionMapIsRange(partmap) (PART_TYPE_RANGE == ((RangePartitionMap*)(partmap))->base.type)
 
-#define PartitionMapIsList(partmap) (PART_TYPE_LIST == ((ListPartitionMap*)(partmap))->type.type)
+#define PartitionMapIsList(partmap) (PART_TYPE_LIST == ((ListPartitionMap*)(partmap))->base.type)
 
-#define PartitionMapIsHash(partmap) (PART_TYPE_HASH == ((HashPartitionMap*)(partmap))->type.type)
+#define PartitionMapIsHash(partmap) (PART_TYPE_HASH == ((HashPartitionMap*)(partmap))->base.type)
 
-#define PartitionMapIsInterval(partmap) (PART_TYPE_INTERVAL == ((RangePartitionMap*)(partmap))->type.type)
+#define PartitionMapIsInterval(partmap) (PART_TYPE_INTERVAL == ((RangePartitionMap*)(partmap))->base.type)
 
 #define FAKERELATIONCACHESIZE 100
 
@@ -103,7 +107,7 @@ void decre_partmap_refcount(PartitionMap* map);
 #define PruningResultIsSubset(pruningRes) (PointerIsValid(pruningRes) && (pruningRes)->state == PRUNING_RESULT_SUBSET)
 
 extern void RelationInitPartitionMap(Relation relation, bool isSubPartition = false);
-
+extern int2vector *PartitionmapGetPartKeyArray(PartitionMap *pm);
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
 extern Oid getListPartitionOid(
     PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex, bool topClosed);

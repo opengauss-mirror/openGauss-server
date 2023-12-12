@@ -98,10 +98,7 @@ typedef struct ValuePartitionMap {
 
 // describe partition info of  Range Partitioned-Table
 typedef struct RangePartitionMap {
-    PartitionMap type;
-    Oid relid;                 /*oid of partitioned table*/
-    int2vector* partitionKey;  /*partition key*/
-    Oid* partitionKeyDataType; /*the data type of partition key*/
+    PartitionMap base;
     /*section 1: range partition specific*/
     int rangeElementsNum;          /* the number of range partition*/
     RangeElement* rangeElements;   /* array of RangeElement */
@@ -115,20 +112,14 @@ extern Const **transformConstIntoPartkeyType(FormData_pg_attribute* attrs, int2v
     int len);
 
 typedef struct ListPartitionMap {
-    PartitionMap type;
-    Oid relid;      /* Oid of partitioned table */
-    int2vector* partitionKey;  /* partition key */
-    Oid* partitionKeyDataType; /* the data type of partition key */
+    PartitionMap base;
     /* section 1: list partition specific */
     int listElementsNum;          /* the number of list partition */
     ListPartElement* listElements;   /* array of listElement */
 } ListPartitionMap;
 
 typedef struct HashPartitionMap {
-    PartitionMap type;
-    Oid relid;      /* Oid of partitioned table */
-    int2vector* partitionKey;  /* partition key */
-    Oid* partitionKeyDataType; /* the data type of partition key */
+    PartitionMap base;
     /* section 1: hash partition specific */
     int hashElementsNum;          /* the number of hash partition */
     HashPartElement* hashElements;   /* array of hashElement */

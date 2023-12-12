@@ -1009,21 +1009,21 @@ bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* partMap2
 
 static bool EqualRangePartitonMap(const RangePartitionMap* partMap1, const RangePartitionMap* partMap2)
 {
-    Assert(partMap1->type.type == partMap2->type.type);
+    Assert(partMap1->base.type == partMap2->base.type);
     int i;
 
     /* check for relid */
-    if (partMap1->relid != partMap2->relid) {
+    if (partMap1->base.relOid != partMap2->base.relOid) {
         return false;
     }
 
     /* check for partition key */
-    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
-        PointerGetDatum(partMap2->partitionKey)))) {
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->base.partitionKey),
+        PointerGetDatum(partMap2->base.partitionKey)))) {
         return false;
     }
-    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
-        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+    for (i = 0; i < partMap1->base.partitionKey->dim1; i++) {
+        if (partMap1->base.partitionKeyDataType[i] != partMap2->base.partitionKeyDataType[i]) {
             return false;
         }
     }
@@ -1083,21 +1083,21 @@ static bool EqualRangeElement(const RangeElement element1, const RangeElement el
 
 static bool EqualListPartitonMap(const ListPartitionMap* partMap1, const ListPartitionMap* partMap2)
 {
-    Assert(partMap1->type.type == partMap2->type.type);
+    Assert(partMap1->base.type == partMap2->base.type);
     int i;
 
     /* check for relid */
-    if (partMap1->relid != partMap2->relid) {
+    if (partMap1->base.relOid != partMap2->base.relOid) {
         return false;
     }
 
     /* check for partition key */
-    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
-        PointerGetDatum(partMap2->partitionKey)))) {
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->base.partitionKey),
+        PointerGetDatum(partMap2->base.partitionKey)))) {
         return false;
     }
-    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
-        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+    for (i = 0; i < partMap1->base.partitionKey->dim1; i++) {
+        if (partMap1->base.partitionKeyDataType[i] != partMap2->base.partitionKeyDataType[i]) {
             return false;
         }
     }
@@ -1139,21 +1139,21 @@ static bool EqualListPartElement(const ListPartElement element1, const ListPartE
 
 static bool EqualHashPartitonMap(const HashPartitionMap* partMap1, const HashPartitionMap* partMap2)
 {
-    Assert(partMap1->type.type == partMap2->type.type);
+    Assert(partMap1->base.type == partMap2->base.type);
     int i;
 
     /* check for relid */
-    if (partMap1->relid != partMap2->relid) {
+    if (partMap1->base.relOid != partMap2->base.relOid) {
         return false;
     }
 
     /* check for partition key */
-    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
-        PointerGetDatum(partMap2->partitionKey)))) {
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->base.partitionKey),
+        PointerGetDatum(partMap2->base.partitionKey)))) {
         return false;
     }
-    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
-        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+    for (i = 0; i < partMap1->base.partitionKey->dim1; i++) {
+        if (partMap1->base.partitionKeyDataType[i] != partMap2->base.partitionKeyDataType[i]) {
             return false;
         }
     }
@@ -1361,11 +1361,11 @@ void DestroyPartitionMap(PartitionMap* partMap)
         RangePartitionMap* range_map = ((RangePartitionMap*)(partMap));
 
         /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
-        if (range_map->partitionKey) {
-            pfree_ext(range_map->partitionKey);
+        if (range_map->base.partitionKey) {
+            pfree_ext(range_map->base.partitionKey);
         }
-        if (range_map->partitionKeyDataType) {
-            pfree_ext(range_map->partitionKeyDataType);
+        if (range_map->base.partitionKeyDataType) {
+            pfree_ext(range_map->base.partitionKeyDataType);
         }
         if (range_map->intervalValue) {
             pfree_ext(range_map->intervalValue);
@@ -1378,13 +1378,13 @@ void DestroyPartitionMap(PartitionMap* partMap)
         }
     } else if (partMap->type == PART_TYPE_LIST) {
         ListPartitionMap* list_map = (ListPartitionMap*)(partMap);
-        if (list_map->partitionKey) {
-            pfree_ext(list_map->partitionKey);
-            list_map->partitionKey = NULL;
+        if (list_map->base.partitionKey) {
+            pfree_ext(list_map->base.partitionKey);
+            list_map->base.partitionKey = NULL;
         }
-        if (list_map->partitionKeyDataType) {
-            pfree_ext(list_map->partitionKeyDataType);
-            list_map->partitionKeyDataType = NULL;
+        if (list_map->base.partitionKeyDataType) {
+            pfree_ext(list_map->base.partitionKeyDataType);
+            list_map->base.partitionKeyDataType = NULL;
         }
         if (list_map->listElements) {
             DestroyListElements(list_map->listElements, list_map->listElementsNum);
@@ -1392,13 +1392,13 @@ void DestroyPartitionMap(PartitionMap* partMap)
         }
     } else if (partMap->type == PART_TYPE_HASH) {
         HashPartitionMap* hash_map = (HashPartitionMap*)(partMap);
-        if (hash_map->partitionKey) {
-            pfree_ext(hash_map->partitionKey);
-            hash_map->partitionKey = NULL;
+        if (hash_map->base.partitionKey) {
+            pfree_ext(hash_map->base.partitionKey);
+            hash_map->base.partitionKey = NULL;
         }
-        if (hash_map->partitionKeyDataType) {
-            pfree_ext(hash_map->partitionKeyDataType);
-            hash_map->partitionKeyDataType = NULL;
+        if (hash_map->base.partitionKeyDataType) {
+            pfree_ext(hash_map->base.partitionKeyDataType);
+            hash_map->base.partitionKeyDataType = NULL;
         }
         if (hash_map->hashElements) {
             PartitionMapDestroyHashArray(hash_map->hashElements, hash_map->hashElementsNum);
@@ -1674,8 +1674,8 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
 
     /* build ListPartitionMap */
     list_map = (ListPartitionMap*)palloc0(sizeof(ListPartitionMap));
-    list_map->type.type = PART_TYPE_LIST;
-    list_map->relid = RelationGetRelid(relation);
+    list_map->base.type = PART_TYPE_LIST;
+    list_map->base.relOid = RelationGetRelid(relation);
     list_map->listElementsNum = partition_list->length;
 
     /* get attribute NO. which is a member of partitionkey */
@@ -1684,12 +1684,12 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     /* copy the partitionKey */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
-    list_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
-    rc = memcpy_s(
-        list_map->partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey, Int2VectorSize(partitionKey->dim1));
+    list_map->base.partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
+    rc = memcpy_s(list_map->base.partitionKey, (size_t)Int2VectorSize(partitionKey->dim1), partitionKey,
+        (size_t)Int2VectorSize(partitionKey->dim1));
     securec_check(rc, "\0", "\0");
-    list_map->partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
-    rc = memcpy_s(list_map->partitionKeyDataType,
+    list_map->base.partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
+    rc = memcpy_s(list_map->base.partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1,
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
@@ -1741,10 +1741,10 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             buildListElement(&(list_eles[list_itr]),
-                list_map->partitionKeyDataType,
-                list_map->partitionKey->dim1,
+                list_map->base.partitionKeyDataType,
+                list_map->base.partitionKey->dim1,
                 rootPartitionOid,
-                list_map->partitionKey,
+                list_map->base.partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
@@ -1810,8 +1810,8 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
     /* build RangePartitionMap */
     hash_map = (HashPartitionMap*)palloc0(sizeof(HashPartitionMap));
-    hash_map->type.type = PART_TYPE_HASH;
-    hash_map->relid = RelationGetRelid(relation);
+    hash_map->base.type = PART_TYPE_HASH;
+    hash_map->base.relOid = RelationGetRelid(relation);
     hash_map->hashElementsNum = partition_list->length;
 
     /* get attribute NO. which is a member of partitionkey */
@@ -1820,12 +1820,12 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     /* copy the partitionKey */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
-    hash_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
-    rc = memcpy_s(
-        hash_map->partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey, Int2VectorSize(partitionKey->dim1));
+    hash_map->base.partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
+    rc = memcpy_s(hash_map->base.partitionKey, (size_t)Int2VectorSize(partitionKey->dim1), partitionKey,
+        (size_t)Int2VectorSize(partitionKey->dim1));
     securec_check(rc, "\0", "\0");
-    hash_map->partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
-    rc = memcpy_s(hash_map->partitionKeyDataType,
+    hash_map->base.partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
+    rc = memcpy_s(hash_map->base.partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1,
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
@@ -1877,10 +1877,10 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             buildHashElement(&(hash_eles[hash_itr]),
-                hash_map->partitionKeyDataType,
-                hash_map->partitionKey->dim1,
+                hash_map->base.partitionKeyDataType,
+                hash_map->base.partitionKey->dim1,
                 rootPartitionOid,
-                hash_map->partitionKey,
+                hash_map->base.partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
@@ -1931,8 +1931,8 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
     /* build RangePartitionMap */
     range_map = (RangePartitionMap*)palloc0(sizeof(RangePartitionMap));
-    range_map->type.type = PART_TYPE_RANGE;
-    range_map->relid = RelationGetRelid(relation);
+    range_map->base.type = PART_TYPE_RANGE;
+    range_map->base.relOid = RelationGetRelid(relation);
     range_map->rangeElementsNum = partition_list->length;
 
     /* get attribute NO. which is a member of partitionkey */
@@ -1941,19 +1941,19 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     /* copy the partitionKey */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
-    range_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
-    rc = memcpy_s(
-        range_map->partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey, Int2VectorSize(partitionKey->dim1));
+    range_map->base.partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
+    rc = memcpy_s(range_map->base.partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey,
+        Int2VectorSize(partitionKey->dim1));
     securec_check(rc, "\0", "\0");
-    range_map->partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
-    rc = memcpy_s(range_map->partitionKeyDataType,
+    range_map->base.partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
+    rc = memcpy_s(range_map->base.partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1,
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
     securec_check(rc, "\0", "\0");
 
     if (partitioned_form->partstrategy == PART_STRATEGY_INTERVAL) {
-        range_map->type.type = PART_TYPE_INTERVAL;
+        range_map->base.type = PART_TYPE_INTERVAL;
         /* the interval partition only supports one partition key */
         Assert(partitionKey->dim1 == 1);
         range_map->intervalValue = ReadInterval(partitioned_tuple, RelationGetDescr(pg_partition));
@@ -2007,10 +2007,10 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             BuildRangeElement(&(range_eles[range_itr]),
-                range_map->partitionKeyDataType,
-                range_map->partitionKey->dim1,
+                range_map->base.partitionKeyDataType,
+                range_map->base.partitionKey->dim1,
                 rootPartitionOid,
-                range_map->partitionKey,
+                range_map->base.partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition),
@@ -2118,7 +2118,7 @@ List* getRangePartitionBoundaryList(Relation rel, int sequence)
     incre_partmap_refcount(rel->partMap);
     if (sequence >= 0 && sequence < partMap->rangeElementsNum) {
         int i = 0;
-        int partKeyNum = partMap->partitionKey->dim1;
+        int partKeyNum = partMap->base.partitionKey->dim1;
         Const** srcBound = partMap->rangeElements[sequence].boundary;
 
         for (i = 0; i < partKeyNum; i++) {
@@ -2191,7 +2191,7 @@ List* getHashPartitionBoundaryList(Relation rel, int sequence)
     incre_partmap_refcount(rel->partMap);
     if (sequence >= 0 && sequence < partMap->hashElementsNum) {
         int i = 0;
-        int partKeyNum = partMap->partitionKey->dim1;
+        int partKeyNum = partMap->base.partitionKey->dim1;
         Const** srcBound = partMap->hashElements[sequence].boundary;
 
         for (i = 0; i < partKeyNum; i++) {
@@ -2260,7 +2260,7 @@ Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32
     incre_partmap_refcount(partitionmap);
     rangePartMap = (RangePartitionMap*)(partitionmap);
 
-    keyNums = rangePartMap->partitionKey->dim1;
+    keyNums = rangePartMap->base.partitionKey->dim1;
     max_part_id = rangePartMap->rangeElementsNum - 1;
     boundary = rangePartMap->rangeElements[max_part_id].boundary;
     partitonKeyCompareForRouting(partKeyValue, boundary, (uint32)keyNums, compare);
@@ -2380,7 +2380,7 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
     incre_partmap_refcount(partMap);
     hashPartMap = (HashPartitionMap*)(partMap);
 
-    keyNums = hashPartMap->partitionKey->dim1;
+    keyNums = hashPartMap->base.partitionKey->dim1;
     
     int i = 0;
     uint32 hash_value = 0;
@@ -3073,6 +3073,12 @@ bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Rel
     }
 
     return true;
+}
+
+int2vector* PartitionmapGetPartKeyArray(PartitionMap *pm)
+{
+    Assert (pm != NULL);
+    return pm->partitionKey;
 }
 
 /* Transform the Const value into the target type of partkey column, do nothing if the type is same.

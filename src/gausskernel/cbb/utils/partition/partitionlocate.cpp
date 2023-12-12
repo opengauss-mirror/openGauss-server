@@ -36,10 +36,10 @@ bool isPartKeyValuesInListPartition(
     ListPartitionMap *partMap, Const **partKeyValues, const int partkeyColumnNum, const int partSeq)
 {
     Assert(partMap && partKeyValues);
-    Assert(partkeyColumnNum == partMap->partitionKey->dim1);
+    Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int sourcePartSeq = -1;
-    Oid sourceOid = getListPartitionOid(&partMap->type, partKeyValues, partkeyColumnNum, &sourcePartSeq, true);
+    Oid sourceOid = getListPartitionOid(&partMap->base, partKeyValues, partkeyColumnNum, &sourcePartSeq, true);
     if (sourcePartSeq < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -58,7 +58,7 @@ bool isPartKeyValuesInHashPartition(Relation partTableRel, const HashPartitionMa
     const int partkeyColumnNum, const int partSeq)
 {
     Assert(partMap && partKeyValues);
-    Assert(partkeyColumnNum == partMap->partitionKey->dim1);
+    Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int sourcePartSeq = -1;
     Oid sourceOid = getHashPartitionOid(partTableRel->partMap, partKeyValues, &sourcePartSeq, true);
@@ -95,7 +95,7 @@ static bool checkTupleIsInListPartition(Relation partTableRel, int partSeq, Tupl
     incre_partmap_refcount(partTableRel->partMap);
     partMap = (ListPartitionMap *)(partTableRel->partMap);
 
-    partkeyColumns = partMap->partitionKey;
+    partkeyColumns = partMap->base.partitionKey;
     partkeyColumnNum = partkeyColumns->dim1;
 
     for (i = 0; i < partkeyColumnNum; i++) {
@@ -129,7 +129,7 @@ static bool checkTupleIsInHashPartition(Relation partTableRel, int partSeq, Tupl
     incre_partmap_refcount(partTableRel->partMap);
     partMap = (HashPartitionMap *)(partTableRel->partMap);
 
-    partkeyColumns = partMap->partitionKey;
+    partkeyColumns = partMap->base.partitionKey;
     partkeyColumnNum = partkeyColumns->dim1;
 
     for (i = 0; i < partkeyColumnNum; i++) {
@@ -164,7 +164,7 @@ static bool checkTupleIsInRangePartition(Relation partTableRel, int partSeq, Tup
     incre_partmap_refcount(partTableRel->partMap);
     partMap = (RangePartitionMap *)(partTableRel->partMap);
 
-    partkeyColumns = partMap->partitionKey;
+    partkeyColumns = partMap->base.partitionKey;
     partkeyColumnNum = partkeyColumns->dim1;
 
     for (i = 0; i < partkeyColumnNum; i++) {
