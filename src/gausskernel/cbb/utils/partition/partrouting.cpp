@@ -58,6 +58,176 @@
 #include "utils/datum.h"
 #include "utils/knl_relcache.h"
 
+/*****************************************************************************
+ *
+ *	   partition routing entry point
+ *
+ * To support tuple to partitionRel mapping mechanism
+ *****************************************************************************/
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: get special table partition for a tuple
+ *			: create a partition if necessary
+ * Description	:
+ * Notes		:
+ */
+Oid heapTupleGetPartitionOid(Relation rel, void *tuple, int *partitionno, bool isDDL, bool canIgnore, bool partExprKeyIsNull)
+{
+    Oid partitionOid = InvalidOid;
+    
+    /* get routing result */
+    partitionRoutingForTuple(rel, tuple, u_sess->catalog_cxt.route, canIgnore, partExprKeyIsNull);
+
+    /* if the partition exists, return partition's oid */
+    if (u_sess->catalog_cxt.route->fileExist) {
+        Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
+        partitionOid = u_sess->catalog_cxt.route->partitionId;
+        if (PointerIsValid(partitionno)) {
+            *partitionno = GetPartitionnoFromSequence(rel->partMap, u_sess->catalog_cxt.route->partSeq);
+        }
+        return partitionOid;
+    }
+
+    /*
+     * feedback for non-existing table partition.
+     *   If the routing result indicates a range partition, give error report
+     */
+    int level = canIgnore ? WARNING : ERROR;
+    switch (u_sess->catalog_cxt.route->partArea) {
+        /*
+         * If it is a range partition, give error report
+         */
+        case PART_AREA_INTERVAL: {
+            return AddNewIntervalPartition(rel, tuple, partitionno, isDDL);
+        } break;
+        case PART_AREA_RANGE:
+        case PART_AREA_LIST:
+        case PART_AREA_HASH: {
+            ereport(
+                level,
+                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
+        } break;
+        /* never happen; just to be self-contained */
+        default: {
+            ereport(
+                level,
+                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("Inserted partition key does not map to any table partition"),
+                 errdetail("Unrecognized PartitionArea %d", u_sess->catalog_cxt.route->partArea)));
+        } break;
+    }
+
+    return partitionOid;
+}
+
+Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple)
+{
+    Oid partitionId = InvalidOid;
+    Oid subPartitionId = InvalidOid;
+    int partitionno = INVALID_PARTITION_NO;
+    Partition part = NULL;
+    Relation partRel = NULL;
+    /* get partititon oid for the record */
+    partitionId = heapTupleGetPartitionOid(rel, tuple, &partitionno);
+    part = PartitionOpenWithPartitionno(rel, partitionId, partitionno, RowExclusiveLock);
+    partRel = partitionGetRelation(rel, part);
+    /* get subpartititon oid for the record */
+    subPartitionId = heapTupleGetPartitionOid(partRel, tuple, NULL);
+    
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, RowExclusiveLock);
+
+    return subPartitionId;
+}
+
+void partitionRoutingForTuple(Relation rel, void *tuple, PartitionIdentifier *partIdentfier, bool canIgnore,
+                              bool partExprKeyIsNull)
+{
+    TupleDesc tuple_desc = NULL;
+    int2vector *partkey_column = NULL;
+    int partkey_column_n = 0;
+    static THR_LOCAL Const consts[PARTITION_PARTKEYMAXNUM];
+    static THR_LOCAL Const *values[PARTITION_PARTKEYMAXNUM];
+    bool isnull = false;
+    bool is_ustore = RelationIsUstoreFormat(rel);
+    Datum column_raw;
+    int i = 0;
+    partkey_column = GetPartitionKey((rel)->partMap);
+    partkey_column_n = partkey_column->dim1;
+    tuple_desc = (rel)->rd_att;
+    for (i = 0; i < partkey_column_n; i++) {
+        isnull = false;
+        if (partExprKeyIsNull) {
+            column_raw = (is_ustore)
+                             ? UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull)
+                             : fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);
+            values[i] = transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);
+        } else {
+            column_raw = Datum(tuple);
+            values[i] = transformDatum2ConstForPartKeyExpr((rel)->partMap, column_raw, isnull, &consts[i]);
+        }
+    }
+    if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {
+        if (canIgnore) { /* treat type as PART_TYPE_RANGE because PART_TYPE_INTERVAL will create a new partition. \ this
+                          * will be handled by caller and directly return */
+            (partIdentfier)->partArea = PART_AREA_RANGE;
+            (partIdentfier)->fileExist = false;
+            (partIdentfier)->partitionId = InvalidOid;
+            return;
+        }
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("inserted partition key does not map to any partition"),
+                        errdetail("inserted partition key cannot be NULL for interval-partitioned table")));
+    }
+    partitionRoutingForValue((rel), values, partkey_column_n, true, false, (partIdentfier));
+}
+
+void partitionRoutingForValue(Relation rel, Const **keyValue, int valueLen, bool topClosed, bool missIsOk,
+                              PartitionIdentifier *result)
+{
+    if ((rel)->partMap->type == PART_TYPE_RANGE || (rel)->partMap->type == PART_TYPE_INTERVAL) {
+        if ((rel)->partMap->type == PART_TYPE_RANGE) {
+            (result)->partArea = PART_AREA_RANGE;
+        } else {
+            Assert((valueLen) == 1);
+            (result)->partArea = PART_AREA_INTERVAL;
+        }
+        (result)->partitionId = getRangePartitionOid((rel)->partMap, (keyValue), &((result)->partSeq), topClosed);
+        if ((result)->partSeq < 0) {
+            (result)->fileExist = false;
+        } else {
+            (result)->fileExist = true;
+            RangePartitionMap *partMap = (RangePartitionMap *)((rel)->partMap);
+            if (partMap->rangeElements[(result)->partSeq].isInterval &&
+                !ValueSatisfyLowBoudary(keyValue, &partMap->rangeElements[(result)->partSeq], partMap->intervalValue,
+                                        topClosed)) {
+                (result)->partSeq = -1;
+                (result)->partitionId = InvalidOid;
+                (result)->fileExist = false;
+            }
+        }
+    } else if ((rel)->partMap->type == PART_TYPE_LIST) {
+        (result)->partArea = PART_AREA_LIST;
+        (result)->partitionId =
+            getListPartitionOid(((rel)->partMap), (keyValue), (valueLen), &((result)->partSeq));
+        if ((result)->partSeq < 0) {
+            (result)->fileExist = false;
+        } else {
+            (result)->fileExist = true;
+        }
+    } else if ((rel)->partMap->type == PART_TYPE_HASH) {
+        (result)->partArea = PART_AREA_HASH;
+        (result)->partitionId = getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq));
+        if ((result)->partSeq < 0) {
+            (result)->fileExist = false;
+        } else {
+            (result)->fileExist = true;
+        }
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Unsupported partition strategy:%d", (rel)->partMap->type)));
+    }
+}
+
 /*
  * @@GaussDB@@
  * Brief		:
@@ -136,7 +306,7 @@ Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32
     return result;
 }
 
-Oid getListPartitionOid(PartitionMap *partMap, Const **partKeyValue, int partKeyCount, int32 *partSeq, bool topClosed)
+Oid getListPartitionOid(PartitionMap *partMap, Const **partKeyValue, int partKeyCount, int32 *partSeq)
 {
     ListPartitionMap *listPartMap = NULL;
     Oid result = InvalidOid;
@@ -190,7 +360,55 @@ Oid getListPartitionOid(PartitionMap *partMap, Const **partKeyValue, int partKey
     return result;
 }
 
-Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* partSeq, bool topClosed)
+/* the 2nd parameter must be partition boundary */
+void partitionKeyCompareForRouting(Const **partkey_value, Const **partkey_bound, uint32 partKeyColumnNum, int &compare)
+{
+    uint32 i = 0;
+    Const *kv = NULL;
+    Const *bv = NULL;
+    for (; i < partKeyColumnNum; i++) {
+        kv = *((partkey_value) + i);
+        bv = *(partkey_bound + i);
+        if (kv == NULL || bv == NULL) {
+            if (kv == NULL && bv == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("NULL can not be compared with NULL")));
+            } else if (kv == NULL) {
+                compare = -1;
+            } else {
+                compare = 1;
+            }
+            break;
+        }
+        if (constIsMaxValue(kv) || constIsMaxValue(bv)) {
+            if (constIsMaxValue(kv) && constIsMaxValue(bv)) {
+                compare = 0;
+                continue;
+            } else if (constIsMaxValue(kv)) {
+                compare = 1;
+            } else {
+                compare = -1;
+            }
+            break;
+        }
+        if (kv->constisnull || bv->constisnull) {
+            if (kv->constisnull && bv->constisnull) {
+                ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                                errmsg("null value can not be compared with null value.")));
+            } else if (kv->constisnull) {
+                compare = 1;
+            } else {
+                compare = -1;
+            }
+            break;
+        }
+        constCompare(kv, bv, bv->constcollid, compare);
+        if ((compare) != 0) {
+            break;
+        }
+    }
+}
+
+Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* partSeq)
 {
     HashPartitionMap* hashPartMap = NULL;
     Oid result = InvalidOid;

@@ -64,55 +64,6 @@ extern bool GetPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseS
 extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
 
-/* the 2nd parameter must be partition boundary */
-#define partitionKeyCompareForRouting(partkey_value, partkey_bound, len, compare)                                 \
-    do {                                                                                                         \
-        uint32 i = 0;                                                                                            \
-        Const *kv = NULL;                                                                                        \
-        Const *bv = NULL;                                                                                        \
-        for (; i < (len); i++) {                                                                                 \
-            kv = *((partkey_value) + i);                                                                                \
-            bv = *((partkey_bound) + i);                                                                                \
-            if (kv == NULL || bv == NULL) {                                                                      \
-                if (kv == NULL && bv == NULL) {                                                                  \
-                    ereport(ERROR,                                                                               \
-                            (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("NULL can not be compared with NULL"))); \
-                } else if (kv == NULL) {                                                                         \
-                    compare = -1;                                                                                \
-                } else {                                                                                         \
-                    compare = 1;                                                                                 \
-                }                                                                                                \
-                break;                                                                                           \
-            }                                                                                                    \
-            if (constIsMaxValue(kv) || constIsMaxValue(bv)) {                                                    \
-                if (constIsMaxValue(kv) && constIsMaxValue(bv)) {                                                \
-                    compare = 0;                                                                                 \
-                    continue;                                                                                    \
-                } else if (constIsMaxValue(kv)) {                                                                \
-                    compare = 1;                                                                                 \
-                } else {                                                                                         \
-                    compare = -1;                                                                                \
-                }                                                                                                \
-                break;                                                                                           \
-            }                                                                                                    \
-            if (kv->constisnull || bv->constisnull) {                                                            \
-                if (kv->constisnull && bv->constisnull) {                                                        \
-                    ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),                                      \
-                                    errmsg("null value can not be compared with null value.")));                 \
-                } else if (kv->constisnull) {                                                                    \
-                    compare = 1;                                                                                 \
-                } else {                                                                                         \
-                    compare = -1;                                                                                \
-                }                                                                                                \
-                break;                                                                                           \
-            }                                                                                                    \
-            constCompare(kv, bv, bv->constcollid, compare);                                                      \
-            if ((compare) != 0) {                                                                                \
-                break;                                                                                           \
-            }                                                                                                    \
-        }                                                                                                        \
-    } while (0)
-
 #endif
 
 #define constIsNull(x) ((x)->constisnull)

@@ -329,69 +329,59 @@ void constCompare(Const* value1, Const* value2, Oid collation, int& compare)
     }
 }
 
-#define BuildRangeElement(range, type, typelen, relid, attrno, tuple, partitionno, desc, isInter) \
-    do {                                                                                          \
-        Assert(PointerIsValid(range));                                                            \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                                   \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                                    \
-        Assert((attrno)->dim1 <= RANGE_PARTKEYMAXNUM);                                            \
-        Assert((attrno)->dim1 == (typelen));                                                      \
-        unserializePartitionStringAttribute((range)->boundary,                                    \
-            RANGE_PARTKEYMAXNUM,                                                                  \
-            (type),                                                                               \
-            (typelen),                                                                            \
-            (relid),                                                                              \
-            (attrno),                                                                             \
-            (tuple),                                                                              \
-            Anum_pg_partition_boundaries,                                                         \
-            (desc));                                                                              \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                                           \
-        (range)->partitionno = (partitionno);                                                     \
-        (range)->len = (typelen);                                                                 \
-        (range)->isInterval = (isInter);                                                          \
-    } while (0)
+static inline void BuildRangeElement(RangeElement *elem, RangePartitionMap *rmap, Oid relOid, HeapTuple tuple,
+                                      int partitionNo, TupleDesc desc, bool interval)
+{
+    PartitionMap *base = &(rmap->base);
 
-#define buildListElement(range, type, typelen, relid, attrno, tuple, partitionno, desc) \
-    do {                                                                                \
-        Assert(PointerIsValid(range));                                                  \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                         \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                          \
-        Assert((attrno)->dim1 == (typelen));                                            \
-        unserializeListPartitionAttribute(&((range)->len),                              \
-            &((range)->boundary),                                                       \
-            (type),                                                                     \
-            (typelen),                                                                  \
-            (relid),                                                                    \
-            (attrno),                                                                   \
-            (tuple),                                                                    \
-            Anum_pg_partition_boundaries,                                               \
-            (desc));                                                                    \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                                 \
-        (range)->partitionno = (partitionno);                                           \
-    } while (0)
+    Assert(PointerIsValid(elem));
+    Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKey));
+    Assert(PointerIsValid(tuple) && PointerIsValid(desc));
+    Assert(base->partitionKey->dim1 <= RANGE_PARTKEYMAXNUM);
+    Assert(base->partitionKey->dim1 == (base->partitionKey->dim1));
+    unserializePartitionStringAttribute(elem->boundary, RANGE_PARTKEYMAXNUM, (base->partitionKeyDataType),
+                                        (base->partitionKey->dim1), (relOid), (base->partitionKey), (tuple),
+                                        Anum_pg_partition_boundaries, (desc));
+    elem->partitionOid = HeapTupleGetOid(tuple);
+    elem->partitionno = (partitionNo);
+    elem->len = (base->partitionKey->dim1);
+    elem->isInterval = (interval);
+}
 
-#define buildHashElement(range, type, typelen, relid, attrno, tuple, partitionno, desc) \
-    do {                                                                                \
-        Assert(PointerIsValid(range));                                                  \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                         \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                          \
-        Assert((attrno)->dim1 == (typelen));                                            \
-        unserializeHashPartitionAttribute((range)->boundary,                            \
-            RANGE_PARTKEYMAXNUM,                                                        \
-            (relid),                                                                    \
-            (attrno),                                                                   \
-            (tuple),                                                                    \
-            Anum_pg_partition_boundaries,                                               \
-            (desc));                                                                    \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                                 \
-        (range)->partitionno = (partitionno);                                           \
-    } while (0)
+static inline void buildListElement(ListPartElement *elem, ListPartitionMap *lmap, Oid relOid, HeapTuple tuple,
+                                    int partitionNo, TupleDesc desc)
+{
+    PartitionMap *base = &(lmap->base);
+
+    Assert(PointerIsValid(elem));
+    Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKey));
+    Assert(PointerIsValid(tuple) && PointerIsValid(desc));
+    Assert((base->partitionKey)->dim1 == (base->partitionKey->dim1));
+    unserializeListPartitionAttribute(&((elem)->len), &((elem)->boundary), (base->partitionKeyDataType),
+                                      (base->partitionKey->dim1), (relOid), (base->partitionKey), (tuple),
+                                      Anum_pg_partition_boundaries, (desc));
+    (elem)->partitionOid = HeapTupleGetOid(tuple);
+    (elem)->partitionno = (partitionNo);
+}
+
+static inline void buildHashElement(HashPartElement *elem, HashPartitionMap *hmap, Oid relOid, HeapTuple tuple,
+                                    int partitionNo, TupleDesc desc)
+{
+    PartitionMap *base = &(hmap->base);
+    Assert(PointerIsValid(elem));
+    Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKeyDataType));
+    Assert(PointerIsValid(tuple) && PointerIsValid(desc));
+    unserializeHashPartitionAttribute((elem)->boundary, RANGE_PARTKEYMAXNUM, (relOid), (base->partitionKey), (tuple),
+                                      Anum_pg_partition_boundaries, (desc));
+    (elem)->partitionOid = HeapTupleGetOid(tuple);
+    (elem)->partitionno = (partitionNo);
+}
 
 static void RebuildListPartitionMap(ListPartitionMap* oldMap, ListPartitionMap* newMap);
 static void RebuildHashPartitionMap(HashPartitionMap* oldMap, HashPartitionMap* newMap);
 /* these routines are partition map related */
-static void buildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
-    Relation pg_partition, const List* partition_list);
+static void BuildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
+    Relation pg_partition, List* partition_list);
 static void BuildHashPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list);
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
@@ -892,7 +882,7 @@ void RelationInitPartitionMap(Relation relation, bool isSubPartition)
     switch (partstrategy) {
         case PART_STRATEGY_RANGE:
         case PART_STRATEGY_INTERVAL:
-            buildRangePartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
+            BuildRangePartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
             break;
         case PART_STRATEGY_LIST:
             BuildListPartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
@@ -1729,10 +1719,8 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             buildListElement(&(list_eles[list_itr]),
-                list_map->base.partitionKeyDataType,
-                list_map->base.partitionKey->dim1,
+                list_map,
                 rootPartitionOid,
-                list_map->base.partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
@@ -1865,10 +1853,8 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             buildHashElement(&(hash_eles[hash_itr]),
-                hash_map->base.partitionKeyDataType,
-                hash_map->base.partitionKey->dim1,
+                hash_map,
                 rootPartitionOid,
-                hash_map->base.partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
@@ -1902,8 +1888,8 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
  * Description	:
  * Notes		:
  */
-static void buildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
-    Relation pg_partition, const List* partition_list)
+static void BuildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
+    Relation pg_partition, List* partition_list)
 {
     int range_itr = 0;
     RangePartitionMap* range_map = NULL;
@@ -1995,10 +1981,8 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             BuildRangeElement(&(range_eles[range_itr]),
-                range_map->base.partitionKeyDataType,
-                range_map->base.partitionKey->dim1,
+                range_map,
                 rootPartitionOid,
-                range_map->base.partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition),

@@ -39,7 +39,7 @@ bool isPartKeyValuesInListPartition(
     Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int sourcePartSeq = -1;
-    Oid sourceOid = getListPartitionOid(&partMap->base, partKeyValues, partkeyColumnNum, &sourcePartSeq, true);
+    Oid sourceOid = getListPartitionOid(&partMap->base, partKeyValues, partkeyColumnNum, &sourcePartSeq);
     if (sourcePartSeq < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -61,7 +61,7 @@ bool isPartKeyValuesInHashPartition(Relation partTableRel, const HashPartitionMa
     Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int sourcePartSeq = -1;
-    Oid sourceOid = getHashPartitionOid(partTableRel->partMap, partKeyValues, &sourcePartSeq, true);
+    Oid sourceOid = getHashPartitionOid(partTableRel->partMap, partKeyValues, &sourcePartSeq);
     if (sourcePartSeq < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

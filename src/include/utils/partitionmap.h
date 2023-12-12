@@ -123,9 +123,10 @@ inline int PartitionMapGetPartKeyNum(PartitionMap *partMap)
 
 extern void RelationInitPartitionMap(Relation relation, bool isSubPartition = false);
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
-extern Oid getListPartitionOid(
-    PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex, bool topClosed);
-extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
+extern void partitionKeyCompareForRouting(Const **partkey_value, Const **partkey_bound, uint32 partKeyColumnNum,
+                                          int &compare);
+extern Oid getListPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex);
+extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex);
 extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm);
 extern List* getRangePartitionBoundaryList(Relation rel, int sequence);
