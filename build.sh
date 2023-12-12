@@ -12,6 +12,7 @@ declare build_binarylib_dir='None'
 declare wrap_binaries='NO'
 declare not_optimized=''
 declare config_file=''
+declare product_mode='opengauss'
 #########################################################################
 ##read command line paramenters
 #######################################################################
@@ -27,6 +28,7 @@ function print_help()
     -nopt|--not_optimized             on kunpeng platform, like 1616 version, without LSE optimized
     -f|--config_file                  set postgresql.conf.sample from config_file when packing
     -T|--tassl                        build with tassl
+    -pm|--product_mode                this values of paramenter is opengauss or lite or finance, the default value is opengauss.
     "
 }
 
@@ -69,6 +71,10 @@ while [ $# -gt 0 ]; do
             config_file=$(realpath "$2")
             shift 2
             ;;
+        -pm|--product_mode)
+            product_mode=$2
+            shift 2
+            ;;
         -T|--tassl)
             build_with_tassl='-T'
             shift 1
@@ -86,14 +92,13 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl}
-if [ "${wrap_binaries}"X = "YES"X ]
-then
+./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl} -pm ${product_mode}
+if [ "${wrap_binaries}"X = "YES"X ]; then
     chmod a+x package_opengauss.sh
     if [ X$config_file = "X" ];then
-        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode}
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -pm ${product_mode}
     else
-        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file} -pm ${product_mode}
     fi
 fi
 exit 0

@@ -134,7 +134,7 @@ function install_gaussdb()
         echo "WARNING: do not separate symbol in debug mode!"
     fi
 
-    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" ]; then
+    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" -a "$product_mode" != "finance" ]; then
         die "the product mode can only be opengauss, lite!"
     fi
 
@@ -201,7 +201,7 @@ function install_gaussdb()
         elif [ "$version_mode"x == "memcheck"x ]; then
             ./configure $shared_opt CFLAGS='-O0' --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt --enable-finance-mode >> "$LOG_FILE" 2>&1
         else
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-finance-mode>> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt --enable-finance-mode>> "$LOG_FILE" 2>&1
         fi
     fi
 
