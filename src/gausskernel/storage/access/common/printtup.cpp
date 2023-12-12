@@ -73,6 +73,7 @@ static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
 static void finalizeLocalStream(DestReceiver *self);
 
 inline void AddCheckInfo(StringInfo buf);
+inline MemoryContext changeToTmpContext(DestReceiver *self);
 
 /* ----------------------------------------------------------------
  *		printtup / debugtup support
@@ -485,6 +486,79 @@ void SetRemoteDestReceiverParams(DestReceiver *self, Portal portal)
     }
 }
 
+#ifdef USE_SPQ
+void assembleSpqStreamMessage(TupleTableSlot *slot, DestReceiver *self, StringInfo buf)
+{
+    TupleDesc typeinfo = slot->tts_tupleDescriptor;
+    DR_printtup *myState = (DR_printtup *)self;
+    int natts = typeinfo->natts;
+    MinimalTuple tuple;
+    int i;
+
+    StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+
+    Assert(buf->len == 0);
+    /*
+     * Prepare a DataRow message
+     */
+    buf->cursor = 'D';
+    if (slot->tts_mintuple) {
+        tuple = slot->tts_mintuple;
+    } else {
+        /* Make sure the tuple is fully deconstructed */
+        tableam_tslot_getallattrs(slot);
+
+        MemoryContext old_context = changeToTmpContext(self);
+
+        tuple = heap_form_minimal_tuple(typeinfo, slot->tts_values, slot->tts_isnull, nullptr);
+
+        (void)MemoryContextSwitchTo(old_context);
+    }
+    pq_sendbytes(buf, (char*)tuple, tuple->t_len);
+
+    StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+}
+void spq_printtupRemoteTuple(TupleTableSlot *slot, DestReceiver *self)
+{
+    TupleDesc typeinfo = slot->tts_tupleDescriptor;
+    DR_printtup *myState = (DR_printtup *)self;
+    StringInfo buf = &myState->buf;
+    MinimalTuple tuple;
+    int natts = typeinfo->natts;
+
+    StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+
+    MemoryContext old_context = changeToTmpContext(self);
+    /*
+         * Prepare a DataRow message
+     */
+    pq_beginmessage_reuse(buf, 'D');
+    if (slot->tts_mintuple) {
+        tuple = slot->tts_mintuple;
+    } else {
+        /* Make sure the tuple is fully deconstructed */
+        tableam_tslot_getallattrs(slot);
+        tuple = heap_form_minimal_tuple(typeinfo, slot->tts_values, slot->tts_isnull, nullptr);
+    }
+    pq_sendbytes(buf, (char*)tuple, tuple->t_len);
+
+    (void)MemoryContextSwitchTo(old_context);
+    StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
+
+    AddCheckInfo(buf);
+    pq_endmessage_reuse(buf);
+}
+
+void SetRemoteDestTupleReceiverParams(DestReceiver *self)
+{
+    DR_printtup *myState = (DR_printtup *)self;
+    Assert(myState->pub.mydest == DestRemote);
+    Assert(myState->pub.receiveSlot == printtupStream);
+
+    myState->pub.receiveSlot = spq_printtupRemoteTuple;
+}
+#endif
+
 static void printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 {
     DR_printtup *myState = (DR_printtup *)self;
@@ -866,6 +940,11 @@ inline MemoryContext changeToTmpContext(DestReceiver *self)
 
 void assembleStreamMessage(TupleTableSlot *slot, DestReceiver *self, StringInfo buf)
 {
+#ifdef USE_SPQ
+    if (IS_SPQ_RUNNING) {
+        return assembleSpqStreamMessage(slot, self, buf);
+    }
+#endif
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
     DR_printtup *myState = (DR_printtup *)self;
     int natts = typeinfo->natts;

@@ -3102,7 +3102,11 @@ void CopyDataRowTupleToSlot(RemoteQueryState* combiner, TupleTableSlot* slot)
     errno_t rc = 0;
     rc = memcpy_s(msg, combiner->currentRow.msglen, combiner->currentRow.msg, combiner->currentRow.msglen);
     securec_check(rc, "\0", "\0");
-    ExecStoreDataRowTuple(msg, combiner->currentRow.msglen, combiner->currentRow.msgnode, slot, true);
+    if (IS_SPQ_RUNNING) {
+        ExecStoreMinimalTuple((MinimalTuple)msg, slot, true);
+    } else {
+        ExecStoreDataRowTuple(msg, combiner->currentRow.msglen, combiner->currentRow.msgnode, slot, true);
+    }
     pfree_ext(combiner->currentRow.msg);
     combiner->currentRow.msg = NULL;
     combiner->currentRow.msglen = 0;

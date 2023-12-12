@@ -1997,7 +1997,11 @@ void AssembleDataRow(StreamState* node)
     NetWorkTimeDeserializeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
 
     oldcontext = MemoryContextSwitchTo(slot->tts_mcxt);
-    ExecStoreDataRowTuple(node->buf.msg, node->buf.len, InvalidOid, slot, false);
+    if (IS_SPQ_RUNNING) {
+        ExecStoreMinimalTuple((MinimalTuple)node->buf.msg, slot, false);
+    } else {
+        ExecStoreDataRowTuple(node->buf.msg, node->buf.len, InvalidOid, slot, false);
+    }
     /* The data has been consumed. */
     node->buf.len = 0;
     MemoryContextSwitchTo(oldcontext);
