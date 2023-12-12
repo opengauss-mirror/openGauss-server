@@ -2303,12 +2303,10 @@ GROUP_GET_SNAPSHOT:
     }
 
     /* Check whether there's a standby requiring an older xmin when dms is enabled. */
-    if (ENABLE_DMS && SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY && SSGetOldestXminFromAllStandby()) {
-        TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
-        if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
-            TransactionIdPrecedes(ss_oldest_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
-            u_sess->utils_cxt.RecentGlobalXmin = ss_oldest_xmin;
-        }
+    if (ENABLE_DMS && SS_STANDBY_CLUSTER_NORMAL_MAIN_STANDBY) {
+        ss_xmin_info_t* xmin_info = &g_instance.dms_cxt.SSXminInfo;
+        uint64 global_xmin = SSGetGlobalOldestXmin(u_sess->utils_cxt.RecentGlobalXmin);
+        u_sess->utils_cxt.RecentGlobalXmin = global_xmin;
     }
     
     /* Non-catalog tables can be vacuumed if older than this xid */
@@ -5005,12 +5003,9 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
         if (TransactionIdPrecedes(xmin, globalxmin))
             globalxmin = xmin;
 
-        if (ENABLE_DMS && SS_PRIMARY_MODE && SSGetOldestXminFromAllStandby()) {
-            TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
-            if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
-                TransactionIdPrecedes(ss_oldest_xmin, globalxmin)) {
-                globalxmin = ss_oldest_xmin;
-            }
+        if (ENABLE_DMS && SS_PRIMARY_MODE) {
+            SSUpdateNodeOldestXmin(SS_MY_INST_ID, globalxmin);
+            globalxmin = SSGetGlobalOldestXmin(globalxmin);
         }
 
         t_thrd.xact_cxt.ShmemVariableCache->xmin = xmin;
@@ -5377,7 +5372,6 @@ void UpdateXLogMaxCSN(CommitSeqNo xlogCSN)
 void GetOldestGlobalProcXmin(TransactionId *globalProcXmin)
 {
     TransactionId globalxmin = MaxTransactionId;
-    *globalProcXmin = InvalidTransactionId;
     ProcArrayStruct *arrayP = g_instance.proc_array_idx;
     int *pgprocnos = arrayP->pgprocnos;
     int numProcs = arrayP->numProcs;

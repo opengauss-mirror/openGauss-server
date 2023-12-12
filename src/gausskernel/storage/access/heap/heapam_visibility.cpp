@@ -1158,7 +1158,7 @@ recheck_xmax:
             else
                 return false; /* deleted before scan started */
         }
-        if (TransactionIdIsInProgress(xmax))
+        if (!XidVisibleInSnapshot(xmax, snapshot, &hintstatus, InvalidBuffer, NULL))
             return true;
         if (TransactionIdDidCommit(xmax)) {
             /* updating transaction committed, but when? */

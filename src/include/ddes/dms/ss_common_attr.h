@@ -197,8 +197,7 @@
 #define MAX_LEN_OF_MAXINTRANGE      12
 
 typedef enum SSBroadcastOp {
-    BCAST_GET_XMIN = 0,
-    BCAST_CANCEL_TRX_FOR_SWITCHOVER,
+    BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
     BCAST_SI,
     BCAST_SEGDROPTL,
     BCAST_DROP_REL_ALL_BUFFER,
@@ -215,8 +214,7 @@ typedef enum SSBroadcastOp {
 } SSBroadcastOp;
 
 typedef enum SSBroadcastOpAck {
-    BCAST_GET_XMIN_ACK = 0,
-    BCAST_CANCEL_TRX_ACK,
+    BCAST_CANCEL_TRX_ACK = 0,
     BCAST_CHECK_DB_BACKENDS_ACK,
     BCAST_ACK_END
 } SSBroadcastOpAck;

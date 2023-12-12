@@ -131,7 +131,7 @@ function db_start_wait
         if [ ${temp} -eq 0 ]; then
             print "wait node $1 start ${wait_time}s"
         fi
-        if [ ${wait_time} -gt 600 ]; then
+        if [ ${wait_time} -gt 300 ]; then
             print "wait node $1 start ${wait_time}s, db start failed"
             exit 1
         fi

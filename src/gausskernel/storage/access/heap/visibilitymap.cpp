@@ -240,6 +240,13 @@ void visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf, XLogRe
 
                     /* caller is expected to set PD_ALL_VISIBLE first */
                     Assert(PageIsAllVisible(heapPage));
+                    if (ENABLE_DMS) {
+                        BufferDesc* buf_desc = GetBufferDescriptor(heapBuf - 1);
+                        if ((pg_atomic_read_u32(&buf_desc->state) & BM_DIRTY) == 0) {
+                            MarkBufferDirty(heapBuf);
+                        }
+                    }
+
                     PageSetLSN(heapPage, recptr);
                 }
             }
