@@ -6,6 +6,18 @@ create database restore_autoinc_db with dbcompatibility = 'B';
 
 \c dump_autoinc_db
 
+-- test rename schema
+create schema gs_dump_test_tmp;
+set search_path to gs_dump_test_tmp;
+create table test(test int auto_increment primary key, id int );
+create table test2(test int auto_increment primary key, id int );
+create table test3(test int auto_increment primary key, id int );
+vacuum full test;
+alter schema gs_dump_test_tmp rename to gs_dump_test;
+set search_path to gs_dump_test;
+vacuum full test2;
+reset search_path;
+
 -- create auto_increment table
 CREATE TABLE test_dump_autoinc_pk(col1 int auto_increment PRIMARY KEY, col2 int) AUTO_INCREMENT = 1;
 INSERT INTO test_dump_autoinc_pk VALUES(0,0);
