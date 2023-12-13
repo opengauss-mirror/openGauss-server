@@ -77,8 +77,8 @@ drop table if exists lineitem;
 ----
 --case 3:  check reserve column
 ----
-CREATE TABLE check_column(id int, tid int);
-CREATE TABLE check_column(id int, tid_test int, ti int);
+CREATE TABLE check_column(id int, tid int) with (orientation = column);
+CREATE TABLE check_column(id int, tid_test int, ti int) with (orientation = column);
 ALTER TABLE check_column ADD COLUMN tid int;
 drop table if exists check_column;
 
