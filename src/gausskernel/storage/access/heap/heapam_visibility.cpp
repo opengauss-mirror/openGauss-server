@@ -1023,8 +1023,8 @@ static bool HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot, Buffer bu
  * basis of the true state of the transaction, even if we then pretend we
  * can't see it.)
  */
-static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer,
-    bool* has_cur_xact_write = NULL)
+bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer,
+    bool* has_cur_xact_write)
 {
     HeapTupleHeader tuple = htup->t_data;
     Assert(ItemPointerIsValid(&htup->t_self));

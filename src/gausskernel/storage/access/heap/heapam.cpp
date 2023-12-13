@@ -1477,7 +1477,9 @@ Relation relation_open(Oid relationId, LOCKMODE lockmode, int2 bucketId)
     if (r->rd_locator_info != NULL && IsRelationReplicated(r->rd_locator_info)) {
         t_thrd.xact_cxt.MyXactAccessedRepRel = true;
     }
+#ifndef ENABLE_DFX_OPT
     pgstat_initstats(r);
+#endif
 
     if (BUCKET_NODE_IS_VALID(bucketId)) {
         Assert(RELATION_OWN_BUCKET(r));
@@ -1532,7 +1534,9 @@ Relation try_relation_open(Oid relationId, LOCKMODE lockmode)
     if (r->rd_locator_info != NULL && IsRelationReplicated(r->rd_locator_info)) {
         t_thrd.xact_cxt.MyXactAccessedRepRel = true;
     }
+#ifndef ENABLE_DFX_OPT
     pgstat_initstats(r);
+#endif
 
     return r;
 }
@@ -2431,7 +2435,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
 
         /* check for bogus TID */
         if (offnum < FirstOffsetNumber || offnum > PageGetMaxOffsetNumber(dp)) {
-            break;
+            return false;
         }
 
         lp = PageGetItemId(dp, offnum);
@@ -2445,7 +2449,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
                 continue;
             }
             /* else must be end of chain */
-            break;
+            return false;
         }
 
         /*
@@ -2468,7 +2472,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          * Shouldn't see a HEAP_ONLY tuple at chain start.
          */
         if (at_chain_start && HeapTupleIsHeapOnly(heap_tuple)) {
-            break;
+            return false;
         }
 
         /*
@@ -2476,7 +2480,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          * broken.
          */
         if (TransactionIdIsValid(prev_xmax) && !TransactionIdEquals(prev_xmax, HeapTupleGetRawXmin(heap_tuple))) {
-            break;
+            return false;
         }
 
         /*
@@ -2488,7 +2492,12 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          */
         if (!skip) {
             /* If it's visible per the snapshot, we must return it */
-            valid = HeapTupleSatisfiesVisibility(heap_tuple, snapshot, buffer, has_cur_xact_write);
+            if (snapshot->satisfies == SNAPSHOT_MVCC) {
+                valid = HeapTupleSatisfiesMVCC(heap_tuple, snapshot, buffer, has_cur_xact_write);
+            } else {
+                valid = HeapTupleSatisfiesVisibility(heap_tuple, snapshot, buffer, has_cur_xact_write);
+            }
+
             /* We unlock buffer if sync xid to finish and xid base may change, so copy base again */
             HeapTupleCopyBaseFromPage(heap_tuple, dp);
             if (isMySerializableXact) {
@@ -2557,7 +2566,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
             at_chain_start = false;
             prev_xmax = HeapTupleGetUpdateXid(heap_tuple);
         } else {
-            break; /* end of chain */
+            return false; /* end of chain */
         }
     }
     return false;

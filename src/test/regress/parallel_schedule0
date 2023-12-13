@@ -524,6 +524,11 @@ test: tpch_disablevec13 tpch_disablevec14 tpch_disablevec16
 test: tpch_disablevec18 tpch_disablevec19 tpch_disablevec21
 
 # ----------
+# Init node reuse
+# ----------
+test: node_reuse_index_scan node_reuse_result
+
+# ----------
 # Postgres-XC additional tests
 # ----------
 

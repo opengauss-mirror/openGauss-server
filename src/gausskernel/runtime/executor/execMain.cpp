@@ -217,6 +217,10 @@ void ExecutorStart(QueryDesc* queryDesc, int eflags)
 {
     gstrace_entry(GS_TRC_ID_ExecutorStart);
 
+#ifdef ENABLE_DFX_OPT
+    ExecutorStart_hook = NULL;
+#endif
+
     /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
     if (ExecutorStart_hook && !(g_instance.status > NoShutdown))
         (*ExecutorStart_hook)(queryDesc, eflags);
@@ -388,9 +392,13 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     (void)INSTR_TIME_SET_CURRENT(starttime);
 #endif
 
+#ifndef ENABLE_DFX_OPT
     IPC_PERFORMANCE_LOG_OUTPUT("standard_ExecutorStart InitPlan start.");
+#endif
     InitPlan(queryDesc, eflags);
+#ifndef ENABLE_DFX_OPT  
     IPC_PERFORMANCE_LOG_OUTPUT("standard_ExecutorStart InitPlan end.");
+#endif
 #ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
 #endif
@@ -492,6 +500,10 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     if (can_operator_history_statistics) {
         ExplainNodeFinish(queryDesc->planstate, NULL, (TimestampTz)0.0, true);
     }
+    
+#ifdef ENABLE_DFX_OPT
+    ExecutorRun_hook = NULL;
+#endif
 
     if (ExecutorRun_hook) {
         (*ExecutorRun_hook)(queryDesc, direction, count);
@@ -702,6 +714,9 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
  */
 void ExecutorFinish(QueryDesc *queryDesc)
 {
+#ifdef ENABLE_DFX_OPT
+    ExecutorFinish_hook = NULL;
+#endif 
     if (ExecutorFinish_hook) {
         (*ExecutorFinish_hook)(queryDesc);
     } else {
@@ -1244,7 +1259,11 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     }
 
     if (check) {
-        (void)ExecCheckRTPerms(rangeTable, true);
+        if (plannedstmt->psrc == NULL) {
+            (void)ExecCheckRTPerms(rangeTable, true);
+        } else if (plannedstmt->psrc->exec_check == false) {
+            plannedstmt->psrc->exec_check = ExecCheckRTPerms(rangeTable, true);
+        }
     }
 
     /*
@@ -1253,6 +1272,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     estate->es_range_table = rangeTable;
     estate->es_plannedstmt = plannedstmt;
     estate->es_is_flt_frame = plannedstmt->is_flt_frame;
+    estate->es_psrc = plannedstmt->psrc;
 #ifdef ENABLE_MOT
     estate->mot_jit_context = queryDesc->mot_jit_context;
 #endif
@@ -1440,6 +1460,17 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
                 current_collectinfo_num)));
         }
         u_sess->instr_cxt.operator_plan_number = plannedstmt->num_plannodes;
+    }
+
+    estate->operator_reuse_enabled = u_sess->attr.attr_common.enable_plan_node_reuse && estate->es_psrc != NULL &&
+        CachedPlanIsValid(estate->es_psrc) && !estate->es_psrc->gpc.status.InShareTable() &&
+        estate->es_psrc->query_context != NULL;
+    if (estate->operator_reuse_enabled) {
+        if (estate->es_psrc->operator_reuse_state == NULL) {
+            estate->cur_reuse_state_cell = NULL;
+        } else {
+            estate->cur_reuse_state_cell = list_head(estate->es_psrc->operator_reuse_state);
+        }
     }
 
     /*

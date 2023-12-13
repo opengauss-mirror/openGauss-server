@@ -278,9 +278,13 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
 
 #ifdef PGXC
     if (u_sess->pgxc_cxt.PGXCNodeIdentifier == 0 && !IsAbortedTransactionBlockState()) {
+#ifndef ENABLE_DFX_OPT
         /* get pgxc_node id */
         Oid node_oid = get_pgxc_nodeoid(g_instance.attr.attr_common.PGXCNodeName);
         u_sess->pgxc_cxt.PGXCNodeIdentifier = get_pgxc_node_id(node_oid);
+#else
+        u_sess->pgxc_cxt.PGXCNodeIdentifier = 0;
+#endif
     }
 #endif
 

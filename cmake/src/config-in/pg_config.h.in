@@ -61,6 +61,10 @@
 /* Define to 1 if you want to check memory. (--enable-memory-check) */
 #cmakedefine ENABLE_MEMORY_CHECK 1
 
+/* Define to 1 if you want to use dfx optimization
+ * --enable-dfx-opt */
+#cmakedefine ENABLE_DFX_OPT 1
+
 /* Define to 1 if you want to check thread. (--enable-thread-check) */
 #cmakedefine ENABLE_THREAD_CHECK 1
 

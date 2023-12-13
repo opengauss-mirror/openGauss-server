@@ -219,7 +219,6 @@ ResultState* ExecInitResult(BaseResult* node, EState* estate, int eflags)
 {
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_MARK | EXEC_FLAG_BACKWARD)) || outerPlan(node) != NULL);
-
     /*
      * create state structure
      */

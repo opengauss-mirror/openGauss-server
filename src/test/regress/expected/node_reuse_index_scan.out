@@ -1,0 +1,85 @@
+DROP SCHEMA IF EXISTS index_scan_node_reuse;
+NOTICE:  schema "index_scan_node_reuse" does not exist, skipping
+CREATE SCHEMA index_scan_node_reuse;
+SET search_path = 'index_scan_node_reuse';
+-- PREPARE BEGIN
+begin;
+drop table if EXISTS t1_2c;
+NOTICE:  table "t1_2c" does not exist, skipping
+drop table if EXISTS t2_2c;
+NOTICE:  table "t2_2c" does not exist, skipping
+create table t1_2c(a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_2c_pkey" for table "t1_2c"
+create table t2_2c(a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_2c_pkey" for table "t2_2c"
+create index t1_2c_idx ON t1_2c(b);
+create index t2_2c_idx ON t2_2c(b);
+insert into t1_2c values(generate_series(1, 10000), generate_series(10000, 1, -1));
+insert into t2_2c values(generate_series(1, 10000), generate_series(10000, 1, -1));
+drop table if EXISTS tes_tb1;
+NOTICE:  table "tes_tb1" does not exist, skipping
+create table res_tb1(a int, b int);
+end;
+-- PREPARE END;
+-- index scan is required
+SET enable_indexscan = on;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+-- dont need bypass
+SET enable_opfusion = off;
+-- show execution plan, need indescan
+explain insert into res_tb1 select * from t1_2c where b = 5 UNION select * from t2_2c where b = 50;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Insert on res_tb1  (cost=267.62..269.54 rows=96 width=8)
+   ->  HashAggregate  (cost=267.62..268.58 rows=96 width=8)
+         Group By Key: t1_2c.a, t1_2c.b
+         ->  Append  (cost=0.00..267.14 rows=96 width=8)
+               ->  Index Scan using t1_2c_idx on t1_2c  (cost=0.00..133.09 rows=48 width=8)
+                     Index Cond: (b = 5)
+               ->  Index Scan using t2_2c_idx on t2_2c  (cost=0.00..133.09 rows=48 width=8)
+                     Index Cond: (b = 50)
+(8 rows)
+
+prepare p_insert1 as insert into res_tb1 select * from t1_2c where b = $1 UNION select * from t2_2c where b = $2;
+execute p_insert1(5, 500);
+execute p_insert1(15, 2500);
+execute p_insert1(25, 3500);
+execute p_insert1(35, 4500);
+execute p_insert1(45, 5500);
+execute p_insert1(55, 6500);
+execute p_insert1(65, 7500);
+execute p_insert1(75, 8500);
+execute p_insert1(85, 9500);
+execute p_insert1(95, 9500);
+-- check result
+select * from res_tb1;
+  a   |  b   
+------+------
+ 9501 |  500
+ 9996 |    5
+ 7501 | 2500
+ 9986 |   15
+ 9976 |   25
+ 6501 | 3500
+ 5501 | 4500
+ 9966 |   35
+ 4501 | 5500
+ 9956 |   45
+ 9946 |   55
+ 3501 | 6500
+ 9936 |   65
+ 2501 | 7500
+ 1501 | 8500
+ 9926 |   75
+ 9916 |   85
+  501 | 9500
+ 9906 |   95
+  501 | 9500
+(20 rows)
+
+DROP SCHEMA IF EXISTS index_scan_node_reuse CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table t1_2c
+drop cascades to table t2_2c
+drop cascades to table res_tb1

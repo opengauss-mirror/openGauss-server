@@ -460,11 +460,28 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     if (m_local.m_ledger_hash_exist && !IsConnFromApp()) {
         errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
             "INSERT 0 %ld %lu\0", nprocessed, m_local.m_ledger_relhash);
+        securec_check_ss(errorno, "\0", "\0");
     } else {
+#ifndef ENABLE_DFX_OPT        
         errorno =
             snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 %ld", nprocessed);
+        securec_check_ss(errorno, "\0", "\0");
+#else
+       char *bufp;
+       bufp = completionTag;
+       *bufp++ = 'I';
+       *bufp++ = 'N';
+       *bufp++ = 'S';
+       *bufp++ = 'E';
+       *bufp++ = 'R';
+       *bufp++ = 'T';
+       *bufp++ = ' ';
+       *bufp++ = '0';
+       *bufp++ = ' ';
+       bufp = pg_ultostr(bufp, nprocessed);
+       *bufp++ = '\0';
+#endif
     }
-    securec_check_ss(errorno, "\0", "\0");
     FreeExecutorStateForOpfusion(m_c_local.m_estate);
     u_sess->statement_cxt.current_row_count = nprocessed;
     u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;

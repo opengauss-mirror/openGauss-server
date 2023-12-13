@@ -394,6 +394,7 @@ enable_kill_query = off			# optional: [on, off], default: off
 #enable_expr_fusion = off
 #enable_functional_dependency = off
 #enable_indexscan_optimization = off
+#enable_plan_node_reuse = on
 #enable_inner_unique_opt = off
 
 #------------------------------------------------------------------------------

@@ -175,6 +175,7 @@ typedef struct knl_session_attr_common {
 
     bool assert_enabled;
     bool enable_expr_fusion;
+    bool enable_plan_node_reuse;
     int AlarmReportInterval;
     int xmloption;
     bool enable_ts_compaction;

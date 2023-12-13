@@ -1425,8 +1425,7 @@ int128 nextval_internal(Oid relid)
 
     TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
-    if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE) != ACLCHECK_OK &&
-        pg_class_aclcheck(elm->relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
+    if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE | ACL_UPDATE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
@@ -1441,6 +1440,8 @@ int128 nextval_internal(Oid relid)
         Assert(elm->last_valid);
         Assert(elm->increment != 0);
         elm->last += elm->increment;
+
+#ifndef ENABLE_DFX_OPT
         char* buf_last = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm->last)));
         char* buf_cached = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm->cached)));
 
@@ -1453,6 +1454,7 @@ int128 nextval_internal(Oid relid)
 
         pfree_ext(buf_last);
         pfree_ext(buf_cached);
+#endif
 
         relation_close(seqrel, NoLock);
         u_sess->cmd_cxt.last_used_seq = elm;
@@ -1498,8 +1500,7 @@ Datum currval_oid(PG_FUNCTION_ARGS)
 
     TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
-    if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_SELECT) != ACLCHECK_OK &&
-        pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE) != ACLCHECK_OK)
+    if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_SELECT | ACL_USAGE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
@@ -1544,8 +1545,7 @@ Datum lastval(PG_FUNCTION_ARGS)
     /* nextval() must have already been called for this sequence */
     Assert(u_sess->cmd_cxt.last_used_seq->last_valid);
 
-    if (pg_class_aclcheck(u_sess->cmd_cxt.last_used_seq->relid, GetUserId(), ACL_SELECT) != ACLCHECK_OK &&
-        pg_class_aclcheck(u_sess->cmd_cxt.last_used_seq->relid, GetUserId(), ACL_USAGE) != ACLCHECK_OK)
+    if (pg_class_aclcheck(u_sess->cmd_cxt.last_used_seq->relid, GetUserId(), ACL_SELECT | ACL_USAGE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));

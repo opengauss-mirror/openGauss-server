@@ -348,10 +348,12 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     }
 #endif
 
+#ifndef ENABLE_DFX_OPT
     if (psrc->opFusionObj != NULL) {
         Assert(psrc->cplan == NULL);
         (void)RevalidateCachedQuery(psrc);
     }
+#endif
 
     if (psrc->opFusionObj != NULL) {
         OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
@@ -455,6 +457,32 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
                 return;
             }
             Assert(0);
+        }
+    }
+
+    /*
+     * Save psrc to portal->stmts
+     */
+    PlannedStmt *pstmt = NULL;
+    if (u_sess->attr.attr_common.enable_plan_node_reuse && portal->stmts && list_length(portal->stmts) == 1) {
+        pstmt = (PlannedStmt *)linitial(portal->stmts);
+        if (IsA(pstmt, PlannedStmt)) {
+            if (pstmt->utilityStmt == NULL && (pstmt->commandType == CMD_SELECT || pstmt->commandType == CMD_INSERT ||
+                                               pstmt->commandType == CMD_UPDATE || pstmt->commandType == CMD_DELETE)) {
+                pstmt->psrc = psrc;
+            } else {
+                pstmt->psrc = NULL;
+            }
+        }
+    } else {
+        /* We set all stmts->psrc NULL default*/
+        ListCell *lc = NULL;
+        foreach (lc, portal->stmts) {
+            Node *planned_stmt_node = (Node *)lfirst(lc);
+            if (IsA(planned_stmt_node, PlannedStmt)) {
+                pstmt = (PlannedStmt *)planned_stmt_node;
+                pstmt->psrc = NULL;
+            }
         }
     }
 

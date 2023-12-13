@@ -28,8 +28,9 @@ extern void pq_send_ascii_string(StringInfo buf, const char* str);
 extern void pq_sendfloat4(StringInfo buf, float4 f);
 extern void pq_sendfloat8(StringInfo buf, float8 f);
 extern void pq_endmessage(StringInfo buf);
-extern void pq_endmessage_reuse(StringInfo buf);
 extern void pq_endmessage_noblock(StringInfo buf);
+extern int pq_putmessage(char msgtype, const char* s, size_t len);
+
 
 extern void pq_begintypsend(StringInfo buf);
 extern bytea* pq_endtypsend(StringInfo buf);
@@ -50,6 +51,19 @@ extern void pq_copymsgbytes(StringInfo msg, char* buf, int datalen);
 extern char* pq_getmsgtext(StringInfo msg, int rawbytes, int* nbytes);
 extern const char* pq_getmsgstring(StringInfo msg);
 extern void pq_getmsgend(StringInfo msg);
+
+/* --------------------------------
+ *		pq_endmessage_reuse	- send the completed message to the frontend
+ *
+ * The data buffer is *not* freed, allowing to reuse the buffer with
+ * pg_beginmessage_reuse.
+ --------------------------------
+ */
+inline void pq_endmessage_reuse(StringInfo buf)
+{
+    /* msgtype was saved in cursor field */
+    (void)pq_putmessage(buf->cursor, buf->data, buf->len);
+}
 
 static inline uint128 pg_bswap128(uint128 x)
 {
@@ -109,10 +123,8 @@ static inline void pq_writeint8(StringInfoData* pg_restrict buf, uint8 i)
 static inline void pq_writeint16(StringInfoData* pg_restrict buf, uint16 i)
 {
     uint16 ni = htons(i);
-    errno_t rc = EOK;
 
-    rc = memcpy_s((char* pg_restrict)(buf->data + buf->len), sizeof(uint16), &ni, sizeof(uint16));
-    securec_check(rc, "\0", "\0");
+    memcpy((char* pg_restrict)(buf->data + buf->len), &ni, sizeof(uint16));
     buf->len += sizeof(uint16);
 }
 
@@ -123,10 +135,8 @@ static inline void pq_writeint16(StringInfoData* pg_restrict buf, uint16 i)
 static inline void pq_writeint32(StringInfoData* pg_restrict buf, uint32 i)
 {
     uint32 ni = htonl(i);
-    errno_t rc = EOK;
 
-    rc = memcpy_s((char* pg_restrict)(buf->data + buf->len), sizeof(uint32), &ni, sizeof(uint32));
-    securec_check(rc, "\0", "\0");
+    memcpy((char* pg_restrict)(buf->data + buf->len), &ni, sizeof(uint32));
     buf->len += sizeof(uint32);
 }
 

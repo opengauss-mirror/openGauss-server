@@ -1553,6 +1553,10 @@ void ProcessUtility(processutility_context* processutility_cxt,
     /* required as of 8.4 */
     AssertEreport(processutility_cxt->query_string != NULL, MOD_EXECUTOR, "query string is NULL");
 
+#ifdef ENABLE_DFX_OPT
+    ProcessUtility_hook = NULL;
+#endif
+
     /*
      * We provide a function hook variable that lets loadable plugins get
      * control when ProcessUtility is called.  Such a plugin would normally
@@ -2595,8 +2599,11 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
     }
 #endif
 
+#ifndef ENABLE_DFX_OPT
     /* Check the statement during online expansion. */
     BlockUnsupportedDDL(parse_tree);
+#endif
+
 #ifdef ENABLE_MULTIPLE_NODES
     block_ts_rangevar_unsupport_ddl(parse_tree);
 #endif

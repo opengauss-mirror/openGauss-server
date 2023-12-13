@@ -422,6 +422,8 @@ typedef struct CachedPlanSource {
     bool opteval;
     bool hasSubQuery;
     int nextval_default_expr_type;
+    List* operator_reuse_state;
+    bool exec_check;
 } CachedPlanSource;
 
 /*

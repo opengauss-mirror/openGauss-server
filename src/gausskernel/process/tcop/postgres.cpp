@@ -3952,7 +3952,8 @@ pass_parsing:
     gstrace_exit(GS_TRC_ID_exec_parse_message);
 }
 
-static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, const char* stmt_name)
+static int 
+getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, const char* stmt_name)
 {
     ParamListInfo params = NULL;
     /* Get the parameter format codes */
@@ -4476,8 +4477,10 @@ static void exec_bind_message(StringInfo input_message)
     u_sess->parser_cxt.param_info = NULL;
     u_sess->parser_cxt.param_message = NULL;
 
+#ifdef ENABLE_MELTIPLE_NODES
     StringInfo temp_message = makeStringInfo();
     copyStringInfo(temp_message, input_message);
+#endif
     gstrace_entry(GS_TRC_ID_exec_bind_message);
 
     /* Instrumentation: PBE - reset unique sql elapsed start time */
@@ -4534,7 +4537,9 @@ static void exec_bind_message(StringInfo input_message)
      */
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
 
+#ifndef ENABLE_DFX_OPT
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
+#endif
     instr_stmt_report_start_time();
 
     set_ps_display("BIND", false);
@@ -4628,6 +4633,7 @@ static void exec_bind_message(StringInfo input_message)
     /* Switch back to message context */
     MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
 
+#ifdef ENABLE_MELTIPLE_NODES
     /* light proxy and not set fetch size */
     if (psrc->single_exec_node && (unsigned int)input_message->len <= SECUREC_MEM_MAX_LEN) {
         /* save the cursor in case of error */
@@ -4711,6 +4717,7 @@ static void exec_bind_message(StringInfo input_message)
     } else
         /* it may be not NULL if last time report error */
         lightProxy::setCurrentProxy(NULL);
+#endif
 
     /* Get the parameter format codes */
     numPFormats = pq_getmsgint(input_message, 2);
@@ -4771,6 +4778,7 @@ static void exec_bind_message(StringInfo input_message)
      */
     oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
 
+#ifdef ENABLE_MELTIPLE_NODES
     /* Version control for DDL PBE */
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_message = makeStringInfo();
@@ -4781,6 +4789,7 @@ static void exec_bind_message(StringInfo input_message)
             pfree_ext(temp_message->data);
         pfree_ext(temp_message);
     }
+#endif
     /* Copy the plan's query string into the portal */
     query_string = pstrdup(psrc->query_string);
 
@@ -5064,6 +5073,31 @@ static void exec_bind_message(StringInfo input_message)
         !IsAbortedTransactionBlockState()) {
         u_sess->wlm_cxt->cgroup_last_stmt = u_sess->wlm_cxt->cgroup_stmt;
         u_sess->wlm_cxt->cgroup_stmt = WLMIsSpecialCommand(psrc->raw_parse_tree, portal);
+    }
+
+    PlannedStmt* planned_stmt = NULL;
+    if (u_sess->attr.attr_common.enable_plan_node_reuse &&
+        portal->stmts && list_length(portal->stmts) == 1) {
+        planned_stmt = (PlannedStmt*)linitial(portal->stmts);
+        if (IsA(planned_stmt, PlannedStmt)) {
+            if (planned_stmt->utilityStmt == NULL &&
+                (planned_stmt->commandType == CMD_SELECT || planned_stmt->commandType == CMD_INSERT ||
+                 planned_stmt->commandType == CMD_UPDATE || planned_stmt->commandType == CMD_DELETE)) {
+                planned_stmt->psrc = psrc;
+            } else {
+                planned_stmt->psrc = NULL;
+            }
+        }
+    } else {
+        /* We set all stmts->psrc NULL default*/
+        ListCell* lc = NULL;
+        foreach(lc, portal->stmts) {
+            Node* planned_stmt_node = (Node*)lfirst(lc);
+            if (IsA(planned_stmt_node, PlannedStmt)) {
+                planned_stmt = (PlannedStmt*)planned_stmt_node;
+                planned_stmt->psrc = NULL;
+            }
+        }
     }
 
     /*
@@ -8163,8 +8197,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         if ((beentry->st_changecount & 1) != 0) {
             pgstat_increment_changecount_after(beentry);
         }
-
+#ifndef ENABLE_DFX_OPT
         (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
+#endif
         t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
         /* output the memory tracking information when error happened */
         MemoryTrackingOutputFile();
@@ -8573,7 +8608,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             }
 
             /* We're ready for a new query, reset wait status and u_sess->debug_query_id */
+#ifndef ENABLE_DFX_OPT
             pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
+#endif
             pgstat_report_queryid(0);
             pgstat_report_unique_sql_id(true);
 
@@ -8606,8 +8643,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 UnsetGlobalSnapshotData();
             }
 #endif
+
+#ifndef ENABLE_DFX_OPT
             /* update our elapsed time statistics. */
             timeInfoRecordEnd();
+#endif
 
             /* reset unique_sql_id & stat
              *
@@ -8622,8 +8662,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             send_ready_for_query = false;
         } else {
+#ifndef ENABLE_DFX_OPT
             /* update our elapsed time statistics. */
             timeInfoRecordEnd();
+#endif
         }
         /*
          * INSTR: when track type is TOP, we reset is_top_unique_sql to false,
@@ -8722,7 +8764,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         firstchar = ReadCommand(&input_message);
         /* update our elapsed time statistics. */
+#ifndef ENABLE_DFX_OPT
         timeInfoRecordStart();
+#endif
 
         /* stmt retry routine phase : pack input_message */
         if (IsStmtRetryEnabled()) {
@@ -8801,6 +8845,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         /* Reset store procedure's session variables. */
         stp_reset_stmt();
+        
         MemoryContext oldMemory =
             MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 #ifdef ENABLE_LLVM_COMPILE
@@ -8874,8 +8919,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     pfree(plan_string);
 
                 InitGlobalNodeDefinition(planstmt);
-
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context();
+#endif
                 exec_simple_plan(planstmt);
 
                 MemoryContextSwitchTo(old_cxt);
@@ -8973,8 +9019,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             case 'Q': /* simple query */
             {
                 const char* query_string = NULL;
-
+#ifndef ENABLE_DFX_OPT
                 pgstat_report_trace_id(&u_sess->trace_cxt, true);
+#endif
                 query_string = pq_getmsgstring(&input_message);
                 if (query_string == NULL) {
                     ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -8990,7 +9037,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 
                 pgstatCountSQL4SessionLevel();
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context();
+#endif
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
                     u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
@@ -9328,7 +9377,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 
                 pgstatCountSQL4SessionLevel();
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context();
+#endif
 
                 /*
                  * @hdfs
@@ -9422,7 +9473,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #endif
 
                 pq_getmsgend(&input_message);
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context();
+#endif
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
                 if ((libpqsw_redirect() || libpqsw_get_set_command()) && !libpqsw_only_localrun()) {
@@ -9432,7 +9485,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         libpqsw_get_set_command() ? RT_SET : RT_NORMAL
                         );
                 }
+#ifndef ENABLE_DFX_OPT
                 statement_commit_metirc_context();
+#endif
 
                 /*
                  * since AbortTransaction can't clean named prepared statement, we need to
@@ -9452,8 +9507,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 if (IsStmtRetryEnabled())
                     u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
 #endif
-
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context();
+#endif
                 /*
                  * this message is complex enough that it seems best to put
                  * the field extraction out-of-line
@@ -9466,9 +9522,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             {
                 const char* portal_name = NULL;
                 int max_rows;
-
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context_if_needs();
                 pgstat_report_trace_id(&u_sess->trace_cxt, true);
+#endif
                 if ((unsigned int)input_message.len > SECUREC_MEM_MAX_LEN)
                     ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid execute message")));
 
@@ -10215,7 +10272,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 u_sess->unique_sql_cxt.unique_sql_start_time = 0;
 
                 pgstatCountSQL4SessionLevel();
+#ifndef ENABLE_DFX_OPT
                 statement_init_metric_context();
+#endif
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
                     u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
@@ -11390,7 +11449,9 @@ static void exec_batch_bind_execute(StringInfo input_message)
      * Report query to various monitoring facilities.
      */
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
+#ifndef ENABLE_DFX_OPT
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
+#endif
 
     set_ps_display(psrc->commandTag, false);
 

@@ -796,6 +796,9 @@ static void pgstat_free_tablist(void)
  */
 void pgstat_report_stat(bool force)
 {
+#ifdef ENABLE_DFX_OPT
+    return;
+#endif
     /* we assume this inits to all zeroes: */
     static const PgStat_TableCounts all_zeroes = {0};
 
@@ -1939,6 +1942,9 @@ static void make_sure_stat_tab_initialized()
  */
 static PgStat_TableStatus* get_tabstat_entry(Oid rel_id, bool isshared, uint32 statFlag)
 {
+#ifdef ENABLE_DFX_OPT
+    return NULL;
+#endif   
     TabStatHashEntry* hash_entry = NULL;
     PgStat_TableStatus* entry = NULL;
     TabStatusArray* tsa = NULL;

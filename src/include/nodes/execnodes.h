@@ -720,6 +720,9 @@ typedef struct EState {
     bool have_current_xact_date; /* Check whether dirty reads exist in the cursor rollback scenario. */
     int128 first_autoinc; /* autoinc has increased during this execution */
 	int result_rel_index;    /* which result_rel_info to be excuted when multiple-relation modified. */
+    CachedPlanSource* es_psrc;
+    ListCell* cur_reuse_state_cell;
+    bool operator_reuse_enabled;
 } EState;
 
 /*
@@ -1437,6 +1440,7 @@ typedef struct ResultState {
     ExprState* resconstantqual;
     bool rs_done;      /* are we done? */
     bool rs_checkqual; /* do we need to check the qual? */
+    TupleDesc resulttype_tup_desc; /* reuse resulttype_tup_desc */
 } ResultState;
 
 /* ----------------
@@ -1881,6 +1885,8 @@ typedef struct IndexScanState {
     List* iss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation iss_CurrentIndexPartition;
+    TupleDesc resulttype_tup_desc;
+    TupleDesc scantype_tup_desc;
 } IndexScanState;
 
 /* ----------------
