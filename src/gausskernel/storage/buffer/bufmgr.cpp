@@ -7414,3 +7414,70 @@ void buffer_in_progress_push()
     t_thrd.storage_cxt.IsForInput = t_thrd.storage_cxt.ParentIsForInput;
     t_thrd.storage_cxt.ParentInProgressBuf = NULL;
 }
+
+void SSTryEliminateBuf(uint64 times)
+{
+    BufferDesc *buf = NULL;
+    uint64 buf_state;
+    LWLock *partition_lock = NULL;
+    BufferTag tag;
+    uint64 flags;
+    uint32 hash;
+
+    buf = SSTryGetBuffer(times, &buf_state);
+    if (buf == NULL) {
+        return;
+    }
+
+    UnlockBufHdr(buf, buf_state);
+    tag = buf->tag;
+    hash = BufTableHashCode(&tag);
+    partition_lock = BufMappingPartitionLock(hash);
+    if (!LWLockAcquire(partition_lock, LW_EXCLUSIVE)) {
+        return;
+    }
+
+    buf_state = LockBufHdr(buf);
+    if (!BUFFERTAGS_EQUAL(buf->tag, tag)) {
+        UnlockBufHdr(buf, buf_state);
+        LWLockRelease(partition_lock);
+        return;
+    }
+
+    if (BUF_STATE_GET_REFCOUNT(buf_state) != 0) {
+        UnlockBufHdr(buf, buf_state);
+        LWLockRelease(partition_lock);
+        return;
+    }
+
+    tag = buf->tag;
+    flags = buf_state & BUF_FLAG_MASK;
+    if (flags & BM_DIRTY) {
+        UnlockBufHdr(buf, buf_state);
+        LWLockRelease(partition_lock);
+        return;
+    }
+
+    if (flags & BM_TAG_VALID) {
+        if (!DmsReleaseOwner(tag, buf->buf_id)) {
+            UnlockBufHdr(buf, buf_state);
+            LWLockRelease(partition_lock);
+            return;
+        }
+    }
+
+    ereport(LOG, (errmodule(MOD_DMS), (errmsg("try eliminate buf, buf tag:[%u/%u/%u/%d %d-%u], buf id:%d",
+                                              tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                                              tag.rnode.bucketNode, tag.forkNum, tag.blockNum, buf->buf_id))));
+
+    CLEAR_BUFFERTAG(tag);
+    buf_state &= ~(BUF_FLAG_MASK | BUF_USAGECOUNT_MASK);
+    UnlockBufHdr(buf, buf_state);
+
+    if (flags & BM_TAG_VALID) {
+        BufTableDelete(&tag, hash);
+    }
+
+    ereport(LOG, (errmodule(MOD_DMS), (errmsg("try eliminate buf success"))));
+    LWLockRelease(partition_lock);
+}
