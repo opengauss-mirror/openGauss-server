@@ -90,9 +90,9 @@ drop table if exists lineitem;
 ----
 --case 3:  check reserve column
 ----
-CREATE TABLE check_column(id int, tid int);
+CREATE TABLE check_column(id int, tid int) with (orientation = column);
 ERROR:  column name "tid" conflicts with a system column name
-CREATE TABLE check_column(id int, tid_test int, ti int);
+CREATE TABLE check_column(id int, tid_test int, ti int) with (orientation = column);
 ALTER TABLE check_column ADD COLUMN tid int;
 ERROR:  column name "tid" conflicts with a system column name
 drop table if exists check_column;
