@@ -880,7 +880,7 @@ void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeR
         case PARTTYPE_VALUE_PARTITIONED_RELATION:
             break;
         case PARTTYPE_PARTITIONED_RELATION:
-            partitionOid = heapTupleGetPartitionId(rel, tuple, &partitionno);
+            partitionOid = heapTupleGetPartitionOid(rel, tuple, &partitionno);
             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, rel, partitionOid, partitionno,
                 partRelation, partition, RowExclusiveLock);
             relAndPart->partRel = partRelation;
@@ -892,10 +892,10 @@ void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeR
             Partition subPart = NULL;
             Oid subPartOid;
             int subpartitionno = INVALID_PARTITION_NO;
-            partitionOid = heapTupleGetPartitionId(rel, tuple, &partitionno);
+            partitionOid = heapTupleGetPartitionOid(rel, tuple, &partitionno);
             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, rel, partitionOid, partitionno,
                 partRelation, partition, RowExclusiveLock);
-            subPartOid = heapTupleGetPartitionId(partRelation, tuple, &subpartitionno);
+            subPartOid = heapTupleGetPartitionOid(partRelation, tuple, &subpartitionno);
             searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRelation, subPartOid,
                 subpartitionno, subPartRel, subPart, RowExclusiveLock);
 

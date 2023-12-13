@@ -832,9 +832,9 @@ static PruningResult* partitionPruningFromNullTest(NullTest* expr, PruningContex
 
     /* Var's column MUST belongs to parition key columns */
     partMap = (RangePartitionMap*)(GetPartitionMap(context));
-    partKeyNum = partMap->partitionKey->dim1;
+    partKeyNum = partMap->base.partitionKey->dim1;
 
-    attrOffset = varIsInPartitionKey(var->varattno, partMap->partitionKey, partKeyNum);
+    attrOffset = varIsInPartitionKey(var->varattno, partMap->base.partitionKey, partKeyNum);
     if (attrOffset != 0) {
         result->state = PRUNING_RESULT_FULL;
         return result;
@@ -868,7 +868,7 @@ static PruningResult* partitionPruningFromNullTest(NullTest* expr, PruningContex
 static PruningResult* ListPartitionPruningFromIsNotNull(ListPartitionMap* listPartMap, PruningResult* pruning,
     int attrOffset)
 {
-    if (listPartMap->partitionKey->dim1 == 1) {
+    if (listPartMap->base.partitionKey->dim1 == 1) {
         pruning->state = PRUNING_RESULT_FULL;
         pruning->isPbeSinlePartition = false;
         return pruning;
@@ -902,7 +902,7 @@ static PruningResult* ListPartitionPruningFromIsNotNull(ListPartitionMap* listPa
 static PruningResult* ListPartitionPruningFromIsNull(ListPartitionMap* listPartMap, PruningResult* pruning,
     int attrOffset)
 {
-    if (listPartMap->partitionKey->dim1 == 1) {
+    if (listPartMap->base.partitionKey->dim1 == 1) {
         int defaultPartitionIndex = -1;
         for (int i = 0; i < listPartMap->listElementsNum; i++) {
             ListPartElement *list = &listPartMap->listElements[i];
@@ -925,11 +925,11 @@ static PruningResult* ListPartitionPruningFromIsNull(ListPartitionMap* listPartM
      * The partition key value of the multi-keys list partition can be NULL.
      * NullTest should be recorded in the boundary for pruning with other OpExpr or NullTest.
      */
-    PruningBoundary* boundary = makePruningBoundary(listPartMap->partitionKey->dim1);
+    PruningBoundary* boundary = makePruningBoundary(listPartMap->base.partitionKey->dim1);
     Oid typid, typcoll;
     int typmod;
 
-    get_atttypetypmodcoll(listPartMap->relid, listPartMap->partitionKey->values[attrOffset],
+    get_atttypetypmodcoll(listPartMap->base.relOid, listPartMap->base.partitionKey->values[attrOffset],
         &typid, &typmod, &typcoll);
     boundary->minClose[attrOffset] = true;
     boundary->min[attrOffset] = PointerGetDatum(makeNullConst(typid, typmod, typcoll));
@@ -970,8 +970,8 @@ static PruningResult* partitionPruningFromNullTest(PartitionType partType, NullT
     /* Var's column MUST belongs to parition key columns */
     if (partType == PART_TYPE_LIST) {
         ListPartitionMap* listPartMap = (ListPartitionMap*)(context->relation->partMap);
-        partKeyNum = listPartMap->partitionKey->dim1;
-        attrOffset = varIsInPartitionKey(var->varattno, listPartMap->partitionKey, partKeyNum);
+        partKeyNum = listPartMap->base.partitionKey->dim1;
+        attrOffset = varIsInPartitionKey(var->varattno, listPartMap->base.partitionKey, partKeyNum);
         if (attrOffset < 0 || attrOffset >= partKeyNum) {
             result->state = PRUNING_RESULT_FULL;
             return result;
@@ -983,8 +983,8 @@ static PruningResult* partitionPruningFromNullTest(PartitionType partType, NullT
     }
     /* HASH partition */
     HashPartitionMap* hashPartMap = (HashPartitionMap*)(context->relation->partMap);
-    partKeyNum = hashPartMap->partitionKey->dim1;
-    attrOffset = varIsInPartitionKey(var->varattno, hashPartMap->partitionKey, partKeyNum);
+    partKeyNum = hashPartMap->base.partitionKey->dim1;
+    attrOffset = varIsInPartitionKey(var->varattno, hashPartMap->base.partitionKey, partKeyNum);
     if (attrOffset != 0) {
         result->state = PRUNING_RESULT_FULL;
         return result;
@@ -1564,8 +1564,8 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     /* Var's column MUST belongs to parition key columns */
     partMap = (RangePartitionMap*)(GetPartitionMap(context));
 
-    partKeyNum = partMap->partitionKey->dim1;
-    attrOffset = varIsInPartitionKey(varArg->varattno, partMap->partitionKey, partKeyNum);
+    partKeyNum = partMap->base.partitionKey->dim1;
+    attrOffset = varIsInPartitionKey(varArg->varattno, partMap->base.partitionKey, partKeyNum);
     if (attrOffset < 0) {
         result->state = PRUNING_RESULT_FULL;
         return result;
@@ -1676,12 +1676,12 @@ static PruningResult* RecordEqualFromOpExprPart(const PartitionType partType, co
     /* Var's column MUST belongs to parition key columns */
     if (partType == PART_TYPE_LIST) {
         ListPartitionMap *partMap = (ListPartitionMap*)(context->relation->partMap);
-        partKeyNum = partMap->partitionKey->dim1;
-        attrOffset = varIsInPartitionKey(varArg->varattno, partMap->partitionKey, partKeyNum);
+        partKeyNum = partMap->base.partitionKey->dim1;
+        attrOffset = varIsInPartitionKey(varArg->varattno, partMap->base.partitionKey, partKeyNum);
     } else if (partType == PART_TYPE_HASH) {
         HashPartitionMap *partMap = (HashPartitionMap*)(context->relation->partMap);
-        partKeyNum = partMap->partitionKey->dim1;
-        attrOffset = varIsInPartitionKey(varArg->varattno, partMap->partitionKey, partKeyNum);
+        partKeyNum = partMap->base.partitionKey->dim1;
+        attrOffset = varIsInPartitionKey(varArg->varattno, partMap->base.partitionKey, partKeyNum);
     }
 
     if (attrOffset < 0) {
@@ -2195,7 +2195,7 @@ static PartKeyRange* constructPartKeyRange(PruningContext* context, int partSeq)
     result = (PartKeyRange*)palloc0(sizeof(PartKeyRange));
 
     partMap = (RangePartitionMap*)GetPartitionMap(context);
-    partKeyNum = partMap->partitionKey->dim1;
+    partKeyNum = partMap->base.partitionKey->dim1;
 
     nextPartition = &(partMap->rangeElements[partSeq]);
 
@@ -2772,13 +2772,13 @@ static bool PartitionPruningForPartialListBoundary(ListPartitionMap* listMap, Pr
         return false;
     }
 
-    incre_partmap_refcount(&listMap->type);
+    incre_partmap_refcount(&listMap->base);
     for (int i = 0; i < listMap->listElementsNum; i++) {
         if (PartialListBoundaryMatched(&listMap->listElements[i], keyPos, keyValues)) {
             listBms = bms_add_member(listBms, i);
         }
     }
-    decre_partmap_refcount(&listMap->type);
+    decre_partmap_refcount(&listMap->base);
     list_free_ext(keyPos);
     if (PointerIsValid(pruningResult->bm_rangeSelectedPartitions)) {
         Bitmapset* tempBms = bms_intersect(pruningResult->bm_rangeSelectedPartitions, listBms);

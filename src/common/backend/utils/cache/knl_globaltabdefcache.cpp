@@ -302,18 +302,18 @@ static PartitionMap *CopyRangePartitionMap(RangePartitionMap *src_rpm)
 
     *dst_rpm = *src_rpm;
 
-    dst_rpm->partitionKey = int2vectorCopy(src_rpm->partitionKey);
+    dst_rpm->base.partitionKey = int2vectorCopy(src_rpm->base.partitionKey);
 
-    size_t key_len = sizeof(Oid) * src_rpm->partitionKey->dim1;
-    dst_rpm->partitionKeyDataType = (Oid *)palloc(key_len);
-    errno_t rc = memcpy_s(dst_rpm->partitionKeyDataType, key_len, src_rpm->partitionKeyDataType, key_len);
+    size_t key_len = sizeof(Oid) * src_rpm->base.partitionKey->dim1;
+    dst_rpm->base.partitionKeyDataType = (Oid *)palloc(key_len);
+    errno_t rc = memcpy_s(dst_rpm->base.partitionKeyDataType, key_len, src_rpm->base.partitionKeyDataType, key_len);
     securec_check(rc, "", "");
 
     dst_rpm->rangeElements =
-        copyRangeElements(src_rpm->rangeElements, src_rpm->rangeElementsNum, src_rpm->partitionKey->dim1);
+        copyRangeElements(src_rpm->rangeElements, src_rpm->rangeElementsNum, src_rpm->base.partitionKey->dim1);
 
-    if (src_rpm->type.type == PART_TYPE_INTERVAL) {
-        Assert(src_rpm->partitionKey->dim1 == 1);
+    if (src_rpm->base.type == PART_TYPE_INTERVAL) {
+        Assert(src_rpm->base.partitionKey->dim1 == 1);
         dst_rpm->intervalValue = (Interval *)palloc(sizeof(Interval));
         *dst_rpm->intervalValue = *src_rpm->intervalValue;
 #define OidVectorSize(n) (offsetof(oidvector, values) + (n) * sizeof(Oid))
@@ -348,28 +348,20 @@ PartitionMap *CopyPartitionMap(PartitionMap *oldmap)
             return (PartitionMap *)CopyRangePartitionMap((RangePartitionMap *)oldmap);
         }
         case PART_TYPE_LIST: {
-            ListPartitionMap *dst_lpm = (ListPartitionMap *)palloc(sizeof(ListPartitionMap));
-            ListPartitionMap *src_lpm = (ListPartitionMap *)oldmap;
-            *dst_lpm = *src_lpm;
-            dst_lpm->partitionKey = int2vectorCopy(src_lpm->partitionKey);
-            size_t key_len = sizeof(Oid) * src_lpm->partitionKey->dim1;
-            dst_lpm->partitionKeyDataType = (Oid *)palloc(key_len);
-            errno_t rc = memcpy_s(dst_lpm->partitionKeyDataType, key_len, src_lpm->partitionKeyDataType, key_len);
-            securec_check(rc, "", "");
-            dst_lpm->listElements = CopyListElements(src_lpm->listElements, src_lpm->listElementsNum);
-            return (PartitionMap *)dst_lpm;
+            return (PartitionMap *)CopyListPartitionMap((ListPartitionMap *)oldmap);
         }
         case PART_TYPE_HASH: {
             HashPartitionMap *dst_hpm = (HashPartitionMap *)palloc(sizeof(HashPartitionMap));
             HashPartitionMap *src_hpm = (HashPartitionMap *)oldmap;
             *dst_hpm = *src_hpm;
-            dst_hpm->partitionKey = int2vectorCopy(src_hpm->partitionKey);
-            size_t key_len = sizeof(Oid) * src_hpm->partitionKey->dim1;
-            dst_hpm->partitionKeyDataType = (Oid *)palloc(key_len);
-            errno_t rc = memcpy_s(dst_hpm->partitionKeyDataType, key_len, src_hpm->partitionKeyDataType, key_len);
+            dst_hpm->base.partitionKey = int2vectorCopy(src_hpm->base.partitionKey);
+            size_t key_len = sizeof(Oid) * src_hpm->base.partitionKey->dim1;
+            dst_hpm->base.partitionKeyDataType = (Oid *)palloc(key_len);
+            errno_t rc = memcpy_s(dst_hpm->base.partitionKeyDataType, key_len,
+                src_hpm->base.partitionKeyDataType, key_len);
             securec_check(rc, "", "");
             dst_hpm->hashElements =
-                CopyHashElements(src_hpm->hashElements, src_hpm->hashElementsNum, src_hpm->partitionKey->dim1);
+                CopyHashElements(src_hpm->hashElements, src_hpm->hashElementsNum, src_hpm->base.partitionKey->dim1);
             return (PartitionMap *)dst_hpm;
         }
         default:

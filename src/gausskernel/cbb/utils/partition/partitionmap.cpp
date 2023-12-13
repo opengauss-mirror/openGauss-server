@@ -62,6 +62,11 @@
 #include "utils/datum.h"
 #include "utils/knl_relcache.h"
 
+static void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo);
+static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap);
+static uint32 PartKeyHashFunc(const void *key, Size keysize);
+static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize);
+
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
 #define overFlowCheck(arg)                                                                \
     do {                                                                                  \
@@ -329,69 +334,59 @@ void constCompare(Const* value1, Const* value2, Oid collation, int& compare)
     }
 }
 
-#define BuildRangeElement(range, type, typelen, relid, attrno, tuple, partitionno, desc, isInter) \
-    do {                                                                                          \
-        Assert(PointerIsValid(range));                                                            \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                                   \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                                    \
-        Assert((attrno)->dim1 <= RANGE_PARTKEYMAXNUM);                                            \
-        Assert((attrno)->dim1 == (typelen));                                                      \
-        unserializePartitionStringAttribute((range)->boundary,                                    \
-            RANGE_PARTKEYMAXNUM,                                                                  \
-            (type),                                                                               \
-            (typelen),                                                                            \
-            (relid),                                                                              \
-            (attrno),                                                                             \
-            (tuple),                                                                              \
-            Anum_pg_partition_boundaries,                                                         \
-            (desc));                                                                              \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                                           \
-        (range)->partitionno = (partitionno);                                                     \
-        (range)->len = (typelen);                                                                 \
-        (range)->isInterval = (isInter);                                                          \
-    } while (0)
+static inline void BuildRangeElement(RangeElement *elem, RangePartitionMap *rmap, Oid relOid, HeapTuple tuple,
+                                      int partitionNo, TupleDesc desc, bool interval)
+{
+    PartitionMap *base = &(rmap->base);
 
-#define buildListElement(range, type, typelen, relid, attrno, tuple, partitionno, desc) \
-    do {                                                                                \
-        Assert(PointerIsValid(range));                                                  \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                         \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                          \
-        Assert((attrno)->dim1 == (typelen));                                            \
-        unserializeListPartitionAttribute(&((range)->len),                              \
-            &((range)->boundary),                                                       \
-            (type),                                                                     \
-            (typelen),                                                                  \
-            (relid),                                                                    \
-            (attrno),                                                                   \
-            (tuple),                                                                    \
-            Anum_pg_partition_boundaries,                                               \
-            (desc));                                                                    \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                                 \
-        (range)->partitionno = (partitionno);                                           \
-    } while (0)
+    Assert(PointerIsValid(elem));
+    Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKey));
+    Assert(PointerIsValid(tuple) && PointerIsValid(desc));
+    Assert(base->partitionKey->dim1 <= MAX_RANGE_PARTKEY_NUMS);
+    Assert(base->partitionKey->dim1 == (base->partitionKey->dim1));
+    unserializePartitionStringAttribute(elem->boundary, MAX_RANGE_PARTKEY_NUMS, (base->partitionKeyDataType),
+                                        (base->partitionKey->dim1), (relOid), (base->partitionKey), (tuple),
+                                        Anum_pg_partition_boundaries, (desc));
+    elem->partitionOid = HeapTupleGetOid(tuple);
+    elem->partitionno = (partitionNo);
+    elem->len = (base->partitionKey->dim1);
+    elem->isInterval = (interval);
+}
 
-#define buildHashElement(range, type, typelen, relid, attrno, tuple, partitionno, desc) \
-    do {                                                                                \
-        Assert(PointerIsValid(range));                                                  \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));                         \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                          \
-        Assert((attrno)->dim1 == (typelen));                                            \
-        unserializeHashPartitionAttribute((range)->boundary,                            \
-            RANGE_PARTKEYMAXNUM,                                                        \
-            (relid),                                                                    \
-            (attrno),                                                                   \
-            (tuple),                                                                    \
-            Anum_pg_partition_boundaries,                                               \
-            (desc));                                                                    \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                                 \
-        (range)->partitionno = (partitionno);                                           \
-    } while (0)
+static inline void buildListElement(ListPartElement *elem, ListPartitionMap *lmap, Oid relOid, HeapTuple tuple,
+                                    int partitionNo, TupleDesc desc)
+{
+    PartitionMap *base = &(lmap->base);
+
+    Assert(PointerIsValid(elem));
+    Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKey));
+    Assert(PointerIsValid(tuple) && PointerIsValid(desc));
+    Assert((base->partitionKey)->dim1 == (base->partitionKey->dim1));
+    unserializeListPartitionAttribute(&((elem)->len), &((elem)->boundary), (base->partitionKeyDataType),
+                                      (base->partitionKey->dim1), (relOid), (base->partitionKey), (tuple),
+                                      Anum_pg_partition_boundaries, (desc));
+    (elem)->partitionOid = HeapTupleGetOid(tuple);
+    (elem)->partitionno = (partitionNo);
+}
+
+static inline void buildHashElement(HashPartElement *elem, HashPartitionMap *hmap, Oid relOid, HeapTuple tuple,
+                                    int partitionNo, TupleDesc desc)
+{
+    PartitionMap *base = &(hmap->base);
+    Assert(PointerIsValid(elem));
+    Assert(PointerIsValid(base->partitionKeyDataType) && PointerIsValid(base->partitionKeyDataType));
+    Assert(PointerIsValid(tuple) && PointerIsValid(desc));
+    unserializeHashPartitionAttribute((elem)->boundary, MAX_HASH_PARTKEY_NUMS, (relOid), (base->partitionKey), (tuple),
+                                      Anum_pg_partition_boundaries, (desc));
+    (elem)->partitionOid = HeapTupleGetOid(tuple);
+    (elem)->partitionno = (partitionNo);
+}
 
 static void RebuildListPartitionMap(ListPartitionMap* oldMap, ListPartitionMap* newMap);
 static void RebuildHashPartitionMap(HashPartitionMap* oldMap, HashPartitionMap* newMap);
 /* these routines are partition map related */
-static void buildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
-    Relation pg_partition, const List* partition_list);
+static void BuildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
+    Relation pg_partition, List* partition_list);
 static void BuildHashPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list);
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
@@ -482,7 +477,7 @@ void unserializePartitionStringAttribute(Const** outMaxValue, int outMaxValueLen
     boundary = untransformPartitionBoundary(attribute_raw_value);
 
     Assert(boundary->length == partKeyAttrNo->dim1);
-    Assert(boundary->length <= RANGE_PARTKEYMAXNUM);
+    Assert(boundary->length <= MAX_RANGE_PARTKEY_NUMS);
 
     /* Now, for each max value item, call it's typin function, save it in datum */
     counter = 0;
@@ -724,7 +719,7 @@ int2vector* getPartitionKeyAttrNo(
     /* Get int2 array of partition key column numbers */
     attnums = (int16*)ARR_DATA_PTR(partkey_columns);
 
-    Assert(n_key_column <= RANGE_PARTKEYMAXNUM);
+    Assert(n_key_column <= MAX_RANGE_PARTKEY_NUMS);
 
     /* Initialize int2verctor structure for attribute number array of partition key */
     partkey = buildint2vector(NULL, n_key_column);
@@ -892,7 +887,7 @@ void RelationInitPartitionMap(Relation relation, bool isSubPartition)
     switch (partstrategy) {
         case PART_STRATEGY_RANGE:
         case PART_STRATEGY_INTERVAL:
-            buildRangePartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
+            BuildRangePartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
             break;
         case PART_STRATEGY_LIST:
             BuildListPartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
@@ -1009,21 +1004,21 @@ bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* partMap2
 
 static bool EqualRangePartitonMap(const RangePartitionMap* partMap1, const RangePartitionMap* partMap2)
 {
-    Assert(partMap1->type.type == partMap2->type.type);
+    Assert(partMap1->base.type == partMap2->base.type);
     int i;
 
     /* check for relid */
-    if (partMap1->relid != partMap2->relid) {
+    if (partMap1->base.relOid != partMap2->base.relOid) {
         return false;
     }
 
     /* check for partition key */
-    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
-        PointerGetDatum(partMap2->partitionKey)))) {
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->base.partitionKey),
+        PointerGetDatum(partMap2->base.partitionKey)))) {
         return false;
     }
-    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
-        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+    for (i = 0; i < partMap1->base.partitionKey->dim1; i++) {
+        if (partMap1->base.partitionKeyDataType[i] != partMap2->base.partitionKeyDataType[i]) {
             return false;
         }
     }
@@ -1083,21 +1078,21 @@ static bool EqualRangeElement(const RangeElement element1, const RangeElement el
 
 static bool EqualListPartitonMap(const ListPartitionMap* partMap1, const ListPartitionMap* partMap2)
 {
-    Assert(partMap1->type.type == partMap2->type.type);
+    Assert(partMap1->base.type == partMap2->base.type);
     int i;
 
     /* check for relid */
-    if (partMap1->relid != partMap2->relid) {
+    if (partMap1->base.relOid != partMap2->base.relOid) {
         return false;
     }
 
     /* check for partition key */
-    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
-        PointerGetDatum(partMap2->partitionKey)))) {
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->base.partitionKey),
+        PointerGetDatum(partMap2->base.partitionKey)))) {
         return false;
     }
-    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
-        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+    for (i = 0; i < partMap1->base.partitionKey->dim1; i++) {
+        if (partMap1->base.partitionKeyDataType[i] != partMap2->base.partitionKeyDataType[i]) {
             return false;
         }
     }
@@ -1139,21 +1134,21 @@ static bool EqualListPartElement(const ListPartElement element1, const ListPartE
 
 static bool EqualHashPartitonMap(const HashPartitionMap* partMap1, const HashPartitionMap* partMap2)
 {
-    Assert(partMap1->type.type == partMap2->type.type);
+    Assert(partMap1->base.type == partMap2->base.type);
     int i;
 
     /* check for relid */
-    if (partMap1->relid != partMap2->relid) {
+    if (partMap1->base.relOid != partMap2->base.relOid) {
         return false;
     }
 
     /* check for partition key */
-    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
-        PointerGetDatum(partMap2->partitionKey)))) {
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->base.partitionKey),
+        PointerGetDatum(partMap2->base.partitionKey)))) {
         return false;
     }
-    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
-        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+    for (i = 0; i < partMap1->base.partitionKey->dim1; i++) {
+        if (partMap1->base.partitionKeyDataType[i] != partMap2->base.partitionKeyDataType[i]) {
             return false;
         }
     }
@@ -1286,6 +1281,36 @@ void DestroyListElements(ListPartElement* src, int elementNum)
     pfree_ext(src);
 }
 
+ListPartitionMap *CopyListPartitionMap(ListPartitionMap *src_lpm)
+{
+    ListPartitionMap *dst_lpm = (ListPartitionMap *)palloc0(sizeof(ListPartitionMap));
+    *dst_lpm = *src_lpm;
+
+    /* copy base class */
+    dst_lpm->base.partitionKey = int2vectorCopy(src_lpm->base.partitionKey);
+    size_t key_len = sizeof(Oid) * (unsigned)src_lpm->base.partitionKey->dim1;
+    dst_lpm->base.partitionKeyDataType = (Oid *)palloc0(key_len);
+    errno_t rc = memcpy_s(dst_lpm->base.partitionKeyDataType, key_len,
+        src_lpm->base.partitionKeyDataType, key_len);
+    securec_check(rc, "", "");
+
+    /* copy list partition speciall part */
+    dst_lpm->defaultPartRelOid = INVALID_PARTREL_OID;
+    dst_lpm->defaultPartSeqNo = INVALID_PARTREL_SEQNO;
+    dst_lpm->listElementsNum = src_lpm->listElementsNum;
+    dst_lpm->listElements = CopyListElements(src_lpm->listElements, src_lpm->listElementsNum);
+
+    /* copy part key hash-table */
+    dst_lpm->ht = BuildPartKeyHashTable(dst_lpm);
+    for (int partSeq = 0; partSeq < dst_lpm->listElementsNum; partSeq++) {
+        ListPartElement *lpe = &(dst_lpm->listElements[partSeq]);
+        InsertPartKeyHashTable(dst_lpm, lpe, partSeq);
+    }
+
+    return dst_lpm;
+}
+
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -1354,58 +1379,46 @@ void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen)
 
 void DestroyPartitionMap(PartitionMap* partMap)
 {
-    Assert(PointerIsValid(partMap));
+    Assert (PointerIsValid(partMap) && PartitionMapTypeIsValid(partMap));
+
+    /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
+    int2vector *partKeyAttrArray = partMap->partitionKey;
+    Oid        *partKeyTypeArray = partMap->partitionKeyDataType;
+
+    Assert (partKeyTypeArray != NULL && partKeyAttrArray != NULL);
+    pfree_ext(partKeyAttrArray);
+    pfree_ext(partKeyTypeArray);
 
     /* partitioned relation, destroy the partition map */
     if (partMap->type == PART_TYPE_RANGE || partMap->type == PART_TYPE_INTERVAL) {
-        RangePartitionMap* range_map = ((RangePartitionMap*)(partMap));
+        RangePartitionMap* rangePartMap = ((RangePartitionMap*)(partMap));
 
-        /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
-        if (range_map->partitionKey) {
-            pfree_ext(range_map->partitionKey);
+        if (rangePartMap->intervalValue) {
+            pfree_ext(rangePartMap->intervalValue);
         }
-        if (range_map->partitionKeyDataType) {
-            pfree_ext(range_map->partitionKeyDataType);
+        if (rangePartMap->intervalTablespace) {
+            pfree_ext(rangePartMap->intervalTablespace);
         }
-        if (range_map->intervalValue) {
-            pfree_ext(range_map->intervalValue);
-        }
-        if (range_map->intervalTablespace) {
-            pfree_ext(range_map->intervalTablespace);
-        }
-        if (range_map->rangeElements) {
-            partitionMapDestroyRangeArray(range_map->rangeElements, range_map->rangeElementsNum);
+        if (rangePartMap->rangeElements) {
+            partitionMapDestroyRangeArray(rangePartMap->rangeElements, rangePartMap->rangeElementsNum);
         }
     } else if (partMap->type == PART_TYPE_LIST) {
-        ListPartitionMap* list_map = (ListPartitionMap*)(partMap);
-        if (list_map->partitionKey) {
-            pfree_ext(list_map->partitionKey);
-            list_map->partitionKey = NULL;
-        }
-        if (list_map->partitionKeyDataType) {
-            pfree_ext(list_map->partitionKeyDataType);
-            list_map->partitionKeyDataType = NULL;
-        }
-        if (list_map->listElements) {
-            DestroyListElements(list_map->listElements, list_map->listElementsNum);
-            list_map->listElements = NULL;
+        ListPartitionMap* listPartMap = (ListPartitionMap*)(partMap);
+
+        if (listPartMap->listElements) {
+            DestroyListElements(listPartMap->listElements, listPartMap->listElementsNum);
+            listPartMap->listElements = NULL;
         }
     } else if (partMap->type == PART_TYPE_HASH) {
-        HashPartitionMap* hash_map = (HashPartitionMap*)(partMap);
-        if (hash_map->partitionKey) {
-            pfree_ext(hash_map->partitionKey);
-            hash_map->partitionKey = NULL;
-        }
-        if (hash_map->partitionKeyDataType) {
-            pfree_ext(hash_map->partitionKeyDataType);
-            hash_map->partitionKeyDataType = NULL;
-        }
-        if (hash_map->hashElements) {
-            PartitionMapDestroyHashArray(hash_map->hashElements, hash_map->hashElementsNum);
-            hash_map->hashElements = NULL;
+        HashPartitionMap* hashPartMap = (HashPartitionMap*)(partMap);
+
+        if (hashPartMap->hashElements) {
+            PartitionMapDestroyHashArray(hashPartMap->hashElements, hashPartMap->hashElementsNum);
+            hashPartMap->hashElements = NULL;
         }
     }
     pfree_ext(partMap);
+
     return;
 }
 
@@ -1657,10 +1670,190 @@ static void BuildElementForPartKeyExpr(void* element, HeapTuple partTuple, int p
     heap_close(typeRel, RowExclusiveLock);
 }
 
+/*
+ * List partition routing improvements!
+ *
+ * Here we bulid a per-partmap level hash search table to hold all partition refs under one
+ * ListPartitionMap, where we gains O(1) search efficiency, it consists of following routines
+ *    - PartKeyHashFunc()
+ *    - PartKeyMatchFunc()
+ *    - BuildPartKeyHashTable()
+ *    - InsertPartKeyHashTable()
+ */
+static uint32 PartKeyHashFunc(const void *key, Size keysize)
+{
+    Assert (keysize == sizeof(PartEntryKey));
+    PartitionKey *pk = &((PartEntryKey *)key)->partKey;
+    Const **c = pk->values;
+    /*
+     * we just take value of key's const val as hashkey, for MaxValue (a.w.k default) we return 0
+     *
+     * Note: hash table is created at current partition map level, for sub-partiting we may have
+     * more than one hashtable.
+     */
+    uint32 hashval = 0;
+    for (int i = 0; i <pk->count; i++) {
+        if (constIsNull(c[i]) || constIsMaxValue(c[i])) {
+            continue;
+        }
+        hashval = hashValueCombination(hashval, c[i]->consttype, c[i]->constvalue, c[i]->constisnull, LOCATOR_TYPE_HASH,
+                                       c[i]->constcollid);
+    }
+
+    return hashval;
+}
+
+static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize)
+{
+    Assert(keysize == sizeof(PartEntryKey));
+    PartEntryKey *c1 = (PartEntryKey *)key1;
+    PartEntryKey *c2 = (PartEntryKey *)key2;
+    int ret = 1;
+
+    /*
+     * 1st check if baseRelOid is equal
+     */
+    if (c1->parentRelOid != c2->parentRelOid || c1->partKey.count != c2->partKey.count) {
+        return 1;
+    }
+
+    for (int i=0; i < c1->partKey.count;i++) {
+        ret = ConstCompareWithNull(c1->partKey.values[i], c2->partKey.values[i], c2->partKey.values[i]->constcollid);
+        if (ret != 0) {
+            break;
+        }
+    }
+    return ret;
+}
+
+static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap)
+{
+    HASHCTL hashCtl;
+    errno_t rc;
+    StringInfoData si;
+
+    /* Create the hash table */
+    rc = memset_s(&hashCtl, sizeof(hashCtl), '\0', sizeof(hashCtl));
+    securec_check(rc, "", "");
+    initStringInfo(&si);
+    appendStringInfo(&si, "list_hash_entry_%u", listMap->base.relOid);
+
+    hashCtl.keysize = sizeof(PartEntryKey);
+    hashCtl.entrysize = sizeof(PartElementHashEntry);
+    hashCtl.hash = PartKeyHashFunc;
+    hashCtl.match = PartKeyMatchFunc;
+    listMap->ht = hash_create(si.data, 1024L, &hashCtl, HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+
+    return listMap->ht;
+}
+
+static inline void DeepCopyPartKey(PartitionKey* src, PartitionKey* dst)
+{
+    dst->count = src->count;
+    dst->values = (Const**)palloc0(sizeof(Const*) * dst->count);
+    for (int i = 0; i < dst->count; i++) {
+        dst->values[i] = (Const *)copyObject(src->values[i]);
+    }
+}
+
+static void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo)
+{
+    Assert (listMap != NULL && partElem != NULL);
+
+    if (!PartitionMapIsList(listMap)) {
+        /* fall back to base class */
+        PartitionMap *pm = (PartitionMap *)listMap;
+        ereport(ERROR,
+            (errcode(ERRCODE_PARTITION_ERROR),
+                errmsg("\"only list partition is allowed to create part hash entry internally baseRelOid:%u\"",
+                pm->relOid)));
+    }
+
+    /* check the default value case, if so we assign default partRelOid and partSeqNo */
+    int partListLen = partElem->len;
+    if (IsDefaultValueListPartition(listMap, partElem)) {
+        Assert (listMap->defaultPartRelOid == INVALID_PARTREL_OID &&
+            listMap->defaultPartSeqNo == INVALID_PARTREL_SEQNO);
+        listMap->defaultPartRelOid = partElem->partitionOid;
+        listMap->defaultPartSeqNo = partSeqNo;
+        return;
+    }
+
+    MemoryContext old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
+    for (int n = 0; n < partListLen; n++) {
+        PartitionKey* newPartKey = &partElem->boundary[n];
+        PartEntryKey key;
+        key.parentRelOid = listMap->base.relOid;
+        key.partKey.values = newPartKey->values;
+        key.partKey.count = newPartKey->count;
+        PartElementHashEntry *entry = NULL;
+        bool found = false;
+
+        entry = (PartElementHashEntry *)hash_search(listMap->ht, &key, HASH_ENTER, &found);
+        if (!found) {
+            Assert (entry != NULL);
+            /* need to keep all in local my db context */
+            entry->key.parentRelOid = listMap->base.relOid;
+            DeepCopyPartKey(newPartKey, &entry->key.partKey);
+            entry->rootRelOid = listMap->base.relOid;
+            entry->partRelOid = partElem->partitionOid;
+            entry->partSeq = partSeqNo;
+            entry->next = NULL;
+        } else {
+            /*
+             * Note!!!, hash conflict we its a rare case where list element runs out of
+             * hash bucket and results in hash conflict, we still try to append it to tail
+             * of hash bucket list onec just hash conflict but not duplicate value
+             */
+            ereport(NOTICE,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("\"insert list element fail in partRelOid:%u partRelName:%s keyVal:%s\"",
+                    listMap->base.relOid, PartitionOidGetName(partElem->partitionOid),
+                    PartKeyGetCstring(newPartKey))));
+
+            /*
+             * find the first element for the conflict list bucket and append the new
+             * element to the tail of list
+             */
+            entry = (PartElementHashEntry *)hash_search(listMap->ht, &key, HASH_FIND, &found);
+            while (entry->next != NULL) {
+                if(ListPartKeyCompare(newPartKey, &entry->key.partKey) == 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_PARTITION_ERROR),
+                            errmsg("\"list element is found duplicate in partRelOid:%u partRelName:%s keyVal:%s\"",
+                            listMap->base.relOid, PartitionOidGetName(partElem->partitionOid),
+                            PartKeyGetCstring(&entry->key.partKey))));
+                }
+
+                entry = entry->next;
+            }
+
+            /* hash key confict bue can still inert into hash table by append its value to tail of bucket list */
+            PartElementHashEntry *newEntry = (PartElementHashEntry *)palloc0(sizeof(PartElementHashEntry));
+            newEntry->key.parentRelOid = listMap->base.relOid;
+            DeepCopyPartKey(newPartKey, &entry->key.partKey);
+            newEntry->rootRelOid = listMap->base.relOid;
+            newEntry->partRelOid = partElem->partitionOid;
+            newEntry->partSeq = partSeqNo;
+            newEntry->next = NULL;
+            entry->next = newEntry;
+
+            ereport(NOTICE,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("\"conflict with rootRelOid:%u partRelOid:%u partRelName:%s keyVal:%s\"",
+                    entry->rootRelOid, partElem->partitionOid, PartitionOidGetName(partElem->partitionOid),
+                    PartKeyGetCstring(newPartKey))));
+        }
+    }
+
+    (void)MemoryContextSwitchTo(old_context);
+
+}
+
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list)
 {
-    int list_itr = 0;
+    int partSeq = 0;
     ListPartitionMap* list_map = NULL;
     ListPartElement* list_eles = NULL;
     Form_pg_partition partition_form = NULL;
@@ -1674,9 +1867,12 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
 
     /* build ListPartitionMap */
     list_map = (ListPartitionMap*)palloc0(sizeof(ListPartitionMap));
-    list_map->type.type = PART_TYPE_LIST;
-    list_map->relid = RelationGetRelid(relation);
+    list_map->base.type = PART_TYPE_LIST;
+    list_map->base.relOid = RelationGetRelid(relation);
     list_map->listElementsNum = partition_list->length;
+    list_map->ht = NULL;
+    list_map->defaultPartRelOid = INVALID_PARTREL_OID;
+    list_map->defaultPartSeqNo = INVALID_PARTREL_SEQNO;
 
     /* get attribute NO. which is a member of partitionkey */
     partitionKey = getPartitionKeyAttrNo(
@@ -1684,16 +1880,20 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     /* copy the partitionKey */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
-    list_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
-    rc = memcpy_s(
-        list_map->partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey, Int2VectorSize(partitionKey->dim1));
+    list_map->base.partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
+    rc = memcpy_s(list_map->base.partitionKey, (size_t)Int2VectorSize(partitionKey->dim1), partitionKey,
+        (size_t)Int2VectorSize(partitionKey->dim1));
     securec_check(rc, "\0", "\0");
-    list_map->partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
-    rc = memcpy_s(list_map->partitionKeyDataType,
+    list_map->base.partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
+    rc = memcpy_s(list_map->base.partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1,
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
     securec_check(rc, "\0", "\0");
+
+    /* build list partition mapping hashtable */
+    list_map->ht = BuildPartKeyHashTable(list_map);
+
     (void)MemoryContextSwitchTo(old_context);
 
     /* allocate range element array */
@@ -1705,7 +1905,6 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     Oid rootPartitionOid = GetRootPartitionOid(relation);
 
     /* iterate partition tuples, build RangeElement for per partition tuple */
-    list_itr = 0;
     char* partkeystr = CheckPartExprKey(partitioned_tuple, pg_partition);
     foreach (tuple_cell, partition_list) {
         partition_tuple = (HeapTuple)lfirst(tuple_cell);
@@ -1740,23 +1939,32 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
         PARTITIONNO_VALID_ASSERT(partitionno);
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
-            buildListElement(&(list_eles[list_itr]),
-                list_map->partitionKeyDataType,
-                list_map->partitionKey->dim1,
+            buildListElement(&(list_eles[partSeq]),
+                list_map,
                 rootPartitionOid,
-                list_map->partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
         } else {
-            BuildElementForPartKeyExpr(&(list_eles[list_itr]), partition_tuple, partitionno,
+            BuildElementForPartKeyExpr(&(list_eles[partSeq]), partition_tuple, partitionno,
                 RelationGetDescr(pg_partition), partkeystr, PART_STRATEGY_LIST);
         }
 
-        list_itr++;
+        /* skip temp partition (Reminding!) */
+
+        /* count for part seq */
+        partSeq++;
     }
 
     qsort(list_eles, list_map->listElementsNum, sizeof(ListPartElement), ListElementCmp);
+
+    for (partSeq = 0; partSeq < list_map->listElementsNum; partSeq++) {
+        /* if the partition map is built during DDL operation, an add-temporary-partition action may occur */
+        if (partSeq > 0 && ListPartKeyCompare(list_eles[partSeq].boundary, list_eles[partSeq - 1].boundary) == 0) {
+            continue;
+        }
+        InsertPartKeyHashTable(list_map, &(list_eles[partSeq]), partSeq);
+    }
 
     /* list element array back in RangePartitionMap */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
@@ -1810,8 +2018,8 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
     /* build RangePartitionMap */
     hash_map = (HashPartitionMap*)palloc0(sizeof(HashPartitionMap));
-    hash_map->type.type = PART_TYPE_HASH;
-    hash_map->relid = RelationGetRelid(relation);
+    hash_map->base.type = PART_TYPE_HASH;
+    hash_map->base.relOid = RelationGetRelid(relation);
     hash_map->hashElementsNum = partition_list->length;
 
     /* get attribute NO. which is a member of partitionkey */
@@ -1820,12 +2028,12 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     /* copy the partitionKey */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
-    hash_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
-    rc = memcpy_s(
-        hash_map->partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey, Int2VectorSize(partitionKey->dim1));
+    hash_map->base.partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
+    rc = memcpy_s(hash_map->base.partitionKey, (size_t)Int2VectorSize(partitionKey->dim1), partitionKey,
+        (size_t)Int2VectorSize(partitionKey->dim1));
     securec_check(rc, "\0", "\0");
-    hash_map->partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
-    rc = memcpy_s(hash_map->partitionKeyDataType,
+    hash_map->base.partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
+    rc = memcpy_s(hash_map->base.partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1,
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
@@ -1877,10 +2085,8 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             buildHashElement(&(hash_eles[hash_itr]),
-                hash_map->partitionKeyDataType,
-                hash_map->partitionKey->dim1,
+                hash_map,
                 rootPartitionOid,
-                hash_map->partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition));
@@ -1914,8 +2120,8 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
  * Description	:
  * Notes		:
  */
-static void buildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
-    Relation pg_partition, const List* partition_list)
+static void BuildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
+    Relation pg_partition, List* partition_list)
 {
     int range_itr = 0;
     RangePartitionMap* range_map = NULL;
@@ -1931,8 +2137,8 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
     /* build RangePartitionMap */
     range_map = (RangePartitionMap*)palloc0(sizeof(RangePartitionMap));
-    range_map->type.type = PART_TYPE_RANGE;
-    range_map->relid = RelationGetRelid(relation);
+    range_map->base.type = PART_TYPE_RANGE;
+    range_map->base.relOid = RelationGetRelid(relation);
     range_map->rangeElementsNum = partition_list->length;
 
     /* get attribute NO. which is a member of partitionkey */
@@ -1941,19 +2147,19 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     /* copy the partitionKey */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
-    range_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
-    rc = memcpy_s(
-        range_map->partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey, Int2VectorSize(partitionKey->dim1));
+    range_map->base.partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
+    rc = memcpy_s(range_map->base.partitionKey, Int2VectorSize(partitionKey->dim1), partitionKey,
+        Int2VectorSize(partitionKey->dim1));
     securec_check(rc, "\0", "\0");
-    range_map->partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
-    rc = memcpy_s(range_map->partitionKeyDataType,
+    range_map->base.partitionKeyDataType = (Oid*)palloc(sizeof(Oid) * partitionKey->dim1);
+    rc = memcpy_s(range_map->base.partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1,
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
     securec_check(rc, "\0", "\0");
 
     if (partitioned_form->partstrategy == PART_STRATEGY_INTERVAL) {
-        range_map->type.type = PART_TYPE_INTERVAL;
+        range_map->base.type = PART_TYPE_INTERVAL;
         /* the interval partition only supports one partition key */
         Assert(partitionKey->dim1 == 1);
         range_map->intervalValue = ReadInterval(partitioned_tuple, RelationGetDescr(pg_partition));
@@ -2007,10 +2213,8 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
         if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
             BuildRangeElement(&(range_eles[range_itr]),
-                range_map->partitionKeyDataType,
-                range_map->partitionKey->dim1,
+                range_map,
                 rootPartitionOid,
-                range_map->partitionKey,
                 partition_tuple,
                 partitionno,
                 RelationGetDescr(pg_partition),
@@ -2118,7 +2322,7 @@ List* getRangePartitionBoundaryList(Relation rel, int sequence)
     incre_partmap_refcount(rel->partMap);
     if (sequence >= 0 && sequence < partMap->rangeElementsNum) {
         int i = 0;
-        int partKeyNum = partMap->partitionKey->dim1;
+        int partKeyNum = partMap->base.partitionKey->dim1;
         Const** srcBound = partMap->rangeElements[sequence].boundary;
 
         for (i = 0; i < partKeyNum; i++) {
@@ -2191,7 +2395,7 @@ List* getHashPartitionBoundaryList(Relation rel, int sequence)
     incre_partmap_refcount(rel->partMap);
     if (sequence >= 0 && sequence < partMap->hashElementsNum) {
         int i = 0;
-        int partKeyNum = partMap->partitionKey->dim1;
+        int partKeyNum = partMap->base.partitionKey->dim1;
         Const** srcBound = partMap->hashElements[sequence].boundary;
 
         for (i = 0; i < partKeyNum; i++) {
@@ -2233,183 +2437,6 @@ Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, b
     partitionRoutingForValue(rel, t_thrd.utils_cxt.valueItemArr, len, topClosed, false, &(*t_thrd.utils_cxt.partId));
 
     return (*t_thrd.utils_cxt.partId).partitionId;
-}
-
-/*
- * @@GaussDB@@
- * Brief		:
- * Description	:give the tuple, return oid of the corresponding partition
- * Notes		:
- */
-Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32* partSeq, bool topClosed)
-{
-    RangeElement* rangeElementIterator = NULL;
-    RangePartitionMap* rangePartMap = NULL;
-    Oid result = InvalidOid;
-    int keyNums;
-    int hit = -1;
-    int min_part_id = 0;
-    int max_part_id = 0;
-    int local_part_id = 0;
-    int compare = 0;
-    Const** boundary = NULL;
-
-    Assert(PointerIsValid(partitionmap));
-    Assert(PointerIsValid(partKeyValue));
-
-    incre_partmap_refcount(partitionmap);
-    rangePartMap = (RangePartitionMap*)(partitionmap);
-
-    keyNums = rangePartMap->partitionKey->dim1;
-    max_part_id = rangePartMap->rangeElementsNum - 1;
-    boundary = rangePartMap->rangeElements[max_part_id].boundary;
-    partitonKeyCompareForRouting(partKeyValue, boundary, (uint32)keyNums, compare);
-
-    if (compare == 0) {
-        if (topClosed) {
-            hit = -1;
-        } else {
-            hit = max_part_id;
-        }
-    } else if (compare > 0) {
-        hit = -1;
-    } else {
-        /* semi-seek */
-        while (max_part_id > min_part_id) {
-            local_part_id = (uint32)(max_part_id + min_part_id) >> 1;
-            rangeElementIterator = &(rangePartMap->rangeElements[local_part_id]);
-
-            boundary = rangeElementIterator->boundary;
-            partitonKeyCompareForRouting(partKeyValue, boundary, (uint32)keyNums, compare);
-
-            if (compare == 0) {
-                hit = local_part_id;
-
-                if (topClosed) {
-                    hit += 1;
-                }
-                break;
-            } else if (compare > 0) {
-                min_part_id = local_part_id + 1;
-            } else {
-                max_part_id = local_part_id;
-            }
-        }
-        /* get it */
-        if (max_part_id == min_part_id) {
-            hit = max_part_id;
-        }
-    }
-
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = rangePartMap->rangeElements[hit].partitionOid;
-    }
-
-    decre_partmap_refcount(partitionmap);
-    return result;
-}
-
-Oid getListPartitionOid(PartitionMap* partMap, Const** partKeyValue, int partKeyCount, int32* partSeq, bool topClosed)
-{
-    ListPartitionMap* listPartMap = NULL;
-    Oid result = InvalidOid;
-    int hit = -1;
-    PartitionKey partKey;
-    PartitionKey* boundary = NULL;
-    Oid defaultPartitionOid = InvalidOid;
-    bool existDefaultPartition = false;
-    int defaultPartitionHit = -1;
-
-    Assert(PointerIsValid(partMap));
-    Assert(PointerIsValid(partKeyValue));
-
-    incre_partmap_refcount(partMap);
-    listPartMap = (ListPartitionMap*)(partMap);
-    partKey.values = partKeyValue;
-    partKey.count = partKeyCount;
-    
-    int i = 0;
-    while (i < listPartMap->listElementsNum && hit < 0) {
-        boundary = listPartMap->listElements[i].boundary;
-        int list_len = listPartMap->listElements[i].len;
-        if (list_len == 1 && ((Const*)boundary[0].values[0])->ismaxvalue) {
-            defaultPartitionOid = listPartMap->listElements[i].partitionOid;
-            existDefaultPartition = true;
-            defaultPartitionHit = i;
-        }
-        int j = 0;
-        while (j < list_len) {
-            if (ListPartKeyCompare(&partKey, &boundary[j]) == 0) {
-                hit = i;
-                break;
-            }
-            j++;
-        }
-        i++;
-    }
-
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = listPartMap->listElements[hit].partitionOid;
-    } else if (existDefaultPartition) {
-        result = defaultPartitionOid;
-        *partSeq = defaultPartitionHit;
-    }
-
-    decre_partmap_refcount(partMap);
-    return result;
-}
-
-Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* partSeq, bool topClosed)
-{
-    HashPartitionMap* hashPartMap = NULL;
-    Oid result = InvalidOid;
-    int keyNums = 0;
-    int hit = -1;
-
-    Assert(PointerIsValid(partMap));
-    Assert(PointerIsValid(partKeyValue));
-
-    incre_partmap_refcount(partMap);
-    hashPartMap = (HashPartitionMap*)(partMap);
-
-    keyNums = hashPartMap->partitionKey->dim1;
-    
-    int i = 0;
-    uint32 hash_value = 0;
-    while (i < keyNums) {
-        if (partKeyValue[i]->constisnull) {
-            if (PointerIsValid(partSeq)) {
-                *partSeq = hit;
-            }
-            decre_partmap_refcount(partMap);
-            return result;
-        }
-        hash_value = hashValueCombination(hash_value, partKeyValue[i]->consttype, partKeyValue[i]->constvalue,
-            false, LOCATOR_TYPE_HASH, partKeyValue[i]->constcollid);
-        i++;
-    }
-
-    hit = hash_value % (uint32)(hashPartMap->hashElementsNum);
-    hit = hashPartMap->hashElementsNum - hit - 1;
-
-    if (PointerIsValid(partSeq)) {
-        *partSeq = hit;
-    }
-
-    if (hit >= 0) {
-        result = hashPartMap->hashElements[hit].partitionOid;
-    }
-
-    decre_partmap_refcount(partMap);
-    return result;
 }
 
 Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm)
@@ -2491,7 +2518,7 @@ int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Inte
     Assert(partition->len == 1);
     int compare = 0;
     Const* lowBoundary = CalcLowBoundary(partition->boundary[0], intervalValue);
-    partitonKeyCompareForRouting(partKeyValue, &lowBoundary, (uint32)(partition->len), compare);
+    partitionKeyCompareForRouting(partKeyValue, &lowBoundary, (uint32)(partition->len), compare);
     pfree(lowBoundary);
     return compare;
 }
@@ -2842,7 +2869,7 @@ int rangeElementCmp(const void* a, const void* b)
     const RangeElement* reb = (const RangeElement*)b;
 
     Assert(rea->len == reb->len);
-    Assert(rea->len <= RANGE_PARTKEYMAXNUM);
+    Assert(rea->len <= MAX_RANGE_PARTKEY_NUMS);
 
     return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, rea->len);
 }

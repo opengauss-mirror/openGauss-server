@@ -1166,16 +1166,16 @@ void StreamProducer::redistributeBatchChannelForSlice(VectorBatch* batch)
     }
 
     int keyNum;
-    Datum keyValues[RANGE_PARTKEYMAXNUM];
-    bool keyNulls[RANGE_PARTKEYMAXNUM];
-    Oid KeyAttrs[RANGE_PARTKEYMAXNUM];
-    int colMap[RANGE_PARTKEYMAXNUM];
+    Datum keyValues[MAX_RANGE_PARTKEY_NUMS];
+    bool keyNulls[MAX_RANGE_PARTKEY_NUMS];
+    Oid KeyAttrs[MAX_RANGE_PARTKEY_NUMS];
+    int colMap[MAX_RANGE_PARTKEY_NUMS];
     Datum data;
     uint64 hashValue;
     bool allIsNull;
     ScalarVector* pDistributeVec = NULL;
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* constPointers[RANGE_PARTKEYMAXNUM] = {NULL};
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* constPointers[MAX_RANGE_PARTKEY_NUMS] = {NULL};
 
     keyNum = list_length(m_distributeKey);
 
@@ -1322,16 +1322,16 @@ template<int distrType>
 void StreamProducer::redistributeTupleChannelForSlice(TupleTableSlot* tuple)
 {
     int keyNum;
-    Datum keyValues[RANGE_PARTKEYMAXNUM] = {0};
-    bool keyNulls[RANGE_PARTKEYMAXNUM] = {false};
-    Oid keyAttrs[RANGE_PARTKEYMAXNUM] = {0};
-    int colMap[RANGE_PARTKEYMAXNUM] = {0};
+    Datum keyValues[MAX_RANGE_PARTKEY_NUMS] = {0};
+    bool keyNulls[MAX_RANGE_PARTKEY_NUMS] = {false};
+    Oid keyAttrs[MAX_RANGE_PARTKEY_NUMS] = {0};
+    int colMap[MAX_RANGE_PARTKEY_NUMS] = {0};
     Datum data;
     uint64 hashValue = 0;
     bool isNull = false;
     bool allIsNULL = true;
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* constPointers[RANGE_PARTKEYMAXNUM] = {NULL};
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* constPointers[MAX_RANGE_PARTKEY_NUMS] = {NULL};
 
     if (distrType == REMOTE_DIRECT_DISTRIBUTE) {
         return;

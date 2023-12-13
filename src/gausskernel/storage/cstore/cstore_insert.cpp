@@ -2486,17 +2486,17 @@ void CStorePartitionInsert::MoveBatchRowToPartitionValueCache(int partitionidx)
 void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nulls, _in_ int options)
 {
     Relation partitionedRel = m_relation;
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* partKeyValues[RANGE_PARTKEYMAXNUM] = {};
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* partKeyValues[MAX_RANGE_PARTKEY_NUMS] = {};
     PartitionIdentifier matchPartition;
 
     CHECK_FOR_INTERRUPTS();
     // Step 1: We need know this batchrow should be which partition and then
     // store into m_batchrows for each partition
-    int2vector* partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->partitionKey;
+    int2vector* partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->base.partitionKey;
     int partkeyColNum = partKeyColumn->dim1;
 
-    Assert(partkeyColNum <= RANGE_PARTKEYMAXNUM);
+    Assert(partkeyColNum <= MAX_RANGE_PARTKEY_NUMS);
     for (int i = 0; i < partkeyColNum; i++) {
         int col_location = partKeyColumn->values[i];
         partKeyValues[i] = transformDatum2Const(

@@ -3535,8 +3535,8 @@ static void RelationDestroySliceMap(Relation relation)
 {
     RangePartitionMap* range_map = (RangePartitionMap*)(relation->sliceMap);
 
-    pfree_ext(range_map->partitionKey);
-    pfree_ext(range_map->partitionKeyDataType);
+    pfree_ext(range_map->base.partitionKey);
+    pfree_ext(range_map->base.partitionKeyDataType);
     pfree_ext(range_map->intervalValue);
     pfree_ext(range_map->intervalTablespace);
     partitionMapDestroyRangeArray(range_map->rangeElements, range_map->rangeElementsNum);

@@ -6196,10 +6196,10 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
     if (!PointerIsValid(newPartDef->boundary)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("boundary not defined for new partition")));
     }
-    if (newPartDef->boundary->length > PARTITION_PARTKEYMAXNUM) {
+    if (newPartDef->boundary->length > MAX_PARTKEY_NUMS) {
         ereport(ERROR,
             (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                errmsg("too many partition keys, allowed is %d", PARTITION_PARTKEYMAXNUM)));
+                errmsg("too many partition keys, allowed is %d", MAX_PARTKEY_NUMS)));
     }
 
     /*new partition name check*/
@@ -6653,7 +6653,7 @@ Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
     } else {
         columnRaw = TimestampGetDatum(ts);
     }
-    int2vector* partKeyColumn = partMap->partitionKey;
+    int2vector* partKeyColumn = partMap->base.partitionKey;
     Assert(partKeyColumn->dim1 == 1);
 
     (void)transformDatum2Const(rel->rd_att, partKeyColumn->values[0], columnRaw, false, &consts);
@@ -6666,9 +6666,9 @@ Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
 Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
 {
     RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
-    int2vector* partKeyColumn = partMap->partitionKey;
+    int2vector* partKeyColumn = partMap->base.partitionKey;
     Assert(partKeyColumn->dim1 == 1);
-    Assert(partMap->type.type == PART_TYPE_INTERVAL);
+    Assert(partMap->base.type == PART_TYPE_INTERVAL);
     Assert(partMap->rangeElementsNum >= 1);
 
     Const* lastPartBoundary = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0];
@@ -7035,10 +7035,10 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
         RangePartitionDefState* lastPartition = NULL;
         lastPartition = (RangePartitionDefState*)lfirst(partTableState->partitionList->tail);
 
-        if (lastPartition->boundary->length > PARTITION_PARTKEYMAXNUM) {
+        if (lastPartition->boundary->length > MAX_PARTKEY_NUMS) {
             ereport(ERROR,
                 (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                    errmsg("number of partition key columns MUST less or equal than %d", PARTITION_PARTKEYMAXNUM)));
+                    errmsg("number of partition key columns MUST less or equal than %d", MAX_PARTKEY_NUMS)));
         }
     }
 
@@ -7581,97 +7581,13 @@ Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTabl
     Oid targetOid = InvalidOid;
     bool partExprKeyIsNull = PartExprKeyIsNull(rel, &partExprKeyStr);
     if (partExprKeyIsNull) {
-        targetOid = heapTupleGetPartitionId(rel, tuple, partitionno, isDDL, canIgnore);
+        targetOid = heapTupleGetPartitionOid(rel, tuple, partitionno, isDDL, canIgnore);
     } else {
         Datum newval = ComputePartKeyExprTuple(rel, estate, slot, NULL, partExprKeyStr);
-        targetOid = heapTupleGetPartitionId(rel, (void*)newval, partitionno, isDDL, canIgnore, false);
+        targetOid = heapTupleGetPartitionOid(rel, (void*)newval, partitionno, isDDL, canIgnore, false);
     }
     pfree_ext(partExprKeyStr);
     return targetOid;
-}
-
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		: get special table partition for a tuple
- *			: create a partition if necessary
- * Description	:
- * Notes		:
- */
-Oid heapTupleGetPartitionId(Relation rel, void *tuple, int *partitionno, bool isDDL, bool canIgnore, bool partExprKeyIsNull)
-{
-    Oid partitionid = InvalidOid;
-
-    /* get routing result */
-    partitionRoutingForTuple(rel, tuple, u_sess->catalog_cxt.route, canIgnore, partExprKeyIsNull);
-
-    /* if the partition exists, return partition's oid */
-    if (u_sess->catalog_cxt.route->fileExist) {
-        Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
-        partitionid = u_sess->catalog_cxt.route->partitionId;
-        if (PointerIsValid(partitionno)) {
-            *partitionno = GetPartitionnoFromSequence(rel->partMap, u_sess->catalog_cxt.route->partSeq);
-        }
-        return partitionid;
-    }
-
-    /*
-     * feedback for non-existing table partition.
-     *   If the routing result indicates a range partition, give error report
-     */
-    int level = canIgnore ? WARNING : ERROR;
-    switch (u_sess->catalog_cxt.route->partArea) {
-        /*
-         * If it is a range partition, give error report
-         */
-        case PART_AREA_RANGE: {
-            ereport(
-                level,
-                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
-        } break;
-        case PART_AREA_INTERVAL: {
-            return AddNewIntervalPartition(rel, tuple, partitionno, isDDL);
-        } break;
-        case PART_AREA_LIST: {
-            ereport(
-                level,
-                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
-        } break;
-        case PART_AREA_HASH: {
-            ereport(
-                level,
-                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
-        } break;
-        /* never happen; just to be self-contained */
-        default: {
-            ereport(
-                level,
-                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("Inserted partition key does not map to any table partition"),
-                 errdetail("Unrecognized PartitionArea %d", u_sess->catalog_cxt.route->partArea)));
-        } break;
-    }
-
-    return partitionid;
-}
-
-Oid heapTupleGetSubPartitionId(Relation rel, void *tuple)
-{
-    Oid partitionId = InvalidOid;
-    Oid subPartitionId = InvalidOid;
-    int partitionno = INVALID_PARTITION_NO;
-    Partition part = NULL;
-    Relation partRel = NULL;
-    /* get partititon oid for the record */
-    partitionId = heapTupleGetPartitionId(rel, tuple, &partitionno);
-    part = PartitionOpenWithPartitionno(rel, partitionId, partitionno, RowExclusiveLock);
-    partRel = partitionGetRelation(rel, part);
-    /* get subpartititon oid for the record */
-    subPartitionId = heapTupleGetPartitionId(partRel, tuple, NULL);
-
-    releaseDummyRelation(&partRel);
-    partitionClose(rel, part, RowExclusiveLock);
-
-    return subPartitionId;
 }
 
 static bool binary_upgrade_is_next_part_pg_partition_oid_valid()
@@ -8077,7 +7993,7 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
     n_key_column = ARR_DIMS(partkey_columns)[0];
 
     /*CHECK: the ArrayType of partition key is valid*/
-    if (ARR_NDIM(partkey_columns) != 1 || n_key_column < 0 || n_key_column > RANGE_PARTKEYMAXNUM ||
+    if (ARR_NDIM(partkey_columns) != 1 || n_key_column < 0 || n_key_column > MAX_RANGE_PARTKEY_NUMS ||
         ARR_HASNULL(partkey_columns) || ARR_ELEMTYPE(partkey_columns) != INT2OID) {
         relation_close(pgPartRel, AccessShareLock);
         ereport(ERROR,
@@ -8086,7 +8002,7 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
                        "type.",
                     RelationGetRelationName(partTableRel))));
     }
-    Assert(n_key_column <= RANGE_PARTKEYMAXNUM);
+    Assert(n_key_column <= MAX_RANGE_PARTKEY_NUMS);
     /* Get int2 array of partition key column numbers*/
     attnums = (int16*)ARR_DATA_PTR(partkey_columns);
 

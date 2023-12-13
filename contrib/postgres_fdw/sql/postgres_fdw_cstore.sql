@@ -570,18 +570,18 @@ RESET enable_hashjoin;
 DROP TABLE local_tbl;
 
 -- check join pushdown in situations where multiple userids are involved
-CREATE ROLE regress_view_owner sysadmin password 'QWERT@12345';
-CREATE USER MAPPING FOR regress_view_owner SERVER loopback;
-GRANT SELECT ON ft4 TO regress_view_owner;
-GRANT SELECT ON ft5 TO regress_view_owner;
+CREATE ROLE regress_view_owner_cstore sysadmin password 'QWERT@12345';
+CREATE USER MAPPING FOR regress_view_owner_cstore SERVER loopback;
+GRANT SELECT ON ft4 TO regress_view_owner_cstore;
+GRANT SELECT ON ft5 TO regress_view_owner_cstore;
 
 CREATE VIEW v4 AS SELECT * FROM ft4;
 CREATE VIEW v5 AS SELECT * FROM ft5;
-ALTER VIEW v5 OWNER TO regress_view_owner;
+ALTER VIEW v5 OWNER TO regress_view_owner_cstore;
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN v5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1, t2.c1 OFFSET 10 LIMIT 10;  -- can't be pushed down, different view owners
 SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN v5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1, t2.c1 OFFSET 10 LIMIT 10;
-ALTER VIEW v4 OWNER TO regress_view_owner;
+ALTER VIEW v4 OWNER TO regress_view_owner_cstore;
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN v5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1, t2.c1 OFFSET 10 LIMIT 10;  -- can be pushed down
 SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN v5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1, t2.c1 OFFSET 10 LIMIT 10;
@@ -589,14 +589,14 @@ SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN v5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN ft5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1, t2.c1 OFFSET 10 LIMIT 10;  -- can't be pushed down, view owner not current user
 SELECT t1.c1, t2.c2 FROM v4 t1 LEFT JOIN ft5 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c1, t2.c1 OFFSET 10 LIMIT 10;
-ALTER VIEW v4 OWNER TO regress_view_owner;
+ALTER VIEW v4 OWNER TO regress_view_owner_cstore;
 
 -- PlaceHolder
 explain(verbose, costs off) select * from ft1 t1 left join (select c1, case when c2 is not null then 1 else 0 end as cc from ft2) t2 on t1.c1 = t2.c1;
 
 -- cleanup
-DROP OWNED BY regress_view_owner;
-DROP ROLE regress_view_owner;
+DROP OWNED BY regress_view_owner_cstore;
+DROP ROLE regress_view_owner_cstore;
 
 -- ======================================================================================================================================
 -- TEST-MODULE: Aggregate and grouping queries

@@ -60,6 +60,8 @@ typedef struct PartitionIdentifier {
     int partSeq;
     bool fileExist;
     Oid partitionId;
+    Const consts[MAX_PARTKEY_NUMS];
+    Const *values[MAX_PARTKEY_NUMS];
 } PartitionIdentifier;
 
 /*
@@ -72,7 +74,7 @@ typedef struct RangeElement {
     Oid partitionOid;                        /* the oid of partition */
     int partitionno;                         /* the partitionno of partition */
     int len;                                 /* the length of partition key number */
-    Const* boundary[RANGE_PARTKEYMAXNUM];    /* upper bond of partition */
+    Const* boundary[MAX_RANGE_PARTKEY_NUMS];    /* upper bond of partition */
     bool isInterval;                         /* is interval partition */
 } RangeElement;
 
@@ -98,10 +100,7 @@ typedef struct ValuePartitionMap {
 
 // describe partition info of  Range Partitioned-Table
 typedef struct RangePartitionMap {
-    PartitionMap type;
-    Oid relid;                 /*oid of partitioned table*/
-    int2vector* partitionKey;  /*partition key*/
-    Oid* partitionKeyDataType; /*the data type of partition key*/
+    PartitionMap base;
     /*section 1: range partition specific*/
     int rangeElementsNum;          /* the number of range partition*/
     RangeElement* rangeElements;   /* array of RangeElement */
@@ -109,26 +108,45 @@ typedef struct RangePartitionMap {
     oidvector* intervalTablespace; /* valid for interval partition */
 } RangePartitionMap;
 
-bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Interval* intervalValue, bool topClosed);
-extern int2vector* GetPartitionKey(const PartitionMap* partMap);
+#define IS_NULL_CONST(x) (x->constisnull)
+
+typedef struct PartEntryKey {
+    Oid parentRelOid;
+    PartitionKey partKey;
+} PartEntryKey;
+
+typedef struct PartElementHashEntry {
+    /* hash table's KEY part */
+    PartEntryKey key;
+
+    /* value part */
+    Oid rootRelOid; /* Oid entry in pg_class, equal to key.parentRelOid in none-subpartition case */
+    Oid partRelOid;
+    int partSeq;
+
+    /* confilct case to lookup party entry */
+    struct PartElementHashEntry *next;
+} ListElementHashEntry;
+
+#define INVALID_PARTREL_OID   InvalidOid
+#define INVALID_PARTREL_SEQNO -1
 extern Const **transformConstIntoPartkeyType(FormData_pg_attribute* attrs, int2vector* partitionKey, Const **boundary,
     int len);
 
 typedef struct ListPartitionMap {
-    PartitionMap type;
-    Oid relid;      /* Oid of partitioned table */
-    int2vector* partitionKey;  /* partition key */
-    Oid* partitionKeyDataType; /* the data type of partition key */
+    PartitionMap base;
     /* section 1: list partition specific */
     int listElementsNum;          /* the number of list partition */
     ListPartElement* listElements;   /* array of listElement */
+
+    /* list value to partRelOid */
+    HTAB *ht;
+    Oid   defaultPartRelOid;
+    int   defaultPartSeqNo;
 } ListPartitionMap;
 
 typedef struct HashPartitionMap {
-    PartitionMap type;
-    Oid relid;      /* Oid of partitioned table */
-    int2vector* partitionKey;  /* partition key */
-    Oid* partitionKeyDataType; /* the data type of partition key */
+    PartitionMap base;
     /* section 1: hash partition specific */
     int hashElementsNum;          /* the number of hash partition */
     HashPartElement* hashElements;   /* array of hashElement */
@@ -141,96 +159,14 @@ typedef struct HashPartitionMap {
         }                                                                              \
     } while (0)
 
-#define partitionRoutingForTuple(rel, tuple, partIdentfier, canIgnore, partExprKeyIsNull)                             \
-    do {                                                                                                              \
-        TupleDesc tuple_desc = NULL;                                                                                  \
-        int2vector *partkey_column = NULL;                                                                            \
-        int partkey_column_n = 0;                                                                                     \
-        static THR_LOCAL Const consts[PARTITION_PARTKEYMAXNUM];                                                       \
-        static THR_LOCAL Const *values[PARTITION_PARTKEYMAXNUM];                                                      \
-        bool isnull = false;                                                                                          \
-        bool is_ustore = RelationIsUstoreFormat(rel);                                                                 \
-        Datum column_raw;                                                                                             \
-        int i = 0;                                                                                                    \
-        partkey_column = GetPartitionKey((rel)->partMap);                                                             \
-        partkey_column_n = partkey_column->dim1;                                                                      \
-        tuple_desc = (rel)->rd_att;                                                                                   \
-        for (i = 0; i < partkey_column_n; i++) {                                                                      \
-            isnull = false;                                                                                           \
-            if (partExprKeyIsNull) {                                                                                  \
-                column_raw = (is_ustore)                                                                              \
-                            ? UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull)   \
-                            : fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);        \
-                values[i] =                                                                                           \
-                    transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);   \
-            } else {                                                                                                  \
-                column_raw = Datum(tuple);                                                                            \
-                values[i] =                                                                                           \
-                    transformDatum2ConstForPartKeyExpr((rel)->partMap, column_raw, isnull, &consts[i]);               \
-            }                                                                                                         \
-        }                                                                                                             \
-        if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                       \
-            if (canIgnore) {                                                                                          \
-                /* treat type as PART_TYPE_RANGE because PART_TYPE_INTERVAL will create a new partition.              \
-                 * this will be handled by caller and directly return */                                              \
-                (partIdentfier)->partArea = PART_AREA_RANGE;                                                          \
-                (partIdentfier)->fileExist = false;                                                                   \
-                (partIdentfier)->partitionId = InvalidOid;                                                            \
-                break;                                                                                                \
-            }                                                                                                         \
-            ereport(ERROR,                                                                                            \
-                    (errcode(ERRCODE_INTERNAL_ERROR), errmsg("inserted partition key does not map to any partition"), \
-                     errdetail("inserted partition key cannot be NULL for interval-partitioned table")));             \
-        }                                                                                                             \
-        partitionRoutingForValue((rel), values, partkey_column_n, true, false, (partIdentfier));                      \
-    } while (0)
-
-#define partitionRoutingForValue(rel, keyValue, valueLen, topClosed, missIsOk, result)                                 \
-    do {                                                                                                               \
-        if ((rel)->partMap->type == PART_TYPE_RANGE || (rel)->partMap->type == PART_TYPE_INTERVAL) {                   \
-            if ((rel)->partMap->type == PART_TYPE_RANGE) {                                                             \
-                (result)->partArea = PART_AREA_RANGE;                                                                  \
-            } else {                                                                                                   \
-                Assert((valueLen) == 1);                                                                               \
-                (result)->partArea = PART_AREA_INTERVAL;                                                               \
-            }                                                                                                          \
-            (result)->partitionId = getRangePartitionOid((rel)->partMap, (keyValue), &((result)->partSeq), topClosed); \
-            if ((result)->partSeq < 0) {                                                                               \
-                (result)->fileExist = false;                                                                           \
-            } else {                                                                                                   \
-                (result)->fileExist = true;                                                                            \
-                RangePartitionMap *partMap = (RangePartitionMap *)((rel)->partMap);                                    \
-                if (partMap->rangeElements[(result)->partSeq].isInterval &&                                            \
-                    !ValueSatisfyLowBoudary(keyValue, &partMap->rangeElements[(result)->partSeq],                      \
-                                            partMap->intervalValue, topClosed)) {                                      \
-                    (result)->partSeq = -1;                                                                            \
-                    (result)->partitionId = InvalidOid;                                                                \
-                    (result)->fileExist = false;                                                                       \
-                }                                                                                                      \
-            }                                                                                                          \
-        } else if ((rel)->partMap->type == PART_TYPE_LIST) {                                                           \
-            (result)->partArea = PART_AREA_LIST;                                                                       \
-            (result)->partitionId =                                                                                    \
-                getListPartitionOid(((rel)->partMap), (keyValue), (valueLen), &((result)->partSeq), topClosed);        \
-            if ((result)->partSeq < 0) {                                                                               \
-                (result)->fileExist = false;                                                                           \
-            } else {                                                                                                   \
-                (result)->fileExist = true;                                                                            \
-            }                                                                                                          \
-        } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                           \
-            (result)->partArea = PART_AREA_HASH;                                                                       \
-            (result)->partitionId =                                                                                    \
-                getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);                    \
-            if ((result)->partSeq < 0) {                                                                               \
-                (result)->fileExist = false;                                                                           \
-            } else {                                                                                                   \
-                (result)->fileExist = true;                                                                            \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),                                                           \
-                            errmsg("Unsupported partition strategy:%d", (rel)->partMap->type)));                       \
-        }                                                                                                              \
-    } while (0)
+extern bool IsDefaultValueListPartition(ListPartitionMap *listMap, ListPartElement *partElem);
+char *PartKeyGetCstring(PartitionKey* partkeys);
+extern bool ConstEqual(Const *c1, Const *c2);
+extern char *PartKeyGetCstring(Const* c);
+void partitionRoutingForTuple(Relation rel, void *tuple, PartitionIdentifier *partIdentfier, bool canIgnore,
+                              bool partExprKeyIsNull);
+void partitionRoutingForValue(Relation rel, Const **keyValue, int valueLen, bool topClosed, bool missIsOk,
+                              PartitionIdentifier *result);
 
 /*
  * search >/>= keyValue partition if direction is true
@@ -269,7 +205,7 @@ typedef struct HashPartitionMap {
         if ((rel)->partMap->type == PART_TYPE_LIST) {                                                           \
             (result)->partArea = PART_AREA_LIST;                                                                \
             (result)->partitionId =                                                                             \
-                getListPartitionOid(((rel)->partMap), (keyValue), (valueLen), &((result)->partSeq), topClosed); \
+                getListPartitionOid(((rel)->partMap), (keyValue), (valueLen), &((result)->partSeq));            \
             if ((result)->partSeq < 0) {                                                                        \
                 (result)->fileExist = false;                                                                    \
             } else {                                                                                            \
@@ -277,8 +213,7 @@ typedef struct HashPartitionMap {
             }                                                                                                   \
         } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                    \
             (result)->partArea = PART_AREA_HASH;                                                                \
-            (result)->partitionId =                                                                             \
-                getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);             \
+            (result)->partitionId = getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq));    \
             if ((result)->partSeq < 0) {                                                                        \
                 (result)->fileExist = false;                                                                    \
             } else {                                                                                            \
@@ -499,6 +434,10 @@ typedef struct PruningResult {
     bool isPbeSinlePartition = false;
 } PruningResult;
 
+extern bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Interval* intervalValue,
+    bool topClosed);
+extern int2vector* GetPartitionKey(const PartitionMap* partMap);
+
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
 extern PartitionIdentifier* partOidGetPartID(Relation rel, Oid partOid);
 
@@ -531,5 +470,9 @@ extern void DestroyPartitionMap(PartitionMap* partMap);
 /* search fake relation with partOid, if no need partitionno, just input 0 */
 extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
     int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
+
+/* partitoin map copy functions */
+extern ListPartitionMap *CopyListPartitionMap(ListPartitionMap *src_lpm);
+/* more! other hash/range and its underlaying element data structores will add here later */
 
 #endif /* PARTITIONMAP_GS_H_ */

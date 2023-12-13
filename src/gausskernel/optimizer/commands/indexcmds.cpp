@@ -5414,8 +5414,9 @@ static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
     if (!PartExprKeyIsNull(rel)) {
         return false;
     }
-    int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
-    for (int i = 0; i < partKey->dim1; i++) {
+    int2vector* partKey = PartitionMapGetPartKeyArray(rel->partMap);
+    int partKeyNum = PartitionMapGetPartKeyNum(rel->partMap);
+    for (int i = 0; i < partKeyNum; i++) {
         int2 attNum = partKey->values[i];
         Form_pg_attribute attTup = &rel->rd_att->attrs[attNum - 1];
         if (!columnIsExist(rel, attTup, indexParams)) {

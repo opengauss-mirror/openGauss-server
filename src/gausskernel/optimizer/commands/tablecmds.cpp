@@ -215,7 +215,6 @@
 #include "utils/pl_package.h"
 #endif
 
-
 extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId* oldestXmin,
     TransactionId* freezeLimit, TransactionId* freezeTableLimit, MultiXactId* multiXactFrzLimit);
 
@@ -1527,11 +1526,11 @@ static void validateDfsTableDef(CreateStmt* stmt, bool isDfsTbl)
             ereport(ERROR,
                 (errcode(ERRCODE_PARTITION_ERROR),
                     errmsg("Num of partition keys in value-partitioned table should not be zeror")));
-        } else if (list_length(stmt->partTableState->partitionKey) > VALUE_PARTKEYMAXNUM) {
+        } else if (list_length(stmt->partTableState->partitionKey) > MAX_VALUE_PARTKEY_NUMS) {
             ereport(ERROR,
                 (errcode(ERRCODE_PARTITION_ERROR),
                     errmsg("Num of partition keys in value-partitioned table exceeds max allowed num:%d",
-                        RANGE_PARTKEYMAXNUM)));
+                        MAX_RANGE_PARTKEY_NUMS)));
         }
 
         /* Partition stragegy check */
@@ -6987,6 +6986,7 @@ ObjectAddress renamePartition(RenameStmt* stmt)
     ParseState* pstate = NULL;
     RangePartitionDefState* rangePartDef = NULL;
     Relation rel = NULL;
+    int2vector *partKeyArray = NULL;
     ObjectAddress address;
 
     /* shouldn't happen */
@@ -7069,9 +7069,9 @@ ObjectAddress renamePartition(RenameStmt* stmt)
         rangePartDef->boundary = stmt->object;
 
         transformPartitionValue(pstate, (Node*)rangePartDef, false);
-
+        partKeyArray = PartitionMapGetPartKeyArray(rel->partMap);
         rangePartDef->boundary = transformConstIntoTargetType(
-            rel->rd_att->attrs, ((RangePartitionMap*)rel->partMap)->partitionKey, rangePartDef->boundary);
+            rel->rd_att->attrs, partKeyArray, rangePartDef->boundary);
 
         partitionOid =
             PartitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessExclusiveLock, true, true, false);
@@ -16411,7 +16411,7 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
      * data type of a partitioned table's partition key can not be changed
      */
     if (RELATION_IS_PARTITIONED(rel) && is_partition_column(rel, attnum)) {
-        int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
+        int2vector* partKey = PartitionMapGetPartKeyArray(rel->partMap);
         int i = 0;
 
         for (; i < partKey->dim1; i++) {
@@ -18789,7 +18789,7 @@ static void ATExecSetTableSpaceForPartitionP2(AlteredTableInfo* tab, Relation re
             rangePartDef = (RangePartitionDefState*)partition;
             transformPartitionValue(make_parsestate(NULL), (Node*)rangePartDef, false);
             rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-                ((RangePartitionMap*)rel->partMap)->partitionKey,
+                ((RangePartitionMap*)rel->partMap)->base.partitionKey,
                 rangePartDef->boundary);
             partOid =
                 PartitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessExclusiveLock, true, false, false);
@@ -23737,14 +23737,14 @@ static Oid FindPartOidByListBoundary(Relation rel, ListPartitionMap *partMap, No
     Oid res;
     if (IsA(boundKey, RowExpr)) { /* Multi-keys partition boundary values */
         partKeyValueList = transformConstIntoTargetType(
-            rel->rd_att->attrs, partMap->partitionKey, ((RowExpr*)boundKey)->args);
+            rel->rd_att->attrs, partMap->base.partitionKey, ((RowExpr*)boundKey)->args);
         res = PartitionValuesGetPartitionOid(rel, partKeyValueList, AccessShareLock, false, true, false);
         list_free_ext(partKeyValueList);
         return res;
     }
 
     Const* con = (Const*)boundKey;
-    FormData_pg_attribute attr = rel->rd_att->attrs[partMap->partitionKey->values[0] - 1];
+    FormData_pg_attribute attr = rel->rd_att->attrs[partMap->base.partitionKey->values[0] - 1];
 
     if (con->ismaxvalue) {
         /*
@@ -23795,8 +23795,8 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
                 errmsg("start value of partition \"%s\" NOT EQUAL up-boundary of last partition.",
                 partDef->partitionInitName ? partDef->partitionInitName : partDef->partitionName)));
         }
-        partKeyValueList = transformConstIntoTargetType(rel->rd_att->attrs,
-            partMap->partitionKey, partDef->boundary, partkeyIsFunc);
+        partKeyValueList = transformConstIntoTargetType(rel->rd_att->attrs, partMap->base.partitionKey,
+                                                        partDef->boundary, partkeyIsFunc);
         pfree_ext(curBound);
         existingPartOid = PartitionValuesGetPartitionOid(rel, partKeyValueList, AccessShareLock, false, true, false);
         list_free_ext(partKeyValueList);
@@ -24555,17 +24555,17 @@ static Oid GetPartOidByATcmd(Relation rel, AlterTableCmd *cmd, const char *comma
         case PART_TYPE_RANGE:
         case PART_TYPE_INTERVAL:
             rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-                ((RangePartitionMap*)rel->partMap)->partitionKey,
+                                                                  rel->partMap->partitionKey,
                 rangePartDef->boundary);
             break;
         case PART_TYPE_LIST:
             rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-                ((ListPartitionMap*)rel->partMap)->partitionKey,
+                                                                  rel->partMap->partitionKey,
                 rangePartDef->boundary);
             break;
         case PART_TYPE_HASH:
             rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-                ((HashPartitionMap*)rel->partMap)->partitionKey,
+                                                                  rel->partMap->partitionKey,
                 rangePartDef->boundary);
             break;
         default:
@@ -24610,13 +24610,13 @@ static Oid GetSubpartOidByATcmd(Relation rel, AlterTableCmd *cmd, Oid *partOid, 
     int2vector *partitionKey = NULL;
     switch (rel->partMap->type) {
         case PART_TYPE_RANGE:
-            partitionKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
+            partitionKey = rel->partMap->partitionKey;
             break;
         case PART_TYPE_LIST:
-            partitionKey = ((ListPartitionMap*)rel->partMap)->partitionKey;
+            partitionKey = rel->partMap->partitionKey;
             break;
         case PART_TYPE_HASH:
-            partitionKey = ((HashPartitionMap*)rel->partMap)->partitionKey;
+            partitionKey = rel->partMap->partitionKey;
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Unknown partitioned type"),
@@ -25102,15 +25102,12 @@ List* GetPartitionBoundary(Relation partTableRel, Node *PartDef)
     switch (nodeTag(PartDef)) {
         case T_RangePartitionDefState:
             boundary = ((RangePartitionDefState *)PartDef)->boundary;
-            partitionKey = ((RangePartitionMap *)partTableRel->partMap)->partitionKey;
             break;
         case T_ListPartitionDefState:
             boundary = ((ListPartitionDefState *)PartDef)->boundary;
-            partitionKey = ((ListPartitionMap *)partTableRel->partMap)->partitionKey;
             break;
         case T_HashPartitionDefState:
             boundary = ((HashPartitionDefState *)PartDef)->boundary;
-            partitionKey = ((HashPartitionMap *)partTableRel->partMap)->partitionKey;
             break;
         default:
             ereport(ERROR,
@@ -25123,6 +25120,7 @@ List* GetPartitionBoundary(Relation partTableRel, Node *PartDef)
                     erraction("Check the table type.")));
             break;
     }
+    partitionKey = PartitionMapGetPartKeyArray(partTableRel->partMap);
     boundary = transformConstIntoTargetType(partTableRel->rd_att->attrs, partitionKey, boundary);
     return boundary;
 }
@@ -27558,7 +27556,7 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
                 int2 bucketId = InvalidBktId;
 
                 // get right partition oid for the tuple
-                targetPartOid = heapTupleGetPartitionId(partTableRel, (HeapTuple)tuple, NULL, true);
+                targetPartOid = heapTupleGetPartitionOid(partTableRel, (HeapTuple)tuple, NULL, true);
 
                 searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partTableRel, targetPartOid,
                     INVALID_PARTITION_NO, partRel, part, RowExclusiveLock);
@@ -27723,7 +27721,7 @@ template <bool exchangeVerbose>
 static void checkValidationForExchangeCStore(Relation partTableRel, Relation ordTableRel, int partSeq)
 {
     RangePartitionMap* partMap = (RangePartitionMap*)(partTableRel->partMap);
-    int2vector* partkeyColumns = partMap->partitionKey;
+    int2vector* partkeyColumns = partMap->base.partitionKey;
     int partkeyColumnNum = partkeyColumns->dim1;
 
     AttrNumber* scanAttrNumbers = NULL;
@@ -27737,8 +27735,8 @@ static void checkValidationForExchangeCStore(Relation partTableRel, Relation ord
     bool* nulls = NULL;
     FormData_pg_attribute* attrs = ordTableRel->rd_att->attrs;
 
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* partKeyValues[RANGE_PARTKEYMAXNUM];
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* partKeyValues[MAX_RANGE_PARTKEY_NUMS];
     bool isInPart = false;
 
     const int tididx = 1;       // junk column for cstore delete
@@ -28051,7 +28049,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
     splitPart = (SplitPartitionState*)cmd->def;
     destPartDefList = splitPart->dest_partition_define_list;
     partMap = (RangePartitionMap*)partTableRel->partMap;
-    partKeyNum = partMap->partitionKey->dim1;
+    partKeyNum = partMap->base.partitionKey->dim1;
     partTableOid = RelationGetRelid(partTableRel);
 
     // get src partition oid
@@ -28067,7 +28065,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
             NoLock);
     } else {
         splitPart->partition_for_values = transformConstIntoTargetType(
-            partTableRel->rd_att->attrs, partMap->partitionKey, splitPart->partition_for_values);
+            partTableRel->rd_att->attrs, partMap->base.partitionKey, splitPart->partition_for_values);
         srcPartOid = PartitionValuesGetPartitionOid(
             partTableRel, splitPart->partition_for_values, AccessExclusiveLock, true, true, false);
     }
@@ -28730,14 +28728,14 @@ static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation par
     RangePartitionMap* partMap = NULL;
     ParseState* pstate = NULL;
     ListCell* cell = NULL;
-    Const* partKeyValueArr[RANGE_PARTKEYMAXNUM] = {NULL};
+    Const* partKeyValueArr[MAX_RANGE_PARTKEY_NUMS] = {NULL};
     int i = 0;
     int partKeyNum = 0;
     int compareSrcPart = 0;
 
     // get partition key number
     partMap = (RangePartitionMap*)partTableRel->partMap;
-    partKeyNum = partMap->partitionKey->dim1;
+    partKeyNum = partMap->base.partitionKey->dim1;
 
     // check split point length
     if (partKeyNum != list_length(splitPart->split_point)) {
@@ -28759,7 +28757,7 @@ static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation par
 
     List *tmp = splitPart->split_point;
     splitPart->split_point =
-        transformConstIntoTargetType(partTableRel->rd_att->attrs, partMap->partitionKey, splitPart->split_point);
+        transformConstIntoTargetType(partTableRel->rd_att->attrs, partMap->base.partitionKey, splitPart->split_point);
     list_free_ext(tmp);
 
     foreach (cell, splitPart->split_point) {
@@ -28822,11 +28820,11 @@ static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefLis
         RangePartitionDefState* rangePartDef = (RangePartitionDefState*)lfirst(cell);
         List* partKeyValueList = NIL;
         ListCell* otherCell = NULL;
-        Const** partKeyValueArr = (Const**)palloc0(sizeof(Const*) * RANGE_PARTKEYMAXNUM);
+        Const** partKeyValueArr = (Const**)palloc0(sizeof(Const*) * MAX_RANGE_PARTKEY_NUMS);
         int i = 0;
 
         partKeyValueList = transformConstIntoTargetType(partTableRel->rd_att->attrs,
-            ((RangePartitionMap*)partTableRel->partMap)->partitionKey,
+            ((RangePartitionMap*)partTableRel->partMap)->base.partitionKey,
             rangePartDef->boundary, partkeyIsFunc);
 
         foreach (otherCell, partKeyValueList) {
@@ -29578,11 +29576,11 @@ static void readTuplesAndInsertInternal(Relation tempTableRel, Relation partTabl
 
         /* tableam_tops_copy_tuple is not ready so we add UStore hack path */
         copyTuple = tableam_tops_copy_tuple(tuple);
-        targetPartOid = heapTupleGetPartitionId(partTableRel, (void *)tuple, &partitionno, true);
+        targetPartOid = heapTupleGetPartitionOid(partTableRel, (void *)tuple, &partitionno, true);
         searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partTableRel, targetPartOid, partitionno,
             partRel, part, RowExclusiveLock);
         if (RelationIsSubPartitioned(partTableRel)) {
-            targetSubPartOid = heapTupleGetPartitionId(partRel, (void *)tuple, &subpartitionno, true);
+            targetSubPartOid = heapTupleGetPartitionOid(partRel, (void *)tuple, &subpartitionno, true);
             searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partRel, targetSubPartOid,
                 subpartitionno, subPartRel, subPart, RowExclusiveLock);
             partRel = subPartRel;
@@ -29741,7 +29739,8 @@ void addToastTableForNewPartition(Relation relation, Oid newPartId, bool isForSu
     firstPartitionId = ((RangePartitionMap*)relation->partMap)->rangeElements[0].partitionOid;
     firstPartition = partitionOpen(relation, firstPartitionId, NoLock);
     firstPartitionToastId = firstPartition->pd_part->reltoastrelid;
-
+    
+    
     if (OidIsValid(firstPartitionToastId)) {
         reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(firstPartitionToastId));
         if (!PointerIsValid(reltuple)) {
@@ -31291,7 +31290,7 @@ bool is_partition_column(Relation rel, AttrNumber att_no)
             }
         }
     } else if (RelationIsCommonPartitioned(rel)) {
-        int2vector* part_key = ((RangePartitionMap*)rel->partMap)->partitionKey;
+        int2vector* part_key = PartitionMapGetPartKeyArray(rel->partMap);
         for (int i = 0; i < part_key->dim1; i++) {
             if (att_no == part_key->values[i]) {
                 is_part_col = true;
@@ -31299,7 +31298,7 @@ bool is_partition_column(Relation rel, AttrNumber att_no)
             }
         }
     } else if (RelationIsSubPartitioned(rel)) {
-        int2vector *partKey = ((RangePartitionMap *)rel->partMap)->partitionKey;
+        int2vector* partKey = PartitionMapGetPartKeyArray(rel->partMap);
         for (int i = 0; i < partKey->dim1; i++) {
             if (att_no == partKey->values[i]) {
                 return true;
@@ -31309,7 +31308,7 @@ bool is_partition_column(Relation rel, AttrNumber att_no)
         Oid partOid = linitial_oid(partOidList);
         Partition part = partitionOpen(rel, partOid, NoLock);
         Relation partRel = partitionGetRelation(rel, part);
-        int2vector *subPartKey = ((RangePartitionMap *)partRel->partMap)->partitionKey;
+        int2vector* subPartKey = PartitionMapGetPartKeyArray(partRel->partMap);
         for (int i = 0; i < subPartKey->dim1; i++) {
             if (att_no == subPartKey->values[i]) {
                 is_part_col = true;
