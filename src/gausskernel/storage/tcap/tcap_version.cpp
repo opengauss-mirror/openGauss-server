@@ -277,7 +277,8 @@ TransactionId TvFetchSnpxminRecycle()
     /* Limit 1 */
     if (tup == NULL) {
         ereport(LOG, (errmodule(MOD_TIMECAPSULE),
-            errmsg("cannot find the recent restore point greate and equal 3 in timecapsule systable, return 0.")));
+            errmsg("cannot find the recent restore point greater than "
+                   "or equal to 3 in timecapsule systable, return 0.")));
     } else {
         value = heap_getattr(tup, Anum_pg_snapshot_snpxmin, RelationGetDescr(rel), &isnull);
         snapxmin = Int64GetDatum(value);
