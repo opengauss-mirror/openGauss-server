@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pg_config (PostgreSQL 9.0)\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2013-01-29 13:45+0000\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
 "PO-Revision-Date: 2012-10-19 13:16+0800\n"
 "Last-Translator: Xiong He <iihero@qq.com>\n"
 "Language-Team: Chinese (Simplified)\n"
@@ -16,282 +16,125 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: Poedit 1.5.4\n"
 
-#: ../../port/exec.c:125 ../../port/exec.c:239 ../../port/exec.c:282
+# startup.c:502
+#: ../../common/port/exec.cpp:64
+#, c-format
+msgid "wrong environment variable \"%s\""
+msgstr "错误的环境变量\"%s\""
+
+#: ../../common/port/exec.cpp:70
+#, c-format
+msgid "Error: environment variable \"%s\" contain invaild symbol\n"
+msgstr "错误:环境变量\"%s\"包含无效符号\n"
+
+#: ../../common/port/exec.cpp:153 ../../common/port/exec.cpp:273
 #, c-format
 msgid "could not identify current directory: %s"
 msgstr "无法确认当前目录: %s"
 
 # command.c:122
-#: ../../port/exec.c:144
+#: ../../common/port/exec.cpp:172
 #, c-format
 msgid "invalid binary \"%s\""
 msgstr "无效的二进制码 \"%s\""
 
 # command.c:1103
-#: ../../port/exec.c:193
+#: ../../common/port/exec.cpp:225
 #, c-format
 msgid "could not read binary \"%s\""
 msgstr "无法读取二进制码 \"%s\""
 
-#: ../../port/exec.c:200
+#: ../../common/port/exec.cpp:233
 #, c-format
 msgid "could not find a \"%s\" to execute"
 msgstr "未能找到一个 \"%s\" 来执行"
 
-#: ../../port/exec.c:255 ../../port/exec.c:291
-#, c-format
-msgid "could not change directory to \"%s\""
-msgstr "无法进入目录 \"%s\""
-
-#: ../../port/exec.c:270
+#: ../../common/port/exec.cpp:289
 #, c-format
 msgid "could not read symbolic link \"%s\""
 msgstr "无法读取符号链结 \"%s\""
 
-#: ../../port/exec.c:526
+#: ../../common/port/exec.cpp:530
 #, c-format
 msgid "child process exited with exit code %d"
 msgstr "子进程已退出, 退出码为 %d"
 
-#: ../../port/exec.c:530
+#: ../../common/port/exec.cpp:533
 #, c-format
 msgid "child process was terminated by exception 0x%X"
 msgstr "子进程被例外(exception) 0x%X 终止"
 
-#: ../../port/exec.c:539
+#: ../../common/port/exec.cpp:546
 #, c-format
 msgid "child process was terminated by signal %s"
 msgstr "子进程被信号 %s 终止"
 
-#: ../../port/exec.c:542
+#: ../../common/port/exec.cpp:549
 #, c-format
 msgid "child process was terminated by signal %d"
 msgstr "子进程被信号 %d 终止"
 
-#: ../../port/exec.c:546
+#: ../../common/port/exec.cpp:553
 #, c-format
 msgid "child process exited with unrecognized status %d"
 msgstr "子进程已退出, 未知状态 %d"
 
-#: pg_config.c:243 pg_config.c:259 pg_config.c:275 pg_config.c:291
-#: pg_config.c:307 pg_config.c:323 pg_config.c:339 pg_config.c:355
-#: pg_config.c:371
+# command.c:1148
+#: ../../common/port/exec.cpp:644 ../../common/port/exec.cpp:680
+#: ../../common/port/exec.cpp:753
 #, c-format
-msgid "not recorded\n"
-msgstr "没有记录\n"
+msgid "could not allocate %lu bytes of memory"
+msgstr "无法分配%lu内存字节数"
 
-#: pg_config.c:428
+#: ../../common/port/exec.cpp:649 ../../common/port/exec.cpp:766
 #, c-format
-msgid ""
-"\n"
-"%s provides information about the installed version of PostgreSQL.\n"
-"\n"
-msgstr ""
-"\n"
-"%s 提供 PostgreSQL 的安装信息.\n"
-"\n"
+msgid "could not get token information: error code %lu"
+msgstr "无法获取令牌信息:错误代码%lu"
 
-#: pg_config.c:429
+#: ../../common/port/exec.cpp:653 ../../common/port/exec.cpp:757
 #, c-format
-msgid "Usage:\n"
-msgstr "使用方法:\n"
+msgid "could not get token information buffer size: error code %lu"
+msgstr "无法获取令牌信息缓冲区大小:错误代码%lu"
 
-#: pg_config.c:430
+#: ../../common/port/exec.cpp:661
 #, c-format
-msgid ""
-"  %s [OPTION]...\n"
-"\n"
-msgstr "  %s [选项]...\n"
+msgid "could not get ACL information: error code %lu"
+msgstr "无法获取ACL信息:错误代码%lu"
 
-#: pg_config.c:431
+#: ../../common/port/exec.cpp:670
 #, c-format
-msgid "Options:\n"
-msgstr "选项:\n"
+msgid "could not get user token: error code %lu"
+msgstr "无法获得用户令牌:错误代码%lu"
 
-#: pg_config.c:432
+#: ../../common/port/exec.cpp:685
 #, c-format
-msgid "  --bindir              show location of user executables\n"
-msgstr "  --bindir              显示执行文件所在位置\n"
+msgid "could not initialize ACL: error code %lu"
+msgstr "无法初始化ACL:错误代码%lu"
 
-#: pg_config.c:433
+#: ../../common/port/exec.cpp:692
 #, c-format
-msgid "  --docdir              show location of documentation files\n"
-msgstr "  --docdir             显示文档所在位置\n"
+msgid "could not get ACE: error code %lu"
+msgstr "无法获取ACE:错误代码%lu"
 
-#: pg_config.c:434
+#: ../../common/port/exec.cpp:697
 #, c-format
-msgid "  --htmldir             show location of HTML documentation files\n"
-msgstr "  --htmldir             显示HTML文档文件所在位置\n"
+msgid "could not add ACE: error code %lu"
+msgstr "无法添加ACE:错误代码%lu"
 
-#: pg_config.c:435
+#: ../../common/port/exec.cpp:704
 #, c-format
-msgid ""
-"  --includedir          show location of C header files of the client\n"
-"                        interfaces\n"
-msgstr ""
-"  --includedir          显示客户端接口 C 头文件所在\n"
-"                        位置\n"
+msgid "could not add access allowed ACE: error code %lu"
+msgstr "不能添加访问允许ACE:错误代码%lu"
 
-#: pg_config.c:437
+#: ../../common/port/exec.cpp:712
 #, c-format
-msgid "  --pkgincludedir       show location of other C header files\n"
-msgstr "  --pkgincludedir      显示其它C语言头文件所在的位置\n"
+msgid "could not set token information: error code %lu"
+msgstr "无法设置令牌信息:错误代码%lu"
 
-#: pg_config.c:438
-#, c-format
-msgid ""
-"  --includedir-server   show location of C header files for the server\n"
-msgstr "  --includedir-server   显示服务端 C 头文件所在位置\n"
-
-#: pg_config.c:439
-#, c-format
-msgid "  --libdir              show location of object code libraries\n"
-msgstr "  --libdir              显示目标代码库文件所在位置\n"
-
-#: pg_config.c:440
-#, c-format
-msgid "  --pkglibdir           show location of dynamically loadable modules\n"
-msgstr "  --pkglibdir           显示动态加载库所在位置\n"
-
-#: pg_config.c:441
-#, c-format
-msgid "  --localedir           show location of locale support files\n"
-msgstr "  --localedir           显示语言环境支持文件所在位置\n"
-
-#: pg_config.c:442
-#, c-format
-msgid "  --mandir              show location of manual pages\n"
-msgstr "  --mandir            显示参考手册所在位置\n"
-
-#: pg_config.c:443
-#, c-format
-msgid ""
-"  --sharedir            show location of architecture-independent support "
-"files\n"
-msgstr "  --sharedir              显示独立架构支持文件所在位置\n"
-
-#: pg_config.c:444
-#, c-format
-msgid ""
-"  --sysconfdir          show location of system-wide configuration files\n"
-msgstr "  --sysconfdir          显示系统范围的配置文件的所在位置\n"
-
-#: pg_config.c:445
-#, c-format
-msgid "  --pgxs                show location of extension makefile\n"
-msgstr "  --pgxs                显示扩展 makefile 所在位置\n"
-
-#: pg_config.c:446
-#, c-format
-msgid ""
-"  --configure           show options given to \"configure\" script when\n"
-"                        PostgreSQL was built\n"
-msgstr ""
-"  --configure           显示编译 PostgreSQL 时 \"configure\"\n"
-"                        的选项\n"
-
-#: pg_config.c:448
-#, c-format
-msgid "  --cc                  show CC value used when PostgreSQL was built\n"
-msgstr "  --cc                   显示在创建PostgreSQL时所使用的CC值\n"
-
-#: pg_config.c:449
-#, c-format
-msgid ""
-"  --cppflags            show CPPFLAGS value used when PostgreSQL was built\n"
-msgstr "  --cppflags            当创建PostgreSQL时显示CPPFLAGS的值\n"
-
-#: pg_config.c:450
-#, c-format
-msgid ""
-"  --cflags              show CFLAGS value used when PostgreSQL was built\n"
-msgstr "  --cflags             显示在创建PostgreSQL时所使用的CFLAG值\n"
-
-#: pg_config.c:451
-#, c-format
-msgid ""
-"  --cflags_sl           show CFLAGS_SL value used when PostgreSQL was built\n"
-msgstr " --cflags_sl            当创建PostgreSQL时显示CFLAGS_SL的值\n"
-
-#: pg_config.c:452
-#, c-format
-msgid ""
-"  --ldflags             show LDFLAGS value used when PostgreSQL was built\n"
-msgstr "  --ldflags             显示在创建PostgreSQL时所使用的LDFLAG值\n"
-
-#: pg_config.c:453
-#, c-format
-msgid ""
-"  --ldflags_ex          show LDFLAGS_EX value used when PostgreSQL was "
-"built\n"
-msgstr "  --ldflags_ex          当创建PostgreSQL时显示LDFLAGS_EX的值\n"
-
-#: pg_config.c:454
-#, c-format
-msgid ""
-"  --ldflags_sl          show LDFLAGS_SL value used when PostgreSQL was "
-"built\n"
-msgstr "  --ldflags_sl           当创建PostgreSQL时显示LDFLAGS_SL的值\n"
-
-#: pg_config.c:455
-#, c-format
-msgid ""
-"  --libs                show LIBS value used when PostgreSQL was built\n"
-msgstr "  --libs               显示在创建PostgreSQL时所使用的LIBS值\n"
-
-#: pg_config.c:456
-#, c-format
-msgid "  --version             show the PostgreSQL version\n"
-msgstr "  --version             显示PostgreSQL的版本信息\n"
-
-#: pg_config.c:457
-#, c-format
-msgid "  -?, --help            show this help, then exit\n"
-msgstr "  -?, --help            显示帮助, 然后退出\n"
-
-#: pg_config.c:458
-#, c-format
-msgid ""
-"\n"
-"With no arguments, all known items are shown.\n"
-"\n"
-msgstr ""
-"\n"
-"没有参数,将显示所有已知的成员.\n"
-"\n"
-
-#: pg_config.c:459
-#, c-format
-msgid "Report bugs to <pgsql-bugs@postgresql.org>.\n"
-msgstr "臭虫报告至 <pgsql-bugs@postgresql.org>.\n"
-
-#: pg_config.c:465
-#, c-format
-msgid "Try \"%s --help\" for more information.\n"
-msgstr "请用 \"%s --help\" 获取更多的信息.\n"
-
-#: pg_config.c:504
-#, c-format
-msgid "%s: could not find own program executable\n"
-msgstr "%s: 无法找到执行文件\n"
-
-#: pg_config.c:527
-#, c-format
-msgid "%s: invalid argument: %s\n"
-msgstr "%s: 无效参数: %s\n"
-
-#~ msgid "%s: could not find own executable\n"
-#~ msgstr "%s: 找不到执行文件\n"
-
-#~ msgid "%s: argument required\n"
-#~ msgstr "%s: 需要参数\n"
-
-#~ msgid ""
-#~ "\n"
-#~ "Try \"%s --help\" for more information\n"
+#~ msgid "  --help                show this help, then exit\n"
 #~ msgstr ""
+#~ "  --help                显示此帮助信息, 然后退出\n"
 #~ "\n"
-#~ "试用 \"%s --help\" 获取更多的信息\n"
 
 #~ msgid ""
 #~ "  %s OPTION...\n"
@@ -300,7 +143,177 @@ msgstr "%s: 无效参数: %s\n"
 #~ "  %s 选项...\n"
 #~ "\n"
 
-#~ msgid "  --help                show this help, then exit\n"
-#~ msgstr ""
-#~ "  --help                显示此帮助信息, 然后退出\n"
+#~ msgid ""
 #~ "\n"
+#~ "Try \"%s --help\" for more information\n"
+#~ msgstr ""
+#~ "\n"
+#~ "试用 \"%s --help\" 获取更多的信息\n"
+
+#~ msgid "%s: argument required\n"
+#~ msgstr "%s: 需要参数\n"
+
+#~ msgid "%s: could not find own executable\n"
+#~ msgstr "%s: 找不到执行文件\n"
+
+#, c-format
+#~ msgid "%s: invalid argument: %s\n"
+#~ msgstr "%s: 无效参数: %s\n"
+
+#, c-format
+#~ msgid "%s: could not find own program executable\n"
+#~ msgstr "%s: 无法找到执行文件\n"
+
+#, c-format
+#~ msgid "Try \"%s --help\" for more information.\n"
+#~ msgstr "请用 \"%s --help\" 获取更多的信息.\n"
+
+#, c-format
+#~ msgid "Report bugs to <pgsql-bugs@postgresql.org>.\n"
+#~ msgstr "臭虫报告至 <pgsql-bugs@postgresql.org>.\n"
+
+#, c-format
+#~ msgid ""
+#~ "\n"
+#~ "With no arguments, all known items are shown.\n"
+#~ "\n"
+#~ msgstr ""
+#~ "\n"
+#~ "没有参数,将显示所有已知的成员.\n"
+#~ "\n"
+
+#, c-format
+#~ msgid "  -?, --help            show this help, then exit\n"
+#~ msgstr "  -?, --help            显示帮助, 然后退出\n"
+
+#, c-format
+#~ msgid "  --version             show the PostgreSQL version\n"
+#~ msgstr "  --version             显示PostgreSQL的版本信息\n"
+
+#, c-format
+#~ msgid "  --libs                show LIBS value used when PostgreSQL was built\n"
+#~ msgstr "  --libs               显示在创建PostgreSQL时所使用的LIBS值\n"
+
+#, c-format
+#~ msgid "  --ldflags_sl          show LDFLAGS_SL value used when PostgreSQL was built\n"
+#~ msgstr "  --ldflags_sl           当创建PostgreSQL时显示LDFLAGS_SL的值\n"
+
+#, c-format
+#~ msgid "  --ldflags_ex          show LDFLAGS_EX value used when PostgreSQL was built\n"
+#~ msgstr "  --ldflags_ex          当创建PostgreSQL时显示LDFLAGS_EX的值\n"
+
+#, c-format
+#~ msgid "  --ldflags             show LDFLAGS value used when PostgreSQL was built\n"
+#~ msgstr "  --ldflags             显示在创建PostgreSQL时所使用的LDFLAG值\n"
+
+#, c-format
+#~ msgid "  --cflags_sl           show CFLAGS_SL value used when PostgreSQL was built\n"
+#~ msgstr " --cflags_sl            当创建PostgreSQL时显示CFLAGS_SL的值\n"
+
+#, c-format
+#~ msgid "  --cflags              show CFLAGS value used when PostgreSQL was built\n"
+#~ msgstr "  --cflags             显示在创建PostgreSQL时所使用的CFLAG值\n"
+
+#, c-format
+#~ msgid "  --cppflags            show CPPFLAGS value used when PostgreSQL was built\n"
+#~ msgstr "  --cppflags            当创建PostgreSQL时显示CPPFLAGS的值\n"
+
+#, c-format
+#~ msgid "  --cc                  show CC value used when PostgreSQL was built\n"
+#~ msgstr "  --cc                   显示在创建PostgreSQL时所使用的CC值\n"
+
+#, c-format
+#~ msgid ""
+#~ "  --configure           show options given to \"configure\" script when\n"
+#~ "                        PostgreSQL was built\n"
+#~ msgstr ""
+#~ "  --configure           显示编译 PostgreSQL 时 \"configure\"\n"
+#~ "                        的选项\n"
+
+#, c-format
+#~ msgid "  --pgxs                show location of extension makefile\n"
+#~ msgstr "  --pgxs                显示扩展 makefile 所在位置\n"
+
+#, c-format
+#~ msgid "  --sysconfdir          show location of system-wide configuration files\n"
+#~ msgstr "  --sysconfdir          显示系统范围的配置文件的所在位置\n"
+
+#, c-format
+#~ msgid "  --sharedir            show location of architecture-independent support files\n"
+#~ msgstr "  --sharedir              显示独立架构支持文件所在位置\n"
+
+#, c-format
+#~ msgid "  --mandir              show location of manual pages\n"
+#~ msgstr "  --mandir            显示参考手册所在位置\n"
+
+#, c-format
+#~ msgid "  --localedir           show location of locale support files\n"
+#~ msgstr "  --localedir           显示语言环境支持文件所在位置\n"
+
+#, c-format
+#~ msgid "  --pkglibdir           show location of dynamically loadable modules\n"
+#~ msgstr "  --pkglibdir           显示动态加载库所在位置\n"
+
+#, c-format
+#~ msgid "  --libdir              show location of object code libraries\n"
+#~ msgstr "  --libdir              显示目标代码库文件所在位置\n"
+
+#, c-format
+#~ msgid "  --includedir-server   show location of C header files for the server\n"
+#~ msgstr "  --includedir-server   显示服务端 C 头文件所在位置\n"
+
+#, c-format
+#~ msgid "  --pkgincludedir       show location of other C header files\n"
+#~ msgstr "  --pkgincludedir      显示其它C语言头文件所在的位置\n"
+
+#, c-format
+#~ msgid ""
+#~ "  --includedir          show location of C header files of the client\n"
+#~ "                        interfaces\n"
+#~ msgstr ""
+#~ "  --includedir          显示客户端接口 C 头文件所在\n"
+#~ "                        位置\n"
+
+#, c-format
+#~ msgid "  --htmldir             show location of HTML documentation files\n"
+#~ msgstr "  --htmldir             显示HTML文档文件所在位置\n"
+
+#, c-format
+#~ msgid "  --docdir              show location of documentation files\n"
+#~ msgstr "  --docdir             显示文档所在位置\n"
+
+#, c-format
+#~ msgid "  --bindir              show location of user executables\n"
+#~ msgstr "  --bindir              显示执行文件所在位置\n"
+
+#, c-format
+#~ msgid "Options:\n"
+#~ msgstr "选项:\n"
+
+#, c-format
+#~ msgid ""
+#~ "  %s [OPTION]...\n"
+#~ "\n"
+#~ msgstr "  %s [选项]...\n"
+
+#, c-format
+#~ msgid "Usage:\n"
+#~ msgstr "使用方法:\n"
+
+#, c-format
+#~ msgid ""
+#~ "\n"
+#~ "%s provides information about the installed version of PostgreSQL.\n"
+#~ "\n"
+#~ msgstr ""
+#~ "\n"
+#~ "%s 提供 PostgreSQL 的安装信息.\n"
+#~ "\n"
+
+#, c-format
+#~ msgid "not recorded\n"
+#~ msgstr "没有记录\n"
+
+#, c-format
+#~ msgid "could not change directory to \"%s\""
+#~ msgstr "无法进入目录 \"%s\""

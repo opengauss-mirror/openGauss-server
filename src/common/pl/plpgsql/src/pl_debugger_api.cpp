@@ -21,6 +21,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "utils/plpgsql_domain.h"
 #include "commands/copy.h"
 #include "catalog/pg_authid.h"
 #include "utils/builtins.h"

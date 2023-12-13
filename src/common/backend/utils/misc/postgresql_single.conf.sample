@@ -877,3 +877,4 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 # and it be add in ANY params in synchronous_standby_names by primary node.
 
 #application_name = 'dn_master'
+#enable_nls = off

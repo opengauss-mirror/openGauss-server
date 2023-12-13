@@ -9,6 +9,7 @@
 
 #include <ctype.h>
 
+#include "utils/plpgsql_domain.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"

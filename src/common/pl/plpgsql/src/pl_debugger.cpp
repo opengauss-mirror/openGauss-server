@@ -21,6 +21,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "utils/plpgsql_domain.h"
 #include "catalog/namespace.h"
 #include "commands/copy.h"
 #include "funcapi.h"

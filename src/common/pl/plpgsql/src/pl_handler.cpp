@@ -14,6 +14,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 #include "utils/fmgroids.h"
 #include "utils/pl_package.h"

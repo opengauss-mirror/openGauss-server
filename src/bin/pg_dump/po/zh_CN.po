@@ -1,11 +1,11 @@
 # simplified Chinese translation file for pg_dump and friends
 # Weiping He <laser@zhengmai.com.cn>, 2001.
-#
+# 
 msgid ""
 msgstr ""
 "Project-Id-Version: pg_dump (PostgreSQL 9.0)\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2013-01-29 13:47+0000\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
 "PO-Revision-Date: 2012-12-17 13:06+0800\n"
 "Last-Translator: Xiong He <iihero@qq.com>\n"
 "Language-Team: Chinese (Simplified)\n"
@@ -16,1272 +16,1770 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 "X-Generator: Poedit 1.5.4\n"
 
-#: ../../port/exec.c:125 ../../port/exec.c:239 ../../port/exec.c:282
+# startup.c:502
+#: ../../common/port/exec.cpp:64
+#, c-format
+msgid "wrong environment variable \"%s\""
+msgstr "错误的环境变量\"%s\""
+
+#: ../../common/port/exec.cpp:70
+#, c-format
+msgid "Error: environment variable \"%s\" contain invaild symbol\n"
+msgstr "错误:环境变量\"%s\"包含无效符号\n"
+
+#: ../../common/port/exec.cpp:153 ../../common/port/exec.cpp:273
 #, c-format
 msgid "could not identify current directory: %s"
 msgstr "无法确认当前目录: %s"
 
 # command.c:122
-#: ../../port/exec.c:144
+#: ../../common/port/exec.cpp:172
 #, c-format
 msgid "invalid binary \"%s\""
 msgstr "无效的二进制码 \"%s\""
 
 # command.c:1103
-#: ../../port/exec.c:193
+#: ../../common/port/exec.cpp:225
 #, c-format
 msgid "could not read binary \"%s\""
 msgstr "无法读取二进制码 \"%s\""
 
-#: ../../port/exec.c:200
+#: ../../common/port/exec.cpp:233
 #, c-format
 msgid "could not find a \"%s\" to execute"
 msgstr "未能找到一个 \"%s\" 来执行"
 
-#: ../../port/exec.c:255 ../../port/exec.c:291
-#, c-format
-msgid "could not change directory to \"%s\""
-msgstr "无法进入目录 \"%s\""
-
-#: ../../port/exec.c:270
+#: ../../common/port/exec.cpp:289
 #, c-format
 msgid "could not read symbolic link \"%s\""
 msgstr "无法读取符号链结 \"%s\""
 
-#: ../../port/exec.c:526
+#: ../../common/port/exec.cpp:530
 #, c-format
 msgid "child process exited with exit code %d"
 msgstr "子进程已退出, 退出码为 %d"
 
-#: ../../port/exec.c:530
+#: ../../common/port/exec.cpp:533
 #, c-format
 msgid "child process was terminated by exception 0x%X"
 msgstr "子进程被例外(exception) 0x%X 终止"
 
-#: ../../port/exec.c:539
+#: ../../common/port/exec.cpp:546
 #, c-format
 msgid "child process was terminated by signal %s"
 msgstr "子进程被信号 %s 终止"
 
-#: ../../port/exec.c:542
+#: ../../common/port/exec.cpp:549
 #, c-format
 msgid "child process was terminated by signal %d"
 msgstr "子进程被信号 %d 终止"
 
-#: ../../port/exec.c:546
+#: ../../common/port/exec.cpp:553
 #, c-format
 msgid "child process exited with unrecognized status %d"
 msgstr "子进程已退出, 未知状态 %d"
 
-#: common.c:105
+# command.c:1148
+#: ../../common/port/exec.cpp:644 ../../common/port/exec.cpp:680
+#: ../../common/port/exec.cpp:753
+#, c-format
+msgid "could not allocate %lu bytes of memory"
+msgstr "无法分配%lu内存字节数"
+
+#: ../../common/port/exec.cpp:649 ../../common/port/exec.cpp:766
+#, c-format
+msgid "could not get token information: error code %lu"
+msgstr "无法获取token信息:错误码%lu"
+
+#: ../../common/port/exec.cpp:653 ../../common/port/exec.cpp:757
+#, c-format
+msgid "could not get token information buffer size: error code %lu"
+msgstr "无法获取token信息缓冲区大小:错误码%lu"
+
+#: ../../common/port/exec.cpp:661
+#, c-format
+msgid "could not get ACL information: error code %lu"
+msgstr "无法获取ACL信息:错误码%lu"
+
+#: ../../common/port/exec.cpp:670
+#, c-format
+msgid "could not get user token: error code %lu"
+msgstr "无法获得用户token:错误码%lu"
+
+#: ../../common/port/exec.cpp:685
+#, c-format
+msgid "could not initialize ACL: error code %lu"
+msgstr "无法初始化ACL:错误码%lu"
+
+#: ../../common/port/exec.cpp:692
+#, c-format
+msgid "could not get ACE: error code %lu"
+msgstr "无法获取ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:697
+#, c-format
+msgid "could not add ACE: error code %lu"
+msgstr "无法添加ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:704
+#, c-format
+msgid "could not add access allowed ACE: error code %lu"
+msgstr "不能添加访问允许ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:712
+#, c-format
+msgid "could not set token information: error code %lu"
+msgstr "无法设置token信息:错误码%lu"
+
+#: common.cpp:103
 #, c-format
 msgid "reading schemas\n"
 msgstr "读取模式\n"
 
-#: common.c:116
+#: common.cpp:114
 #, c-format
 msgid "reading user-defined tables\n"
 msgstr "读取用户定义表\n"
 
-#: common.c:124
+#: common.cpp:122
 #, c-format
 msgid "reading extensions\n"
 msgstr "读扩展\n"
 
-#: common.c:128
+#: common.cpp:126
 #, c-format
 msgid "reading user-defined functions\n"
 msgstr "读取用户定义函数\n"
 
-#: common.c:134
+#: common.cpp:132
 #, c-format
 msgid "reading user-defined types\n"
 msgstr "读取用户定义类型\n"
 
-#: common.c:140
+#: common.cpp:138
 #, c-format
 msgid "reading procedural languages\n"
 msgstr "读取过程语言\n"
 
-#: common.c:144
+#: common.cpp:142
 #, c-format
 msgid "reading user-defined aggregate functions\n"
 msgstr "读取用户定义聚集函数\n"
 
-#: common.c:148
+#: common.cpp:146
 #, c-format
 msgid "reading user-defined operators\n"
 msgstr "读取用户定义操作符\n"
 
-#: common.c:153
+#: common.cpp:151
 #, c-format
 msgid "reading user-defined operator classes\n"
 msgstr "读取用户定义操作符集\n"
 
-#: common.c:157
+#: common.cpp:155
 #, c-format
 msgid "reading user-defined operator families\n"
 msgstr "读取用户定义操作符\n"
 
-#: common.c:161
+#: common.cpp:159
 #, c-format
 msgid "reading user-defined text search parsers\n"
 msgstr "读取用户定义的文本搜索解析器\n"
 
-#: common.c:165
+#: common.cpp:163
 #, c-format
 msgid "reading user-defined text search templates\n"
 msgstr "读取用户定义的文本搜索模板\n"
 
-#: common.c:169
+#: common.cpp:167
 #, c-format
 msgid "reading user-defined text search dictionaries\n"
 msgstr "读取用户定义的文本搜索字典\n"
 
 # sql_help.h:129
-#: common.c:173
+#: common.cpp:171
 #, c-format
 msgid "reading user-defined text search configurations\n"
 msgstr "读取用户定义的文本搜索配置\n"
 
-#: common.c:177
+#: common.cpp:175
 #, c-format
 msgid "reading user-defined foreign-data wrappers\n"
 msgstr "读取用户定义外部数据封装器\n"
 
-#: common.c:181
+#: common.cpp:179
 #, c-format
 msgid "reading user-defined foreign servers\n"
 msgstr "读取用户定义的外部服务器\n"
 
-#: common.c:185
+#: common.cpp:183
 #, c-format
 msgid "reading default privileges\n"
 msgstr "正在读取缺省权限\n"
 
-#: common.c:189
+#: common.cpp:187
 #, c-format
 msgid "reading user-defined collations\n"
 msgstr "读取用户定义的校对函数\n"
 
-#: common.c:194
+#: common.cpp:192
 #, c-format
 msgid "reading user-defined conversions\n"
 msgstr "读取用户定义的字符集转换\n"
 
-#: common.c:198
+#: common.cpp:196
 #, c-format
 msgid "reading type casts\n"
 msgstr "读取类型转换\n"
 
-#: common.c:202
+#: common.cpp:200
 #, c-format
 msgid "reading table inheritance information\n"
 msgstr "读取表继承信息\n"
 
-#: common.c:206
-#, c-format
-msgid "reading rewrite rules\n"
-msgstr "读取重写规则\n"
-
-#: common.c:215
+#: common.cpp:209
 #, c-format
 msgid "finding extension members\n"
 msgstr "查找扩展成员\n"
 
-#: common.c:220
+#: common.cpp:214
 #, c-format
 msgid "finding inheritance relationships\n"
 msgstr "正在查找关系继承\n"
 
-#: common.c:224
+#: common.cpp:218
 #, c-format
 msgid "reading column info for interesting tables\n"
 msgstr "正在读取感兴趣表的列信息\n"
 
-#: common.c:228
+#: common.cpp:222
 #, c-format
 msgid "flagging inherited columns in subtables\n"
 msgstr "在子表里标记继承字段\n"
 
-#: common.c:232
+#: common.cpp:226
 #, c-format
 msgid "reading indexes\n"
 msgstr "读取索引\n"
 
-#: common.c:236
+#: common.cpp:230
 #, c-format
 msgid "reading constraints\n"
 msgstr "读取约束\n"
 
-#: common.c:240
+#: common.cpp:238
+#, c-format
+msgid "reading constraints about foregin table\n"
+msgstr "关于外文表的阅读约束\n"
+
+#: common.cpp:242
 #, c-format
 msgid "reading triggers\n"
 msgstr "读取触发器\n"
 
-#: common.c:786
+#: common.cpp:246
+msgid "reading events\n"
+msgstr "读取事件\n"
+
+#: common.cpp:252
+#, c-format
+msgid "reading rewrite rules\n"
+msgstr "读取重写规则\n"
+
+#: common.cpp:256
+#, c-format
+msgid "reading row level security policies\n"
+msgstr "读取行级安全策略\n"
+
+#: common.cpp:260
+#, c-format
+msgid "reading user-defined packages\n"
+msgstr "读取用户定义的包\n"
+
+#: common.cpp:267
+#, c-format
+msgid "reading publications\n"
+msgstr "读取publications\n"
+
+#: common.cpp:272
+#, c-format
+msgid "reading publication membership\n"
+msgstr "读取publications会员资格\n"
+
+#: common.cpp:277
+#, c-format
+msgid "reading subscriptions\n"
+msgstr "读取subscriptions\n"
+
+#: common.cpp:281
+msgid "reading event triggers\n"
+msgstr "读取事件触发器\n"
+
+#: common.cpp:773
 #, c-format
 msgid "failed sanity check, parent OID %u of table \"%s\" (OID %u) not found\n"
-msgstr "健全检查失败, 未找到表 \"%2$s\" (OID %3$u) 的 OID 为 %1$u 的父辈\n"
+msgstr "健全检查失败, 父OID%u来自表\"%s\"(OID%u)未找到\n"
 
-#: common.c:828
+#: common.cpp:808
 #, c-format
 msgid "could not parse numeric array \"%s\": too many numbers\n"
 msgstr "无法分析数值数组\"%s\": 数字太多\n"
 
-#: common.c:843
+#: common.cpp:820
 #, c-format
 msgid "could not parse numeric array \"%s\": invalid character in number\n"
 msgstr "无法分析数值数组\"%s\": 出现无效字符\n"
 
 #. translator: this is a module name
-#: compress_io.c:78
+#: compress_io.cpp:80
 msgid "compress_io"
-msgstr "压缩IO"
+msgstr "compress_io"
 
-#: compress_io.c:114
+#: compress_io.cpp:109
 #, c-format
 msgid "invalid compression code: %d\n"
 msgstr "无效的压缩码: %d\n"
 
-#: compress_io.c:138 compress_io.c:174 compress_io.c:192 compress_io.c:519
-#: compress_io.c:546
+#: compress_io.cpp:137 compress_io.cpp:172 compress_io.cpp:187
+#: compress_io.cpp:500 compress_io.cpp:535
 #, c-format
 msgid "not built with zlib support\n"
 msgstr "没有编译成带有zlib库支持的版本\n"
 
-#: compress_io.c:240 compress_io.c:349
+#: compress_io.cpp:233 compress_io.cpp:325
 #, c-format
 msgid "could not initialize compression library: %s\n"
 msgstr "无法初始化压缩库: %s\n"
 
-#: compress_io.c:261
+#: compress_io.cpp:251
 #, c-format
 msgid "could not close compression stream: %s\n"
 msgstr "无法关闭压缩流: %s\n"
 
-#: compress_io.c:279
+#: compress_io.cpp:268
 #, c-format
 msgid "could not compress data: %s\n"
 msgstr "无法压缩数据: %s\n"
 
-#: compress_io.c:300 compress_io.c:431 pg_backup_archiver.c:1476
-#: pg_backup_archiver.c:1499 pg_backup_custom.c:650 pg_backup_directory.c:480
-#: pg_backup_tar.c:589 pg_backup_tar.c:1096 pg_backup_tar.c:1389
+#: compress_io.cpp:283 compress_io.cpp:398 pg_backup_archiver.cpp:1296
+#: pg_backup_archiver.cpp:1330 pg_backup_archiver.cpp:1577
+#: pg_backup_archiver.cpp:1606 pg_backup_custom.cpp:619
+#: pg_backup_directory.cpp:474 pg_backup_tar.cpp:578 pg_backup_tar.cpp:1066
+#: pg_backup_tar.cpp:1327 pg_dump.cpp:2596 pg_dump.cpp:4284 pg_dumpall.cpp:711
 #, c-format
 msgid "could not write to output file: %s\n"
 msgstr "无法写到输出文件: %s\n"
 
-#: compress_io.c:366 compress_io.c:382
+#: compress_io.cpp:338 compress_io.cpp:352
 #, c-format
 msgid "could not uncompress data: %s\n"
 msgstr "无法解压缩数据: %s\n"
 
-#: compress_io.c:390
+#: compress_io.cpp:359
 #, c-format
 msgid "could not close compression library: %s\n"
 msgstr "无法关闭压缩库: %s\n"
 
+#: compress_io.cpp:550 pg_backup_custom.cpp:151 pg_backup_tar.cpp:177
+#, c-format
+msgid "changing permissions for file \"%s\" failed with: %s\n"
+msgstr "更改文件权限\"%s\"失败:%s\n"
+
 # fe-exec.c:737
-#: dumpmem.c:33
+#: dumpmem.cpp:34 dumputils.cpp:486 pg_dumpall.cpp:3662
 #, c-format
 msgid "cannot duplicate null pointer\n"
 msgstr "无法重复空指针\n"
 
-#: dumpmem.c:36 dumpmem.c:50 dumpmem.c:61 dumpmem.c:75 pg_backup_db.c:149
-#: pg_backup_db.c:204 pg_backup_db.c:248 pg_backup_db.c:294
+#: dumpmem.cpp:37 dumpmem.cpp:50 dumpmem.cpp:62 dumpmem.cpp:75
+#: dumputils.cpp:490 dumputils.cpp:1714 pg_backup_archiver.cpp:5072
+#: pg_backup_db.cpp:153 pg_backup_db.cpp:214 pg_backup_db.cpp:252
+#: pg_backup_db.cpp:309 pg_backup_db.cpp:713 pg_dump.cpp:1203 pg_dump.cpp:1212
+#: pg_dumpall.cpp:624 pg_dumpall.cpp:633 pg_dumpall.cpp:3665
 #, c-format
 msgid "out of memory\n"
-msgstr "内存用尽\n"
+msgstr "内存溢出\n"
 
-#: dumputils.c:1266
+#: dumpmem.cpp:59
+#, c-format
+msgid "Invalid size or invalid block count specified\n"
+msgstr "指定的大小或块数无效\n"
+
+#: dumputils.cpp:513
+#, c-format
+msgid "query to get role password for role \"%s\" failed: wrong number of rows returned\n"
+msgstr "查询以获取角色的角色密码\"%s\"失败:返回的行数错误\n"
+
+#: dumputils.cpp:1338
 #, c-format
 msgid "%s: unrecognized section name: \"%s\"\n"
 msgstr "%s: 无法识别的节名称: \"%s\"\n"
 
-#: dumputils.c:1268 pg_dump.c:517 pg_dump.c:531 pg_dumpall.c:298
-#: pg_dumpall.c:308 pg_dumpall.c:318 pg_dumpall.c:327 pg_dumpall.c:336
-#: pg_dumpall.c:394 pg_restore.c:281 pg_restore.c:297 pg_restore.c:309
+#: dumputils.cpp:1339 pg_dump.cpp:1364 pg_dump.cpp:1601 pg_dump.cpp:1627
+#: pg_dump.cpp:1646 pg_dump.cpp:1658 pg_dump.cpp:1670 pg_dump.cpp:1696
+#: pg_dump.cpp:1733 pg_dumpall.cpp:356 pg_dumpall.cpp:1048 pg_dumpall.cpp:1078
+#: pg_dumpall.cpp:1086 pg_dumpall.cpp:1099 pg_dumpall.cpp:1105
+#: pg_dumpall.cpp:1111 pg_dumpall.cpp:1119 pg_dumpall.cpp:1125
+#: pg_dumpall.cpp:1131 pg_dumpall.cpp:1137 pg_dumpall.cpp:1143
+#: pg_dumpall.cpp:1149 pg_dumpall.cpp:1159 pg_dumpall.cpp:1166
+#: pg_dumpall.cpp:1173 pg_restore.cpp:490 pg_restore.cpp:725 pg_restore.cpp:739
 #, c-format
 msgid "Try \"%s --help\" for more information.\n"
-msgstr "输入 \"%s --help\" 获取更多的信息.\n"
+msgstr "用 \"%s --help\" 获取更多的信息.\n"
 
-#: dumputils.c:1329
+#: dumputils.cpp:1459
 #, c-format
 msgid "out of on_exit_nicely slots\n"
 msgstr "超出on_exit_nicely槽\n"
 
+#: dumputils.cpp:1587 pg_backup_archiver.cpp:1414 pg_backup_custom.cpp:146
+#: pg_backup_directory.cpp:301 pg_backup_directory.cpp:517
+#: pg_backup_directory.cpp:557 pg_backup_directory.cpp:577
+#, c-format
+msgid "could not open output file \"%s\": %s\n"
+msgstr "无法打开输出文件\"%s\": %s\n"
+
+#: dumputils.cpp:1597
+#, c-format
+msgid "Another process is trying to dump/restore using the same file\n"
+msgstr "另一个进程正在尝试使用相同的文件转储/恢复\n"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: dumputils.cpp:1601
+#, c-format
+msgid "Acquiring lock on file \"%s\" failed: %s\n"
+msgstr "获取文件锁\"%s\"失败:%s\n"
+
+#: dumputils.cpp:1735
+#, c-format
+msgid "could not get maximum length of current working directory: %s\n"
+msgstr "无法获取当前工作目录的最大长度:%s\n"
+
+#: dumputils.cpp:1739
+#, c-format
+msgid "could not get current working directory: %s\n"
+msgstr "无法获取当前工作目录:%s\n"
+
 #. translator: this is a module name
-#: pg_backup_archiver.c:116
+#: pg_backup_archiver.cpp:134
 msgid "archiver"
 msgstr "归档"
 
-#: pg_backup_archiver.c:232 pg_backup_archiver.c:1339
+#: pg_backup_archiver.cpp:250 pg_backup_archiver.cpp:1444
 #, c-format
 msgid "could not close output file: %s\n"
 msgstr "无法关闭输出文件: %s\n"
 
-#: pg_backup_archiver.c:267 pg_backup_archiver.c:272
+#: pg_backup_archiver.cpp:279 pg_backup_archiver.cpp:283
 #, c-format
 msgid "WARNING: archive items not in correct section order\n"
 msgstr "警告: 归档项的序号不正确\n"
 
-#: pg_backup_archiver.c:278
+#: pg_backup_archiver.cpp:289
 #, c-format
 msgid "unexpected section code %d\n"
 msgstr "意外的节码 %d\n"
 
-#: pg_backup_archiver.c:310
+#: pg_backup_archiver.cpp:337
 #, c-format
 msgid "-C and -1 are incompatible options\n"
-msgstr "-C 和 -c 是互不兼容的选项\n"
+msgstr "-C 和 -1 是互不兼容的选项\n"
 
 # input.c:213
-#: pg_backup_archiver.c:320
+#: pg_backup_archiver.cpp:346
 #, c-format
 msgid "parallel restore is not supported with this archive file format\n"
 msgstr "不支持以这种归档文件格式进行并行恢复\n"
 
-#: pg_backup_archiver.c:324
+#: pg_backup_archiver.cpp:350
 #, c-format
-msgid ""
-"parallel restore is not supported with archives made by pre-8.0 pg_dump\n"
-msgstr "不支持使用8.0版本以前的pg_dump命令产生的存档文件进行并行恢复\n"
+msgid "parallel restore is not supported with archives made by pre-8.0 gs_dump\n"
+msgstr "gs_dump 8.0版本之前的存档不支持并行恢复\n"
 
-#: pg_backup_archiver.c:342
+#: pg_backup_archiver.cpp:367
 #, c-format
-msgid ""
-"cannot restore from compressed archive (compression not supported in this "
-"installation)\n"
+msgid "cannot restore from compressed archive (compression not supported in this installation)\n"
 msgstr "无法从压缩的归档中恢复 (未配置压缩支持)\n"
 
-#: pg_backup_archiver.c:359
+#: pg_backup_archiver.cpp:384
 #, c-format
 msgid "connecting to database for restore\n"
-msgstr "为恢复数据库与数据库联接\n"
+msgstr "为恢复数据库与数据库连接\n"
 
-#: pg_backup_archiver.c:361
+#: pg_backup_archiver.cpp:386
 #, c-format
 msgid "direct database connections are not supported in pre-1.3 archives\n"
-msgstr "1.3 以前的归档里不支持直接数据库联接\n"
+msgstr "1.3 以前的归档里不支持直连数据库\n"
 
-#: pg_backup_archiver.c:402
+#: pg_backup_archiver.cpp:399 pg_dump.cpp:847
+#, c-format
+msgid "%s is not supported on standby or cascade standby\n"
+msgstr "%s不支持备用或级联备用\n"
+
+#: pg_backup_archiver.cpp:432
 #, c-format
 msgid "implied data-only restore\n"
 msgstr "隐含的只恢复数据\n"
 
-#: pg_backup_archiver.c:471
+#: pg_backup_archiver.cpp:509
 #, c-format
-msgid "dropping %s %s\n"
-msgstr "删除 %s %s\n"
+msgid "dropping %s \"%s.%s\"\n"
+msgstr "dropping %s \"%s.%s\"\n"
 
-#: pg_backup_archiver.c:520
+#: pg_backup_archiver.cpp:511
 #, c-format
-msgid "setting owner and privileges for %s %s\n"
-msgstr "为 %s %s 设置属主和权限\n"
+msgid "dropping %s \"%s\"\n"
+msgstr "dropping %s \"%s\"\n"
 
-#: pg_backup_archiver.c:586 pg_backup_archiver.c:588
+#: pg_backup_archiver.cpp:548 pg_backup_archiver.cpp:3639
+#, c-format
+msgid "start restore operation ...\n"
+msgstr "开始恢复操作…\n"
+
+#: pg_backup_archiver.cpp:556 pg_backup_archiver.cpp:3668
+#: pg_backup_archiver.cpp:3785 pg_backup_archiver.cpp:3845
+#, c-format
+msgid "%d SQL statements read in !\n"
+msgstr "%d SQL语句读取!\n"
+
+#: pg_backup_archiver.cpp:561 pg_backup_archiver.cpp:3850
+#, c-format
+msgid "Finish reading %d SQL statements!\n"
+msgstr "读完%dSQL语句!\n"
+
+#: pg_backup_archiver.cpp:562 pg_backup_archiver.cpp:3851
+#, c-format
+msgid "end restore operation ...\n"
+msgstr "结束恢复操作…\n"
+
+#: pg_backup_archiver.cpp:576
+#, c-format
+msgid "setting owner and privileges for %s \"%s.%s\"\n"
+msgstr "设置的所有者和权限%s \"%s.%s\"\n"
+
+#: pg_backup_archiver.cpp:578
+#, c-format
+msgid "setting owner and privileges for %s \"%s\"\n"
+msgstr "设置的所有者和权限%s \"%s\"\n"
+
+#: pg_backup_archiver.cpp:676 pg_backup_archiver.cpp:678
 #, c-format
 msgid "warning from original dump file: %s\n"
 msgstr "来自原始转储文件的警告: %s\n"
 
-#: pg_backup_archiver.c:595
+#: pg_backup_archiver.cpp:686
 #, c-format
-msgid "creating %s %s\n"
-msgstr "创建 %s %s\n"
+msgid "creating %s \"%s.%s\"\n"
+msgstr "创建%s \"%s.%s\"\n"
 
-#: pg_backup_archiver.c:639
+#: pg_backup_archiver.cpp:688
+#, c-format
+msgid "creating %s \"%s\"\n"
+msgstr "创建%s \"%s\"\n"
+
+#: pg_backup_archiver.cpp:729
 #, c-format
 msgid "connecting to new database \"%s\"\n"
-msgstr "联接到新数据库 \"%s\"\n"
+msgstr "连接到新数据库 \"%s\"\n"
 
-#: pg_backup_archiver.c:667
+#: pg_backup_archiver.cpp:756
 #, c-format
 msgid "restoring %s\n"
-msgstr "正在恢复%s\n"
+msgstr "正在恢复 %s\n"
 
-#: pg_backup_archiver.c:681
+#: pg_backup_archiver.cpp:769
+#, c-format
+msgid "restoring data for table \"%s.%s\"\n"
+msgstr "恢复表的数据 \"%s.%s\"\n"
+
+#: pg_backup_archiver.cpp:771
 #, c-format
 msgid "restoring data for table \"%s\"\n"
 msgstr "为表 \"%s\" 恢复数据\n"
 
-#: pg_backup_archiver.c:743
+#: pg_backup_archiver.cpp:829
 #, c-format
 msgid "executing %s %s\n"
 msgstr "执行 %s %s\n"
 
-#: pg_backup_archiver.c:777
+#: pg_backup_archiver.cpp:862
 #, c-format
 msgid "disabling triggers for %s\n"
 msgstr "为%s禁用触发器\n"
 
-#: pg_backup_archiver.c:803
+#: pg_backup_archiver.cpp:886
 #, c-format
 msgid "enabling triggers for %s\n"
 msgstr "为%s启用触发器\n"
 
-#: pg_backup_archiver.c:833
+#: pg_backup_archiver.cpp:914
 #, c-format
-msgid ""
-"internal error -- WriteData cannot be called outside the context of a "
-"DataDumper routine\n"
+msgid "internal error -- WriteData cannot be called outside the context of a DataDumper routine\n"
 msgstr "内部错误 -- WriteData 不能在 DataDumper 过程的环境之外调用\n"
 
-#: pg_backup_archiver.c:987
+#: pg_backup_archiver.cpp:1095
 #, c-format
 msgid "large-object output not supported in chosen format\n"
 msgstr "选定的格式不支持大对象输出\n"
 
-#: pg_backup_archiver.c:1041
+#: pg_backup_archiver.cpp:1143
 #, c-format
 msgid "restored %d large object\n"
 msgid_plural "restored %d large objects\n"
 msgstr[0] "恢复%d个大对象\n"
 
-#: pg_backup_archiver.c:1062 pg_backup_tar.c:722
+#: pg_backup_archiver.cpp:1159 pg_backup_tar.cpp:698
 #, c-format
 msgid "restoring large object with OID %u\n"
 msgstr "恢复带有OID %u 的大对象\n"
 
-#: pg_backup_archiver.c:1074
+#: pg_backup_archiver.cpp:1169
 #, c-format
 msgid "could not create large object %u: %s"
 msgstr "无法创建大对象%u: %s"
 
-#: pg_backup_archiver.c:1079 pg_dump.c:2379
+#: pg_backup_archiver.cpp:1173 pg_dump.cpp:4266
 #, c-format
 msgid "could not open large object %u: %s"
 msgstr "无法打开大对象%u: %s"
 
 # fe-lobj.c:400 fe-lobj.c:483
-#: pg_backup_archiver.c:1136
+#: pg_backup_archiver.cpp:1220
 #, c-format
 msgid "could not open TOC file \"%s\": %s\n"
 msgstr "无法打开TOC文件 \"%s\": %s\n"
 
-#: pg_backup_archiver.c:1177
+#: pg_backup_archiver.cpp:1257
 #, c-format
 msgid "WARNING: line ignored: %s\n"
 msgstr "警告: 忽略的行: %s\n"
 
-#: pg_backup_archiver.c:1184
+#: pg_backup_archiver.cpp:1264
 #, c-format
 msgid "could not find entry for ID %d\n"
 msgstr "无法为 ID %d 找到记录\n"
 
-#: pg_backup_archiver.c:1205 pg_backup_directory.c:180
-#: pg_backup_directory.c:541
+#: pg_backup_archiver.cpp:1284 pg_backup_directory.cpp:170
+#: pg_backup_directory.cpp:530
 #, c-format
 msgid "could not close TOC file: %s\n"
 msgstr "无法关闭 TOC 文件: %s\n"
 
-#: pg_backup_archiver.c:1309 pg_backup_custom.c:150 pg_backup_directory.c:291
-#: pg_backup_directory.c:527 pg_backup_directory.c:571
-#: pg_backup_directory.c:591
-#, c-format
-msgid "could not open output file \"%s\": %s\n"
-msgstr "无法打开输出文件\"%s\": %s\n"
-
-#: pg_backup_archiver.c:1312 pg_backup_custom.c:157
+#: pg_backup_archiver.cpp:1377 pg_backup_archiver.cpp:1390
+#: pg_backup_archiver.cpp:1401 pg_backup_archiver.cpp:1416
+#: pg_backup_custom.cpp:156
 #, c-format
 msgid "could not open output file: %s\n"
 msgstr "无法打开输出文件: %s\n"
 
-#: pg_backup_archiver.c:1412
+#: pg_backup_archiver.cpp:1513
 #, c-format
 msgid "wrote %lu byte of large object data (result = %lu)\n"
 msgid_plural "wrote %lu bytes of large object data (result = %lu)\n"
 msgstr[0] "已经写入了大对象的%lu字节(结果 = %lu)\n"
 
-#: pg_backup_archiver.c:1418
+#: pg_backup_archiver.cpp:1520
 #, c-format
 msgid "could not write to large object (result: %lu, expected: %lu)\n"
 msgstr "无法写入大对象 (结果: %lu, 预期: %lu)\n"
 
-#: pg_backup_archiver.c:1484
+#: pg_backup_archiver.cpp:1582
 #, c-format
 msgid "could not write to custom output routine\n"
 msgstr "无法写出到客户输出过程\n"
 
-#: pg_backup_archiver.c:1522
+#: pg_backup_archiver.cpp:1602 pg_dumpall.cpp:707
+#, c-format
+msgid "Encryption failed: %s\n"
+msgstr "加密失败:%s\n"
+
+#: pg_backup_archiver.cpp:1625
 #, c-format
 msgid "Error while INITIALIZING:\n"
 msgstr "INITIALIZING 时错误:\n"
 
-#: pg_backup_archiver.c:1527
+#: pg_backup_archiver.cpp:1630
 #, c-format
 msgid "Error while PROCESSING TOC:\n"
 msgstr "PROCESSING TOC 时错误:\n"
 
-#: pg_backup_archiver.c:1532
+#: pg_backup_archiver.cpp:1635
 #, c-format
 msgid "Error while FINALIZING:\n"
 msgstr "FINALIZING 时错误:\n"
 
-#: pg_backup_archiver.c:1537
+#: pg_backup_archiver.cpp:1642
 #, c-format
 msgid "Error from TOC entry %d; %u %u %s %s %s\n"
 msgstr "错误来自 TOC 记录 %d; %u %u %s %s %s\n"
 
-#: pg_backup_archiver.c:1610
+#: pg_backup_archiver.cpp:1715
 #, c-format
 msgid "bad dumpId\n"
 msgstr "错误的dumpId号\n"
 
-#: pg_backup_archiver.c:1631
+#: pg_backup_archiver.cpp:1735
 #, c-format
 msgid "bad table dumpId for TABLE DATA item\n"
-msgstr "TABLE DATA 项的表dumpId错误\n"
+msgstr "TABLE DATA item的表dumpId错误\n"
 
-#: pg_backup_archiver.c:1723
+#: pg_backup_archiver.cpp:1822
 #, c-format
 msgid "unexpected data offset flag %d\n"
 msgstr "意外的数据偏移标志 %d\n"
 
-#: pg_backup_archiver.c:1736
+#: pg_backup_archiver.cpp:1834
 #, c-format
 msgid "file offset in dump file is too large\n"
 msgstr "在转储文件中的文件偏移量太大\n"
 
-#: pg_backup_archiver.c:1830 pg_backup_archiver.c:3263 pg_backup_custom.c:628
-#: pg_backup_directory.c:463 pg_backup_tar.c:778
+#: pg_backup_archiver.cpp:1920 pg_backup_archiver.cpp:2006
+#: pg_backup_archiver.cpp:2010 pg_backup_archiver.cpp:2021
+#: pg_backup_archiver.cpp:2033 pg_backup_archiver.cpp:2040
+#: pg_backup_archiver.cpp:2049 pg_backup_archiver.cpp:3384
+#: pg_backup_custom.cpp:599 pg_backup_directory.cpp:458 pg_backup_tar.cpp:748
 #, c-format
 msgid "unexpected end of file\n"
 msgstr "意外的文件结尾\n"
 
-#: pg_backup_archiver.c:1847
-#, c-format
-msgid "attempting to ascertain archive format\n"
-msgstr "试图确认归档格式\n"
-
-#: pg_backup_archiver.c:1873 pg_backup_archiver.c:1883
+#: pg_backup_archiver.cpp:1955 pg_backup_archiver.cpp:1963
 #, c-format
 msgid "directory name too long: \"%s\"\n"
-msgstr "字典名字太长: \"%s\"\n"
+msgstr "目录名称太长: \"%s\"\n"
 
-#: pg_backup_archiver.c:1891
+#: pg_backup_archiver.cpp:1970
 #, c-format
-msgid ""
-"directory \"%s\" does not appear to be a valid archive (\"toc.dat\" does not "
-"exist)\n"
+msgid "directory \"%s\" does not appear to be a valid archive (\"toc.dat\" does not exist)\n"
 msgstr "目录 \"%s\" 看上去不像一个有效的归档 (\"toc.dat\" 不存在)\n"
 
-#: pg_backup_archiver.c:1899 pg_backup_custom.c:169 pg_backup_custom.c:760
-#: pg_backup_directory.c:164 pg_backup_directory.c:349
+#: pg_backup_archiver.cpp:1976 pg_backup_custom.cpp:164
+#: pg_backup_custom.cpp:725 pg_backup_directory.cpp:155
+#: pg_backup_directory.cpp:354
 #, c-format
 msgid "could not open input file \"%s\": %s\n"
 msgstr "无法打开输入文件 \"%s\": %s\n"
 
-#: pg_backup_archiver.c:1907 pg_backup_custom.c:176
+#: pg_backup_archiver.cpp:1981 pg_backup_custom.cpp:168
 #, c-format
 msgid "could not open input file: %s\n"
 msgstr "无法打开输入文件: %s\n"
 
-#: pg_backup_archiver.c:1916
+#: pg_backup_archiver.cpp:1987
 #, c-format
 msgid "could not read input file: %s\n"
 msgstr "无法读取输入文件: %s\n"
 
-#: pg_backup_archiver.c:1918
+#: pg_backup_archiver.cpp:1989
 #, c-format
 msgid "input file is too short (read %lu, expected 5)\n"
 msgstr "输入文件太短 (读了 %lu, 预期 5)\n"
 
-#: pg_backup_archiver.c:1983
+#: pg_backup_archiver.cpp:2067
 #, c-format
-msgid "input file appears to be a text format dump. Please use psql.\n"
-msgstr "输入文件看起来像是文本格式的dump. 请使用psql.\n"
+msgid "input file appears to be a text format dump. Please use gsql.\n"
+msgstr "输入文件似乎是一个文本格式转储.请使用gsql.\n"
 
-#: pg_backup_archiver.c:1987
+#: pg_backup_archiver.cpp:2071
 #, c-format
 msgid "input file does not appear to be a valid archive (too short?)\n"
 msgstr "输入文件看上去不象有效的归档 (太短?)\n"
 
-#: pg_backup_archiver.c:1990
+#: pg_backup_archiver.cpp:2074
 #, c-format
 msgid "input file does not appear to be a valid archive\n"
 msgstr "输入文件看上去不象有效的归档\n"
 
-#: pg_backup_archiver.c:2010
+#: pg_backup_archiver.cpp:2093
 #, c-format
 msgid "could not close input file: %s\n"
 msgstr "无法关闭输入文件: %s\n"
 
-#: pg_backup_archiver.c:2027
-#, c-format
-msgid "allocating AH for %s, format %d\n"
-msgstr "为 %s 分配 AH, 格式 %d\n"
-
-#: pg_backup_archiver.c:2130
+#: pg_backup_archiver.cpp:2204
 #, c-format
 msgid "unrecognized file format \"%d\"\n"
 msgstr "不可识别的文件格式 \"%d\"\n"
 
-#: pg_backup_archiver.c:2264
+#: pg_backup_archiver.cpp:2331
 #, c-format
 msgid "entry ID %d out of range -- perhaps a corrupt TOC\n"
-msgstr "记录 ID %d 超出范围 - 可能是损坏了的 TOC\n"
+msgstr "entry ID %d 超出范围 --可能是损坏了的 TOC\n"
 
-#: pg_backup_archiver.c:2380
+#: pg_backup_archiver.cpp:2445
 #, c-format
 msgid "read TOC entry %d (ID %d) for %s %s\n"
-msgstr "为 %3$s %4$s 读取 TOC 记录 %1$d (ID %2$d)\n"
+msgstr "读TOC entry %d(ID %d)给%s %s\n"
 
-#: pg_backup_archiver.c:2414
+#: pg_backup_archiver.cpp:2478
 #, c-format
 msgid "unrecognized encoding \"%s\"\n"
 msgstr "未知编码: \"%s\"\n"
 
-#: pg_backup_archiver.c:2419
+#: pg_backup_archiver.cpp:2482
 #, c-format
 msgid "invalid ENCODING item: %s\n"
 msgstr "无效的ENCODING成员:%s\n"
 
-#: pg_backup_archiver.c:2437
+#: pg_backup_archiver.cpp:2499
 #, c-format
 msgid "invalid STDSTRINGS item: %s\n"
 msgstr "无效的STDSTRINGS成员:%s\n"
 
-#: pg_backup_archiver.c:2651
+#: pg_backup_archiver.cpp:2672 pg_dump.cpp:1942 pg_dumpall.cpp:479
+#, c-format
+msgid "Failed to escapes a string for an SQL command: %s\n"
+msgstr "SQL命令转义字符串失败:%s\n"
+
+#: pg_backup_archiver.cpp:2735
 #, c-format
 msgid "could not set session user to \"%s\": %s"
 msgstr "无法设置会话用户为 \"%s\": %s"
 
-#: pg_backup_archiver.c:2683
+#: pg_backup_archiver.cpp:2757
+#, c-format
+msgid "could not reset session: %s"
+msgstr "无法重置会话:%s"
+
+#: pg_backup_archiver.cpp:2783
 #, c-format
 msgid "could not set default_with_oids: %s"
 msgstr "无法设置 default_with_oids: %s"
 
-#: pg_backup_archiver.c:2821
+#: pg_backup_archiver.cpp:2908
 #, c-format
 msgid "could not set search_path to \"%s\": %s"
 msgstr "无法设置search_path值为\"%s\": %s"
 
-#: pg_backup_archiver.c:2882
+#: pg_backup_archiver.cpp:2963
 #, c-format
 msgid "could not set default_tablespace to %s: %s"
 msgstr "无法设置default_tablespace为 %s: %s"
 
-#: pg_backup_archiver.c:2991 pg_backup_archiver.c:3173
+#: pg_backup_archiver.cpp:3085 pg_backup_archiver.cpp:3296
 #, c-format
 msgid "WARNING: don't know how to set owner for object type %s\n"
 msgstr "警告: 不知道如何为对象类型%s设置属主\n"
 
-#: pg_backup_archiver.c:3226
+#: pg_backup_archiver.cpp:3347
 #, c-format
-msgid ""
-"WARNING: requested compression not available in this installation -- archive "
-"will be uncompressed\n"
-msgstr "警告: 所要求的压缩无法在本次安装中获取 - 归档将不被压缩\n"
+msgid "WARNING: requested compression not available in this installation -- archive will be uncompressed\n"
+msgstr "警告: 所要求的压缩无法在本次安装中获取 -- 归档将不被压缩\n"
 
-#: pg_backup_archiver.c:3266
+#: pg_backup_archiver.cpp:3389
 #, c-format
-msgid "did not find magic string in file header\n"
-msgstr "在文件头中没有找到魔术字串\n"
+msgid "failed to remove archive %s.\n"
+msgstr "删除存档失败%s.\n"
 
-#: pg_backup_archiver.c:3279
+#: pg_backup_archiver.cpp:3390
+#, c-format
+msgid "the archive is encrpyted, please check the decrypt key\n"
+msgstr "档案已加密, 请检查解密密钥\n"
+
+#: pg_backup_archiver.cpp:3392
+#, c-format
+msgid "did not find magic string in file header, the archive may be encrypted\n"
+msgstr "在文件头中没有发现magic字符串, 档案可能被加密了\n"
+
+#: pg_backup_archiver.cpp:3407
 #, c-format
 msgid "unsupported version (%d.%d) in file header\n"
 msgstr "在文件头中有不支持的版本 (%d.%d)\n"
 
-#: pg_backup_archiver.c:3284
+#: pg_backup_archiver.cpp:3411
 #, c-format
 msgid "sanity check on integer size (%lu) failed\n"
 msgstr "整数尺寸 (%lu) 的健全检查失败\n"
 
-#: pg_backup_archiver.c:3288
+#: pg_backup_archiver.cpp:3415
 #, c-format
-msgid ""
-"WARNING: archive was made on a machine with larger integers, some operations "
-"might fail\n"
+msgid "WARNING: archive was made on a machine with larger integers, some operations might fail\n"
 msgstr "警告: 归档不是在支持更大范围整数的主机上产生的, 有些操作可能失败\n"
 
-#: pg_backup_archiver.c:3298
+#: pg_backup_archiver.cpp:3425
 #, c-format
 msgid "expected format (%d) differs from format found in file (%d)\n"
 msgstr "预期的格式 (%d) 和在文件里找到的格式 (%d) 不同\n"
 
-#: pg_backup_archiver.c:3314
+#: pg_backup_archiver.cpp:3441
 #, c-format
-msgid ""
-"WARNING: archive is compressed, but this installation does not support "
-"compression -- no data will be available\n"
-msgstr "警告: 归档是压缩过的, 但是当前安装不支持压缩 - 数据将不可使用\n"
+msgid "WARNING: archive is compressed, but this installation does not support compression -- no data will be available\n"
+msgstr "警告: 归档是压缩过的, 但是当前安装不支持压缩 -- 数据将不可使用\n"
 
-#: pg_backup_archiver.c:3332
+#: pg_backup_archiver.cpp:3459
 #, c-format
 msgid "WARNING: invalid creation date in header\n"
 msgstr "警告: 在头中的创建日期无效\n"
 
-#: pg_backup_archiver.c:3492
+#: pg_backup_archiver.cpp:3610
 #, c-format
 msgid "entering restore_toc_entries_parallel\n"
 msgstr "正在进入restore_toc_entries_parallel\n"
 
-#: pg_backup_archiver.c:3543
+#: pg_backup_archiver.cpp:3662
 #, c-format
 msgid "processing item %d %s %s\n"
 msgstr "正在处理成员%d %s %s\n"
 
-#: pg_backup_archiver.c:3624
+#: pg_backup_archiver.cpp:3741
 #, c-format
 msgid "entering main parallel loop\n"
 msgstr "正在进入主并行循环\n"
 
-#: pg_backup_archiver.c:3636
+#: pg_backup_archiver.cpp:3750
 #, c-format
 msgid "skipping item %d %s %s\n"
 msgstr "忽略成员%d %s %s\n"
 
-#: pg_backup_archiver.c:3652
+#: pg_backup_archiver.cpp:3767
 #, c-format
 msgid "launching item %d %s %s\n"
 msgstr "正在启动成员%d %s %s\n"
 
-#: pg_backup_archiver.c:3690
+#: pg_backup_archiver.cpp:3810
 #, c-format
 msgid "worker process crashed: status %d\n"
 msgstr "工作进程崩溃: 状态 %d\n"
 
-#: pg_backup_archiver.c:3695
+#: pg_backup_archiver.cpp:3814
 #, c-format
 msgid "finished main parallel loop\n"
 msgstr "已完成主并行循环\n"
 
-#: pg_backup_archiver.c:3719
+#: pg_backup_archiver.cpp:3840
 #, c-format
 msgid "processing missed item %d %s %s\n"
 msgstr "正在处理丢失的成员%d %s %s\n"
 
-#: pg_backup_archiver.c:3745
-#, c-format
-msgid "parallel_restore should not return\n"
-msgstr "parallel_restore不应返回\n"
-
 # fe-connect.c:891
-#: pg_backup_archiver.c:3751
+#: pg_backup_archiver.cpp:3877
 #, c-format
 msgid "could not create worker process: %s\n"
 msgstr "无法创建工作进程: %s\n"
 
 # fe-connect.c:891
-#: pg_backup_archiver.c:3759
+#: pg_backup_archiver.cpp:3882
 #, c-format
 msgid "could not create worker thread: %s\n"
 msgstr "无法创建工作线程: %s\n"
 
-#: pg_backup_archiver.c:3983
+#: pg_backup_archiver.cpp:4057
 #, c-format
 msgid "no item ready\n"
 msgstr "没有成员准备好\n"
 
-#: pg_backup_archiver.c:4080
+#: pg_backup_archiver.cpp:4150
 #, c-format
 msgid "could not find slot of finished worker\n"
 msgstr "无法找到已完成的工作进程的位置\n"
 
-#: pg_backup_archiver.c:4082
+#: pg_backup_archiver.cpp:4152
 #, c-format
 msgid "finished item %d %s %s\n"
 msgstr "已完成的成员%d %s %s\n"
 
-#: pg_backup_archiver.c:4095
+#: pg_backup_archiver.cpp:4162
 #, c-format
 msgid "worker process failed: exit code %d\n"
 msgstr "子进程已退出, 退出码为 %d\n"
 
-#: pg_backup_archiver.c:4257
+#: pg_backup_archiver.cpp:4302
 #, c-format
 msgid "transferring dependency %d -> %d to %d\n"
-msgstr "传输依赖关系从%d -> %d 到%d\n"
+msgstr "传输依赖关系从%d -> %d到%d\n"
 
-#: pg_backup_archiver.c:4326
+#: pg_backup_archiver.cpp:4365
 #, c-format
 msgid "reducing dependencies for %d\n"
 msgstr "为%d减少依赖关系\n"
 
-#: pg_backup_archiver.c:4365
+#: pg_backup_archiver.cpp:4370
+#, c-format
+msgid "otherte cannot be NULL.\n"
+msgstr "otherte不能为NULL.\n"
+
+#: pg_backup_archiver.cpp:4406
 #, c-format
 msgid "table \"%s\" could not be created, will not restore its data\n"
-msgstr "无法创建表\"%s\" , 这样无法恢复它的数据\n"
+msgstr "无法创建表\"%s\", 这样无法恢复它的数据\n"
+
+#: pg_backup_archiver.cpp:4562 pg_dumpall.cpp:672
+#, c-format
+msgid "No encryption method,only AES128 is available\n"
+msgstr "没有加密方法, 只有AES128可用\n"
+
+# input.c:213
+#: pg_backup_archiver.cpp:4565 pg_dumpall.cpp:675
+#, c-format
+msgid "%s is not supported,only AES128 is available\n"
+msgstr "不支持%s, 只有AES128可用\n"
+
+#: pg_backup_archiver.cpp:4568 pg_dumpall.cpp:678
+#, c-format
+msgid "No key for encryption,please input the key\n"
+msgstr "加密无密钥, 请输入密钥\n"
+
+#: pg_backup_archiver.cpp:4571 pg_dumpall.cpp:682
+#, c-format
+msgid "The input key must be %d~%d bytes and contain at least three kinds of characters!\n"
+msgstr "输入键必须为%d~%d字节和包含至少三种字符!\n"
+
+#: pg_backup_archiver.cpp:4625 pg_backup_archiver.cpp:4785
+#, c-format
+msgid "failed to remove temp encrypt dir \"%s\": %s\n"
+msgstr "删除临时加密目录失败\"%s\": %s\n"
+
+#: pg_backup_archiver.cpp:4630 pg_backup_archiver.cpp:4790
+#, c-format
+msgid "could not open directory \"%s\"\n"
+msgstr "无法打开目录\"%s\"\n"
+
+#: pg_backup_archiver.cpp:4640 pg_backup_archiver.cpp:4803
+#, c-format
+msgid "could not stat file or directory \"%s\"\n"
+msgstr "不能统计文件或目录\"%s\"\n"
+
+#: pg_backup_archiver.cpp:4653
+#, c-format
+msgid "failed to create aes label file in \"%s\".\n"
+msgstr "在\"%s\"创建aes标签文件失败.\n"
+
+#: pg_backup_archiver.cpp:4656
+#, c-format
+msgid "failed to remove dir %s.\n"
+msgstr "删除目录失败%s.\n"
+
+#: pg_backup_archiver.cpp:4659
+#, c-format
+msgid "failed to rename dir %s.\n"
+msgstr "重命名dir失败%s.\n"
+
+#: pg_backup_archiver.cpp:4688
+#, c-format
+msgid "could not stat encrypt archive file \"%s\".\n"
+msgstr "无法统计加密存档文件\"%s\".\n"
+
+#: pg_backup_archiver.cpp:4694 pg_backup_archiver.cpp:4701
+#: pg_backup_archiver.cpp:4946 pg_backup_archiver.cpp:4955
+#, c-format
+msgid "could not open encrypt archive file.\n"
+msgstr "无法打开加密存档文件.\n"
+
+#: pg_backup_archiver.cpp:4714
+#, c-format
+msgid "could not read archive file. errCode: %d readSize: %d\n"
+msgstr "无法读取存档文件.错误码: %d 读取大小: %d\n"
+
+#: pg_backup_archiver.cpp:4723
+#, c-format
+msgid "Encryption failed."
+msgstr "加密失败了."
+
+#: pg_backup_archiver.cpp:4735
+#, c-format
+msgid "Failed to fsync file %s.\n"
+msgstr "同步文件失败%s.\n"
+
+#: pg_backup_archiver.cpp:4817
+#, c-format
+msgid "failed to create aes temp decrypt label file in \"%s\": %s\n"
+msgstr "在\"%s\"中创建aes临时解密标签文件失败: %s\n"
+
+#: pg_backup_archiver.cpp:4870
+#, c-format
+msgid "WARNING: line ignored: %s, cipher length is %u\n"
+msgstr "警告: 行被忽略:%s, 密码长度为 %u\n"
+
+#: pg_backup_archiver.cpp:4963
+#, c-format
+msgid "Decryption failed.\n"
+msgstr "解密失败.\n"
+
+#: pg_backup_archiver.cpp:4971
+#, c-format
+msgid "could not write archive file.\n"
+msgstr "无法写入存档文件.\n"
+
+#: pg_backup_archiver.cpp:5058 pg_dump.cpp:23077
+#, c-format
+msgid "query returned %d row instead of one: %s\n"
+msgid_plural "query returned %d rows instead of one: %s\n"
+msgstr[0] "查询返回了%d条记录, 而不是一条记录: %s\n"
+
+# 
+#: pg_backup_archiver.cpp:5070 pg_dump.cpp:1201 pg_dumpall.cpp:622
+msgid "Role Password: "
+msgstr "角色密码: "
+
+# input.c:210
+#: pg_backup_archiver.cpp:5081
+#, c-format
+msgid "Cannot read from input file. errcode: %d\n"
+msgstr "无法从输入文件中读取. 错误码: %d\n"
+
+# input.c:210
+#: pg_backup_archiver.cpp:5094
+#, c-format
+msgid "Cannot read from compressed file: %s\n"
+msgstr "无法从压缩文件中读取: %s\n"
 
 #. translator: this is a module name
-#: pg_backup_custom.c:89
+#: pg_backup_custom.cpp:90
 msgid "custom archiver"
 msgstr "客户归档"
 
-#: pg_backup_custom.c:371 pg_backup_null.c:152
+#: pg_backup_custom.cpp:361 pg_backup_null.cpp:144
 #, c-format
 msgid "invalid OID for large object\n"
 msgstr "大对象的无效 OID\n"
 
-#: pg_backup_custom.c:442
+#: pg_backup_custom.cpp:426
 #, c-format
 msgid "unrecognized data block type (%d) while searching archive\n"
-msgstr "搜索归档是碰到不识别的数据块类型 (%d)\n"
+msgstr "在搜索归档时碰到无法识别的数据块类型 (%d)\n"
 
-#: pg_backup_custom.c:453
+#: pg_backup_custom.cpp:434
 #, c-format
 msgid "error during file seek: %s\n"
 msgstr "在文件内定位时出错: %s\n"
 
-#: pg_backup_custom.c:463
+#: pg_backup_custom.cpp:443
 #, c-format
-msgid ""
-"could not find block ID %d in archive -- possibly due to out-of-order "
-"restore request, which cannot be handled due to lack of data offsets in "
-"archive\n"
-msgstr ""
-"在归档中无法找到数据块ID %d -- 这可能是由于不正常的恢复引起的，这种不正常的恢"
-"复通常因为在归档中缺少数据偏移量而无法处理\n"
+msgid "could not find block ID %d in archive -- possibly due to out-of-order restore request, which cannot be handled due to lack of data offsets in archive\n"
+msgstr "在归档中无法找到数据块ID %d -- 这可能是由于不正常的恢复引起的, 这种不正常的恢复通常因为在归档中缺少数据偏移量而无法处理\n"
 
-#: pg_backup_custom.c:468
+#: pg_backup_custom.cpp:449
 #, c-format
-msgid ""
-"could not find block ID %d in archive -- possibly due to out-of-order "
-"restore request, which cannot be handled due to non-seekable input file\n"
-msgstr ""
-"在归档中无法找到数据块ID %d -- 这可能是由于不正常的恢复引起的，这种不正常的恢"
-"复通常因为缺少的输入文件而无法处理\n"
+msgid "could not find block ID %d in archive -- possibly due to out-of-order restore request, which cannot be handled due to non-seekable input file\n"
+msgstr "在归档中无法找到数据块ID %d -- 这可能是由于不正常的恢复引起的, 这种不正常的恢复通常因为缺少的输入文件而无法处理\n"
 
-#: pg_backup_custom.c:473
+#: pg_backup_custom.cpp:455
 #, c-format
 msgid "could not find block ID %d in archive -- possibly corrupt archive\n"
-msgstr "无法在归档中找到ID为%d的数据块--这可能是因为归档文件损坏\n"
+msgstr "无法在归档中找到ID为%d的数据块 -- 这可能是因为归档文件损坏\n"
 
-#: pg_backup_custom.c:480
+#: pg_backup_custom.cpp:463
 #, c-format
 msgid "found unexpected block ID (%d) when reading data -- expected %d\n"
-msgstr "读取数据时发现意外块 ID (%d) - 预期是 %d\n"
+msgstr "读取数据时发现意外块 ID (%d) -- 预期是 %d\n"
 
-#: pg_backup_custom.c:494
+#: pg_backup_custom.cpp:475
 #, c-format
 msgid "unrecognized data block type %d while restoring archive\n"
 msgstr "恢复归档时碰到不识别的数据块类型 %d\n"
 
 # input.c:210
-#: pg_backup_custom.c:576 pg_backup_custom.c:910
+#: pg_backup_custom.cpp:546 pg_backup_custom.cpp:872
 #, c-format
 msgid "could not read from input file: end of file\n"
-msgstr "无法从输入文件中读取：文件的结尾\n"
+msgstr "无法从输入文件中读取: 文件的结尾\n"
 
 # input.c:210
-#: pg_backup_custom.c:579 pg_backup_custom.c:913
+#: pg_backup_custom.cpp:548 pg_backup_custom.cpp:874
 #, c-format
 msgid "could not read from input file: %s\n"
-msgstr "无法从输入档案读取：%s\n"
+msgstr "无法从输入档案读取: %s\n"
 
-#: pg_backup_custom.c:608
+#: pg_backup_custom.cpp:579
 #, c-format
 msgid "could not write byte: %s\n"
 msgstr "无法写字节: %s\n"
 
-#: pg_backup_custom.c:716 pg_backup_custom.c:754
+#: pg_backup_custom.cpp:682 pg_backup_custom.cpp:719
 #, c-format
 msgid "could not close archive file: %s\n"
 msgstr "无法关闭归档文件: %s\n"
 
-#: pg_backup_custom.c:735
+#: pg_backup_custom.cpp:700
 #, c-format
 msgid "can only reopen input archives\n"
 msgstr "只能重新打开输入归档\n"
 
-#: pg_backup_custom.c:742
+#: pg_backup_custom.cpp:707
 #, c-format
 msgid "parallel restore from standard input is not supported\n"
 msgstr "不支持从标准输入进行并行恢复\n"
 
-#: pg_backup_custom.c:744
+#: pg_backup_custom.cpp:710
 #, c-format
 msgid "parallel restore from non-seekable file is not supported\n"
 msgstr "不支持从不可随机寻址的文件里并行恢复\n"
 
-#: pg_backup_custom.c:749
+#: pg_backup_custom.cpp:715
 #, c-format
 msgid "could not determine seek position in archive file: %s\n"
 msgstr "无法在归档文件中确定查找位置: %s\n"
 
-#: pg_backup_custom.c:764
+#: pg_backup_custom.cpp:728
 #, c-format
 msgid "could not set seek position in archive file: %s\n"
 msgstr "无法在归档文件中设置查找位置: %s\n"
 
-#: pg_backup_custom.c:782
+#: pg_backup_custom.cpp:747
 #, c-format
 msgid "compressor active\n"
 msgstr "压缩程序已激活\n"
 
-#: pg_backup_custom.c:818
+#: pg_backup_custom.cpp:780
 #, c-format
 msgid "WARNING: ftell mismatch with expected position -- ftell used\n"
 msgstr "警告: ftell 和预期位置不匹配 -- 使用 ftell\n"
 
 #. translator: this is a module name
-#: pg_backup_db.c:27
+#: pg_backup_db.cpp:37
 msgid "archiver (db)"
 msgstr "归档 (db)"
 
-#: pg_backup_db.c:40 pg_dump.c:583
+#: pg_backup_db.cpp:49 pg_dump.cpp:804
 #, c-format
 msgid "could not parse version string \"%s\"\n"
 msgstr "无法分析版本字串 \"%s\"\n"
 
-#: pg_backup_db.c:56
+#: pg_backup_db.cpp:64
 #, c-format
 msgid "could not get server_version from libpq\n"
 msgstr "无法从 libpq 获取服务器版本\n"
 
-#: pg_backup_db.c:69 pg_dumpall.c:1793
+#: pg_backup_db.cpp:78 pg_dumpall.cpp:3266
 #, c-format
 msgid "server version: %s; %s version: %s\n"
 msgstr "服务器版本: %s; %s 版本: %s\n"
 
-#: pg_backup_db.c:71 pg_dumpall.c:1795
+#: pg_backup_db.cpp:79 pg_dumpall.cpp:3267
 #, c-format
 msgid "aborting because of server version mismatch\n"
 msgstr "因为服务器版本不匹配而终止\n"
 
-#: pg_backup_db.c:142
+#: pg_backup_db.cpp:148
 #, c-format
 msgid "connecting to database \"%s\" as user \"%s\"\n"
-msgstr "以用户 \"%2$s\" 的身份联接到数据库 \"%1$s\"\n"
+msgstr "连接数据库\"%s\"作为用户\"%s\"\n"
 
-#: pg_backup_db.c:147 pg_backup_db.c:199 pg_backup_db.c:246 pg_backup_db.c:292
-#: pg_dumpall.c:1695 pg_dumpall.c:1741
+#: pg_backup_db.cpp:151 pg_backup_db.cpp:209 pg_backup_db.cpp:250
+#: pg_backup_db.cpp:307 pg_backup_db.cpp:711 pg_dumpall.cpp:3186
+#: pg_dumpall.cpp:3228
 msgid "Password: "
-msgstr "口令: "
+msgstr "密码: "
 
-#: pg_backup_db.c:180
+#: pg_backup_db.cpp:189
 #, c-format
 msgid "failed to reconnect to database\n"
-msgstr "与数据库重新联接失败\n"
+msgstr "与数据库重新连接失败\n"
 
-#: pg_backup_db.c:185
+#: pg_backup_db.cpp:193
 #, c-format
 msgid "could not reconnect to database: %s"
-msgstr "无法与数据库重新联接: %s"
+msgstr "无法与数据库重新连接: %s"
 
 # fe-misc.c:450 fe-misc.c:642 fe-misc.c:798
-#: pg_backup_db.c:201
+#: pg_backup_db.cpp:211
 #, c-format
 msgid "connection needs password\n"
-msgstr "在连接时需要输入口令\n"
+msgstr "在连接时需要输入密码\n"
 
-#: pg_backup_db.c:242
+#: pg_backup_db.cpp:247
 #, c-format
 msgid "already connected to a database\n"
-msgstr "已经与一个数据库联接\n"
+msgstr "已经与一个数据库连接\n"
 
-#: pg_backup_db.c:284
+#: pg_backup_db.cpp:301
 #, c-format
 msgid "failed to connect to database\n"
-msgstr "与数据库联接失败\n"
+msgstr "与数据库连接失败\n"
 
-#: pg_backup_db.c:303
+#: pg_backup_db.cpp:322 pg_backup_db.cpp:719
 #, c-format
 msgid "connection to database \"%s\" failed: %s"
-msgstr "与数据库 \"%s\" 联接失败: %s"
+msgstr "与数据库 \"%s\" 连接失败: %s"
 
-#: pg_backup_db.c:332
+#: pg_backup_db.cpp:374
 #, c-format
 msgid "%s"
 msgstr "%s"
 
-#: pg_backup_db.c:339
+#: pg_backup_db.cpp:380 pg_dump.cpp:1953
 #, c-format
 msgid "query failed: %s"
 msgstr "查询失败: %s"
 
-#: pg_backup_db.c:341
+#: pg_backup_db.cpp:381
 #, c-format
 msgid "query was: %s\n"
 msgstr "查询是: %s\n"
 
-#: pg_backup_db.c:405
+#: pg_backup_db.cpp:447
 #, c-format
 msgid "%s: %s    Command was: %s\n"
 msgstr "%s: %s    命令是: %s\n"
 
-#: pg_backup_db.c:456 pg_backup_db.c:527 pg_backup_db.c:534
+#: pg_backup_db.cpp:491 pg_backup_db.cpp:591 pg_backup_db.cpp:598
 msgid "could not execute query"
 msgstr "无法执行查询"
 
-#: pg_backup_db.c:507
+#: pg_backup_db.cpp:543 pg_backup_db.cpp:627
+#, c-format
+msgid "table %s complete data imported !\n"
+msgstr "表格%s数据已完整导入!\n"
+
+#: pg_backup_db.cpp:574
 #, c-format
 msgid "error returned by PQputCopyData: %s"
 msgstr "PQputCopyData返回错误: %s"
 
-#: pg_backup_db.c:553
+#: pg_backup_db.cpp:616
 #, c-format
 msgid "error returned by PQputCopyEnd: %s"
 msgstr "PQputCopyEnd返回错误: %s"
 
 # describe.c:933
-#: pg_backup_db.c:559
+#: pg_backup_db.cpp:622
 #, c-format
 msgid "COPY failed for table \"%s\": %s"
 msgstr "复制表 \"%s\"失败: %s"
 
-#: pg_backup_db.c:570
+#: pg_backup_db.cpp:633
 msgid "could not start database transaction"
 msgstr "无法开始数据库事务"
 
-#: pg_backup_db.c:576
+#: pg_backup_db.cpp:638
 msgid "could not commit database transaction"
 msgstr "无法提交数据库事务"
 
+#: pg_backup_db.cpp:725
+#, c-format
+msgid "get dumpsyslog connect failed, could not get version result from server\n"
+msgstr "获取dumpsylog连接失败, 无法从服务器获取版本结果\n"
+
+#: pg_backup_db.cpp:729
+#, c-format
+msgid "get dumpsyslog connect failed, version result from server is not correct\n"
+msgstr "获取dumpsylog连接失败, 服务器的版本结果不正确\n"
+
+#: pg_backup_db.cpp:737
+#, c-format
+msgid "get dumpsyslog connect failed, could not get the local protocal version\n"
+msgstr "获取dumpsylog连接失败, 无法获取本地协议版本\n"
+
+#: pg_backup_db.cpp:748
+#, c-format
+msgid "get dumpsyslog connect failed, local protocol version is not same to server version\n"
+msgstr "获取dumpsylog连接失败, 本地协议版本与服务器版本不一致\n"
+
+#: pg_backup_db.cpp:753
+#, c-format
+msgid "get dumpsyslog connect failed, local system version is not same to server version\n"
+msgstr "获取dumpsylog连接失败, 本地系统版本与服务器版本不一致\n"
+
 #. translator: this is a module name
-#: pg_backup_directory.c:62
+#: pg_backup_directory.cpp:60
 msgid "directory archiver"
 msgstr "目录归档器"
 
-#: pg_backup_directory.c:144
+#: pg_backup_directory.cpp:140
 #, c-format
 msgid "no output directory specified\n"
 msgstr "没有指定输出目录\n"
 
-#: pg_backup_directory.c:151
+#: pg_backup_directory.cpp:146
 #, c-format
 msgid "could not create directory \"%s\": %s\n"
 msgstr "无法创建目录 \"%s\": %s\n"
 
-#: pg_backup_directory.c:360
+#: pg_backup_directory.cpp:365
 #, c-format
 msgid "could not close data file: %s\n"
 msgstr "无法关闭数据文件: %s\n"
 
-#: pg_backup_directory.c:400
+#: pg_backup_directory.cpp:403
 #, c-format
 msgid "could not open large object TOC file \"%s\" for input: %s\n"
 msgstr "无法为输入: %s打开大对象文件\"%s\"\n"
 
-#: pg_backup_directory.c:410
+#: pg_backup_directory.cpp:410
 #, c-format
 msgid "invalid line in large object TOC file \"%s\": \"%s\"\n"
 msgstr "无效行存在于大对象文件\"%s\": \"%s\"\n"
 
-#: pg_backup_directory.c:419
+#: pg_backup_directory.cpp:419
 #, c-format
 msgid "error reading large object TOC file \"%s\"\n"
 msgstr "在读取大对象文件\"%s\"时发生错误\n"
 
-#: pg_backup_directory.c:423
+#: pg_backup_directory.cpp:422
 #, c-format
 msgid "could not close large object TOC file \"%s\": %s\n"
 msgstr "无法关闭大对象 TOC 文件\"%s\": %s\n"
 
-#: pg_backup_directory.c:444
+#: pg_backup_directory.cpp:440
 #, c-format
 msgid "could not write byte\n"
 msgstr "无法写字节\n"
 
-#: pg_backup_directory.c:614
+#: pg_backup_directory.cpp:599
 #, c-format
 msgid "could not write to blobs TOC file\n"
 msgstr "无法写入BLOB到大对象TOC文件\n"
 
-#: pg_backup_directory.c:642
+#: pg_backup_directory.cpp:625
 #, c-format
 msgid "file name too long: \"%s\"\n"
 msgstr "文件名超长: \"%s\"\n"
 
-#: pg_backup_null.c:77
+#: pg_backup_null.cpp:78
 #, c-format
 msgid "this format cannot be read\n"
 msgstr "无法读取这个格式\n"
 
 #. translator: this is a module name
-#: pg_backup_tar.c:105
+#: pg_backup_tar.cpp:98
 msgid "tar archiver"
 msgstr "tar 归档"
 
-#: pg_backup_tar.c:181
+#: pg_backup_tar.cpp:172
 #, c-format
 msgid "could not open TOC file \"%s\" for output: %s\n"
 msgstr "无法为输出打开TOC文件\"%s\": %s\n"
 
-#: pg_backup_tar.c:189
+#: pg_backup_tar.cpp:182
 #, c-format
 msgid "could not open TOC file for output: %s\n"
 msgstr "无法为输出打开 TOC 文件: %s\n"
 
-#: pg_backup_tar.c:217 pg_backup_tar.c:373
+#: pg_backup_tar.cpp:207 pg_backup_tar.cpp:348
 #, c-format
 msgid "compression is not supported by tar archive format\n"
 msgstr "不支持tar归档格式的压缩\n"
 
-#: pg_backup_tar.c:225
+#: pg_backup_tar.cpp:212
 #, c-format
 msgid "could not open TOC file \"%s\" for input: %s\n"
 msgstr "无法为输入打开TOC文件\"%s\": %s\n"
 
-#: pg_backup_tar.c:232
+#: pg_backup_tar.cpp:216
 #, c-format
 msgid "could not open TOC file for input: %s\n"
 msgstr "无法为输入打开 TOC 文件: %s\n"
 
-#: pg_backup_tar.c:359
+#: pg_backup_tar.cpp:336 pg_backup_tar.cpp:617
 #, c-format
 msgid "could not find file \"%s\" in archive\n"
 msgstr "无法在归档中找到文件\"%s\"\n"
 
-#: pg_backup_tar.c:415
+#: pg_backup_tar.cpp:379 pg_backup_tar.cpp:408
 #, c-format
 msgid "could not generate temporary file name: %s\n"
 msgstr "无法生成临时文件名: %s\n"
 
-#: pg_backup_tar.c:424
+#: pg_backup_tar.cpp:418
 #, c-format
 msgid "could not open temporary file\n"
 msgstr "无法打开临时文件\n"
 
-#: pg_backup_tar.c:451
+#: pg_backup_tar.cpp:443
 #, c-format
 msgid "could not close tar member\n"
 msgstr "无法关闭 tar 成员\n"
 
-#: pg_backup_tar.c:551
+#: pg_backup_tar.cpp:543
 #, c-format
 msgid "internal error -- neither th nor fh specified in tarReadRaw()\n"
-msgstr "内部错误 -- 在 tarReadRaw() 里既未声明 th 也未声明 fh\n"
+msgstr "内部错误 -- tarReadRaw()里未声明th或 fh\n"
 
-#: pg_backup_tar.c:677
+#: pg_backup_tar.cpp:660
 #, c-format
 msgid "unexpected COPY statement syntax: \"%s\"\n"
 msgstr "意外的COPY语句语法: \"%s\"\n"
 
-#: pg_backup_tar.c:880
+#: pg_backup_tar.cpp:853
 #, c-format
 msgid "could not write null block at end of tar archive\n"
 msgstr "无法在 tar 归档末尾写 null 块\n"
 
-#: pg_backup_tar.c:935
+#: pg_backup_tar.cpp:908
 #, c-format
 msgid "invalid OID for large object (%u)\n"
 msgstr "用于大对象的非法 OID (%u)\n"
 
-#: pg_backup_tar.c:1087
+#: pg_backup_tar.cpp:1056
 #, c-format
 msgid "archive member too large for tar format\n"
 msgstr "在 tar 格式中归档成员太大\n"
 
 # command.c:1148
-#: pg_backup_tar.c:1102
+#: pg_backup_tar.cpp:1074
 #, c-format
 msgid "could not close temporary file: %s\n"
 msgstr "无法关闭临时文件: %s\n"
 
-#: pg_backup_tar.c:1112
+#: pg_backup_tar.cpp:1091
 #, c-format
 msgid "actual file length (%s) does not match expected (%s)\n"
 msgstr "实际文件长度 (%s) 不匹配预期的长度 (%s)\n"
 
-#: pg_backup_tar.c:1120
+#: pg_backup_tar.cpp:1099
 #, c-format
 msgid "could not output padding at end of tar member\n"
 msgstr "无法在 tar 成员尾部输出填充内容\n"
 
-#: pg_backup_tar.c:1149
+#: pg_backup_tar.cpp:1130
 #, c-format
 msgid "moving from position %s to next member at file position %s\n"
 msgstr "从位置 %s 移动到文件位置 %s 的下一个成员\n"
 
-#: pg_backup_tar.c:1160
+#: pg_backup_tar.cpp:1141
 #, c-format
 msgid "now at file position %s\n"
 msgstr "现在在文件的位置 %s\n"
 
-#: pg_backup_tar.c:1169 pg_backup_tar.c:1199
+#: pg_backup_tar.cpp:1149 pg_backup_tar.cpp:1183
 #, c-format
 msgid "could not find header for file \"%s\" in tar archive\n"
 msgstr "无法在tar归档中为文件\"%s\"找到标题头\n"
 
-#: pg_backup_tar.c:1183
+#: pg_backup_tar.cpp:1162
 #, c-format
 msgid "skipping tar member %s\n"
 msgstr "忽略 tar 成员 %s\n"
 
-#: pg_backup_tar.c:1187
+#: pg_backup_tar.cpp:1167
 #, c-format
-msgid ""
-"restoring data out of order is not supported in this archive format: \"%s\" "
-"is required, but comes before \"%s\" in the archive file.\n"
-msgstr ""
-"这个归档格式里不支持不按照顺序转储数据: 要求\"%s\" ,但它在归档文件里位于\"%s"
-"\"前面.\n"
+msgid "restoring data out of order is not supported in this archive format: \"%s\" is required, but comes before \"%s\" in the archive file.\n"
+msgstr "这个归档格式里不支持不按照顺序转储数据: 要求\"%s\" ,但它在归档文件里位于\"%s\"前面.\n"
 
-#: pg_backup_tar.c:1233
-#, c-format
-msgid "mismatch in actual vs. predicted file position (%s vs. %s)\n"
-msgstr "实际文件位置和预期文件位置不匹配 (%s 对 %s)\n"
-
-#: pg_backup_tar.c:1248
+#: pg_backup_tar.cpp:1218
 #, c-format
 msgid "incomplete tar header found (%lu byte)\n"
 msgid_plural "incomplete tar header found (%lu bytes)\n"
 msgstr[0] "找到未完成的tar文件头(%lu个字节)\n"
 
-#: pg_backup_tar.c:1286
+#: pg_backup_tar.cpp:1256
 #, c-format
 msgid "TOC Entry %s at %s (length %lu, checksum %d)\n"
-msgstr "在 %2$s 的 TOC 记录 %1$s (长度 %3$lu, 校验和 %4$d)\n"
+msgstr "TOC Entry %s在%s(长度 %lu, checksum %d)\n"
 
-#: pg_backup_tar.c:1296
+#: pg_backup_tar.cpp:1264
+#, c-format
+msgid "corrupt tar header found in %s (expected %d, computed %d) file position %s\n"
+msgstr "在%s发现了损坏的tar头文件(预计%d, 计算%d)档案位置%s\n"
+
+#: pg_dump.cpp:700
+#, c-format
+msgid "Encrypt mode is only supported for plain text, You should assign -F p or -F plain.\n"
+msgstr "加密模式只支持纯文本, 您应该指定-F p或-F plain.\n"
+
+#: pg_dump.cpp:711
+#, c-format
+msgid "Compress mode is not supported for plain text.\n"
+msgstr "纯文本不支持压缩模式.\n"
+
+#: pg_dump.cpp:718
 #, c-format
 msgid ""
-"corrupt tar header found in %s (expected %d, computed %d) file position %s\n"
+"Dump File specified already exists.\n"
+"Perform dump again by: \n"
+"1) Specifying a different file \n"
+"2) Removing the specified file \n"
+"3) Not specifying dont-overwrite-file option\n"
 msgstr ""
-"在文件 %1$s 的位置 %4$s 发现崩溃的 tar 头(预计在 %2$d, 计算出来在 %3$d)\n"
+"指定的转储文件已存在\n"
+"通过以下方式再次执行转储: \n"
+"1) 指定其他文件\n"
+"2) 删除指定的文件\n"
+"3) 不指定 dont-overwrite-file 选项\n"
 
-#: pg_dump.c:529 pg_dumpall.c:306 pg_restore.c:295
+#: pg_dump.cpp:755
 #, c-format
-msgid "%s: too many command-line arguments (first is \"%s\")\n"
-msgstr "%s: 命令行参数太多 (第一个是 \"%s\")\n"
+msgid "out of memory.\n"
+msgstr "内存溢出\n"
 
-#: pg_dump.c:541
-#, c-format
-msgid "options -s/--schema-only and -a/--data-only cannot be used together\n"
-msgstr "选项 -s/--schema-only和-a/--data-only 不能同时使用.\n"
-
-#: pg_dump.c:544
-#, c-format
-msgid "options -c/--clean and -a/--data-only cannot be used together\n"
-msgstr "选项 -c/--clean和 -a/--data-only不能同时使用.\n"
-
-#: pg_dump.c:548
-#, c-format
-msgid ""
-"options --inserts/--column-inserts and -o/--oids cannot be used together\n"
-msgstr "选项--inserts/--column-inserts和-o/--oids不能同时使用.\n"
-
-#: pg_dump.c:549
-#, c-format
-msgid "(The INSERT command cannot set OIDs.)\n"
-msgstr "(INSERT 命令无法设置对象标识(oid).)\n"
-
-#: pg_dump.c:576
+#: pg_dump.cpp:768
 #, c-format
 msgid "could not open output file \"%s\" for writing\n"
-msgstr "无法打开输出文件 \"%s\" 用于写出\n"
+msgstr "无法打开输出文件 \"%s\" 用于写\n"
 
-#: pg_dump.c:660
+#: pg_dump.cpp:787 pg_dumpall.cpp:851
+#, c-format
+msgid "Generate random key failed\n"
+msgstr "生成随机密钥失败\n"
+
+#: pg_dump.cpp:825
+#, c-format
+msgid "connection to database \"%s\" failed: %s "
+msgstr "连接数据库\"%s\"失败:%s"
+
+#: pg_dump.cpp:839
+msgid "%s set uppercase_attribute_name to off failed.\n"
+msgstr "%s 设定uppercase_attribute_name为off失败.\n"
+
+#: pg_dump.cpp:878
+#, c-format
+msgid "Notice: options --role is not super or sysadmin role, can only back up objects belonging to user %s.\n"
+msgstr "注意:options --role不是超级或系统管理员角色, 只能备份属于user的对象%s.\n"
+
+#: pg_dump.cpp:883
+#, c-format
+msgid "Notice: options -U is not super or sysadmin role, can only back up objects belonging to user %s.\n"
+msgstr "注意:options -U不是超级或系统管理员角色, 只能备份属于user的对象%s.\n"
+
+#: pg_dump.cpp:942
 #, c-format
 msgid "last built-in OID is %u\n"
 msgstr "最后的内置 OID 是 %u\n"
 
 # describe.c:1542
-#: pg_dump.c:669
+#: pg_dump.cpp:949
 #, c-format
 msgid "No matching schemas were found\n"
-msgstr "没有找到符合的关联。\n"
+msgstr "没有找到符合的关联.\n"
 
 # describe.c:1542
-#: pg_dump.c:681
+#: pg_dump.cpp:958 pg_dump.cpp:7496
 #, c-format
 msgid "No matching tables were found\n"
-msgstr "没有找到符合的关联。\n"
+msgstr "没有找到符合的关联.\n"
 
-#: pg_dump.c:820
+#: pg_dump.cpp:1055
+#, c-format
+msgid "The total objects number is %d.\n"
+msgstr "对象总数为%d.\n"
+
+#: pg_dump.cpp:1064
+#, c-format
+msgid "[%6.2lf%%] %d objects have been dumped.\n"
+msgstr "[%6.2lf%%] %d已转储对象.\n"
+
+#: pg_dump.cpp:1078
+#, c-format
+msgid "[100.00%%] %d objects have been dumped.\n"
+msgstr "[100.00%%] %d 已转储对象.\n"
+
+#: pg_dump.cpp:1161
+#, c-format
+msgid "dump database %s successfully\n"
+msgstr "数据库转储%s成功\n"
+
+#: pg_dump.cpp:1167 pg_dumpall.cpp:578 pg_restore.cpp:388
+#, c-format
+msgid "total time: %lld  ms\n"
+msgstr "总时间: %lld ms\n"
+
+#: pg_dump.cpp:1179 pg_dumpall.cpp:592 pg_restore.cpp:400
+#, c-format
+msgid "Terminal is not allowed to use --pipeline\n"
+msgstr "终端不允许使用 --pipeline\n"
+
+#: pg_dump.cpp:1210 pg_dumpall.cpp:631
+msgid "Encrypt Key: "
+msgstr "加密密钥:"
+
+#: pg_dump.cpp:1270
+#, c-format
+msgid "lineValue is too long(%u).\n"
+msgstr "lineValue太长(%u).\n"
+
+#: pg_dump.cpp:1301
+#, c-format
+msgid "%s: could not open file \"%s\" for reading: %s\n"
+msgstr "%s: 为了读取, 无法打开文件 \"%s\": %s\n"
+
+#: pg_dump.cpp:1363
+#, c-format
+msgid "%s: options -Z/--compress should be set between 0 and 9\n"
+msgstr "%s: options -Z/--compress应该设置在0到9之间\n"
+
+#: pg_dump.cpp:1389
+msgid "%s: The option '-' is not a valid option.\n"
+msgstr "%s: 选项'-'不是一个有效的选项\n"
+
+#: pg_dump.cpp:1403 pg_dump.cpp:1411
+msgid "%s: The option '-%c' requires a parameter.\n"
+msgstr "%s: 选项'-%c'需要一个参数\n"
+
+#: pg_dump.cpp:1600
+#, c-format
+msgid "%s: Invalid binary upgrade usermap\n"
+msgstr "%s: 无效的二进制升级用户映射\n"
+
+#: pg_dump.cpp:1626
+#, c-format
+msgid "%s: Invalid include-table-file\n"
+msgstr "%s: 无效的include-table文件\n"
+
+#: pg_dump.cpp:1645
+#, c-format
+msgid "%s: Invalid exclude-table-file\n"
+msgstr "%s: 无效的exclude-table文件\n"
+
+#: pg_dump.cpp:1669 pg_dumpall.cpp:1085 pg_restore.cpp:738
+#, c-format
+msgid "%s: too many command-line arguments (first is \"%s\")\n"
+msgstr "%s: 命令行参数太多 (第一个是 \"%s\")\n"
+
+#: pg_dump.cpp:1683
+#, c-format
+msgid "options -s/--schema-only and -a/--data-only cannot be used together\n"
+msgstr "选项 -s/--schema-only和-a/--data-only 不能同时使用.\n"
+
+#: pg_dump.cpp:1686
+#, c-format
+msgid "options -c/--clean and -a/--data-only cannot be used together\n"
+msgstr "选项 -c/--clean和 -a/--data-only不能同时使用.\n"
+
+#: pg_dump.cpp:1689
+#, c-format
+msgid "options --inserts/--column-inserts and -o/--oids cannot be used together\n"
+msgstr "选项 --inserts/--column-inserts 和 -o/--oids 不能同时使用.\n"
+
+#: pg_dump.cpp:1690
+#, c-format
+msgid "(The INSERT command cannot set OIDs.)\n"
+msgstr "(INSERT 命令无法设置OIDs.)\n"
+
+#: pg_dump.cpp:1695 pg_dumpall.cpp:1148
+#, c-format
+msgid "%s: options --binary-upgrade-usermap should be used with --binary-upgrade option\n"
+msgstr "%s: options --binary-upgrade-usermap应该和 --binary-upgrade选项一起使用\n"
+
+#: pg_dump.cpp:1701
+#, c-format
+msgid "%s: options --exclude-self should be used with --include-depend-objs option.\n"
+msgstr "%s: options --exclude-self应该与--include-depend-objs选项一起使用.\n"
+
+#: pg_dump.cpp:1706
+#, c-format
+msgid "%s: options --exclude-self should not be used with -c option.\n"
+msgstr "%s: options --exclude-self不应该与-c 选项 一起使用.\n"
+
+#: pg_dump.cpp:1711
+#, c-format
+msgid "%s: The number of options -t must less than or equal to 100.\n"
+msgstr "%s: -t选项个数必须小于等于100.\n"
+
+#: pg_dump.cpp:1732
+#, c-format
+msgid "options -F/--format argument '%c' must be used with -f/--file together\n"
+msgstr "选项 -F/--format参数'%c'必须与-f/--file一起使用\n"
+
+# fe-connect.c:891
+#: pg_dump.cpp:1763
+#, c-format
+msgid "could not create the specified log path: %s\n"
+msgstr "无法创建指定的日志路径:%s\n"
+
+#: pg_dump.cpp:1769
+#, c-format
+msgid "could not access the specified log path: %s\n"
+msgstr "无法访问指定的日志路径:%s\n"
+
+#: pg_dump.cpp:1778
+#, c-format
+msgid "get dumpsyslog connect failed, could not send dump_syslog command to server\n"
+msgstr "获取dump_syslog连接失败, 无法向服务器发送dump_syslog命令\n"
+
+#: pg_dump.cpp:1783
+#, c-format
+msgid "Dump syslog finished\n"
+msgstr "转储syslog日志完成\n"
+
+#: pg_dump.cpp:1791
 #, c-format
 msgid ""
 "%s dumps a database as a text file or to other formats.\n"
@@ -1290,67 +1788,65 @@ msgstr ""
 "%s 把一个数据库转储为纯文本文件或者是其它格式.\n"
 "\n"
 
-#: pg_dump.c:821 pg_dumpall.c:536 pg_restore.c:401
+#: pg_dump.cpp:1792 pg_dumpall.cpp:1219 pg_restore.cpp:747
 #, c-format
 msgid "Usage:\n"
 msgstr "用法:\n"
 
-#: pg_dump.c:822
+#: pg_dump.cpp:1793
 #, c-format
 msgid "  %s [OPTION]... [DBNAME]\n"
 msgstr "  %s [选项]... [数据库名字]\n"
 
-#: pg_dump.c:824 pg_dumpall.c:539 pg_restore.c:404
+#: pg_dump.cpp:1795 pg_dumpall.cpp:1222 pg_restore.cpp:750
 #, c-format
 msgid ""
 "\n"
 "General options:\n"
 msgstr ""
 "\n"
-"一般选项:\n"
+"常规选项:\n"
 
-#: pg_dump.c:825
+#: pg_dump.cpp:1796
 #, c-format
-msgid "  -f, --file=FILENAME          output file or directory name\n"
-msgstr "  -f, --file=FILENAME          输出文件或目录名\n"
+msgid "  -f, --file=FILENAME                         output file or directory name\n"
+msgstr "  -f, --file=FILENAME                         输出文件或目录名\n"
 
-#: pg_dump.c:826
+#: pg_dump.cpp:1797
 #, c-format
 msgid ""
-"  -F, --format=c|d|t|p         output file format (custom, directory, tar,\n"
-"                               plain text (default))\n"
+"  -F, --format=c|d|t|p                        output file format (custom, directory, tar,\n"
+"                                              plain text (default))\n"
 msgstr ""
-"  -F, --format=c|d|t|p         输出文件格式 (定制, 目录, tar)\n"
-"                               明文 (默认值))\n"
+"  -F, --format=c|d|t|p         输出文件格式 (自定义, 目录, tar, 纯文本(默认值))\n"
+"\n"
 
-#: pg_dump.c:828
+#: pg_dump.cpp:1799 pg_dumpall.cpp:1224
 #, c-format
-msgid "  -v, --verbose                verbose mode\n"
-msgstr "  -v, --verbose                详细模式\n"
+msgid "  -v, --verbose                               verbose mode\n"
+msgstr "  -v, --verbose                                verbose模式\n"
 
-#: pg_dump.c:829 pg_dumpall.c:541
+#: pg_dump.cpp:1800 pg_dumpall.cpp:1225
 #, c-format
-msgid "  -V, --version                output version information, then exit\n"
-msgstr "  -V, --version                输出版本信息，然后退出\n"
+msgid "  -V, --version                               output version information, then exit\n"
+msgstr "  -V, --version                                输出版本信息, 然后退出\n"
 
-#: pg_dump.c:830
+#: pg_dump.cpp:1801
 #, c-format
-msgid ""
-"  -Z, --compress=0-9           compression level for compressed formats\n"
-msgstr "  -Z, --compress=0-9           被压缩格式的压缩级别\n"
+msgid "  -Z, --compress=0-9                          compression level for compressed formats\n"
+msgstr "  -Z, --compress=0-9                           压缩级别的压缩格式\n"
 
-#: pg_dump.c:831 pg_dumpall.c:542
+#: pg_dump.cpp:1802 pg_dumpall.cpp:1226
 #, c-format
-msgid ""
-"  --lock-wait-timeout=TIMEOUT  fail after waiting TIMEOUT for a table lock\n"
-msgstr "  --lock-wait-timeout=TIMEOUT  在等待表锁超时后操作失败\n"
+msgid "  --lock-wait-timeout=TIMEOUT                 fail after waiting TIMEOUT for a table lock\n"
+msgstr "  --lock-wait-timeout=TIMEOUT                  在表锁等待超时后失败\n"
 
-#: pg_dump.c:832 pg_dumpall.c:543
+#: pg_dump.cpp:1803 pg_dumpall.cpp:1227
 #, c-format
-msgid "  -?, --help                   show this help, then exit\n"
-msgstr "  -?, --help                   显示此帮助, 然后退出\n"
+msgid "  -?, --help                                  show this help, then exit\n"
+msgstr "  -?, --help                                   显示此帮助, 然后退出\n"
 
-#: pg_dump.c:834 pg_dumpall.c:544
+#: pg_dump.cpp:1805 pg_dumpall.cpp:1228
 #, c-format
 msgid ""
 "\n"
@@ -1359,216 +1855,300 @@ msgstr ""
 "\n"
 "控制输出内容选项:\n"
 
-#: pg_dump.c:835 pg_dumpall.c:545
+#: pg_dump.cpp:1806 pg_dumpall.cpp:1229
 #, c-format
-msgid "  -a, --data-only              dump only the data, not the schema\n"
-msgstr "  -a, --data-only              只转储数据,不包括模式\n"
+msgid "  -a, --data-only                             dump only the data, not the schema\n"
+msgstr "  -a, --data-only                              只转储数据,不包括模式\n"
 
-#: pg_dump.c:836
+#: pg_dump.cpp:1807
 #, c-format
-msgid "  -b, --blobs                  include large objects in dump\n"
-msgstr "  -b, --blobs                  在转储中包括大对象\n"
+msgid "  -b, --blobs                                 include large objects in dump\n"
+msgstr "  -b, --blobs                                  包含dump中的大对象\n"
 
-#: pg_dump.c:837 pg_restore.c:415
+#: pg_dump.cpp:1808
+#, c-format
+msgid "  -c, --clean                                 clean (drop) database objects before recreating\n"
+msgstr "  -c, --clean                                  在重新创建之前清除(删除)数据库对象\n"
+
+#: pg_dump.cpp:1809
+#, c-format
+msgid "  -C, --create                                include commands to create database in dump\n"
+msgstr "  -C, --create                                  包含在dump中创建数据库的命令\n"
+
+#: pg_dump.cpp:1810
+#, c-format
+msgid "  -E, --encoding=ENCODING                     dump the data in encoding ENCODING\n"
+msgstr "  -E, --encoding=ENCODING                      转储encoding中的数据\n"
+
+#: pg_dump.cpp:1811
+#, c-format
+msgid "  -g, --exclude-guc=GUC_PARAM                 do NOT dump the GUC_PARAM set\n"
+msgstr "  -g, --exclude-guc=GUC_PARAM                  不转储GUC_PARAM集\n"
+
+#: pg_dump.cpp:1812
+#, c-format
+msgid "  -n, --schema=SCHEMA                         dump the named schema(s) only\n"
+msgstr "  -n, --schema=SCHEMA                          只转储指定的模式\n"
+
+#: pg_dump.cpp:1813
+#, c-format
+msgid "  -N, --exclude-schema=SCHEMA                 do NOT dump the named schema(s)\n"
+msgstr "  -N, --exclude-schema=SCHEMA                  不转储指定的模式\n"
+
+#: pg_dump.cpp:1814 pg_dumpall.cpp:1232
+#, c-format
+msgid "  -o, --oids                                  include OIDs in dump\n"
+msgstr "  -o, --oids                                   包括dump中的oid\n"
+
+#: pg_dump.cpp:1815
 #, c-format
 msgid ""
-"  -c, --clean                  clean (drop) database objects before "
-"recreating\n"
+"  -O, --no-owner                              skip restoration of object ownership in\n"
+"                                              plain-text format\n"
 msgstr ""
-"  -c, --clean                  在重新创建之前，先清除（删除）数据库对象\n"
-
-#: pg_dump.c:838
-#, c-format
-msgid ""
-"  -C, --create                 include commands to create database in dump\n"
-msgstr "  -C, --create                 在转储中包括命令,以便创建数据库\n"
-
-#: pg_dump.c:839
-#, c-format
-msgid "  -E, --encoding=ENCODING      dump the data in encoding ENCODING\n"
-msgstr "  -E, --encoding=ENCODING      转储以ENCODING形式编码的数据\n"
-
-#: pg_dump.c:840
-#, c-format
-msgid "  -n, --schema=SCHEMA          dump the named schema(s) only\n"
-msgstr "  -n, --schema=SCHEMA          只转储指定名称的模式\n"
-
-#: pg_dump.c:841
-#, c-format
-msgid "  -N, --exclude-schema=SCHEMA  do NOT dump the named schema(s)\n"
-msgstr "  -N, --exclude-schema=SCHEMA  不转储已命名的模式\n"
-
-#: pg_dump.c:842 pg_dumpall.c:548
-#, c-format
-msgid "  -o, --oids                   include OIDs in dump\n"
-msgstr "  -o, --oids                   在转储中包括 OID\n"
-
-#: pg_dump.c:843
-#, c-format
-msgid ""
-"  -O, --no-owner               skip restoration of object ownership in\n"
-"                               plain-text format\n"
-msgstr ""
-"  -O, --no-owner               在明文格式中, 忽略恢复对象所属者\n"
+"  -O, --no-owner                              跳过恢复纯文本格式的对象所有权\n"
 "\n"
 
-#: pg_dump.c:845 pg_dumpall.c:551
+#: pg_dump.cpp:1817 pg_dumpall.cpp:1235
 #, c-format
-msgid "  -s, --schema-only            dump only the schema, no data\n"
-msgstr "  -s, --schema-only            只转储模式, 不包括数据\n"
+msgid "  -s, --schema-only                           dump only the schema, no data\n"
+msgstr "  -s, --schema-only                           只转储模式, 不转储数据\n"
 
-#: pg_dump.c:846
+#: pg_dump.cpp:1818
+#, c-format
+msgid "  -q, --target=VERSION                        dump data format can compatible Gaussdb version (v1 or ..)\n"
+msgstr "  -q, --target=VERSION dump                    数据格式是否兼容Gaussdb版本(v1或..)\n"
+
+#: pg_dump.cpp:1820
+#, c-format
+msgid "  -S, --sysadmin=NAME                         system admin user name to use in plain-text format\n"
+msgstr "  -S, --sysadmin=NAME                        以纯文本格式使用的系统管理员用户名\n"
+
+#: pg_dump.cpp:1821
+#, c-format
+msgid "  -t, --table=TABLE                           dump the named table(s) only\n"
+msgstr "  -t, --table=TABLE                            只转储指定的表\n"
+
+#: pg_dump.cpp:1822
+#, c-format
+msgid "  -T, --exclude-table=TABLE                   do NOT dump the named table(s)\n"
+msgstr "  -T, --exclude-table=TABLE                    不转储指定表\n"
+
+#: pg_dump.cpp:1823
+#, c-format
+msgid "  --include-table-file=FileName               dump the named table(s) only\n"
+msgstr "  --include-table-file=FileName                只转储指定的表\n"
+
+#: pg_dump.cpp:1824
+#, c-format
+msgid "  --exclude-table-file=FileName               do NOT dump the named table(s)\n"
+msgstr "  --exclude-table-file=FileName                不转储指定的表\n"
+
+#: pg_dump.cpp:1825 pg_dumpall.cpp:1261
 #, c-format
 msgid ""
-"  -S, --superuser=NAME         superuser user name to use in plain-text "
-"format\n"
-msgstr "  -S, --superuser=NAME         在明文格式中使用指定的超级用户名\n"
-
-#: pg_dump.c:847
-#, c-format
-msgid "  -t, --table=TABLE            dump the named table(s) only\n"
-msgstr "  -t, --table=TABLE            只转储指定名称的表\n"
-
-#: pg_dump.c:848
-#, c-format
-msgid "  -T, --exclude-table=TABLE    do NOT dump the named table(s)\n"
-msgstr "  -T, --exclude-table=TABLE    不转储指定名称的表\n"
-
-#: pg_dump.c:849 pg_dumpall.c:554
-#, c-format
-msgid "  -x, --no-privileges          do not dump privileges (grant/revoke)\n"
-msgstr "  -x, --no-privileges          不要转储权限 (grant/revoke)\n"
-
-#: pg_dump.c:850 pg_dumpall.c:555
-#, c-format
-msgid "  --binary-upgrade             for use by upgrade utilities only\n"
-msgstr "  --binary-upgrade             只能由升级工具使用\n"
-
-#: pg_dump.c:851 pg_dumpall.c:556
-#, c-format
-msgid ""
-"  --column-inserts             dump data as INSERT commands with column "
-"names\n"
-msgstr "  --column-inserts             以带有列名的INSERT命令形式转储数据\n"
-
-#: pg_dump.c:852 pg_dumpall.c:557
-#, c-format
-msgid ""
-"  --disable-dollar-quoting     disable dollar quoting, use SQL standard "
-"quoting\n"
+"  --pipeline                                  use pipeline to pass the password,\n"
+"                                              forbidden to use in terminal\n"
 msgstr ""
-"  --disable-dollar-quoting     取消美元 (符号) 引号, 使用 SQL 标准引号\n"
+"  --pipeline                                  使用管道传递密码，禁止在终端使用\n"
+"\n"
 
-#: pg_dump.c:853 pg_dumpall.c:558 pg_restore.c:431
+#: pg_dump.cpp:1827
 #, c-format
-msgid ""
-"  --disable-triggers           disable triggers during data-only restore\n"
-msgstr "  --disable-triggers           在只恢复数据的过程中禁用触发器\n"
+msgid "  -x, --no-privileges/--no-acl                do not dump privileges (grant/revoke)\n"
+msgstr "  -x, --no-privileges/--no-acl                 不要转储权限 (grant/revoke)\n"
 
-#: pg_dump.c:854
+#: pg_dump.cpp:1828 pg_dumpall.cpp:1239
 #, c-format
-msgid ""
-"  --exclude-table-data=TABLE   do NOT dump data for the named table(s)\n"
-msgstr "  --exclude-table-data=TABLE   不转储指定名称的表中的数据\n"
+msgid "  --column-inserts/--attribute-inserts        dump data as INSERT commands with column names\n"
+msgstr "  --column-inserts/--attribute-inserts          将数据转储为带列名的INSERT命令\n"
 
-#: pg_dump.c:855 pg_dumpall.c:559
+#: pg_dump.cpp:1829 pg_dumpall.cpp:1240
 #, c-format
-msgid ""
-"  --inserts                    dump data as INSERT commands, rather than "
-"COPY\n"
-msgstr ""
-"  --inserts                    以INSERT命令，而不是COPY命令的形式转储数据\n"
+msgid "  --disable-dollar-quoting                    disable dollar quoting, use SQL standard quoting\n"
+msgstr "  --disable-dollar-quoting                      禁用美元引用, 使用SQL标准引用\n"
 
-#: pg_dump.c:856 pg_dumpall.c:560
+#: pg_dump.cpp:1830 pg_dumpall.cpp:1241
 #, c-format
-msgid "  --no-security-labels         do not dump security label assignments\n"
-msgstr "  --no-security-labels         不转储安全标签的分配\n"
+msgid "  --disable-triggers                          disable triggers during data-only restore\n"
+msgstr "  --disable-triggers                            在仅数据恢复期间禁用触发器\n"
 
-#: pg_dump.c:857 pg_dumpall.c:561
+#: pg_dump.cpp:1831
 #, c-format
-msgid "  --no-tablespaces             do not dump tablespace assignments\n"
-msgstr "  --no-tablespaces             不转储表空间分配信息\n"
+msgid "  --exclude-table-data=TABLE                  do NOT dump data for the named table(s)\n"
+msgstr "  --exclude-table-data=TABLE                    不转储指定表的数据\n"
 
-#: pg_dump.c:858 pg_dumpall.c:562
+#: pg_dump.cpp:1832
 #, c-format
-msgid "  --no-unlogged-table-data     do not dump unlogged table data\n"
-msgstr "  --no-unlogged-table-data     不转储没有日志的表数据\n"
+msgid "  --exclude-with                              do NOT dump WITH() of table(s)\n"
+msgstr "  --exclude-with                                不转储表的WITH()\n"
 
-#: pg_dump.c:859 pg_dumpall.c:563
+#: pg_dump.cpp:1833 pg_dumpall.cpp:1242
 #, c-format
-msgid ""
-"  --quote-all-identifiers      quote all identifiers, even if not key words\n"
-msgstr "  --quote-all-identifiers      所有标识符加引号，即使不是关键字\n"
+msgid "  --inserts                                   dump data as INSERT commands, rather than COPY\n"
+msgstr "  --inserts                                      dump数据为INSERT命令, 而不是COPY命令\n"
 
-#: pg_dump.c:860
+#: pg_dump.cpp:1835 pg_dumpall.cpp:1244
 #, c-format
-msgid ""
-"  --section=SECTION            dump named section (pre-data, data, or post-"
-"data)\n"
-msgstr ""
-"  --section=SECTION            备份命名的节 (数据前, 数据, 及 数据后)\n"
+msgid "  --no-publications                           do not dump publications\n"
+msgstr "  --no-publications                              不转储发布\n"
 
-#: pg_dump.c:861
+#: pg_dump.cpp:1837 pg_dumpall.cpp:1246
 #, c-format
-msgid ""
-"  --serializable-deferrable    wait until the dump can run without "
-"anomalies\n"
-msgstr "  --serializable-deferrable   等到备份可以无异常运行\n"
+msgid "  --no-security-labels                        do not dump security label assignments\n"
+msgstr "  --no-security-labels                           不转储安全标签分配\n"
 
-#: pg_dump.c:862 pg_dumpall.c:564 pg_restore.c:437
+#: pg_dump.cpp:1839 pg_dumpall.cpp:1249
+#, c-format
+msgid "  --no-subscriptions                          do not dump subscriptions\n"
+msgstr "  --no-subscriptions                             不转储订阅\n"
+
+#: pg_dump.cpp:1841 pg_dumpall.cpp:1247
+#, c-format
+msgid "  --no-tablespaces                            do not dump tablespace assignments\n"
+msgstr "  --no-tablespaces                               不转储表空间分配\n"
+
+#: pg_dump.cpp:1842 pg_dumpall.cpp:1251
+#, c-format
+msgid "  --no-unlogged-table-data                    do not dump unlogged table data\n"
+msgstr "  --no-unlogged-table-data                      不转储未记录日志的表数据\n"
+
+#: pg_dump.cpp:1843 pg_dumpall.cpp:1252
+#, c-format
+msgid "  --include-alter-table                       dump the table delete column\n"
+msgstr "  --include-alter-table                         dump表删除列\n"
+
+#: pg_dump.cpp:1844 pg_dumpall.cpp:1253
+#, c-format
+msgid "  --quote-all-identifiers                     quote all identifiers, even if not key words\n"
+msgstr "  --quote-all-identifiers                       引用所有标识符, 即使不是关键字\n"
+
+#: pg_dump.cpp:1845
+#, c-format
+msgid "  --section=SECTION                           dump named section (pre-data, data, or post-data)\n"
+msgstr "  --section=SECTION                             转储指定的section (pre-data, data或post-data)\n"
+
+#: pg_dump.cpp:1846
+#, c-format
+msgid "  --serializable-deferrable                   wait until the dump can run without anomalies\n"
+msgstr "  --serializable-deferred                       等待, 直到转储可以正常运行\n"
+
+#: pg_dump.cpp:1847
+#, c-format
+msgid "  --dont-overwrite-file                       do not overwrite the existing file in case of plain, tar and custom format\n"
+msgstr "  --dont-overwrite-file                      在纯文本, tar和自定义格式的情况下, 不要覆盖现有的文件\n"
+
+#: pg_dump.cpp:1849
 #, c-format
 msgid ""
 "  --use-set-session-authorization\n"
-"                               use SET SESSION AUTHORIZATION commands "
-"instead of\n"
-"                               ALTER OWNER commands to set ownership\n"
+"                                              use SET SESSION AUTHORIZATION commands instead of\n"
+"                                              ALTER OWNER commands to set ownership\n"
 msgstr ""
 "  --use-set-session-authorization\n"
-"                               使用 SESSION AUTHORIZATION 命令代替\n"
-"                ALTER OWNER 命令来设置所有权\n"
+"                                               使用 SESSION AUTHORIZATION 命令代替\n"
+"                                               ALTER OWNER 命令来设置所有权\n"
 
-#: pg_dump.c:866 pg_dumpall.c:568 pg_restore.c:441
+#: pg_dump.cpp:1852
+#, c-format
+msgid "  --exclude-function                          do not dump function and procedure\n"
+msgstr "  --exclude-function                           不转储函数和存储过程\n"
+
+#: pg_dump.cpp:1854 pg_dumpall.cpp:1257
+#, c-format
+msgid "  --with-encryption=AES128                    dump data is encrypted using AES128\n"
+msgstr "  --with-encryption=AES128                     转储数据使用AES128加密\n"
+
+#: pg_dump.cpp:1855
+#, c-format
+msgid "  --with-key=KEY                              AES128 encryption key, must be 16 bytes in length\n"
+msgstr "  --with-key=KEY                               AES128加密密钥, 长度必须为16字节\n"
+
+#: pg_dump.cpp:1856
+#, c-format
+msgid "  --with-salt=RANDVALUES                      used by gs_dumpall, pass rand value array\n"
+msgstr "  --with-salt=RANDVALUES                       由gs_dumpall使用, 传递rand值数组\n"
+
+#: pg_dump.cpp:1858
+#, c-format
+msgid "  --include-nodes                             include TO NODE/GROUP clause in the dumped CREATE TABLE and CREATE FOREIGN TABLE commands.\n"
+msgstr "--include-nodes                              在转储的CREATE TABLE和CREATE FOREIGN TABLE命令中包含TO NODE/GROUP子句.\n"
+
+#: pg_dump.cpp:1861
+#, c-format
+msgid "  --include-extensions                        include extensions in dump\n"
+msgstr "  --include-extensions                       在dump中包含扩展\n"
+
+#: pg_dump.cpp:1863 pg_dumpall.cpp:1272
+#, c-format
+msgid "  --binary-upgrade                            for use by upgrade utilities only\n"
+msgstr "  --binary-upgrade                           仅供升级工具使用\n"
+
+#: pg_dump.cpp:1865 pg_dumpall.cpp:1274
+#, c-format
+msgid "  --binary-upgrade-usermap=\"USER1=USER2\"      to be used only by upgrade utility for mapping usernames\n"
+msgstr "  --binary-upgrade-usermap =\"USER1=USER2\"    仅供升级工具用于映射用户名\n"
+
+#: pg_dump.cpp:1866 pg_dumpall.cpp:1275
+#, c-format
+msgid "  --non-lock-table                            for use by OM tools utilities only\n"
+msgstr "  --non-lock-table                             仅供OM工具实用程序使用\n"
+
+#: pg_dump.cpp:1867
+#, c-format
+msgid "  --include-depend-objs                       dump the object which depends on the input object\n"
+msgstr "  --include-depend-objs                        转储依赖于输入对象的对象\n"
+
+#: pg_dump.cpp:1868
+#, c-format
+msgid "  --exclude-self                              do not dump the input object\n"
+msgstr "  --exclude-self                               不转储输入对象\n"
+
+#: pg_dump.cpp:1870 pg_dumpall.cpp:1280 pg_restore.cpp:794
 #, c-format
 msgid ""
 "\n"
 "Connection options:\n"
 msgstr ""
 "\n"
-"联接选项:\n"
+"连接选项:\n"
 
-#: pg_dump.c:867 pg_dumpall.c:569 pg_restore.c:442
+#: pg_dump.cpp:1871 pg_dumpall.cpp:1281
 #, c-format
-msgid "  -h, --host=HOSTNAME      database server host or socket directory\n"
-msgstr "  -h, --host=主机名        数据库服务器的主机名或套接字目录\n"
+msgid "  -h, --host=HOSTNAME                         database server host or socket directory\n"
+msgstr "  -h, --host=HOSTNAME                          数据库服务器所在机器的主机名或套接字目录\n"
 
-#: pg_dump.c:868 pg_dumpall.c:571 pg_restore.c:443
+#: pg_dump.cpp:1872 pg_dumpall.cpp:1283
 #, c-format
-msgid "  -p, --port=PORT          database server port number\n"
-msgstr "  -p, --port=端口号        数据库服务器的端口号\n"
+msgid "  -p, --port=PORT                             database server port number\n"
+msgstr "  -p, --port=PORT                              数据库服务器端口号\n"
 
-#: pg_dump.c:869 pg_dumpall.c:572 pg_restore.c:444
+#: pg_dump.cpp:1873 pg_dumpall.cpp:1284
 #, c-format
-msgid "  -U, --username=NAME      connect as specified database user\n"
-msgstr "  -U, --username=名字      以指定的数据库用户联接\n"
+msgid "  -U, --username=NAME                         connect as specified database user\n"
+msgstr "  -U, --username=NAME                           连接指定的数据库用户\n"
 
-#: pg_dump.c:870 pg_dumpall.c:573 pg_restore.c:445
+#: pg_dump.cpp:1874 pg_dumpall.cpp:1285
 #, c-format
-msgid "  -w, --no-password        never prompt for password\n"
-msgstr "  -w, --no-password        永远不提示输入口令\n"
+msgid "  -w, --no-password                           never prompt for password\n"
+msgstr "  -w, --no-password                             从不提示输入密码\n"
 
-#: pg_dump.c:871 pg_dumpall.c:574 pg_restore.c:446
+#: pg_dump.cpp:1875 pg_dumpall.cpp:1286
 #, c-format
-msgid ""
-"  -W, --password           force password prompt (should happen "
-"automatically)\n"
-msgstr "  -W, --password           强制口令提示 (自动)\n"
+msgid "  -W, --password=PASSWORD                     the password of specified database user\n"
+msgstr "  -W, --password=PASSWORD                       指定数据库用户的密码\n"
 
-#: pg_dump.c:872 pg_dumpall.c:575
+#: pg_dump.cpp:1876 pg_dumpall.cpp:1287
 #, c-format
-msgid "  --role=ROLENAME          do SET ROLE before dump\n"
-msgstr "  --role=ROLENAME          在转储前运行SET ROLE\n"
+msgid "  --role=ROLENAME                             do SET ROLE before dump\n"
+msgstr "  --role=ROLENAME                               设置转储前的角色\n"
 
-#: pg_dump.c:874
+#: pg_dump.cpp:1877 pg_dumpall.cpp:1288
+#, c-format
+msgid "  --rolepassword=ROLEPASSWORD                 the password for role\n"
+msgstr "  --rolepassword=ROLEPASSWORD                    角色密码\n"
+
+#: pg_dump.cpp:1879
 #, c-format
 msgid ""
 "\n"
@@ -1577,445 +2157,615 @@ msgid ""
 "\n"
 msgstr ""
 "\n"
-"如果没有提供数据库名字, 那么使用 PGDATABASE 环境变量\n"
-"的数值.\n"
+"如果没有提供数据库名字,\n"
+"那么使用 PGDATABASE 环境变量的值.\n"
 "\n"
 
-#: pg_dump.c:876 pg_dumpall.c:579 pg_restore.c:450
-#, c-format
-msgid "Report bugs to <pgsql-bugs@postgresql.org>.\n"
-msgstr "报告错误至 <pgsql-bugs@postgresql.org>.\n"
-
-#: pg_dump.c:889
+#: pg_dump.cpp:1908
 #, c-format
 msgid "invalid client encoding \"%s\" specified\n"
 msgstr "声明了无效的输出格式 \"%s\"\n"
 
-#: pg_dump.c:978
+#: pg_dump.cpp:1952 pg_dumpall.cpp:488 pg_dumpall.cpp:489 pg_dumpall.cpp:3293
+#: pg_dumpall.cpp:3314
+#, c-format
+msgid "%s: query failed: %s"
+msgstr "%s: 查询失败: %s"
+
+#: pg_dump.cpp:2056
 #, c-format
 msgid "invalid output format \"%s\" specified\n"
 msgstr "声明了非法的输出格式 \"%s\"\n"
 
-#: pg_dump.c:1000
+#: pg_dump.cpp:2078
 #, c-format
 msgid "server version must be at least 7.3 to use schema selection switches\n"
 msgstr "服务器版本必须至少是7.3才能使用模式选择转换\n"
 
-#: pg_dump.c:1270
+# describe.c:1542
+#: pg_dump.cpp:2093
 #, c-format
-msgid "dumping contents of table %s\n"
-msgstr "正在转储表 %s 的内容\n"
+msgid "no matching schemas were found for pattern \"%s\"\n"
+msgstr "没有找到匹配的模式\"%s\"\n"
 
-#: pg_dump.c:1392
+# describe.c:1542
+#: pg_dump.cpp:2155
+#, c-format
+msgid "no matching tables were found for pattern \"%s\"\n"
+msgstr "没有为模式找到匹配的表\"%s\"\n"
+
+#: pg_dump.cpp:2526
+#, c-format
+msgid "dumping contents of table \"%s\"\n"
+msgstr "转储表内容\"%s\"\n"
+
+#: pg_dump.cpp:2530 pg_dump.cpp:2702
+msgid "WARNING: schema db4ai not dumped because current user is not a superuser\n"
+msgstr "警告: 模式db4ai未转储 因为当前用户不是超级用户\n"
+
+#: pg_dump.cpp:2654
 #, c-format
 msgid "Dumping the contents of table \"%s\" failed: PQgetCopyData() failed.\n"
 msgstr "转储表 \"%s\" 的内容的 SQL 命令失败: PQendcopy() 失败.\n"
 
-#: pg_dump.c:1393 pg_dump.c:1403
+#: pg_dump.cpp:2655 pg_dump.cpp:2664
 #, c-format
 msgid "Error message from server: %s"
 msgstr "来自服务器的错误信息: %s"
 
-#: pg_dump.c:1394 pg_dump.c:1404
+#: pg_dump.cpp:2656 pg_dump.cpp:2665
 #, c-format
 msgid "The command was: %s\n"
 msgstr "命令是: %s\n"
 
-#: pg_dump.c:1402
+#: pg_dump.cpp:2663
 #, c-format
 msgid "Dumping the contents of table \"%s\" failed: PQgetResult() failed.\n"
 msgstr "转储表 \"%s\" 的内容失败: PQgetResult() 失败.\n"
 
-#: pg_dump.c:1853
+#: pg_dump.cpp:3174
 #, c-format
 msgid "saving database definition\n"
 msgstr "保存数据库定义\n"
 
-#: pg_dump.c:2150
+#: pg_dump.cpp:4006
 #, c-format
 msgid "saving encoding = %s\n"
 msgstr "正在保存encoding = %s\n"
 
-#: pg_dump.c:2177
+#: pg_dump.cpp:4043
 #, c-format
 msgid "saving standard_conforming_strings = %s\n"
 msgstr "正在保存standard_conforming_strings = %s\n"
 
-#: pg_dump.c:2210
+#: pg_dump.cpp:4084
 #, c-format
 msgid "reading large objects\n"
 msgstr "正在读取大对象\n"
 
-#: pg_dump.c:2342
+#: pg_dump.cpp:4225
 #, c-format
 msgid "saving large objects\n"
 msgstr "保存大对象\n"
 
-#: pg_dump.c:2389
+#: pg_dump.cpp:4277
 #, c-format
 msgid "error reading large object %u: %s"
 msgstr "在读取大对象时发生错误%u: %s"
 
-#: pg_dump.c:2582
+#: pg_dump.cpp:4370
+#, c-format
+msgid "WARNING: owner of publication \"%s\" appears to be invalid\n"
+msgstr "警告:出版物所有者\"%s\"似乎无效\n"
+
+#: pg_dump.cpp:4473
+#, c-format
+msgid "reading publication membership for table \"%s.%s\"\n"
+msgstr "读取发布会员表\"%s.%s\"\n"
+
+#: pg_dump.cpp:4579
+#, c-format
+msgid "WARNING: subscriptions not dumped because current user is not a superuser\n"
+msgstr "警告:订阅未转储, 因为当前用户不是超级用户\n"
+
+#: pg_dump.cpp:4641
+#, c-format
+msgid "WARNING: owner of subscription \"%s\" appears to be invalid\n"
+msgstr "警告:订阅的所有者\"%s\"似乎无效\n"
+
+#: pg_dump.cpp:4681
+#, c-format
+msgid "WARNING: could not parse subpublications array\n"
+msgstr "警告:无法解析子发布数组\n"
+
+#: pg_dump.cpp:4964
 #, c-format
 msgid "could not find parent extension for %s\n"
 msgstr "无法找到父扩展%s\n"
 
-#: pg_dump.c:2685
+#: pg_dump.cpp:5085
 #, c-format
-msgid "WARNING: owner of schema \"%s\" appears to be invalid\n"
-msgstr "警告: 模式 \"%s\" 的所有者非法\n"
+msgid "Using options -c/--clean to dump db4ai schema. Or clean this schema.\n"
+msgstr "使用选项-c/--clean 转储db4ai模式。或者清除此schema.\n"
 
-#: pg_dump.c:2728
+#: pg_dump.cpp:5128
 #, c-format
 msgid "schema with OID %u does not exist\n"
-msgstr "OID %u 的模式不存在\n"
+msgstr "OID为%u 的schema不存在\n"
 
-#: pg_dump.c:3078
+#: pg_dump.cpp:5372
 #, c-format
-msgid "WARNING: owner of data type \"%s\" appears to be invalid\n"
-msgstr "警告: 数据类型 \"%s\" 的所有者非法\n"
+msgid "PQgetvalue cannot be NULL.\n"
+msgstr "PQgetvalue不能为NULL.\n"
 
-#: pg_dump.c:3189
+#: pg_dump.cpp:6087 pg_dump.cpp:6255
 #, c-format
-msgid "WARNING: owner of operator \"%s\" appears to be invalid\n"
-msgstr "警告: 操作符 \"%s\" 的所有者非法\n"
+msgid "the number is overflow.\n"
+msgstr "数字已溢出.\n"
 
-#: pg_dump.c:3446
+#: pg_dump.cpp:6370
 #, c-format
-msgid "WARNING: owner of operator class \"%s\" appears to be invalid\n"
-msgstr "警告: 操作符表 \"%s\" 无效\n"
+msgid "Failed to find the object type for \"%u\"\n"
+msgstr "查找对象类型失败\"%u\"\n"
 
-#: pg_dump.c:3534
+#: pg_dump.cpp:6502
 #, c-format
-msgid "WARNING: owner of operator family \"%s\" appears to be invalid\n"
-msgstr "警告: 操作符 \"%s\" 的所有者无效\n"
+msgid "unexpected section code %c\n"
+msgstr "意外的段代码%c\n"
 
-#: pg_dump.c:3672
+#: pg_dump.cpp:6514
 #, c-format
-msgid "WARNING: owner of aggregate function \"%s\" appears to be invalid\n"
-msgstr "警告: 聚集函数 \"%s\" 的所有者非法\n"
+msgid "PQfnumber cannot be negative(%d).\n"
+msgstr "PQfnumber不能为负数(%d).\n"
 
-#: pg_dump.c:3854
+#: pg_dump.cpp:7526
 #, c-format
-msgid "WARNING: owner of function \"%s\" appears to be invalid\n"
-msgstr "警告: 函数 \"%s\" 的所有者非法\n"
+msgid "gs_matview has incorrect attribute for type %u, make sure it's a matview"
+msgstr "gs_matview的类型属性不正确%u, 确保它是matview"
 
-#: pg_dump.c:4356
+#: pg_dump.cpp:7627
 #, c-format
-msgid "WARNING: owner of table \"%s\" appears to be invalid\n"
-msgstr "警告: 数据表 \"%s\" 的所有者非法\n"
+msgid "dump is failed to allocate memory!\n"
+msgstr "转储分配内存失败!\n"
 
-#: pg_dump.c:4503
+#: pg_dump.cpp:7716
 #, c-format
 msgid "reading indexes for table \"%s\"\n"
 msgstr "为表 \"%s\" 读取索引\n"
 
-#: pg_dump.c:4822
+#: pg_dump.cpp:8062
+#, c-format
+msgid "reading constraints for foreign table \"%s\"\n"
+msgstr "读取外部表的约束\"%s\"\n"
+
+#: pg_dump.cpp:8214
 #, c-format
 msgid "reading foreign key constraints for table \"%s\"\n"
 msgstr "为表 \"%s\" 读取外键约束\n"
 
-#: pg_dump.c:5067
+#: pg_dump.cpp:8505
 #, c-format
-msgid ""
-"failed sanity check, parent table OID %u of pg_rewrite entry OID %u not "
-"found\n"
-msgstr "健全检查失败,pg_rewrite项OID %2$u 的源表 OID%1$u 未找到\n"
+msgid "failed sanity check, parent table OID %u of pg_rewrite entry OID %u not found\n"
+msgstr "完整性检查失败, 父表OID%u来自pg_rewrite的entry OID%u没有找到\n"
 
-#: pg_dump.c:5158
+#: pg_dump.cpp:8591
+#, c-format
+msgid "reading policies for table \"%s\"\n"
+msgstr "表的读取策略\"%s\"\n"
+
+#: pg_dump.cpp:8683
 #, c-format
 msgid "reading triggers for table \"%s\"\n"
 msgstr "为表 \"%s\" 读取触发器\n"
 
-#: pg_dump.c:5319
+#: pg_dump.cpp:8858
 #, c-format
-msgid ""
-"query produced null referenced table name for foreign key trigger \"%s\" on "
-"table \"%s\" (OID of table: %u)\n"
-msgstr ""
-"对在表 \"%2$s\" 上的外键触发器 \"%1$s\" 上的查询生成了 NULL 个引用表(表的 "
-"OID 是: %3$u)\n"
+msgid "query produced null referenced table name for foreign key trigger \"%s\" on table \"%s\" (OID of table: %u)\n"
+msgstr "查询为外键触发器产生空引用表名\"%s\"在表\"%s\"上(表的OID:%u)\n"
 
-#: pg_dump.c:5688
+#: pg_dump.cpp:9328
 #, c-format
 msgid "finding the columns and types of table \"%s\"\n"
-msgstr "正在查找表 \"%s\" 的字段和类型\n"
+msgstr "正在查找表 \"%s\" 的列和类型\n"
 
-#: pg_dump.c:5866
+#: pg_dump.cpp:9529
 #, c-format
 msgid "invalid column numbering in table \"%s\"\n"
-msgstr "在表 \"%s\" 中的字段个数是无效的\n"
+msgstr "在表 \"%s\" 中的列数是无效的\n"
 
-#: pg_dump.c:5900
+#: pg_dump.cpp:9585
 #, c-format
 msgid "finding default expressions of table \"%s\"\n"
 msgstr "正在查找表 \"%s\" 的默认表达式\n"
 
-#: pg_dump.c:5952
+#: pg_dump.cpp:9658
 #, c-format
 msgid "invalid adnum value %d for table \"%s\"\n"
-msgstr "表 \"%2$s\" 的无效 adnum 值 %1$d\n"
+msgstr "adnum值%d对于表\"%s\"来说是无效的\n"
 
-#: pg_dump.c:6024
+#: pg_dump.cpp:9740
 #, c-format
 msgid "finding check constraints for table \"%s\"\n"
 msgstr "正在为表 \"%s\" 查找检查约束\n"
 
-#: pg_dump.c:6119
+#: pg_dump.cpp:9829
 #, c-format
 msgid "expected %d check constraint on table \"%s\" but found %d\n"
 msgid_plural "expected %d check constraints on table \"%s\" but found %d\n"
-msgstr[0] "在表\"%2$s\"上期望有%1$d个检查约束,但是找到了%3$d个\n"
+msgstr[0] "预期%d检查表的约束条件\"%s\"但发现%d\n"
 
-#: pg_dump.c:6123
+#: pg_dump.cpp:9835
 #, c-format
 msgid "(The system catalogs might be corrupted.)\n"
 msgstr "(系统表可能损坏了.)\n"
 
-#: pg_dump.c:7483
+#: pg_dump.cpp:10966 pg_dump.cpp:10977
+#, c-format
+msgid "WARNING: permission denied for object \"%s\" when dump the object data, only user %s can do it\n"
+msgstr "警告:对对象的权限被拒绝\"%s\"当转储对象数据时, 只有用户%s可以做到\n"
+
+#: pg_dump.cpp:11183
+#, c-format
+msgid "WARNING: directory not dumped because current user is not a superuser\n"
+msgstr "警告:目录没有被转储, 因为当前用户不是超级用户\n"
+
+#: pg_dump.cpp:11439
 #, c-format
 msgid "WARNING: typtype of data type \"%s\" appears to be invalid\n"
 msgstr "警告: 数据类型 \"%s\" 的所有者看起来无效\n"
 
-#: pg_dump.c:8932
+#: pg_dump.cpp:13045
 #, c-format
 msgid "WARNING: bogus value in proargmodes array\n"
 msgstr "警告: 无法分析 proargmodes 数组\n"
 
-#: pg_dump.c:9260
+#: pg_dump.cpp:13335
 #, c-format
 msgid "WARNING: could not parse proallargtypes array\n"
 msgstr "警告: 无法分析 proallargtypes 数组\n"
 
-#: pg_dump.c:9276
+#: pg_dump.cpp:13345
 #, c-format
 msgid "WARNING: could not parse proargmodes array\n"
 msgstr "警告: 无法分析 proargmodes 数组\n"
 
-#: pg_dump.c:9290
+#: pg_dump.cpp:13354
 #, c-format
 msgid "WARNING: could not parse proargnames array\n"
 msgstr "警告: 无法分析 proargnames 数组\n"
 
-#: pg_dump.c:9301
+#: pg_dump.cpp:13361
 #, c-format
 msgid "WARNING: could not parse proconfig array\n"
 msgstr "警告: 无法解析 proconfig 数组\n"
 
-#: pg_dump.c:9358
+#: pg_dump.cpp:13452
 #, c-format
 msgid "unrecognized provolatile value for function \"%s\"\n"
 msgstr "函数 \"%s\" 的意外正向易失值\n"
 
-#: pg_dump.c:9578
+#: pg_dump.cpp:13826
+#, c-format
+msgid "unable to find function definition for OID %u"
+msgstr "无法找到OID的函数定义%u"
+
+#: pg_dump.cpp:13904
 #, c-format
 msgid "WARNING: bogus value in pg_cast.castfunc or pg_cast.castmethod field\n"
 msgstr "警告: 在pg_cast.castfunc或者pg_cast.castmethod字段中的是假值\n"
 
-#: pg_dump.c:9581
+#: pg_dump.cpp:13907
 #, c-format
 msgid "WARNING: bogus value in pg_cast.castmethod field\n"
 msgstr "警告: 在pg_cast.castmethod字段中的是假值\n"
 
-#: pg_dump.c:9950
+#: pg_dump.cpp:14293
 #, c-format
 msgid "WARNING: could not find operator with OID %s\n"
 msgstr "警告: 未找到 OID 为 %s 的操作符\n"
 
-#: pg_dump.c:11012
+#: pg_dump.cpp:15355
 #, c-format
-msgid ""
-"WARNING: aggregate function %s could not be dumped correctly for this "
-"database version; ignored\n"
+msgid "WARNING: aggregate function %s could not be dumped correctly for this database version; ignored\n"
 msgstr "警告: 无法为此版本的数据库正确转储聚集函数 \"%s\"; 忽略\n"
 
-#: pg_dump.c:11788
+#: pg_dump.cpp:16299
 #, c-format
 msgid "unrecognized object type in default privileges: %d\n"
 msgstr "缺省权限中存在未知对象类型: %d\n"
 
-#: pg_dump.c:11803
+#: pg_dump.cpp:16356
 #, c-format
 msgid "could not parse default ACL list (%s)\n"
 msgstr "无法解析缺省ACL列表(%s)\n"
 
-#: pg_dump.c:11858
+#: pg_dump.cpp:16415
 #, c-format
 msgid "could not parse ACL list (%s) for object \"%s\" (%s)\n"
-msgstr "无法为对象 \"%2$s\" 分析 ACL 列表 (%1$s) (%3$s)\n"
+msgstr "无法解析ACL列表(%s)为对象\"%s\"(%s)\n"
 
-#: pg_dump.c:12299
+#: pg_dump.cpp:17899
 #, c-format
-msgid "query to obtain definition of view \"%s\" returned no data\n"
-msgstr "获取视图 \"%s\" 定义的查询没有返回数据\n"
+msgid "tablespace %u not exist\n"
+msgstr "表空间%u不存在\n"
 
-#: pg_dump.c:12302
+#: pg_dump.cpp:18051
 #, c-format
-msgid ""
-"query to obtain definition of view \"%s\" returned more than one definition\n"
-msgstr "获取视图 \"%s\" 定义的查询返回超过一个定义\n"
+msgid "unsupported subpartition type %c\n"
+msgstr "不支持的子分区类型 %c\n"
 
-#: pg_dump.c:12309
+#: pg_dump.cpp:18060 pg_dump.cpp:18320 pg_dump.cpp:20677
 #, c-format
-msgid "definition of view \"%s\" appears to be empty (length zero)\n"
-msgstr "视图 \"%s\" 的定义是空的(零长)\n"
+msgid "array index should not be smaller than zero: %d\n"
+msgstr "数组下标不能小于零:%d\n"
 
-#: pg_dump.c:12920
+#: pg_dump.cpp:18617
+#, c-format
+msgid "query to obtain definition of view %s returned no data\n"
+msgstr "查询以获取视图的定义%s没有返回数据\n"
+
+#: pg_dump.cpp:18620
+#, c-format
+msgid "query to obtain definition of view %s returned more than one definition\n"
+msgstr "查询以获取视图的定义%s返回多个定义\n"
+
+#: pg_dump.cpp:18627
+#, c-format
+msgid "definition of view %s appears to be empty (length zero)\n"
+msgstr "视图的定义%s显示为空(长度为0)\n"
+
+#: pg_dump.cpp:18639
+#, c-format
+msgid "query to obtain schema info of view %s returned no data\n"
+msgstr "查询视图的架构信息%s没有返回数据\n"
+
+#: pg_dump.cpp:18643
+#, c-format
+msgid "schema info of view %s appears to be empty (length zero)\n"
+msgstr "视图的架构信息%s显示为空(长度为0)\n"
+
+#: pg_dump.cpp:19165
+#, c-format
+msgid "query to obtain definition of materialized view %s returned no data\n"
+msgstr "查询以获取实体化视图的定义%s没有返回数据\n"
+
+#: pg_dump.cpp:19168
+#, c-format
+msgid "query to obtain definition of materialized view %s returned more than one definition\n"
+msgstr "查询以获取实体化视图的定义%s返回多个定义\n"
+
+#: pg_dump.cpp:19177
+#, c-format
+msgid "definition of materialized view %s appears to be empty (length zero)\n"
+msgstr "物化视图的定义%s显示为空(长度为0)\n"
+
+#: pg_dump.cpp:19190
+#, c-format
+msgid "query to obtain schema info of materialized view %s returned no data\n"
+msgstr "查询实体化视图的架构信息%s没有返回数据\n"
+
+#: pg_dump.cpp:19195
+#, c-format
+msgid "schema info of materialized view %s appears to be empty (length zero)\n"
+msgstr "物化视图的架构信息%s显示为空(长度为0)\n"
+
+#: pg_dump.cpp:20052
+#, c-format
+msgid "Failed to dump foreign table %s, because the distribution mode %c is not supported.\n"
+msgstr "日志含义转储外部表失败%s, 因为配送方式%c不支持.\n"
+
+#: pg_dump.cpp:20730
 #, c-format
 msgid "invalid column number %d for table \"%s\"\n"
-msgstr "对于表 \"%2$s\" 字段个数 %1$d 是无效的\n"
+msgstr "无效的列号%d对于表\"%s\"\n"
 
-#: pg_dump.c:13030
+#: pg_dump.cpp:20880
+#, c-format
+msgid "missing constraint \"%s\"\n"
+msgstr "缺少约束\"%s\"\n"
+
+#: pg_dump.cpp:20897 pg_dump.cpp:21034
 #, c-format
 msgid "missing index for constraint \"%s\"\n"
 msgstr "对于约束 \"%s\" 缺少索引\n"
 
-#: pg_dump.c:13217
+#: pg_dump.cpp:21210
 #, c-format
 msgid "unrecognized constraint type: %c\n"
 msgstr "未知的约束类型: %c\n"
 
-#: pg_dump.c:13366 pg_dump.c:13530
+#: pg_dump.cpp:21363 pg_dump.cpp:21564
 #, c-format
-msgid "query to get data of sequence \"%s\" returned %d row (expected 1)\n"
-msgid_plural ""
-"query to get data of sequence \"%s\" returned %d rows (expected 1)\n"
-msgstr[0] "查询得到了序列\"%s\"的数据，返回了%d条记录(期望一条)\n"
+msgid "query to get data of sequence %s returned %d row (expected 1)\n"
+msgid_plural "query to get data of sequence %s returned %d rows (expected 1)\n"
+msgstr[0] "查询获取序列数据%s返回%d行数(预计1行)\n"
 
-#: pg_dump.c:13377
+#: pg_dump.cpp:21379
 #, c-format
 msgid "query to get data of sequence \"%s\" returned name \"%s\"\n"
 msgstr "获取序列 \"%s\" 的数据的查询返回了名字 \"%s\"\n"
 
+#: pg_dump.cpp:21626
+#, c-format
+msgid "failed to execute SELECT pg_catalog.nextval(%s).\n"
+msgstr "执行SELECT pg_catalog.nextval(%s)失败.\n"
+
+#: pg_dump.cpp:21635
+#, c-format
+msgid "query to get nextval of sequence %s returned %d rows (expected 1)\n"
+msgid_plural "query to get nextval of sequence %s returned %d rows (expected 1)\n"
+msgstr[0] "查询获取序列的nextval%s返回%d行数(预计1行)\n"
+
 # fe-exec.c:1371
-#: pg_dump.c:13617
+#: pg_dump.cpp:21744
 #, c-format
 msgid "unexpected tgtype value: %d\n"
 msgstr "意外的tgtype值: %d\n"
 
-#: pg_dump.c:13699
+#: pg_dump.cpp:21814
 #, c-format
-msgid "invalid argument string (%s) for trigger \"%s\" on table \"%s\"\n"
-msgstr "给表 \"%3$s\" 上的触发器 \"%2$s\" 的错误参数 (%1$s)\n"
+msgid "invalid argument string (%s) for trigger %s on table %s\n"
+msgstr "参数字符串(%s)对表%s的触发器%s是无效的\n"
 
-#: pg_dump.c:13816
+#: pg_dump.cpp:21953
 #, c-format
-msgid ""
-"query to get rule \"%s\" for table \"%s\" failed: wrong number of rows "
-"returned\n"
-msgstr "获取表 \"%2$s\" 的规则 \"%1$s\" 查询失败: 返回了错误的行数\n"
+msgid "query to get rule %s for table %s failed: wrong number of rows returned\n"
+msgstr "查询获取规则%s对于表%s失败:返回的行数错误\n"
 
-#: pg_dump.c:14088
+#: pg_dump.cpp:22173
+#, c-format
+msgid "unexpected policy command type: %c\n"
+msgstr "异常的策略命令类型:%c\n"
+
+#: pg_dump.cpp:22228
+#, c-format
+msgid "WARNING: synonym not dumped because current user is not a superuser\n"
+msgstr "警告:同义词没有被转储, 因为当前用户不是超级用户\n"
+
+#: pg_dump.cpp:22521
 #, c-format
 msgid "reading dependency data\n"
 msgstr "读取从属数据\n"
 
-#: pg_dump.c:14669
+#: pg_dump.cpp:23102
 #, c-format
-msgid "query returned %d row instead of one: %s\n"
-msgid_plural "query returned %d rows instead of one: %s\n"
-msgstr[0] "查询返回了%d条记录，而不是一条记录: %s\n"
+msgid "%s: receive syslog failed because of internal error: %s"
+msgstr "%s: 由于内部错误 %s 接收syslog失败"
+
+#: pg_dump.cpp:23115
+#, c-format
+msgid "%s: could not get COPY data stream: %s"
+msgstr "%s: 无法得到复制数据流: %s"
+
+#: pg_dump.cpp:23134
+msgid "\n"
+msgstr "\n"
+
+#: pg_dump.cpp:23135
+#, c-format
+msgid "%s: could not read COPY data: %s"
+msgstr "%s: 无法读取COPY数据: %s"
+
+#: pg_dump.cpp:23147
+#, c-format
+msgid "%s: invalid tar block header size: %d\n"
+msgstr "%s: 无效的tar压缩块头大小: %d\n"
+
+#: pg_dump.cpp:23153
+#, c-format
+msgid "%s: could not parse file size\n"
+msgstr "%s: 无法解析文件大小\n"
+
+#: pg_dump.cpp:23159
+#, c-format
+msgid "%s: could not parse file mode\n"
+msgstr "%s: 无法解析文件模式\n"
+
+#: pg_dump.cpp:23178
+#, c-format
+msgid "%s: could not create file \"%s\": %s\n"
+msgstr "%s: 无法创建文件 \"%s\": %s\n"
+
+#: pg_dump.cpp:23186
+#, c-format
+msgid "%s: could not set permissions on file \"%s\": %s\n"
+msgstr "%s: 无法设置文件 \"%s\"的访问权限: %s\n"
+
+#: pg_dump.cpp:23210
+#, c-format
+msgid "%s: could not write to file \"%s\": %s\n"
+msgstr "%s: 无法写文件 \"%s\": %s\n"
+
+#: pg_dump.cpp:23225
+#, c-format
+msgid "%s: COPY stream ended before last file was finished\n"
+msgstr "%s: 复制流在最后一个文件结束前终止\n"
+
+#: pg_dump.cpp:23519
+#, c-format
+msgid "query to get auto_increment sequence name of %s returned %d row (expected 1)\n"
+msgid_plural "query to get auto_increment sequence name of %s returned %d row (expected 1)\n"
+msgstr[0] "查询的自动递增序列名%s返回%d行(预计为1)\n"
+
+#: pg_dump.cpp:23546
+#, c-format
+msgid "query to get auto_increment sequence value of %s returned %d row (expected 1)\n"
+msgid_plural "query to get auto_increment sequence value of %s returned %d row (expected 1)\n"
+msgstr[0] "查询的自动递增序列值%s返回%d行(预计为1)\n"
 
 #. translator: this is a module name
-#: pg_dump_sort.c:21
+#: pg_dump_sort.cpp:25
 msgid "sorter"
 msgstr "排序器"
 
-#: pg_dump_sort.c:367
+#: pg_dump_sort.cpp:350
 #, c-format
 msgid "invalid dumpId %d\n"
 msgstr "无效的dumpId %d\n"
 
-#: pg_dump_sort.c:373
+#: pg_dump_sort.cpp:355
 #, c-format
 msgid "invalid dependency %d\n"
 msgstr "无效的依赖 %d\n"
 
-#: pg_dump_sort.c:587
+#: pg_dump_sort.cpp:558
 #, c-format
 msgid "could not identify dependency loop\n"
 msgstr "无法标识循环依赖\n"
 
-#: pg_dump_sort.c:1037
+#: pg_dump_sort.cpp:970
 #, c-format
-msgid ""
-"NOTICE: there are circular foreign-key constraints among these table(s):\n"
+msgid "NOTICE: there are circular foreign-key constraints among these table(s):\n"
 msgstr "注意: 这些表之间存在循环外键约束依赖:\n"
 
-#: pg_dump_sort.c:1039 pg_dump_sort.c:1059
+#: pg_dump_sort.cpp:972 pg_dump_sort.cpp:994
 #, c-format
 msgid "  %s\n"
 msgstr "  %s\n"
 
-#: pg_dump_sort.c:1040
+#: pg_dump_sort.cpp:974
 #, c-format
-msgid ""
-"You might not be able to restore the dump without using --disable-triggers "
-"or temporarily dropping the constraints.\n"
-msgstr ""
-"不使用 --disable-triggers 选项或者临时删除约束，你将不能对备份进行恢复 .\n"
+msgid "You might not be able to restore the dump without using --disable-triggers or temporarily dropping the constraints.\n"
+msgstr "不使用 --disable-triggers 选项或者临时删除约束, 你将不能对备份进行恢复 .\n"
 
-#: pg_dump_sort.c:1041
+#: pg_dump_sort.cpp:976
 #, c-format
-msgid ""
-"Consider using a full dump instead of a --data-only dump to avoid this "
-"problem.\n"
+msgid "Consider using a full dump instead of a --data-only dump to avoid this problem.\n"
 msgstr "考虑使用完全备份代替 --data-only选项进行备份以避免此问题.\n"
 
-#: pg_dump_sort.c:1053
+#: pg_dump_sort.cpp:988
 #, c-format
 msgid "WARNING: could not resolve dependency loop among these items:\n"
 msgstr "WARNING: 无法解析这些项的循环依赖:\n"
 
-#: pg_dumpall.c:173
+#: pg_dumpall.cpp:291
 #, c-format
 msgid ""
-"The program \"pg_dump\" is needed by %s but was not found in the\n"
+"The program \"gs_dump\" is needed by %s but was not found in the\n"
 "same directory as \"%s\".\n"
 "Check your installation.\n"
 msgstr ""
-"%s 需要程序 \"pg_dump\", 但是在同一个目录 \"%s\" 没有找到.\n"
-"\n"
-"检查您的安装.\n"
+"%s 需要程序 \"pg_dump\",\n"
+"但是在同一个目录 \"%s\"没有找到.\n"
+"请检查您的安装.\n"
 
-#: pg_dumpall.c:180
+#: pg_dumpall.cpp:298
 #, c-format
 msgid ""
-"The program \"pg_dump\" was found by \"%s\"\n"
+"The program \"gs_dump\" was found by \"%s\"\n"
 "but was not the same version as %s.\n"
 "Check your installation.\n"
 msgstr ""
-"%s 找到程序 \"pg_dump\", 但是和版本 \"%s\" 不一致.\n"
-"\n"
-"检查您的安装.\n"
+"%s 找到了程序 \"pg_dump\",\n"
+"但是版本和 \"%s\" 不一致.\n"
+"请检查您的安装.\n"
 
-#: pg_dumpall.c:316
-#, c-format
-msgid ""
-"%s: options -g/--globals-only and -r/--roles-only cannot be used together\n"
-msgstr "%s: 选项-g/--globals-only和-r/--roles-only不能同时使用.\n"
-
-#: pg_dumpall.c:325
-#, c-format
-msgid ""
-"%s: options -g/--globals-only and -t/--tablespaces-only cannot be used "
-"together\n"
-msgstr "%s: 选项  -g/--globals-only和-t/--tablespaces-only不能同时使用.\n"
-
-#: pg_dumpall.c:334
-#, c-format
-msgid ""
-"%s: options -r/--roles-only and -t/--tablespaces-only cannot be used "
-"together\n"
-msgstr "%s: 选项  -r/--roles-only和 -t/--tablespaces-only不能同时使用.\n"
-
-#: pg_dumpall.c:376 pg_dumpall.c:1730
+#: pg_dumpall.cpp:326
 #, c-format
 msgid "%s: could not connect to database \"%s\"\n"
-msgstr "%s: 无法与数据库 \"%s\" 联接\n"
+msgstr "%s: 无法连接数据库\"%s\"\n"
 
-#: pg_dumpall.c:391
+#: pg_dumpall.cpp:353
 #, c-format
 msgid ""
 "%s: could not connect to databases \"postgres\" or \"template1\"\n"
@@ -2024,220 +2774,416 @@ msgstr ""
 "%s: 无法连接到数据库 \"postgres\"或\"template1\"\n"
 "请指定另外一个数据库.\n"
 
+#: pg_dumpall.cpp:390
+#, c-format
+msgid ""
+"Dumpall File specified already exists.\n"
+"Perform dumpall again by: \n"
+"1) specifying a different file or \n"
+"2) removing the specified file or \n"
+"3) Not specifying dont-overwrite-file option\n"
+msgstr ""
+"指定的Dumpall文件已存在."
+"通过以下方式再次执行转储: \n"
+"1) 指定不同的文件\n"
+"2) 删除指定的文件\n"
+"3) 不指定 dont-overwrite-file 选项\n"
+
 # command.c:1148
-#: pg_dumpall.c:408
+#: pg_dumpall.cpp:414
 #, c-format
 msgid "%s: could not open the output file \"%s\": %s\n"
-msgstr "%s：无法打开输出文件 \"%s\"：%s\n"
+msgstr "%s: 无法打开输出文件 \"%s\": %s\n"
 
-#: pg_dumpall.c:535
+#: pg_dumpall.cpp:443
+msgid "%s: set uppercase_attribute_name to off failed.\n"
+msgstr "%s: 设置uppercase_attribute_name为off失败.\n"
+
+#: pg_dumpall.cpp:573
 #, c-format
+msgid "dumpall operation successful\n"
+msgstr "dumpall操作成功\n"
+
+#: pg_dumpall.cpp:864
+#, c-format
+msgid "Generate random key failed.\n"
+msgstr "生成随机密钥失败.\n"
+
+#: pg_dumpall.cpp:1047
+#, c-format
+msgid "%s: invalid binary upgrade usermap\n"
+msgstr "%s: 无效的二进制升级用户映射\n"
+
+#: pg_dumpall.cpp:1098
+#, c-format
+msgid "%s: options -g/--globals-only and -r/--roles-only cannot be used together\n"
+msgstr "%s: 选项-g/--globals-only和-r/--roles-only不能同时使用.\n"
+
+#: pg_dumpall.cpp:1104
+#, c-format
+msgid "%s: options -g/--globals-only and -t/--tablespaces-only cannot be used together\n"
+msgstr "%s: 选项  -g/--globals-only和-t/--tablespaces-only不能同时使用.\n"
+
+#: pg_dumpall.cpp:1110
+#, c-format
+msgid "%s: options -r/--roles-only and -t/--tablespaces-only cannot be used together\n"
+msgstr "%s: 选项  -r/--roles-only和 -t/--tablespaces-only不能同时使用.\n"
+
+#: pg_dumpall.cpp:1117 pg_restore.cpp:502
+#, c-format
+msgid "%s: options -s/--schema-only and -a/--data-only cannot be used together\n"
+msgstr "%s: options -s/--schema-only和-a/--data-only不能同时使用\n"
+
+#: pg_dumpall.cpp:1124
+#, c-format
+msgid "%s: options -r/--roles-only and -a/--data-only cannot be used together\n"
+msgstr "%s: options -r/--roles-only和-a/--data-only不能同时使用\n"
+
+#: pg_dumpall.cpp:1130
+#, c-format
+msgid "%s: options -t/--tablespaces-only and -a/--data-only cannot be used together\n"
+msgstr "%s: options -t/--tablspace -only和-a/--data-only不能同时使用\n"
+
+#: pg_dumpall.cpp:1136
+#, c-format
+msgid "%s: options -g/--globals-only and -a/--data-only cannot be used together\n"
+msgstr "%s: options -g/--global -only和-a/--data-only不能同时使用\n"
+
+#: pg_dumpall.cpp:1142
+#, c-format
+msgid "%s: options tablespaces-postfix should be used with --binary-upgrade option\n"
+msgstr "%s: options tablespaces-postfix应该与--binary-upgrade选项一起使用\n"
+
+#: pg_dumpall.cpp:1158 pg_dumpall.cpp:1165
+#, c-format
+msgid "%s: options --parallel-jobs should be set between 1 and 1000\n"
+msgstr "%s: options --并行作业应该设置在1到1000之间\n"
+
+#: pg_dumpall.cpp:1172
+#, c-format
+msgid "%s: options --parallel-jobs should be used with -f/--file option\n"
+msgstr "%s: options --并行作业应该与-f/--file option一起使用\n"
+
+#: pg_dumpall.cpp:1218
 msgid ""
-"%s extracts a PostgreSQL database cluster into an SQL script file.\n"
+"%s extracts an openGauss database cluster into an SQL script file.\n"
 "\n"
 msgstr ""
-"%s 抽取一个 PostgreSQL 数据库簇进一个 SQL 脚本文件.\n"
+"%s 提取一个openGauss数据库集群到一个 SQL 脚本文件.\n"
 "\n"
 
-#: pg_dumpall.c:537
+#: pg_dumpall.cpp:1220
 #, c-format
 msgid "  %s [OPTION]...\n"
-msgstr "  %s [选项]...\n"
+msgstr "  %s [OPTION]...\n"
 
-#: pg_dumpall.c:540
+#: pg_dumpall.cpp:1223
 #, c-format
-msgid "  -f, --file=FILENAME          output file name\n"
-msgstr "  -f, --file=FILENAME          输出文件名\n"
+msgid "  -f, --file=FILENAME                         output file name\n"
+msgstr "  -f, --file=FILENAME                          输出文件名\n"
 
-#: pg_dumpall.c:546
+#: pg_dumpall.cpp:1230
+#, c-format
+msgid "  -c, --clean                                 clean (drop) databases before recreating\n"
+msgstr "  -c, --clean                                  在重新创建之前清除(删除)数据库\n"
+
+#: pg_dumpall.cpp:1231
+#, c-format
+msgid "  -g, --globals-only                          dump only global objects, no databases\n"
+msgstr "  -g, --globals-only                           只转储全局对象, 不转储数据库\n"
+
+#: pg_dumpall.cpp:1233
+#, c-format
+msgid "  -O, --no-owner                              skip restoration of object ownership\n"
+msgstr "  -O, --no-owner                               跳过对象所有权的恢复\n"
+
+#: pg_dumpall.cpp:1234
+#, c-format
+msgid "  -r, --roles-only                            dump only roles, no databases or tablespaces\n"
+msgstr "  -r, --roles-only                             只转储角色, 不转储数据库或表空间\n"
+
+#: pg_dumpall.cpp:1236
+#, c-format
+msgid "  -S, --sysadmin=NAME                         system admin user name to use in the dump\n"
+msgstr "  -S, --sysadmin=NAME                          转储时使用的系统管理员用户名\n"
+
+#: pg_dumpall.cpp:1237
+#, c-format
+msgid "  -t, --tablespaces-only                      dump only tablespaces, no databases or roles\n"
+msgstr "  -t, --tablespaces-only                       只转储表空间, 不转储数据库或角色\n"
+
+#: pg_dumpall.cpp:1238
+#, c-format
+msgid "  -x, --no-privileges                         do not dump privileges (grant/revoke)\n"
+msgstr "  -x, --no-privileges                          不转储权限(grant/revoke)\n"
+
+#: pg_dumpall.cpp:1254
+#, c-format
+msgid "  --dont-overwrite-file                       do not overwrite the existing file\n"
+msgstr "  --don-override-file                          不覆盖现有文件\n"
+
+#: pg_dumpall.cpp:1255
 #, c-format
 msgid ""
-"  -c, --clean                  clean (drop) databases before recreating\n"
-msgstr "  -c, --clean                  在重新创建数据库前先清除(删除)数据库\n"
-
-#: pg_dumpall.c:547
-#, c-format
-msgid "  -g, --globals-only           dump only global objects, no databases\n"
-msgstr "  -g, --globals-only           只转储全局对象, 不包括数据库\n"
-
-#: pg_dumpall.c:549 pg_restore.c:423
-#, c-format
-msgid "  -O, --no-owner               skip restoration of object ownership\n"
-msgstr "  -O, --no-owner               不恢复对象所属者\n"
-
-#: pg_dumpall.c:550
-#, c-format
-msgid ""
-"  -r, --roles-only             dump only roles, no databases or tablespaces\n"
-msgstr "  -r, --roles-only             只转储角色，不包括数据库或表空间\n"
-
-#: pg_dumpall.c:552
-#, c-format
-msgid "  -S, --superuser=NAME         superuser user name to use in the dump\n"
-msgstr "  -S, --superuser=NAME         在转储中, 指定的超级用户名\n"
-
-#: pg_dumpall.c:553
-#, c-format
-msgid ""
-"  -t, --tablespaces-only       dump only tablespaces, no databases or roles\n"
-msgstr "  -t, --tablespaces-only       只转储表空间，而不转储数据库或角色\n"
-
-#: pg_dumpall.c:570
-#, c-format
-msgid "  -l, --database=DBNAME    alternative default database\n"
-msgstr "  -l, --database=DBNAME    另一个缺省数据库\n"
-
-#: pg_dumpall.c:577
-#, c-format
-msgid ""
-"\n"
-"If -f/--file is not used, then the SQL script will be written to the "
-"standard\n"
-"output.\n"
-"\n"
+"  --use-set-session-authorization             use SET SESSION AUTHORIZATION commands instead of\n"
+"                                              ALTER OWNER commands to set ownership\n"
 msgstr ""
-"\n"
-"如果没有使用 -f/--file，那么将把SQL脚本写到标准输出\n"
-".\n"
-"\n"
+"  --use-set-session-authorization             使用 SESSION AUTHORIZATION 命令代替\n"
+"                                              ALTER OWNER 命令来设置所有权\n"
 
-#: pg_dumpall.c:1068
+#: pg_dumpall.cpp:1258
+#, c-format
+msgid "  --with-key=KEY                              AES128 encryption key ,must be 16 bytes in length\n"
+msgstr "  --with-key=KEY                               AES128加密密钥, 长度必须为16字节\n"
+
+#: pg_dumpall.cpp:1259
+#, c-format
+msgid "  --include-extensions                        include extensions in dumpall \n"
+msgstr "  --include-extensions                         包含dumpall中的扩展\n"
+
+#: pg_dumpall.cpp:1260
+#, c-format
+msgid "  --include-templatedb                        include dumping of template database also \n"
+msgstr "  --include-templatedb                         包含转储模板数据库\n"
+
+#: pg_dumpall.cpp:1264
+#, c-format
+msgid "  --dump-nodes                                include nodes and node groups in the dump\n"
+msgstr "  --dump-nodes                                 包括转储中的节点和节点组\n"
+
+#: pg_dumpall.cpp:1266
+#, c-format
+msgid "  --include-nodes                             include TO NODE clause in the dumped CREATE TABLE commands\n"
+msgstr "--include-nodes                                包含转储的CREATE TABLE命令中的TO NODE子句\n"
+
+#: pg_dumpall.cpp:1267
+#, c-format
+msgid "  --include-buckets                           include BUCKETS clause in the dumped CREATE NODE GROUP commands\n"
+msgstr "  --include-buckets                            在转储的CREATE NODE GROUP命令中包含BUCKETS子句\n"
+
+#: pg_dumpall.cpp:1269
+#, c-format
+msgid "  --dump-wrm                                  include workload resource manager settings in the dump\n"
+msgstr "  --dump-wrm                                   在dump中包含工作负载资源管理器设置\n"
+
+#: pg_dumpall.cpp:1276
+#, c-format
+msgid "  --tablespaces-postfix                       to be used only by upgrade utility for adding the postfix name specified for all the tablespaces\n"
+msgstr "  --tablespaces-postfix                        仅供升级工具使用, 用于为所有表空间添加指定的后缀名\n"
+
+#: pg_dumpall.cpp:1278
+#, c-format
+msgid "  --parallel-jobs                             number of parallel jobs to dump databases\n"
+msgstr "  --parallel-jobs                               转储数据库的并行作业数\n"
+
+#: pg_dumpall.cpp:1282
+#, c-format
+msgid "  -l, --database=DBNAME                       alternative default database\n"
+msgstr "  -l, --database=DBNAME                         备选默认数据库\n"
+
+#: pg_dumpall.cpp:1993
+#, c-format
+msgid "grolist maybe exist sql injection: %s.\n"
+msgstr "grolist可能存在SQL注入:%s.\n"
+
+#: pg_dumpall.cpp:2256
 #, c-format
 msgid "%s: could not parse ACL list (%s) for tablespace \"%s\"\n"
-msgstr "%1$s: 无法为表空间 \"%3$s\" 分析 ACL 列表 (%2$s)\n"
+msgstr "%s: 无法解析ACL列表(%s)为表空间\"%s\"\n"
 
-#: pg_dumpall.c:1372
+#: pg_dumpall.cpp:2619
 #, c-format
 msgid "%s: could not parse ACL list (%s) for database \"%s\"\n"
-msgstr "%1$s: 无法为数据库 \"%3$s\" 分析 ACL 列表 (%2$s)\n"
+msgstr "%s: 无法解析ACL列表(%s)用于数据库\"%s\"\n"
 
-#: pg_dumpall.c:1584
+#: pg_dumpall.cpp:2851
+#, c-format
+msgid "%s: Skipping database \"%s\" as include-templatedb option not specified...\n"
+msgstr "%s: 跳过数据库\"%s\"因为include-templatedb选项没有指定…\n"
+
+#: pg_dumpall.cpp:2858
 #, c-format
 msgid "%s: dumping database \"%s\"...\n"
 msgstr "%s: 正在转储数据库 \"%s\"...\n"
 
-#: pg_dumpall.c:1594
-#, c-format
-msgid "%s: pg_dump failed on database \"%s\", exiting\n"
-msgstr "%s: pg_dump 失败在数据库 \"%s\", 正在退出\n"
-
-# command.c:1148
-#: pg_dumpall.c:1603
-#, c-format
-msgid "%s: could not re-open the output file \"%s\": %s\n"
-msgstr "%s：无法重新打开输出文件 \"%s\"：%s\n"
-
-#: pg_dumpall.c:1642
+#: pg_dumpall.cpp:2873
 #, c-format
 msgid "%s: running \"%s\"\n"
 msgstr "%s: 正在运行 \"%s\"\n"
 
-#: pg_dumpall.c:1752
+# command.c:1148
+#: pg_dumpall.cpp:2881
+#, c-format
+msgid "%s: could not re-open the output file \"%s\": %s\n"
+msgstr "%s: 无法重新打开输出文件 \"%s\": %s\n"
+
+#: pg_dumpall.cpp:3087
+#, c-format
+msgid "%s%s%s"
+msgstr "%s%s%s"
+
+#: pg_dumpall.cpp:3104
+#, c-format
+msgid "%s: gs_dump failed on database \"%s\", exiting\n"
+msgstr "%s: gs_dump在数据库上失败\"%s\",退出\n"
+
+#: pg_dumpall.cpp:3221
+#, c-format
+msgid "%s: could not connect to database \"%s\""
+msgstr "%s:无法连接数据库\"%s\""
+
+#: pg_dumpall.cpp:3236
 #, c-format
 msgid "%s: could not connect to database \"%s\": %s\n"
-msgstr "%s: 无法与数据库 \"%s\" 联接: %s\n"
+msgstr "%s: 无法与数据库 \"%s\" 连接: %s\n"
 
-#: pg_dumpall.c:1766
+#: pg_dumpall.cpp:3246
 #, c-format
 msgid "%s: could not get server version\n"
 msgstr "%s: 无法从服务器获取版本\n"
 
-#: pg_dumpall.c:1772
+#: pg_dumpall.cpp:3251
 #, c-format
 msgid "%s: could not parse server version \"%s\"\n"
 msgstr "%s: 无法分析版本字串 \"%s\"\n"
 
-#: pg_dumpall.c:1780
+#: pg_dumpall.cpp:3257
 #, c-format
 msgid "%s: could not parse version \"%s\"\n"
 msgstr "%s: 无法解析版本 \"%s\"\n"
 
-#: pg_dumpall.c:1819 pg_dumpall.c:1845
+#: pg_dumpall.cpp:3289 pg_dumpall.cpp:3310
 #, c-format
 msgid "%s: executing %s\n"
 msgstr "%s: 执行 %s\n"
 
-#: pg_dumpall.c:1825 pg_dumpall.c:1851
-#, c-format
-msgid "%s: query failed: %s"
-msgstr "%s: 查询失败: %s"
-
-#: pg_dumpall.c:1827 pg_dumpall.c:1853
+#: pg_dumpall.cpp:3294 pg_dumpall.cpp:3315
 #, c-format
 msgid "%s: query was: %s\n"
 msgstr "%s: 查询是: %s\n"
 
-#: pg_restore.c:307
+#: pg_dumpall.cpp:3400 pg_dumpall.cpp:3415
 #, c-format
-msgid "%s: options -d/--dbname and -f/--file cannot be used together\n"
-msgstr "%s: 选项 -d/--dbname和-f/--file不能同时使用.\n"
+msgid "shell command argument contains a newline or carriage.\n"
+msgstr "Shell命令参数包含换行符或回车.\n"
 
-#: pg_restore.c:319
+#: pg_dumpall.cpp:3672
 #, c-format
-msgid "%s: cannot specify both --single-transaction and multiple jobs\n"
-msgstr "%s: 不能同时指定选项--single-transaction和多个任务\n"
+msgid "%s: could not parse ACL list (%s) for node group \"%s\"\n"
+msgstr "%s: 无法解析ACL列表(%s)为节点组\"%s\"\n"
 
-#: pg_restore.c:350
+#: pg_dumpall.cpp:4176
 #, c-format
-msgid ""
-"unrecognized archive format \"%s\"; please specify \"c\", \"d\", or \"t\"\n"
-msgstr "不可识别的归档格式\"%s\"; 请指定 \"c\", \"d\", 或 \"t\"\n"
+msgid "%s: could not parse ACL list (%s) for data source \"%s\"\n"
+msgstr "%s: 无法解析ACL列表(%s)作为数据源\"%s\"\n"
 
-#: pg_restore.c:386
+#: pg_restore.cpp:207
+msgid "Mandatory to specify dump filename/path for gs_restore\n"
+msgstr "必须指定gs_restore的转储文件名/路径\n"
+
+#: pg_restore.cpp:222
+msgid "Mandatory to specify either dbname or list option for gs_restore\n"
+msgstr "gs_restore必须指定dbname或list选项\n"
+
+#: pg_restore.cpp:237
+msgid "Either one of dbname or list option need to be specified for gs_restore\n"
+msgstr "对于gs_restore, 需要指定dbname或list选项中的任意一个\n"
+
+# fe-auth.c:595
+#: pg_restore.cpp:263
+#, c-format
+msgid "Encrypt mode is not supported yet.\n"
+msgstr "暂不支持加密模式.\n"
+
+#: pg_restore.cpp:313 pg_restore.cpp:372
+#, c-format
+msgid "%s: failed to remove dir %s.\n"
+msgstr "%s: 删除dir失败%s.\n"
+
+#: pg_restore.cpp:314 pg_restore.cpp:497
+#, c-format
+msgid "%s: invalid number of parallel jobs\n"
+msgstr "%s: 无效的并行任务数\n"
+
+#: pg_restore.cpp:353
 #, c-format
 msgid "WARNING: errors ignored on restore: %d\n"
 msgstr "警告: 恢复中忽略错误: %d\n"
 
-#: pg_restore.c:400
+#: pg_restore.cpp:384
 #, c-format
+msgid "restore operation successful\n"
+msgstr "恢复操作成功\n"
+
+#: pg_restore.cpp:489
+#, c-format
+msgid "%s: options -d/--dbname and -f/--file cannot be used together\n"
+msgstr "%s: 选项 -d/--dbname和-f/--file不能同时使用.\n"
+
+#: pg_restore.cpp:507
+#, c-format
+msgid "%s: options -c/--clean and -a/--data-only cannot be used together\n"
+msgstr "%s: options -c/--clean和-a/--data-only不能同时使用\n"
+
+#: pg_restore.cpp:513
+#, c-format
+msgid "%s: cannot specify both --single-transaction and multiple jobs\n"
+msgstr "%s: 不能同时指定选项--single-transaction和多个任务\n"
+
+#: pg_restore.cpp:544
+#, c-format
+msgid "unrecognized archive format \"%s\"; please specify \"c\", \"d\", or \"t\"\n"
+msgstr "不可识别的归档格式\"%s\"; 请指定 \"c\", \"d\", 或 \"t\"\n"
+
+#: pg_restore.cpp:746
 msgid ""
-"%s restores a PostgreSQL database from an archive created by pg_dump.\n"
+"%s restores an openGauss database from an archive created by gs_dump.\n"
 "\n"
 msgstr ""
-"%s 从一个归档中恢复一个由 pg_dump 创建的 PostgreSQL 数据库.\n"
+"%s 从gs_dump创建的存档中恢复openGauss数据库.\n"
 "\n"
 
-#: pg_restore.c:402
+#: pg_restore.cpp:748
 #, c-format
-msgid "  %s [OPTION]... [FILE]\n"
-msgstr "  %s [选项]... [文件名]\n"
+msgid "  %s [OPTION]... FILE\n"
+msgstr "  %s [OPTION]... FILE\n"
 
-#: pg_restore.c:405
+#: pg_restore.cpp:751
 #, c-format
-msgid "  -d, --dbname=NAME        connect to database name\n"
-msgstr "  -d, --dbname=名字        连接数据库名字\n"
+msgid "  -d, --dbname=NAME                       connect to database name\n"
+msgstr "  -d, --dbname=NAME                        连接数据库名称\n"
 
-#: pg_restore.c:406
+#: pg_restore.cpp:752
 #, c-format
-msgid "  -f, --file=FILENAME      output file name\n"
-msgstr "  -f, --file=文件名        输出文件名\n"
+msgid "  -f, --file=FILENAME                     output file name\n"
+msgstr "  -f, --file=FILENAME                      输出文件名\n"
 
-#: pg_restore.c:407
+#: pg_restore.cpp:753
 #, c-format
-msgid "  -F, --format=c|d|t       backup file format (should be automatic)\n"
-msgstr "  -F, --format=c|d|t       备份文件格式(应该自动进行)\n"
+msgid "  -F, --format=c|d|t                      backup file format (should be automatic)\n"
+msgstr "  -F, --format=c|d|t                       备份文件的格式(应该是自动的)\n"
 
-#: pg_restore.c:408
+#: pg_restore.cpp:754
 #, c-format
-msgid "  -l, --list               print summarized TOC of the archive\n"
-msgstr "  -l, --list               打印归档文件的 TOC 概述\n"
+msgid "  -l, --list                              print summarized TOC of the archive\n"
+msgstr "  -l, --list                               打印归档文件的摘要TOC\n"
 
-#: pg_restore.c:409
+#: pg_restore.cpp:755
 #, c-format
-msgid "  -v, --verbose            verbose mode\n"
-msgstr "  -v, --verbose            详细模式\n"
+msgid "  -v, --verbose                           verbose mode\n"
+msgstr "  -v, --verbose                            verbose模式\n"
 
-#: pg_restore.c:410
+#: pg_restore.cpp:756
 #, c-format
-msgid "  -V, --version            output version information, then exit\n"
-msgstr "  -V, --version            输出版本信息, 然后退出\n"
+msgid "  -V, --version                           output version information, then exit\n"
+msgstr "  -V, --version                            输出版本信息, 然后退出\n"
 
-#: pg_restore.c:411
+#: pg_restore.cpp:757
 #, c-format
-msgid "  -?, --help               show this help, then exit\n"
-msgstr "  -?, --help               显示此帮助, 然后退出\n"
+msgid "  -?, --help                              show this help, then exit\n"
+msgstr "  -？--help                                显示此帮助, 然后退出\n"
 
-#: pg_restore.c:413
+#: pg_restore.cpp:759
 #, c-format
 msgid ""
 "\n"
@@ -2246,473 +3192,178 @@ msgstr ""
 "\n"
 "恢复控制选项:\n"
 
-#: pg_restore.c:414
+#: pg_restore.cpp:760
 #, c-format
-msgid "  -a, --data-only              restore only the data, no schema\n"
-msgstr "  -a, --data-only             只恢复数据, 不包括模式\n"
+msgid "  -a, --data-only                       restore only the data, no schema\n"
+msgstr "  -a, --data-only                         只恢复数据, 不包括模式\n"
 
-#: pg_restore.c:416
+#: pg_restore.cpp:761
 #, c-format
-msgid "  -C, --create                 create the target database\n"
-msgstr "  -C, --create                 创建目标数据库\n"
+msgid "  -c, --clean                           clean (drop) database objects before recreating\n"
+msgstr "  -c, --clean                             在重新创建之前清除(删除)数据库对象\n"
 
-#: pg_restore.c:417
+#: pg_restore.cpp:762
 #, c-format
-msgid "  -e, --exit-on-error          exit on error, default is to continue\n"
-msgstr "  -e, --exit-on-error          发生错误退出, 默认为继续\n"
+msgid "  -C, --create                          create the target database\n"
+msgstr "  -C, --create                            创建目标数据库\n"
 
-#: pg_restore.c:418
+#: pg_restore.cpp:763
 #, c-format
-msgid "  -I, --index=NAME             restore named index\n"
-msgstr "  -I, --index=NAME             恢复指定名称的索引\n"
+msgid "  -e, --exit-on-error                   exit on error, default is to continue\n"
+msgstr "  -e, --exit-on-error                     退出错误, 默认是继续\n"
 
-#: pg_restore.c:419
+#: pg_restore.cpp:764
 #, c-format
-msgid "  -j, --jobs=NUM               use this many parallel jobs to restore\n"
-msgstr "  -j, --jobs=NUM               执行多个并行任务进行恢复工作\n"
+msgid "  -I, --index=NAME                      restore named index(s)\n"
+msgstr "  -I, --index=NAME                        恢复指定索引\n"
 
-#: pg_restore.c:420
+#: pg_restore.cpp:765
+#, c-format
+msgid "  -j, --jobs=NUM                        use this many parallel jobs to restore\n"
+msgstr "  -j, --jobs=NUM                          使用这么多并行作业进行恢复\n"
+
+#: pg_restore.cpp:766
 #, c-format
 msgid ""
-"  -L, --use-list=FILENAME      use table of contents from this file for\n"
-"                               selecting/ordering output\n"
+"  -L, --use-list=FILENAME               use table of contents from this file for\n"
+"                                        selecting/ordering output\n"
 msgstr ""
-"  -L, --use-list=FILENAME      从这个文件中使用指定的内容表排序\n"
-"                               输出\n"
+"  -L, --use-list=FILENAME               使用该文件中的目录选择/排序输出\n"
+"\n"
 
-#: pg_restore.c:422
+#: pg_restore.cpp:768
 #, c-format
-msgid "  -n, --schema=NAME            restore only objects in this schema\n"
-msgstr "  -n, --schema=NAME            在这个模式中只恢复对象\n"
+msgid "  -n, --schema=NAME                     restore only objects in this schema(s)\n"
+msgstr "  -n, --schema=NAME                       只恢复该模式下的对象\n"
 
-#: pg_restore.c:424
+#: pg_restore.cpp:769
 #, c-format
-msgid "  -P, --function=NAME(args)    restore named function\n"
-msgstr "  -P, --function=NAME(args)    恢复指定名字的函数\n"
+msgid "  -O, --no-owner                        skip restoration of object ownership\n"
+msgstr "  -O, --no-owner                          跳过对象所有权的恢复\n"
 
-#: pg_restore.c:425
+#: pg_restore.cpp:770
 #, c-format
-msgid "  -s, --schema-only            restore only the schema, no data\n"
-msgstr "  -s, --schema-only           只恢复模式, 不包括数据\n"
+msgid "  -P, --function=NAME(args)             restore named function(s)\n"
+msgstr "  -P, --function=NAME(args)               恢复指定函数\n"
 
-#: pg_restore.c:426
+#: pg_restore.cpp:771
+#, c-format
+msgid "  -s, --schema-only                     restore only the schema, no data\n"
+msgstr "  -s, --schema-only                       只恢复模式, 不恢复数据\n"
+
+#: pg_restore.cpp:772
+#, c-format
+msgid "  -S, --sysadmin=NAME                   system admin user name to use for disabling triggers\n"
+msgstr "  -S, --sysadmin=NAME                     用于禁用触发器的系统管理员用户名\n"
+
+#: pg_restore.cpp:773
+#, c-format
+msgid "  -t, --table=NAME                      restore named table(s)\n"
+msgstr "  -t, --table=NAME                        恢复指定的表\n"
+
+#: pg_restore.cpp:774
+#, c-format
+msgid "  -T, --trigger=NAME                    restore named trigger(s)\n"
+msgstr "  -T, --trigger=NAME                      恢复指定触发器\n"
+
+#: pg_restore.cpp:775
+#, c-format
+msgid "  -x, --no-privileges/--no-acl          skip restoration of access privileges (grant/revoke)\n"
+msgstr "  -x, --no-privileges/--no-acl            skip恢复访问权限(grant/revoke)\n"
+
+#: pg_restore.cpp:776
+#, c-format
+msgid "  -1, --single-transaction              restore as a single transaction\n"
+msgstr "  -1, --single-transaction                恢复为单个事务\n"
+
+#: pg_restore.cpp:777
+#, c-format
+msgid "  --disable-triggers                    disable triggers during data-only restore\n"
+msgstr "  --disable-triggers                      在仅数据恢复期间禁用触发器\n"
+
+#: pg_restore.cpp:778
 #, c-format
 msgid ""
-"  -S, --superuser=NAME         superuser user name to use for disabling "
-"triggers\n"
-msgstr "  -S, --superuser=NAME         使用指定的超级用户来禁用触发器\n"
-
-#: pg_restore.c:427
-#, c-format
-msgid "  -t, --table=NAME             restore named table\n"
-msgstr "  -t, --table=NAME             恢复指定名字的表\n"
-
-#: pg_restore.c:428
-#, c-format
-msgid "  -T, --trigger=NAME           restore named trigger\n"
-msgstr "  -T, --trigger=NAME          恢复指定名字的触发器\n"
-
-#: pg_restore.c:429
-#, c-format
-msgid ""
-"  -x, --no-privileges          skip restoration of access privileges (grant/"
-"revoke)\n"
-msgstr "  -x, --no-privileges          跳过处理权限的恢复 (grant/revoke)\n"
-
-#: pg_restore.c:430
-#, c-format
-msgid "  -1, --single-transaction     restore as a single transaction\n"
-msgstr "  -1, --single-transaction     作为单个事务恢复\n"
-
-#: pg_restore.c:432
-#, c-format
-msgid ""
-"  --no-data-for-failed-tables  do not restore data of tables that could not "
-"be\n"
-"                               created\n"
+"  --no-data-for-failed-tables           do not restore data of tables that could not be\n"
+"                                        created\n"
 msgstr ""
-"  --no-data-for-failed-tables  对那些无法创建的表不进行\n"
-"                               数据恢复\n"
+"  --no-data-for-failed-tables           对那些无法创建的表不进行数据恢复\n"
+"\n"
 
-#: pg_restore.c:434
+#: pg_restore.cpp:781
 #, c-format
-msgid "  --no-security-labels         do not restore security labels\n"
-msgstr "  --no-security-labels         不恢复安全标签信息\n"
+msgid "  --no-publications                     do not restore publications\n"
+msgstr "  --no-publications                       不恢复出版物\n"
 
-#: pg_restore.c:435
+#: pg_restore.cpp:783
 #, c-format
-msgid "  --no-tablespaces             do not restore tablespace assignments\n"
-msgstr "  --no-tablespaces             不恢复表空间的分配信息\n"
+msgid "  --no-security-labels                  do not restore security labels\n"
+msgstr "  --no-security-labels                    不恢复安全标签\n"
 
-#: pg_restore.c:436
+#: pg_restore.cpp:785
+#, c-format
+msgid "  --no-subscriptions                    do not restore subscriptions\n"
+msgstr "  --no-subscriptions                      不恢复订阅\n"
+
+#: pg_restore.cpp:787
+#, c-format
+msgid "  --no-tablespaces                      do not restore tablespace assignments\n"
+msgstr "  --no-tablespaces                        不恢复表空间分配\n"
+
+#: pg_restore.cpp:788
+#, c-format
+msgid "  --section=SECTION                     restore named section (pre-data, data, or post-data)\n"
+msgstr "  --section=SECTION                       恢复指定的section(前数据, 数据或后数据)\n"
+
+#: pg_restore.cpp:789
 #, c-format
 msgid ""
-"  --section=SECTION            restore named section (pre-data, data, or "
-"post-data)\n"
-msgstr "  --section=SECTION            恢复命名节 (数据前、数据及数据后)\n"
-
-#: pg_restore.c:447
-#, c-format
-msgid "  --role=ROLENAME          do SET ROLE before restore\n"
-msgstr "  --role=ROLENAME          在恢复前执行SET ROLE操作\n"
-
-#: pg_restore.c:449
-#, c-format
-msgid ""
-"\n"
-"If no input file name is supplied, then standard input is used.\n"
-"\n"
+"  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of\n"
+"                                        ALTER OWNER commands to set ownership\n"
 msgstr ""
+"  --use-set-session-authorization       使用 SESSION AUTHORIZATION 命令代替\n"
+"                                        ALTER OWNER 命令来设置所有权\n"
+
+#: pg_restore.cpp:791
+#, c-format
+msgid ""
+"  --pipeline                            use pipeline to pass the password,\n"
+"                                        forbidden to use in terminal\n"
+msgstr ""
+"  --pipeline                            使用管道传递密码，禁止在终端使用\n"
 "\n"
-"如果没有提供输入文件名, 则使用标准输入.\n"
-"\n"
 
-#~ msgid "%s: invalid -X option -- %s\n"
-#~ msgstr "%s: 无效的 -X 选项 -- %s\n"
-
-#~ msgid "  --help                      show this help, then exit\n"
-#~ msgstr "  --help                       显示此帮助信息, 然后退出\n"
-
-#~ msgid ""
-#~ "  --version                   output version information, then exit\n"
-#~ msgstr "  --versoin                    输出版本信息, 然后退出\n"
-
-#~ msgid "*** aborted because of error\n"
-#~ msgstr "*** 因为错误退出\n"
-
-#~ msgid "missing pg_database entry for database \"%s\"\n"
-#~ msgstr "缺少用于 \"%s\" 的 pg_database 记录\n"
-
-#~ msgid ""
-#~ "query returned more than one (%d) pg_database entry for database \"%s\"\n"
-#~ msgstr "查询为数据库 \"%2$s\" 返回了超过一条 (%1$d) pg_database 记录\n"
-
-#~ msgid "dumpDatabase(): could not find pg_largeobject.relfrozenxid\n"
-#~ msgstr "dumpDatabase():  无法找到pg_largeobject.relfrozenxid\n"
-
-#~ msgid "query returned no rows: %s\n"
-#~ msgstr "查询放弃, 没有记录: %s\n"
-
-#~ msgid "missing pg_database entry for this database\n"
-#~ msgstr "缺少此数据库的 pg_database 记录\n"
-
-#~ msgid "found more than one pg_database entry for this database\n"
-#~ msgstr "找到此数据库的多于一条的 pg_database 记录\n"
-
-#~ msgid "could not find entry for pg_indexes in pg_class\n"
-#~ msgstr "在 pg_class 中无法为 pg_indexes 找到记录\n"
-
-#~ msgid "found more than one entry for pg_indexes in pg_class\n"
-#~ msgstr "在 pg_class 表中找到多条 pg_indexes 的记录\n"
-
-#~ msgid "SQL command failed\n"
-#~ msgstr "SQL 命令失败\n"
-
-#~ msgid "cannot reopen stdin\n"
-#~ msgstr "无法重新打开stdin\n"
-
-#~ msgid "cannot reopen non-seekable file\n"
-#~ msgstr "无法重新打开不可查找的文件\n"
-
-#~ msgid "file archiver"
-#~ msgstr "文件归档"
-
-#~ msgid ""
-#~ "WARNING:\n"
-#~ "  This format is for demonstration purposes; it is not intended for\n"
-#~ "  normal use. Files will be written in the current working directory.\n"
-#~ msgstr ""
-#~ "警告:\n"
-#~ "  这个格式仅用于演示; 并非用于一般用途.\n"
-#~ "  文件将写入当前工作目录.\n"
-
-#~ msgid "could not close data file after reading\n"
-#~ msgstr "读取之后无法关闭数据文件\n"
-
-#~ msgid "could not open large object TOC for input: %s\n"
-#~ msgstr "无法打开大对象 TOC 进行输入: %s\n"
-
-#~ msgid "could not open large object TOC for output: %s\n"
-#~ msgstr "无法打开大对象 TOC 进行输出: %s\n"
-
-#~ msgid "could not close large object file\n"
-#~ msgstr "无法关闭大对象文件\n"
-
-#~ msgid "invalid COPY statement -- could not find \"copy\" in string \"%s\"\n"
-#~ msgstr "COPY 语句错 -- 无法在字串 \"%s\" 中找到 \"copy\"\n"
-
-#~ msgid ""
-#~ "invalid COPY statement -- could not find \"from stdin\" in string \"%s\" "
-#~ "starting at position %lu\n"
-#~ msgstr ""
-#~ "COPY 语句错 -- 无法在从 %2$lu 位置开始的字串 \"%1$s\" 里找到 \"from stdin"
-#~ "\" 字样\n"
-
-#~ msgid "restoring large object OID %u\n"
-#~ msgstr "恢复 OID %u 的大对象\n"
-
-#~ msgid "  --help                   show this help, then exit\n"
-#~ msgstr "  --help                   显示此帮助信息, 然后退出\n"
-
-#~ msgid "  --version                output version information, then exit\n"
-#~ msgstr "  --version                输出版本信息, 然后退出\n"
-
-#~ msgid ""
-#~ "  -c, --clean              clean (drop) database objects before "
-#~ "recreating\n"
-#~ msgstr ""
-#~ "  -c, --clean              在重新创建数据库对象之前需要清除（删除）数据库"
-#~ "对象\n"
-
-#~ msgid "  -O, --no-owner           skip restoration of object ownership\n"
-#~ msgstr "  -O, --no-owner           忽略恢复对象所属者\n"
-
-#~ msgid ""
-#~ "  --disable-triggers       disable triggers during data-only restore\n"
-#~ msgstr " --disable-triggers        在只恢复数据的过程中禁用触发器\n"
-
-#~ msgid ""
-#~ "  --use-set-session-authorization\n"
-#~ "                           use SET SESSION AUTHORIZATION commands instead "
-#~ "of\n"
-#~ "                           ALTER OWNER commands to set ownership\n"
-#~ msgstr ""
-#~ "  --use-set-session-authorization\n"
-#~ "                           使用 SESSION AUTHORIZATION 命令代替\n"
-#~ "                  ALTER OWNER命令来设置对象所有权\n"
-
-#~ msgid "%s: out of memory\n"
-#~ msgstr "%s: 内存溢出\n"
-
-#~ msgid "dumpBlobs(): could not open large object: %s"
-#~ msgstr "dumpBlobs(): 无法打开大对象: %s"
-
-#~ msgid "saving large object comments\n"
-#~ msgstr "正在保存大对象注释\n"
-
-#~ msgid "no label definitions found for enum ID %u\n"
-#~ msgstr "对于枚举 ID %u没有找到标签定义\n"
-
-#~ msgid ""
-#~ "dumping a specific TOC data block out of order is not supported without "
-#~ "ID on this input stream (fseek required)\n"
-#~ msgstr ""
-#~ "如果在此输入流中没有ID(标识)(fseek 要求的), 那么是不支持非顺序转储特定TOC"
-#~ "数据块的\n"
-
-#~ msgid "compression support is disabled in this format\n"
-#~ msgstr "在这个格式里, 压缩支持时被关闭了的\n"
-
-#~ msgid "User name: "
-#~ msgstr "用户名: "
-
-#~ msgid "large-object output not supported for a single table\n"
-#~ msgstr "不支持单个表的大对象输出.\n"
-
-#~ msgid "use a full dump instead\n"
-#~ msgstr "使用完整转储替代.\n"
-
-#~ msgid "large-object output not supported for a single schema\n"
-#~ msgstr "不支持单个模式的大对象输出.\n"
-
-#~ msgid "INSERT (-d, -D) and OID (-o) options cannot be used together\n"
-#~ msgstr "INSERT (-d, -D) 和 OID (-o) 选项不能同时使用.\n"
-
-#~ msgid "large-object output is not supported for plain-text dump files\n"
-#~ msgstr "纯文本转储文件不支持输出大对象.\n"
-
-#~ msgid "(Use a different output format.)\n"
-#~ msgstr "(使用不同的输出格式.)\n"
-
-#~ msgid ""
-#~ "  -i, --ignore-version     proceed even when server version mismatches\n"
-#~ "                           pg_dump version\n"
-#~ msgstr ""
-#~ "  -i, --ignore-version     当服务器的版本号与 pg_dump 的版本号不匹配时\n"
-#~ "                           仍继续运行\n"
-
-#~ msgid "  -c, --clean              clean (drop) schema prior to create\n"
-#~ msgstr "  -c, --clean              先清楚(删除)预先的模式,再建立\n"
-
-#~ msgid ""
-#~ "  -S, --superuser=NAME     specify the superuser user name to use in\n"
-#~ "                           plain text format\n"
-#~ msgstr ""
-#~ "  -S, --superuser=NAME     在明文格式中, 使用指定的超级用户\n"
-#~ "                           名称\n"
-
-#~ msgid "specified schema \"%s\" does not exist\n"
-#~ msgstr "指定的模式 \"%s\" 不存在\n"
-
-#~ msgid "specified table \"%s\" does not exist\n"
-#~ msgstr "指定的表 \"%s\" 不存在\n"
-
-#~ msgid "expected %d triggers on table \"%s\" but found %d\n"
-#~ msgstr "预期在表 \"%2$s\" 上有触发器 %1$d , 却发现 %3$d\n"
-
-#~ msgid "Got %d rows instead of one from: %s"
-#~ msgstr "已得到 %d 条记录替代来自 %s 的一条"
-
-#~ msgid "inserted invalid OID\n"
-#~ msgstr "插入了非法 OID\n"
-
-#~ msgid "maximum system OID is %u\n"
-#~ msgstr "最大系统 OID 是 %u\n"
-
-#~ msgid "could not close output archive file\n"
-#~ msgstr "无法关闭输出归档文件\n"
-
-#~ msgid "WARNING: skipping large-object restoration\n"
-#~ msgstr "警告: 忽略大对象的恢复\n"
-
-#~ msgid "fixing up large-object cross-reference for \"%s\"\n"
-#~ msgstr "为 \"%s\" 修复大对象的交叉引用\n"
-
-#~ msgid "committing large-object transactions\n"
-#~ msgstr "提交大对象事务\n"
-
-#~ msgid "cannot restore large objects without a database connection\n"
-#~ msgstr "没有数据库联接时无法恢复大对象\n"
-
-#~ msgid "starting large-object transactions\n"
-#~ msgstr "开始大对象事务\n"
-
-#~ msgid "restoring large object with OID %u as %u\n"
-#~ msgstr "把 OID 为 %u 的大对象恢复为 %u\n"
-
-#~ msgid "wrote remaining %lu bytes of large-object data (result = %lu)\n"
-#~ msgstr "写剩下了 %lu 字节的大对象数据 (结果 = %lu)\n"
-
-#~ msgid "could not open TOC file\n"
-#~ msgstr "无法打开 TOC 文件\n"
-
-#~ msgid "could not write to compressed archive\n"
-#~ msgstr "无法写入压缩的归档\n"
-
-#~ msgid "could not write to output file (%lu != %lu)\n"
-#~ msgstr "无法写出到输出文件 (%lu != %lu)\n"
-
-#~ msgid "read %lu bytes into lookahead buffer\n"
-#~ msgstr "读取 %lu 字节到预览缓冲区\n"
-
-#~ msgid "could not close the input file after reading header: %s\n"
-#~ msgstr "读取头之后无法关闭输入文件: %s\n"
-
-#~ msgid "archive format is %d\n"
-#~ msgstr "归档格式是 %d\n"
-
-#~ msgid "could not open archive file \"%s\": %s\n"
-#~ msgstr "无法打开归档文件 \"%s\": %s\n"
-
-#~ msgid "large objects cannot be loaded without a database connection\n"
-#~ msgstr "没有数据库联接时无法装载大对象\n"
-
-#~ msgid "could not read data block -- expected %lu, got %lu\n"
-#~ msgstr "无法读取数据块 - 预期 %lu, 实际 %lu\n"
-
-#~ msgid "write error in _WriteBuf (%lu != %lu)\n"
-#~ msgstr "在 _WriteBuf 里的写错误 (%lu != %lu)\n"
-
-#~ msgid "could not write compressed chunk\n"
-#~ msgstr "无法写入压缩的块\n"
-
-#~ msgid "could not write uncompressed chunk\n"
-#~ msgstr "无法写入未压缩的块\n"
-
-#~ msgid ""
-#~ "aborting because of version mismatch  (Use the -i option to proceed "
-#~ "anyway.)\n"
-#~ msgstr "因版本差异退出 (用 -i 选项忽略差异继续处理.)\n"
-
-#~ msgid "%s: no result from server\n"
-#~ msgstr "%s: 没有来自服务器的结果\n"
-
-#~ msgid "COPY command executed in non-primary connection\n"
-#~ msgstr "COPY 命令在没有主联接的环境下执行\n"
-
-#~ msgid "error returned by PQendcopy\n"
-#~ msgstr "PQendcopy 返回错误\n"
-
-#~ msgid "could not find OID columns of table \"%s\": %s"
-#~ msgstr "无法寻找表 \"%s\" 的 OID 字段: %s"
-
-#~ msgid "no OID type columns in table %s\n"
-#~ msgstr "表 %s 中没有 OID 类型字段\n"
-
-#~ msgid "fixing large object cross-references for %s.%s\n"
-#~ msgstr "为 %s.%s 修补大对象交叉引用\n"
-
-#~ msgid "SQL: %s\n"
-#~ msgstr "SQL: %s\n"
-
-#~ msgid "could not update column \"%s\" of table \"%s\": %s"
-#~ msgstr "无法更新表 \"%2$s\" 的字段 \"%1$s\": %3$s"
-
-#~ msgid "error while updating column \"%s\" of table \"%s\": %s"
-#~ msgstr "更新表 \"%2$s\" 的字段 \"%1$s\" 时出错: %3$s"
-
-#~ msgid "creating table for large object cross-references\n"
-#~ msgstr "为大对象交叉引用创建表\n"
-
-#~ msgid "could not create large object cross-reference table"
-#~ msgstr "无法创建大对象交叉引用表"
-
-#~ msgid "creating index for large object cross-references\n"
-#~ msgstr "为大对象交叉引用创建索引\n"
-
-#~ msgid "could not create index on large object cross-reference table"
-#~ msgstr "无法在大对象交叉引用表上创建索引"
-
-#~ msgid "could not create large object cross-reference entry"
-#~ msgstr "无法创建大对象交叉引用记录"
-
-#~ msgid "could not start transaction for large object cross-references"
-#~ msgstr "无法为大对象交叉引用启动事务"
-
-#~ msgid "could not commit transaction for large object cross-references"
-#~ msgstr "无法为大对象交叉引用提交事务"
-
-#~ msgid "could not open data file for output\n"
-#~ msgstr "无法为输出打开数据文件\n"
-
-#~ msgid "could not open data file for input\n"
-#~ msgstr "无法为输入打开数据文件\n"
-
-#~ msgid "could not open large object file\n"
-#~ msgstr "无法打开大对象文件\n"
-
-#~ msgid "requested %d bytes, got %d from lookahead and %d from file\n"
-#~ msgstr "要求 %d 字节, 从预览中获取 %d, 从文件中获取 %d\n"
-
-#~ msgid "could not write to tar member (wrote %lu, attempted %lu)\n"
-#~ msgstr "无法写入 tar 成员 (写了 %lu, 企图写 %lu)\n"
-
-#~ msgid "write error appending to tar archive (wrote %lu, attempted %lu)\n"
-#~ msgstr "向 tar 归档附加时写错误 (写了 %lu, 试图写 %lu)\n"
-
-#~ msgid "could not close tar member: %s\n"
-#~ msgstr "无法关闭 tar 成员: %s\n"
-
-#~ msgid "could not write tar header\n"
-#~ msgstr "无法写 tar 头\n"
-
-#~ msgid ""
-#~ "  -i, --ignore-version     proceed even when server version mismatches\n"
-#~ msgstr "  -i, --ignore-version     当服务器版本不匹配时继续运行\n"
-
-#~ msgid ""
-#~ "  -i, --ignore-version     proceed even when server version mismatches\n"
-#~ "                           pg_dumpall version\n"
-#~ msgstr ""
-#~ "  -i, --ignore-version     当服务器版本与 pg_dumpall 不匹配时\n"
-#~ "                           继续运行\n"
-
-#~ msgid ""
-#~ "  -O, --no-owner           do not output commands to set object "
-#~ "ownership\n"
-#~ msgstr ""
-#~ "  -O, --no-owner           设置对象的所属者时不输出\n"
-#~ "                           命令\n"
-
-#~ msgid "-C and -c are incompatible options\n"
-#~ msgstr "-C 和 -c 是互不兼容的选项\n"
+#: pg_restore.cpp:795
+#, c-format
+msgid "  -h, --host=HOSTNAME                   database server host or socket directory\n"
+msgstr "  -h, --host=HOSTNAME                    数据库服务器的主机或套接字目录\n"
+
+#: pg_restore.cpp:796
+#, c-format
+msgid "  -p, --port=PORT                       database server port number\n"
+msgstr "  -p, --port=PORT                        数据库服务器端口号\n"
+
+#: pg_restore.cpp:797
+#, c-format
+msgid "  -U, --username=NAME                   connect as specified database user\n"
+msgstr "  -U, --username=NAME                    连接指定的数据库用户\n"
+
+#: pg_restore.cpp:798
+#, c-format
+msgid "  -w, --no-password                     never prompt for password\n"
+msgstr "  -w, --no-password                      从不提示输入密码\n"
+
+#: pg_restore.cpp:799
+#, c-format
+msgid "  -W, --password=PASSWORD               the password of specified database user\n"
+msgstr "  -W, --password=PASSWORD                指定数据库用户的密码\n"
+
+#: pg_restore.cpp:800
+#, c-format
+msgid "  --role=ROLENAME                       do SET ROLE before restore\n"
+msgstr "  --role=ROLENAME                        在恢复前设置角色\n"
+
+#: pg_restore.cpp:801
+#, c-format
+msgid "  --rolepassword=ROLEPASSWORD           the password for role\n"
+msgstr "  --rolepassword=ROLEPASSWORD             角色密码\n"

@@ -2038,6 +2038,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_nls",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("enable native language support"),
+            NULL},
+            &u_sess->attr.attr_common.enable_nls,
+            false,
+            NULL,
+            NULL,
+            NULL
+	},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

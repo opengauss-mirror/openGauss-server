@@ -34,27 +34,27 @@ msgstr "%s: 太多的命令行参数 (第一个是 \"%s\")\n"
 #: clusterdb.c:139
 #, c-format
 msgid "%s: cannot cluster all databases and a specific one at the same time\n"
-msgstr "%s: 无法对所有数据库和一个指定的数据库同时建簇\n"
+msgstr "%s: 无法对所有数据库和一个指定的数据库同时建集群\n"
 
 #: clusterdb.c:145
 #, c-format
 msgid "%s: cannot cluster a specific table in all databases\n"
-msgstr "%s: 无法在所有数据库中对一个指定的表进行建簇\n"
+msgstr "%s: 无法在所有数据库中对一个指定的表进行建集群\n"
 
 #: clusterdb.c:198
 #, c-format
 msgid "%s: clustering of table \"%s\" in database \"%s\" failed: %s"
-msgstr "%1$s: 在数据库 \"%3$s\" 中的表 \"%2$s\" 建簇失败: %4$s"
+msgstr "%s:表的聚类\"%s\"在数据库\"%s\"失败:%s"
 
 #: clusterdb.c:201
 #, c-format
 msgid "%s: clustering of database \"%s\" failed: %s"
-msgstr "%s: 数据库 \"%s\" 建簇失败: %s"
+msgstr "%s: 数据库 \"%s\" 建集群失败: %s"
 
 #: clusterdb.c:232
 #, c-format
 msgid "%s: clustering database \"%s\"\n"
-msgstr "%s: 对数据库 \"%s\" 进行建簇\n"
+msgstr "%s: 对数据库 \"%s\" 进行建集群\n"
 
 #: clusterdb.c:248
 #, c-format
@@ -62,7 +62,7 @@ msgid ""
 "%s clusters all previously clustered tables in a database.\n"
 "\n"
 msgstr ""
-"%s 对一个数据库中先前已经建过簇的表进行建簇.\n"
+"%s 对一个数据库中先前已经建过集群的表进行建集群.\n"
 "\n"
 
 #: clusterdb.c:249 createdb.c:252 createlang.c:234 createuser.c:329
@@ -89,12 +89,12 @@ msgstr ""
 #: clusterdb.c:252
 #, c-format
 msgid "  -a, --all                 cluster all databases\n"
-msgstr "  -a, --all                 对所有数据库建簇\n"
+msgstr "  -a, --all                 对所有数据库建集群\n"
 
 #: clusterdb.c:253
 #, c-format
 msgid "  -d, --dbname=DBNAME       database to cluster\n"
-msgstr "  -d, --dbname=DBNAME       对数据库 DBNAME 建簇\n"
+msgstr "  -d, --dbname=DBNAME       集群的数据库\n"
 
 #: clusterdb.c:254 createlang.c:238 createuser.c:335 dropdb.c:158
 #: droplang.c:239 dropuser.c:159 reindexdb.c:333
@@ -111,7 +111,7 @@ msgstr "  -q, --quiet               不写任何信息\n"
 #: clusterdb.c:256
 #, c-format
 msgid "  -t, --table=TABLE         cluster specific table only\n"
-msgstr "  -t, --table=TABLE         只对指定的表 TABLE 建簇\n"
+msgstr "  -t, --table=TABLE         只对指定的表 TABLE 建集群\n"
 
 #: clusterdb.c:257
 #, c-format
@@ -138,7 +138,7 @@ msgid ""
 "Connection options:\n"
 msgstr ""
 "\n"
-"联接选项:\n"
+"连接选项:\n"
 
 #: clusterdb.c:261 createlang.c:243 createuser.c:355 dropdb.c:164
 #: droplang.c:244 dropuser.c:166 reindexdb.c:341 vacuumdb.c:358
@@ -156,19 +156,19 @@ msgstr "  -p, --port=PORT           数据库服务器端口号\n"
 #: reindexdb.c:343 vacuumdb.c:360
 #, c-format
 msgid "  -U, --username=USERNAME   user name to connect as\n"
-msgstr "  -U, --username=USERNAME   联接的用户名\n"
+msgstr "  -U, --username=USERNAME   连接的用户名\n"
 
 #: clusterdb.c:264 createlang.c:246 createuser.c:358 dropdb.c:167
 #: droplang.c:247 dropuser.c:169 reindexdb.c:344 vacuumdb.c:361
 #, c-format
 msgid "  -w, --no-password         never prompt for password\n"
-msgstr "  -w, -no-password         永远不提示输入口令\n"
+msgstr "  -w, -no-password         永远不提示输入密码\n"
 
 #: clusterdb.c:265 createlang.c:247 createuser.c:359 dropdb.c:168
 #: droplang.c:248 dropuser.c:170 reindexdb.c:345 vacuumdb.c:362
 #, c-format
 msgid "  -W, --password            force password prompt\n"
-msgstr "  -W, --password            强制提示输入口令\n"
+msgstr "  -W, --password            强制提示输入密码\n"
 
 #: clusterdb.c:266 dropdb.c:169 reindexdb.c:346 vacuumdb.c:363
 #, c-format
@@ -192,7 +192,7 @@ msgid ""
 "Report bugs to <pgsql-bugs@postgresql.org>.\n"
 msgstr ""
 "\n"
-"臭虫报告至 <pgsql-bugs@postgresql.org>.\n"
+"报告错误至 <pgsql-bugs@postgresql.org>.\n"
 
 #: common.c:45
 #, c-format
@@ -206,7 +206,7 @@ msgstr "%s: 无法获取当前用户名称: %s\n"
 
 #: common.c:103 common.c:155
 msgid "Password: "
-msgstr "口令: "
+msgstr "密码: "
 
 #: common.c:117
 #, c-format
@@ -216,12 +216,12 @@ msgstr "%s: 内存溢出\n"
 #: common.c:144
 #, c-format
 msgid "%s: could not connect to database %s\n"
-msgstr "%s: 无法联接到数据库 %s\n"
+msgstr "%s: 无法连接到数据库 %s\n"
 
 #: common.c:171
 #, c-format
 msgid "%s: could not connect to database %s: %s"
-msgstr "%s: 无法联接到数据库 %s: %s"
+msgstr "%s: 无法连接到数据库 %s: %s"
 
 #: common.c:220 common.c:248
 #, c-format
@@ -335,7 +335,7 @@ msgstr "  -E, --encoding=ENCODING      数据库编码\n"
 #: createdb.c:258
 #, c-format
 msgid "  -l, --locale=LOCALE          locale settings for the database\n"
-msgstr "  -O, --owner=OWNER            新数据库的所属用户\n"
+msgstr "  -l, --locale=LOCALE          数据库的区域设置\n"
 
 #: createdb.c:259
 #, c-format
@@ -382,17 +382,17 @@ msgstr "  -p, --port=PORT              数据库服务器端口号\n"
 #: createdb.c:268
 #, c-format
 msgid "  -U, --username=USERNAME      user name to connect as\n"
-msgstr "  -U, --username=USERNAME      联接的用户名\n"
+msgstr "  -U, --username=USERNAME      连接的用户名\n"
 
 #: createdb.c:269
 #, c-format
 msgid "  -w, --no-password            never prompt for password\n"
-msgstr "  -w, --no-password           永远不提示输入口令\n"
+msgstr "  -w, --no-password           永远不提示输入密码\n"
 
 #: createdb.c:270
 #, c-format
 msgid "  -W, --password               force password prompt\n"
-msgstr "  -W, --password              强制提示输入口令\n"
+msgstr "  -W, --password              强制提示输入密码\n"
 
 #: createdb.c:271
 #, c-format
@@ -436,7 +436,7 @@ msgstr "%s: 缺少要求的语言名称参数\n"
 #: createlang.c:195
 #, c-format
 msgid "%s: language \"%s\" is already installed in database \"%s\"\n"
-msgstr "%1$s: 数据库 \"%3$s\" 中已经安装了语言 \"%2$s\"\n"
+msgstr "%s: 语言\"%s\"已安装在数据库中\"%s\"\n"
 
 #: createlang.c:217
 #, c-format
@@ -474,7 +474,7 @@ msgstr "输入要增加的角色名称: "
 
 #: createuser.c:200
 msgid "Enter password for new role: "
-msgstr "为新角色输入的口令: "
+msgstr "为新角色输入的密码: "
 
 #: createuser.c:201
 msgid "Enter it again: "
@@ -483,7 +483,7 @@ msgstr "再输入一遍: "
 #: createuser.c:204
 #, c-format
 msgid "Passwords didn't match.\n"
-msgstr "口令不匹配.\n"
+msgstr "密码不匹配.\n"
 
 #: createuser.c:213
 msgid "Shall the new role be a superuser?"
@@ -525,7 +525,7 @@ msgstr "  %s [选项]... [用户名]\n"
 #, c-format
 msgid ""
 "  -c, --connection-limit=N  connection limit for role (default: no limit)\n"
-msgstr "  -c, --connection-limit=N  角色的连接限制(缺省: 没有限制)\n"
+msgstr "  -c, --connection-limit=N  角色的连接限制(默认: 没有限制)\n"
 
 #: createuser.c:333
 #, c-format
@@ -540,7 +540,7 @@ msgstr "  -D, --no-createdb         此角色不可以创建新数据库(默认)
 #: createuser.c:336
 #, c-format
 msgid "  -E, --encrypted           encrypt stored password\n"
-msgstr "  -E, --encrypted           口令加密存储\n"
+msgstr "  -E, --encrypted           密码加密存储\n"
 
 #: createuser.c:337
 #, c-format
@@ -549,7 +549,7 @@ msgid ""
 "                            member of (default)\n"
 msgstr ""
 "  -i, --inherit            角色能够继承它所属角色的权限\n"
-"                   （这是缺省情况)\n"
+"                          (这是默认情况)\n"
 
 #: createuser.c:339
 #, c-format
@@ -559,7 +559,7 @@ msgstr "  -I, --no-inherit          角色不继承权限\n"
 #: createuser.c:340
 #, c-format
 msgid "  -l, --login               role can login (default)\n"
-msgstr "  -l, --login              角色能够登录(这是缺省情况)\n"
+msgstr "  -l, --login              角色能够登录(这是默认情况)\n"
 
 #: createuser.c:341
 #, c-format
@@ -569,12 +569,12 @@ msgstr "  -L, --no-login            角色不能登录\n"
 #: createuser.c:342
 #, c-format
 msgid "  -N, --unencrypted         do not encrypt stored password\n"
-msgstr "  -N, --unencrypted         口令不加密存储\n"
+msgstr "  -N, --unencrypted         密码不加密存储\n"
 
 #: createuser.c:343
 #, c-format
 msgid "  -P, --pwprompt            assign a password to new role\n"
-msgstr "  -P, --pwprompt            给新角色指定口令\n"
+msgstr "  -P, --pwprompt            给新角色指定密码\n"
 
 #: createuser.c:344
 #, c-format
@@ -604,7 +604,8 @@ msgid ""
 "                            than using defaults\n"
 msgstr ""
 "  --interactive             提示缺少角色名及其属性\n"
-"                            而不是使用默认值\n"
+"而非\n"
+"                            使用默认值\n"
 
 #: createuser.c:351
 #, c-format
@@ -620,7 +621,7 @@ msgstr "  --no-replication          角色不能启动复制\n"
 #, c-format
 msgid ""
 "  -U, --username=USERNAME   user name to connect as (not the one to create)\n"
-msgstr "  -U, --username=USERNAME   联接用户 (不是要创建的用户名)\n"
+msgstr "  -U, --username=USERNAME   连接用户 (不是要创建的用户名)\n"
 
 #: dropdb.c:102
 #, c-format
@@ -634,7 +635,7 @@ msgstr "数据库 \"%s\" 将被永久的删除.\n"
 
 #: dropdb.c:118 dropuser.c:123
 msgid "Are you sure?"
-msgstr "您确定吗? (y/n) "
+msgstr "您确定吗?"
 
 #: dropdb.c:139
 #, c-format
@@ -670,7 +671,7 @@ msgstr "  --if-exists               如果数据库不存在则不报告错误\n
 #: droplang.c:201
 #, c-format
 msgid "%s: language \"%s\" is not installed in database \"%s\"\n"
-msgstr "%1$s: 数据库 \"%3$s\" 中, 没有安装语言 \"%2$s\"\n"
+msgstr "%s:语言\"%s\"数据库中没有安装\"%s\"\n"
 
 #: droplang.c:219
 #, c-format
@@ -690,7 +691,8 @@ msgstr ""
 #, c-format
 msgid ""
 "  -d, --dbname=DBNAME       database from which to remove the language\n"
-msgstr "  -d, --dbname=DBNAME       要删除语言的数据库\n"
+msgstr ""
+"  -d, --dbname=DBNAME       要删除语言的数据库\n"
 
 #: dropuser.c:111
 msgid "Enter name of role to drop: "
@@ -704,7 +706,7 @@ msgstr "%s: 缺少需要的参数角色名\n"
 #: dropuser.c:122
 #, c-format
 msgid "Role \"%s\" will be permanently removed.\n"
-msgstr "用户 \"%s\" 将被永久删除.\n"
+msgstr "角色 \"%s\" 将被永久删除.\n"
 
 #: dropuser.c:140
 #, c-format
@@ -738,7 +740,7 @@ msgstr "  --if-exists              用户名不存在时则不报告错误\n"
 #, c-format
 msgid ""
 "  -U, --username=USERNAME   user name to connect as (not the one to drop)\n"
-msgstr "  -U, --username=USERNAME   联接用户 (不是要删除的用户名)\n"
+msgstr "  -U, --username=USERNAME   连接用户 (不是要删除的用户名)\n"
 
 #: reindexdb.c:149
 #, c-format
@@ -764,23 +766,25 @@ msgstr "%s: 无法在所有数据库中对一个指定的索引进行重建\n"
 #, c-format
 msgid ""
 "%s: cannot reindex a specific table and system catalogs at the same time\n"
-msgstr "%s: 无法对一张指定的表和系统视图同时进行索引重建操作\n"
+msgstr ""
+"%s: 无法对一张指定的表和系统视图同时进行索引重建操作\n"
 
 #: reindexdb.c:180
 #, c-format
 msgid ""
 "%s: cannot reindex a specific index and system catalogs at the same time\n"
-msgstr "%s: 无法对一个指定索引和系统视图同时进行索引重建操作\n"
+msgstr "" 
+"%s: 无法对一个指定索引和系统视图同时进行索引重建操作\n"
 
 #: reindexdb.c:250
 #, c-format
 msgid "%s: reindexing of table \"%s\" in database \"%s\" failed: %s"
-msgstr "%1$s: 在数据库\"%3$s\"中对表\"%2$s\"上的索引重新创建失败: %4$s"
+msgstr "%s:表的索引\"%s\"在数据库\"%s\"失败:%s"
 
 #: reindexdb.c:253
 #, c-format
 msgid "%s: reindexing of index \"%s\" in database \"%s\" failed: %s"
-msgstr "%1$s: 在数据库\"%3$s\"中对索引\"%2$s\"重新创建失败: %4$s"
+msgstr "%s:索引的索引\"%s\"在数据库\"%s\"失败:%s"
 
 #: reindexdb.c:256
 #, c-format
@@ -814,12 +818,12 @@ msgstr "  -a, --all                 对所有数据库进行重建索引操作\n
 #: reindexdb.c:332
 #, c-format
 msgid "  -d, --dbname=DBNAME       database to reindex\n"
-msgstr "  -d, --dbname=数据库名称       对数据库中的索引进行重建\n"
+msgstr "  -d, --dbname=DBNAME       对数据库中的索引进行重建\n"
 
 #: reindexdb.c:334
 #, c-format
 msgid "  -i, --index=INDEX         recreate specific index only\n"
-msgstr "  -I, --index=索引名称       仅重新创建指定的索引\n"
+msgstr "  -I, --index=INDEX         仅重新创建指定的索引\n"
 
 #: reindexdb.c:336
 #, c-format
@@ -829,7 +833,7 @@ msgstr "  -s, --system              对系统视图重新创建索引\n"
 #: reindexdb.c:337
 #, c-format
 msgid "  -t, --table=TABLE         reindex specific table only\n"
-msgstr "  -t, --table=表名        只对指定的表TABLE重新创建索引\n"
+msgstr "  -t, --table=TABLE         只对指定的表TABLE重新创建索引\n"
 
 #: reindexdb.c:347
 #, c-format
@@ -863,7 +867,7 @@ msgstr "%s: 无法在所有数据库中对一个指定的表进行清理\n"
 #: vacuumdb.c:290
 #, c-format
 msgid "%s: vacuuming of table \"%s\" in database \"%s\" failed: %s"
-msgstr "%1$s: 在数据库 \"%3$s\" 中的表 \"%2$s\" 清理失败: %4$s"
+msgstr "%s: 清理表\"%s\"失败, 它位于数据库\"%s\": %s"
 
 #: vacuumdb.c:293
 #, c-format
@@ -899,7 +903,9 @@ msgstr "  -d, --dbname=DBNAME             清理数据库 DBNAME\n"
 msgid ""
 "  -e, --echo                      show the commands being sent to the "
 "server\n"
-msgstr "  -e, --echo                      显示发送到服务端的命令\n"
+msgstr ""
+"  -e, --echo                      显示发送到服务端的命令\n"
+"server\n"
 
 #: vacuumdb.c:348
 #, c-format
@@ -930,7 +936,8 @@ msgstr "  -v, --verbose                   写大量的输出\n"
 #, c-format
 msgid ""
 "  -V, --version                   output version information, then exit\n"
-msgstr "  -V, --version                   输出版本信息, 然后退出\n"
+msgstr "" 
+"  -V, --version                   输出版本信息, 然后退出\n"
 
 #: vacuumdb.c:354
 #, c-format
@@ -961,7 +968,7 @@ msgstr ""
 #~ msgstr "  -D, --location=PATH       选择一个地方存放数据库\n"
 
 #~ msgid "  -W, --password            prompt for password to connect\n"
-#~ msgstr "  -W, --password            联接提示口令输入\n"
+#~ msgstr "  -W, --password            连接提示密码输入\n"
 
 #~ msgid "  -i, --sysid=SYSID         select sysid for new user\n"
 #~ msgstr "  -i, --sysid=SYSID         选择一个 sysid 给新用户\n"

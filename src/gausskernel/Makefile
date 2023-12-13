@@ -552,13 +552,13 @@ $(top_builddir)/src/include/storage/lwlocknames.h: storage/lmgr/lwlocknames.h
 
 # Be sure that these files get removed by the maintainer-clean target
 distprep:
-	$(MAKE) -C ../common/backend/parser	gram.cpp gram.hpp scan.cpp hint_gram.cpp hint_gram.hpp hint_scan.cpp
-	$(MAKE) -C bootstrap	bootparse.cpp bootscanner.cpp
+	$(MAKE) -C ../common/backend/parser	gram.cpp gram.hpp scan.inc hint_gram.cpp hint_gram.hpp hint_scan.inc
+	$(MAKE) -C bootstrap	bootparse.cpp bootscanner.inc
 	$(MAKE) -C ../common/backend/catalog	schemapg.h postgres.bki postgres.description postgres.shdescription
-	$(MAKE) -C storage/replication	repl_gram.cpp repl_gram.hpp repl_scanner.cpp syncrep_gram.cpp syncrep_gram.hpp syncrep_scanner.cpp
+	$(MAKE) -C storage/replication	repl_gram.cpp repl_gram.hpp repl_scanner.inc syncrep_gram.cpp syncrep_gram.hpp syncrep_scanner.inc
 	$(MAKE) -C storage/lmgr	lwlocknames.h lwlocknames.cpp
 	$(MAKE) -C ../common/backend/utils	fmgrtab.cpp fmgroids.h errcodes.h
-	$(MAKE) -C ../common/backend/utils/misc	guc-file.cpp
+	$(MAKE) -C ../common/backend/utils/misc	guc-file.inc
 
 
 ##########################################################################

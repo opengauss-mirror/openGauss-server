@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pg_controldata (PostgreSQL 9.0)\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2013-01-29 13:47+0000\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
 "PO-Revision-Date: 2012-10-19 14:39+0800\n"
 "Last-Translator: Xiong He <iihero@qq.com>\n"
 "Language-Team: Chinese (Simplified)\n"
@@ -15,26 +15,25 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: Poedit 1.5.4\n"
 
-#: pg_controldata.c:33
-#, c-format
+#: pg_controldata.cpp:43
 msgid ""
-"%s displays control information of a PostgreSQL database cluster.\n"
+"%s displays control information of an openGauss database cluster.\n"
 "\n"
 msgstr ""
-"%s 显示 PostgreSQL 数据库簇控制信息.\n"
+"%s 显示openGauss数据库集群的控制信息.\n"
 "\n"
 
-#: pg_controldata.c:34
+#: pg_controldata.cpp:44
 #, c-format
 msgid "Usage:\n"
-msgstr "使用方法:\n"
+msgstr "用法:\n"
 
-#: pg_controldata.c:35
+#: pg_controldata.cpp:45
 #, c-format
 msgid "  %s [OPTION] [DATADIR]\n"
-msgstr "  %s [选项][DATADIR]\n"
+msgstr "  %s [OPTION] [DATADIR]\n"
 
-#: pg_controldata.c:36
+#: pg_controldata.cpp:46
 #, c-format
 msgid ""
 "\n"
@@ -43,92 +42,140 @@ msgstr ""
 "\n"
 "选项:\n"
 
-#: pg_controldata.c:37
+#: pg_controldata.cpp:48
 #, c-format
-msgid "  -V, --version  output version information, then exit\n"
-msgstr " -V, --version 输出版本信息，然后退出\n"
+msgid "  -I, --instance-id=INSTANCE_ID\n"
+msgstr "  -I, --instance-id=INSTANCE_ID\n"
 
-#: pg_controldata.c:38
+#: pg_controldata.cpp:49
+msgid "                    display information of specified instance (default all)\n"
+msgstr "                     显示指定实例的信息（默认为全部）\n"
+
+#: pg_controldata.cpp:50
+msgid "      --enable-dss  enable shared storage mode\n"
+msgstr "      --enable-dss  启用共享存储模式\n"
+
+#: pg_controldata.cpp:51
 #, c-format
-msgid "  -?, --help     show this help, then exit\n"
-msgstr "  -?, --help     显示帮助信息，然后退出\n"
+msgid "      --socketpath=SOCKETPATH\n"
+msgstr "      --socketpath=SOCKETPATH\n"
 
-#: pg_controldata.c:39
+#: pg_controldata.cpp:52
+msgid "                    dss connect socket file path\n"
+msgstr "                     dss连接套接字文件路径\n"
+
+#: pg_controldata.cpp:54
+msgid "  -V, --version     output version information, then exit\n"
+msgstr "  -V, --version      输出版本信息, 然后退出\n"
+
+#: pg_controldata.cpp:55
+msgid "  -?, --help        show this help, then exit\n"
+msgstr "  -?, --help         显示帮助信息, 然后退出\n"
+
+#: pg_controldata.cpp:56
 #, c-format
 msgid ""
 "\n"
-"If no data directory (DATADIR) is specified, the environment variable "
-"PGDATA\n"
+"If no data directory (DATADIR) is specified, the environment variable PGDATA\n"
 "is used.\n"
-"\n"
 msgstr ""
 "\n"
 "如果没有指定数据目录(DATADIR), 将使用\n"
 "环境变量PGDATA.\n"
-"\n"
 
-#: pg_controldata.c:41
+#: pg_controldata.cpp:59
 #, c-format
-msgid "Report bugs to <pgsql-bugs@postgresql.org>.\n"
-msgstr "报告错误至 <pgsql-bugs@postgresql.org>.\n"
+msgid ""
+"\n"
+"Report bugs to GaussDB support.\n"
+msgstr ""
+"\n"
+"报告错误到GaussDB support\n"
 
-#: pg_controldata.c:51
+#: pg_controldata.cpp:61
+#, c-format
+msgid ""
+"\n"
+"Report bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"
+msgstr ""
+"\n"
+"报告错误到community@opengauss.org> 或者加入opengauss社区<https://opengauss.org>.\n"
+
+#: pg_controldata.cpp:69
 msgid "starting up"
-msgstr "正在启动"
+msgstr "启动"
 
-#: pg_controldata.c:53
+#: pg_controldata.cpp:71
 msgid "shut down"
 msgstr "关闭"
 
-#: pg_controldata.c:55
+#: pg_controldata.cpp:73
 msgid "shut down in recovery"
 msgstr "在恢复过程中关闭数据库"
 
-#: pg_controldata.c:57
+#: pg_controldata.cpp:75
 msgid "shutting down"
 msgstr "正在关闭"
 
-#: pg_controldata.c:59
+#: pg_controldata.cpp:77
 msgid "in crash recovery"
 msgstr "在恢复中"
 
-#: pg_controldata.c:61
+#: pg_controldata.cpp:79
 msgid "in archive recovery"
 msgstr "正在归档恢复"
 
-#: pg_controldata.c:63
+#: pg_controldata.cpp:81
 msgid "in production"
 msgstr "在运行中"
 
-#: pg_controldata.c:65
+#: pg_controldata.cpp:85 pg_controldata.cpp:99
 msgid "unrecognized status code"
 msgstr "不被认可的状态码"
 
-#: pg_controldata.c:80
+#: pg_controldata.cpp:91
+msgid "in on-demand build"
+msgstr "正在按照要求构建"
+
+#: pg_controldata.cpp:93
+msgid "in on-demand redo"
+msgstr "正在按照要求redo"
+
+# help.c:211
+#: pg_controldata.cpp:95
+msgid "normal"
+msgstr "常规"
+
+# describe.c:925
+#: pg_controldata.cpp:105
+msgid "primary cluster"
+msgstr "主集群"
+
+# describe.c:940
+#: pg_controldata.cpp:107
+msgid "standby cluster"
+msgstr "备集群"
+
+#: pg_controldata.cpp:111
+msgid "unrecognized cluster run mode"
+msgstr "无法识别集群运行模式"
+
+#: pg_controldata.cpp:128
 msgid "unrecognized wal_level"
 msgstr "参数wal_level的值无法识别"
 
-#: pg_controldata.c:123
+#: pg_controldata.cpp:156
 #, c-format
-msgid "%s: no data directory specified\n"
-msgstr "%s: 没有指定数据目录\n"
+msgid ""
+"\n"
+"pg_control data (instance id %d)\n"
+"\n"
+msgstr ""
+"\n"
+"pg_control data (实例id %d)\n"
+"\n"
 
-#: pg_controldata.c:124
-#, c-format
-msgid "Try \"%s --help\" for more information.\n"
-msgstr "用 \"%s --help\" 显示更多的信息.\n"
-
-#: pg_controldata.c:132
-#, c-format
-msgid "%s: could not open file \"%s\" for reading: %s\n"
-msgstr "%s: 无法打开文件 \"%s\" 读取信息: %s\n"
-
-#: pg_controldata.c:139
-#, c-format
-msgid "%s: could not read file \"%s\": %s\n"
-msgstr "%s: 无法读取文件 \"%s\": %s\n"
-
-#: pg_controldata.c:153
+#: pg_controldata.cpp:166 pg_controldata.cpp:269
 #, c-format
 msgid ""
 "WARNING: Calculated CRC checksum does not match value stored in file.\n"
@@ -141,265 +188,337 @@ msgstr ""
 "下面的结果是不可靠的.\n"
 "\n"
 
-#: pg_controldata.c:180
+#: pg_controldata.cpp:193
 #, c-format
 msgid "pg_control version number:            %u\n"
-msgstr "pg_control 版本:                      %u\n"
+msgstr "pg_control 版本号:            %u\n"
 
-#: pg_controldata.c:183
+#: pg_controldata.cpp:195
 #, c-format
 msgid ""
 "WARNING: possible byte ordering mismatch\n"
 "The byte ordering used to store the pg_control file might not match the one\n"
-"used by this program.  In that case the results below would be incorrect, "
-"and\n"
-"the PostgreSQL installation would be incompatible with this data directory.\n"
+"used by this program.  In that case the results below would be incorrect, and\n"
+"the openGauss installation would be incompatible with this data directory.\n"
 msgstr ""
 "警告: 可能字节顺序不匹配\n"
 "用于存储文件pg_control的字节顺序可能与程序使用的不匹配\n"
-"在那种情况下结果将会是不正确的,并且所安装的PostgreSQL\n"
-"将会与这个数据目录不兼容\n"
+"如果确实不匹配, 那么结果将会是不正确的\n"
+"且所安装的openGauss会与这个数据目录不兼容\n"
 
-#: pg_controldata.c:187
+#: pg_controldata.cpp:199
 #, c-format
 msgid "Catalog version number:               %u\n"
-msgstr "Catalog 版本:                         %u\n"
+msgstr "目录版本号:               %u\n"
 
-#: pg_controldata.c:189
+#: pg_controldata.cpp:200
 #, c-format
 msgid "Database system identifier:           %s\n"
-msgstr "数据库系统标识符:                     %s\n"
+msgstr "数据库系统标识符:           %s\n"
 
-#: pg_controldata.c:191
+#: pg_controldata.cpp:201
 #, c-format
 msgid "Database cluster state:               %s\n"
-msgstr "数据库簇状态:                         %s\n"
+msgstr "数据库集群状态:               %s\n"
 
-#: pg_controldata.c:193
+#: pg_controldata.cpp:202
 #, c-format
 msgid "pg_control last modified:             %s\n"
-msgstr "pg_control 最后修改:                  %s\n"
+msgstr "pg_control 最后修改:             %s\n"
 
-#: pg_controldata.c:195
+#: pg_controldata.cpp:203
 #, c-format
 msgid "Latest checkpoint location:           %X/%X\n"
-msgstr "最新检查点位置:                       %X/%X\n"
+msgstr "最新检查点位置:           %X/%X\n"
 
-#: pg_controldata.c:198
+#: pg_controldata.cpp:206
 #, c-format
 msgid "Prior checkpoint location:            %X/%X\n"
-msgstr "优先检查点位置:                       %X/%X\n"
+msgstr "优先检查点位置:            %X/%X\n"
 
-#: pg_controldata.c:201
+#: pg_controldata.cpp:209
 #, c-format
 msgid "Latest checkpoint's REDO location:    %X/%X\n"
-msgstr "最新检查点的 REDO 位置:               %X/%X\n"
+msgstr "最新检查点的 REDO 位置:    %X/%X\n"
 
-#: pg_controldata.c:204
+#: pg_controldata.cpp:212
 #, c-format
 msgid "Latest checkpoint's TimeLineID:       %u\n"
-msgstr "最新检查点的 TimeLineID:              %u\n"
+msgstr "最新检查点的 TimeLineID:       %u\n"
 
-#: pg_controldata.c:206
+#: pg_controldata.cpp:213
 #, c-format
 msgid "Latest checkpoint's full_page_writes: %s\n"
 msgstr "最新检查点的full_page_writes: %s\n"
 
 # help.c:48
-#: pg_controldata.c:207
+#: pg_controldata.cpp:214
 msgid "off"
 msgstr "关闭"
 
 # help.c:48
-#: pg_controldata.c:207
+#: pg_controldata.cpp:214
 msgid "on"
 msgstr "开启"
 
-#: pg_controldata.c:208
+#: pg_controldata.cpp:215
 #, c-format
-msgid "Latest checkpoint's NextXID:          %u/%u\n"
-msgstr "最新检查点的 NextXID:            %u/%u\n"
+msgid "Latest checkpoint's NextXID:          "
+msgstr "最新检查点的NextXID:          "
 
-#: pg_controldata.c:211
+#: pg_controldata.cpp:216
 #, c-format
 msgid "Latest checkpoint's NextOID:          %u\n"
-msgstr "最新检查点的 NextOID:                 %u\n"
+msgstr "最新检查点的NextOID:          %u\n"
 
-#: pg_controldata.c:213
+#: pg_controldata.cpp:217
 #, c-format
-msgid "Latest checkpoint's NextMultiXactId:  %u\n"
-msgstr "最新检查点的NextMultiXactId: %u\n"
+msgid "Latest checkpoint's NextMultiXactId:  "
+msgstr "最新检查点的NextMultiXactId:  "
 
-#: pg_controldata.c:215
+#: pg_controldata.cpp:218
 #, c-format
-msgid "Latest checkpoint's NextMultiOffset:  %u\n"
-msgstr "最新检查点的NextMultiOffsetD: %u\n"
+msgid "Latest checkpoint's NextMultiOffset:  "
+msgstr "最新检查点的NextMultiOffset:  "
 
-#: pg_controldata.c:217
+#: pg_controldata.cpp:219
 #, c-format
-msgid "Latest checkpoint's oldestXID:        %u\n"
-msgstr "最新检查点的oldestXID:            %u\n"
+msgid "Latest checkpoint's oldestXID:        "
+msgstr "最新检查点的oldestXID:        "
 
-#: pg_controldata.c:219
+#: pg_controldata.cpp:220
 #, c-format
 msgid "Latest checkpoint's oldestXID's DB:   %u\n"
-msgstr "最新检查点的oldestXID所在的数据库：%u\n"
+msgstr "最新检查点的oldestXID所在的数据库:   %u\n"
 
-#: pg_controldata.c:221
+#: pg_controldata.cpp:221
 #, c-format
-msgid "Latest checkpoint's oldestActiveXID:  %u\n"
-msgstr "最新检查点检查oldestActiveXID:  %u\n"
+msgid "Latest checkpoint's oldestActiveXID:  "
+msgstr "最新检查点的oldestActiveXID:  "
 
-#: pg_controldata.c:223
+#: pg_controldata.cpp:222
+msgid "Latest checkpoint's remove lsn:       %X/%X\n"
+msgstr "最新检查点的删除lsn:       %X/%X\n"
+
+#: pg_controldata.cpp:225
 #, c-format
 msgid "Time of latest checkpoint:            %s\n"
-msgstr "最新检查点的时间:                     %s\n"
+msgstr "最新检查点的时间:            %s\n"
 
-#: pg_controldata.c:225
+#: pg_controldata.cpp:226
 #, c-format
 msgid "Minimum recovery ending location:     %X/%X\n"
-msgstr "最小恢复结束位置: %X/%X\n"
+msgstr "最小恢复结束位置:    %X/%X\n"
 
-#: pg_controldata.c:228
+#: pg_controldata.cpp:229
 #, c-format
 msgid "Backup start location:                %X/%X\n"
-msgstr "开始进行备份的点位置:                       %X/%X\n"
+msgstr "开始进行备份的点位置:                %X/%X\n"
 
-#: pg_controldata.c:231
+#: pg_controldata.cpp:232
 #, c-format
 msgid "Backup end location:                  %X/%X\n"
 msgstr "备份的最终位置:                  %X/%X\n"
 
-#: pg_controldata.c:234
+#: pg_controldata.cpp:235
 #, c-format
 msgid "End-of-backup record required:        %s\n"
 msgstr "需要终止备份的记录:        %s\n"
 
-#: pg_controldata.c:235
+#: pg_controldata.cpp:235
 msgid "no"
 msgstr "否"
 
-#: pg_controldata.c:235
+#: pg_controldata.cpp:235
 msgid "yes"
 msgstr "是"
 
-#: pg_controldata.c:236
+#: pg_controldata.cpp:236
 #, c-format
 msgid "Current wal_level setting:            %s\n"
-msgstr "参数wal_level的当前设置:         %s\n"
+msgstr "参数wal_level的当前设置:              %s\n"
 
-#: pg_controldata.c:238
+#: pg_controldata.cpp:237
 #, c-format
 msgid "Current max_connections setting:      %d\n"
-msgstr "参数max_connections的当前设置：   %d\n"
+msgstr "参数max_connections的当前设置:      %d\n"
 
-#: pg_controldata.c:240
+#: pg_controldata.cpp:238
 #, c-format
 msgid "Current max_prepared_xacts setting:   %d\n"
-msgstr "参数 max_prepared_xacts的当前设置：   %d\n"
+msgstr "参数 max_prepared_xacts的当前设置:   %d\n"
 
-#: pg_controldata.c:242
+#: pg_controldata.cpp:239
 #, c-format
 msgid "Current max_locks_per_xact setting:   %d\n"
-msgstr "参数max_locks_per_xact setting的当前设置：   %d\n"
+msgstr "参数max_locks_per_xact setting的当前设置:    %d\n"
 
-#: pg_controldata.c:244
+#: pg_controldata.cpp:240
 #, c-format
 msgid "Maximum data alignment:               %u\n"
-msgstr "最大数据校准:     %u\n"
+msgstr "最大数据校准:                  %u\n"
 
-#: pg_controldata.c:247
+#: pg_controldata.cpp:242
 #, c-format
 msgid "Database block size:                  %u\n"
-msgstr "数据库块大小:                         %u\n"
+msgstr "数据库块大小:                   %u\n"
 
-#: pg_controldata.c:249
+#: pg_controldata.cpp:243
 #, c-format
 msgid "Blocks per segment of large relation: %u\n"
-msgstr "大关系的每段块数:                     %u\n"
+msgstr "大关系的每段块数: %u\n"
 
-#: pg_controldata.c:251
+#: pg_controldata.cpp:244
 #, c-format
 msgid "WAL block size:                       %u\n"
-msgstr "WAL的块大小:    %u\n"
+msgstr "WAL的块大小:                      %u\n"
 
-#: pg_controldata.c:253
+#: pg_controldata.cpp:245
 #, c-format
 msgid "Bytes per WAL segment:                %u\n"
-msgstr "每一个 WAL 段字节数:                  %u\n"
+msgstr "每一个 WAL 段字节数:                %u\n"
 
-#: pg_controldata.c:255
+#: pg_controldata.cpp:246
 #, c-format
 msgid "Maximum length of identifiers:        %u\n"
-msgstr "标识符的最大长度:                     %u\n"
+msgstr "标识符的最大长度:        %u\n"
 
-#: pg_controldata.c:257
+#: pg_controldata.cpp:247
 #, c-format
 msgid "Maximum columns in an index:          %u\n"
-msgstr "在索引中可允许使用最大的列数:    %u\n"
+msgstr "在索引中可允许使用最大的列数:           %u\n"
 
-#: pg_controldata.c:259
+#: pg_controldata.cpp:248
 #, c-format
 msgid "Maximum size of a TOAST chunk:        %u\n"
-msgstr "TOAST区块的最大长度:                %u\n"
+msgstr "TOAST区块的最大长度:        %u\n"
 
-#: pg_controldata.c:261
+#: pg_controldata.cpp:249
 #, c-format
 msgid "Date/time type storage:               %s\n"
-msgstr "日期/时间 类型存储:                   %s\n"
+msgstr "日期/时间 类型存储:               %s\n"
 
-#: pg_controldata.c:262
+#: pg_controldata.cpp:250
 msgid "64-bit integers"
 msgstr "64位整数"
 
-#: pg_controldata.c:262
+#: pg_controldata.cpp:250
 msgid "floating-point numbers"
 msgstr "浮点数"
 
-#: pg_controldata.c:263
+#: pg_controldata.cpp:252
 #, c-format
 msgid "Float4 argument passing:              %s\n"
-msgstr "正在传递Flloat4类型的参数:           %s\n"
+msgstr "正在传递Flloat4类型的参数:               %s\n"
 
-#: pg_controldata.c:264 pg_controldata.c:266
+#: pg_controldata.cpp:252 pg_controldata.cpp:254
 msgid "by reference"
 msgstr "由引用"
 
-#: pg_controldata.c:264 pg_controldata.c:266
+#: pg_controldata.cpp:252 pg_controldata.cpp:254
 msgid "by value"
 msgstr "由值"
 
-#: pg_controldata.c:265
+#: pg_controldata.cpp:254
 #, c-format
 msgid "Float8 argument passing:              %s\n"
-msgstr "正在传递Flloat8类型的参数:                   %s\n"
+msgstr "正在传递Flloat8类型的参数:              %s\n"
 
-#~ msgid "Latest checkpoint's StartUpID:        %u\n"
-#~ msgstr "最新检查点的 StartUpID:               %u\n"
+#: pg_controldata.cpp:255
+#, c-format
+msgid "Database system TimeLine:             %u\n"
+msgstr "数据库系统时间:             %u\n"
 
-#~ msgid "LC_CTYPE:                             %s\n"
-#~ msgstr "LC_CTYPE:                             %s\n"
+#: pg_controldata.cpp:273
+#, c-format
+msgid ""
+"\n"
+"reformer data (last page id %d)\n"
+"\n"
+msgstr ""
+"\n"
+"reformer data (最后一页id %d)\n"
+"\n"
 
-#~ msgid "LC_COLLATE:                           %s\n"
-#~ msgstr "LC_COLLATE:                           %s\n"
+#: pg_controldata.cpp:274
+msgid "Reform control version number:        %u\n"
+msgstr "Reform控制版本号:       %u\n"
 
-#~ msgid "Maximum number of function arguments: %u\n"
-#~ msgstr "函数参数的最大个数:                   %u\n"
+#: pg_controldata.cpp:275
+msgid "Stable instances list:                %lu\n"
+msgstr "稳定实例列表:                    %lu\n"
 
-#~ msgid "Latest checkpoint's UNDO location:    %X/%X\n"
-#~ msgstr "最新检查点的 UNDO 位置:               %X/%X\n"
+#: pg_controldata.cpp:276
+msgid "Primary instance ID:                  %d\n"
+msgstr "主实例ID:                    %d\n"
 
-#~ msgid ""
-#~ "Usage:\n"
-#~ "  %s [OPTION] [DATADIR]\n"
-#~ "\n"
-#~ "Options:\n"
-#~ "  --help         show this help, then exit\n"
-#~ "  --version      output version information, then exit\n"
-#~ msgstr ""
-#~ "使用方法:\n"
-#~ "  %s [选项] [数据目录]\n"
-#~ "\n"
-#~ "选项:\n"
-#~ "  --help         显示此帮助信息, 然后退出\n"
-#~ "  --version      显示 pg_controldata 的版本, 然后退出\n"
+#: pg_controldata.cpp:277
+msgid "Recovery instance ID:                 %d\n"
+msgstr "恢复实例ID:                   %d\n"
+
+#: pg_controldata.cpp:278
+msgid "Cluster status:                       %s\n"
+msgstr "数据库集群状态:                       %s\n"
+
+#: pg_controldata.cpp:279
+msgid "Cluster run mode:                     %s\n"
+msgstr "集群运行模式:                      %s\n"
+
+#: pg_controldata.cpp:341
+#, c-format
+msgid "%s: unexpected node id specified, the instance-id should be an integer in the range of %d - %d\n"
+msgstr "%s: 指定了意外的节点id, 实例id应为范围为的整数 %d - %d\n"
+
+#: pg_controldata.cpp:358 pg_controldata.cpp:370
+#, c-format
+msgid "Try \"%s --help\" for more information.\n"
+msgstr "用 \"%s --help\" 显示更多的信息.\n"
+
+#: pg_controldata.cpp:369
+#, c-format
+msgid "%s: no data directory specified\n"
+msgstr "%s: 没有指定数据目录\n"
+
+#: pg_controldata.cpp:379
+#, c-format
+msgid "%s: socketpath must be specific correctly when enable dss, format is: '--socketpath=\"UDS:xxx\"'.\n"
+msgstr "%s: 启用dss时, socketpath必须正确指定, 格式为: '--socketpath=\"UDS:xxx\"'.\n"
+
+#: pg_controldata.cpp:385
+#, c-format
+msgid "%s: the DATADIR is not correct with enable dss."
+msgstr "%s: DATADIR在启用dss时不正确."
+
+#: pg_controldata.cpp:392
+msgid "failed to init dss device\n"
+msgstr "无法初始化dss设备\n"
+
+#: pg_controldata.cpp:407
+#, c-format
+msgid "%s: could not open file \"%s\" for reading: %s\n"
+msgstr "%s: 无法打开文件 \"%s\" 读取信息: %s\n"
+
+#: pg_controldata.cpp:412
+msgid "%s: could not get \"%s\" size: %s\n"
+msgstr "%s: 无法获得\"%s\"大小: %s\n"
+
+#: pg_controldata.cpp:420
+msgid "%s: cound not read beyond end of file \"%s\", file_size: %ld, instance_id: %d\n"
+msgstr "%s: 无法读取超出文件末尾的内容\"%s\", file_size: %ld, instance_id: %d\n"
+
+#: pg_controldata.cpp:428
+msgid "%s: could not seek in \"%s\" to offset %d: %s\n"
+msgstr "%s: 在\"%s\"中找不到来抵消%d: %s\n"
+
+#: pg_controldata.cpp:436 pg_controldata.cpp:447
+#, c-format
+msgid "%s: could not read file \"%s\": %s\n"
+msgstr "%s: 无法读取文件 \"%s\": %s\n"
+
+#, c-format
+#~ msgid "  -?, --help     show this help, then exit\n"
+#~ msgstr "  -?, --help     显示帮助信息, 然后退出\n"
+
+#, c-format
+#~ msgid "  -V, --version  output version information, then exit\n"
+#~ msgstr " -V, --version 输出版本信息, 然后退出\n"

@@ -586,7 +586,7 @@ void set_pglocale_pgservice(const char* argv0, const char* app)
     bindtextdomain(app, path);
     textdomain(app);
 
-    gs_setnev_r("PGLOCALEDIR", path, 0);
+    gs_setenv_r("PGLOCALEDIR", path, 0);
 #endif
 
     if (gs_getenv_r("PGSYSCONFDIR") == NULL) {
