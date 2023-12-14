@@ -134,8 +134,8 @@ function install_gaussdb()
         echo "WARNING: do not separate symbol in debug mode!"
     fi
 
-    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" ]; then
-        die "the product mode can only be opengauss, lite!"
+    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" -a "$product_mode" != "finance" ]; then
+        die "the product mode can only be opengauss, lite, finance!"
     fi
 
     #configure
@@ -144,11 +144,9 @@ function install_gaussdb()
     echo "Begin configure." >> "$LOG_FILE" 2>&1
     chmod 755 configure
 
-    if [ "$product_mode"x == "opengauss"x ]; then
-        enable_readline="--with-readline"
-    else
-        enable_readline="--without-readline"
-    fi
+    enable_readline="--with-readline"
+    disable_readline="--without-readline"
+
     shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} --without-zlib"
     if [ "$product_mode"x == "opengauss"x ]; then
         if [ "$version_mode"x == "release"x ]; then
@@ -169,7 +167,7 @@ function install_gaussdb()
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         fi
     elif [ "$product_mode"x == "lite"x ]; then
-        shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} --without-zlib  --without-gssapi --without-krb5"
+        shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${disable_readline} --without-zlib  --without-gssapi --without-krb5"
         if [ "$version_mode"x == "release"x ]; then
             # configure -D__USE_NUMA -D__ARM_LSE with arm single mode
             if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
@@ -183,7 +181,7 @@ function install_gaussdb()
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-lite-mode>> "$LOG_FILE" 2>&1
         fi
     elif [ "$product_mode"x == "finance"x ]; then
-        shared_opt="--gcc-version=${gcc_version}.${gcc_sub_version} --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline}  ${with_tassl}  --without-zlib  --without-gssapi --without-krb5"
+        shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} --without-zlib"
         if [ "$version_mode"x == "release"x ]; then
             # configure -D__USE_NUMA -D__ARM_LSE with arm single mode
             if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then

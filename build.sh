@@ -12,6 +12,7 @@ declare build_binarylib_dir='None'
 declare wrap_binaries='NO'
 declare not_optimized=''
 declare config_file=''
+declare product_mode='opengauss'
 #########################################################################
 ##read command line paramenters
 #######################################################################
@@ -26,6 +27,7 @@ function print_help()
     -wrap|--wrap_binaries             wrop up the project binaries. By default, only compile the project
     -nopt|--not_optimized             on kunpeng platform, like 1616 version, without LSE optimized
     -f|--config_file                  set postgresql.conf.sample from config_file when packing
+    -pm|--product_mode                this values of paramenter is opengauss or lite or finance, the default value is opengauss.
     "
 }
 
@@ -59,6 +61,10 @@ while [ $# -gt 0 ]; do
             not_optimized='-nopt'
             shift 1
             ;;
+        -pm|--product_mode)
+            product_mode=$2
+            shift 2
+            ;;
         -f|--config_file)
             if [[ ! -f "$2" ]]
             then
@@ -81,14 +87,14 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server
+./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server -pm ${product_mode}
 if [ "${wrap_binaries}"X = "YES"X ]
 then
     chmod a+x package_opengauss.sh
     if [ X$config_file = "X" ];then
-        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode}
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -pm ${product_mode}
     else
-        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file} -pm ${product_mode}
     fi
 fi
 exit 0
