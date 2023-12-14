@@ -5950,6 +5950,10 @@ bool WalSndAllInProgress(int type)
     if (t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
         allNum++;
     }
+    /* in dorado cluster of share storage mode we only need one sender one moment */
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        allNum = 1;
+    }
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
@@ -7347,7 +7351,7 @@ static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
 
 XLogSegNo WalGetSyncCountWindow(void)
 {
-    return (XLogSegNo)(uint32)XLogSegmentsNum(u_sess->attr.attr_storage.wal_keep_segments);
+    return (XLogSegNo)(uint32)(u_sess->attr.attr_storage.wal_keep_segments);
 }
 
 void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd) 
