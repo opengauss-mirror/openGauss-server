@@ -161,7 +161,7 @@ function install_gaussdb()
             GAUSSDB_EXTRA_FLAGS=" "
 
         if [[ "$PLATFORM_ARCH"x == "x86_64"x || "$PLATFORM_ARCH"x == "aarch64"x ]] ; then
-            extra_config_opt+=" --enable-mot "
+            extra_config_opt+=" --enable-mot --enable-bbox "
         fi
         
         if [ "$PLATFORM_ARCH"x = "loongarch64"x ] ; then
