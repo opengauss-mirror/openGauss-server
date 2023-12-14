@@ -2676,8 +2676,13 @@ else
   commits=$(git log 2>/dev/null | grep "See in merge request" | wc -l)
   debug_str=""
   mrid=$(git log 2>/dev/null | grep "See merge request" | head -1 | awk -F! '{print $2}' | grep -o '[0-9]\+')
+  
+  if test "${enable_finance_mode}" = yes; then
+      product="${product}-finance"
+  fi
+
   if test "$enable_debug" = yes; then
-    debug_str="debug"
+      debug_str="debug"
   fi
 
   if test "$enable_ccache" = yes; then

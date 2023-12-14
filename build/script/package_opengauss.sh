@@ -40,7 +40,7 @@ function print_help()
     -3rd|--binarylib_dir   the directory of third party binarylibs.
     -pkg|--package         provode type of installation packages, values parameter is server.
     -m|--version_mode      this values of paramenter is debug, release, memcheck, the default value is release.
-    -pm|--product_mode     this values of paramenter is opengauss or lite, the default value is opengauss.
+    -pm|--product_mode     this values of paramenter is opengauss or lite or finance, the default value is opengauss.
 "
 }
 
