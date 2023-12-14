@@ -456,19 +456,24 @@ typedef const Pg_magic_struct* (*PGModuleMagicFunction)(void);
  * are allowed to be NULL.
  */
 extern Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1, bool can_ignore = false);
-extern Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2);
-extern Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
-extern Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4);
+extern Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, bool can_ignore = false);
+extern Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3,
+    bool can_ignore = false);
+extern Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    bool can_ignore = false);
 extern Datum DirectFunctionCall5Coll(
-    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5);
+    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
+    bool can_ignore = false);
 extern Datum DirectFunctionCall6Coll(
-    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6);
+    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6,
+    bool can_ignore = false);
 extern Datum DirectFunctionCall7Coll(
-    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6, Datum arg7);
+    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6, Datum arg7,
+    bool can_ignore = false);
 extern Datum DirectFunctionCall8Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
-    Datum arg5, Datum arg6, Datum arg7, Datum arg8);
+    Datum arg5, Datum arg6, Datum arg7, Datum arg8, bool can_ignore = false);
 extern Datum DirectFunctionCall9Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
-    Datum arg5, Datum arg6, Datum arg7, Datum arg8, Datum arg9);
+    Datum arg5, Datum arg6, Datum arg7, Datum arg8, Datum arg9, bool can_ignore = false);
 
 /* These are for invocation of a previously-looked-up function with a
  * directly-computed parameter list.  Note that neither arguments nor result
