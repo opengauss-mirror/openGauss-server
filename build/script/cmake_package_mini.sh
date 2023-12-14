@@ -445,7 +445,6 @@ function install_gaussdb()
     export THIRD_BIN_PATH="${binarylibs_path}"
     export PREFIX_HOME="${BUILD_DIR}"
     export ENABLE_LITE_MODE=ON
-    export ENABLE_FINANCE_MODE=ON
 
     export WITH_TASSL="${build_with_tassl}"
 
