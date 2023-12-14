@@ -1047,10 +1047,11 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     seqstmt->is_large = large;
 
     /* Assign UUID for create sequence */
+    seqstmt->uuid = INVALIDSEQUUID;
+#ifdef ENABLE_MUTIPLE_NODES
     if (!IS_SINGLE_NODE)
         seqstmt->uuid = gen_uuid(cxt->uuids);
-    else
-        seqstmt->uuid = INVALIDSEQUUID;
+#endif
 
     /*
      * If this is ALTER ADD COLUMN, make sure the sequence will be owned
