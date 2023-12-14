@@ -315,6 +315,9 @@ test: hw_datatype_2 hw_datatype_3
 test: hw_datatype hw_datatype_set
 test: test_regex llt_atc
 
+# test for inherit table
+test: inherits01
+
 # ----------
 # test for set operations
 # ----------

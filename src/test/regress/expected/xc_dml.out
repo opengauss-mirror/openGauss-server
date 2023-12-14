@@ -2,71 +2,85 @@ CREATE SCHEMA FVT_DBSYSTEM_MANAGE;
 CREATE TABLE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TAB_013(ID INT,ID2 INT);
 COMMENT ON TABLE  FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TAB_013 IS 'PG_DESCRIPTION_TAB_013';
 CREATE TABLE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020(DESCRIPTION TEXT) INHERITS (PG_DESCRIPTION);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+NOTICE:  merging column "description" with inherited definition
 INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SELECT * FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SEL...
-                    ^
 SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
-                                ^
-SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
       description       
 ------------------------
  PG_DESCRIPTION_TAB_013
 (1 row)
+
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+      description       
+------------------------
+ PG_DESCRIPTION_TAB_013
+ PG_DESCRIPTION_TAB_013
+(2 rows)
 
 EXPLAIN (VERBOSE ON, COSTS OFF) UPDATE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_0' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: EXPLAIN (VERBOSE ON, COSTS OFF) UPDATE FVT_DBSYSTEM_MANAGE.P...
-                                               ^
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Update on fvt_dbsystem_manage.pg_description_table_020
+   ->  Seq Scan on fvt_dbsystem_manage.pg_description_table_020
+         Output: objoid, classoid, objsubid, 'PG_DESCRIPTION_TAB_013_0'::text, ctid
+         Filter: (pg_description_table_020.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+(4 rows)
+
 UPDATE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_0' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: UPDATE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SET DESC...
-               ^
 SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
-                                ^
-SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
-      description       
-------------------------
- PG_DESCRIPTION_TAB_013
+       description        
+--------------------------
+ PG_DESCRIPTION_TAB_013_0
 (1 row)
 
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+       description        
+--------------------------
+ PG_DESCRIPTION_TAB_013
+ PG_DESCRIPTION_TAB_013_0
+(2 rows)
+
 EXPLAIN (VERBOSE ON, COSTS OFF) UPDATE PG_DESCRIPTION SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_1' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+                                                                                                           QUERY PLAN                                                                                                           
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on pg_catalog.pg_description
    ->  Seq Scan on pg_catalog.pg_description
-         Output: objoid, classoid, objsubid, 'PG_DESCRIPTION_TAB_013_1'::text, ctid
-         Filter: (pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
-(4 rows)
+         Output: pg_catalog.pg_description.objoid, pg_catalog.pg_description.classoid, pg_catalog.pg_description.objsubid, 'PG_DESCRIPTION_TAB_013_1'::text, pg_catalog.pg_description.ctid
+         Filter: (pg_catalog.pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+   ->  Seq Scan on fvt_dbsystem_manage.pg_description_table_020 pg_description
+         Output: fvt_dbsystem_manage.pg_description.objoid, fvt_dbsystem_manage.pg_description.classoid, fvt_dbsystem_manage.pg_description.objsubid, 'PG_DESCRIPTION_TAB_013_1'::text, fvt_dbsystem_manage.pg_description.ctid
+         Filter: (fvt_dbsystem_manage.pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+(7 rows)
 
 UPDATE PG_DESCRIPTION SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_1' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
 SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
-                                ^
-SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
        description        
 --------------------------
  PG_DESCRIPTION_TAB_013_1
 (1 row)
 
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+       description        
+--------------------------
+ PG_DESCRIPTION_TAB_013_1
+ PG_DESCRIPTION_TAB_013_1
+(2 rows)
+
 EXPLAIN (VERBOSE ON, COSTS OFF) DELETE FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: EXPLAIN (VERBOSE ON, COSTS OFF) DELETE FROM FVT_DBSYSTEM_MAN...
-                                                    ^
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Delete on fvt_dbsystem_manage.pg_description_table_020
+   ->  Seq Scan on fvt_dbsystem_manage.pg_description_table_020
+         Output: ctid
+         Filter: (pg_description_table_020.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+(4 rows)
+
 DELETE FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: DELETE FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHE...
-                    ^
 SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
-                                ^
+ description 
+-------------
+(0 rows)
+
 SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
        description        
 --------------------------
@@ -74,30 +88,33 @@ SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TA
 (1 row)
 
 INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SELECT * FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SEL...
-                    ^
 EXPLAIN (VERBOSE ON, COSTS OFF) DELETE FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
  Delete on pg_catalog.pg_description
    ->  Seq Scan on pg_catalog.pg_description
-         Output: ctid
-         Filter: (pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
-(4 rows)
+         Output: pg_catalog.pg_description.ctid
+         Filter: (pg_catalog.pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+   ->  Seq Scan on fvt_dbsystem_manage.pg_description_table_020 pg_description
+         Output: fvt_dbsystem_manage.pg_description.ctid
+         Filter: (fvt_dbsystem_manage.pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+(7 rows)
 
 DELETE FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
 SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
-ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
-LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
-                                ^
+ description 
+-------------
+(0 rows)
+
 SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
  description 
 -------------
 (0 rows)
 
 DROP SCHEMA FVT_DBSYSTEM_MANAGE CASCADE;
-NOTICE:  drop cascades to table fvt_dbsystem_manage.pg_description_tab_013
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table fvt_dbsystem_manage.pg_description_tab_013
+drop cascades to table fvt_dbsystem_manage.pg_description_table_020
 CREATE TABLE DELETE_XC_C(C1 INT, C2 DATE, C3 INT);
 CREATE TABLE DELETE_XC_D(D1 INT, D2 DATE, D3 INT);
 INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,100),NOW(), 1;
@@ -1678,64 +1695,57 @@ ALTER TABLE parent_replica_table ADD PRIMARY KEY (A, B);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "parent_replica_table_pkey" for table "parent_replica_table"
 INSERT INTO parent_replica_table VALUES(1, 2, 3, 'sadfadsgdsf');
 CREATE TABLE son_hash_table() INHERITS (parent_replica_table);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 INSERT INTO son_hash_table VALUES(1, 2, 3, 'sadfadsgdsf');
-ERROR:  relation "son_hash_table" does not exist on datanode1
-LINE 1: INSERT INTO son_hash_table VALUES(1, 2, 3, 'sadfadsgdsf');
-                    ^
 INSERT INTO son_hash_table VALUES(1, 1, 1, 'sadfadsgdsf');
-ERROR:  relation "son_hash_table" does not exist on datanode1
-LINE 1: INSERT INTO son_hash_table VALUES(1, 1, 1, 'sadfadsgdsf');
-                    ^
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) DELETE FROM parent_replica_table;
-                  QUERY PLAN                   
------------------------------------------------
+                          QUERY PLAN                          
+--------------------------------------------------------------
  Delete on public.parent_replica_table
    ->  Seq Scan on public.parent_replica_table
-         Output: ctid
-(3 rows)
+         Output: public.parent_replica_table.ctid
+   ->  Seq Scan on public.son_hash_table parent_replica_table
+         Output: public.parent_replica_table.ctid
+(5 rows)
 
 DELETE FROM parent_replica_table WHERE A = 1 AND B = 1 AND C = 1;
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
-                          QUERY PLAN                           
----------------------------------------------------------------
+                                                                                  QUERY PLAN                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on public.parent_replica_table
-   ->  Bitmap Heap Scan on public.parent_replica_table
-         Output: a, b, c, 'AAAAA'::character varying(20), ctid
-         Recheck Cond: (parent_replica_table.a > 0)
-         ->  Bitmap Index Scan on parent_replica_table_pkey
-               Index Cond: (parent_replica_table.a > 0)
-(6 rows)
+   ->  Seq Scan on public.parent_replica_table
+         Output: public.parent_replica_table.a, public.parent_replica_table.b, public.parent_replica_table.c, 'AAAAA'::character varying(20), public.parent_replica_table.ctid
+         Filter: (public.parent_replica_table.a > 0)
+   ->  Seq Scan on public.son_hash_table parent_replica_table
+         Output: public.parent_replica_table.a, public.parent_replica_table.b, public.parent_replica_table.c, 'AAAAA'::character varying(20), public.parent_replica_table.ctid
+         Filter: (public.parent_replica_table.a > 0)
+(7 rows)
 
 UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
 UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0;
 UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0 AND C > 0;
 DROP TABLE son_hash_table;
-ERROR:  table "son_hash_table" does not exist
 CREATE TABLE son_replica_table() INHERITS (parent_replica_table);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 ALTER TABLE son_replica_table ADD PRIMARY KEY (A, B);
-ERROR:  relation "son_replica_table" does not exist
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "son_replica_table_pkey" for table "son_replica_table"
 INSERT INTO son_replica_table VALUES(1, 2, 3, 'sadfadsgdsf');
-ERROR:  relation "son_replica_table" does not exist on datanode1
-LINE 1: INSERT INTO son_replica_table VALUES(1, 2, 3, 'sadfadsgdsf')...
-                    ^
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
-                          QUERY PLAN                           
----------------------------------------------------------------
+                                                                                  QUERY PLAN                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on public.parent_replica_table
-   ->  Bitmap Heap Scan on public.parent_replica_table
-         Output: a, b, c, 'AAAAA'::character varying(20), ctid
-         Recheck Cond: (parent_replica_table.a > 0)
-         ->  Bitmap Index Scan on parent_replica_table_pkey
-               Index Cond: (parent_replica_table.a > 0)
-(6 rows)
+   ->  Seq Scan on public.parent_replica_table
+         Output: public.parent_replica_table.a, public.parent_replica_table.b, public.parent_replica_table.c, 'AAAAA'::character varying(20), public.parent_replica_table.ctid
+         Filter: (public.parent_replica_table.a > 0)
+   ->  Bitmap Heap Scan on public.son_replica_table parent_replica_table
+         Output: public.parent_replica_table.a, public.parent_replica_table.b, public.parent_replica_table.c, 'AAAAA'::character varying(20), public.parent_replica_table.ctid
+         Recheck Cond: (public.parent_replica_table.a > 0)
+         ->  Bitmap Index Scan on son_replica_table_pkey
+               Index Cond: (public.parent_replica_table.a > 0)
+(9 rows)
 
 UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
 UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0;
 UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0 AND C > 0;
 DROP TABLE son_replica_table;
-ERROR:  table "son_replica_table" does not exist
 DROP TABLE parent_replica_table;
 --
 ---- CLEAN UP

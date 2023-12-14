@@ -95,15 +95,16 @@ JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* sl
     cleanLength = cleanTupType->natts;
     if (cleanLength > 0) {
         cleanMap = (AttrNumber*)palloc(cleanLength * sizeof(AttrNumber));
-        cleanResno = 1;
+        cleanResno = 0;
         foreach (t, targetList) {
             TargetEntry* tle = (TargetEntry*)lfirst(t);
 
             if (!tle->resjunk) {
-                cleanMap[cleanResno - 1] = tle->resno;
+                cleanMap[cleanResno] = tle->resno;
                 cleanResno++;
             }
         }
+        Assert(cleanResno == cleanLength);
     } else {
         cleanMap = NULL;
     }

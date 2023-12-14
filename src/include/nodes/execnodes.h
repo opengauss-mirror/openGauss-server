@@ -1505,6 +1505,7 @@ typedef struct ModifyTableState {
     bool mt_done;         /* are we done? */
     bool isReplace;
     bool isConflict;
+    bool isinherit;
     PlanState** mt_plans; /* subplans (one per target rel) */
 #ifdef PGXC
     PlanState** mt_remoterels;        /* per-target remote query node */

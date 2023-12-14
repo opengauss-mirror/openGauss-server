@@ -1359,7 +1359,7 @@ static Plan* create_merge_append_plan(PlannerInfo* root, MergeAppendPath* best_p
     (void)prepare_sort_from_pathkeys(root,
         plan,
         pathkeys,
-        NULL,
+        best_path->path.parent->relids,
         NULL,
         true,
         &node->numCols,

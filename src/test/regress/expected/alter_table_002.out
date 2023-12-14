@@ -50,7 +50,6 @@ drop table atacc1;
 create table atacc1 (test int);
 create table atacc2 (test2 int);
 create table atacc3 (test3 int) inherits (atacc1, atacc2);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 alter table atacc2 add constraint foo check (test2>0);
 -- fail and then succeed on atacc2
 insert into atacc2 (test2) values (-3);
@@ -59,32 +58,22 @@ DETAIL:  N/A
 insert into atacc2 (test2) values (3);
 -- fail and then succeed on atacc3
 insert into atacc3 (test2) values (-3);
-ERROR:  relation "atacc3" does not exist on datanode1
-LINE 1: insert into atacc3 (test2) values (-3);
-                    ^
+ERROR:  new row for relation "atacc3" violates check constraint "foo"
+DETAIL:  N/A
 insert into atacc3 (test2) values (3);
-ERROR:  relation "atacc3" does not exist on datanode1
-LINE 1: insert into atacc3 (test2) values (3);
-                    ^
 drop table atacc3;
-ERROR:  table "atacc3" does not exist
 drop table atacc2;
 drop table atacc1;
 -- same things with one created with INHERIT
 create table atacc1 (test int);
 create table atacc2 (test2 int);
 create table atacc3 (test3 int) inherits (atacc1, atacc2);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 alter table atacc3 no inherit atacc2;
-ERROR:  relation "atacc3" does not exist
 -- fail
 alter table atacc3 no inherit atacc2;
-ERROR:  relation "atacc3" does not exist
+ERROR:  relation "atacc2" is not a parent of relation "atacc3"
 -- make sure it really isn't a child
 insert into atacc3 (test2) values (3);
-ERROR:  relation "atacc3" does not exist on datanode1
-LINE 1: insert into atacc3 (test2) values (3);
-                    ^
 select test2 from atacc2;
  test2 
 -------
@@ -93,35 +82,27 @@ select test2 from atacc2;
 -- fail due to missing constraint
 alter table atacc2 add constraint foo check (test2>0);
 alter table atacc3 inherit atacc2;
-ERROR:  relation "atacc3" does not exist
+ERROR:  child table is missing constraint "foo"
 -- fail due to missing column
 alter table atacc3 rename test2 to testx;
-ERROR:  relation "atacc3" does not exist
 alter table atacc3 inherit atacc2;
-ERROR:  relation "atacc3" does not exist
+ERROR:  child table is missing column "test2"
 -- fail due to mismatched data type
 alter table atacc3 add test2 bool;
-ERROR:  relation "atacc3" does not exist
 alter table atacc3 inherit atacc2;
-ERROR:  relation "atacc3" does not exist
+ERROR:  child table "atacc3" has different type for column "test2"
 alter table atacc3 drop test2;
-ERROR:  relation "atacc3" does not exist
 -- succeed
 alter table atacc3 add test2 int;
-ERROR:  relation "atacc3" does not exist
 update atacc3 set test2 = 4 where test2 is null;
-ERROR:  relation "atacc3" does not exist on datanode1
-LINE 1: update atacc3 set test2 = 4 where test2 is null;
-               ^
 alter table atacc3 add constraint foo check (test2>0);
-ERROR:  relation "atacc3" does not exist
 alter table atacc3 inherit atacc2;
-ERROR:  relation "atacc3" does not exist
 -- fail due to duplicates and circular inheritance
 alter table atacc3 inherit atacc2;
-ERROR:  relation "atacc3" does not exist
+ERROR:  relation "atacc2" would be inherited from more than once
 alter table atacc2 inherit atacc3;
-ERROR:  relation "atacc3" does not exist
+ERROR:  circular inheritance not allowed
+DETAIL:  "atacc3" is already a child of "atacc2".
 alter table atacc2 inherit atacc2;
 ERROR:  circular inheritance not allowed
 DETAIL:  "atacc2" is already a child of "atacc2".
@@ -129,21 +110,19 @@ DETAIL:  "atacc2" is already a child of "atacc2".
 select test2 from atacc2;
  test2 
 -------
-(0 rows)
+     4
+(1 row)
 
 drop table atacc2 cascade;
+NOTICE:  drop cascades to table atacc3
 drop table atacc1;
 -- adding only to a parent is allowed as of 9.2
 create table atacc1 (test int);
 create table atacc2 (test2 int) inherits (atacc1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 -- ok:
 alter table atacc1 add constraint foo check (test>0) no inherit;
 -- check constraint is not there on child
 insert into atacc2 (test) values (-3);
-ERROR:  relation "atacc2" does not exist on datanode1
-LINE 1: insert into atacc2 (test) values (-3);
-                    ^
 -- check constraint is there on parent
 insert into atacc1 (test) values (-3);
 ERROR:  new row for relation "atacc1" violates check constraint "foo"
@@ -151,9 +130,8 @@ DETAIL:  N/A
 insert into atacc1 (test) values (3);
 -- fail, violating row:
 alter table atacc2 add constraint foo check (test>0) no inherit;
-ERROR:  relation "atacc2" does not exist
+ERROR:  check constraint "foo" is violated by some row
 drop table atacc2;
-ERROR:  table "atacc2" does not exist
 drop table atacc1;
 -- test unique constraint adding
 create table atacc1 ( test int ) with oids;
@@ -408,48 +386,35 @@ ERROR:  table "atacc1" does not exist
 -- test inheritance
 create table parent (a int);
 create table child (b varchar(255)) inherits (parent);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 alter table parent alter a set not null;
 insert into parent values (NULL);
 ERROR:  null value in column "a" violates not-null constraint
 DETAIL:  Failing row contains (null).
 insert into child (a, b) values (NULL, 'foo');
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: insert into child (a, b) values (NULL, 'foo');
-                    ^
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null, foo).
 alter table parent alter a drop not null;
 insert into parent values (NULL);
 insert into child (a, b) values (NULL, 'foo');
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: insert into child (a, b) values (NULL, 'foo');
-                    ^
 alter table only parent alter a set not null;
 ERROR:  column "a" contains null values
 alter table child alter a set not null;
-ERROR:  relation "child" does not exist
+ERROR:  column "a" contains null values
 delete from parent;
 alter table only parent alter a set not null;
 insert into parent values (NULL);
 ERROR:  null value in column "a" violates not-null constraint
 DETAIL:  Failing row contains (null).
 alter table child alter a set not null;
-ERROR:  relation "child" does not exist
 insert into child (a, b) values (NULL, 'foo');
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: insert into child (a, b) values (NULL, 'foo');
-                    ^
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null, foo).
 delete from child;
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: delete from child;
-                    ^
 alter table child alter a set not null;
-ERROR:  relation "child" does not exist
 insert into child (a, b) values (NULL, 'foo');
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: insert into child (a, b) values (NULL, 'foo');
-                    ^
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null, foo).
 drop table child;
-ERROR:  table "child" does not exist
 drop table parent;
 -- test setting and removing default values
 create table def_test (
@@ -835,34 +800,35 @@ create table parent (a int, b int, c int);
 insert into parent values (1, 2, 3);
 alter table parent drop a;
 create table child (d varchar(255)) inherits (parent);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 insert into child values (12, 13, 'testing');
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: insert into child values (12, 13, 'testing');
-                    ^
 select * from parent order by b;
- b | c 
----+---
- 2 | 3
-(1 row)
+ b  | c  
+----+----
+  2 |  3
+ 12 | 13
+(2 rows)
 
 select * from child;
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: select * from child;
-                      ^
+ b  | c  |    d    
+----+----+---------
+ 12 | 13 | testing
+(1 row)
+
 alter table parent drop c;
 select * from parent order by b;
- b 
----
- 2
-(1 row)
+ b  
+----
+  2
+ 12
+(2 rows)
 
 select * from child;
-ERROR:  relation "child" does not exist on datanode1
-LINE 1: select * from child;
-                      ^
+ b  |    d    
+----+---------
+ 12 | testing
+(1 row)
+
 drop table child;
-ERROR:  table "child" does not exist
 drop table parent;
 -- test copy in/out
 create table test (a int4, b int4, c int4);

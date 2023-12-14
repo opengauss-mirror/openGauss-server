@@ -3408,8 +3408,9 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     bool is_first_modified = true;
     int2 bucketid = InvalidBktId;
     List *partition_list = NIL;
-    int resultRelationNum = node->mt_ResultTupleSlots ? list_length(node->mt_ResultTupleSlots) : 1;
 
+    int resultRelationNum = node->mt_ResultTupleSlots ? list_length(node->mt_ResultTupleSlots): node->mt_nplans;
+    
     CHECK_FOR_INTERRUPTS();
 
     /*
@@ -3518,7 +3519,9 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
         result_rel_info = node->resultRelInfo + estate->result_rel_index;
         estate->es_result_relation_info = result_rel_info;
         junk_filter = result_rel_info->ri_junkFilter;
-        partExprKeyStr = node->partExprKeyStrArray[estate->result_rel_index];
+        if (!node->isinherit) {
+            partExprKeyStr = node->partExprKeyStrArray[estate->result_rel_index];
+        }
         if (estate->deleteLimitCount != 0 && estate->es_processed == estate->deleteLimitCount) {
             break;
         }
@@ -3530,7 +3533,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
          */
         ResetPerTupleExprContext(estate);
         t_thrd.xact_cxt.ActiveLobRelid = result_rel_info->ri_RelationDesc->rd_id;
-        plan_slot = FetchPlanSlot(subPlanState, node->mt_ProjInfos);
+        plan_slot = FetchPlanSlot(subPlanState, node->mt_ProjInfos, node->isinherit);
         t_thrd.xact_cxt.ActiveLobRelid = InvalidOid;
         if (TupIsNull(plan_slot)) {
             record_first_time();
@@ -3541,8 +3544,18 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 
             /* advance to next subplan if any */
             node->mt_whichplan++;
-            Assert(estate->result_rel_index == 0);
+            if (!node->isinherit) {
+                Assert(estate->result_rel_index == 0);
+            }
             if (node->mt_whichplan < node->mt_nplans) {
+                if (node->isinherit) {
+                    if (estate->result_rel_index == resultRelationNum - 1) {
+                        estate->result_rel_index = 0;
+                    } else {
+                        estate->result_rel_index++;
+                    }
+                    result_rel_info = node->resultRelInfo + estate->result_rel_index;
+                }
                 subPlanState = node->mt_plans[node->mt_whichplan];
 #ifdef ENABLE_MULTIPLE_NODES
                 /* Move to next remote plan */
@@ -3569,7 +3582,6 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                         LockRelFileNode(estate->es_result_relation_info->ri_RelationDesc->rd_node, RowExclusiveLock);
                     }
                 }
-
                 continue;
             } else {
                 if (use_heap_multi_insert) {
@@ -3699,8 +3711,10 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
             /*
              * apply the junk_filter if needed.
              */
-            if (operation != CMD_DELETE)
+            if (operation != CMD_DELETE) {
                 slot = ExecFilterJunk(junk_filter, slot);
+                slot->tts_tam_ops = result_rel_info->ri_RelationDesc->rd_tam_ops;
+            }
         }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3745,11 +3759,19 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
         }
 
         record_first_time();
-
-        if (estate->result_rel_index == resultRelationNum - 1) {
-            estate->result_rel_index = 0;
-        } else {
-            estate->result_rel_index++;
+        
+        /*
+         * Switching the result_relation_info here will cause the inheritance function error,
+         * but if don't switch the result_relation_info here,
+         * openGauss will not be compatible with the multi-table update and deletion of 'B' database
+         * ensure result_relation_info must be switched here when perform the multi-table update and deletion
+         */
+        if (!node->isinherit) {
+            if (estate->result_rel_index == resultRelationNum - 1) {
+                estate->result_rel_index = 0;
+            } else {
+                estate->result_rel_index++;
+            }
         }
 
         /*
@@ -3796,7 +3818,7 @@ static void InitMultipleModify(ModifyTableState* node, PlanState* subnode, uint3
     List* targetlists = ((ModifyTable*)(node->ps.plan))->targetlists;
     EState* estate = node->ps.state;
 
-    if (resultRelationNum == 1) {
+    if (resultRelationNum == 1 || node->isinherit) {
         return;
     }
 
@@ -3849,13 +3871,12 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     UpsertState* upsertState = NULL;
     ListCell* l = NULL;
     int i;
+    int resultRelationNum;
 #ifdef PGXC
 #ifdef ENABLE_MULTIPLE_NDOES
     PlanState* saved_remote_rel_info = NULL;
 #endif
 #endif
-    int resultRelationNum = list_length((List*)linitial(node->resultRelations));
-
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
 
@@ -3868,7 +3889,13 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         mt_state = makeNode(ModifyTableState);
 
     estate->deleteLimitCount = 0;
-
+	
+    mt_state->isinherit = node->plan.isinherit;
+    if (mt_state->isinherit)
+        resultRelationNum = list_length(node->resultRelations);
+    else
+        resultRelationNum = list_length((List*)linitial(node->resultRelations));
+	
     if (node->cacheEnt != NULL) {
         ErrorCacheEntry* entry = node->cacheEnt;
 
@@ -4312,29 +4339,60 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         }
 
         if (junk_filter_needed) {
-            result_rel_info = mt_state->resultRelInfo;
-            for (i = 0; i < nplans; i++) {
-                sub_plan = mt_state->mt_plans[i]->plan;
-                if (resultRelationNum > 1) {
-                    foreach (l, node->targetlists) {
-                        List* targetlist = (List*)lfirst(l);
-                        if (operation == CMD_UPDATE) {
-                            ExecCheckPlanOutput(result_rel_info->ri_RelationDesc, targetlist);
+            if (mt_state->isinherit) {
+                result_rel_info = mt_state->resultRelInfo;
+                for (i = 0; i < nplans; i++) {
+                    JunkFilter *j;
+                    sub_plan = mt_state->mt_plans[i]->plan;
+                    if (operation == CMD_INSERT || operation == CMD_UPDATE)
+                        ExecCheckPlanOutput(result_rel_info->ri_RelationDesc, sub_plan->targetlist);
+
+                    j = ExecInitJunkFilter(sub_plan->targetlist,
+                                           result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
+                                           ExecInitExtraTupleSlot(estate, NULL), TableAmHeap);
+
+                    if (operation == CMD_UPDATE || operation == CMD_DELETE) {
+                        /* For UPDATE/DELETE, find the appropriate junk attr now */
+                        char relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
+                        if (relkind == RELKIND_RELATION ||
+                            relkind == RELKIND_MATVIEW ||
+                            relkind == PARTTYPE_PARTITIONED_RELATION) {
+                            j->jf_junkAttNo = ExecFindJunkAttribute(j, "ctid");
+                            if (!AttributeNumberIsValid(j->jf_junkAttNo))
+                                elog(ERROR, "could not find junk ctid column");
+                        } else {
+                            j->jf_junkAttNo = ExecFindJunkAttribute(j, "wholerow");
+                            if (!AttributeNumberIsValid(j->jf_junkAttNo))
+                                elog(ERROR, "could not find junk wholerow column");
                         }
-                        ExecInitJunkAttr(estate, operation, targetlist, result_rel_info);
-                        result_rel_info++;
                     }
-                } else {
-                    if (operation == CMD_UPDATE) {
-                        CheckPlanOutput(sub_plan, result_rel_info->ri_RelationDesc);
+                    result_rel_info->ri_junkFilter = j;
+                    result_rel_info++;
+                }
+            } else {
+                result_rel_info = mt_state->resultRelInfo;
+                for (i = 0; i < nplans; i++) {
+                    sub_plan = mt_state->mt_plans[i]->plan;
+                    if (resultRelationNum > 1) {
+                        foreach (l, node->targetlists) {
+                            List* targetlist = (List*)lfirst(l);
+                            if (operation == CMD_UPDATE) {
+                                ExecCheckPlanOutput(result_rel_info->ri_RelationDesc, targetlist);
+                            }
+                            ExecInitJunkAttr(estate, operation, targetlist, result_rel_info);
+                            result_rel_info++;
+                        }
+                    } else {
+                        if (operation == CMD_UPDATE) {
+                            CheckPlanOutput(sub_plan, result_rel_info->ri_RelationDesc);
+                        }
+                        ExecInitJunkAttr(estate, operation, sub_plan->targetlist, result_rel_info);
                     }
-                    ExecInitJunkAttr(estate, operation, sub_plan->targetlist, result_rel_info);
                 }
             }
         } else {
-            if (operation == CMD_INSERT) {
+            if (operation == CMD_INSERT)
                 CheckPlanOutput(sub_plan, mt_state->resultRelInfo->ri_RelationDesc);
-            }
         }
     }
 

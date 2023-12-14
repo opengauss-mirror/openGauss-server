@@ -8,7 +8,8 @@ DROP TYPE cstore_person_type;
 -- feature 2: inheritance
 CREATE TABLE cstore_parent_tbl( a1 int, a2 bool, a3 bigint);
 CREATE TABLE cstore_child_tbl( b1 bool, b2 bool, b3 bigint) INHERITS ( cstore_parent_tbl ) with (ORIENTATION = COLUMN );
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ERROR:  Unsupport feature
+DETAIL:  cstore/timeseries don't support relation defination with inheritance.
 DROP TABLE cstore_parent_tbl;
 -- feature 3: unchange some storage parameter
 CREATE TABLE cstore_coltbl( a1 int, a2 int ) with (orientation = column);

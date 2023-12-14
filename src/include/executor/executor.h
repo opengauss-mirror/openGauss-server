@@ -255,7 +255,7 @@ extern PlanState* ExecInitNode(Plan* node, EState* estate, int eflags);
 extern Node* MultiExecProcNode(PlanState* node);
 extern void ExecEndNode(PlanState* node);
 extern bool NeedStubExecution(Plan* plan);
-extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos);
+extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos, bool isinherit);
 
 extern long ExecGetPlanMemCost(Plan* node);
 

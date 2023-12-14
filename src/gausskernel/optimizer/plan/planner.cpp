@@ -1915,8 +1915,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      */
     if (parse->resultRelations && parse->commandType != CMD_INSERT &&
         rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->inh)
+    {
         plan = inheritance_planner(root);
-    else {
+        plan->isinherit = true;
+    } else {
         plan = grouping_planner(root, tuple_fraction);
         /*
         * Make sure the topmost plan node's targetlist exposes the original

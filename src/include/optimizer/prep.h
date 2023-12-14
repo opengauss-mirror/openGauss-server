@@ -104,7 +104,9 @@ extern void make_inh_translation_list(
 extern Bitmapset* translate_col_privs(const Bitmapset* parent_privs, List* translated_vars);
 
 extern Node* adjust_appendrel_attrs(PlannerInfo* root, Node* node, AppendRelInfo* appinfo);
-
+extern Node* adjust_appendrel_attrs_multilevel(
+    PlannerInfo *root, Node *node, Relids child_relids, Relids top_parent_relids);
+extern AppendRelInfo **find_appinfos_by_relids(PlannerInfo *root, Relids relids, int *nappinfos);
 extern void mark_parent_child_pushdown_flag(Query *parent, Query *child);
 extern bool check_base_rel_in_fromlist(Query *parse, Node *jtnode);
 extern UNIONALL_SHIPPING_TYPE precheck_shipping_union_all(Query *subquery, Node *setOp);
