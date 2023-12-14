@@ -2262,7 +2262,8 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
 
     isExtend = (blockNum == P_NEW);
 
-    if (IsSegmentFileNode(smgr->smgr_rnode.node) && RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery) {
+    if (!ENABLE_DMS && IsSegmentFileNode(smgr->smgr_rnode.node) && RecoveryInProgress() &&
+        !t_thrd.xlog_cxt.InRecovery) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("bucket and undo segment standby read is not yet supported.")));
