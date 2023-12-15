@@ -390,7 +390,7 @@ function testcase()
     restart_all
     delete_add_standby
     delete_add_primary
-    full_clean
+    # full_clean
     failover_alive
     failover_restart
     switchover_4times

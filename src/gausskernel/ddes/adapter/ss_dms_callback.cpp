@@ -1725,14 +1725,14 @@ static void ReformCleanBackends()
     }
 }
 
-static void AliveFailoverCleanBackends()
+static void FailoverCleanBackends()
 {
     if (g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
         return;
     }
 
     /**
-     * for alive failover: wait for backend threads to exit, at most 30s
+     * for failover: wait for backend threads to exit, at most 30s
      * why wait code write this
      *      step 1, sned signal to tell thread to exit
      *      step 2, PM detected backend exit
@@ -1841,6 +1841,8 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
             pmState = PM_WAIT_BACKENDS;
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
         }
+    } else {
+        g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
     }
     INSTR_TIME_SET_CURRENT(reform_info->reform_start_time);
 
@@ -1871,8 +1873,8 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmsg("[SS reform] old cluster node bitmap: %lld", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 
-    if (SS_STANDBY_FAILOVER) {
-        AliveFailoverCleanBackends();
+    if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
+        FailoverCleanBackends();
     } else if (!SSPerformingStandbyScenario()) {
         ReformCleanBackends();
     }
