@@ -54,13 +54,15 @@ CATALOG(pg_subscription,6126) BKI_SHARED_RELATION BKI_ROWTYPE_OID(6128) BKI_SCHE
                               * publisher to send data in binary */
     text subskiplsn;         /* All changes finished at this LSN are
                               * skipped */
+    bool submatchddlowner;   /* True if replicated objects by DDL replication
+                              * should match the original owner on the publisher */
 #endif
 }
 FormData_pg_subscription;
 
 typedef FormData_pg_subscription *Form_pg_subscription;
 
-#define Natts_pg_subscription 10
+#define Natts_pg_subscription 11
 #define Anum_pg_subscription_subdbid 1
 #define Anum_pg_subscription_subname 2
 #define Anum_pg_subscription_subowner 3
@@ -71,7 +73,7 @@ typedef FormData_pg_subscription *Form_pg_subscription;
 #define Anum_pg_subscription_subpublications 8
 #define Anum_pg_subscription_subbinary 9
 #define Anum_pg_subscription_subskiplsn 10
-
+#define Anum_pg_subscription_submatchddlowner 11
 
 typedef struct Subscription {
     Oid oid;            /* Oid of the subscription */
@@ -86,6 +88,8 @@ typedef struct Subscription {
     bool binary;        /* Indicates if the subscription wants data in binary format */
     XLogRecPtr skiplsn; /* All changes finished at this LSN are
                          * skipped */
+    bool matchddlowner; /* Indicated if replicated objects by DDL repllication
+                         * shold match the original owner on th publisher */
 } Subscription;
 
 

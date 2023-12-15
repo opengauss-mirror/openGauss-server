@@ -242,13 +242,14 @@ def main():
 	pub_process = Process(target=real_run, args=(pub_ptdb,run_type,))
 	pub_process.start()
 
+	if pub_process.is_alive():
+		pub_process.join()
+
 	sub_port_arr = [sub_node1_port, sub_node2_port, sub_node3_port];
 	sub_ptdb = Pterodb(datanode_num, sub_port_arr, data_dir, "sub_datanode");
 	sub_process = Process(target=real_run, args=(sub_ptdb,run_type,))
 	sub_process.start()
 
-	if pub_process.is_alive():
-		pub_process.join()
 	if sub_process.is_alive():
 		sub_process.join()
 

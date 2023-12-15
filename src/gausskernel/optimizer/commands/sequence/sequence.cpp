@@ -2430,6 +2430,58 @@ static void process_owned_by(const Relation seqrel, List* owned_by)
 }
 
 /*
+ * Return sequence parameters, detailed
+ */
+sequence_values *get_sequence_values(Oid sequenceId)
+{
+    Relation seq_rel;
+    SeqTable elm = NULL;
+    HeapTupleData seqtuple;
+    int64 uuid;
+    Buffer buf;
+
+    sequence_values *seqvalues = NULL;
+
+    /*
+     * Read the old sequence. This does a bit more work than really
+     * necessary, but it's simple, and we do want to double-check that it's
+     * indeed a sequence.
+     */
+    init_sequence(sequenceId, &elm, &seq_rel);
+
+    seqvalues = (sequence_values *)palloc(sizeof(sequence_values));
+    seqvalues->large = (RelationGetRelkind(seq_rel) == RELKIND_LARGE_SEQUENCE);
+
+    if (seqvalues->large) {
+        Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(elm, seq_rel, &buf, &seqtuple, &uuid);
+        seqvalues->sequence_name = pstrdup(seq->sequence_name.data);
+        seqvalues->is_cycled = seq->is_cycled;
+        seqvalues->last_value = Int8or16Out<int128, true>(seq->last_value);
+        seqvalues->start_value = Int8or16Out<int128, true>(seq->start_value);
+        seqvalues->increment_by = Int8or16Out<int128, true>(seq->increment_by);
+        seqvalues->max_value = Int8or16Out<int128, true>(seq->max_value);
+        seqvalues->min_value = Int8or16Out<int128, true>(seq->min_value);
+        seqvalues->cache_value = Int8or16Out<int128, true>(seq->cache_value);
+        UnlockReleaseBuffer(buf);
+    } else {
+        Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(elm, seq_rel, &buf, &seqtuple, &uuid);
+        seqvalues->sequence_name = pstrdup(seq->sequence_name.data);
+        seqvalues->is_cycled = seq->is_cycled;
+        seqvalues->last_value = Int8or16Out<int64, false>(seq->last_value);
+        seqvalues->start_value = Int8or16Out<int64, false>(seq->start_value);
+        seqvalues->increment_by = Int8or16Out<int64, false>(seq->increment_by);
+        seqvalues->max_value = Int8or16Out<int64, false>(seq->max_value);
+        seqvalues->min_value = Int8or16Out<int64, false>(seq->min_value);
+        seqvalues->cache_value = Int8or16Out<int64, false>(seq->cache_value);
+        UnlockReleaseBuffer(buf);
+    }
+
+    relation_close(seq_rel, NoLock);
+    
+    return seqvalues;
+}
+
+/*
  * Return sequence parameters
  */
 void get_sequence_params(Relation rel, int64* uuid, int64* start, int64* increment, int64* maxvalue, int64* minvalue,

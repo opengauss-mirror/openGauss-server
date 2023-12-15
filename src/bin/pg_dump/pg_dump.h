@@ -511,6 +511,7 @@ typedef struct _PublicationInfo {
     bool pubinsert;
     bool pubupdate;
     bool pubdelete;
+    int64 pubddl;
 } PublicationInfo;
 
 /*
@@ -534,6 +535,7 @@ typedef struct _SubscriptionInfo {
     char *subsynccommit;
     char *subpublications;
     char *subbinary;
+    char *submatchddlowner;
 } SubscriptionInfo;
 
 /* global decls */

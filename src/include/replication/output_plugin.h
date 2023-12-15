@@ -55,6 +55,18 @@ typedef void (*LogicalDecodeStartupCB)(struct LogicalDecodingContext* ctx, Outpu
 typedef void (*LogicalDecodeBeginCB)(struct LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
 
 /*
+ * Called for the logical decoding DDL message.
+ */
+typedef void (*LogicalDecodeDDLMessageCB) (struct LogicalDecodingContext *ctx,
+                                            ReorderBufferTXN *txn,
+                                            XLogRecPtr message_lsn,
+                                            const char *prefix,
+                                            Oid relid,
+                                            DeparsedCommandType cmdtype,
+                                            Size message_size,
+                                            const char *message);
+
+/*
  * Callback for every individual change in a successful transaction.
  */
 typedef void (*LogicalDecodeChangeCB)(
@@ -100,6 +112,7 @@ typedef struct OutputPluginCallbacks {
     LogicalDecodePrepareCB prepare_cb;
     LogicalDecodeShutdownCB shutdown_cb;
     LogicalDecodeFilterByOriginCB filter_by_origin_cb;
+    LogicalDecodeDDLMessageCB ddl_cb;
 } OutputPluginCallbacks;
 
 typedef struct ParallelOutputPluginCallbacks {

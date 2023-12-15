@@ -62,6 +62,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_rlspolicy.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_publication.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_attrdef.h"
 #include "catalog/pg_partition.h"
@@ -299,6 +300,7 @@ const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
 const uint32 RB_OBJECT_VERSION_NUM = 92831;
+const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -4387,6 +4389,7 @@ void getPublications(Archive *fout)
     int i_pubinsert;
     int i_pubupdate;
     int i_pubdelete;
+    int i_pubddl = 0;
     int i, ntups;
 
     if (no_publications || GetVersionNum(fout) < SUBSCRIPTION_VERSION) {
@@ -4398,12 +4401,21 @@ void getPublications(Archive *fout)
     resetPQExpBuffer(query);
 
     /* Get the publications. */
-    appendPQExpBuffer(query,
-        "SELECT p.tableoid, p.oid, p.pubname, "
-        "(%s p.pubowner) AS rolname, "
-        "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete "
-        "FROM pg_catalog.pg_publication p",
-        username_subquery);
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        appendPQExpBuffer(query,
+            "SELECT p.tableoid, p.oid, p.pubname, "
+            "(%s p.pubowner) AS rolname, "
+            "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete, p.pubddl "
+            "FROM pg_catalog.pg_publication p",
+            username_subquery);
+    } else {
+        appendPQExpBuffer(query,
+            "SELECT p.tableoid, p.oid, p.pubname, "
+            "(%s p.pubowner) AS rolname, "
+            "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete "
+            "FROM pg_catalog.pg_publication p",
+            username_subquery);
+    }
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
@@ -4422,6 +4434,9 @@ void getPublications(Archive *fout)
     i_pubinsert = PQfnumber(res, "pubinsert");
     i_pubupdate = PQfnumber(res, "pubupdate");
     i_pubdelete = PQfnumber(res, "pubdelete");
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        i_pubddl = PQfnumber(res, "pubddl");
+    }
 
     pubinfo = (PublicationInfo *)pg_malloc(ntups * sizeof(PublicationInfo));
 
@@ -4436,6 +4451,9 @@ void getPublications(Archive *fout)
         pubinfo[i].pubinsert = (strcmp(PQgetvalue(res, i, i_pubinsert), "t") == 0);
         pubinfo[i].pubupdate = (strcmp(PQgetvalue(res, i, i_pubupdate), "t") == 0);
         pubinfo[i].pubdelete = (strcmp(PQgetvalue(res, i, i_pubdelete), "t") == 0);
+        if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+            pubinfo[i].pubddl = atol(PQgetvalue(res, i, i_pubddl));
+        }
 
         if (strlen(pubinfo[i].rolname) == 0) {
             write_msg(NULL, "WARNING: owner of publication \"%s\" appears to be invalid\n", pubinfo[i].dobj.name);
@@ -4496,6 +4514,23 @@ static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo)
             appendPQExpBufferStr(query, ", ");
         }
         appendPQExpBufferStr(query, "delete");
+        first = false;
+    }
+
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM && pubinfo->pubddl != 0) {
+        if (!first) {
+            appendPQExpBufferStr(query, "',");
+        }
+
+        if (pubinfo->pubddl == PUBDDL_ALL) {
+            appendPQExpBufferStr(query, "ddl = 'all");
+        } else {
+            appendPQExpBufferStr(query, "ddl = ");
+
+            if (ENABLE_PUBDDL_TYPE(pubinfo->pubddl, PUBDDL_TABLE)) {
+                appendPQExpBuffer(query, "'table");
+            }
+        }
         first = false;
     }
 
@@ -4639,6 +4674,7 @@ void getSubscriptions(Archive *fout)
     int i_subsynccommit;
     int i_subpublications;
     int i_subbinary;
+    int i_submatchddlowner;
     int i;
     int ntups;
 
@@ -4658,12 +4694,18 @@ void getSubscriptions(Archive *fout)
     /* Get the subscriptions in current database. */
     appendPQExpBuffer(query, "SELECT s.tableoid, s.oid, s.subname,"
         "(%s s.subowner) AS rolname, s.subconninfo, s.subslotname, "
-        "s.subsynccommit, s.subpublications, \n", username_subquery);
+        "s.subsynccommit, s.subpublications \n", username_subquery);
 
     if (GetVersionNum(fout) >= SUBSCRIPTION_BINARY_VERSION_NUM) {
-        appendPQExpBuffer(query, " s.subbinary\n");
+        appendPQExpBuffer(query, ", s.subbinary\n");
     } else {
-        appendPQExpBuffer(query, " false AS subbinary\n");
+        appendPQExpBuffer(query, ", false AS subbinary\n");
+    }
+
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        appendPQExpBuffer(query, ", s.submatchddlowner\n");
+    } else {
+        appendPQExpBuffer(query, ", true AS submatchddlowner\n");
     }
 
     appendPQExpBuffer(query, "FROM pg_catalog.pg_subscription s "
@@ -4688,6 +4730,7 @@ void getSubscriptions(Archive *fout)
     i_subsynccommit = PQfnumber(res, "subsynccommit");
     i_subpublications = PQfnumber(res, "subpublications");
     i_subbinary = PQfnumber(res, "subbinary");
+    i_submatchddlowner = PQfnumber(res, "submatchddlowner");
 
     subinfo = (SubscriptionInfo *)pg_malloc(ntups * sizeof(SubscriptionInfo));
 
@@ -4707,6 +4750,7 @@ void getSubscriptions(Archive *fout)
         subinfo[i].subsynccommit = gs_strdup(PQgetvalue(res, i, i_subsynccommit));
         subinfo[i].subpublications = gs_strdup(PQgetvalue(res, i, i_subpublications));
         subinfo[i].subbinary = gs_strdup(PQgetvalue(res, i, i_subbinary));
+        subinfo[i].submatchddlowner = gs_strdup(PQgetvalue(res, i, i_submatchddlowner));
 
         if (strlen(subinfo[i].rolname) == 0) {
             write_msg(NULL, "WARNING: owner of subscription \"%s\" appears to be invalid\n", subinfo[i].dobj.name);
@@ -4775,6 +4819,10 @@ static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
 
     if (strcmp(subinfo->subbinary, "t") == 0) {
         appendPQExpBuffer(query, ", binary = true");
+    }
+
+    if (strcmp(subinfo->submatchddlowner, "f") == 0) {
+        appendPQExpBuffer(query, ", match_ddl_owner = false");
     }
 
     if (strcmp(subinfo->subsynccommit, "off") != 0) {
@@ -23465,6 +23513,24 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
     return evtinfo;
 }
  
+static bool eventtrigger_filter(EventTriggerInfo *evtinfo)
+{
+    static const uint32 reserved_eventtrigger_prefix_len = 2;
+    static char *reserved_eventtrigger_prefix[] = {
+        PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_END,
+        PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START
+    };
+    
+    Assert(sizeof(reserved_eventtrigger_prefix)/sizeof(reserved_eventtrigger_prefix[0]) == reserved_eventtrigger_prefix_len);
+
+    for (int i = 0; i < reserved_eventtrigger_prefix_len; ++i) {
+        if (!strncmp(evtinfo->dobj.name, reserved_eventtrigger_prefix[i], strlen(reserved_eventtrigger_prefix[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 {
     PQExpBuffer query;
@@ -23473,7 +23539,10 @@ static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
     /* Skip if not to be dumped */
     if (!evtinfo->dobj.dump || dataOnly)
         return;
-      
+
+    if (!eventtrigger_filter(evtinfo))
+        return;
+
     query = createPQExpBuffer();
     labelq = createPQExpBuffer();
  

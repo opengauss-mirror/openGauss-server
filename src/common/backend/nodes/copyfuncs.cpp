@@ -5947,6 +5947,7 @@ static CreateSeqStmt* _copyCreateSeqStmt(const CreateSeqStmt* from)
     COPY_SCALAR_FIELD(canCreateTempSeq);
     COPY_SCALAR_FIELD(is_large);
     COPY_SCALAR_FIELD(missing_ok);
+    COPY_SCALAR_FIELD(is_autoinc);
 
     return newnode;
 }
@@ -5959,6 +5960,7 @@ static AlterSeqStmt* _copyAlterSeqStmt(const AlterSeqStmt* from)
     COPY_NODE_FIELD(options);
     COPY_SCALAR_FIELD(missing_ok);
     COPY_SCALAR_FIELD(is_large);
+    COPY_SCALAR_FIELD(is_autoinc);
 
     return newnode;
 }

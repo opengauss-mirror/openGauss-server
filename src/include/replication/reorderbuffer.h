@@ -16,6 +16,7 @@
 #include "lib/ilist.h"
 
 #include "storage/sinval.h"
+#include "replication/ddlmessage.h"
 
 #include "utils/hsearch.h"
 #include "utils/rel.h"
@@ -71,6 +72,7 @@ enum ReorderBufferChangeType {
     REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT,
     REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID,
     REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID,
+    REORDER_BUFFER_CHANGE_DDL,
     REORDER_BUFFER_CHANGE_UINSERT,
     REORDER_BUFFER_CHANGE_UUPDATE,
     REORDER_BUFFER_CHANGE_UDELETE
@@ -126,6 +128,14 @@ typedef struct ReorderBufferChange {
             ReorderBufferUTupleBuf* newtuple;
             CommitSeqNo snapshotcsn;
         } utp;
+
+        struct {
+            char *prefix;
+            Size message_size;
+            char *message;
+            Oid relid;
+            DeparsedCommandType cmdtype;
+        } ddl;
 
         /* New snapshot, set when action == *_INTERNAL_SNAPSHOT */
         Snapshot snapshot;
@@ -294,6 +304,11 @@ typedef struct ReorderBufferTXN {
      */
     dlist_node node;
     Size size;
+
+    /*
+     * Private data pointer of the output plugin.
+     */
+    void *output_plugin_private;
 } ReorderBufferTXN;
 
 /* so we can define the callbacks used inside struct ReorderBuffer itself */
@@ -308,6 +323,16 @@ typedef void (*ReorderBufferBeginCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
 
 /* commit callback signature */
 typedef void (*ReorderBufferCommitCB)(ReorderBuffer* rb, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
+
+/* DDL message callback signature */
+typedef void (*ReorderBufferDDLMessageCB) (ReorderBuffer *rb,
+                                            ReorderBufferTXN *txn,
+                                            XLogRecPtr message_lsn,
+                                            const char *prefix,
+                                            Oid relid,
+                                            DeparsedCommandType cmdtype,
+                                            Size sz,
+                                            const char *message);
 
 /* abort callback signature */
 typedef void (*ReorderBufferAbortCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
@@ -352,6 +377,7 @@ struct ReorderBuffer {
     ReorderBufferCommitCB commit;
     ReorderBufferAbortCB abort;
     ReorderBufferPrepareCB prepare;
+    ReorderBufferDDLMessageCB ddl;
 
     /*
      * Pointer that will be passed untouched to the callbacks.
@@ -487,5 +513,6 @@ void ReorderBufferSetRestartPoint(ReorderBuffer*, XLogRecPtr ptr);
 
 void StartupReorderBuffer(void);
 void ReorderBufferClear(const char *slotname);
-
+extern void ReorderBufferQueueDDLMessage(LogicalDecodingContext *ctx, TransactionId xid, XLogRecPtr lsn,
+    const char*prefix, Size message_size, const char *message, Oid relid, DeparsedCommandType cmdtype);
 #endif

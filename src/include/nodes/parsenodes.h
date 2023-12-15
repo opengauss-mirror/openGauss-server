@@ -1143,6 +1143,7 @@ typedef struct CreateSeqStmt {
     bool canCreateTempSeq; /* create sequence when "create table (like )" */
     bool is_large;
     bool missing_ok; /* skip error if a Sequence is exists */
+    bool is_autoinc;
 } CreateSeqStmt;
 
 typedef struct AlterSeqStmt {
@@ -1154,6 +1155,7 @@ typedef struct AlterSeqStmt {
     bool is_serial; /* Indicates if this sequence is part of SERIAL process */
 #endif
     bool is_large; /* Indicates if this is a large or normal sequence */
+    bool is_autoinc;
 } AlterSeqStmt;
 
 /* ----------------------

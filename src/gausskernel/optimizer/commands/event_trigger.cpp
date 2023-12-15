@@ -31,6 +31,8 @@
 #include "commands/trigger.h"
 #include "funcapi.h"
 #include "parser/parse_func.h"
+#include "parser/parser.h"
+#include "parser/parse_relation.h"
 #include "pgstat.h"
 #include "miscadmin.h"
 #include "utils/acl.h"
@@ -42,23 +44,9 @@
 #include "utils/rel.h"
 #include "utils/syscache.h"
 #include "tcop/utility.h"
+#include "tcop/ddldeparse.h"
 #include "lib/ilist.h"
 #include "access/heapam.h"
-
-/* Support for dropped objects */
-typedef struct SQLDropObject {
-   ObjectAddress   address;
-   const char     *schemaname;
-   const char     *objname;
-   const char     *objidentity;
-   const char     *objecttype;
-   List             *addrnames;
-   List             *addrargs;
-   bool             original;
-   bool             normal;
-   bool             istemp;
-   slist_node       next;
-} SQLDropObject;
 
 typedef struct {
     const char     *obtypename;
@@ -664,7 +652,7 @@ static List * EventTriggerCommonSetup(Node *parsetree,
     List       *cachelist;
     ListCell   *lc;
     List       *runlist = NIL;
-
+    int         pub_deparse_func_cnt = 0;
  #ifdef USE_ASSERT_CHECKING
     {
         const char *dbgtag;
@@ -701,8 +689,26 @@ static List * EventTriggerCommonSetup(Node *parsetree,
  
         /* Filter by session replication role. */
         if (filter_event_trigger(&tag, item)) {
-            /* We must plan to fire this trigger. */
-            runlist = lappend_oid(runlist, item->fnoid);
+            static const char *trigger_func_prefix = "publication_deparse_%s";
+            char trigger_func_name[NAMEDATALEN];
+            Oid pub_funcoid;
+            List *pubfuncname;
+            errno_t rc;
+            /* Get function oid of the publicaiton's ddl deparse event trigger */
+            rc = snprintf_s(trigger_func_name, sizeof(trigger_func_name), sizeof(trigger_func_name) - 1, 
+                trigger_func_prefix, eventstr);
+            securec_check_ss(rc, "", "");
+            pubfuncname = SystemFuncName(trigger_func_name);
+            pub_funcoid = LookupFuncName(pubfuncname, 0, NULL, true);
+
+            if (item->fnoid != pub_funcoid) {
+                runlist = lappend_oid(runlist, item->fnoid);
+            } else {
+                /* Only the first ddl deparse event trigger needs to be invoked */
+                if (pub_deparse_func_cnt++ == 0) {
+                    runlist = lappend_oid(runlist, item->fnoid);
+                }
+            }
         }
  
         /* Filter by tags, if any were specified. */
@@ -1561,7 +1567,8 @@ void EventTriggerCollectSimpleCommand(ObjectAddress address,
  
     command->type = SCT_Simple;
     command->in_extension = creating_extension;
- 
+    command->role = GetUserNameFromId(GetUserId());
+
     command->d.simple.address = address;
     command->d.simple.secondaryObject = secondaryObject;
     command->parsetree = (Node*)copyObject(parsetree);
@@ -1601,7 +1608,8 @@ void EventTriggerAlterTableStart(Node *parsetree)
  
     command->type = SCT_AlterTable;
     command->in_extension = creating_extension;
- 
+    command->role = GetUserNameFromId(GetUserId());
+
     command->d.alterTable.classId = RelationRelationId;
     command->d.alterTable.objectId = InvalidOid;
     command->d.alterTable.subcmds = NIL;

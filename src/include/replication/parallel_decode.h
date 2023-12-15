@@ -44,13 +44,6 @@
 
 #include "catalog/pg_control.h"
 
-typedef struct XLogRecordBuffer {
-    XLogRecPtr origptr;
-    XLogRecPtr endptr;
-    XLogReaderState *record;
-    char *record_data;
-} XLogRecordBuffer;
-
 
 typedef enum {
     NOT_DECODE_THREAD,

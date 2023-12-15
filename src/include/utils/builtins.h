@@ -24,6 +24,7 @@
 #include "lib/stringinfo.h"
 #endif
 #include "utils/sortsupport.h"
+#include "catalog/pg_index.h"
 
 /*
  *		Defined in adt/
@@ -891,6 +892,10 @@ extern char* pg_get_triggerdef_string(Oid trigid);
 extern Datum pg_get_constraintdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_constraintdef_ext(PG_FUNCTION_ARGS);
 extern char* pg_get_constraintdef_string(Oid constraintId);
+extern char* pg_get_constraintdef_part_string(Oid constraintId);
+extern char *pg_get_partkeydef_string(Relation relation);
+extern void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, 
+                        StringInfoData *buf, bool dumpSchemaOnly, bool showPartitionLocal, bool showSubPartitionLocal);
 extern Datum pg_get_expr(PG_FUNCTION_ARGS);
 extern Datum pg_get_expr_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_userbyid(PG_FUNCTION_ARGS);
@@ -909,7 +914,6 @@ extern void get_query_def(Query* query, StringInfo buf, List* parentnamespace, T
     bool qrw_phase = false, bool viewdef = false, bool is_fqs = false);
 extern char* deparse_create_sequence(Node* stmt, bool owned_by_none = false);
 extern char* deparse_alter_sequence(Node* stmt, bool owned_by_none = false);
-
 #ifdef PGXC
 extern void get_hint_string(HintState* hstate, StringInfo buf);
 extern void deparse_query(Query* query, StringInfo buf, List* parentnamespace, bool finalise_aggs, bool sortgroup_colno,
@@ -1876,7 +1880,7 @@ extern Datum dss_io_stat(PG_FUNCTION_ARGS);
 #endif
 extern char *pg_ultostr(char *str, uint32 value);
 extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
-
+extern char *printTypmod(const char *typname, int32 typmod, Oid typmodout);
 /* float.cpp */
 extern int float8_cmp_internal(float8 a, float8 b);
 

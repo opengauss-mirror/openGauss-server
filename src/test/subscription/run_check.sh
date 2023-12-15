@@ -29,7 +29,7 @@ for line in `cat $1/schedule | grep -v ^#`
 do
 	printf "%-50s" $line
 	starttime=`date +"%Y-%m-%d %H:%M:%S"` 
-	sh $1/testcase/$line.sh $1 $2 > $1/results/$line.log 2>&1
+	sh $1/testcase/$line.sh $1 $2 $3 > $1/results/$line.log 2>&1
 	count=`expr $count + 1`
 	endtime=`date +"%Y-%m-%d %H:%M:%S"` 
 	starttime1=`date -d "$starttime" +%s`

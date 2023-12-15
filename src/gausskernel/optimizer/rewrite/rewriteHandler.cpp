@@ -5084,7 +5084,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED, true);
     }
 
     /* CREATE MATILIZED VIEW AS*/
@@ -5097,7 +5097,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED, true);
 
         create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
 

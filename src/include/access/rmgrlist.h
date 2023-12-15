@@ -80,4 +80,5 @@ PG_RMGR(RM_REPLORIGIN_ID, "ReplicationOrigin", replorigin_redo, replorigin_desc,
     replorigin_type_name)
 PG_RMGR(RM_COMPRESSION_REL_ID, "CompressionRelation", CfsShrinkRedo, CfsShrinkDesc, NULL, NULL, NULL, NULL, NULL, \
     CfsShrinkTypeName)
-
+PG_RMGR(RM_LOGICALDDLMSG_ID, "LogicalDDLMessage", logicalddlmsg_redo, logicalddlmsg_desc, NULL, NULL, NULL, NULL, NULL, \
+    logicalddlmsg_type_name)
