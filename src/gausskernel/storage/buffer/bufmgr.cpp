@@ -1699,17 +1699,21 @@ Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_
      * Read the buffer, and update pgstat counters to reflect a cache hit or
      * miss.
      */
+#ifndef ENABLE_MOT
     pgstat_count_buffer_read(reln);
     pgstatCountBlocksFetched4SessionLevel();
+#endif
 
     if (RelationisEncryptEnable(reln)) {
         reln->rd_smgr->encrypt = true;
     }
     buf = ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num,
                             block_num, mode, strategy, &hit, NULL);
+#ifndef ENABLE_MOT
     if (hit) {
         pgstat_count_buffer_hit(reln);
     }
+#endif
     return buf;
 }
 

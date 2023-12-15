@@ -1683,7 +1683,6 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
     int written;
     XLogRecPtr CurrPos;
     XLogPageHeader pagehdr;
-    errno_t errorno = EOK;
     bool stop = true;
     /*
      * The following 2 variables are used to handle large records
@@ -1716,8 +1715,7 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
              * Write what fits on this page, and continue on the next page.
              */
             Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || freespace == 0);
-            errorno = memcpy_s(currpos, SECUREC_STRING_MAX_LEN, rdata_data, freespace);
-            securec_check(errorno, "", "");
+            memcpy(currpos, rdata_data, freespace);
 
             rdata_data += freespace;
             rdata_len -= freespace;
@@ -1759,8 +1757,7 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
         }
 
         Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || rdata_len == 0);
-        errorno = memcpy_s(currpos, SECUREC_STRING_MAX_LEN, rdata_data, rdata_len);
-        securec_check(errorno, "", "");
+        memcpy(currpos, rdata_data, rdata_len);
 
         currpos += rdata_len;
         CurrPos += rdata_len;

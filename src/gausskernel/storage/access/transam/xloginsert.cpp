@@ -557,9 +557,11 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast)
      * too much log may slow down the speed of xlog, so only write log
      * when log level belows DEBUG4
      */
+#ifndef ENABLE_MOT
     if (module_logging_is_on(MOD_REDO)) {
         XLogInsertTrace(rmid, info, EndPos);
     }
+#endif
 
     /*
      * Great! We have inserted all the request information into WAL. The last
@@ -653,6 +655,15 @@ static bool XLogNeedVMPhysicalLocation(RmgrId rmi, uint8 info, int blockId)
 }
 
 /* This macro can be only used in XLogRecordAssemble to assemble on variable into xlog */
+#ifdef ENABLE_MOT
+#define XLOG_ASSEMBLE_ONE_ITEM(scratch, size, src, remained_size) \
+    do { \
+        memcpy(scratch, src, size); \
+        (scratch) += (size); \
+    } while (0)
+
+#define DECREASE_ONE_REMAINED_SIZE(remained_size)
+#else
 #define XLOG_ASSEMBLE_ONE_ITEM(scratch, size, src, remained_size) \
     do { \
         rc = memcpy_s(scratch, remained_size, src, size); \
@@ -660,6 +671,12 @@ static bool XLogNeedVMPhysicalLocation(RmgrId rmi, uint8 info, int blockId)
         (scratch) += (size); \
         (remained_size) -= (size); \
     } while (0)
+
+#define DECREASE_ONE_REMAINED_SIZE(remained_size) \
+    do { \
+        (remained_size)--; \
+    } while (0)
+#endif
 
 /*
  * Assemble a WAL record from the registered data and buffers into an
@@ -945,6 +962,7 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(XLogRecPtr), &regbuf->lastLsn, remained_size);
     }
 
+#ifndef ENABLE_MOT
     int m_session_id = u_sess->reporigin_cxt.originId != InvalidRepOriginId ?
         u_sess->reporigin_cxt.originId :
         u_sess->attr.attr_storage.replorigin_sesssion_origin;
@@ -961,25 +979,26 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     if (m_include_origin && (m_session_id != InvalidRepOriginId || istoast)) {
         Assert(remained_size > 0);
         *(scratch++) = XLR_BLOCK_ID_ORIGIN;
-        remained_size--;
+        DECREASE_ONE_REMAINED_SIZE(remained_size);
         if (istoast && t_thrd.proc->workingVersionNum >= PARALLEL_DECODE_VERSION_NUM && XLogLogicalInfoActive()) {
             m_session_id = (int)((uint32)(m_session_id) | TOAST_FLAG);
         }
         XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(m_session_id), &m_session_id, remained_size);
     }
+#endif
 
     /* followed by main data, if any */
     if (t_thrd.xlog_cxt.mainrdata_len > 0) {
         if (t_thrd.xlog_cxt.mainrdata_len > 255) {
             Assert(remained_size > 0);
             *(scratch++) = XLR_BLOCK_ID_DATA_LONG;
-            remained_size--;
+            DECREASE_ONE_REMAINED_SIZE(remained_size);
             XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(uint32), &t_thrd.xlog_cxt.mainrdata_len, remained_size);
         } else {
             Assert(remained_size >= 2);
             *(scratch++) = XLR_BLOCK_ID_DATA_SHORT;
             *(scratch++) = (uint8)t_thrd.xlog_cxt.mainrdata_len;
-            remained_size--;
+            DECREASE_ONE_REMAINED_SIZE(remained_size);
         }
         rdt_datas_last->next = t_thrd.xlog_cxt.mainrdata_head;
         rdt_datas_last = t_thrd.xlog_cxt.mainrdata_last;
@@ -1020,15 +1039,11 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
      * once we know where in the WAL the record will be inserted. The CRC does
      * not include the record header yet.
      */
+#ifndef ENABLE_MOT
     bool isUHeap = (rmid >= RM_UHEAP_ID) && (rmid <= RM_UHEAPUNDO_ID);
+#endif
 
-    rechdr->xl_xid = (isUHeap) ? GetTopTransactionIdIfAny() : GetCurrentTransactionIdIfAny();
     rechdr->xl_tot_len = total_len;
-    rechdr->xl_info = info;
-    rechdr->xl_rmid = rmid;
-    rechdr->xl_prev = InvalidXLogRecPtr;
-    rechdr->xl_crc = rdata_crc;
-    Assert(hashbucket_flag == false || no_hashbucket_flag == false);
     rechdr->xl_term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
                           g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
     if ((rechdr->xl_term & XLOG_CONTAIN_CSN) != 0) {
@@ -1041,7 +1056,17 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     if (t_thrd.proc->workingVersionNum >= PARALLEL_DECODE_VERSION_NUM && XLogLogicalInfoActive()) {
         rechdr->xl_term |= XLOG_CONTAIN_CSN;
     }
+#ifndef ENABLE_MOT
+    rechdr->xl_xid = (isUHeap) ? GetTopTransactionIdIfAny() : GetCurrentTransactionIdIfAny();
+#else
+    rechdr->xl_xid = GetCurrentTransactionIdIfAny();
+#endif
+    rechdr->xl_prev = InvalidXLogRecPtr;
+    rechdr->xl_info = info;
+    rechdr->xl_rmid = rmid;
+    Assert(hashbucket_flag == false || no_hashbucket_flag == false);
     rechdr->xl_bucket_id = (uint2)(bucket_id + 1);
+    rechdr->xl_crc = rdata_crc;
 
     return t_thrd.xlog_cxt.ptr_hdr_rdt;
 }
