@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           122
+#define DMS_LOCAL_VERSION           123
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -673,6 +673,13 @@ typedef struct st_stat_buf_info {
     char                aio_in_progress;        /* indicate aio is in progress */
     char                data[DMS_RESID_SIZE];   /* user defined resource(page) identifier */
 } stat_buf_info_t;
+
+typedef enum en_broadcast_scope {
+    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
+    DMS_BROADCAST_ONLINE_LIST = 1,
+    DMS_BROADCAST_TYPE_COUNT,
+} dms_broadcast_scope_e;
+
 /*
 * used by openGauss server to get DRC information
 */
@@ -695,16 +702,10 @@ typedef struct st_dv_drc_buf_info {
     unsigned char           recovery_skip;      /* DRC is accessed in recovery and skip because drc has owner */
     unsigned char           recycling;
     unsigned char           converting_req_info_inst_id;
-    unsigned char           converting_req_info_curr_mod;
-    unsigned char           converting_req_info_req_mod;
+    unsigned char           converting_req_info_curr_mode;
+    unsigned char           converting_req_info_req_mode;
     unsigned char           is_valid;
 } dv_drc_buf_info;
-
-typedef enum en_broadcast_scope {
-    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
-    DMS_BROADCAST_ONLINE_LIST = 1,
-    DMS_BROADCAST_TYPE_COUNT,
-} dms_broadcast_scope_e;
 
 typedef struct st_dms_reform_start_context {
     dms_role_t role;
@@ -729,8 +730,9 @@ typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
 typedef int(*dms_recovery_analyse)(void *db_handle, void *recovery_list, int is_reformer);
-typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, int is_reformer);
+typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, unsigned long long list_in, int is_reformer);
 typedef int(*dms_df_recovery)(void *db_handle, unsigned long long list_in, void *recovery_list);
+typedef int(*dms_space_reload)(void *db_handle, unsigned long long list_in);
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
@@ -887,6 +889,7 @@ typedef struct st_dms_callback {
     dms_recovery_analyse recovery_analyse;
     dms_dw_recovery dw_recovery;
     dms_df_recovery df_recovery;
+    dms_space_reload space_reload;
     dms_get_open_status get_open_status;
     dms_undo_init undo_init;
     dms_tx_area_init tx_area_init;
@@ -1093,9 +1096,6 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
 
-/*
-* used by openGauss server to get dms cmd information
-*/
 typedef struct st_wait_cmd_stat_result {
     char name[DMS_MAX_NAME_LEN];
     char p1[DMS_MAX_NAME_LEN];

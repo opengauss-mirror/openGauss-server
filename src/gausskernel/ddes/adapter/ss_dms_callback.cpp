@@ -1966,10 +1966,12 @@ static int CBMarkNeedFlush(void *db_handle, char *pageid, unsigned char *is_edp)
         return DMS_ERROR;
     }
 
+#ifdef USE_ASSERT_CHECKING
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     if (buf_ctrl->is_edp) {
         ereport(PANIC, (errmsg("[SS] CBMarkNeedFlush, do not allow edp exist, please check")));
     }
+#endif
     *is_edp = false;
 
     ereport(LOG, (errmsg("[SS] CBMarkNeedFlush found buf: %u/%u/%u/%d %d-%u",
