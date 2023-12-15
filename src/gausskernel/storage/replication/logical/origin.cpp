@@ -1410,6 +1410,11 @@ Datum pg_show_replication_origin_status(PG_FUNCTION_ARGS)
     int i;
     int rc;
 
+    if (ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot show replication_origin_status when DSS and DMS enabled")));
+    }
+
     /* we we want to return 0 rows if slot is set to zero */
     replorigin_check_prerequisites(false, true);
 
