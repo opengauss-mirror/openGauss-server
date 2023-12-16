@@ -16291,16 +16291,8 @@ pkg_body_subprogram: {
 						} else if (block_level == 0 && tok != ';') {
 							in_procedure = false;
 						}
-                        if (tok == ';')
-                        {
-                            block_level = block_level - 1;
-                            if (block_level == 0)
-                            {
-                                in_procedure = false;
-                            }
-                            continue;
-                        }
-                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && pre_tok == ';' && tok == IDENT && in_procedure)
+                        if (tok == ';' || 
+							(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && pre_tok == ';' && tok == IDENT && in_procedure))
                         {
                             block_level = block_level - 1;
                             if (block_level == 0)
