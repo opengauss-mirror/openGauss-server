@@ -153,19 +153,25 @@ static void groupNodeReleaseTape(SortGroupStatePriv *state, GroupNode *group);
 static TupleTableSlot *ExecSortGroup(PlanState *pstate);
 static void dumpSortGroupState(SortGroupState *statee);
 
-static inline int64 groupSortUsedMemory(SortGroupStatePriv *state)
-{
-    AllocSetContext* maincontex = (AllocSetContext*)state->maincontext;
-    AllocSetContext* tuplecontext = (AllocSetContext*)state->tuplecontext;
-    int64 bytes = maincontex->totalSpace - maincontex->freeSpace;
+static inline int64 getMemoryContextUsedSize(MemoryContext cxt) {
+     int64 bytes;
+#ifndef ENABLE_MEMORY_CHECK
+    Assert(cxt->type == T_AllocSetContext);
+    AllocSetContext* aset = (AllocSetContext*) cxt;
+    bytes = aset->totalSpace - aset->freeSpace;
+#else
+    Assert(cxt->type == T_AsanSetContext);
+    AsanSetContext* aset = (AsanSetContext*) cxt;
+    bytes = aset->totalSpace - aset->freeSpace;
+#endif
+    return bytes;
+}
 
-    Assert(maincontex->header.type == T_AllocSetContext);
-    
-    if (tuplecontext) {
-        Assert(tuplecontext->header.type == T_AllocSetContext);
-        bytes += (tuplecontext->totalSpace - tuplecontext->freeSpace);
+static inline int64 groupSortUsedMemory(SortGroupStatePriv *state) {
+    int64 bytes = getMemoryContextUsedSize(state->maincontext);
+    if (state->tuplecontext) {
+        bytes += getMemoryContextUsedSize(state->tuplecontext);
     }
-
     return bytes;
 }
 
