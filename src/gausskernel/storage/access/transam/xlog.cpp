@@ -231,7 +231,7 @@ static const int ONE_SECOND = 1000000;
  * of them; the +1 allows boundary cases to happen without wasting a
  * delete/create-segment cycle.
  */
-#define XLOGfileslop (2 * XLogSegmentsNum(u_sess->attr.attr_storage.CheckPointSegments) + 1)
+#define XLOGfileslop (2 * u_sess->attr.attr_storage.CheckPointSegments + 1)
 
 /*
  * GUC support
@@ -2492,7 +2492,7 @@ static bool XLogCheckpointNeeded(XLogSegNo new_segno)
 
     XLByteToSeg(t_thrd.xlog_cxt.RedoRecPtr, old_segno);
 
-    if (new_segno >= old_segno + ((uint32)XLogSegmentsNum(u_sess->attr.attr_storage.CheckPointSegments) - 1)) {
+    if (new_segno >= old_segno + ((uint32)(u_sess->attr.attr_storage.CheckPointSegments) - 1)) {
         return true;
     }
     return false;
@@ -13485,14 +13485,14 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
     fill_keeper(segno, WALKEEPER_BASECHECK, xlogkeeper);
 
     /* avoid underflow, don't go below 1 */
-    if (segno <= (uint64)(uint32)XLogSegmentsNum(u_sess->attr.attr_storage.wal_keep_segments)) {
+    if (segno <= (uint32)(u_sess->attr.attr_storage.wal_keep_segments)) {
         /* segno = 1 show all file should be keep */
         ereport(LOG, (errmsg("keep all the xlog segments, because current segno = %lu, "
             "less than wal_keep_segments = %d", segno,
-            (int)XLogSegmentsNum(u_sess->attr.attr_storage.wal_keep_segments))));
+            (int)(u_sess->attr.attr_storage.wal_keep_segments))));
         segno = 1;
     } else {
-        segno = segno - (uint32)XLogSegmentsNum(u_sess->attr.attr_storage.wal_keep_segments);
+        segno = segno - (uint32)(u_sess->attr.attr_storage.wal_keep_segments);
     }
 
     wal_keep_segno = segno;

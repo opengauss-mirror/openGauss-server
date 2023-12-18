@@ -817,7 +817,7 @@ static bool IsCheckpointOnSchedule(double progress)
     if (!RecoveryInProgress()) {
         recptr = GetInsertRecPtr();
         elapsed_xlogs = (((double)(recptr - t_thrd.checkpoint_cxt.ckpt_start_recptr)) / XLogSegSize) /
-                        XLogSegmentsNum(u_sess->attr.attr_storage.CheckPointSegments);
+                        (u_sess->attr.attr_storage.CheckPointSegments);
 
         if (progress < elapsed_xlogs) {
             t_thrd.checkpoint_cxt.ckpt_cached_elapsed = elapsed_xlogs;

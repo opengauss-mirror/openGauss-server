@@ -259,7 +259,7 @@ incremental_checkpoint_timeout = 60s	# range 1s-1h
 
 max_wal_senders = 4		# max number of walsender processes
 				# (change requires restart)
-wal_keep_segments = 16		# in logfile segments, 16MB each; 0 disables
+wal_keep_segments = 16		# in logfile segments, 16MB each normal, 1GB each in share storage mode; 0 disables
 #wal_sender_timeout = 6s	# in milliseconds; 0 disables
 enable_slot_log = off
 max_replication_slots = 8
