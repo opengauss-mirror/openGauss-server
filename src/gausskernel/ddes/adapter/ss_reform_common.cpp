@@ -255,6 +255,7 @@ void SSDoradoGetXlogPathList()
 
 void SSUpdateReformerCtrl()
 {
+    Assert(SS_PRIMARY_MODE);
     int fd = -1;
     int len;
     errno_t err = EOK;
