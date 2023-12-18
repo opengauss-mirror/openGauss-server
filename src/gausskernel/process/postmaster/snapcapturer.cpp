@@ -253,7 +253,7 @@ void TxnSnapDeserialize(char *buf, Snapshot snap)
 }
 
 /*
- * Get the current snapshot and record to pg_snapshot.
+ * Get the current snapshot and record to gs_txn_snapshot.
  */
 static void TxnSnapInsert(void)
 {
@@ -352,7 +352,7 @@ static void TxnReportRecycleXmin()
 /*
  * TxnSnapWorkerImpl
  *
- * maintains the sys table pg_snapshot.
+ * maintains the sys table gs_txn_snapshot.
  */
 static void TxnSnapWorkerImpl(void)
 {
