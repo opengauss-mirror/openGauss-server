@@ -9974,6 +9974,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  */
                 StreamNodeGroup::grantStreamConnectPermission();
 
+                StringInfoData buf;
+                pq_beginmessage(&buf, 'l');
+                pq_sendint16(&buf, g_instance.attr.attr_network.comm_control_port);
+                pq_sendint16(&buf, g_instance.attr.attr_network.comm_sctp_port);
+                pq_endmessage(&buf);
                 pq_putemptymessage('O'); /* PlanIdComplete */
                 pq_flush();
             } break;
