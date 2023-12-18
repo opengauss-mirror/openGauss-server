@@ -3944,30 +3944,29 @@ static void MergeTargetList(List** targetLists, RangeTblEntry* rte1, int rtindex
     targetLists[rtindex2 - 1] = NULL;
 }
 
-static void transformMultiTargetList(List* target_rangetblentry, List** targetLists)
+static void transformMultiTargetList(List* target_rangetblentry, List** targetLists, List* result_relations)
 {
-    int rtindex1 = 1, rtindex2 = 1;
-    ListCell* l1;
-    ListCell* l2;
-
     if (list_length(target_rangetblentry) <= 1) {
         return;
     }
-    foreach (l1, target_rangetblentry) {
-        RangeTblEntry* rte1 = (RangeTblEntry*)lfirst(l1);
-        rtindex2 = 0;
 
-        l2 = lnext(l1);
-        rtindex2 = rtindex1 + 1;
-        while (l2 != NULL) {
-            RangeTblEntry* rte2 = (RangeTblEntry*)lfirst(l2);
+    ListCell *l1 = NULL;
+    ListCell *l2 = NULL;
+    forboth (l1, target_rangetblentry, l2, result_relations) {
+        RangeTblEntry* rte1 = (RangeTblEntry*)lfirst(l1);
+        int rtindex1 = lfirst_int(l2);
+        ListCell *l3 = lnext(l1);
+        ListCell *l4 = lnext(l2);
+
+        while (l3 && l4) {
+            RangeTblEntry* rte2 = (RangeTblEntry*)lfirst(l3);
+            int rtindex2 = lfirst_int(l4);
             if (rte2->relid == rte1->relid) {
                 MergeTargetList(targetLists, rte1, rtindex1, rte2, rtindex2);
             }
-            rtindex2++;
-            l2 = lnext(l2);
+            l3 = lnext(l3);
+            l4 = lnext(l4);
         }
-        rtindex1++;
     }
 }
 
@@ -4394,7 +4393,7 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
      * If there are actually the same result relations by different alias
      * or synonym in multiple update, merge their targetLists.
      */
-    transformMultiTargetList(pstate->p_target_rangetblentry, new_tle);
+    transformMultiTargetList(pstate->p_target_rangetblentry, new_tle, resultRelations);
 
     if (targetRelationNum == 1) {
         int i = linitial_int(resultRelations);
