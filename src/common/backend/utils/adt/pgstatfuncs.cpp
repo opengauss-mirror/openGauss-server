@@ -15427,8 +15427,8 @@ void fill_drc_info_to_values(dv_drc_buf_info *drc_info, Datum *values)
     values[13] = UInt32GetDatum((uint32)drc_info->recovery_skip);
     values[14] = UInt32GetDatum((uint32)drc_info->recycling);
     values[15] = UInt32GetDatum((uint32)drc_info->converting_req_info_inst_id);
-    values[16] = UInt32GetDatum((uint32)drc_info->converting_req_info_curr_mod);
-    values[17] = UInt32GetDatum((uint32)drc_info->converting_req_info_req_mod);
+    values[16] = UInt32GetDatum((uint32)drc_info->converting_req_info_curr_mode);
+    values[17] = UInt32GetDatum((uint32)drc_info->converting_req_info_req_mode);
 }
 
 Datum query_all_drc_info(PG_FUNCTION_ARGS)
