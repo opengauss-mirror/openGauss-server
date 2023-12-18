@@ -1943,6 +1943,27 @@ typedef struct knl_u_storage_context {
     MemoryContext LocalBufferContext;
     List *partition_dml_oids; /* list of partitioned table's oid which is on dml operations */
     List *partition_ddl_oids; /* list of partitioned table's oid which is on ddl operations */
+
+    /* Max value of pre-read parms, they are used for reseting buffers */
+    int max_heap_bulk_read_size;
+    int max_vacuum_bulk_read_size;
+
+    /* Whether in pre-read process */
+    bool bulk_io_is_in_progress;
+    /* Numbers of pre-read blocks */
+    int bulk_io_in_progress_count;
+    /* Buffers for record BufferDesc*/
+    struct BufferDesc** bulk_io_in_progress_buf;
+    /* Buffers for read from disk */
+    char* bulk_buf_read;
+    /* Buffers for read from disk by vacuum*/
+    char* bulk_buf_vacuum;
+    /* Flags array for whether is input */
+    bool *bulk_io_is_for_input;
+    /* Already numbers of pre-read blocks */
+    int bulk_io_count;
+    /* Error numbers of pre-read blocks */
+    int bulk_io_error_count;
 } knl_u_storage_context;
 
 
@@ -2948,6 +2969,8 @@ typedef struct knl_session_context {
     MemoryContextGroup* mcxt_group;
     /* temp_mem_cxt is a context which will be reset when the session attach to a thread */
     MemoryContext temp_mem_cxt;
+    /* pre_read_mem_cxt is a context which will be used in pre-read process */
+    MemoryContext pre_read_mem_cxt;
     int session_ctr_index;
     uint64 session_id;
     GlobalSessionId globalSessionId;

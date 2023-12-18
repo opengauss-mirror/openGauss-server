@@ -173,6 +173,13 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
         u_sess->storage_cxt.LocalRefCount[b]++;
         ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf_desc));
         *foundPtr = (buf_state & BM_VALID) ? TRUE : FALSE; /* If previous read attempt have failed; try again */
+        if (*foundPtr == FALSE) {
+            if (u_sess->storage_cxt.bulk_io_is_in_progress) {   
+                /* If not found, we record this buf */
+                u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count] = buf_desc;
+                u_sess->storage_cxt.bulk_io_in_progress_count++;
+            }
+        }
 #ifdef EXTREME_RTO_DEBUG
         ereport(LOG, (errmsg("LocalBufferAlloc %u/%u/%u %u %u find in local buf %u/%u/%u %u %u id %d state %lu, lsn %lu",
                              smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode,
@@ -278,6 +285,11 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
     buf_desc->extra->seg_fileno = EXTENT_INVALID;
 
     *foundPtr = FALSE;
+    if (u_sess->storage_cxt.bulk_io_is_in_progress) {   
+       /* If not found, we record this buf */
+        u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count] = buf_desc;
+        u_sess->storage_cxt.bulk_io_in_progress_count++;
+    }
     return buf_desc;
 }
 
