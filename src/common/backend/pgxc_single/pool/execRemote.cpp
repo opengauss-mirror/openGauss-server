@@ -436,6 +436,17 @@ bool SpqFetchTuple(RemoteQueryState* combiner, TupleTableSlot* slot, ParallelFun
  
     return have_tuple;
 }
+static void update_spq_port(PGXCNodeHandle **conn, PlannedStmt *planstmt, int regular_conn_count)
+{
+    for (int i = 0; i < regular_conn_count; i++) {
+        if (strcmp(planstmt->nodesDefinition[i].nodename.data, conn[i]->remoteNodeName) != 0) {
+            elog(WARNING, "update_spq_port index[%d] not same[%s][%s]", i, planstmt->nodesDefinition[i].nodename.data,
+                  conn[i]->remoteNodeName);
+        }
+        planstmt->nodesDefinition[i].nodectlport = conn[i]->tcpCtlPort;
+        planstmt->nodesDefinition[i].nodesctpport = conn[i]->listenPort;
+    }
+}
 static void
 HandleDatanodeGxid(PGXCNodeHandle* conn, const char* msg_body, size_t len)
 {
@@ -456,7 +467,20 @@ HandleDatanodeGxid(PGXCNodeHandle* conn, const char* msg_body, size_t len)
     gxid += ntohl(n32);
     conn->remote_top_txid = gxid;
 }
- 
+static void HandleLibcommPort(PGXCNodeHandle *conn, const char *msg_body, size_t len)
+{
+    Assert(msg_body != NULL);
+    Assert(len == sizeof(uint16) + sizeof(uint16));
+    errno_t rc = 0;
+    uint16 n16;
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
+    securec_check(rc, "\0", "\0");
+    conn->tcpCtlPort = ntohs(n16);
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body + sizeof(uint16), sizeof(uint16));
+    securec_check(rc, "\0", "\0");
+    conn->listenPort = ntohs(n16);
+    elog(DEBUG1, "spq HandleLibcommPort get [%d:%d]", conn->tcpCtlPort, conn->listenPort);
+}
 static void HandleLocalCsnMin(PGXCNodeHandle* conn, const char* msg_body, size_t len)
 {
     Assert(msg_body != NULL);
@@ -982,6 +1006,9 @@ int spq_handle_response(PGXCNodeHandle* conn, RemoteQueryState* combiner, bool i
             case 'O': /* PlanIdComplete */
                 conn->state = DN_CONNECTION_STATE_IDLE;
                 return RESPONSE_PLANID_OK;
+            case 'l': /* libcomm port infomation */
+                HandleLibcommPort(conn, msg, msg_len);
+                break;
             case 'g': /* DN top xid */
                 HandleDatanodeGxid(conn, msg, msg_len);
                 break;
@@ -1581,16 +1608,21 @@ void spq_do_query(RemoteQueryState* node)
     node->queryId = generate_unique_id64(&gt_queryId);
     node->node_count = step->nodeCount;
 
-    spq_startQcThread(node);
-
     connections = spq_get_exec_connections(node, step->exec_nodes, step->exec_type);
     u_sess->spq_cxt.remoteQuerys = lappend(u_sess->spq_cxt.remoteQuerys, node);
  
     Assert(node->spq_connections_info != NULL);
     Assert(connections != NULL);
     Assert(step->exec_type == EXEC_ON_DATANODES);
- 
+
     regular_conn_count = node->node_count;
+    /*
+     *	Send begin statement to all datanodes for RW transaction parallel.
+     *  Current it should be RO transaction
+     */
+    pgxc_node_send_queryid_with_sync(connections, regular_conn_count, node->queryId);
+    update_spq_port(connections, planstmt, regular_conn_count);
+    spq_startQcThread(node);
 
     pfree_ext(node->switch_connection);
     pfree_ext(node->nodeidxinfo);
@@ -1649,13 +1681,6 @@ void spq_do_query(RemoteQueryState* node)
 #endif
     if (node->rqs_num_params) {
         step->sql_statement = node->serializedPlan;
-    }
-    /*
-     *	Send begin statement to all datanodes for RW transaction parallel.
-     *  Current it should be RO transaction
-     */
-    if (need_stream_sync) {
-        pgxc_node_send_queryid_with_sync(connections, regular_conn_count, node->queryId);
     }
     for (i = 0; i < regular_conn_count; i++) {
         if (!pgxc_start_command_on_connection(connections[i], node, snapshot, compressedPlan, cLen)) {
