@@ -1905,6 +1905,23 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_plan_node_reuse",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable expr fusion"),
+            NULL},
+            &u_sess->attr.attr_common.enable_plan_node_reuse,
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_LITE_MODE)))
+            false,
+#else
+            true,
+#endif
+            NULL,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"ts_adaptive_threads",
             PGC_SIGHUP, 
             NODE_DISTRIBUTE,

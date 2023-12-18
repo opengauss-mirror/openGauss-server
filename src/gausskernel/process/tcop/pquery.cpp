@@ -677,9 +677,6 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
          */
         portal->strategy = ChoosePortalStrategy(portal->stmts);
 
-        // Allocate and initialize scan descriptor
-        portal->scanDesc = (TableScanDesc)palloc0(SizeofHeapScanDescData + MaxHeapTupleSize);
-
         /*
          * Fire her up according to the strategy
          */
@@ -1065,10 +1062,12 @@ bool PortalRun(
 
     QueryDesc* queryDesc = portal->queryDesc;
 
+#ifndef ENABLE_DFX_OPT
     if (IS_PGXC_DATANODE && queryDesc != NULL && (queryDesc->plannedstmt) != NULL &&
         queryDesc->plannedstmt->has_obsrel) {
         increase_rp_number();
     }
+#endif
 
     /*
      * Set up global portal context pointers.
@@ -1275,6 +1274,7 @@ bool PortalRun(
     }
     TRACE_POSTGRESQL_QUERY_EXECUTE_DONE();
 
+#ifndef ENABLE_DFX_OPT
     /* doing sql count accordiong to cmdType */
     if (cmdType != CMD_UNKNOWN || queryType != CMD_UNKNOWN) {
         report_qps_type(cmdType);
@@ -1312,6 +1312,8 @@ bool PortalRun(
             }
         }
     }
+#endif
+
     decrease_instr_portal_nesting_level();
     gstrace_exit(GS_TRC_ID_PortalRun);
     u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;
@@ -1401,6 +1403,9 @@ static uint64 PortalRunSelect(Portal portal, bool forward, long count, DestRecei
                  * id of the command that created the cursor.
                  */
                 RemoteQueryState* rqs = (RemoteQueryState*)queryDesc->planstate;
+
+                // Allocate and initialize scan descriptor
+                portal->scanDesc = (TableScanDesc)palloc0(SizeofHeapScanDescData + MaxHeapTupleSize);
 
                 // get the cached scan descriptor in portal
                 rqs->ss.ss_currentScanDesc = (TableScanDesc)portal->scanDesc;

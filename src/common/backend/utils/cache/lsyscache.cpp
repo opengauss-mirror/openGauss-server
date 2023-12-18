@@ -2138,7 +2138,7 @@ constexpr int16 DATE_TYPLEN = 4;
 constexpr int16 TIMESTAMP_TYPLEN = 8;
 int16 get_typlen(Oid typid)
 {
-    if (typid == INT4OID || typid == DATEOID) {
+    if (typid == INT4OID || typid == DATEOID || typid == FLOAT4OID) {
         return DATE_TYPLEN;
     } else if (typid == BPCHAROID || typid == VARCHAROID) {
         return -1;

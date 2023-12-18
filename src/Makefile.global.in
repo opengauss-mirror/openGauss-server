@@ -175,6 +175,7 @@ enable_privategauss             = @enable_privategauss@
 enable_multiple_nodes		= @enable_multiple_nodes@
 enable_lite_mode		= @enable_lite_mode@
 enable_mot			= @enable_mot@
+enable_opt_dfx			= @enable_opt_dfx@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
 enable_memory_check		= @enable_memory_check@

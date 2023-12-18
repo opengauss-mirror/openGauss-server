@@ -247,5 +247,9 @@ typedef struct StopRequestPacket {
 } StopRequestPacket;
 
 extern int internal_putbytes(const char* s, size_t len);
+extern bool pq_disk_is_temp_file_enabled(void);
+extern size_t pq_disk_write_tempfile(const void* data, size_t size);
+extern void pq_set_nonblocking(bool nonblocking);
+extern int internal_flush(void);
 
 #endif /* PQCOMM_H */

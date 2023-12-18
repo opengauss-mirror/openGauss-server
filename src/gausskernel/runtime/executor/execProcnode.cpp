@@ -446,8 +446,13 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
     MemoryContext old_context;
     MemoryContext node_context;
     MemoryContext query_context;
+
+#ifdef ENABLE_DFX_OPT
+    const char* context_name= NULL;
+#else
     char context_name[NODENAMELEN];
     int rc = 0;
+#endif
 
     /*
      * do nothing when we get to the end of a leaf on tree.
@@ -465,6 +470,9 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
 
     gstrace_entry(GS_TRC_ID_ExecInitNode);
 
+#ifdef ENABLE_DFX_OPT
+    context_name = nodeTagToString(nodeTag(node));
+#else
     if (!StreamTopConsumerAmI())
         rc = snprintf_s(context_name,
             NODENAMELEN,
@@ -481,6 +489,7 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
             estate->es_plannedstmt->queryId,
             node->plan_node_id);
     securec_check_ss(rc, "", "");
+#endif
 
     /*
      * Create working memory for expression evaluation in this context.

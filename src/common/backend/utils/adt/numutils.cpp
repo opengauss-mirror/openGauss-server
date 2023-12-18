@@ -407,6 +407,58 @@ void pg_ltoa(int32 value, char* a)
     }
 }
 
+char* pg_ltoa2(int32 value)
+{
+    u_sess->utils_cxt.int4output_buffer[0] = '\0';
+    char* a = u_sess->utils_cxt.int4output_buffer;
+    char* start = a;
+    bool neg = false;
+    errno_t ss_rc;
+
+    if (a == NULL)
+        return u_sess->utils_cxt.int4output_buffer;
+
+    /*
+     * Avoid problems with the most negative integer not being representable
+     * as a positive integer.
+     */
+    if (value == (-2147483647 - 1)) {
+        const int a_len = 12;
+        ss_rc = memcpy_s(a, a_len, "-2147483648", a_len);
+        securec_check(ss_rc, "\0", "\0");
+        return u_sess->utils_cxt.int4output_buffer;
+    } else if (value < 0) {
+        value = -value;
+        neg = true;
+    }
+
+    /* Compute the result string backwards. */
+    do {
+        int32 remainder;
+        int32 oldval = value;
+
+        value /= 10;
+        remainder = oldval - value * 10;
+        *a++ = '0' + remainder;
+    } while (value != 0);
+
+    if (neg)
+        *a++ = '-';
+
+    /* Add trailing NUL byte, and back up 'a' to the last character. */
+    *a-- = '\0';
+
+    /* Reverse string. */
+    while (start < a) {
+        char swap = *start;
+
+        *start++ = *a;
+        *a-- = swap;
+    }
+
+    return u_sess->utils_cxt.int4output_buffer;
+}
+
 /*
  * pg_lltoa: convert a signed 64-bit integer to its string representation
  *
@@ -460,6 +512,59 @@ void pg_lltoa(int64 value, char* a)
         *start++ = *a;
         *a-- = swap;
     }
+}
+
+char* pg_lltoa2(int64 value)
+{
+    u_sess->utils_cxt.int8output_buffer[0] = '\0';
+    char* a = u_sess->utils_cxt.int8output_buffer;
+    char* start = a;
+    bool neg = false;
+
+    if (a == NULL) {
+        return u_sess->utils_cxt.int8output_buffer;
+    }
+
+    /*
+     * Avoid problems with the most negative integer not being representable
+     * as a positive integer.
+     */
+    if (value == (-INT64CONST(0x7FFFFFFFFFFFFFFF) - 1)) {
+        const int a_len = 21;
+        errno_t ss_rc = memcpy_s(a, a_len, "-9223372036854775808", a_len);
+        securec_check(ss_rc, "\0", "\0");
+        return u_sess->utils_cxt.int8output_buffer;
+    } else if (value < 0) {
+        value = -value;
+        neg = true;
+    }
+
+    /* Compute the result string backwards. */
+    do {
+        int64 remainder;
+        int64 oldval = value;
+
+        value /= 10;
+        remainder = oldval - value * 10;
+        *a++ = '0' + remainder;
+    } while (value != 0);
+
+    if (neg) {
+        *a++ = '-';
+    }
+
+    /* Add trailing NUL byte, and back up 'a' to the last character. */
+    *a-- = '\0';
+
+    /* Reverse string. */
+    while (start < a) {
+        char swap = *start;
+
+        *start++ = *a;
+        *a-- = swap;
+    }
+
+    return u_sess->utils_cxt.int8output_buffer;
 }
 
 /*
@@ -545,9 +650,9 @@ int pg_ultoa_n(uint32 value, char *a)
 
         value /= 10000;
 
-        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c0, 2);
+        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c0, 2);
         securec_check(rc, "\0", "\0");
-        rc = memcpy_s(pos - 4, 2, DIGIT_TABLE + c1, 2);
+        rc = memcpy_sp(pos - 4, 2, DIGIT_TABLE + c1, 2);
         securec_check(rc, "\0", "\0");
         i += 4;
     }
@@ -558,7 +663,7 @@ int pg_ultoa_n(uint32 value, char *a)
 
         value /= 100;
 
-        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c, 2);
+        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c, 2);
         securec_check(rc, "\0", "\0");
         i += 2;
     }
@@ -567,7 +672,7 @@ int pg_ultoa_n(uint32 value, char *a)
 
         char *pos = a + olength - i;
 
-        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c, 2);
+        errno_t rc = memcpy_sp(pos - 2, 2, DIGIT_TABLE + c, 2);
         securec_check(rc, "\0", "\0");
     } else {
         *a = (char)('0' + value);
@@ -633,7 +738,7 @@ char* pg_ultostr_zeropad(char* str, uint32 value, int32 minwidth)
 
     if (value < 100 && minwidth == 2)	/* Short cut for common case */
     {
-        rc = memcpy_s(str, 2, DIGIT_TABLE + value * 2, 2);
+        rc = memcpy_sp(str, 2, DIGIT_TABLE + value * 2, 2);
         securec_check(rc, "\0", "\0");
         return str + 2;
     }

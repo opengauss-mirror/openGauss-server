@@ -74,6 +74,8 @@
 /* Define to 1 if you want to check memory. (--enable-memory-check) */
 #undef ENABLE_MEMORY_CHECK
 
+#undef ENABLE_DFX_OPT
+
 /* Define to 1 if you want to check thread. (--enable-thread-check) */
 #undef ENABLE_THREAD_CHECK
 

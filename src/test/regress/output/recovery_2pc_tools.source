@@ -301,6 +301,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_partition_opfusion                        | bool    |      |           | 
  enable_partitionwise                             | bool    |      |           | 
  enable_pbe_optimization                          | bool    |      |           | 
+ enable_plan_node_reuse                           | bool    |      |           | 
  enable_prevent_job_task_startup                  | bool    |      |           | 
  enable_recyclebin                                | bool    |      |           | 
  enable_remote_excute                             | bool    |      |           | 

@@ -183,6 +183,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(multi_node_hint);
     COPY_SCALAR_FIELD(uniqueSQLId);
     COPY_SCALAR_FIELD(cause_type);
+    COPY_SCALAR_FIELD(psrc); /* we don't need deep copy CachedPlanSource */
 
     /*
      * Not copy ng_queryMem to avoid memory leak in CachedPlan context,

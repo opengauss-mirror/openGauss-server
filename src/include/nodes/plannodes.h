@@ -31,6 +31,12 @@
 #define MAX_SPECIAL_BUCKETMAP_NUM    20
 #define BUCKETMAP_DEFAULT_INDEX_BIT (1 << 31)
 
+#ifndef ENABLE_MULTIPLE_NODES
+#define ENABLE_PLAN_NODE_REUSE (IS_SINGLE_NODE && u_sess->attr.attr_common.enable_plan_node_reuse)
+#else
+#define ENABLE_PLAN_NODE_REUSE false
+#endif
+
 /*
  * Determines the position where the RemoteQuery node will run.
  */
@@ -194,6 +200,7 @@ typedef struct PlannedStmt {
     uint64 uniqueSQLId;
 
     uint32 cause_type; /* Possible Slow SQL Risks in the Plan. */
+    CachedPlanSource* psrc;
 } PlannedStmt;
 
 typedef struct NodeGroupInfoContext {

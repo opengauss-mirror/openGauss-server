@@ -58,6 +58,7 @@ option(ENABLE_PRIVATEGAUSS "enable privategauss,the old is --enable-pribategauss
 option(ENABLE_LITE_MODE "enable lite in single_node mode,the old is --enable-lite-mode" OFF)
 option(ENABLE_DEBUG "enable privategauss,the old is --enable-pribategauss" OFF)
 option(ENABLE_MOT "enable mot in single_node mode,the old is --enable-mot" OFF)
+option(ENABLE_DFX_OPT "enable dfx optimization in single_node/distribute mode" OFF)
 option(ENABLE_NUMA "enable numa,the old is --enable-numa" ON)
 option(ENABLE_LSE "enable lse,the old is --enable-lse" ON)
 option(ENABLE_MYSQL_FDW "enable export or import data with mysql,the old is --enable-mysql-fdw" OFF)

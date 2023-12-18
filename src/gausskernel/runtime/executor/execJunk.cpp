@@ -62,17 +62,23 @@
  */
 JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, const TableAmRoutine* tam_ops)
 {
-    JunkFilter* junkfilter = NULL;
     TupleDesc cleanTupType;
-    int cleanLength;
-    AttrNumber* cleanMap = NULL;
-    ListCell* t = NULL;
-    AttrNumber cleanResno;
 
     /*
      * Compute the tuple descriptor for the cleaned tuple.
      */
     cleanTupType = ExecCleanTypeFromTL(targetList, hasoid, tam_ops);
+
+    return exec_init_junk_filter_for_update(targetList, hasoid, slot, cleanTupType);
+}
+
+JunkFilter* exec_init_junk_filter_for_update(List* targetList, bool hasoid, TupleTableSlot* slot, TupleDesc cleanTupType)
+{
+    JunkFilter* junkfilter = NULL;
+    int cleanLength;
+    AttrNumber* cleanMap = NULL;
+    ListCell* t = NULL;
+    AttrNumber cleanResno;
 
     /*
      * Use the given slot, or make a new slot if we weren't given one.
@@ -206,9 +212,15 @@ void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, Resul
 {
     JunkFilter* j = NULL;
 
-    j = ExecInitJunkFilter(targetlist,
-        result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
-        ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_ops), TableAmHeap);
+    if (operation == CMD_UPDATE) {
+        j = exec_init_junk_filter_for_update(targetlist, result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
+                               ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_ops),
+                               RelationGetDescr(result_rel_info->ri_RelationDesc));
+    } else {
+        j = ExecInitJunkFilter(targetlist, result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
+                               ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_ops),
+                               TableAmHeap);
+    }
 
     if (operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) {
         /* For UPDATE/DELETE, find the appropriate junk attr now */

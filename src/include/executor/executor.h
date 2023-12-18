@@ -187,6 +187,8 @@ extern TupleHashEntry FindTupleHashEntry(
 /*
  * prototypes from functions in execJunk.c
  */
+extern JunkFilter *exec_init_junk_filter_for_update(List *targetList, bool hasoid, TupleTableSlot *slot,
+                                                    TupleDesc cleanTupType);
 extern JunkFilter *ExecInitJunkFilter(List *targetList, bool hasoid, TupleTableSlot *slot,
                                       const TableAmRoutine *tam_ops = TableAmHeap);
 extern void ExecInitJunkAttr(EState *estate, CmdType operation, List *targetlist, ResultRelInfo *result_rel_info);

@@ -254,6 +254,8 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->dependsOnRole = false;
     plansource->cq_is_flt_frame = 
         (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
+    plansource->operator_reuse_state = NULL;
+    plansource->exec_check = false;
     plansource->fixed_result = false;
     plansource->resultDesc = NULL;
     plansource->search_path = NULL;
@@ -359,6 +361,8 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
     plansource->dependsOnRole = false;
     plansource->cq_is_flt_frame = 
         (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
+    plansource->operator_reuse_state = NULL;
+    plansource->exec_check = false;
     plansource->fixed_result = false;
     plansource->resultDesc = NULL;
     plansource->search_path = NULL;
@@ -969,6 +973,8 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     if (plansource->planManager != NULL) {
         plansource->planManager->is_valid = false;
     }
+    plansource->operator_reuse_state = NULL;
+    plansource->exec_check = false;
     plansource->query_list = NIL;
     plansource->relationOids = NIL;
     plansource->invalItems = NIL;
@@ -1500,6 +1506,8 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
         plan->saved_xmin = InvalidTransactionId;
     plansource->cq_is_flt_frame =
         (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
+    plansource->operator_reuse_state = NULL;
+    plansource->exec_check = false;
     plan->refcount = 0;
     plan->global_refcount = 0;
     plan->context = plan_context;

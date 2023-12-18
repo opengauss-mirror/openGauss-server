@@ -754,6 +754,7 @@ enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
 enable_mot
+enable_dfx_opt
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
@@ -839,6 +840,7 @@ enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
 enable_mot
+enable_dfx_opt
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
@@ -1548,6 +1550,7 @@ Optional Features:
   --enable-multiple-nodes generate the gauss product as multiple nodes mode
   --enable-jemalloc-debug build with jemalloc debug library
   --enable-memory-check   build with memory checking feature
+  --enable-dfx-opt        build with dfx feature
   --disable-spinlocks     do not use spinlocks
   --enable-debug          build with debugging symbols (-g)
   --enable-qunit          enable query driven unit test framework(QUnit)
@@ -2905,15 +2908,46 @@ else
 
 fi
 
-if test "$enable_multiple_nodes" = yes; then
 
-  enable_mot=no
-fi
 
 if test "$enable_mot" = yes; then
 
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_MOT 1
+_ACEOF
+
+fi
+
+# Check whether --enable-dfx-opt was given.
+if test "${enable_dfx_opt+set}" = set; then
+  enableval=$enable_dfx_opt;
+  case $enableval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_DFX_OPT 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-dfx-opt option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-dfx-opt option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_dfx_opt=no
+
+fi
+
+if test "$enable_dfx_opt" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_DFX_OPT 1
 _ACEOF
 
 fi
