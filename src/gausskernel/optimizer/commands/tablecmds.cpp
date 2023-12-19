@@ -513,8 +513,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
 static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgRlspolicyFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static ViewInfoForAdd *GetViewInfoFirstAfter(const char *rel_name, Oid objid, bool keep_star = false);
-static List *CheckPgRewriteFirstAfter(Relation rel);
-static void ReplaceViewQueryFirstAfter(List *query_str);
+
 static void UpdateDependRefobjsubidFirstAfter(Relation rel, Oid myrelid, int curattnum, int newattnum,
     bool *has_depend);
 static void UpdateDependRefobjsubidToNewattnum(Relation rel, Oid myrelid, int curattnum, int newattnum);
@@ -11862,12 +11861,95 @@ static List *CheckPgRewriteFirstAfter(Relation rel)
     return query_str;
 }
 
+
+void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute attForm,
+    int2 old_attnum, char** attName, List **old_query_str)
+{
+    List *query_str = NIL;
+    ScanKeyData entry;
+    ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_oid));
+    Relation rewrite_rel = heap_open(RewriteRelationId, RowExclusiveLock);
+    SysScanDesc rewrite_scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, NULL, 1, &entry);
+    HeapTuple rewrite_tup = systable_getnext(rewrite_scan);
+    if (!HeapTupleIsValid(rewrite_tup)) {
+        systable_endscan(rewrite_scan);
+        heap_close(rewrite_rel, RowExclusiveLock);
+        return;
+    }
+    Form_pg_rewrite rewrite_form = (Form_pg_rewrite)GETSTRUCT(rewrite_tup);
+    if (strcmp(NameStr(rewrite_form->rulename), ViewSelectRuleName) != 0) {
+        systable_endscan(rewrite_scan);
+        heap_close(rewrite_rel, RowExclusiveLock);
+        return;
+    }
+    bool is_null = false;
+    Datum evActiomDatum = fastgetattr(rewrite_tup, Anum_pg_rewrite_ev_action, rewrite_rel->rd_att, &is_null);
+    if (!is_null) {
+        Datum values[Natts_pg_rewrite] = { 0 };
+        bool nulls[Natts_pg_rewrite] = { 0 };
+        bool replaces[Natts_pg_rewrite] = { 0 };
+        char *evActionString = TextDatumGetCString(evActiomDatum);
+        List *evAction = (List *)stringToNode(evActionString);
+        Query* query = (Query*)linitial(evAction);
+        // change query targetEntry
+        ListCell* lc = NULL;
+        foreach (lc, query->targetList) {
+            TargetEntry* tle = (TargetEntry*)lfirst(lc);
+            if (nodeTag((Node*)tle->expr) == T_Var && tle->resorigtbl == rel_oid &&
+                ((Var*)tle->expr)->varoattno == old_attnum) {
+                Var *var = (Var *)tle->expr;
+                var->varattno = attForm->attnum;
+                var->varoattno = attForm->attnum;
+                var->vartype = attForm->atttypid;
+                var->vartypmod = attForm->atttypmod;
+                *attName = pstrdup(tle->resname);
+            }
+        }
+        char* actiontree = nodeToString((Node*)evAction);
+        HeapTuple new_dep_tuple;
+        values[Anum_pg_rewrite_ev_action - 1] = CStringGetTextDatum(actiontree);
+        replaces[Anum_pg_rewrite_ev_action - 1] = true;
+        new_dep_tuple = heap_modify_tuple(rewrite_tup, RelationGetDescr(rewrite_rel), values, nulls, replaces);
+        simple_heap_update(rewrite_rel, &new_dep_tuple->t_self, new_dep_tuple);
+        CatalogUpdateIndexes(rewrite_rel, new_dep_tuple);
+        CommandCounterIncrement();
+        StringInfoData buf;
+        initStringInfo(&buf);
+        Relation ev_relation = heap_open(rewrite_form->ev_class, AccessShareLock);
+        get_query_def(query,
+            &buf,
+            NIL,
+            RelationGetDescr(ev_relation),
+            0,
+            -1,
+            0,
+            false,
+            false,
+            NULL,
+            false,
+            false);
+        appendStringInfo(&buf, ";");
+        ViewInfoForAdd * info = static_cast<ViewInfoForAdd *>(palloc(sizeof(ViewInfoForAdd)));
+        info->ev_class = rewrite_form->ev_class;
+        info->query_string = pstrdup(buf.data);
+        heap_close(ev_relation, AccessShareLock);
+        FreeStringInfo(&buf);
+        query_str = lappend(query_str, info);
+        *old_query_str = query_str;
+        heap_freetuple_ext(new_dep_tuple);
+        pfree_ext(evActionString);
+        pfree_ext(actiontree);
+    }
+    systable_endscan(rewrite_scan);
+    heap_close(rewrite_rel, RowExclusiveLock);
+}
+
 /*
  * create or replace view when the table has view.
  * 1. add column with first or after col_name.
  * 2. modify column to first or after column.
  */
-static void ReplaceViewQueryFirstAfter(List *query_str)
+void ReplaceViewQueryFirstAfter(List *query_str)
 {
     if (query_str != NIL) {
         ListCell* viewinfo = NULL;
@@ -16371,6 +16453,69 @@ static void UpdateNewvalsAttnum(AlteredTableInfo* tab, Relation rel, AlterTableC
     }
 }
 
+bool InvalidateDependView(Oid viewOid, char objType)
+{
+    List* view_oid_list = NIL;
+    List *dep_oid_list = NIL;
+    // 1. filter the invalid view
+    if (!GetPgObjectValid(viewOid, objType)) {
+        return false;
+    }
+    // 2. find all views which depend on this view directly or indirectly
+    view_oid_list = lappend_oid(view_oid_list, viewOid);
+    dep_oid_list = lappend_oid(dep_oid_list, viewOid);
+    const int keyNum = 2;
+    ScanKeyData key[keyNum];
+    SysScanDesc scan = NULL;
+    HeapTuple tup = NULL;
+    Relation dep_rel = heap_open(DependRelationId, AccessShareLock);
+    while (list_length(dep_oid_list) > 0) {
+        // (1) get dependent view oid
+        Oid objid = linitial_oid(dep_oid_list);
+        dep_oid_list = list_delete_first(dep_oid_list);
+        List *rw_oid_list = NIL;
+        ListCell *rw_cell = NULL;
+        // (2) find rw_objid of pg_rewrite entry from pg_depend by objid
+        ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ,
+            ObjectIdGetDatum(RelationRelationId));
+        ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objid));
+        scan = systable_beginscan(dep_rel, DependReferenceIndexId, true, NULL, keyNum, key);
+        while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
+            Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
+            Oid rw_objid = depform->objid;
+            if (depform->classid == RewriteRelationId && depform->deptype == DEPENDENCY_NORMAL
+                && !list_member_oid(rw_oid_list, rw_objid)) {
+                rw_oid_list = lappend_oid(rw_oid_list, rw_objid);
+            }
+        }
+        // (3) find dependent view oid from pg_rewrite by rw_objid
+        foreach(rw_cell, rw_oid_list) {
+            Oid rw_objid = lfirst_oid(rw_cell);
+            Oid dep_view_oid = get_rewrite_relid(rw_objid, true);
+            if (!OidIsValid(dep_view_oid) || dep_view_oid == objid) {
+                continue;
+            }
+            char relkind = get_rel_relkind(dep_view_oid);
+            if (relkind != RELKIND_VIEW && relkind != RELKIND_MATVIEW) {
+                continue;
+            }
+            dep_oid_list = lappend_oid(dep_oid_list, dep_view_oid);
+            view_oid_list = lappend_oid(view_oid_list, dep_view_oid);
+        }
+        list_free_ext(rw_oid_list);
+        systable_endscan(scan);
+    }
+    heap_close(dep_rel, AccessShareLock);
+    // 3. mark all dependent view invalid
+    ListCell *dep_cell = NULL;
+    foreach(dep_cell, view_oid_list) {
+        Oid depoid = lfirst_oid(dep_cell);
+        SetPgObjectValid(depoid, objType, false);
+    }
+    list_free_ext(view_oid_list);
+    list_free_ext(dep_oid_list);
+    return true;
+}
 
 static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode)
 {
@@ -16639,12 +16784,20 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
                 }
                 break;
 
-            case OCLASS_REWRITE:
+            case OCLASS_REWRITE: {
                 /* XXX someday see if we can cope with revising views */
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot alter type of a column used by a view or rule"),
-                        errdetail("%s depends on column \"%s\"", getObjectDescription(&foundObject), colName)));
-                break;
+                    Oid objOid = get_rewrite_relid(foundObject.objectId, false);
+                    char relKind = get_rel_relkind(objOid);
+                    if (relKind == RELKIND_VIEW || relKind == RELKIND_MATVIEW) {
+                        (void)InvalidateDependView(objOid,
+                                                   relKind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW);
+                    } else {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("cannot alter type of a column used by a relation kind %c", relKind),
+                            errdetail("%s depends on column \"%s\"", getObjectDescription(&foundObject), colName)));
+                    }
+                    break;
+                }
 
             case OCLASS_TRIGGER:
 

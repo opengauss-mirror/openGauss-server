@@ -407,7 +407,7 @@ extern void performTsCudescDeletion(List* cudesc_oids);
 extern void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressStack* stack,
     ObjectAddresses* targetObjects, const ObjectAddresses* pendingObjects, Relation* depRel);
 extern void reportDependentObjects(
-    const ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject);
+    ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject);
 extern void AcquireDeletionLock(const ObjectAddress* object, int flags);
 extern void add_object_address_ext(Oid classId, Oid objectId, int32 subId, char deptype, ObjectAddresses* addrs);
 extern void add_object_address_ext1(const ObjectAddress *obj, ObjectAddresses* addrs);

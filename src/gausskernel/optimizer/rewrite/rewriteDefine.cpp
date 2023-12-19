@@ -56,6 +56,7 @@
 #include "utils/sec_rls_utils.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "catalog/pg_object.h"
 
 static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect);
 static bool checkWhetherForbiddenRule(Oid relId);

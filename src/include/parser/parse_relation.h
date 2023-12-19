@@ -58,7 +58,7 @@ extern Oid attnumTypeId(Relation rd, int attid);
 extern Oid attnumCollationId(Relation rd, int attid);
 extern bool GetPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
-
+extern bool ValidateDependView(Oid view_oid, char obj_type);
 #ifdef PGXC
 extern int specialAttNum(const char* attname);
 #endif
