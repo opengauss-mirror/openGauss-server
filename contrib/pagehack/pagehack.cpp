@@ -210,6 +210,14 @@ int SegNo = 0;
 
 bool vm_cache[BLCKSZ] = {false};
 
+/* change addr*/
+static uint32 changeBlockNumber = InvalidBlockNumber; // block number is less than 131072
+static uint32 changeAllocatedChunks; // less than 16
+static uint32 changeUseChunk;  // less than 16
+/* max count of chunk is 16 */
+static uint32 changeChunkNumbers[16];
+
+
 /*
  * MaxLevelNum can not exceed 0x0F
  */
@@ -825,6 +833,9 @@ typedef enum HackingType {
     HACKING_UNDO_FIX,
     HACKING_SEGMENT,
     HACKING_INDEX_URQ,
+    HACKING_HEAP_PCA,
+    HACKING_CHECK_PCA,
+    HACKING_CHANGE_PCA,
     NUM_HACKINGTYPE
 } HackingType;
 
@@ -852,7 +863,10 @@ static const char* HACKINGTYPE[] = {"heap",
     "undo_record",
     "undo_fix",
     "segment",
-    "btree_index_urq"
+    "btree_index_urq",
+    "pca",
+    "check_pca",
+    "change_pca",
 };
 
 const char* PageTypeNames[] = {"DATA", "FSM", "VM"};
@@ -867,6 +881,10 @@ extern int optind;
 char* pgdata = NULL;
 
 static void fill_filenode_map(char** class_map);
+
+bool CheckPcaAddress(char *filename);
+
+bool ChangePcaAddress(char *filename);
 
 static const char HexCharMaps[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
@@ -988,7 +1006,8 @@ static void usage(const char* progname)
         printf(" %s%s", HACKINGTYPE[i], (i == nTypes - 1) ? " " : "|");
     }
     printf("}\n"
-           "       the hacking type (default: heap)\n");
+           "       the hacking type (default: heap)\n"
+           "       change pca: only for test\n");
 
     // print supported table name for HEAP type
     //
@@ -1011,7 +1030,7 @@ static void usage(const char* progname)
     printf("  -v only show visibility map info, can only work when parsing index or heap\n"
            "  -b only show BCM map info, can only work when parsing index or heap\n"
            "  -u double write hacking\n"
-           "  -s set the start point to hack when hacking heap/index/undo\n"
+           "  -s set the start point to hack when hacking heap/index/undo/pca/change_pca\n"
            "  -n set the number of blocks to hack\n"
            "  -o set the CU pointer from cudesc\n"
            "  -I set the start item slot need change in one page\n"
@@ -1019,6 +1038,11 @@ static void usage(const char* progname)
            "  -w write the change to file\n"
            "  -d only for test, use 0xFF to fill the last half page[4k]\n"
            "  -z only for undo space/group meta, dump the specified space/group\n"
+           "  -c only for change_pca, set the new address of block, such as '1 2 2 1 2 2'\n"
+           "     first: blocknum\n"
+           "     second: allocted_chunks\n"
+           "     third: nchunks\n"
+           "     others: chunk numbers\n"
            "  -S heap file segment number\n"
            "\nCommon options:\n"
            "  --help, -h       show this help, then exit\n"
@@ -3216,14 +3240,14 @@ static int parse_page_file(const char *filename, SegmentType type, const uint32 
     char compressed[BLCKSZ];
     char decompressed[BLCKSZ];
     while (start < number) {
-        auto compressedSize = pageCompression->ReadCompressedBuffer(start, compressed, BLCKSZ);
-        if (compressedSize == 0) {
+        auto compressedSize = pageCompression->ReadCompressedBuffer(start, compressed, BLCKSZ, false, false);
+        /* PageHeader is complete */
+        if (compressedSize == COMPRESS_CHECKSUM_ERROR) {
             fprintf(stderr, "read block %d failed, filename: %s_pcd: %s\n", start, filename, strerror(errno));
-            delete pageCompression;
-            return false;
         }
+
         char *parseFile = NULL;
-        if (compressedSize < BLCKSZ) {
+        if (compressedSize >= 0 && compressedSize < BLCKSZ) {
             pageCompression->DecompressedPage(compressed, decompressed);
             parseFile = decompressed;
         } else {
@@ -4337,7 +4361,8 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
         GET_REL_PGAENUM(curr_head->page_num));
     page_start = (char*)curr_head + BLCKSZ;
     page_num--;
-    if (curr_head->buftag_ver == HASHBUCKET_TAG) {
+    /* compress tag and hash bucket tag use the same header*/
+    if (curr_head->buftag_ver == HASHBUCKET_TAG || curr_head->buftag_ver == PAGE_COMPRESS_TAG) {
         isHashbucket = true;
     }
     for (i = 0; i < GET_REL_PGAENUM(curr_head->page_num) && page_num > 0; i++, page_num--) {
@@ -5014,6 +5039,103 @@ static int ParseUndoSpaceMeta(const char *filename, int zid, UndoSpaceType type)
     return true;
 }
 
+static int OpenPcdFile(const char *filename)
+{
+    char pcdFilePath[MAXPGPATH];
+    securec_check(strcpy_s(pcdFilePath, MAXPGPATH, filename), "", "");
+    pcdFilePath[strlen(filename) - 1] = 'd';
+    int pcdFd = open(pcdFilePath, O_RDONLY);
+    if (pcdFd <= 0) {
+        fprintf(stderr, "open %s failed: %s", pcdFilePath, strerror(errno));
+    }
+    return pcdFd;
+}
+
+static int ParsePcaFile(const char *filename, bool checkPcdFile, const uint32 start_point, const uint32 number_read) {
+    int fd = open(filename, O_RDONLY);
+    int fileLength = lseek(fd, 0L, SEEK_END);
+    PageCompressHeader *map = pc_mmap_real_size(fd, fileLength, true);
+    if (map == (void *) -1) {
+        fprintf(stderr, "mmap %s failed: %s", filename, strerror(errno));
+        close(fd);
+        return false;
+    }
+    int pcdFd = checkPcdFile ? OpenPcdFile(filename) : -1;
+    checkPcdFile = pcdFd != -1;
+
+    BlockNumber start = start_point;
+    BlockNumber blknum = map->nblocks;
+    BlockNumber maxBlockNumber = CalculateMaxBlockNumber(blknum, start, number_read);
+    if (maxBlockNumber == InvalidBlockNumber) {
+        munmap(map, sizeof(PageCompressHeader));
+        close(fd);
+        return false;
+    }
+
+    printf("totalBlock: %u, totalChunks: %u\n", map->nblocks, map->allocated_chunks);
+    auto chunkSize = map->chunk_size;
+    for (uint i = start; i < maxBlockNumber; i++) {
+        auto addr = GET_PAGE_COMPRESS_ADDR(map, map->chunk_size, i);
+        auto checksum = AddrChecksum32(i, addr, chunkSize);
+        const char *checksumSuccess = checksum == AddrChecksum32(i, addr, chunkSize) ? "success" : "failed";
+        printf("blockNumber: %u, allocated: %u, nchunks: %u, checksum（%s): ", i, addr->allocated_chunks,
+               addr->nchunks, checksumSuccess);
+        char compressBuffer[BLCKSZ];
+        char *bufferPosition = compressBuffer;
+        for (int j = 0; j < addr->allocated_chunks; j++) {
+            printf("%u ", addr->chunknos[j]);
+            if (checkPcdFile && j < addr->nchunks) {
+                bufferPosition = compressBuffer + j * chunkSize;
+                off_t seekpos = (off_t) OFFSET_OF_PAGE_COMPRESS_CHUNK(chunkSize, addr->chunknos[j]);
+                lseek(pcdFd, seekpos, SEEK_SET);
+                auto bytes = read(pcdFd, bufferPosition, chunkSize);
+                if (bytes != chunkSize) {
+                    printf(" read error : %zd: %s", bytes, strerror(errno));
+                }
+            }
+        }
+        if (checkPcdFile && addr->allocated_chunks != 0) {
+            bool crc32Check;
+            uint32 size;
+            uint32 crc32;
+            char *data;
+            uint32 extraSize;
+            if (PageIs8BXidHeapVersion(compressBuffer)) {
+                auto header = (HeapPageCompressData *) compressBuffer;
+                size = header->size;
+                crc32 = header->crc32;
+                data = header->data;
+                crc32Check = DataBlockChecksum(data, size, true) == crc32;
+                extraSize = SIZE_OF_PAGE_COMPRESS_DATA_HEADER_DATA(true);
+            } else {
+                auto header = (PageCompressData *) compressBuffer;
+                size = header->size;
+                crc32 = header->crc32;
+                data = header->data;
+                crc32Check = DataBlockChecksum(data, size, true) == crc32;
+                extraSize = SIZE_OF_PAGE_COMPRESS_DATA_HEADER_DATA(false);
+            }
+            char res[BLCKSZ];
+            bool decompress = DecompressPage(compressBuffer, res, map->algorithm) == BLCKSZ;
+            if (crc32Check && decompress) {
+                printf("pcd check: success");
+            } else {
+                printf("pcd %s check failed: crc32(%s) decompress(%s) chunksize(exptect small than %u but actual is %u)",
+                       filename, crc32Check ? "success" : "failed", decompress ? "success" : "failed",
+                       addr->nchunks * chunkSize, size + extraSize);
+            }
+        }
+        printf("\n");
+    }
+    munmap(map, sizeof(PageCompressHeader));
+    close(fd);
+    if (pcdFd > 0) {
+        close(pcdFd);
+    }
+    return true;
+}
+
+
 static int ParseUndoSlot(const char *filename)
 {
     errno_t rc = EOK;
@@ -5606,22 +5728,30 @@ static void fill_filenode_map(char** class_map)
     return;
 }
 
-static long int strtolSafe(const char* nptr, long int default_value)
+static long int strtolSafe(const char* nptr, long int default_value, bool suspendError = true)
 {
     char* tmp = NULL;
     long int res = strtol(nptr, &tmp, TEN);
     if (errno == ERANGE || tmp == nptr || (errno != 0 && res == 0)) {
+        if (!suspendError) {
+            fprintf(stderr, "ERROR: failed to convert parameter %s to int!\n", nptr);
+            exit(1);
+        }
         fprintf(stdout, "WARNING: failed to convert parameter %s to int!\n", nptr);
         res = default_value;
     }
     return res;
 }
 
-static long long int strtollSafe(const char* nptr, long long int default_value)
+static long long int strtollSafe(const char* nptr, long long int default_value, bool suspendError = true)
 {
     char* tmp = NULL;
     long long int res = strtoll(nptr, &tmp, TEN);
     if (errno == ERANGE || tmp == nptr || (errno != 0 && res == 0)) {
+        if (!suspendError) {
+            fprintf(stderr, "ERROR: failed to convert parameter %s to int!\n", nptr);
+            exit(1);
+        }
         fprintf(stdout, "WARNING: failed to convert parameter %s to int!\n", nptr);
         res = default_value;
     }
@@ -5648,7 +5778,7 @@ int main(int argc, char** argv)
         }
 
         if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0) {
-            puts("pagehack (PostgreSQL) " PG_VERSION);
+            puts("gaussdb " DEF_GS_VERSION);
             exit(0);
         }
     }
@@ -5658,7 +5788,7 @@ int main(int argc, char** argv)
     setvbuf(stderr, NULL, _IONBF, 0);
 #endif
 
-    while ((c = getopt(argc, argv, "bf:o:t:vs:z:n:r:i:I:N:uwdS:")) != -1) {
+    while ((c = getopt(argc, argv, "bf:o:t:vs:z:n:r:i:I:N:uwdS:c:")) != -1) {
         switch (c) {
             case 'f':
                 filename = optarg;
@@ -5739,7 +5869,42 @@ int main(int argc, char** argv)
             case 'n':
                 num_block = (unsigned int)strtolSafe(optarg, 0);
                 break;
-
+            case 'c': {
+                /* assign blockNumber, allocatedChunks, nchunks */
+                char *changeAddrToken = strtok(optarg, " ");
+                char *errorLog[] = {"block number", "allocated chunk number", "use chunk number"};
+                void *assigned[] = {(void *) &changeBlockNumber, (void *) &changeAllocatedChunks,
+                                    (void *) &changeUseChunk};
+                for (uint32 i = 0; i < sizeof(errorLog) / sizeof(void *); i++) {
+                    if (changeAddrToken != nullptr) {
+                        *(uint32 *) (assigned[i]) = strtollSafe(changeAddrToken, 0, false);
+                    } else {
+                        fprintf(stderr, "ERROR: can not find %s in -c\n", errorLog[i]);
+                        exit(1);
+                    }
+                    changeAddrToken = strtok(NULL, " ");
+                }
+                if (changeUseChunk > changeAllocatedChunks) {
+                    fprintf(stderr, "ERROR: nchunks: %u must less then allocated chunks: %u\n", changeUseChunk,
+                            changeAllocatedChunks);
+                    exit(1);
+                }
+                /* assign chunk number */
+                for (uint32 i = 0; i < changeAllocatedChunks && i < 16; i++) {
+                    if (changeAddrToken != nullptr) {
+                        changeChunkNumbers[i] = strtollSafe(changeAddrToken, 0, false);
+                    } else {
+                        fprintf(stderr, "ERROR: chunk number count must equal to %u\n", changeAllocatedChunks);
+                        exit(1);
+                    }
+                    changeAddrToken = strtok(NULL, " ");
+                }
+                if (changeAddrToken != nullptr) {
+                    fprintf(stderr, "ERROR: chunk number count must equal to %u\n", changeAllocatedChunks);
+                    exit(1);
+                }
+                break;
+            }
             case 'I':
                 start_item = (unsigned int)strtolSafe(optarg, 1);
                 break;
@@ -5786,10 +5951,16 @@ int main(int argc, char** argv)
         exit(1);
     }
 
+    if (hackingtype == HACKING_CHANGE_PCA && changeBlockNumber == InvalidBlockNumber) {
+        fprintf(stderr, "-c is needed when hacking change_pca.\n");
+        exit(1);
+
+    }
+    
     if (((start_point != 0) || (num_block != 0)) &&
         /* only heap/index/undo/dw */
         (hackingtype > HACKING_UNDO && hackingtype != HACKING_DW && hackingtype != HACKING_SEGMENT &&
-         hackingtype != HACKING_INDEX_URQ)) {
+         hackingtype != HACKING_INDEX_URQ && hackingtype != HACKING_HEAP_PCA && hackingtype != HACKING_CHANGE_PCA)) {
         fprintf(stderr, "Start point or block number only takes effect when hacking segment/heap/undo/index.\n");
         start_point = num_block = 0;
     }
@@ -5973,6 +6144,24 @@ int main(int argc, char** argv)
                 exit(1);
             }
             break;
+        case HACKING_HEAP_PCA:
+            if (!ParsePcaFile(filename, true, start_point, num_block)) {
+                fprintf(stderr, "Error during parsing pca file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_CHECK_PCA:
+            if (!CheckPcaAddress(filename)) {
+                fprintf(stderr, "Error during parsing pca file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_CHANGE_PCA:
+            if (!ChangePcaAddress(filename)) {
+                fprintf(stderr, "Error during parsing pca file %s\n", filename);
+                exit(1);
+            }
+            break;
         case HACKING_UNDO_FIX:
             break;
         default:
@@ -5981,4 +6170,95 @@ int main(int argc, char** argv)
     }
 
     return 0;
+}
+
+bool ChangePcaAddress(char *filename) {
+    PageCompressAddr *addr;
+    int fd = open(filename, O_RDWR);
+    int fileLength = lseek(fd, 0L, SEEK_END);
+    PageCompressHeader *map = pc_mmap_real_size(fd, fileLength, false);
+    bool result = false;
+    if (map == (void *) -1) {
+        fprintf(stderr, "mmap %s failed: %s\n", filename, strerror(errno));
+        goto error;
+    }
+
+    addr = GET_PAGE_COMPRESS_ADDR(map, map->chunk_size, changeBlockNumber);
+    /* sanity check */
+    if (BLCKSZ / map->chunk_size < changeAllocatedChunks) {
+        fprintf(stderr, "allocated chunks: %u must less than %u\n", changeAllocatedChunks, BLCKSZ / map->chunk_size);
+        goto error;
+    }
+    
+    addr->nchunks = changeUseChunk;
+    addr->allocated_chunks = changeAllocatedChunks;
+    for (uint32 i = 0; i < BLCKSZ / map->chunk_size; i++) {
+        if (i < changeAllocatedChunks) {
+            addr->chunknos[i] = changeChunkNumbers[i];
+        } else {
+            addr->chunknos[i] = 0;
+        }
+    }
+    addr->checksum = AddrChecksum32(changeBlockNumber, addr, map->chunk_size);
+    result = true;
+error:
+    if (map != (void *) -1) {
+        munmap(map, sizeof(PageCompressHeader));
+    }
+    close(fd);
+    return result;
+}
+
+bool CheckPcaAddress(char *filename) {
+    int fd = open(filename, O_RDONLY);
+    int fileLength = lseek(fd, 0L, SEEK_END);
+    PageCompressHeader *map = pc_mmap_real_size(fd, fileLength, true);
+    if (map == (void *) -1) {
+        fprintf(stderr, "mmap %s failed: %s\n", filename, strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    pg_atomic_uint32 allocatedChunks = map->allocated_chunks;
+    bool chunkCheck[allocatedChunks + 1];
+    BlockNumber blockNumbers[allocatedChunks + 1];
+    for (pg_atomic_uint32 i = 0; i <= allocatedChunks; ++i) {
+        chunkCheck[i] = false;
+        blockNumbers[i] = InvalidBlockNumber;
+    }
+    int maxIndexInAddr = BLCKSZ / map->chunk_size;
+    for (pg_atomic_uint32 i = 0; i < map->nblocks; ++i) {
+        auto addr = GET_PAGE_COMPRESS_ADDR(map, map->chunk_size, i);
+        for (int j = 0; j < addr->allocated_chunks; j++) {
+            if (chunkCheck[addr->chunknos[j]]) {
+                fprintf(stderr, "duplicate chunkno: %u, block: %u\n", addr->chunknos[j], blockNumbers[addr->chunknos[j]]);
+            } else {
+                chunkCheck[addr->chunknos[j]] = true;
+                blockNumbers[addr->chunknos[j]] = i;
+            }
+        }
+        if (addr->allocated_chunks < maxIndexInAddr && addr->chunknos[addr->allocated_chunks] != 0) {
+            fprintf(stderr, "out of range chunk: block(%u), nchunks(%u), allocated_chunks(%u), chunk_index(%u), chunkno(%u)\n", i,
+                    addr->nchunks, addr->allocated_chunks, addr->allocated_chunks - 1, addr->chunknos[addr->allocated_chunks - 1]);
+        }
+    }
+    
+    /* The error information is printed only once. */
+    bool unusedChunksPrint = false;
+    for (pg_atomic_uint32 i = 1; i <= allocatedChunks; ++i) {
+        if (!chunkCheck[i]) {
+            if (!unusedChunksPrint) {
+                fprintf(stderr, "unused chunk num: ");
+                unusedChunksPrint = true;
+            }
+            fprintf(stderr, "%u ", i);
+        }
+    }
+    if (unusedChunksPrint) {
+        fprintf(stderr, "\n");
+    }
+
+    munmap(map, sizeof(PageCompressHeader));
+    close(fd);
+    return true;
 }

@@ -551,7 +551,12 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
         XLogRecGetPhysicalBlock(record, block_id, &seg_fileno, &seg_blockno);
         
         // output format: ", blkref #%u: rel %u/%u/%u/%d storage %s fork %s blk %u (phy loc %u/%u) lastlsn %X/%X"
-        printf(", blkref #%u: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
+        if (rnode.opt == 0) {
+            printf(", blkref #%u: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
+        } else {
+            printf(", blkref #%u: opt(%u) rel %u/%u/%u", block_id, rnode.opt, rnode.spcNode, rnode.dbNode,
+                   rnode.relNode);
+        }
         if (IsBucketFileNode(rnode)) {
             printf("/%d", rnode.bucketNode);
         }

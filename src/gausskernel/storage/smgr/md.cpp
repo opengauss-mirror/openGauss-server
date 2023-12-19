@@ -1780,7 +1780,7 @@ bool mdread_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char
     } else {
         nbytes = DecompressPage(compress_buffer, buffer, algorithm);
         if (nbytes != BLCKSZ) {
-            if (nbytes == -2) {
+            if (nbytes == COMPRESS_UNSUPPORTED_ERROR) {
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
                     "could not recognized compression algorithm %d for file \"%s\"", algorithm,
                     FilePathName(v->mdfd_vfd_pcd))));
