@@ -487,6 +487,9 @@ select jsonb_insert('{"a": {"b": {"c": [0, 1, "test1", "test2"]}}}', '{a, b, c, 
 select jsonb_insert('{"a": [0,1,2]}', '{a, 1}', '{"b": "value"}');
 select jsonb_insert('{"a": [0,1,2]}', '{a, 1}', '["value1", "value2"]');
 
+-- jsonb_insert {-1}
+select jsonb_insert('[{"f1":[1,2,3]},[{"f2":null}]]'::jsonb -> 1, '{-1}', '"not"');
+
 -- jsonb_set
 select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{n}', '[1,2,3]');
 select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '[1,2,3]');
