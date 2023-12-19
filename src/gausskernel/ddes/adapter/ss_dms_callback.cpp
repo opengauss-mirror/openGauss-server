@@ -451,7 +451,14 @@ static int SetPrimaryIdOnStandby(int primary_id)
                     SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id, ntries)));
             return DMS_SUCCESS;
         } else {
-            SSSavePrimaryInstId(primary_id);
+            if (dms_reform_failed()) {
+                ereport(ERROR,
+                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d,"
+                        " control file indicates primary is %d; dms reform failed.",
+                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id,
+                        g_instance.dms_cxt.SSReformerControl.primaryInstId)));
+                return DMS_ERROR;
+            }
             if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
                 ereport(ERROR,
                     (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d,"
