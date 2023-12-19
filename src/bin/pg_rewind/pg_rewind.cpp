@@ -1001,7 +1001,23 @@ BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sys
     }
     PG_CHECKBUILD_AND_RETURN();
     /* in share storage mode, all nodes's pg_control is in one file, we need offset BLCKSZ * id */
-    digestControlFile(&ControlFile_target, (const char*)(buffer + BLCKSZ * ss_instance_config.dss.instance_id));
+    if (ss_instance_config.dss.enable_dss && ss_instance_config.dss.enable_dorado) {
+        ControlFileData standbyCtl = {0};
+        ControlFileData tempCtl = {0};
+        errno_t errorno = EOK;
+        for (int i = 0; i < ss_instance_config.dss.interNodeNum; i++) {
+            digestControlFile(&tempCtl, (const char *)(buffer + BLCKSZ * i));
+            if (tempCtl.checkPoint > standbyCtl.checkPoint) {
+                errorno = memcpy_s(&standbyCtl, sizeof(ControlFileData), &tempCtl, sizeof(ControlFileData));
+                securec_check_c(errorno, "\0", "\0");
+            }
+        }
+        errorno = memcpy_s(&ControlFile_target, sizeof(ControlFileData), &standbyCtl, sizeof(ControlFileData));
+        securec_check_c(errorno, "\0", "\0");
+    } else {
+        digestControlFile(&ControlFile_target, (const char *)(buffer + BLCKSZ * ss_instance_config.dss.instance_id));
+    }
+
     pg_free(buffer);
     buffer = NULL;
     PG_CHECKBUILD_AND_RETURN();
@@ -1041,9 +1057,18 @@ BuildErrorCode do_build_check(const char* pgdata, const char* connstr, char* sys
         (uint32)(ControlFile_source.checkPointCopy.redo >> 32),
         (uint32)(ControlFile_source.checkPointCopy.redo));
 
-    /* Find the common checkpoint locaiton */
-    startrec = ControlFile_source.checkPoint <= ControlFile_target.checkPoint ?
-        ControlFile_source.checkPoint : ControlFile_target.checkPoint;
+    if (ss_instance_config.dss.enable_dss && ss_instance_config.dss.enable_dorado) {
+        if (ControlFile_target.checkPoint > ControlFile_source.checkPoint) {
+            pg_log(PG_FATAL, "standby checkpoint leading primary checkpoint\n");
+            return BUILD_FATAL;
+        }
+        startrec = ControlFile_target.checkPoint;
+    } else {
+        /* Find the common checkpoint locaiton */
+        startrec = ControlFile_source.checkPoint <= ControlFile_target.checkPoint ? ControlFile_source.checkPoint
+                                                                                  : ControlFile_target.checkPoint;
+    }
+
     rv = findCommonCheckpoint(datadir_target, lastcommontli, startrec, &chkptrec, &chkpttli, &chkptredo, term);
     PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "find diverge point success\n");

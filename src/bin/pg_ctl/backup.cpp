@@ -1689,7 +1689,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     }
 #endif
 
-    if (ss_instance_config.dss.enable_dss) {
+    if (ss_instance_config.dss.enable_dss && !ss_instance_config.dss.enable_dorado) {
         BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 

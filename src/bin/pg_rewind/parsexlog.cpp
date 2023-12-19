@@ -211,7 +211,12 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
             pg_log(PG_FATAL, "init xlog dirs failed\n");
             return BUILD_FATAL;
         }
-        max_lsn = SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, xlogDirs, xlogDirNum);
+        if (ss_instance_config.dss.enable_dorado) {
+            max_lsn = startrec;
+        } else {
+            max_lsn =
+                SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, xlogDirs, xlogDirNum);
+        }
     } else {
         max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
     }
