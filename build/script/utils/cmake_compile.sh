@@ -145,7 +145,7 @@ function install_gaussdb()
     fi
 
     if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" -a "$product_mode" != "finance" ]; then
-        die "the product mode can only be opengauss, lite!"
+        die "the product mode can only be opengauss, lite, finance!"
     fi
 
     echo "build gaussdb kernel." >> "$LOG_FILE" 2>&1
