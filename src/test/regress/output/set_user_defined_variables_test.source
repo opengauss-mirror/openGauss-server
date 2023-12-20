@@ -241,10 +241,10 @@ create table t_const as select @v1, @v2, @v3, @v4, @v5;
                             Table "public.t_const"
  Column |       Type       | Modifiers | Storage  | Stats target | Description 
 --------+------------------+-----------+----------+--------------+-------------
- @v1    | bigint           |           | plain    |              | 
+ @v1    | integer          |           | plain    |              | 
  @v2    | double precision |           | plain    |              | 
  @v3    | text             |           | extended |              | 
- @v4    | bigint           |           | plain    |              | 
+ @v4    | integer          |           | plain    |              | 
  @v5    | text             |           | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no
@@ -405,8 +405,8 @@ create table res_select1 as select @v_select_bool1, @v_select_int1, @v_select_fl
                                  Table "public.res_select1"
         Column        |       Type       | Modifiers | Storage  | Stats target | Description 
 ----------------------+------------------+-----------+----------+--------------+-------------
- @v_select_bool1      | bigint           |           | plain    |              | 
- @v_select_int1       | bigint           |           | plain    |              | 
+ @v_select_bool1      | integer          |           | plain    |              | 
+ @v_select_int1       | integer          |           | plain    |              | 
  @v_select_float1     | double precision |           | plain    |              | 
  @v_select_number1    | double precision |           | plain    |              | 
  @v_select_text1      | text             |           | extended |              | 
@@ -427,8 +427,8 @@ create table res_select2 as select @v_select_bool2, @v_select_int2, @v_select_fl
                                  Table "public.res_select2"
         Column        |       Type       | Modifiers | Storage  | Stats target | Description 
 ----------------------+------------------+-----------+----------+--------------+-------------
- @v_select_bool2      | bigint           |           | plain    |              | 
- @v_select_int2       | bigint           |           | plain    |              | 
+ @v_select_bool2      | integer          |           | plain    |              | 
+ @v_select_int2       | integer          |           | plain    |              | 
  @v_select_float2     | double precision |           | plain    |              | 
  @v_select_number2    | double precision |           | plain    |              | 
  @v_select_text2      | text             |           | extended |              | 
@@ -1453,16 +1453,23 @@ my_table h WHERE @r <>0;
 SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2 FROM
 (SELECT @r:= 5) vars,
 my_table h WHERE @r<> 0;
-ERROR:  failed to find conversion function from bigint to integer
+ @r | parent_id2 
+----+------------
+ 5  |          4
+ 4  |          2
+ 2  |          1
+ 1  |           
+(4 rows)
+
 SELECT @r, (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id2 FROM
 (SELECT @r:= 5) vars,
 my_table h WHERE @r<> 0;
  @r | parent_id2 
 ----+------------
-  5 |          4
-  4 |          2
-  2 |          1
-  1 |           
+ 5  |          4
+ 4  |          2
+ 2  |          1
+ 1  |           
 (4 rows)
 
 SELECT (SELECT @r:= parent_id FROM my_table WHERE id = @r) AS parent_id1 FROM

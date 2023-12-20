@@ -323,6 +323,9 @@ Node *type_transfer(Node *node, Oid atttypid, bool isSelect)
         case INT1OID:
         case INT2OID:
         case INT4OID:
+            result = coerce_type(NULL, node, con->consttype,
+                INT4OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
         case INT8OID:
             result = coerce_type(NULL, node, con->consttype,
                 INT8OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
@@ -572,6 +575,147 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
         ReleaseSysCache(targetType);
 
         return result;
+    }
+    if (inputTypeId == UNKNOWNOID && IsA(node, UserVar) && IsA(((UserVar*)node)->value, Const)) {
+        /*
+         * Input is a string constant with previously undetermined type. Apply
+         * the target type's typinput function to it to produce a constant of
+         * the target type.
+         *
+         * NOTE: this case cannot be folded together with the other
+         * constant-input case, since the typinput function does not
+         * necessarily behave the same as a type conversion function. For
+         * example, int4's typinput function will reject "1.2", whereas
+         * float-to-int type conversion will round to integer.
+         *
+         * XXX if the typinput function is not immutable, we really ought to
+         * postpone evaluation of the function call until runtime. But there
+         * is no way to represent a typinput function call as an expression
+         * tree, because C-string values are not Datums. (XXX This *is*
+         * possible as of 7.3, do we want to do it?)
+         */
+        Const* con = (Const*)((UserVar*)node)->value;
+        Const* newcon = makeNode(Const);
+        Oid baseTypeId;
+        int32 baseTypeMod;
+        int32 inputTypeMod;
+        Type targetType;
+        ParseCallbackState pcbstate;
+
+        /*
+         * If the target type is a domain, we want to call its base type's
+         * input routine, not domain_in().	This is to avoid premature failure
+         * when the domain applies a typmod: existing input routines follow
+         * implicit-coercion semantics for length checks, which is not always
+         * what we want here.  The needed check will be applied properly
+         * inside coerce_to_domain().
+         */
+        baseTypeMod = targetTypeMod;
+        baseTypeId = getBaseTypeAndTypmod(targetTypeId, &baseTypeMod);
+
+        /*
+         * For most types we pass typmod -1 to the input routine, because
+         * existing input routines follow implicit-coercion semantics for
+         * length checks, which is not always what we want here.  Any length
+         * constraint will be applied later by our caller.	An exception
+         * however is the INTERVAL type, for which we *must* pass the typmod
+         * or it won't be able to obey the bizarre SQL-spec input rules. (Ugly
+         * as sin, but so is this part of the spec...)
+         */
+        if (baseTypeId == INTERVALOID) {
+            inputTypeMod = baseTypeMod;
+        } else {
+            inputTypeMod = -1;
+        }
+
+        targetType = typeidType(baseTypeId);
+
+        newcon->consttype = baseTypeId;
+        newcon->consttypmod = inputTypeMod;
+        if (OidIsValid(GetCollationConnection()) &&
+            IsSupportCharsetType(baseTypeId)) {
+            newcon->constcollid = GetCollationConnection();
+        } else {
+            newcon->constcollid = typeTypeCollation(targetType);
+        }
+        newcon->constlen = typeLen(targetType);
+        newcon->constbyval = typeByVal(targetType);
+        newcon->constisnull = con->constisnull;
+        newcon->cursor_data.cur_dno = -1;
+
+        /*
+         * We use the original literal's location regardless of the position
+         * of the coercion.  This is a change from pre-9.2 behavior, meant to
+         * simplify life for pg_stat_statements.
+         */
+        newcon->location = con->location;
+
+        /*
+         * Set up to point at the constant's text if the input routine throws
+         * an error.
+         */
+        setup_parser_errposition_callback(&pcbstate, pstate, con->location);
+
+        /*
+        * We assume here that UNKNOWN's internal representation is the same
+        * as CSTRING.
+        */
+        if (!con->constisnull) {
+            newcon->constvalue = stringTypeDatum_with_collation(targetType, DatumGetCString(con->constvalue),
+                inputTypeMod, pstate != NULL && pstate->p_has_ignore, con->constcollid);
+        } else {
+            newcon->constvalue =
+                stringTypeDatum(targetType, NULL, inputTypeMod, pstate != NULL && pstate->p_has_ignore);
+        }
+
+        cancel_parser_errposition_callback(&pcbstate);
+
+        result = (Node*)newcon;
+
+        /* If target is a domain, apply constraints. */
+        if (baseTypeId != targetTypeId) {
+            result = coerce_to_domain(result, baseTypeId, baseTypeMod, targetTypeId, cformat, location, false, false);
+        }
+
+        ReleaseSysCache(targetType);
+
+        UserVar *newus = makeNode(UserVar);
+        newus->name = ((UserVar*)node)->name;
+        newus->value = (Expr*)result;
+
+        pathtype = find_coercion_pathway(targetTypeId, inputTypeId, ccontext, &funcId);
+        if (pathtype != COERCION_PATH_NONE) {
+            if (pathtype != COERCION_PATH_RELABELTYPE) {
+                Oid baseTypeId;
+                int32 baseTypeMod;
+
+                baseTypeMod = targetTypeMod;
+                baseTypeId = getBaseTypeAndTypmod(targetTypeId, &baseTypeMod);
+
+                result = build_coercion_expression(
+                    (Node *)newus, pathtype, funcId, baseTypeId, baseTypeMod, cformat, location, (cformat != COERCE_IMPLICIT_CAST));
+
+                if (targetTypeId != baseTypeId)
+                    result = coerce_to_domain(result,
+                        baseTypeId,
+                        baseTypeMod,
+                        targetTypeId,
+                        cformat,
+                        location,
+                        true,
+                        exprIsLengthCoercion(result, NULL));
+            } else {
+                result = coerce_to_domain((Node *)newus, InvalidOid, -1, targetTypeId, cformat, location, false, false);
+                if (result == (Node *)newus) {
+                    RelabelType* r = makeRelabelType((Expr*)result, targetTypeId, -1, InvalidOid, cformat);
+
+                    r->location = location;
+                    result = (Node*)r;
+                }
+            }
+            return result;
+        }
+        return (Node *)newus;
     }
     if (IsA(node, Param) && pstate != NULL && pstate->p_coerce_param_hook != NULL) {
         /*
