@@ -122,26 +122,37 @@ typedef struct SimpleEcontextStackEntry {
  ************************************************************/
 static void plpgsql_exec_error_callback(void* arg);
 
-static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack=NULL, bool resignal_in_handler = false);
+static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack=NULL, bool resignal_in_handler = false, int* coverage = NULL);
 static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack, bool resignal_in_handler = false);
-static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_handler = false);
-static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resignal_in_handler = false);
+static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resignal_in_handler = false, int* coverage = NULL);
 static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt);
 static int exec_stmt_perform(PLpgSQL_execstate* estate, PLpgSQL_stmt_perform* stmt);
 static int exec_stmt_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* stmt);
 static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* stmt);
-static int exec_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool resignal_in_handler = false);
+static int exec_stmt_if(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool resignal_in_handler = false, int* coverage = NULL);
 static int exec_stmt_goto(PLpgSQL_execstate* estate, PLpgSQL_stmt_goto* stmt);
 static PLpgSQL_stmt* search_goto_target_global(PLpgSQL_execstate* estate, const PLpgSQL_stmt_goto* goto_stmt);
 static PLpgSQL_stmt* search_goto_target_current_block(
     PLpgSQL_execstate* estate, const List* stmts, PLpgSQL_stmt* target_stmt, int* stepno);
-static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bool resignal_in_handler = false);
-static int exec_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool resignal_in_handler = false);
-static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool resignal_in_handler = false);
-static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bool resignal_in_handler = false);
-static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt, bool resignal_in_handler = false);
-static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bool resignal_in_handler = false);
-static int exec_stmt_foreach_a(PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a* stmt, bool resignal_in_handler = false);
+static int exec_stmt_case(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt_loop(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt_while(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_exception_handler(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, ExceptionContext *context, int* coverage = NULL);
+static int exec_stmt_fori(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt_fors(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt_forc(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt_foreach_a(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a* stmt, bool resignal_in_handler = false, int* coverage = NULL);
 static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt);
 static int exec_stmt_fetch(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt);
 static int exec_stmt_close(PLpgSQL_execstate* estate, PLpgSQL_stmt_close* stmt);
@@ -159,12 +170,13 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt);
 static void exec_savepoint_rollback(PLpgSQL_execstate *estate, const char *spName);
 static int exec_stmt_savepoint(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt);
 #ifndef ENABLE_MULTIPLE_NODES
-static int exec_stmts_savecursor(PLpgSQL_execstate* estate, List* stmts);
+static int exec_stmts_savecursor(PLpgSQL_execstate* estate, List* stmts, int* coverage = NULL);
 #endif
 static int exchange_parameters(
     PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecute* dynstmt, List* stmts, int* ppdindex, int* datumindex);
 static bool is_anonymous_block(const char* query);
-static int exec_stmt_dynfors(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* stmt, bool resignal_in_handler = false);
+static int exec_stmt_dynfors(
+    PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* stmt, bool resignal_in_handler = false, int* coverage = NULL);
 
 static void exec_prepare_plan(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, int cursorOptions);
 static bool exec_simple_check_node(Node* node);
@@ -185,7 +197,7 @@ static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool*
     HTAB** tableOfIndex = NULL, ExecTableOfIndexInfo* tableOfIndexInfo = NULL);
 static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples,
                            Portal* portalP, bool isCollectParam = false);
-static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno, bool resignal_in_handler = false);
+static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno, bool resignal_in_handler = false, int* coverage = NULL);
 static ParamListInfo setup_param_list(PLpgSQL_execstate* estate, PLpgSQL_expr* expr);
 static void exec_move_row(PLpgSQL_execstate* estate,
     PLpgSQL_rec* rec, PLpgSQL_row* row, HeapTuple tup, TupleDesc tupdesc, bool fromExecSql = false);
@@ -1329,7 +1341,8 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
  *				function execution.
  * ----------
  */
-Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, bool dynexec_anonymous_block)
+Datum plpgsql_exec_function(PLpgSQL_function* func,
+                            FunctionCallInfo fcinfo, bool dynexec_anonymous_block, int* coverage)
 {
     PLpgSQL_execstate estate;
     ErrorContextCallback plerrcontext;
@@ -1552,7 +1565,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
      */
     estate.err_text = NULL;
     estate.err_stmt = (PLpgSQL_stmt*)(func->action);
-    rc = exec_stmt_block(&estate, func->action);
+    rc = exec_stmt_block(&estate, func->action, NULL, false, coverage);
     if (rc != PLPGSQL_RC_RETURN) {
         estate.err_stmt = NULL;
         estate.err_text = NULL;
@@ -3019,7 +3032,8 @@ static bool exec_is_declare_handler(PLpgSQL_exception* exception)
  *
  * if no handler is defiend for exception, exception will be re-throw out.
  */
-static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, ExceptionContext *context)
+static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
+                                  ExceptionContext *context, int* coverage)
 {
     ListCell* e = NULL;
     ErrorData* edata = context->cur_edata;
@@ -3074,12 +3088,12 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
             u_sess->plsql_cxt.cur_exception_cxt = context;
 #ifndef ENABLE_MULTIPLE_NODES
             if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && COMPAT_CURSOR) {
-                rc = exec_stmts_savecursor(estate, exception->action);
+                rc = exec_stmts_savecursor(estate, exception->action, coverage);
             } else {
 #endif
                 estate->is_declare_handler = exec_is_declare_handler(exception);
             
-                rc = exec_stmts(estate, exception->action, true);
+                rc = exec_stmts(estate, exception->action, true, coverage);
 #ifndef ENABLE_MULTIPLE_NODES
             }
 #endif
@@ -3118,7 +3132,7 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
  * exec_stmt_block			Execute a block of statements
  * ----------
  */
-static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack, bool resignal_in_handler)
+static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack, bool resignal_in_handler, int* coverage)
 {
     volatile int rc = -1;
     int i;
@@ -3274,7 +3288,7 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 estate->err_text = NULL;
 
                 /* Run the block's statements */
-                rc = exec_stmts(estate, block->body, resignal_in_handler);
+                rc = exec_stmts(estate, block->body, resignal_in_handler, coverage);
 
     #ifdef ENABLE_MOT
                 // throws ereport
@@ -3330,7 +3344,7 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 AutoDopControl dopControl;
                 dopControl.CloseSmp();
     #endif
-                rc = exec_exception_handler(estate, block, &excptContext);
+                rc = exec_exception_handler(estate, block, &excptContext, coverage);
 
                 stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
                 u_sess->SPI_cxt.is_stp = savedIsSTP;
@@ -3353,7 +3367,7 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
             rc = exec_stmts_savecursor(estate, block->body);
         } else {
 #endif
-            rc = exec_stmts(estate, block->body, resignal_in_handler);
+            rc = exec_stmts(estate, block->body, resignal_in_handler, coverage);
 #ifndef ENABLE_MULTIPLE_NODES
         }
 #endif
@@ -3893,13 +3907,13 @@ static PLpgSQL_stmt* search_goto_target_current_block(
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
-static int exec_stmts_savecursor(PLpgSQL_execstate* estate, List* stmts)
+static int exec_stmts_savecursor(PLpgSQL_execstate* estate, List* stmts, int* coverage)
 {
     int rc = -1;
 
     PG_TRY();
     {
-        rc = exec_stmts(estate, stmts);
+        rc = exec_stmts(estate, stmts, coverage);
     }
     PG_CATCH();
     {
@@ -3917,7 +3931,7 @@ static int exec_stmts_savecursor(PLpgSQL_execstate* estate, List* stmts)
  *				as long as their return code is OK
  * ----------
  */
-static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_handler)
+static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_handler, int* coverage)
 {
     if (stmts == NIL) {
         /*
@@ -3933,6 +3947,7 @@ static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_h
     estate->block_level++;
     int num_stmts = list_length(stmts);
     int stmtid = 0;
+    bool enableCoverage = u_sess->attr.attr_common.enable_proc_coverage;
 
     for (;;) {
         if (stmtid >= num_stmts) {
@@ -3972,8 +3987,15 @@ static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_h
             stmtid = new_index;
             continue;
         }
+        if (enableCoverage && coverage != NULL &&
+            estate->func->namespaceOid != PG_CATALOG_NAMESPACE && stmt->lineno != 0) {
+            int headerlines = 0;
+            pg_get_functiondef_worker(estate->func->fn_oid, &headerlines);
+            int index = stmt->lineno + headerlines - 1;
+            coverage[index]++;
+        }
 
-        int rc = exec_stmt(estate, stmt, resignal_in_handler);
+        int rc = exec_stmt(estate, stmt, resignal_in_handler, coverage);
         stmtid++;
 
 #ifdef ENABLE_MOT
@@ -4012,7 +4034,7 @@ normal_exit:
  *				type specific execution function.
  * ----------
  */
-static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resignal_in_handler)
+static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resignal_in_handler, int* coverage)
 {
     PLpgSQL_stmt* save_estmt = NULL;
     int rc = -1;
@@ -4054,7 +4076,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
     old_command_tag = t_thrd.postgres_cxt.cur_command_tag;
     switch ((enum PLpgSQL_stmt_types)stmt->cmd_type) {
         case PLPGSQL_STMT_BLOCK:
-            rc = exec_stmt_block(estate, (PLpgSQL_stmt_block*)stmt, NULL, resignal_in_handler);
+            rc = exec_stmt_block(estate, (PLpgSQL_stmt_block*)stmt, NULL, resignal_in_handler, coverage);
             break;
 
         case PLPGSQL_STMT_ASSIGN:
@@ -4088,7 +4110,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             break;
 
         case PLPGSQL_STMT_IF:
-            rc = exec_stmt_if(estate, (PLpgSQL_stmt_if*)stmt, resignal_in_handler);
+            rc = exec_stmt_if(estate, (PLpgSQL_stmt_if*)stmt, resignal_in_handler, coverage);
             break;
 
         case PLPGSQL_STMT_GOTO:
@@ -4096,14 +4118,14 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             break;
 
         case PLPGSQL_STMT_CASE:
-            rc = exec_stmt_case(estate, (PLpgSQL_stmt_case*)stmt, resignal_in_handler);
+            rc = exec_stmt_case(estate, (PLpgSQL_stmt_case*)stmt, resignal_in_handler, coverage);
             break;
 
         case PLPGSQL_STMT_LOOP: {
             u_sess->unique_sql_cxt.skip_sql_in_open = true;
             PG_TRY();
             {
-                rc = exec_stmt_loop(estate, (PLpgSQL_stmt_loop*)stmt, resignal_in_handler);
+                rc = exec_stmt_loop(estate, (PLpgSQL_stmt_loop*)stmt, resignal_in_handler, coverage);
             }
             PG_CATCH();
             {
@@ -4116,11 +4138,11 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
         }
 
         case PLPGSQL_STMT_WHILE:
-            rc = exec_stmt_while(estate, (PLpgSQL_stmt_while*)stmt, resignal_in_handler);
+            rc = exec_stmt_while(estate, (PLpgSQL_stmt_while*)stmt, resignal_in_handler, coverage);
             break;
 
         case PLPGSQL_STMT_FORI:
-            rc = exec_stmt_fori(estate, (PLpgSQL_stmt_fori*)stmt, resignal_in_handler);
+            rc = exec_stmt_fori(estate, (PLpgSQL_stmt_fori*)stmt, resignal_in_handler, coverage);
             break;
 
         case PLPGSQL_STMT_FORS: {
@@ -4128,7 +4150,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             BACKUP_UNIQUE_SQL_CXT();
             PG_TRY();
             {
-                rc = exec_stmt_fors(estate, (PLpgSQL_stmt_fors *)stmt, resignal_in_handler);
+                rc = exec_stmt_fors(estate, (PLpgSQL_stmt_fors *)stmt, resignal_in_handler, coverage);
             }
             PG_CATCH();
             {
@@ -4144,7 +4166,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             BACKUP_UNIQUE_SQL_CXT();
             PG_TRY();
             {
-                rc = exec_stmt_forc(estate, (PLpgSQL_stmt_forc*)stmt, resignal_in_handler);
+                rc = exec_stmt_forc(estate, (PLpgSQL_stmt_forc*)stmt, resignal_in_handler, coverage);
             }
             PG_CATCH();
             {
@@ -4157,7 +4179,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
         }
 
         case PLPGSQL_STMT_FOREACH_A:
-            rc = exec_stmt_foreach_a(estate, (PLpgSQL_stmt_foreach_a*)stmt, resignal_in_handler);
+            rc = exec_stmt_foreach_a(estate, (PLpgSQL_stmt_foreach_a*)stmt, resignal_in_handler, coverage);
             break;
 
         case PLPGSQL_STMT_EXIT: {
@@ -4263,7 +4285,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             BACKUP_UNIQUE_SQL_CXT();
             PG_TRY();
             {
-                rc = exec_stmt_dynfors(estate, (PLpgSQL_stmt_dynfors*)stmt, resignal_in_handler);
+                rc = exec_stmt_dynfors(estate, (PLpgSQL_stmt_dynfors*)stmt, resignal_in_handler, coverage);
             }
             PG_CATCH();
             {
@@ -4843,7 +4865,7 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
  *					conditionally.
  * ----------
  */
-static int exec_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool resignal_in_handler)
+static int exec_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool resignal_in_handler, int* coverage)
 {
     bool value = false;
     bool isnull = false;
@@ -4852,7 +4874,7 @@ static int exec_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool r
     value = exec_eval_boolean(estate, stmt->cond, &isnull);
     exec_eval_cleanup(estate);
     if (!isnull && value) {
-        return exec_stmts(estate, stmt->then_body, resignal_in_handler);
+        return exec_stmts(estate, stmt->then_body, resignal_in_handler, coverage);
     }
 
     foreach (lc, stmt->elsif_list) {
@@ -4861,11 +4883,11 @@ static int exec_stmt_if(PLpgSQL_execstate* estate, PLpgSQL_stmt_if* stmt, bool r
         value = exec_eval_boolean(estate, elif->cond, &isnull);
         exec_eval_cleanup(estate);
         if (!isnull && value) {
-            return exec_stmts(estate, elif->stmts, resignal_in_handler);
+            return exec_stmts(estate, elif->stmts, resignal_in_handler, coverage);
         }
     }
 
-    return exec_stmts(estate, stmt->else_body, resignal_in_handler);
+    return exec_stmts(estate, stmt->else_body, resignal_in_handler, coverage);
 }
 
 /* -----------
@@ -4886,7 +4908,7 @@ static int exec_stmt_goto(PLpgSQL_execstate* estate, PLpgSQL_stmt_goto* stmt)
  * exec_stmt_case
  * -----------
  */
-static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bool resignal_in_handler)
+static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bool resignal_in_handler, int* coverage)
 {
     PLpgSQL_var* t_var = NULL;
     bool isnull = false;
@@ -4938,7 +4960,7 @@ static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bo
             }
 
             /* Evaluate the statement(s), and we're done */
-            return exec_stmts(estate, cwt->stmts, resignal_in_handler);
+            return exec_stmts(estate, cwt->stmts, resignal_in_handler, coverage);
         }
     }
 
@@ -4959,7 +4981,7 @@ static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bo
     }
 
     /* Evaluate the ELSE statements, and we're done */
-    return exec_stmts(estate, stmt->else_stmts, resignal_in_handler);
+    return exec_stmts(estate, stmt->else_stmts, resignal_in_handler, coverage);
 }
 
 /* ----------
@@ -4967,10 +4989,10 @@ static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bo
  *					an exit occurs.
  * ----------
  */
-static int exec_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool resignal_in_handler)
+static int exec_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool resignal_in_handler, int* coverage)
 {
     for (;;) {
-        int rc = exec_stmts(estate, stmt->body, resignal_in_handler);
+        int rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
         switch (rc) {
             case PLPGSQL_RC_OK:
@@ -5029,7 +5051,7 @@ static int exec_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bo
  *					true or an exit occurs.
  * ----------
  */
-static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool resignal_in_handler)
+static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, bool resignal_in_handler, int* coverage)
 {
     bool condition = stmt->condition;
     for (;;) {
@@ -5044,7 +5066,7 @@ static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, 
             break;
         }
 
-        rc = exec_stmts(estate, stmt->body, resignal_in_handler);
+        rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
         switch (rc) {
             case PLPGSQL_RC_OK:
@@ -5148,7 +5170,7 @@ static void AppendBulkExceptionArray(Datum *target, Datum newelem)
  *					incrementing or decrementing by the BY value
  * ----------
  */
-static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bool resignal_in_handler)
+static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bool resignal_in_handler, int* coverage)
 {
     PLpgSQL_var* var = NULL;
     Datum value;
@@ -5291,7 +5313,7 @@ static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bo
 
             PG_TRY();
             {
-                rc = exec_stmts(estate, stmt->body, resignal_in_handler);
+                rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
                 SPI_savepoint_release(SE_SAVEPOINT_NAME);
                 plpgsql_create_econtext(estate);
                 stp_cleanup_subxact_resource(stackId);
@@ -5321,7 +5343,7 @@ static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bo
             }
             PG_END_TRY();
         } else {
-            rc = exec_stmts(estate, stmt->body, resignal_in_handler);
+            rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
         }
 
         if (rc == PLPGSQL_RC_RETURN) {
@@ -5411,7 +5433,7 @@ static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bo
  *					for it.
  * ----------
  */
-static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt, bool resignal_in_handler)
+static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt, bool resignal_in_handler, int* coverage)
 {
     if (stmt->query != NULL && stmt->query->query != NULL) {
         record_plsql_action(stmt->sqlString, estate->func);
@@ -5438,7 +5460,7 @@ static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt, bo
     /*
      * Execute the loop
      */
-    rc = exec_for_query(estate, (PLpgSQL_stmt_forq*)stmt, portal, true, -1, resignal_in_handler);
+    rc = exec_for_query(estate, (PLpgSQL_stmt_forq*)stmt, portal, true, -1, resignal_in_handler, coverage);
 
     /*
      * Close the implicit cursor
@@ -5452,7 +5474,7 @@ static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt, bo
  * exec_stmt_forc			Execute a loop for each row from a cursor.
  * ----------
  */
-static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bool resignal_in_handler)
+static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bool resignal_in_handler, int* coverage)
 {
     if (stmt->sqlString != NULL) {
         record_plsql_action(stmt->sqlString, estate->func);
@@ -5617,7 +5639,7 @@ static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bo
      * Execute the loop.  We can't prefetch because the cursor is accessible
      * to the user, for instance via UPDATE WHERE CURRENT OF within the loop.
      */
-    rc = exec_for_query(estate, (PLpgSQL_stmt_forq*)stmt, portal, false, stmt->curvar, resignal_in_handler);
+    rc = exec_for_query(estate, (PLpgSQL_stmt_forq*)stmt, portal, false, stmt->curvar, resignal_in_handler, coverage);
 
     /* restore the status of display cursor after Modify attributes of cursor */
     ((PLpgSQL_var*)(estate->datums[stmt->curvar + CURSOR_ISOPEN]))->value = isopen.value;
@@ -5666,7 +5688,7 @@ static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bo
  * is an array of size and dimensions to match the size of the slice.
  * ----------
  */
-static int exec_stmt_foreach_a(PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a* stmt, bool resignal_in_handler)
+static int exec_stmt_foreach_a(PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a* stmt, bool resignal_in_handler, int* coverage)
 {
     ArrayType* arr = NULL;
     Oid arrtype;
@@ -5772,7 +5794,7 @@ static int exec_stmt_foreach_a(PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a
         /*
          * Execute the statements
          */
-        rc = exec_stmts(estate, stmt->body, resignal_in_handler);
+        rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
         /* Handle the return code */
         if (rc == PLPGSQL_RC_RETURN) {
@@ -8029,7 +8051,8 @@ static bool is_anonymous_block(const char* query)
  *					for it.
  * ----------
  */
-static int exec_stmt_dynfors(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* stmt, bool resignal_in_handler)
+static int exec_stmt_dynfors(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* stmt,
+                             bool resignal_in_handler, int* coverage)
 {
     if (stmt->sqlString != NULL) {
         record_plsql_action(stmt->sqlString, estate->func);
@@ -8042,7 +8065,7 @@ static int exec_stmt_dynfors(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* st
     /*
      * Execute the loop
      */
-    rc = exec_for_query(estate, (PLpgSQL_stmt_forq*)stmt, portal, true, -1, resignal_in_handler);
+    rc = exec_for_query(estate, (PLpgSQL_stmt_forq*)stmt, portal, true, -1, resignal_in_handler, coverage);
 
     /*
      * Close the implicit cursor
@@ -11248,7 +11271,7 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
  *
  * Used by exec_stmt_fors, exec_stmt_forc and exec_stmt_dynfors
  */
-static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno, bool resignal_in_handler)
+static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno, bool resignal_in_handler, int* coverage)
 {
     PLpgSQL_rec* rec = NULL;
     PLpgSQL_row* row = NULL;
@@ -11335,7 +11358,7 @@ static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Po
             /*
              * Execute the statements
              */
-            rc = exec_stmts(estate, stmt->body, resignal_in_handler);
+            rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
             if (rc != PLPGSQL_RC_OK) {
                 if (rc == PLPGSQL_RC_EXIT) {

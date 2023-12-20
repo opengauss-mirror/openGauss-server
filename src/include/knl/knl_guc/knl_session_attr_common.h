@@ -225,6 +225,7 @@ typedef struct knl_session_attr_common {
     int wdr_snapshot_query_timeout;
     int dn_heartbeat_interval;
     bool enable_full_encryption;
+    bool enable_proc_coverage;
 
     char* router_att;
     bool enable_router;
