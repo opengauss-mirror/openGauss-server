@@ -68,7 +68,10 @@
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
+
 
 #ifdef ENABLE_UT
 #define static

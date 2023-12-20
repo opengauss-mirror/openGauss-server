@@ -24,6 +24,9 @@ subdir = src/gausskernel/cbb
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = extension  grpc  instruments  communication  workload utils bbox
+SUBDIRS     = extension  grpc  instruments  communication  workload utils
 
+ifeq ($(enable_bbox), yes)
+SUBDIRS		+= bbox
+endif
 include $(top_srcdir)/src/gausskernel/common.mk

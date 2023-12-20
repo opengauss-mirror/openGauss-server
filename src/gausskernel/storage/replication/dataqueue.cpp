@@ -43,7 +43,9 @@
 #include "storage/shmem.h"
 #include "storage/buf/bufmgr.h"
 #include "pgxc/pgxc.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 
 #define BCMElementArrayLen 8192
 #define BCMElementArrayLenHalf (BCMElementArrayLen / 2)
@@ -132,10 +134,11 @@ void DataWriterQueueShmemInit(void)
         if (foundDataQueue) {
             return;
         }
-
+#ifdef ENABLE_BBOX
         if (BBOX_BLACKLIST_DATA_WRITER_QUEUE) {
             bbox_blacklist_add(DATA_WRITER_QUEUE, t_thrd.dataqueue_cxt.DataWriterQueue, DataQueueShmemSize());
         }
+#endif
 
         rc = memset_s(t_thrd.dataqueue_cxt.DataWriterQueue, sizeof(DataQueueData), 0, sizeof(DataQueueData));
         securec_check_c(rc, "", "");

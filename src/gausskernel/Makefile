@@ -145,6 +145,7 @@ ifeq ($(SUPPORT_HOTPATCH), yes)
     CRC_CHECK=$(LIBHOTPATCH_TOOL_PATH)/makepatch -CHECK -CRC gaussdb > $(CRC_LOG)
 endif
 
+LIBS += -latomic
 ##########################################################################
 # append lz4 for compression : lz4.a or lz4.a
 ############################################################################
@@ -657,10 +658,11 @@ endif
 
 ifeq ($(enable_lite_mode), no)
 	cp -r $(with_jdk)/jre/* '$(DESTDIR)$(bindir)/../jre/'
-
+ifneq ($(host_cpu), loongarch64)
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
 	cp $(PLJAVA_HOME)/udstools.py '$(DESTDIR)$(datadir)/tmp/'
+endif
 endif
 
 	cp '$(top_builddir)/src/include/ssl/openssl_gsql.cnf' '$(DESTDIR)$(datadir)/../sslcert/gsql/openssl.cnf'

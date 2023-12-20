@@ -1634,7 +1634,7 @@ void ItemBlocksOfItemIsReplayed(RedoItem *item)
 void GetLsnCheckInfo(uint64 *curPosition, XLogRecPtr *curLsn)
 {
     volatile LsnCheckCtl *checkCtl = g_dispatcher->lsnCheckCtl;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u current = atomic_compare_and_swap_u128((uint128_u *)&checkCtl->curPosition);
     Assert(sizeof(checkCtl->curPosition) == sizeof(uint64));
     Assert(sizeof(checkCtl->curLsn) == sizeof(XLogRecPtr));
@@ -1652,7 +1652,7 @@ void GetLsnCheckInfo(uint64 *curPosition, XLogRecPtr *curLsn)
 void SetLsnCheckInfo(uint64 curPosition, XLogRecPtr curLsn)
 {
     volatile LsnCheckCtl *checkCtl = g_dispatcher->lsnCheckCtl;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u exchange;
 
     uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&checkCtl->curPosition);

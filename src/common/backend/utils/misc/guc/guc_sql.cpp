@@ -38,7 +38,9 @@
 #include "access/xlog.h"
 #include "access/ustore/knl_whitebox_test.h"
 #include "access/ubtree.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"

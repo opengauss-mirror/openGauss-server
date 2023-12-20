@@ -74,6 +74,14 @@
    Supported only in single_node mode, not supported with (--enable-multiple-nodes) */
 #undef ENABLE_MOT
 
+/* Define to 1 if you want LLVM support. (--enable-llvm).
+   Supported only in single_node mode, not supported with (--enable-multiple-nodes) */
+#undef ENABLE_LLVM_COMPILE
+
+/* Define to 1 if you want BBOX support. (--enable-bbox).
+   Supported only in single_node mode, not supported with (--enable-multiple-nodes) */
+#undef ENABLE_BBOX
+
 /* Define to 1 if you want to check memory. (--enable-memory-check) */
 #undef ENABLE_MEMORY_CHECK
 

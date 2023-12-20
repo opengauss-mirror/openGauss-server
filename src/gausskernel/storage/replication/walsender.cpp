@@ -112,7 +112,9 @@
 #include "postmaster/postmaster.h"
 #include "alarm/alarm.h"
 #include "utils/distribute_test.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "lz4.h"
 
 #define InvalidPid ((ThreadId)(-1))
@@ -3865,10 +3867,12 @@ static void WSDataSendInit()
     if (!g_instance.attr.attr_storage.enable_mix_replication) {
         t_thrd.walsender_cxt.output_xlog_message =
             (char *)palloc(1 + sizeof(WalDataMessageHeader) + (int)WS_MAX_SEND_SIZE);
+#ifdef ENABLE_BBOX
         if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
             bbox_blacklist_add(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message,
                                1 + sizeof(WalDataMessageHeader) + (int)WS_MAX_SEND_SIZE);
         }
+#endif
     } else {
         t_thrd.walsender_cxt.output_xlog_msg_prefix_len = 1 + sizeof(WalDataMessageHeader) + sizeof(uint32) + 1 +
                                                           sizeof(XLogRecPtr);
@@ -3884,10 +3888,12 @@ static void WSDataSendInit()
         t_thrd.walsender_cxt.wsXLogJustSendRegion->start_ptr = InvalidXLogRecPtr;
         t_thrd.walsender_cxt.wsXLogJustSendRegion->end_ptr = InvalidXLogRecPtr;
 
+#ifdef ENABLE_BBOX
         if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
             bbox_blacklist_add(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message,
                                t_thrd.walsender_cxt.output_xlog_msg_prefix_len + (int)WS_MAX_SEND_SIZE);
         }
+#endif
     }
 
     return;
@@ -4759,9 +4765,11 @@ static void WalSndKill(int code, Datum arg)
     t_thrd.walsender_cxt.wsXLogJustSendRegion->start_ptr = InvalidXLogRecPtr;
     t_thrd.walsender_cxt.wsXLogJustSendRegion->end_ptr = InvalidXLogRecPtr;
 
+#ifdef ENABLE_BBOX
     if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
         bbox_blacklist_remove(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message);
     }
+#endif
     if (XlogCopyStartPtr != InvalidXLogRecPtr) {
         LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
         XlogCopyStartPtr = InvalidXLogRecPtr;

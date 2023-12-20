@@ -421,7 +421,9 @@ extern bool comm_compare_and_swap_32(volatile int32* dest, int32 oldval, int32 n
 #define gaussdb_numa_memory_unbind()
 
 #else
-#define gaussdb_memory_barrier()
+#define gaussdb_memory_barrier() __asm__ __volatile__("" ::: "memory")
+#define gaussdb_read_barrier() gaussdb_memory_barrier()
+#define gaussdb_write_barrier() gaussdb_memory_barrier()
 
 #define gaussdb_numa_memory_bind(i)
 #define gaussdb_numa_memory_unbind()

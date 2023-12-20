@@ -66,7 +66,9 @@
 #include "catalog/pg_database.h"
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #ifdef PGXC
@@ -896,7 +898,7 @@ static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, ui
      * because the usable byte position doesn't include any headers, reserving
      * X bytes from WAL is almost as simple as "CurrBytePos += X".
      */
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     union Union128 compare;
     union Union128 exchange;
     union Union128 current;
@@ -934,25 +936,30 @@ loop:
         UINT128_COPY(compare.value, current.value);
         goto loop;
     }
-#else
-    uint64 startbytepos;
-    uint64 endbytepos;
-    uint64 prevbytepos;
-
-    SpinLockAcquire(&Insert->insertpos_lck);
-
-    startbytepos = Insert->CurrBytePos;
-    endbytepos = startbytepos + size;
-    prevbytepos = Insert->PrevBytePos;
-    Insert->CurrBytePos = endbytepos;
-    Insert->PrevBytePos = endbytepos - lastRecordSize;
-
-    SpinLockRelease(&Insert->insertpos_lck);
-#endif /* __x86_64__ || __aarch64__ */
+    
     *currlrc_ptr = compare.struct128.LRC;
     *StartBytePos = compare.struct128.currentBytePos;
     *EndBytePos = exchange.struct128.currentBytePos;
     *PrevBytePos = compare.struct128.currentBytePos - compare.struct128.byteSize;
+#else
+loop1:
+    SpinLockAcquire(&Insert->insertpos_lck);
+
+    if (unlikely(Insert->CurrLRC == WAL_COPY_SUSPEND)) {
+        SpinLockRelease(&Insert->insertpos_lck);
+        goto loop1;
+    }
+
+    *currlrc_ptr = Insert->CurrLRC;
+    *StartBytePos = Insert->CurrBytePos;
+    *EndBytePos = Insert->CurrBytePos + size;
+    *PrevBytePos = Insert->CurrBytePos - Insert->PrevByteSize;
+    Insert->CurrLRC = (Insert->CurrLRC + 1) & 0x7FFFFFFF;
+    Insert->PrevByteSize = lastRecordSize;
+    Insert->CurrBytePos = *EndBytePos;
+
+    SpinLockRelease(&Insert->insertpos_lck);
+#endif /* __x86_64__ || __aarch64__ */
 }
 
 /*
@@ -1413,7 +1420,7 @@ static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr *StartPos, XLogRec
      * because the usable byte position doesn't include any headers, reserving
      * X bytes from WAL is almost as simple as "CurrBytePos += X".
      */
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     union Union128 compare;
     union Union128 exchange;
     union Union128 current;
@@ -1452,25 +1459,29 @@ loop1:
         goto loop1;
     }
 
-#else
-    uint64 startbytepos;
-    uint64 endbytepos;
-    uint64 prevbytepos;
-
-    SpinLockAcquire(&Insert->insertpos_lck);
-
-    startbytepos = Insert->CurrBytePos;
-    prevbytepos = Insert->PrevBytePos;
-    endbytepos = startbytepos + size;
-    Insert->CurrBytePos = endbytepos;
-    Insert->PrevBytePos = startbytepos;
-
-    SpinLockRelease(&Insert->insertpos_lck);
-#endif /* __x86_64__|| __aarch64__ */
     *currlrc_ptr = compare.struct128.LRC;
     *StartPos = XLogBytePosToRecPtr(compare.struct128.currentBytePos);
     *EndPos = XLogBytePosToEndRecPtr(exchange.struct128.currentBytePos);
     *PrevPtr = XLogBytePosToRecPtr(compare.struct128.currentBytePos - compare.struct128.byteSize);
+
+#else
+loop1:
+    SpinLockAcquire(&Insert->insertpos_lck);
+    if (unlikely(Insert->CurrLRC == WAL_COPY_SUSPEND)) {
+        SpinLockRelease(&Insert->insertpos_lck);
+        pg_usleep(1);
+        goto loop1;
+    }
+    *currlrc_ptr = Insert->CurrLRC;
+    *PrevPtr = XLogBytePosToRecPtr(Insert->CurrBytePos - Insert->PrevByteSize);
+    *StartPos = XLogBytePosToRecPtr(Insert->CurrBytePos);
+    Insert->CurrBytePos = Insert->CurrBytePos + size;
+    *EndPos = XLogBytePosToEndRecPtr(Insert->CurrBytePos);
+    Insert->PrevByteSize = size;
+    Insert->CurrLRC = (Insert->CurrLRC + 1) & 0x7FFFFFFF;
+
+    SpinLockRelease(&Insert->insertpos_lck);
+#endif /* __x86_64__|| __aarch64__ */
 }
 
 /*
@@ -1499,7 +1510,7 @@ static bool ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecP
      * are no other inserters competing for it. GetXLogInsertRecPtr() does
      * compete for it, but that's not called very frequently.
      */
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u exchange;
     uint128_u current;
     uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&Insert->CurrBytePos);
@@ -1550,7 +1561,8 @@ loop:
     }
 
     endbytepos = startbytepos + size;
-    prevbytesize = startbytepos - Insert->PrevByteSize;
+    prevbytesize = Insert->PrevByteSize;
+    currlrc = Insert->CurrLRC;
 
     *StartPos = XLogBytePosToRecPtr(startbytepos);
     *EndPos = XLogBytePosToEndRecPtr(endbytepos);
@@ -1562,7 +1574,8 @@ loop:
         endbytepos = XLogRecPtrToBytePos(*EndPos);
     }
     Insert->CurrBytePos = endbytepos;
-    Insert->PrevByteSize = size;
+    Insert->PrevByteSize = (uint32)(endbytepos - startbytepos);
+    Insert->CurrLRC = currlrc;
 
     SpinLockRelease(&Insert->insertpos_lck);
 #endif /* __x86_64__ || __aarch64__ */
@@ -1580,11 +1593,12 @@ loop:
 static void StartSuspendWalInsert(int32 *const lastlrc_ptr)
 {
     volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
-    uint64 startbytepos;
-    uint32 prevbytesize;
     int32 currlrc;
     int32 ientry;
     volatile WALInsertStatusEntry *entry;
+#if (defined(__x86_64__) || defined(__aarch64__)) && !defined(__USE_SPINLOCK)
+    uint64 startbytepos;
+    uint32 prevbytesize;
     uint128_u compare;
     uint128_u exchange;
     uint128_u current;
@@ -1633,7 +1647,25 @@ loop:
         UINT128_COPY(compare, current);
         goto loop;
     }
+#else
+loop:
+    SpinLockAcquire(&Insert->insertpos_lck);
+    currlrc = Insert->CurrLRC;
+    if (unlikely(currlrc == WAL_COPY_SUSPEND)) {
+        SpinLockRelease(&Insert->insertpos_lck);
+        goto loop;
+    }
 
+    /*
+     * Return the last LRC
+     */
+    *lastlrc_ptr = currlrc;
+
+    Insert->CurrLRC = WAL_COPY_SUSPEND;
+
+    SpinLockRelease(&Insert->insertpos_lck);
+#endif /* __x86_64__ || __aarch64__ */
+    /*
     /*
      * Wait for the WAL copy thread obtaining the "*lastlrc_ptr - 1" to finish
      * *lastlrc_ptr is the LRC for the next WAL insert thread to acquire
@@ -6712,10 +6744,12 @@ void XLOGShmemInit(void)
     /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
     MemSet(t_thrd.shemem_ptr_cxt.XLogCtl->pages, 0, (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers);
 
+#ifdef ENABLE_BBOX
     if (BBOX_BLACKLIST_XLOG_BUFFER) {
         bbox_blacklist_add(XLOG_BUFFER, t_thrd.shemem_ptr_cxt.XLogCtl->pages,
                            (uint64)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers);
     }
+#endif
 
     /*
      * Do basic initialization of XLogCtl shared data. (StartupXLOG will fill
@@ -15570,7 +15604,9 @@ XLogRecPtr do_roach_stop_backup(const char *backupidstr)
 {
     bool backup_started_in_recovery = false;
     XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
+#if defined(__aarch64__) || defined(__x86_64__) || defined(__i386__)
     uint64 current_bytepos;
+#endif
     XLogRecPtr stoppoint;
     char backup_label[MAXPGPATH];
     char backup_label_done[MAXPGPATH];
@@ -15603,7 +15639,7 @@ XLogRecPtr do_roach_stop_backup(const char *backupidstr)
         stoppoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
         LWLockRelease(ControlFileLock);
     } else {
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
         current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
         stoppoint = XLogBytePosToEndRecPtr(current_bytepos);
 #else
@@ -15860,7 +15896,7 @@ XLogRecPtr enable_delay_ddl_recycle(void)
 
     LWLockAcquire(CBMParseXlogLock, LW_EXCLUSIVE);
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint64 current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
     curDelayRange.startLSN = XLogBytePosToEndRecPtr(current_bytepos);
 #else
@@ -15996,7 +16032,7 @@ void disable_delay_ddl_recycle(XLogRecPtr barrierLSN, bool isForce, XLogRecPtr *
      */
     LWLockAcquire(RelfilenodeReuseLock, LW_EXCLUSIVE);
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint64 current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
     delayRange.endLSN = XLogBytePosToEndRecPtr(current_bytepos);
 #else
@@ -16085,7 +16121,7 @@ XLogRecPtr enable_delay_ddl_recycle_with_slot(const char *slotname)
     /* hold this lock to push cbm parse exact to the ddl stop position */
     LWLockAcquire(CBMParseXlogLock, LW_EXCLUSIVE);
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint64 current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
     delay_start_lsn = XLogBytePosToEndRecPtr(current_bytepos);
 #else
@@ -16157,7 +16193,7 @@ void disable_delay_ddl_recycle_with_slot(const char *slotname, XLogRecPtr *start
      */
     LWLockAcquire(RelfilenodeReuseLock, LW_EXCLUSIVE);
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint64 current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
     delay_end_lsn = XLogBytePosToEndRecPtr(current_bytepos);
 #else
@@ -16600,7 +16636,7 @@ XLogRecPtr GetXLogInsertRecPtr(void)
     volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
     uint64 current_bytepos;
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
 #else
     SpinLockAcquire(&Insert->insertpos_lck);
@@ -16622,7 +16658,7 @@ XLogRecPtr GetXLogInsertEndRecPtr(void)
     volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
     uint64 current_bytepos;
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     current_bytepos = pg_atomic_barrier_read_u64((uint64 *)&Insert->CurrBytePos);
 #else
     SpinLockAcquire(&Insert->insertpos_lck);
@@ -18787,7 +18823,7 @@ bool IsRoachRestore(void)
 }
 
 const uint UPDATE_REC_XLOG_NUM = 4;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
 bool atomic_update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_immediately_update)
 {
     XLogRecPtr cur_rec_lsn = InvalidXLogRecPtr;
@@ -18844,7 +18880,7 @@ void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_im
         }
     }
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     is_update = atomic_update_dirty_page_queue_rec_lsn(current_insert_lsn, need_immediately_update);
 #else
     SpinLockAcquire(&g_instance.ckpt_cxt_ctl->queue_lock);
@@ -18864,7 +18900,7 @@ void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_im
 uint64 get_dirty_page_queue_rec_lsn()
 {
     uint64 dirty_page_queue_rec_lsn = 0;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     dirty_page_queue_rec_lsn = pg_atomic_barrier_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_reclsn);
 #else
     SpinLockAcquire(&g_instance.ckpt_cxt_ctl->queue_lock);

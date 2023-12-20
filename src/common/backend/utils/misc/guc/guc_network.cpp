@@ -36,7 +36,9 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"

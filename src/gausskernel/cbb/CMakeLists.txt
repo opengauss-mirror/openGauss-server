@@ -14,7 +14,11 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/workload
 )
 
-add_subdirectory(bbox)
+if("${ENABLE_BBOX}" STREQUAL "ON")
+	add_subdirectory(bbox)
+else()
+	list(REMOVE_ITEM CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/bbox)
+endif()
 add_subdirectory(instruments)
 add_subdirectory(communication)
 add_subdirectory(extension)

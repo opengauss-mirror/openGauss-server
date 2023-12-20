@@ -74,9 +74,11 @@ OBJS = $(SUBDIROBJS) $(LOCALOBJS) \
 LIBS := $(filter-out -lpgport, $(LIBS)) $(LDAP_LIBS_BE)
 
 # the link options for llvm
-LLVM_ZLIB_NAME=z
-LLVMLIBS :=  -L$(LIBLLVM_LIB_PATH) -L$(LIBTINFO_LIB_PATH) -l$(LLVM_ZLIB_NAME) -pthread -lncurses -lrt -ldl -lm  -lLLVMInstrumentation -lLLVMIRReader -lLLVMAsmParser -lLLVMDebugInfo -lLLVMOption -lLLVMLTO -lLLVMLinker -lLLVMipo -lLLVMVectorize -lLLVMBitWriter -lLLVMBitReader -lLLVMTableGen -lLLVMR600CodeGen -lLLVMR600Desc -lLLVMR600Info -lLLVMR600AsmPrinter -lLLVMSystemZDisassembler -lLLVMSystemZCodeGen -lLLVMSystemZAsmParser -lLLVMSystemZDesc -lLLVMSystemZInfo -lLLVMSystemZAsmPrinter -lLLVMHexagonCodeGen -lLLVMHexagonAsmPrinter -lLLVMHexagonDesc -lLLVMHexagonInfo -lLLVMNVPTXCodeGen -lLLVMNVPTXDesc -lLLVMNVPTXInfo -lLLVMNVPTXAsmPrinter -lLLVMCppBackendCodeGen -lLLVMCppBackendInfo -lLLVMMSP430CodeGen -lLLVMMSP430Desc -lLLVMMSP430Info -lLLVMMSP430AsmPrinter -lLLVMXCoreDisassembler -lLLVMXCoreCodeGen -lLLVMXCoreDesc -lLLVMXCoreInfo -lLLVMXCoreAsmPrinter -lLLVMMipsDisassembler -lLLVMMipsCodeGen -lLLVMMipsAsmParser -lLLVMMipsDesc -lLLVMMipsInfo -lLLVMMipsAsmPrinter -lLLVMARMDisassembler -lLLVMARMCodeGen -lLLVMARMAsmParser -lLLVMARMDesc -lLLVMARMInfo -lLLVMARMAsmPrinter -lLLVMAArch64Disassembler -lLLVMAArch64CodeGen -lLLVMAArch64AsmParser -lLLVMAArch64Desc -lLLVMAArch64Info -lLLVMAArch64AsmPrinter -lLLVMAArch64Utils -lLLVMPowerPCCodeGen -lLLVMPowerPCAsmParser -lLLVMPowerPCDesc -lLLVMPowerPCInfo -lLLVMPowerPCAsmPrinter -lLLVMSparcCodeGen -lLLVMSparcDesc -lLLVMSparcInfo -lLLVMX86Disassembler -lLLVMX86AsmParser -lLLVMX86CodeGen -lLLVMSelectionDAG -lLLVMAsmPrinter -lLLVMX86Desc -lLLVMX86Info -lLLVMX86AsmPrinter -lLLVMX86Utils -lLLVMMCDisassembler -lLLVMMCParser -lLLVMInterpreter -lLLVMMCJIT -lLLVMJIT -lLLVMCodeGen -lLLVMObjCARCOpts -lLLVMScalarOpts -lLLVMInstCombine -lLLVMTransformUtils -lLLVMipa -lLLVMAnalysis -lLLVMRuntimeDyld -lLLVMExecutionEngine -lLLVMTarget -lLLVMMC -lLLVMObject -lLLVMCore -lLLVMSupport -ltinfo
-
+ifeq ($(enable_llvm), yes)
+    # the link options for llvm
+    LLVM_ZLIB_NAME=z
+	LLVMLIBS :=  -L$(LIBLLVM_LIB_PATH) -L$(LIBTINFO_LIB_PATH) -l$(LLVM_ZLIB_NAME) -pthread -lncurses -lrt -ldl -lm  -lLLVMInstrumentation -lLLVMIRReader -lLLVMAsmParser -lLLVMDebugInfo -lLLVMOption -lLLVMLTO -lLLVMLinker -lLLVMipo -lLLVMVectorize -lLLVMBitWriter -lLLVMBitReader -lLLVMTableGen -lLLVMR600CodeGen -lLLVMR600Desc -lLLVMR600Info -lLLVMR600AsmPrinter -lLLVMSystemZDisassembler -lLLVMSystemZCodeGen -lLLVMSystemZAsmParser -lLLVMSystemZDesc -lLLVMSystemZInfo -lLLVMSystemZAsmPrinter -lLLVMHexagonCodeGen -lLLVMHexagonAsmPrinter -lLLVMHexagonDesc -lLLVMHexagonInfo -lLLVMNVPTXCodeGen -lLLVMNVPTXDesc -lLLVMNVPTXInfo -lLLVMNVPTXAsmPrinter -lLLVMCppBackendCodeGen -lLLVMCppBackendInfo -lLLVMMSP430CodeGen -lLLVMMSP430Desc -lLLVMMSP430Info -lLLVMMSP430AsmPrinter -lLLVMXCoreDisassembler -lLLVMXCoreCodeGen -lLLVMXCoreDesc -lLLVMXCoreInfo -lLLVMXCoreAsmPrinter -lLLVMMipsDisassembler -lLLVMMipsCodeGen -lLLVMMipsAsmParser -lLLVMMipsDesc -lLLVMMipsInfo -lLLVMMipsAsmPrinter -lLLVMARMDisassembler -lLLVMARMCodeGen -lLLVMARMAsmParser -lLLVMARMDesc -lLLVMARMInfo -lLLVMARMAsmPrinter -lLLVMAArch64Disassembler -lLLVMAArch64CodeGen -lLLVMAArch64AsmParser -lLLVMAArch64Desc -lLLVMAArch64Info -lLLVMAArch64AsmPrinter -lLLVMAArch64Utils -lLLVMPowerPCCodeGen -lLLVMPowerPCAsmParser -lLLVMPowerPCDesc -lLLVMPowerPCInfo -lLLVMPowerPCAsmPrinter -lLLVMSparcCodeGen -lLLVMSparcDesc -lLLVMSparcInfo -lLLVMX86Disassembler -lLLVMX86AsmParser -lLLVMX86CodeGen -lLLVMSelectionDAG -lLLVMAsmPrinter -lLLVMX86Desc -lLLVMX86Info -lLLVMX86AsmPrinter -lLLVMX86Utils -lLLVMMCDisassembler -lLLVMMCParser -lLLVMInterpreter -lLLVMMCJIT -lLLVMJIT -lLLVMCodeGen -lLLVMObjCARCOpts -lLLVMScalarOpts -lLLVMInstCombine -lLLVMTransformUtils -lLLVMipa -lLLVMAnalysis -lLLVMRuntimeDyld -lLLVMExecutionEngine -lLLVMTarget -lLLVMMC -lLLVMObject -lLLVMCore -lLLVMSupport -ltinfo
+endif
 # The backend doesn't need everything that's in LIBS, however
 LIBS := $(filter-out -lreadline -ledit -ltermcap -lncurses -lcurses, $(LIBS))
 
@@ -432,8 +434,10 @@ endif
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
 	cp -d $(XGBOOST_LIB_PATH)/libxgboost* '$(DESTDIR)$(libdir)/'
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
+ifneq ($(host_cpu), loogarch64)
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
+endif
 	cp -r $(top_builddir)/../$(BUILD_TOOLS_PATH)/jdk8/jdk1.8.0_77/jre/* '$(DESTDIR)$(bindir)/../jre/'
 
 install-bin: gaussdb $(POSTGRES_IMP) installdirs libcgroup
@@ -493,7 +497,9 @@ uninstall:
 	rm -f '$(DESTDIR)$(bindir)/gaussdb$(X)' '$(DESTDIR)$(bindir)/gs_encrypt'
 	rm -f $(DESTDIR)$(libdir)/libcgroup*
 	rm -f $(DESTDIR)$(libdir)/libsimsearch/*
+ifneq ($(host_cpu), loongarch64)
 	rm -f '$(DESTDIR)$(libdir)/$(LIBPLJAVA)' '$(DESTDIR)$(pkglibdir)/java/$(JARPLJAVA)'
+endif
 
 ifeq ($(MAKE_EXPORTS), true)
 	rm -f '$(DESTDIR)$(pkglibdir)/$(POSTGRES_IMP)'

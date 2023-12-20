@@ -66,7 +66,9 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -345,7 +347,9 @@ pthread_rwlock_t hba_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 extern bool data_catchup;
 extern bool wal_catchup;
 
+#ifdef ENABLE_BBOX
 char g_bbox_dump_path[1024] = {0};
+#endif
 
 #define CHECK_FOR_PROCDIEPENDING()                                                                          \
     do {                                                                                                    \
@@ -2223,13 +2227,17 @@ int PostmasterMain(int argc, char* argv[])
     if (strlen(GetConfigOption(const_cast<char*>("unix_socket_directory"), true, false)) != 0) {
         PythonFencedMasterModel = true;
 
+#ifdef ENABLE_BBOX
         /* disable bbox for fenced UDF process */
         SetConfigOption("enable_bbox_dump", "false", PGC_POSTMASTER, PGC_S_ARGV);
+#endif
     }
 #else
     if (FencedUDFMasterMode) {
+#ifdef ENABLE_BBOX
         /* disable bbox for fenced UDF process */
         SetConfigOption("enable_bbox_dump", "false", PGC_POSTMASTER, PGC_S_ARGV);
+#endif
     } else if (!SelectConfigFiles(userDoption, progname)) {
         ExitPostmaster(1);
     }
@@ -2855,8 +2863,10 @@ int PostmasterMain(int argc, char* argv[])
     (void)gspqsignal(SIGXFSZ, SIG_IGN); /* ignored */
 #endif
 
+#ifdef ENABLE_BBOX
     /* core dump injection */
     bbox_initialize();
+#endif
 
     /*
      * Initialize stats collection subsystem (this does NOT start the
