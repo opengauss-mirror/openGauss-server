@@ -157,7 +157,7 @@ void PRRegisterBlockChangeExtended(XLogRecParseState *recordBlockState, const Re
     }
     if (!g_instance.dms_cxt.SSReformInfo.is_hashmap_constructed) {
         g_instance.dms_cxt.SSReformInfo.is_hashmap_constructed = true;
-        INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.construct_hashmap);
+        g_instance.dms_cxt.SSReformInfo.construct_hashmap = GetCurrentTimestamp();
     }
     if (!found) {
         PRInitRedoItemEntry(redoItemHashEntry);

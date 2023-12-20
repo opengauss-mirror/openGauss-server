@@ -65,14 +65,14 @@ typedef struct st_reform_info {
     dms_reform_type_t reform_type;
     unsigned long long bitmap_nodes;
     unsigned long long bitmap_reconnect;
-    timeval reform_start_time;
-    timeval reform_end_time;
+    TimestampTz reform_start_time;
+    TimestampTz reform_end_time;
     uint64 old_bitmap;      // Save the cluster nodes bitmap before REFORM
     uint64 new_bitmap;      // Save the cluster nodes bitmap after REFORM
     
-    timeval redo_start_time;
-    timeval redo_end_time;
-    timeval construct_hashmap;
+    TimestampTz redo_start_time;
+    TimestampTz redo_end_time;
+    TimestampTz construct_hashmap;
     uint64 redo_total_bytes;
     bool reform_success;
     bool is_hashmap_constructed;
