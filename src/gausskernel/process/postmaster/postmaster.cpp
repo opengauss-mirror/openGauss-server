@@ -6396,6 +6396,14 @@ static void PrepareDemoteResponse(void)
         return;
 
     if (ENABLE_DMS) {
+        ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+        if (g_instance.dms_cxt.SSClusterState != NODESTATE_PRIMARY_DEMOTING &&
+            (dms_reform_failed() || dms_reform_last_failed() || reform_info->in_reform == false)) {
+            ereport(LOG,
+                (errmsg("[SS switchover] primary demoting: current switchover round failed caused by"
+                " remote instance; new round of reform has been running concurrently, exit now")));
+            _exit(0);
+        }
         ereport(LOG,
             (errmsg("[SS switchover] primary demoting: shutdown ckpt done, demote success. restart now")));
         Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_PRIMARY_DEMOTING);
