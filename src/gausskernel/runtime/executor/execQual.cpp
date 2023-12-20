@@ -1095,28 +1095,23 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
 
         /* if not found, return a null const */
         if (found) {
-            if (entry->isParse) {
-                con = (Const *)uservar->value;
-                entry->isParse = false;
+            Oid target_type = InvalidOid;
+            if (IsA(uservar->value, CoerceViaIO)) {
+                target_type = ((CoerceViaIO *)uservar->value)->resulttype;
             } else {
-                Oid target_type = InvalidOid;
-                if (IsA(uservar->value, CoerceViaIO)) {
-                    target_type = ((CoerceViaIO *)uservar->value)->resulttype;
-                } else {
-                    target_type = ((Const *)uservar->value)->consttype;
+                target_type = ((Const *)uservar->value)->consttype;
+            }
+            if (target_type == UNKNOWNOID && ((Const *)uservar->value)->constisnull) {
+                con = entry->value;
+            } else {
+                Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
+                    -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                node = eval_const_expression_value(NULL, node, NULL);
+                if (nodeTag(node) != T_Const) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("The value of a user_defined variable must be convertible to a constant.")));
                 }
-                if (target_type == UNKNOWNOID && ((Const *)uservar->value)->constisnull) {
-                    con = entry->value;
-                } else {
-                    Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
-                        -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
-                    node = eval_const_expression_value(NULL, node, NULL);
-                    if (nodeTag(node) != T_Const) {
-                        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
-                            errmsg("The value of a user_defined variable must be convertible to a constant.")));
-                    }
-                    con = (Const *)node;
-                }
+                con = (Const *)node;
             }
         } else {
             con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);

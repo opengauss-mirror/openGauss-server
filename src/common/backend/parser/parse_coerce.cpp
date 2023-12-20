@@ -323,9 +323,6 @@ Node *type_transfer(Node *node, Oid atttypid, bool isSelect)
         case INT1OID:
         case INT2OID:
         case INT4OID:
-            result = coerce_type(NULL, node, con->consttype,
-                INT4OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
-            break;
         case INT8OID:
             result = coerce_type(NULL, node, con->consttype,
                 INT8OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
@@ -684,18 +681,31 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
         newus->value = (Expr*)result;
 
         pathtype = find_coercion_pathway(targetTypeId, inputTypeId, ccontext, &funcId);
-        if (pathtype != COERCION_PATH_NONE) {
-            if (pathtype != COERCION_PATH_RELABELTYPE) {
+        switch (pathtype) {
+            case COERCION_PATH_NONE:
+                return (Node *)newus;
+                break;
+            case COERCION_PATH_RELABELTYPE: {
+                result = coerce_to_domain((Node *)newus, InvalidOid, -1, targetTypeId, cformat, location, false, false);
+                if (result == (Node *)newus) {
+                    RelabelType* r = makeRelabelType((Expr*)result, targetTypeId, -1, InvalidOid, cformat);
+
+                    r->location = location;
+                    result = (Node*)r;
+                }
+                return result;
+            } break;
+            default: {
                 Oid baseTypeId;
                 int32 baseTypeMod;
 
                 baseTypeMod = targetTypeMod;
                 baseTypeId = getBaseTypeAndTypmod(targetTypeId, &baseTypeMod);
 
-                result = build_coercion_expression(
-                    (Node *)newus, pathtype, funcId, baseTypeId, baseTypeMod, cformat, location, (cformat != COERCE_IMPLICIT_CAST));
+                result = build_coercion_expression((Node *)newus, pathtype, funcId, baseTypeId, 
+                                baseTypeMod, cformat, location, (cformat != COERCE_IMPLICIT_CAST));
 
-                if (targetTypeId != baseTypeId)
+                if (targetTypeId != baseTypeId) {
                     result = coerce_to_domain(result,
                         baseTypeId,
                         baseTypeMod,
@@ -704,18 +714,9 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
                         location,
                         true,
                         exprIsLengthCoercion(result, NULL));
-            } else {
-                result = coerce_to_domain((Node *)newus, InvalidOid, -1, targetTypeId, cformat, location, false, false);
-                if (result == (Node *)newus) {
-                    RelabelType* r = makeRelabelType((Expr*)result, targetTypeId, -1, InvalidOid, cformat);
-
-                    r->location = location;
-                    result = (Node*)r;
                 }
-            }
-            return result;
+            } break;
         }
-        return (Node *)newus;
     }
     if (IsA(node, Param) && pstate != NULL && pstate->p_coerce_param_hook != NULL) {
         /*
