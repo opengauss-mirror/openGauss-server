@@ -2147,7 +2147,10 @@ void check_interrupt()
  */
 static void *ProgressReportProbackup(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
@@ -2178,7 +2181,10 @@ static void *ProgressReportProbackup(void *arg)
 
 static void *ProgressReportSyncBackupFile(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */

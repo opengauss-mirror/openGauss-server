@@ -2155,7 +2155,7 @@ END;
 9         RETURN lb_date;
 10      END;
 11      /
-\! @abs_bindir@/gs_dump -f @abs_bindir@/test_comment.tar -c -n test_comment -p @portstring@ test_comment -F t >>/dev/null
+\! @abs_bindir@/gs_dump -f @abs_bindir@/test_comment.tar -c -n test_comment -p @portstring@ test_comment -F t --disable-progress >>/dev/null
 Begin scanning database. 
 Finish scanning database. 
 Start dumping objects 
@@ -2165,7 +2165,7 @@ NOTICE:  database "test_comment1" does not exist, skipping
 create database test_comment1;
 \c test_comment1
 CREATE SCHEMA test_comment;
-\! @abs_bindir@/gs_restore @abs_bindir@/test_comment.tar -p @portstring@ -d test_comment1 -s -e -c  >>/dev/null
+\! @abs_bindir@/gs_restore @abs_bindir@/test_comment.tar -p @portstring@ -d test_comment1 -s -e -c --disable-progress >>/dev/null
 SET search_path to test_comment;
 \sf fi_random_str
 CREATE OR REPLACE FUNCTION test_comment.fi_random_str(length integer)

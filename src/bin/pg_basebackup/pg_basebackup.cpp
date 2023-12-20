@@ -581,7 +581,10 @@ static void verify_dir_is_empty_or_create(char *dirname)
  */
 static void *ProgressReport(void *arg)
 {
-    char progressBar[52];
+    if (totalsize == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     char totaldone_str[32];
     char totalsize_str[32];
     errno_t errorno = EOK;
@@ -620,8 +623,6 @@ static void *ProgressReport(void *arg)
             ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\r",
             "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\r", tblspaceCount),
             progressBar, totaldone_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
-
-        /* print it per second */
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
