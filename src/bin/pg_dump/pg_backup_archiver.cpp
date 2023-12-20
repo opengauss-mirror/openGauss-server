@@ -139,6 +139,9 @@ static int g_restoredEntries = 0;
 static volatile bool g_progressFlag = false;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+static bool disable_progress;
+#endif
 
 static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode);
 static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* AH);
@@ -404,9 +407,14 @@ static void out_drop_stmt(ArchiveHandle* AH, const TocEntry* te)
 static void *ProgressReportRestore(void *arg)
 {
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    return nullptr;
+    if (disable_progress) {
+        return nullptr;
+    }
 #endif
-    char progressBar[52];
+    if (g_totalEntries == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
@@ -448,6 +456,10 @@ void RestoreArchive(Archive* AHX)
     AH->stage = STAGE_INITIALIZING;
 
     g_totalEntries = AH->tocCount;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    disable_progress = ropt->disable_progress;
+#endif
+
     /*
      * Check for nonsensical option combinations.
      *

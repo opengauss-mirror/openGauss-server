@@ -1067,7 +1067,10 @@ static char check_in_dss_instance(pgFile *file, int include_id)
  */
 static void *ProgressReportRestore(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
@@ -1098,7 +1101,10 @@ static void *ProgressReportRestore(void *arg)
 
 static void *ProgressReportSyncRestoreFile(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */

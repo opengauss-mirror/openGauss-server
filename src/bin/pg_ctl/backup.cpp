@@ -2806,7 +2806,10 @@ bool RenameTblspcDir(char *dataDir)
  * Execute this function in another thread and print the progress periodically.
  */
 static void *ProgressReportFullBuild(void *arg) {
-    char progressBar[52];
+    if (totalsize == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */

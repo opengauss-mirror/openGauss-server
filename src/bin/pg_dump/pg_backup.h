@@ -147,7 +147,9 @@ typedef struct _restoreOptions {
     bool targetV1;
     bool targetV5;
     int number_of_jobs;
-
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    bool disable_progress;
+#endif
     bool* idWanted; /* array showing which dump IDs to emit */
 } RestoreOptions;
 

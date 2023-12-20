@@ -163,6 +163,9 @@ int main(int argc, char** argv)
         {"rolepassword", required_argument, NULL, 5},
         {"with-key", required_argument, NULL, 6},
         {"pipeline", no_argument, NULL, 7},
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+        {"disable-progress", no_argument, NULL, 8},
+#endif
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -720,7 +723,11 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
             case 7:
                 is_pipeline = true;
                 break;
-
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+            case 8:
+                opts->disable_progress = true;
+                break;
+#endif
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);

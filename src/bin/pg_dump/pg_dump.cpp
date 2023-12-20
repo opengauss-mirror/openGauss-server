@@ -373,6 +373,9 @@ static int exclude_function = 0;
 static bool is_pipeline = false;
 static int no_subscriptions = 0;
 static int no_publications = 0;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+static bool disable_progress = false;
+#endif
 
 /* Used to count the number of -t input */
 int gTableCount = 0;
@@ -681,6 +684,9 @@ int main(int argc, char** argv)
         {"include-table-file", required_argument, NULL, 15},
         {"exclude-table-file", required_argument, NULL, 16},
         {"pipeline", no_argument, NULL, 17},
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+        {"disable-progress", no_argument, NULL, 18},
+#endif
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -1108,30 +1114,14 @@ int main(int argc, char** argv)
     if (isExistsSQLResult(archiveHandle->connection, sqlCmd)) {
         dumpAnyPrivilege(fout);
     }
-    /* gets the total number of dump objects */
-    if (!dataOnly) {
-        for (i = 0; i < numObjs; i++) {
-            if (dobjs[i]->dump && dobjs[i]->objType != DO_DUMMY_TYPE && dobjs[i]->objType != DO_PRE_DATA_BOUNDARY &&
-                dobjs[i]->objType != DO_POST_DATA_BOUNDARY)
-                g_totalObjNums++;
-        }
-        write_msg(NULL, "The total objects number is %d.\n", g_totalObjNums);
-    }
+    g_totalObjNums = numObjs;
     fprintf(stderr, "Start dumping objects \n");
     pthread_t progressThreadDumpProgress;
     pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
 
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
-        if (!dataOnly && dobjs[i]->dump && dobjs[i]->objType != DO_DUMMY_TYPE &&
-            dobjs[i]->objType != DO_PRE_DATA_BOUNDARY && dobjs[i]->objType != DO_POST_DATA_BOUNDARY) {
-            g_dumpObjNums++;
-            if (g_dumpObjNums % OUTPUT_OBJECT_NUM == 0)
-                write_msg(NULL,
-                    "[%6.2lf%%] %d objects have been dumped.\n",
-                    float((float(g_dumpObjNums * 100.0)) / g_totalObjNums),
-                    g_dumpObjNums);
-        }
+        g_dumpObjNums++;
         dumpDumpableObject(fout, dobjs[i]);
     }
     g_progressFlagDump = true;
@@ -1727,6 +1717,11 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
             case 17:
                 is_pipeline = true;
                 break;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+            case 18:
+                disable_progress = true;
+                break;
+#endif
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -23723,9 +23718,14 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
 static void *ProgressReportDump(void *arg)
 {
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    return nullptr;
+    if (disable_progress) {
+        return nullptr;
+    }
 #endif
-    char progressBar[52];
+    if (g_totalObjNums == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
@@ -23757,9 +23757,11 @@ static void *ProgressReportDump(void *arg)
 static void *ProgressReportScanDatabase(void *arg)
 {
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    return nullptr;
+    if (disable_progress) {
+        return nullptr;
+    }
 #endif
-    char progressBar[52];
+    char progressBar[53];
     int percent;
     do {
         /* progress report */

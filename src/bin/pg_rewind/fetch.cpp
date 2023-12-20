@@ -1331,7 +1331,10 @@ bool checkDummyStandbyConnection(void)
  */
 static void *ProgressReportIncrementalBuild(void *arg)
 {
-    char progressBar[52];
+    if (fetch_size == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */

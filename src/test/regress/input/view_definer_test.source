@@ -33,12 +33,12 @@ end;
 SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
 
 -- dump all views
-\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
+\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self --disable-progress | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
 \! cat @abs_bindir@/definer_view_dump.sql
-\! @abs_bindir@/gs_dump test_db -p @portstring@ -F c -f @abs_bindir@/definer_view_dump.dmp
+\! @abs_bindir@/gs_dump test_db -p @portstring@ -F c -f @abs_bindir@/definer_view_dump.dmp --disable-progress
 CREATE DATABASE target DBCOMPATIBILITY 'B';
 
-\! @abs_bindir@/gs_restore -d target -p @portstring@ @abs_bindir@/definer_view_dump.dmp
+\! @abs_bindir@/gs_restore -d target -p @portstring@ @abs_bindir@/definer_view_dump.dmp --disable-progress
 
 SELECT * FROM definer_test_view1;
 SELECT * FROM definer_test_view2;
@@ -53,7 +53,7 @@ create database test_1;
 create table startwith_t(id int, level int, connect_by_isleaf int, connect_by_iscycle int);
 create view startwith_v as select id, connect_by_isleaf as level, level as connect_by_isleaf from startwith_t;
 
-\! @abs_bindir@/gs_dump test_1 -p @portstring@ -f @abs_bindir@/dump_postgres.sql
+\! @abs_bindir@/gs_dump test_1 -p @portstring@ -f @abs_bindir@/dump_postgres.sql --disable-progress
 drop database if exists test_2;
 create database test_2;
 \! @abs_bindir@/gsql -d test_2 -p @portstring@ -f @abs_bindir@/dump_postgres.sql
