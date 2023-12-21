@@ -3706,7 +3706,13 @@ bool heap_page_prepare_for_xid(Relation relation, Buffer buffer, TransactionId x
             return false;
         }
 
-        if (PageGetMaxOffsetNumber(page) == InvalidOffsetNumber && !PageIsCompressed(page) && !multi) {
+        if (PageGetMaxOffsetNumber(page) == InvalidOffsetNumber && !PageIsCompressed(page) && !multi &&
+                                                            (xid >= (base + FirstNormalTransactionId))) {
+             /*
+              * If something wrong occur for example muti CPU read out of order, may cause xid < (base + FirstNormalTransactionId),
+              * in this case we can not solve it by shift xid_base = (RecentXmin - FirstNormalTransactionId). Instead the xid_base
+              * need a negative shift, as below code done.
+              */
             TransactionId xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
             ereport(LOG,
                 (errmsg("new page, the xid base is not correct, base is %lu, reset the xid_base to %lu",
