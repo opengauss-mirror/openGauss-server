@@ -2143,6 +2143,12 @@ void StreamProducer::SetDest(bool is_vec_plan)
                     else
                         m_dest = DestTupleRoundRobin;
                     break;
+#ifdef USE_SPQ
+                case REMOTE_DML_WRITE_NODE:
+                    if (!is_vec_plan)
+                        m_dest = DestTupleDML;
+                    break;
+#endif
                 case PARALLEL_NONE:
                 case REMOTE_DISTRIBUTE:
                 case REMOTE_SPLIT_DISTRIBUTE:
@@ -2339,6 +2345,24 @@ void StreamProducer::roundRobinStream(VectorBatch* batch)
 {
     roundRobinBatch<BCT_LZ4>(batch);
 }
+
+#ifdef USE_SPQ
+void StreamProducer::dmlStream(TupleTableSlot* tuple, DestReceiver* self)
+{
+    assembleStreamMessage(tuple, self, &m_tupleBuffer);
+
+    int write_node_index = u_sess->attr.attr_spq.spq_wr_node_index;
+    sendByteStream(write_node_index + m_roundRobinIdx * m_plan->num_nodes);
+
+    m_roundRobinIdx++;
+    /* only send to write node. */
+    int write_dop = m_connNum / m_plan->num_nodes;
+    m_roundRobinIdx = m_roundRobinIdx % write_dop;
+
+    /* reset tuple buffer. */
+    resetStringInfo(&m_tupleBuffer);
+}
+#endif
  
 template<BatchCompressType ctype>
 void StreamProducer::roundRobinBatch(VectorBatch* batch)

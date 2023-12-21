@@ -10572,6 +10572,11 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             appendStringInfo(buf, "(%d)", pkey->length);
         } break;
 
+#ifdef USE_SPQ
+        case T_DMLActionExpr:
+            appendStringInfo(buf, "DMLAction");
+            break;
+#endif
         default:
             if (context->qrw_phase)
                 appendStringInfo(buf, "<unknown %d>", (int)nodeTag(node));

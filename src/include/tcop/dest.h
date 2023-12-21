@@ -105,6 +105,7 @@ typedef enum {
 #ifdef USE_SPQ
     DestTupleRoundRobin,
     DestBatchRoundRobin,
+    DestTupleDML,
 #endif
 
     DestBatchBroadCast,         /* results send to consumer thread in a broadcast way */

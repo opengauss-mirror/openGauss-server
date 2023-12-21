@@ -4346,7 +4346,16 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(targetlists) {
         READ_NODE_FIELD(targetlists);
     }
-	
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+        READ_NODE_FIELD(withCheckOptionLists);
+    }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        IF_EXIST(isSplitUpdates) {
+            READ_NODE_FIELD(isSplitUpdates);
+	}
+    }
+#endif
     READ_DONE();
 }
 
@@ -4837,6 +4846,27 @@ static Sequence* _readSequence(void)
     _readPlan(&local_node->plan);
     READ_NODE_FIELD(subplans);
  
+    READ_END();
+}
+
+static DMLActionExpr * _readDMLActionExpr(void)
+{
+    READ_LOCALS_NO_FIELDS(DMLActionExpr);
+
+    READ_END();
+}
+
+static SplitUpdate * _readSplitUpdate(void)
+{
+    READ_LOCALS(SplitUpdate);
+
+    READ_INT_FIELD(actionColIdx);
+    READ_INT_FIELD(tupleoidColIdx);
+    READ_NODE_FIELD(insertColIdx);
+    READ_NODE_FIELD(deleteColIdx);
+
+    _readPlan(&local_node->plan);
+
     READ_END();
 }
 #endif
@@ -6520,6 +6550,10 @@ Node* parseNodeString(void)
         return_value = _readSpqIndexOnlyScan();
     } else if (MATCH("SPQBITMAPHEAPSCAN", 17)) {
         return_value = _readSpqBitmapHeapScan();
+    } else if (MATCH("DMLACTIONEXPR", 13)) {
+        return_value = _readDMLActionExpr();
+    } else if (MATCH("SPLITUPDATE", 11)) {
+        return_value = _readSplitUpdate();
 #endif
     } else if (MATCH("BITMAPHEAPSCAN", 14)) {
         return_value = _readBitmapHeapScan(NULL);

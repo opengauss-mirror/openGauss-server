@@ -1588,8 +1588,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 #ifdef ENABLE_MULTIPLE_NODES
         state->operation != CMD_MERGE && state->mt_upsert->us_action == UPSERT_NONE &&
 #endif
-        !useHeapMultiInsert)
-        ExecARInsertTriggers(estate, result_rel_info, partition_id, bucket_id, (HeapTuple)tuple, recheck_indexes);
+        !useHeapMultiInsert) {
+        if (!state->mt_isSplitUpdates) {
+            ExecARInsertTriggers(estate, result_rel_info, partition_id, bucket_id, (HeapTuple)tuple, recheck_indexes);
+        }
+    }
 
     /* try to insert tuple into mlog-table. */
     if (target_rel != NULL && target_rel->rd_mlogoid != InvalidOid) {
@@ -1790,6 +1793,11 @@ ldelete:
                                  errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
                                  errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
 
+                    if (node->mt_isSplitUpdates) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                                errmsg("multiple updates to a row by the same query is not allowed")));
+                    }
                     return NULL;
 
                 case TM_Ok: {
@@ -1919,7 +1927,9 @@ end:;
     }
 
 #ifdef PGXC
-    ExecARDeleteTriggers(estate, result_rel_info, deletePartitionOid, bucketid, oldtuple, tupleid);
+    if (!node->mt_isSplitUpdates) {
+        ExecARDeleteTriggers(estate, result_rel_info, deletePartitionOid, bucketid, oldtuple, tupleid);
+    }
 #else
     /* AFTER ROW DELETE Triggers */
     ExecARDeleteTriggers(estate, result_rel_info, deletePartitionOid, tupleid);
@@ -3410,6 +3420,10 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     List *partition_list = NIL;
 
     int resultRelationNum = node->mt_ResultTupleSlots ? list_length(node->mt_ResultTupleSlots): node->mt_nplans;
+#ifdef USE_SPQ
+    AttrNumber action_attno = InvalidAttrNumber;
+    int action = -1;
+#endif
     
     CHECK_FOR_INTERRUPTS();
 
@@ -3451,6 +3465,9 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     /* Preload local variables */
     result_rel_info = node->resultRelInfo + estate->result_rel_index;
     subPlanState = node->mt_plans[node->mt_whichplan];
+#ifdef USE_SPQ
+    action_attno = result_rel_info->ri_actionAttno;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
     /* Initialize remote plan state */
     remote_rel_state = node->mt_remoterels[node->mt_whichplan];
@@ -3519,6 +3536,9 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
         result_rel_info = node->resultRelInfo + estate->result_rel_index;
         estate->es_result_relation_info = result_rel_info;
         junk_filter = result_rel_info->ri_junkFilter;
+#ifdef USE_SPQ
+        action_attno = estate->es_result_relation_info->ri_actionAttno;
+#endif
         if (!node->isinherit) {
             partExprKeyStr = node->partExprKeyStrArray[estate->result_rel_index];
         }
@@ -3706,6 +3726,14 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 
                     old_tuple = DatumGetHeapTupleHeader(datum);
                 }
+                if (IS_SPQ_RUNNING && AttributeNumberIsValid(action_attno)) {
+                    datum = ExecGetJunkAttribute(slot, action_attno, &isNull);
+                    /* shouldn't ever get a null result... */
+                    if (isNull) {
+                        ereport(ERROR, (errmsg("action_attno is NULL")));
+                    }
+                    action = DatumGetInt32(datum);
+                }
             }
 
             /*
@@ -3731,20 +3759,28 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
                     slot = ExecReplace(estate, node, slot, plan_slot, bucketid, hi_options, partition_list, partExprKeyStr);
                 }
                 break;
-            case CMD_UPDATE: {
-                slot = ExecUpdate(tuple_id,
-                    old_partition_oid,
-                    bucketid,
-                    old_tuple,
-                    slot,
-                    plan_slot,
-                    &node->mt_epqstate,
-                    node,
-                    node->canSetTag,
-                    part_key_updated,
-                    NULL,
-                    partExprKeyStr);
-                } break;
+            case CMD_UPDATE:
+                if (!IS_SPQ_RUNNING) {
+                    slot = ExecUpdate(tuple_id,
+                                      old_partition_oid,
+                                      bucketid,
+                                      old_tuple,
+                                      slot,
+                                      plan_slot,
+                                      &node->mt_epqstate,
+                                      node,
+                                      node->canSetTag,
+                                      part_key_updated,
+                                      NULL,
+                                      partExprKeyStr);
+                } else if (DML_INSERT == action) {
+                    slot = ExecInsertT<false>(node, slot, plan_slot, estate, node->canSetTag,
+                                              hi_options, &partition_list, partExprKeyStr);
+                } else { /* DML_DELETE */
+                    slot = ExecDelete(tuple_id, old_partition_oid, bucketid, old_tuple, plan_slot,
+                                      &node->mt_epqstate, node, false);
+                }
+                break;
             case CMD_DELETE:
                 slot = ExecDelete(
                     tuple_id, old_partition_oid, bucketid, old_tuple, plan_slot, &node->mt_epqstate, node, node->canSetTag);
@@ -3953,6 +3989,20 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     mt_state->isReplace = node->isReplace;
 
     mt_state->fireBSTriggers = true;
+
+    mt_state->mt_isSplitUpdates = NULL;
+    if (IS_SPQ_RUNNING) {
+        if (node->isSplitUpdates) {
+            if (list_length(node->isSplitUpdates) != nplans) {
+                ereport(ERROR, (errmsg("ModifyTable node is missing is-split-update information")));
+            }
+            mt_state->mt_isSplitUpdates = (bool *)palloc0(nplans * sizeof(bool));
+            i = 0;
+            foreach(l, node->isSplitUpdates) {
+                mt_state->mt_isSplitUpdates[i++] = (bool)lfirst_int(l);
+            }
+        }
+    }
 
     /*
      * call ExecInitNode on each of the plans to be executed and save the
@@ -4387,6 +4437,22 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
                             CheckPlanOutput(sub_plan, result_rel_info->ri_RelationDesc);
                         }
                         ExecInitJunkAttr(estate, operation, sub_plan->targetlist, result_rel_info);
+                    }
+                    if (IS_SPQ_RUNNING && operation == CMD_UPDATE) {
+                        char relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
+                        if (relkind == RELKIND_RELATION ||
+                            relkind == RELKIND_MATVIEW ||
+                            relkind == PARTTYPE_PARTITIONED_RELATION) {
+                            if (mt_state->mt_isSplitUpdates && mt_state->mt_isSplitUpdates[i]) {
+                                JunkFilter* j = result_rel_info->ri_junkFilter;
+                                result_rel_info->ri_actionAttno = ExecFindJunkAttribute(j, "DMLAction");
+                                if (!AttributeNumberIsValid(result_rel_info->ri_actionAttno)) {
+                                    ereport(ERROR, (errmsg("could not find junk action column")));
+                                }
+                            } else {
+                                ereport(ERROR, (errmsg("parallel update could not find mt_isSplitUpdates")));
+                            }
+                        }
                     }
                 }
             }

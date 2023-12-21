@@ -944,6 +944,11 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
         WRITE_NODE_FIELD(withCheckOptionLists);
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        WRITE_NODE_FIELD(isSplitUpdates);
+    }
+#endif
 }
 
 static void _outUpsertClause(StringInfo str, const UpsertClause* node)
@@ -1485,6 +1490,23 @@ static void _outSpqBitmapHeapScan(StringInfo str, SpqBitmapHeapScan* node)
 {
     WRITE_NODE_TYPE("SPQBITMAPHEAPSCAN");
     _outBitmapHeapScanInfo(str, &node->scan);
+}
+
+static void _outDMLActionExpr(StringInfo str, const DMLActionExpr *node)
+{
+    WRITE_NODE_TYPE("DMLACTIONEXPR");
+}
+
+static void _outSplitUpdate(StringInfo str, const SplitUpdate *node)
+{
+    WRITE_NODE_TYPE("SPLITUPDATE");
+
+    WRITE_INT_FIELD(actionColIdx);
+    WRITE_INT_FIELD(tupleoidColIdx);
+    WRITE_NODE_FIELD(insertColIdx);
+    WRITE_NODE_FIELD(deleteColIdx);
+
+    _outPlanInfo(str, (Plan *) node);
 }
 #endif
 
@@ -6306,6 +6328,12 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_SpqBitmapHeapScan:
                 _outSpqBitmapHeapScan(str, (SpqBitmapHeapScan*)obj);
+                break;
+            case T_DMLActionExpr:
+                _outDMLActionExpr(str, (DMLActionExpr*)obj);
+                break;
+            case T_SplitUpdate:
+                _outSplitUpdate(str, (SplitUpdate*)obj);
                 break;
 #endif
 #ifdef PGXC

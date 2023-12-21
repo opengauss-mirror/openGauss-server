@@ -172,6 +172,9 @@ const char* GetStreamTypeRedistribute(Stream* node)
         case REMOTE_ROUNDROBIN:
             stream_tag = "ROUNDROBIN";
             break;
+        case REMOTE_DML_WRITE_NODE:
+            stream_tag = "DML REDISTRIBUTE";
+            break;
 #endif
 
         default: {

@@ -184,6 +184,7 @@ typedef enum NodeTag {
     T_AssertOpState,
     T_ShareInputScanState,
     T_SequenceState,
+    T_SplitUpdateState,
 #endif
     T_IndexScanState,
     T_IndexOnlyScanState,
@@ -284,6 +285,9 @@ typedef enum NodeTag {
     T_PseudoTargetEntry,
     T_PrefixKey,
     T_SetVariableExpr,
+#ifdef USE_SPQ
+    T_DMLActionExpr,
+#endif
 
     /*
      * TAGS FOR EXPRESSION STATE NODES (execnodes.h)

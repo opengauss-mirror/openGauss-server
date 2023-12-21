@@ -1483,6 +1483,17 @@ typedef struct UpsertExpr {
     Node* upsertWhere;        /* Qualifiers for upsert's update clause to check */
 } UpsertExpr;
 
+#ifdef USE_SPQ
+/*
+ * DMLActionExpr
+ *
+ * Represents the expression which introduces the action in a SplitUpdate statement
+ */
+typedef struct DMLActionExpr {
+    Expr xpr;
+} DMLActionExpr;
+#endif
+
 /*
  * DB4AI
  */
