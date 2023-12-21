@@ -927,7 +927,7 @@ bool SetDBStateFileState(DbState state, bool optional)
         securec_check_intval(rc, , false);
 
         /* Write the new content into a temp file and rename it at last. */
-        int fd = open(gaussdb_state_file, O_RDONLY, 0);
+        int fd = open(gaussdb_state_file, O_RDWR, 0);
         if (fd == -1) {
             if (errno == ENOENT && optional) {
                 write_stderr("gaussdb.state does not exist, and skipt setting since it is optional.");
@@ -942,8 +942,9 @@ bool SetDBStateFileState(DbState state, bool optional)
         len = read(fd, &s, sizeof(GaussState));
         /* sizeof(int) is for current_connect_idx of GaussState */
         if ((len != sizeof(GaussState)) && (len != sizeof(GaussState) - sizeof(int))) {
-            write_stderr("Failed to read gaussdb.state: %d", errno);
+            write_stderr("Failed to read gaussdb.state: %d, len: %d", errno, len);
             (void)close(fd);
+            (void)unlink(gaussdb_state_file);
             return false;
         }
 
