@@ -207,13 +207,6 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  */
 SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
-    /* Check sync replication through XLogWaitFlush if uwal enabled.
-     * Fast exit.
-     */
-    if (g_instance.attr.attr_storage.enable_uwal) {
-        return REPSYNCED;
-    }
-
     char *new_status = NULL;
     const char *old_status = NULL;
     int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;

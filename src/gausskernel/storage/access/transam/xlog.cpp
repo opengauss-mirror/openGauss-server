@@ -373,10 +373,12 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst);
 int UwalXLogPageRead(XLogRecPtr targetPagePtr, char *readBuf, XLogRecPtr targetRecPtr);
 static bool UwalAcquire();
 static void SetUwalReadInfo(XLogRecPtr targetPagePtr, XLogRecPtr writeUwalOffSet, uint32 targetPageOff);
+void XlogArchUwal(XLogRecPtr archRqstPtr);
 int GsUwalCreate(uint64_t startOffset);
-int GsUwalWriteAsync(UwalId id, int nBytes, char *buf, UwalNodeInfo *infos);
-int GsUwalRead(UwalId id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen);
-int GsUwalQuery(UwalId id, UwalBaseInfo *info);
+int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen);
+int GsUwalQuery(UwalId *id, UwalBaseInfo *info);
 static void XLogFlushUwal(XLogRecPtr writeRqstPtr);
 static bool InstallXLogFileSegment(XLogSegNo *segno, const char *tmppath, bool find_free, int *max_advance,
                                    bool use_lock, const char *xlog_dir);
@@ -2927,6 +2929,7 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
     bool last_iteration = false;
     bool finishing_seg = false;
     bool use_existent = false;
+    bool uwal_write_limit = false;
     int curridx = 0;
     int npages = 0;
     int startidx = 0;
@@ -2934,6 +2937,10 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
     XLogRecPtr lastWrited = InvalidXLogRecPtr;
     uint32 offset;
     bool firstUwal = false;
+    int uwalMaxPages = UWAL_OBJ_ALIGN_LEN / XLOG_BLCKSZ;
+    if (g_instance.attr.attr_storage.uwal_async_append_switch) {
+        uwalMaxPages = uwalMaxPages * 4;
+    }
 
     Assert(t_thrd.int_cxt.CritSectionCount > 0);
 
@@ -3022,9 +3029,11 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
          */
         last_iteration = !XLByteLT(t_thrd.xlog_cxt.LogwrtResult->Write, UwalWriteRqst);
         finishing_seg = !ispartialpage && (startoffset + npages * XLOG_BLCKSZ) >= XLogSegSize;
+        uwal_write_limit = (npages >= uwalMaxPages);
         int ret = 0;
 
-        if (last_iteration || curridx == t_thrd.shemem_ptr_cxt.XLogCtl->XLogCacheBlck || finishing_seg) {
+        if (last_iteration || curridx == t_thrd.shemem_ptr_cxt.XLogCtl->XLogCacheBlck || finishing_seg ||
+            uwal_write_limit) {
             /* record elapsed time */
             instr_time startTime;
             instr_time endTime;
@@ -3051,7 +3060,15 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
 
             pgstat_report_waitevent(WAIT_EVENT_WAL_WRITE);
             INSTR_TIME_SET_CURRENT(startTime);
-            ret = GsUwalWriteAsync(t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
+            if (g_instance.attr.attr_storage.uwal_async_append_switch) {
+                while ((ret = GsUwalWriteAsync(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos)) ==
+                       REPLICA_APPEND_LOG_FAIL)
+                    ;
+            } else {
+                while ((ret = GsUwalWrite(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos)) ==
+                       REPLICA_APPEND_LOG_FAIL)
+                    ;
+            }
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
             /* when track_activities and enable_instr_track_wait are on,
@@ -3076,7 +3093,10 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
             reportRedoWrite((PgStat_Counter)npages, elapsedTime);
 
             lastWrited += WriteTotal - offset;
-            GsUwalUpdateSenderSyncLsn(lastWrited, infos);
+            if (ret == 0) {
+                GsUwalUpdateSenderSyncLsn(lastWrited, infos);
+                GsUwalRcvStateUpdate(lastWrited);
+            }
             pfree(infos);
             npages = 0;
             offset = lastWrited % XLOG_BLCKSZ;
@@ -3085,9 +3105,6 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
                 /* signal that we need to wakeup walsenders later */
                 WalSndWakeupRequest();
                 t_thrd.xlog_cxt.LogwrtResult->Flush = t_thrd.xlog_cxt.LogwrtResult->Write; /* end of page */
-                if (XLogArchivingActive()) {
-                    XLogArchiveNotifySeg(t_thrd.xlog_cxt.openLogSegNo);
-                }
                 t_thrd.shemem_ptr_cxt.XLogCtl->lastSegSwitchTime = (pg_time_t)time(NULL);
 
                 /*
@@ -10557,6 +10574,15 @@ void StartupXLOG(void)
      */
     ShutdownWalRcv();
     ShutdownDataRcv();
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode == PENDING_MODE ||
+            t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+            int ret = GsUwalPrimaryInitNotify();
+            if (ret != 0) {
+                ereport(PANIC, (errmsg("uwal primary init notify failed at pending, ret: %d", ret)));
+            }
+        }
+    }
 
     /* Move this check to redo done not in the process of redo.
      *
@@ -10678,7 +10704,9 @@ void StartupXLOG(void)
      * previous incarnation.
      */
     t_thrd.xlog_cxt.openLogSegNo = endLogSegNo;
-    t_thrd.xlog_cxt.openLogFile = XLogFileOpen(t_thrd.xlog_cxt.openLogSegNo);
+    if (!g_instance.attr.attr_storage.enable_uwal) {
+        t_thrd.xlog_cxt.openLogFile = XLogFileOpen(t_thrd.xlog_cxt.openLogSegNo);
+    }
     t_thrd.xlog_cxt.openLogOff = 0;
     Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
     Insert->CurrBytePos = XLogRecPtrToBytePos(EndOfLog);
@@ -17696,6 +17724,38 @@ retry:
                 if (t_thrd.xlog_cxt.InArchiveRecovery) {
                     sources |= XLOG_FROM_ARCHIVE;
                 }
+                if (g_instance.attr.attr_storage.enable_uwal && UwalAcquire()) {
+                    if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+                        if (targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
+                            if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
+                                if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+                                    if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
+                                        goto next_record_is_invalid;
+                                    }
+                                }
+                            }
+                            t_thrd.xlog_cxt.curFileTLI = t_thrd.xlog_cxt.uwalInfo.info.startTimeLine;
+                            t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
+                            t_thrd.xlog_cxt.readOff = targetPageOff;
+                            goto uwal_buf_read;
+                        }
+                    }
+                }
+
+                if (g_instance.attr.attr_storage.enable_uwal && UwalAcquire() &&
+                    t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0 &&
+                    targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
+                    if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
+                        GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info);
+                        if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
+                            goto next_record_is_invalid;
+                        }
+                    }
+                    t_thrd.xlog_cxt.curFileTLI = t_thrd.xlog_cxt.uwalInfo.info.startTimeLine;
+                    t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
+                    t_thrd.xlog_cxt.readOff = targetPageOff;
+                    goto uwal_buf_read;
+                }
 
                 t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
                 if (dummyStandbyMode) {
@@ -17738,7 +17798,7 @@ retry:
     if (g_instance.attr.attr_storage.enable_uwal && UwalAcquire()) {
         if (targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
             if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
-                if (0 == GsUwalQuery(t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+                if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
                     if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
                         goto next_record_is_invalid;
                     }
@@ -17790,7 +17850,7 @@ uwal_buf_read:
     UwalPtr =
         Min(Max(t_thrd.xlog_cxt.uwalInfo.info.writeOffset, t_thrd.xlog_cxt.receivedUpto), targetPagePtr + XLOG_BLCKSZ);
     if (0 > UwalXLogPageRead(targetPagePtr, readBuf, UwalPtr)) {
-        if (0 == GsUwalQuery(t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+        if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
             goto retry;
         } else {
             ereport(LOG, (errmsg("uwal_query return failed, goto next_record_is_invalid")));
@@ -20172,7 +20232,7 @@ int UwalXLogPageRead(XLogRecPtr targetPagePtr, char *readBuf, XLogRecPtr targetR
         }
     }
 
-    int ret = GsUwalRead(t_thrd.xlog_cxt.uwalInfo.id, targetPagePtr, readBuf, readLen);
+    int ret = GsUwalRead(&t_thrd.xlog_cxt.uwalInfo.id, targetPagePtr, readBuf, readLen);
     if (0 != ret) {
         return -1;
     }
@@ -20206,7 +20266,7 @@ static void XLogFlushUwal(XLogRecPtr writeRqstPtr)
 static bool UwalAcquire()
 {
     if (t_thrd.xlog_cxt.uwalInfo.info.dataSize <= 0) {
-        int tli =
+        TimeLineID tli =
             (t_thrd.xlog_cxt.startup_processing ? t_thrd.xlog_cxt.recoveryTargetTLI : t_thrd.xlog_cxt.ThisTimeLineID);
         if (GsUwalQueryByUser(tli, false) != 0) {
             ereport(PANIC, (errcode_for_file_access(), errmsg("uwal query by user failed")));
@@ -20227,4 +20287,14 @@ static void SetUwalReadInfo(XLogRecPtr targetPagePtr, XLogRecPtr writeUwalOffSet
         t_thrd.xlog_cxt.readLen = writeUwalOffSet % XLogSegSize - targetPageOff;
     }
     t_thrd.xlog_cxt.readOff = targetPageOff;
+}
+
+void XlogArchUwal(XLogRecPtr archRqstPtr)
+{
+    XLogSegNo archLogSegNo;
+    XLByteToSeg(archRqstPtr, archLogSegNo);
+    if (XLogArchivingActive()) {
+        XLogArchiveNotifySeg(archLogSegNo);
+    }
+    return;
 }

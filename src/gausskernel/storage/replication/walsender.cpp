@@ -2952,7 +2952,7 @@ static void ProcessStandbyReplyMessage(void)
         ProcessTargetRtoRpoChanged();
     }
 
-    if (!AM_WAL_STANDBY_SENDER && !g_instance.attr.attr_storage.enable_uwal) {
+    if (!AM_WAL_STANDBY_SENDER) {
         SyncRepReleaseWaiters();
     }
 
@@ -4242,15 +4242,6 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                     WalSndKeepalive(true);
                 }
             }
-
-            if (g_instance.attr.attr_storage.enable_uwal &&
-                t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP_END) {
-                WalSndSetState(WALSNDSTATE_STREAMING);
-                ereport(LOG, (errmsg("master is state [WALSNDSTATE_STREAMING]")));
-                /* Refresh new state to peer */
-                WalSndKeepalive(true);
-            }
-
             t_thrd.walsender_cxt.catchup_threshold = 0;
 
             /*
@@ -4286,6 +4277,33 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         } else {
             if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP) {
                 CalCatchupRate();
+            }
+        }
+
+        if (g_instance.attr.attr_storage.enable_uwal &&
+            t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP_END) {
+            if (t_thrd.walsender_cxt.MyWalSnd->standbyInSyncRepConfig) {
+                /* Update lsn for walsender of sync standby */
+                XLogRecPtr flushResult = g_instance.wal_cxt.flushResult;
+                volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+                SpinLockAcquire(&walsnd->mutex);
+                walsnd->sentPtr = flushResult;
+                walsnd->receive = flushResult;
+                walsnd->write = flushResult;
+                walsnd->flush = flushResult;
+                walsnd->peer_role = STANDBY_MODE;
+                walsnd->peer_state = NORMAL_STATE;
+                SpinLockRelease(&walsnd->mutex);
+            }
+
+            WalSndSetState(WALSNDSTATE_STREAMING);
+            ereport(LOG, (errmsg("master is state [WALSNDSTATE_STREAMING]")));
+            /* Refresh new state to peer */
+            WalSndKeepalive(true);
+
+            /* Wake the SyncRepQueue up immediately */
+            if (t_thrd.walsender_cxt.MyWalSnd->standbyInSyncRepConfig && !AM_WAL_STANDBY_SENDER) {
+                SyncRepReleaseWaiters();
             }
         }
 
@@ -4335,7 +4353,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
             WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
                               sleeptime);
-            if (!AM_WAL_STANDBY_SENDER && !g_instance.attr.attr_storage.enable_uwal) {
+            if (!AM_WAL_STANDBY_SENDER) {
                 SyncRepReleaseWaiters();
             }
             t_thrd.int_cxt.ImmediateInterruptOK = false;
@@ -4629,6 +4647,7 @@ static void InitWalSnd(void)
             walsnd->lastApplyChangeTime = 0;
             rc = strncpy_s((char *)&walsnd->remote_application_name, NAMEDATALEN, u_sess->proc_cxt.applicationName, NAMEDATALEN - 1);
             securec_check_c(rc, "\0", "\0");
+            walsnd->standbyInSyncRepConfig = false;
             SpinLockRelease(&walsnd->mutex);
 
             SpinLockAcquire(&g_instance.wal_cxt.walSenderStats->mutex);
@@ -4678,6 +4697,7 @@ static void WalSndReset(WalSnd *walsnd)
     walsnd->channel_get_replc = 0;
     walsnd->is_cross_cluster = false;
     walsnd->isTermChanged = false;
+    walsnd->standbyInSyncRepConfig = false;
     rc = memset_s(walsnd->wal_sender_channel.localhost, sizeof(walsnd->wal_sender_channel.localhost), 0,
                   sizeof(walsnd->wal_sender_channel.localhost));
     securec_check_c(rc, "\0", "\0");
@@ -4721,8 +4741,8 @@ static void WalSndKill(int code, Datum arg)
     /* Mark WalSnd struct no longer in use. */
     WalSndReset(walsnd);
 
-    if (g_instance.attr.attr_storage.enable_uwal && walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
-        ereport(LOG, (errmsg("wal sender has been killed , start walsender notify")));
+    if (g_instance.attr.attr_storage.enable_uwal && walsnd->sendRole == SNDROLE_PRIMARY_STANDBY &&
+        t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
         if (GsUwalWalSenderNotify(true) != 0) {
             ereport(FATAL, (errmsg("uwal primary notify for WalSndKill() failed.")));
         }
@@ -4815,6 +4835,47 @@ retry:
         bool need_read = true;
 
         startoff = recptr % XLogSegSize;
+
+        if (g_instance.attr.attr_storage.enable_uwal) {
+            if (nbytes > (XLogSegSize - startoff)) {
+                segbytes = XLogSegSize - startoff;
+            } else {
+                segbytes = nbytes;
+            }
+            if (t_thrd.xlog_cxt.uwalInfo.info.dataSize == 0) {
+                if (0 != GsUwalQueryByUser(t_thrd.xlog_cxt.ThisTimeLineID, false)) {
+                    ereport(PANIC, (errcode_for_file_access(), errmsg("uwal query by user failed")));
+                }
+            } else {
+                if (0 != GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+                    ereport(LOG, (errmsg("walsender xlogread GsUwalQuery return failed")));
+                    return;
+                }
+            }
+            if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+                if (recptr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
+                    segbytes = Min(segbytes, MaxReadUwalBytes);
+                    int ret = GsUwalRead(&t_thrd.xlog_cxt.uwalInfo.id, recptr, p, segbytes);
+                    if (ret == 0) {
+                        need_read = false;
+                        readbytes = segbytes;
+                        /* Update state for read */
+                        XLByteAdvance(recptr, readbytes);
+                        nbytes -= readbytes;
+                        p += readbytes;
+                        continue;
+                    } else {
+                        if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+                            ereport(LOG, (errmsg("GsUwalQuery return success, goto retry")));
+                            continue;
+                        } else {
+                            ereport(LOG, (errmsg("walsender xlogread GsUwalQuery return failed")));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
 
         /* Do we need to switch to a different xlog segment? */
         if (t_thrd.walsender_cxt.sendFile < 0 || !XLByteInSeg(recptr, t_thrd.walsender_cxt.sendSegNo)) {
@@ -6698,13 +6759,15 @@ static void WalSndKeepalive(bool requestReply)
     keepalive_message.replyRequested = requestReply;
     keepalive_message.catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP);
 
-    /* if the standby is belong 'ANY 0' / not belong any domain, tell it exec catchup */ 
+    /* if the standby is belong 'ANY 0' / not belong any domain, tell it exec catchup */
     if (g_instance.attr.attr_storage.enable_uwal) {
         keepalive_message.uwal_catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP);
-        uint8 syncrep_method;
-        unsigned num_sync;
-        bool find = FindSyncRepConfig(t_thrd.walsender_cxt.MyWalSnd->remote_application_name, NULL, &syncrep_method, &num_sync);
-        keepalive_message.need_catchup = ((find && syncrep_method == SYNC_REP_QUORUM && num_sync == 0) || !find);
+        UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
+        if (uwalrcv != NULL) {
+            SpinLockAcquire(&uwalrcv->mutex);
+            keepalive_message.fullSync = uwalrcv->fullSync;
+            SpinLockRelease(&uwalrcv->mutex);
+        }
     }
 
     ereport(((requestReply && AM_WAL_DB_SENDER) ? LOG : DEBUG2), (errmsg("sending wal replication keepalive")));

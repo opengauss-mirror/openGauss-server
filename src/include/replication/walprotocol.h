@@ -47,7 +47,7 @@ typedef struct {
     bool replyRequested;
     bool catchup;
     bool uwal_catchup;
-    bool need_catchup;
+    bool fullSync = false;
 } WalSndrMessage;
 
 /*

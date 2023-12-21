@@ -29,11 +29,26 @@
 #include "knl/knl_thread.h"
 #include "knl/knl_session.h"
 #include "replication/walsender_private.h"
+#include "replication/walreceiver.h"
 #include <access/xact.h>
 #include <sys/signalfd.h>
 #include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
+
+#define UWAL_IP_LEN 16
+#define UWAL_PROTOCOL_LEN 16
+
+#define UWAL_CPU_BIND_NUM_DEF 3
+#define UWAL_CPU_BIND_NUM_MIN 2
+#define UWAL_CPU_BIND_NUM_MAX 16
+#define UWAL_CPU_BIND_START_DEF 1
+#define UWAL_CPU_BIND_START_MIN 0
+#define UWAL_CPU_BIND_START_MAX 1024
+#define UWAL_PORT_MAX 65535
+#define UWAL_PORT_MIN 9000
+
+const Size MaxReadUwalBytes = 2097152;
 
 typedef struct CBParams {
     pthread_mutex_t  mutex;
@@ -60,6 +75,16 @@ typedef struct {
     UwalAppendParam *appendParam;
 } UwalSingleAsyncCbCtx;
 
+typedef struct {
+    int id;
+    char ip[UWAL_IP_LEN];
+    int port;
+    char protocol[UWAL_PROTOCOL_LEN];
+    bool bindCpuSwitch;
+    int bindCpuNum;
+    int bindCpuStart;
+} UwalConfig;
+
 int gs_uwal_load_symbols();
 /**
  * must called after SetHaShmemData
@@ -69,6 +94,10 @@ void GetLocalStateInfo(OUT NodeStateInfo* nodeStateInfo);
 void GsUwalLogNotifyNodeid (const NodeStateList * nodeStateList);
 void GsUwalNotifyCallback(void *ctx, int ret);
 int GsUwalSyncNotify(NodeStateList *nodeList);
+void GsUwalRcvStateUpdate(XLogRecPtr lastWrited);
+UwalrcvWriterState *GsGetCurrentUwalRcvState(void);
+void GsUwalRcvFlush();
+
 /**
  * must called in postmaster thread
  * @return
@@ -94,10 +123,12 @@ int GsUwalStandbyInitNotify();
  */
 void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn, UwalNodeInfo *infos);
 int GsUwalQueryByUser(TimeLineID ThisTimeLineID, bool needHistoryList = true);
-int GsUwalQuery(UwalId id, UwalBaseInfo *info);
+int GsUwalQuery(UwalId *id, UwalBaseInfo *info);
 int GsUwalCreate(uint64_t startOffset);
-int GsUwalRead(UwalId id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen);
+int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen);
+int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
 void GsUwalWriteAsyncCallBack(void *cbCtx, int retCode);
-int GsUwalWriteAsync(UwalId id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalTruncate(UwalId *id, uint64_t offset);
 
 #endif
