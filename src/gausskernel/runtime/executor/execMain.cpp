@@ -1841,6 +1841,9 @@ void InitResultRelInfo(ResultRelInfo *resultRelInfo, Relation resultRelationDesc
     resultRelInfo->ri_projectReturning = NULL;
     resultRelInfo->ri_mergeTargetRTI = 0;
     resultRelInfo->ri_mergeState = (MergeState *)palloc0(sizeof(MergeState));
+#ifdef USE_SPQ
+    resultRelInfo->ri_actionAttno = InvalidAttrNumber;
+#endif
 }
 
 /*

@@ -168,6 +168,7 @@
 #include "executor/node/nodeSpqIndexscan.h"
 #include "executor/node/nodeSpqIndexonlyscan.h"
 #include "executor/node/nodeSpqBitmapHeapscan.h"
+#include "executor/node/nodeSplitUpdate.h"
 #endif
 #define NODENAMELEN 64
 static TupleTableSlot *ExecProcNodeFirst(PlanState *node);
@@ -320,6 +321,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("spqbitmapheapscan hook init_spqbitmapheapscan_hook uninited.")));
             }
+        case T_SplitUpdate:
+            return (PlanState *)ExecInitSplitUpdate((SplitUpdate *)node, estate, eflags);
 #endif
         case T_IndexScan:
             return (PlanState*)ExecInitIndexScan((IndexScan*)node, estate, eflags);
@@ -1121,15 +1124,19 @@ static void ExecEndNodeByType(PlanState* node)
             break;
  
         case T_AssertOpState:
-            ExecEndAssertOp((AssertOpState *) node);
+            ExecEndAssertOp((AssertOpState *)node);
             break;
  
         case T_ShareInputScanState:
-            ExecEndShareInputScan((ShareInputScanState *) node);
+            ExecEndShareInputScan((ShareInputScanState *)node);
             break;
  
         case T_SequenceState:
-            ExecEndSequence((SequenceState *) node);
+            ExecEndSequence((SequenceState *)node);
+            break;
+
+        case T_SplitUpdateState:
+            ExecEndSplitUpdate((SplitUpdateState *)node);
             break;
 #endif
         case T_CStoreScanState:

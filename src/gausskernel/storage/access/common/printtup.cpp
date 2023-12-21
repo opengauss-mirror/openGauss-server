@@ -68,6 +68,7 @@ static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
 #ifdef USE_SPQ
 static void printRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self);
 static void printRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
+static void printDMLTuple(TupleTableSlot *tuple, DestReceiver *self);
 #endif
 static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
 static void finalizeLocalStream(DestReceiver *self);
@@ -122,6 +123,9 @@ DestReceiver *createStreamDestReceiver(CommandDest dest)
             self->pub.receiveSlot = printHybridTuple;
             break;
 #ifdef USE_SPQ
+        case DestTupleDML:
+            self->pub.receiveSlot = printDMLTuple;
+            break;
         case DestTupleRoundRobin:
             self->pub.receiveSlot = printRoundRobinTuple;
             break;
@@ -257,6 +261,19 @@ static void printRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
     streamReceiver *rec = (streamReceiver *)self;
     rec->arg->roundRobinStream(tuple, self);
+}
+
+/*
+ * @Description: Send a tuple to write node
+ *
+ * @param[IN] tuple: tuple to send.
+ * @param[IN] dest: dest receiver.
+ * @return void
+ */
+static void printDMLTuple(TupleTableSlot *tuple, DestReceiver *self)
+{
+    streamReceiver *rec = (streamReceiver *)self;
+    rec->arg->dmlStream(tuple, self);
 }
 #endif
 /*

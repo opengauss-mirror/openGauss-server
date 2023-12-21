@@ -109,6 +109,7 @@ public:
 #ifdef USE_SPQ
     /* Send batch with Roundrobin. */
     void roundRobinStream(VectorBatch* batch);
+    void dmlStream(TupleTableSlot* tuple, DestReceiver* self);
 #endif
 
     /* Local roundrobin the tuple through memory. */

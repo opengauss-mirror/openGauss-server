@@ -43,6 +43,7 @@ typedef enum {
     REMOTE_HYBRID,           /* Hybrid send data. */
 #ifdef USE_SPQ
     REMOTE_ROUNDROBIN,
+    REMOTE_DML_WRITE_NODE,   /* DML only send datas to write node. */
 #endif
     LOCAL_DISTRIBUTE,        /* Distribute data to all threads at local node. */
     LOCAL_BROADCAST,         /* Broadcast data to all threads at local node. */

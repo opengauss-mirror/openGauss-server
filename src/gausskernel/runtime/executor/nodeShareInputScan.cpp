@@ -502,7 +502,8 @@ void ShareInputShmemInit(void)
 
     if (!found || t_thrd.shemem_ptr_cxt.shareinput_Xslice_hash == nullptr) {
         HASHCTL info;
-
+        errno_t rc = memset_s(&info, sizeof(info), 0, sizeof(info));
+        securec_check(rc, "\0", "\0");
         info.keysize = sizeof(shareinput_tag);
 
         info.entrysize = sizeof(shareinput_Xslice_state);

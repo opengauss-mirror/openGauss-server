@@ -474,6 +474,9 @@ typedef struct ModifyTable {
     OpMemInfo mem_info;    /*  Memory info for modify node */
     List* targetlists;     /* For multi-relation modifying */
     List* withCheckOptionLists; /* per-target-table WCO lists */
+#ifdef USE_SPQ
+    List *isSplitUpdates;
+#endif
 } ModifyTable;
 
 /* ----------------
@@ -1832,6 +1835,11 @@ typedef struct AssertOp {
     int errcode; /* SQL error code */
     List *errmessage; /* error message */
 } AssertOp;
+
+typedef enum DMLAction {
+    DML_DELETE,
+    DML_INSERT
+} DMLAction;
 #endif /* USE_SPQ */
 #endif /* PLANNODES_H */
 

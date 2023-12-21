@@ -590,6 +590,9 @@ typedef struct ResultRelInfo {
     List* ri_WithCheckOptionExprs;
 
     ProjectionInfo* ri_updateWhere; /* list of ON CONFLICT DO UPDATE exprs (qual)*/
+#ifdef USE_SPQ
+    AttrNumber ri_actionAttno; /* is this an INSERT or DELETE ? */
+#endif
 } ResultRelInfo;
 
 /* bloom filter controller */
@@ -1539,6 +1542,9 @@ typedef struct ModifyTableState {
     List* mt_ResultTupleSlots;            /* for multiple modifying, ResultTupleSlot list for build mt_ProjInfos. */
     ProjectionInfo** mt_ProjInfos;        /* for multiple modifying, projectInfo list array for each result relation. */
     char** partExprKeyStrArray;           /* for multiple modifying, partition expr key */
+#ifdef USE_SPQ
+    bool* mt_isSplitUpdates; /* per-subplan flag to indicate if it's a split update */
+#endif
 } ModifyTableState;
 
 typedef struct CopyFromManagerData* CopyFromManager;
@@ -1880,6 +1886,21 @@ typedef struct SequenceState {
      */
     bool initState;
 } SequenceState;
+
+/*
+ * ExecNode for Split.
+ * This operator contains a Plannode in PlanState.
+ * The Plannode contains indexes to the ctid, insert, delete, resjunk columns
+ * needed for adding the action (Insert/Delete).
+ * A MemoryContext and TupleTableSlot are maintained to keep the INSERT
+ * tuple until requested.
+ */
+typedef struct SplitUpdateState {
+    PlanState ps;
+    bool processInsert; /* flag that specifies the operator's next action. */
+    TupleTableSlot *insertTuple; /* tuple to Insert */
+    TupleTableSlot *deleteTuple; /* tuple to Delete */
+} SplitUpdateState;
 #endif
 /*
  * These structs store information about index quals that don't have simple

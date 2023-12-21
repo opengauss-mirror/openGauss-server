@@ -243,6 +243,11 @@ Oid exprType(const Node* expr)
         case T_UserSetElem:
             type = userSetElemTypeCollInfo(expr, exprType);
             break;
+#ifdef USE_SPQ
+        case T_DMLActionExpr:
+            type = INT4OID;
+            break;
+#endif
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -967,6 +972,11 @@ Oid exprCollation(const Node* expr)
         case T_UserSetElem:
             coll = userSetElemTypeCollInfo(expr, exprCollation); 
             break;
+#ifdef USE_SPQ
+        case T_DMLActionExpr:
+            coll = InvalidOid;
+            break;
+#endif
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1703,6 +1713,9 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Rownum:
         case T_UserVar:
         case T_SetVariableExpr:
+#ifdef USE_SPQ
+        case T_DMLActionExpr:
+#endif
             /* primitive node types with no expression subnodes */
             break;
         case T_WithCheckOption:
@@ -2792,6 +2805,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->val, use->val, Expr*);
             return (Node*)newnode;
         } break;
+#ifdef USE_SPQ
+        case T_DMLActionExpr: {
+            DMLActionExpr *action_expr = (DMLActionExpr *) node;
+            DMLActionExpr *newnode = NULL;
+            FLATCOPY(newnode, action_expr, DMLActionExpr, isCopy);
+            return (Node *)newnode;
+        } break;
+#endif
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));

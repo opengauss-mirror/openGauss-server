@@ -412,6 +412,9 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(targetlists);
     COPY_NODE_FIELD(withCheckOptionLists);
 
+#ifdef USE_SPQ
+    COPY_NODE_FIELD(isSplitUpdates);
+#endif
     return newnode;
 }
 
@@ -7576,6 +7579,31 @@ static Sequence *_copySequence(const Sequence *from)
 
     return newnode;
 }
+
+static DMLActionExpr *_copyDMLActionExpr(const DMLActionExpr *from)
+{
+    DMLActionExpr *newnode = makeNode(DMLActionExpr);
+
+    return newnode;
+}
+
+static SplitUpdate *_copySplitUpdate(const SplitUpdate *from)
+{
+    SplitUpdate *newnode = makeNode(SplitUpdate);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((Plan *) from, (Plan *) newnode);
+
+    COPY_SCALAR_FIELD(actionColIdx);
+    COPY_SCALAR_FIELD(tupleoidColIdx);
+    COPY_NODE_FIELD(insertColIdx);
+    COPY_NODE_FIELD(deleteColIdx);
+
+    return newnode;
+}
+
 #endif
 static CondInfo *_copyCondInfo(const CondInfo *from)
 {
@@ -9051,7 +9079,13 @@ void* copyObject(const void* from)
 #ifdef USE_SPQ
         case T_Motion:
             retval = _copyMotion((Motion*)from);
-            break;;
+            break;
+        case T_DMLActionExpr:
+            retval = _copyDMLActionExpr((DMLActionExpr*)from);
+            break;
+        case T_SplitUpdate:
+            retval = _copySplitUpdate((SplitUpdate*)from);
+            break;
 #endif
         default:
             ereport(ERROR,

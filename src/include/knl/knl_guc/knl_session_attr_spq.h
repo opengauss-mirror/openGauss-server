@@ -69,6 +69,17 @@ typedef struct knl_session_attr_spq {
     bool spq_optimizer_print_optimization_stats;
 
     bool spq_optimizer_print_optimization_cost;
+
+    /* Optimizer Parallel DML */
+    bool spq_enable_insert_select;
+    int spq_insert_dop_num;
+    bool spq_enable_insert_from_tableless;
+    bool spq_enable_insert_order_sensitive;
+    bool spq_enable_delete;
+    int spq_delete_dop_num;
+    bool spq_enable_update;
+    int spq_update_dop_num;
+    int spq_wr_node_index;
  
     /* array of xforms disable flags */
 #define OPTIMIZER_XFORMS_COUNT 400 /* number of transformation rules */
