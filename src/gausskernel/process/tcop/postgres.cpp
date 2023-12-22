@@ -197,6 +197,7 @@ extern int optreset; /* might not be declared by system headers */
 #include "replication/libpqsw.h"
 #include "replication/walreceiver.h"
 #include "libpq/libpq-int.h"
+#include "tcop/autonomoustransaction.h"
 
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
@@ -8381,6 +8382,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         StreamNodeGroup::MarkRecursiveVfdInvalid();
 
         BgworkerListSyncQuit();
+        
+        /* clean autonomous session */
+        DestoryAutonomousSession(true);
         /*
          * Abort the current transaction in order to recover.
          */
