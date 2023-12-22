@@ -342,9 +342,10 @@ static float calc_rank(const float* w, TSVector t, TSQuery q, int4 method)
 
 static float* getWeights(ArrayType* win)
 {
-    static float ws[lengthof(weights)];
     int i;
     float4* arrdata = NULL;
+    float* ws = u_sess->utils_cxt.tsrankWs;
+    Assert(sizeof(u_sess->utils_cxt.tsrankWs) == sizeof(weights));
 
     if (win == NULL)
         return weights;
