@@ -1,0 +1,11 @@
+-- The structure of function standby_statement_history must be consistent with table statement_history.
+select
+    (select relnatts from pg_class where relname = 'statement_history' limit 1)
+    =
+    (select array_length(proargnames, 1) - 1 from pg_proc where proname = 'standby_statement_history' order by 1 limit 1)
+    as issame;
+ issame 
+--------
+ t
+(1 row)
+
