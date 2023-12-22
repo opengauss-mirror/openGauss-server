@@ -111,7 +111,7 @@ drop table t1_rep;
 Command:     CREATE TYPE
 Description: define a new data type
 Syntax:
-CREATE TYPE name AS
+CREATE [ OR REPLACE ] TYPE name AS
     ( [ attribute_name data_type [ COLLATE collation ] [, ... ] ] )
 
 CREATE TYPE name AS ENUM
@@ -143,7 +143,7 @@ CREATE TYPE name
 CREATE TYPE name AS ENUM
     ( [ 'lable' [, ... ] ] )
 
-CREATE TYPE name AS TABLE OF data_type
+CREATE [ OR REPLACE ] TYPE name AS TABLE OF data_type
 
 \h alter type
 Command:     ALTER TYPE

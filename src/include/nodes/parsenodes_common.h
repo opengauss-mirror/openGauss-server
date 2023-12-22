@@ -814,6 +814,7 @@ typedef struct AlterTableStmt {
     ObjectType relkind;    /* type of object */
     bool missing_ok;       /* skip error if table missing */
     bool fromCreate;       /* from create stmt */
+    bool fromReplace;      /* from create or replace stmt */
     bool need_rewrite_sql; /* after rewrite rule, need to rewrite query string */
 } AlterTableStmt;
 

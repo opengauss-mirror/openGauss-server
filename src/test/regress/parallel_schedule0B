@@ -44,7 +44,7 @@ test: hw_procedure_define
 #test: hw_anonymous_block
 #test: hw_procedure#
 test: hw_grant_all hw_dynamic_sql hw_func_return_out
-test: hw_package_function
+test: hw_package_function type_replace
 
 #show plan
 #test: plan_hint

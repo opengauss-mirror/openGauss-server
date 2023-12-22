@@ -397,6 +397,7 @@ extern void prepareDatabaseCFunLibrary(Oid databaseId);
 extern void deleteDictionaryTSFile(Oid dictId);
 extern void deleteDatabaseTSFile(Oid databaseId);
 extern void changeDependencyOnObjfile(Oid objectId, Oid refobjId, const char *newObjfile);
+extern void ReplaceTypeCheckRef(const ObjectAddress* object);
 
 #ifdef ENABLE_MULTIPLE_NODES
 namespace Tsdb {

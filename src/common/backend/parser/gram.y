@@ -12456,14 +12456,34 @@ DefineStmt:
 
 					/* can't use qualified_name, sigh */
 					n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
+					n->replace = false;
 					n->coldeflist = $6;
+					$$ = (Node *)n;
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is '(' OptTableFuncElementList ')'
+				{
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+
+					/* can't use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
+					n->replace = true;
+					n->coldeflist = $8;
 					$$ = (Node *)n;
 				}
 			| CREATE TYPE_P any_name as_is TABLE OF func_type
 				{
 					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
+					n->replace = false;
 					n->typname = $3;
 					n->reftypname = $7;
+					$$ = (Node *)n;
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is TABLE OF func_type
+				{
+					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
+					n->replace = true;
+					n->typname = $5;
+					n->reftypname = $9;
 					$$ = (Node *)n;
 				}
 			| CREATE TYPE_P any_name as_is ENUM_P '(' opt_enum_val_list ')'

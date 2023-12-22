@@ -4081,6 +4081,7 @@ static void _outAlterTableStmt(StringInfo str, AlterTableStmt* node)
 {
     WRITE_NODE_TYPE("ALTERTABLE");
     WRITE_NODE_FIELD(relation);
+    WRITE_BOOL_FIELD(fromReplace);
 }
 
 static void _outCopyStmt(StringInfo str, CopyStmt* node)

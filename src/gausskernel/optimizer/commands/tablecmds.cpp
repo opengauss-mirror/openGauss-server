@@ -452,12 +452,12 @@ static void validateCheckConstraintForBucket(Relation rel, Partition part, HeapT
 static void validateForeignKeyConstraint(char* conname, Relation rel, Relation pkrel, Oid pkindOid, Oid constraintOid);
 static void createForeignKeyTriggers(
     Relation rel, Oid refRelOid, Constraint* fkconstraint, Oid constraintOid, Oid indexOid);
-static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bool recurse, LOCKMODE lockmode);
+static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bool recurse, LOCKMODE lockmode, bool fromReplace);
 static bool ATCheckLedgerTableCmd(Relation rel, AlterTableCmd* cmd);
 static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, bool recursing, LOCKMODE lockmode,
     bool isDeltaTable = false);
-static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode);
-static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode);
+static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode, bool fromReplace);
+static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode, bool fromReplace);
 static void ATRewriteTables(AlterTableStmt *parsetree, List** wqueue, LOCKMODE lockmode);
 static void ATRewriteTable(AlteredTableInfo* tab, Relation oldrel, Relation newrel);
 static void ATCStoreRewriteTable(AlteredTableInfo* tab, Relation heapRel, LOCKMODE lockMode, Oid targetTblspc);
@@ -553,7 +553,7 @@ static bool CheckLastColumn(Relation rel, AttrNumber attrnum);
 static void ATPrepDropColumn(
     List** wqueue, Relation rel, bool recurse, bool recursing, AlterTableCmd* cmd, LOCKMODE lockmode);
 static ObjectAddress ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
-    bool recursing, bool missing_ok, LOCKMODE lockmode);
+    bool recursing, bool missing_ok, LOCKMODE lockmode, bool fromReplace);
 static ObjectAddress ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt, bool is_rebuild, LOCKMODE lockmode);
 static ObjectAddress ATExecAddConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, Constraint* newConstraint,
     bool recurse, bool is_readd, LOCKMODE lockmode);
@@ -7880,7 +7880,7 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
     // Next version remove hack patch for 'ALTER FOREIGN TABLE ... ADD NODE'
     if (stmt->cmds != NIL) {
         /* process 'ALTER TABLE' cmd */
-        ATController(stmt, rel, stmt->cmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
+        ATController(stmt, rel, stmt->cmds, interpretInhOption(stmt->relation->inhOpt), lockmode, stmt->fromReplace);
         if (enable_plpgsql_gsdependency_guc()) {
             (void)gsplsql_build_ref_type_dependency(get_rel_type_id(relid));
         }
@@ -7899,7 +7899,7 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
             /* open error table releation, closed in ATController */
             Relation errtablerel = relation_open(errtableid, lockmode);
 
-            ATController(stmt, errtablerel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
+            ATController(stmt, errtablerel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode, stmt->fromReplace);
         }
         list_free_ext(addNodeCmds);
     }
@@ -7924,7 +7924,7 @@ void AlterTableInternal(Oid relid, List* cmds, bool recurse)
     rel = relation_open(relid, lockmode);
 
     EventTriggerAlterTableRelid(relid);
-    ATController(NULL, rel, cmds, recurse, lockmode);
+    ATController(NULL, rel, cmds, recurse, lockmode, false);
 }
 
 static LOCKMODE set_lockmode(LOCKMODE mode, LOCKMODE cmd_mode)
@@ -8028,7 +8028,7 @@ LOCKMODE AlterTableGetLockLevel(List* cmds)
     return lockmode;
 }
 
-static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bool recurse, LOCKMODE lockmode)
+static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bool recurse, LOCKMODE lockmode, bool fromReplace)
 {
     List* wqueue = NIL;
     ListCell* lcmd = NULL;
@@ -8095,7 +8095,7 @@ static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bo
     relation_close(rel, NoLock);
 
     /* Phase 2: update system catalogs */
-    ATRewriteCatalogs(&wqueue, lockmode);
+    ATRewriteCatalogs(&wqueue, lockmode, fromReplace);
 
 #ifdef PGXC
     /* Invalidate cache for redistributed relation */
@@ -8659,7 +8659,7 @@ static void UpdateGeneratedExpr(AlteredTableInfo* tab)
  * dispatched in a "safe" execution order (designed to avoid unnecessary
  * conflicts).
  */
-static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode)
+static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode, bool fromReplace)
 {
     int pass;
     ListCell* ltab = NULL;
@@ -8688,7 +8688,7 @@ static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode)
             rel = relation_open(tab->relid, NoLock);
 
             foreach (lcmd, subcmds)
-                ATExecCmd(wqueue, tab, rel, (AlterTableCmd*)lfirst(lcmd), lockmode);
+                ATExecCmd(wqueue, tab, rel, (AlterTableCmd*)lfirst(lcmd), lockmode, fromReplace);
 
             /*
              * After the ALTER TYPE pass, do cleanup work (this is not done in
@@ -8906,7 +8906,7 @@ static void ATCreateColumComments(Oid relOid, ColumnDef* columnDef)
 /*
  * ATExecCmd: dispatch a subcommand to appropriate execution routine
  */
-static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode)
+static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode, bool fromReplace)
 {
     ObjectAddress address = InvalidObjectAddress;
     elog(ES_LOGLEVEL, "[ATExecCmd] cmd subtype: %d", cmd->subtype);
@@ -8970,10 +8970,10 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             address = ATExecSetStorage(rel, cmd->name, cmd->def, lockmode);
             break;
         case AT_DropColumn: /* DROP COLUMN */
-            address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode);
+            address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode, fromReplace);
             break;
         case AT_DropColumnRecurse: /* DROP COLUMN with recursion */
-            address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, true, false, cmd->missing_ok, lockmode);
+            address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, true, false, cmd->missing_ok, lockmode, fromReplace);
             break;
         case AT_DropPartition: /* drop partition */
             ATExecDropPartition(rel, cmd);
@@ -13464,7 +13464,7 @@ static void ResetTempAutoIncrement(Relation rel, AttrNumber attnum)
  * Return value is that of the dropped column.
  */
 static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
-    bool recursing, bool missing_ok, LOCKMODE lockmode)
+    bool recursing, bool missing_ok, LOCKMODE lockmode, bool fromReplace)
 {
     HeapTuple tuple;
     Form_pg_attribute targetatt;
@@ -13527,7 +13527,7 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
      * We have to check if the drop column is the last column.
      * If it is, not allow to drop it.
      */
-    if (GetLocatorType(rel->rd_id) != LOCATOR_TYPE_HASH) {
+    if (!fromReplace && GetLocatorType(rel->rd_id) != LOCATOR_TYPE_HASH) {
         bool lastColumn = CheckLastColumn(rel, attnum);
         if (lastColumn) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("must have at least one column")));
@@ -13606,7 +13606,7 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
                     /*
                      * Delete this column of the delta table.
                      */
-                    ATExecDropColumn(wqueue, childrel, colName, behavior, true, true, false, lockmode);
+                    ATExecDropColumn(wqueue, childrel, colName, behavior, true, true, false, lockmode, fromReplace);
                 } else if (childatt->attinhcount == 1 && !childatt->attislocal) {
                     /*
                      * If the child column has other definition sources, just
@@ -13615,7 +13615,7 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
                      * Time to delete this child column, too
                      */
 
-                    ATExecDropColumn(wqueue, childrel, colName, behavior, true, true, false, lockmode);
+                    ATExecDropColumn(wqueue, childrel, colName, behavior, true, true, false, lockmode, fromReplace);
                 } else {
                     /* Child column must survive my deletion */
                     childatt->attinhcount--;
@@ -13701,7 +13701,7 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
             Oid tag_relid = get_tag_relid(RelationGetRelationName(rel), rel->rd_rel->relnamespace);
             Relation tagrel = heap_open(tag_relid, lockmode);
             CheckTableNotInUse(tagrel, "ALTER TABLE");
-            ATExecDropColumn(wqueue, tagrel, colName, behavior, false, false, true, lockmode);
+            ATExecDropColumn(wqueue, tagrel, colName, behavior, false, false, true, lockmode, fromReplace);
             TagsCacheMgr::GetInstance().clear();
 
             heap_close(tagrel, NoLock);
@@ -13709,7 +13709,7 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
             /* if drop TSField columns, update delta table simultaneously */
             Relation delta_rel = Tsdb::RelationGetDeltaRelation(rel, lockmode);
             CheckTableNotInUse(delta_rel, "ALTER TABLE");
-            ATExecDropColumn(wqueue, delta_rel, colName, behavior, false, false, true, lockmode);
+            ATExecDropColumn(wqueue, delta_rel, colName, behavior, false, false, true, lockmode, fromReplace);
             heap_close(delta_rel, NoLock);
         }
     }

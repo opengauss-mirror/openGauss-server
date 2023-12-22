@@ -1496,6 +1496,7 @@ typedef struct UnlistenStmt {
  */
 typedef struct CompositeTypeStmt {
     NodeTag type;
+    bool replace;
     RangeVar* typevar; /* the composite type to be created */
     List* coldeflist;  /* list of ColumnDef nodes */
 } CompositeTypeStmt;
@@ -1506,6 +1507,7 @@ typedef struct CompositeTypeStmt {
  */
 typedef struct TableOfTypeStmt {
     NodeTag type;
+    bool replace;
     List* typname;         /* the table of type to be quoted */
     TypeName* reftypname;  /* the name of the type being referenced */
 } TableOfTypeStmt;
