@@ -19583,8 +19583,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * Attach to type, if reloftype; except in case of a binary upgrade,
          * we dump the table normally and attach it to the type afterward.
          */
-        if ((tbinfo->reloftype != NULL) && !binary_upgrade)
-            appendPQExpBuffer(q, " OF %s", tbinfo->reloftype);
+        if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
+            Oid typeOid = atooid(tbinfo->reloftype);
+            appendPQExpBuffer(q, " OF %s", getFormattedTypeName(fout, typeOid, zeroAsNone));
+        }
         /*
          * No matter row table or colunm table, We can make suere that attrNums >= 1.
          */
