@@ -632,7 +632,7 @@ TransactionState GetCurrentTransactionState(void)
  * It will return InvalidTransactionId if we are not currently inside a
  * transaction, or inside a transaction that hasn't been assigned an XID yet.
  */
-FORCE_INLINE TransactionId GetCurrentTransactionIdIfAny(void)
+TransactionId GetCurrentTransactionIdIfAny(void)
 {
     return CurrentTransactionState->transactionId;
 }

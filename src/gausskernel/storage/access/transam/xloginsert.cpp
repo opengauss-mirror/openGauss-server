@@ -557,7 +557,7 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast)
      * too much log may slow down the speed of xlog, so only write log
      * when log level belows DEBUG4
      */
-#ifndef ENABLE_MOT
+#ifndef ENABLE_DFX_OPT
     if (module_logging_is_on(MOD_REDO)) {
         XLogInsertTrace(rmid, info, EndPos);
     }
@@ -655,7 +655,7 @@ static bool XLogNeedVMPhysicalLocation(RmgrId rmi, uint8 info, int blockId)
 }
 
 /* This macro can be only used in XLogRecordAssemble to assemble on variable into xlog */
-#ifdef ENABLE_MOT
+#ifdef ENABLE_DFX_OPT
 #define XLOG_ASSEMBLE_ONE_ITEM(scratch, size, src, remained_size) \
     do { \
         memcpy(scratch, src, size); \
@@ -962,7 +962,8 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(XLogRecPtr), &regbuf->lastLsn, remained_size);
     }
 
-#ifndef ENABLE_MOT
+#ifndef ENABLE_DFX_OPT
+    /* not support LOGICAL wal in iuds_opt :  if (g_instance.attr.attr_storage.wal_level == WAL_LEVEL_LOGICAL)   */
     int m_session_id = u_sess->reporigin_cxt.originId != InvalidRepOriginId ?
         u_sess->reporigin_cxt.originId :
         u_sess->attr.attr_storage.replorigin_sesssion_origin;
@@ -1034,12 +1035,12 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     for (rdt = t_thrd.xlog_cxt.ptr_hdr_rdt->next; rdt != NULL; rdt = rdt->next)
         COMP_CRC32C(rdata_crc, rdt->data, rdt->len);
 
-    /*
+    /*  
      * Fill in the fields in the record header. Prev-link is filled in later,
      * once we know where in the WAL the record will be inserted. The CRC does
      * not include the record header yet.
      */
-#ifndef ENABLE_MOT
+#ifndef ENABLE_DFX_OPT
     bool isUHeap = (rmid >= RM_UHEAP_ID) && (rmid <= RM_UHEAPUNDO_ID);
 #endif
 
@@ -1056,7 +1057,7 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     if (t_thrd.proc->workingVersionNum >= PARALLEL_DECODE_VERSION_NUM && XLogLogicalInfoActive()) {
         rechdr->xl_term |= XLOG_CONTAIN_CSN;
     }
-#ifndef ENABLE_MOT
+#ifndef ENABLE_DFX_OPT
     rechdr->xl_xid = (isUHeap) ? GetTopTransactionIdIfAny() : GetCurrentTransactionIdIfAny();
 #else
     rechdr->xl_xid = GetCurrentTransactionIdIfAny();

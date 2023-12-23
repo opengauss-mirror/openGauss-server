@@ -28,11 +28,6 @@
 #include "storage/compress_kits.h"
 #include "vectorsonic/vsonichash.h"
 #include "utils/dynahash.h"
-#ifdef __aarch64__
-#include <arm_acle.h>
-#else
-#include <nmmintrin.h>
-#endif
 
 extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 

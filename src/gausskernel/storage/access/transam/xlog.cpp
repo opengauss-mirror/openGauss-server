@@ -1342,7 +1342,7 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn)
  */
 XLogRecPtr XLogInsertRecord(XLogRecData *rdata, XLogRecPtr fpw_lsn)
 {
-#ifdef __aarch64__
+#if defined(__aarch64__) && !defined(ENABLE_DFX_OPT)
     /*
      * In ARM architecture, insert an XLOG record represented by an already-constructed chain of data
      * chunks. If the record is LogSwitch or upgrade data, insert the record in single mode, and in other
@@ -1867,7 +1867,9 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
         }
         *currlrc_ptr = currlrc;
     }
+#ifndef ENABLE_DFX_OPT
     pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
+#endif
 }
 
 /*

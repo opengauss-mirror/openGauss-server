@@ -2153,12 +2153,16 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
         /* assign returnCode with buffer size */
         returnCode = amount;
     } else {
+#ifdef ENABLE_DFX_OPT
+        returnCode = pwrite(vfdcache[file].fd, buffer, (size_t)amount, offset);
+#else
         PROFILING_MDIO_START();
         PGSTAT_INIT_TIME_RECORD();
         PGSTAT_START_TIME_RECORD();
         returnCode = pwrite(vfdcache[file].fd, buffer, (size_t)amount, offset);
         PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
         PROFILING_MDIO_END_WRITE((uint32)amount, returnCode);
+#endif
     }
     return returnCode;
 }

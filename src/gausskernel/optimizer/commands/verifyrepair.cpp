@@ -786,7 +786,7 @@ bool isNeedRepairPageByMem(char* disk_page_res, BlockNumber blockNum, char* mem_
         securec_check_ss(rc, "\0", "\0");
     } else {
         buf_desc = GetBufferDescriptor(buf - 1);
-        uint32 old_buf_state = LockBufHdr(buf_desc);
+        uint64 old_buf_state = LockBufHdr(buf_desc);
         isDirty = old_buf_state & BM_DIRTY;
         UnlockBufHdr(buf_desc, old_buf_state);
         Page page = BufferGetPage(buf);

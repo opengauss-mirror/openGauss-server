@@ -585,7 +585,7 @@ loop:
          */
         target_block = RecordAndGetPageWithFreeSpace(relation, target_block, page_free_space,
                                                      len + save_free_space + extralen);
-#ifndef ENABLE_MOT
+#ifndef ENABLE_DFX_OPT
         ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                          errmsg("RelationGetBufferForTuple, get target block %u from FSM, nblocks in relation is %u",
                                 target_block, smgrnblocks(relation->rd_smgr, MAIN_FORKNUM))));

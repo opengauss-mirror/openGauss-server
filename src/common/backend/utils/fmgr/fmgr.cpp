@@ -774,8 +774,12 @@ void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext destcxt)
         return;
     }
 
+#ifdef ENABLE_DFX_OPT
+    memcpy(dstinfo, srcinfo, sizeof(FmgrInfo));
+#else
     errno_t rc = memcpy_s(dstinfo, sizeof(FmgrInfo), srcinfo, sizeof(FmgrInfo));
     securec_check(rc, "\0", "\0");
+#endif
 
     dstinfo->fn_mcxt = destcxt;
 
@@ -784,8 +788,12 @@ void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext destcxt)
         Oldstyle_fnextra* fnextra = NULL;
 
         fnextra = (Oldstyle_fnextra*)MemoryContextAlloc(destcxt, sizeof(Oldstyle_fnextra));
+#ifdef ENABLE_DFX_OPT
+        memcpy(fnextra, srcinfo->fn_extra, sizeof(Oldstyle_fnextra));
+#else
         rc = memcpy_s(fnextra, sizeof(Oldstyle_fnextra), srcinfo->fn_extra, sizeof(Oldstyle_fnextra));
         securec_check(rc, "\0", "\0");
+#endif
         dstinfo->fn_extra = (void*)fnextra;
     } else {
         dstinfo->fn_extra = NULL;
