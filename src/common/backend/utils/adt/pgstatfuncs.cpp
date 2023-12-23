@@ -15411,19 +15411,25 @@ Datum query_all_drc_info(PG_FUNCTION_ARGS)
     if (!ENABLE_DMS) {
         ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
     }
+    if (!SS_PRIMARY_MODE) {
+        ereport(WARNING, (errmsg("[SS] query only in primary node. current node is standby!")));
+    }
 
     FuncCallContext *funcctx = NULL;
     if (SRF_IS_FIRSTCALL()) {
         funcctx = SRF_FIRSTCALL_INIT();
         MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        unsigned long long *rowid = (unsigned long long *)palloc0(sizeof(unsigned long long));
+        *rowid = 0;
+        funcctx->user_fctx = (void*)rowid;
         funcctx->tuple_desc = create_query_all_drc_info_tupdesc();
         MemoryContextSwitchTo(oldcontext);
     }
     funcctx = SRF_PERCALL_SETUP();
 
     dv_drc_buf_info drc_info = {0};
-    unsigned long long rowid = funcctx->call_cntr;
-    dms_get_buf_res(&rowid, &drc_info, type);
+    unsigned long long *rowid = (unsigned long long *)funcctx->user_fctx;
+    dms_get_buf_res(rowid, &drc_info, type);
     Datum values[18];
     bool nulls[18] = {false};
     if (drc_info.is_valid) {
@@ -15431,5 +15437,6 @@ Datum query_all_drc_info(PG_FUNCTION_ARGS)
         HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
+    pfree_ext(rowid);
     SRF_RETURN_DONE(funcctx);
 }
