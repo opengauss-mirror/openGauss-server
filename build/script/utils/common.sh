@@ -12,6 +12,10 @@ bit=$(getconf LONG_BIT)
 if [ "$bit" -eq 64 ]; then
     declare PLATFORM=64
 fi
+product_mode=$1
+if [ "$product_mode" == "finance" ]; then
+    product_name="openGauss-Finance"
+fi
 
 # 公共方法
 #######################################################################
