@@ -5,6 +5,23 @@ NOTICE:  database "restore_autoinc_db" does not exist, skipping
 create database dump_autoinc_db with dbcompatibility = 'B';
 create database restore_autoinc_db with dbcompatibility = 'B';
 \c dump_autoinc_db
+-- test rename schema
+create schema gs_dump_test_tmp;
+set search_path to gs_dump_test_tmp;
+create table test(test int auto_increment primary key, id int );
+NOTICE:  CREATE TABLE will create implicit sequence "test_test_seq" for serial column "test.test"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_pkey" for table "test"
+create table test2(test int auto_increment primary key, id int );
+NOTICE:  CREATE TABLE will create implicit sequence "test2_test_seq" for serial column "test2.test"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test2_pkey" for table "test2"
+create table test3(test int auto_increment primary key, id int );
+NOTICE:  CREATE TABLE will create implicit sequence "test3_test_seq" for serial column "test3.test"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test3_pkey" for table "test3"
+vacuum full test;
+alter schema gs_dump_test_tmp rename to gs_dump_test;
+set search_path to gs_dump_test;
+vacuum full test2;
+reset search_path;
 -- create auto_increment table
 CREATE TABLE test_dump_autoinc_pk(col1 int auto_increment PRIMARY KEY, col2 int) AUTO_INCREMENT = 1;
 NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_pk_col1_seq" for serial column "test_dump_autoinc_pk.col1"
