@@ -355,7 +355,7 @@ test: gpi_index
 test: gpi_index_only
 
 # gpi bitmap
-test: gpi_bitmapscan
+test: gpi_bitmapscan gpi_bitmapscan_prefetch
 
 # gpi pwj
 test: gpi_pwj
