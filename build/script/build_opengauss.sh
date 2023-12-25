@@ -128,7 +128,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -e "$SCRIPT_DIR/utils/common.sh" ];then
-    source $SCRIPT_DIR/utils/common.sh
+    source $SCRIPT_DIR/utils/common.sh ${product_mode}
 else
     exit 1
 fi
