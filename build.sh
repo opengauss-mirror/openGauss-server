@@ -99,6 +99,11 @@ echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
 ./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server ${build_with_tassl} -pm ${product_mode} ${extra_config_opt}
+if [ $? -ne 0 ]; then
+    echo "build_opengauss.sh failed, aborting."
+    exit 1
+fi
+
 if [ "${wrap_binaries}"X = "YES"X ]; then
     chmod a+x package_opengauss.sh
     if [ X$config_file = "X" ];then
