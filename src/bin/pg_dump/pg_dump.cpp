@@ -23530,7 +23530,9 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
                              "pg_class c left join pg_namespace n on c.relnamespace = n.oid "
                              "left join  pg_depend d on c.oid = d.objid "
                              "where classid = %u and deptype = '%c' and refobjid = %u and refobjsubid = %u "
-                      ,RelationRelationId, DEPENDENCY_AUTO, tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum);
+                             "and c.relkind in ('%c', '%c')"
+                      ,RelationRelationId, DEPENDENCY_AUTO, tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum
+                      ,RELKIND_SEQUENCE, RELKIND_LARGE_SEQUENCE);
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     if (PQntuples(res) != 1) {
