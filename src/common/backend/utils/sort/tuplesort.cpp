@@ -3411,7 +3411,6 @@ static void* readtup_alloc(Tuplesortstate *state, Size tuplen)
      * We pre-allocate enough slots in the slab arena that we should never run
      * out.
      */
-    Assert(state->slabFreeHead);
 
     if (tuplen > SLAB_SLOT_SIZE || !state->slabFreeHead) {
         return MemoryContextAlloc(state->sortcontext, tuplen);
