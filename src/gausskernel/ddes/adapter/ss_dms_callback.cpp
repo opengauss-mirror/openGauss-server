@@ -508,7 +508,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     int ret = DMS_SUCCESS;
     int buf_id = -1;
     uint32 hash;
-    LWLock *partition_lock = NULL;
     BufferDesc *buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
 
@@ -525,16 +524,13 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
 
     *buf_ctrl = NULL;
     hash = BufTableHashCode(tag);
-    partition_lock = BufMappingPartitionLock(hash);
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
         do {
-            (void)LWLockAcquire(partition_lock, LW_SHARED);
             buf_id = BufTableLookup(tag, hash);
             if (buf_id < 0) {
-                LWLockRelease(partition_lock);
                 break;
             }
 
@@ -547,11 +543,15 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                 (void)PinBuffer(buf_desc, NULL);
                 is_seg = false;
             }
-            LWLockRelease(partition_lock);
+
+            if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
+                break;
+            }
 
             WaitIO(buf_desc);
 
-            if (!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) {
+            if (!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is not valid, state = 0x%x",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
@@ -561,7 +561,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                 break;
             }
 
-            if (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR) {
+            if (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is io error, state = 0x%x",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
@@ -619,7 +619,7 @@ static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
         return 0;
     }
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
-    bool is_dirty = (pg_atomic_read_u32(&buf_desc->state) & (BM_DIRTY | BM_JUST_DIRTIED)) > 0;
+    bool is_dirty = (pg_atomic_read_u64(&buf_desc->state) & (BM_DIRTY | BM_JUST_DIRTIED)) > 0;
     return (unsigned char)is_dirty;
 }
 
@@ -652,16 +652,13 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
     uint32 hash;
-    LWLock *partition_lock = NULL;
+    uint64 buf_state;
     int ret = DMS_SUCCESS;
-
+    bool get_lock;
     hash = BufTableHashCode(tag);
-    partition_lock = BufMappingPartitionLock(hash);
-    (void)LWLockAcquire(partition_lock, LW_SHARED);
     buf_id = BufTableLookup(tag, hash);
     if (buf_id < 0) {
         /* not found in shared buffer */
-        LWLockRelease(partition_lock);
         return ret;
     }
 
@@ -677,11 +674,16 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
             (void)PinBuffer(buf_desc, NULL);
         }
-        LWLockRelease(partition_lock);
+
+        if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+            DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
+            return ret;
+        }
 
         WaitIO(buf_desc);
-        if ((!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID)) ||
-            (pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR)) {
+
+        if ((!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) ||
+            (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR)) {
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
                 tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
@@ -753,7 +755,7 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     /* page content is not valid */
-    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) == 0) {
+    if ((pg_atomic_read_u64(&buf_desc->state) & BM_VALID) == 0) {
         return;
     }
 
@@ -1081,7 +1083,7 @@ static void CBSetDmsStatus(void *db_handle, int dms_status)
     g_instance.dms_cxt.dms_status = (dms_status_t)dms_status;
 }
 
-static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint32 buf_state)
+static bool SSCheckBufferIfCanGoRebuild(BufferDesc* buf_desc, uint64 buf_state)
 {
     bool ret = false;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -1138,7 +1140,7 @@ static int32 SSRebuildBuf(BufferDesc *buf_desc, unsigned char thread_index)
 
 static int32 CBDrcBufRebuildInternal(int begin, int len, unsigned char thread_index)
 {
-    uint32 buf_state;
+    uint64 buf_state;
     Assert(begin >= 0 && len > 0 && (begin + len) <= TOTAL_BUFFER_NUM);
     for (int i = begin; i < begin + len; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
@@ -1208,7 +1210,7 @@ static int32 CBDrcBufValidate(void *db_handle)
     SSReadControlFile(src_id, true);
     int buf_cnt = 0;
 
-    uint32 buf_state;
+    uint64 buf_state;
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform]CBDrcBufValidate starts before reform done.")));
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
@@ -1231,7 +1233,6 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
 {
     int buf_id;
     uint32 hash;
-    LWLock *partition_lock = NULL;
     BufferTag *tag = (BufferTag *)pageid;
     BufferDesc *buf_desc;
 
@@ -1249,12 +1250,10 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
 #endif
 
     hash = BufTableHashCode(tag);
-    partition_lock = BufMappingPartitionLock(hash);
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        (void)LWLockAcquire(partition_lock, LW_SHARED);
         buf_id = BufTableLookup(tag, hash);
         if (buf_id >= 0) {
             buf_desc = GetBufferDescriptor(buf_id);
@@ -1264,14 +1263,18 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
                 ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
                 (void)PinBuffer(buf_desc, NULL);
             }
-            LWLockRelease(partition_lock);
+
+            if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                SSUnPinBuffer(buf_desc);
+                *ret_buf_desc = NULL;
+                break;
+            }
 
             WaitIO(buf_desc);
-            Assert(!(pg_atomic_read_u32(&buf_desc->state) & BM_IO_ERROR));
-            *is_valid = (pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0;
+            Assert(!(pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR));
+            *is_valid = (pg_atomic_read_u64(&buf_desc->state) & BM_VALID) != 0;
             *ret_buf_desc = buf_desc;
         } else {
-            LWLockRelease(partition_lock);
             *ret_buf_desc = NULL;
         }
     }

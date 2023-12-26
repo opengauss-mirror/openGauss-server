@@ -35,6 +35,12 @@
 #include "vectorsonic/vsonicencodingchar.h"
 #include "vectorsonic/vsonicfixlen.h"
 
+#ifdef __aarch64__
+#include <arm_acle.h>
+#else
+#include <nmmintrin.h>
+#endif
+
 #define PROBE_FETCH 0
 #define PROBE_PARTITION_FILE 1
 #define PROBE_DATA 2

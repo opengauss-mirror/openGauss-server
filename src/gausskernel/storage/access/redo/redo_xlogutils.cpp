@@ -1112,7 +1112,7 @@ Block XLogRedoBufferGetPage(RedoBufferManager *buffermanager, Buffer bufferid)
     return blkdata;
 }
 
-void XLogRedoBufferSetState(RedoBufferManager *buffermanager, RedoMemSlot *bufferslot, uint32 state)
+void XLogRedoBufferSetState(RedoBufferManager *buffermanager, RedoMemSlot *bufferslot, uint64 state)
 {
     RedoMemManager *memctl = &(buffermanager->memctl);
     RedoBufferDesc *bufferdesc = NULL;

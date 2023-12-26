@@ -1842,11 +1842,11 @@ void pgstate_update_percentile_responsetime(void);
  */
 static inline WaitState pgstat_report_waitstatus(WaitState waitstatus, bool isOnlyFetch = false)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-    WaitState oldwaitstatus;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return STATE_WAIT_UNDEFINED;
+
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    WaitState oldwaitstatus;
 
     WaitState oldStatus = beentry->st_waitstatus;
 
@@ -1905,10 +1905,11 @@ static inline WaitState pgstat_report_waitstatus(WaitState waitstatus, bool isOn
  */
 static inline WaitState pgstat_report_waitstatus_xid(WaitState waitstatus, uint64 xid, bool isOnlyFetch = false)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return STATE_WAIT_UNDEFINED;
+
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
     WaitState oldStatus = beentry->st_waitstatus;
 
     if (isOnlyFetch)
@@ -1935,11 +1936,12 @@ static inline WaitState pgstat_report_waitstatus_xid(WaitState waitstatus, uint6
  */
 static inline WaitState pgstat_report_waitstatus_relname(WaitState waitstatus, char* relname, bool isOnlyFetch = false)
 {
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return STATE_WAIT_UNDEFINED;
+
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
     int len = 0;
 
-    if (IS_PGSTATE_TRACK_UNDEFINE)
-        return STATE_WAIT_UNDEFINED;
     WaitState oldStatus = beentry->st_waitstatus;
 
     if (isOnlyFetch)
@@ -1978,10 +1980,11 @@ static inline WaitState pgstat_report_waitstatus_relname(WaitState waitstatus, c
 static inline WaitState pgstat_report_waitstatus_comm(WaitState waitstatus, int nodeId = -1, int waitnode_count = -1,
     int plannodeid = -1, int numnodes = -1, bool isOnlyFetch = false)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return STATE_WAIT_UNDEFINED;
+
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
     WaitState oldStatus = beentry->st_waitstatus;
 
     if (isOnlyFetch)
@@ -2010,10 +2013,10 @@ static inline WaitState pgstat_report_waitstatus_comm(WaitState waitstatus, int 
  */
 static inline WaitStatePhase pgstat_report_waitstatus_phase(WaitStatePhase waitstatus_phase, bool isOnlyFetch = false)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return PHASE_NONE;
+
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
     WaitStatePhase oldPhase = beentry->st_waitstatus_phase;
 
@@ -2031,10 +2034,10 @@ static inline WaitStatePhase pgstat_report_waitstatus_phase(WaitStatePhase waits
 
 static inline void pgstat_report_wait_lock_failed(uint32 wait_event_info)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
     if (!u_sess->attr.attr_common.pgstat_track_activities || !u_sess->attr.attr_common.enable_instr_track_wait ||
-        !beentry)
+        !t_thrd.shemem_ptr_cxt.MyBEEntry)
         return;
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
     pgstat_increment_changecount_before(beentry);
     uint32 old_wait_event_info = beentry->st_waitevent;
     UpdateWaitEventFaildStat(&beentry->waitInfo, old_wait_event_info);
@@ -2056,10 +2059,10 @@ static inline void pgstat_report_wait_lock_failed(uint32 wait_event_info)
  */
 static inline void pgstat_report_waitevent(uint32 wait_event_info)
 {
-    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
+
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
     pgstat_increment_changecount_before(beentry);
     /*
@@ -2085,10 +2088,10 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
 
 static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
 {
-    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
+
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
     pgstat_increment_changecount_before(beentry);
     /*
@@ -2106,10 +2109,10 @@ static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
 
 static inline void pgstat_reset_waitStatePhase(WaitState waitstatus, WaitStatePhase waitstatus_phase)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
+
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
     beentry->st_waitstatus = waitstatus;
     beentry->st_waitstatus_phase = waitstatus_phase;

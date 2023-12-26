@@ -270,7 +270,7 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
         state->rs_block_count = 0;
 
         for (int i = 0; i < REWRITE_BUFFERS_QUEUE_COUNT * 2; i++) {
-            pg_atomic_init_u32(&(state->rs_buffers_handler[i].state), 0);
+            pg_atomic_init_u64(&(state->rs_buffers_handler[i].state), 0);
         }
     }
     ADIO_ELSE()
@@ -1027,7 +1027,7 @@ void rewrite_page_list_write(RewriteState state)
     for (int i = 0; i < n_bufs; i++) {
         AioDispatchDesc_t *aioDescp = NULL;
         BufferDesc *bufHdr = (BufferDesc *)(state->rs_buffers_handler + i);
-        uint32 buf_state;
+        uint64 buf_state;
 
         /*
          * Allocate an iocb, fill it in, and write the addr in the
@@ -1143,8 +1143,8 @@ static void rewrite_flush_page(RewriteState state, Page page)
                 CheckIOState((char *)(&(state->rs_buffers_handler[i])));
                 ereport(DEBUG1,
                         (errmodule(MOD_ADIO),
-                         errmsg("rewrite_flush_page, CheckIOState, flags(%d)",
-                                (int)(pg_atomic_read_u32(&state->rs_buffers_handler[i].state) & BUF_FLAG_MASK))));
+                         errmsg("rewrite_flush_page, CheckIOState, flags(%lu)",
+                                (pg_atomic_read_u64(&state->rs_buffers_handler[i].state) & BUF_FLAG_MASK))));
             }
         }
     } else {
@@ -1174,8 +1174,8 @@ static void rewrite_end_flush_page(RewriteState state)
         for (int i = 0; i < REWRITE_BUFFERS_QUEUE_COUNT * 2; i++) {
             CheckIOState((char *)(&(state->rs_buffers_handler_ptr[i])));
             ereport(DEBUG1, (errmodule(MOD_ADIO),
-                             errmsg("rewrite_end_flush_page, CheckIOState, flags(%d)",
-                                    (int)(pg_atomic_read_u32(&state->rs_buffers_handler[i].state) & BUF_FLAG_MASK))));
+                             errmsg("rewrite_end_flush_page, CheckIOState, flags(%lu)",
+                                    (pg_atomic_read_u64(&state->rs_buffers_handler[i].state) & BUF_FLAG_MASK))));
         }
     }
 #endif

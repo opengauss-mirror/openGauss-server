@@ -45,8 +45,7 @@ void PageInit(Page page, Size pageSize, Size specialSize, bool isHeap)
     Assert(pageSize > specialSize + SizeOfPageHeaderData);
 
     /* Make sure all fields of page are zero, as well as unused space */
-    errno_t ret = memset_s(p, pageSize, 0, pageSize);
-    securec_check(ret, "", "");
+    memset(p, 0, pageSize);
 
     /* p->pd_flags = 0;								done by above MemSet */
     p->pd_upper = pageSize - specialSize;
@@ -811,17 +810,14 @@ OffsetNumber PageAddItem(Page page, Item item, Size size, OffsetNumber offsetNum
     itemId = PageGetItemId(phdr, offsetNumber);
 
     if (needshuffle) {
-        rc = memmove_s(itemId + 1, (limit - offsetNumber) * sizeof(ItemIdData), itemId,
-                       (limit - offsetNumber) * sizeof(ItemIdData));
-        securec_check(rc, "", "");
+        memmove(itemId + 1, itemId, (limit - offsetNumber) * sizeof(ItemIdData));
     }
 
     /* set the item pointer */
     ItemIdSetNormal(itemId, upper, size);
 
     /* copy the item's data onto the page */
-    rc = memcpy_s((char *)page + upper, alignedSize, item, size);
-    securec_check(rc, "", "");
+    memcpy((char *)page + upper, item, size);
 
     /* adjust page header */
     phdr->pd_lower = (LocationIndex)lower;

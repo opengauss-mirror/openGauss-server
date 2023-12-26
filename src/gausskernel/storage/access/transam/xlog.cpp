@@ -1342,7 +1342,7 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn)
  */
 XLogRecPtr XLogInsertRecord(XLogRecData *rdata, XLogRecPtr fpw_lsn)
 {
-#ifdef __aarch64__
+#if defined(__aarch64__) && !defined(ENABLE_DFX_OPT)
     /*
      * In ARM architecture, insert an XLOG record represented by an already-constructed chain of data
      * chunks. If the record is LogSwitch or upgrade data, insert the record in single mode, and in other
@@ -1683,7 +1683,6 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
     int written;
     XLogRecPtr CurrPos;
     XLogPageHeader pagehdr;
-    errno_t errorno = EOK;
     bool stop = true;
     /*
      * The following 2 variables are used to handle large records
@@ -1716,8 +1715,7 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
              * Write what fits on this page, and continue on the next page.
              */
             Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || freespace == 0);
-            errorno = memcpy_s(currpos, SECUREC_STRING_MAX_LEN, rdata_data, freespace);
-            securec_check(errorno, "", "");
+            memcpy(currpos, rdata_data, freespace);
 
             rdata_data += freespace;
             rdata_len -= freespace;
@@ -1759,8 +1757,7 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
         }
 
         Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || rdata_len == 0);
-        errorno = memcpy_s(currpos, SECUREC_STRING_MAX_LEN, rdata_data, rdata_len);
-        securec_check(errorno, "", "");
+        memcpy(currpos, rdata_data, rdata_len);
 
         currpos += rdata_len;
         CurrPos += rdata_len;
@@ -1870,7 +1867,9 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
         }
         *currlrc_ptr = currlrc;
     }
+#ifndef ENABLE_DFX_OPT
     pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
+#endif
 }
 
 /*

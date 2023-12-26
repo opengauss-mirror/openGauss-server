@@ -36,7 +36,7 @@ typedef enum trace_data_fmt {
     TRC_DATA_FMT_UINT32 /* data is stored as uint32 */
 } trace_data_fmt;
 
-#ifdef ENABLE_GSTRACE
+#if defined(ENABLE_GSTRACE) && !defined(ENABLE_DFX_OPT)
 
 /* Initialize context during startup process. */
 extern int gstrace_init(int key);
