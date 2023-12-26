@@ -63,7 +63,6 @@ static void InterfaceCheck(const char* funcname, bool needAttach = true);
 static PlDebugEntry* add_debug_func(Oid key);
 static void* get_debug_entries(uint32* num);
 static DebugClientInfo* InitDebugClient(int comm_idx);
-static CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerlines);
 static void* debug_client_split_breakpoints_msg(uint32* num);
 static void* debug_client_split_localvariables_msg(uint32 *num);
 static void* debug_client_split_backtrace_msg(uint32* num);

@@ -2055,7 +2055,20 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL
-	},
+        },
+        {{"enable_proc_coverage",
+            PGC_SUSET,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enable procedure coverage"),
+            NULL,
+            },
+            &u_sess->attr.attr_common.enable_proc_coverage,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

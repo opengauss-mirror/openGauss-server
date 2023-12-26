@@ -925,9 +925,15 @@ bool IsSnapshotNamespace(Oid namespaceId)
     return namespaceId == PG_SNAPSHOT_NAMESPACE;
 }
 
+bool IsProcCoverageNamespace(Oid namespaceId)
+{
+    return namespaceId == PROC_COVERAGE_NAMESPACE;
+}
+
 bool IsMonitorSpace(Oid namespaceId)
 {
-    return IsPerformanceNamespace(namespaceId) || IsSnapshotNamespace(namespaceId);
+    return IsPerformanceNamespace(namespaceId) || IsSnapshotNamespace(namespaceId) ||
+           IsProcCoverageNamespace(namespaceId);
 }
 /*
  * IsReservedName

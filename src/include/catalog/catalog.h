@@ -71,6 +71,7 @@ extern bool IsCStoreNamespace(Oid namespaceId);
 
 extern bool IsPerformanceNamespace(Oid namespaceId);
 extern bool IsSnapshotNamespace(Oid namespaceId);
+extern bool IsProcCoverageNamespace(Oid namespaceId);
 extern bool IsMonitorSpace(Oid namespaceId);
 
 extern bool IsReservedName(const char *name);
