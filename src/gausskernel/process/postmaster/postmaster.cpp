@@ -462,8 +462,7 @@ bool PMstateIsRun(void);
 #define BACKEND_TYPE_TEMPBACKEND                                        \
     0x0010                      /* temp thread processing cancel signal \
                                    or stream connection */
-#define BACKEND_TYPE_CMAGENT 0x0020 /* cmagent process*/
-#define BACKEND_TYPE_ALL 0x002F /* OR of all the above */
+#define BACKEND_TYPE_ALL 0x001F /* OR of all the above */
 
 #define GTM_LITE_CN (GTM_LITE_MODE && IS_PGXC_COORDINATOR)
 
@@ -10744,8 +10743,6 @@ static int CountChildren(int target)
                 child = BACKEND_TYPE_WALSND;
             else if (IsPostmasterChildDataSender(bp->child_slot))
                 child = BACKEND_TYPE_DATASND;
-            else if (ENABLE_DMS && (bp->backend_type & BACKEND_TYPE_CMAGENT))
-                child = BACKEND_TYPE_CMAGENT;
             else
                 child = BACKEND_TYPE_NORMAL;
 
@@ -11841,7 +11838,6 @@ Backend* AssignFreeBackEnd(int slot)
     bn->role = t_thrd.role;
     bn->cancel_key = 0;
     bn->dead_end = false;
-    bn->backend_type = 0;
     return bn;
 }
 
