@@ -10517,7 +10517,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
-        pmState = PM_WAIT_BACKENDS;
+
+        if (SS_STANDBY_FAILOVER) {
+            pmState = PM_WAIT_BACKENDS;
+        }
+
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
         }
