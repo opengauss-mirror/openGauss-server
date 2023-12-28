@@ -92,6 +92,10 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
 {
     /* For cm agent, it only query the system status using the parameter in memory. So don't need MVCC */
     if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        if (SS_IN_REFORM && !SSPerformingStandbyScenario()) {
+            ereport(ERROR, (errmsg("failed to request snapshot as current node is in reform.")));
+        }
+
         snapshot = SnapshotNow;
         if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin)) {
             u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
@@ -302,7 +306,7 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
         } else {
             if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
-                ereport(ERROR, (errmsg("SSTransactionIdGetCommitSeqNo failed during reform, xid=%lu.", transactionId)));
+                ereport(FATAL, (errmsg("SSTransactionIdGetCommitSeqNo failed during reform, xid=%lu.", transactionId)));
             }
             pg_usleep(USECS_PER_SEC);
             continue;
@@ -387,7 +391,7 @@ void SSTransactionIdDidCommit(TransactionId transactionId, bool* ret_did_commit)
             } else {
                 if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                     (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
-                    ereport(ERROR, (errmsg("SSTransactionIdDidCommit failed during reform, xid=%lu.", transactionId)));
+                    ereport(FATAL, (errmsg("SSTransactionIdDidCommit failed during reform, xid=%lu.", transactionId)));
                 }
                 pg_usleep(USECS_PER_SEC);
                 continue;
@@ -421,7 +425,7 @@ void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress)
         } else {
             if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
-                ereport(ERROR, (errmsg("SSTransactionIdIsInProgress failed during reform, xid=%lu.", transactionId)));
+                ereport(FATAL, (errmsg("SSTransactionIdIsInProgress failed during reform, xid=%lu.", transactionId)));
             }
             pg_usleep(USECS_PER_SEC);
             continue;
@@ -446,7 +450,7 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
         } else {
             if (SS_IN_REFORM && !SSPerformingStandbyScenario() &&
                 (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
-                ereport(ERROR, (errmsg("SSMultiXactIdGetUpdateXid failed during reform, xid=%lu.", xmax)));
+                ereport(FATAL, (errmsg("SSMultiXactIdGetUpdateXid failed during reform, xid=%lu.", xmax)));
             }
             pg_usleep(USECS_PER_SEC);
             continue;
