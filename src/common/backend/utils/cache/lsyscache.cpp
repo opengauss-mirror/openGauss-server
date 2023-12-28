@@ -802,14 +802,18 @@ Oid get_opfamily_proc(Oid opfamily, Oid lefttype, Oid righttype, int16 procnum)
  *
  * Note: returns a palloc'd copy of the string, or NULL if no such attribute.
  */
-char* get_attname(Oid relid, AttrNumber attnum)
+char* get_attname(Oid relid, AttrNumber attnum, bool allowDropped)
 {
     HeapTuple tp;
     tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
     if (HeapTupleIsValid(tp)) {
         Form_pg_attribute att_tup = (Form_pg_attribute)GETSTRUCT(tp);
         char* result = NULL;
-        result = pstrdup(NameStr(att_tup->attname));
+        if (!att_tup->attisdropped) {
+            result = pstrdup(NameStr(att_tup->attname));
+        } else if (allowDropped && att_tup->attisdropped) {
+            result = pstrdup(NameStr(att_tup->attdroppedname));
+        }
         ReleaseSysCache(tp);
         return result;
     } else {
@@ -845,11 +849,11 @@ int get_kvtype(Oid relid, AttrNumber attnum)
  * Same as above routine get_attname(), except that error
  * is handled by elog() instead of returning NULL.
  */
-char* get_relid_attribute_name(Oid relid, AttrNumber attnum)
+char* get_relid_attribute_name(Oid relid, AttrNumber attnum, bool allowDropped)
 {
     char* attname = NULL;
 
-    attname = get_attname(relid, attnum);
+    attname = get_attname(relid, attnum, allowDropped);
     if (attname == NULL) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
             errmsg("cache lookup failed for attribute %d of relation %u", attnum, relid)));

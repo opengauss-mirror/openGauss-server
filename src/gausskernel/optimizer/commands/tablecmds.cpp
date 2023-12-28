@@ -11891,18 +11891,42 @@ void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute 
         char *evActionString = TextDatumGetCString(evActiomDatum);
         List *evAction = (List *)stringToNode(evActionString);
         Query* query = (Query*)linitial(evAction);
-        // change query targetEntry
+        // change querytree's targetEntry and RTE
         ListCell* lc = NULL;
         foreach (lc, query->targetList) {
             TargetEntry* tle = (TargetEntry*)lfirst(lc);
+            Index rtevarno = 0;
+            AttrNumber rtevarattno = 0;
             if (nodeTag((Node*)tle->expr) == T_Var && tle->resorigtbl == rel_oid &&
-                ((Var*)tle->expr)->varoattno == old_attnum) {
+                tle->resorigcol == old_attnum) {
+                ListCell* rtelc = NULL;
+                tle->resorigcol = attForm->attnum;
+                Var *var = (Var *)tle->expr;
+                rtevarno = var->varno;
+                rtevarattno = var->varattno;
+                var->vartype = attForm->atttypid;
+                var->vartypmod = attForm->atttypmod;
+                var->varcollid = attForm->attcollation;
+                *attName = pstrdup(tle->resname);
+            }
+            // change rtable entry
+            if (rtevarno == 0 || rtevarattno == 0) {
+                continue;
+            }
+            RangeTblEntry* rte = rt_fetch(rtevarno, query->rtable);
+            if (!rte || rte->alias != NULL || rte->rtekind != RTE_JOIN || rte->joinaliasvars == NIL) {
                 Var *var = (Var *)tle->expr;
                 var->varattno = attForm->attnum;
                 var->varoattno = attForm->attnum;
-                var->vartype = attForm->atttypid;
-                var->vartypmod = attForm->atttypmod;
-                *attName = pstrdup(tle->resname);
+                continue;
+            }
+            Var* aliasvar = (Var*)list_nth(rte->joinaliasvars, rtevarattno - 1);
+            if (IsA(aliasvar, Var)) {
+                aliasvar->varattno = attForm->attnum;
+                aliasvar->varoattno = attForm->attnum;
+                aliasvar->vartype = attForm->atttypid;
+                aliasvar->vartypmod = attForm->atttypmod;
+                aliasvar->varcollid = attForm->attcollation;
             }
         }
         char* actiontree = nodeToString((Node*)evAction);

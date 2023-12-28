@@ -8781,7 +8781,7 @@ static char* get_variable(
     if (attnum == InvalidAttrNumber)
         attname = NULL;
     else
-        attname = get_rte_attribute_name(rte, attnum);
+        attname = get_rte_attribute_name(rte, attnum, true);
 
     if (refname && (context->varprefix || attname == NULL)) {
         if (schemaname != NULL)
