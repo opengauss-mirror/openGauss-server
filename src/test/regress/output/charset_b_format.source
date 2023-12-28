@@ -863,8 +863,8 @@ select * from pg_get_tabledef('p_charset_1');
  WITH (orientation=row, compression=no)                                       +
  PARTITION BY HASH (c1)                                                       +
  (                                                                            +
-     PARTITION p1 TABLESPACE pg_default,                                      +
-     PARTITION p2 TABLESPACE pg_default                                       +
+     PARTITION p1,                                                            +
+     PARTITION p2                                                             +
  )                                                                            +
  ENABLE ROW MOVEMENT;
 (1 row)

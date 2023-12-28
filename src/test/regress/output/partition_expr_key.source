@@ -662,15 +662,15 @@ select pg_get_tabledef('subpart_range_add');
  WITH (orientation=row, compression=no)                         +
  PARTITION BY RANGE (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
  (                                                              +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default +
+     PARTITION p1 VALUES LESS THAN (2000)                       +
      (                                                          +
-         SUBPARTITION p1sub1 TABLESPACE pg_default,             +
-         SUBPARTITION p1sub2 TABLESPACE pg_default              +
+         SUBPARTITION p1sub1,                                   +
+         SUBPARTITION p1sub2                                    +
      ),                                                         +
-     PARTITION p2 VALUES LESS THAN (3000) TABLESPACE pg_default +
+     PARTITION p2 VALUES LESS THAN (3000)                       +
      (                                                          +
-         SUBPARTITION p2sub1 TABLESPACE pg_default,             +
-         SUBPARTITION p2sub2 TABLESPACE pg_default              +
+         SUBPARTITION p2sub1,                                   +
+         SUBPARTITION p2sub2                                    +
      )                                                          +
  )                                                              +
  ENABLE ROW MOVEMENT;
@@ -688,19 +688,19 @@ select pg_get_tabledef('subpart_range_add');
  WITH (orientation=row, compression=no)                         +
  PARTITION BY RANGE (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
  (                                                              +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default +
+     PARTITION p1 VALUES LESS THAN (2000)                       +
      (                                                          +
-         SUBPARTITION p1sub1 TABLESPACE pg_default,             +
-         SUBPARTITION p1sub2 TABLESPACE pg_default              +
+         SUBPARTITION p1sub1,                                   +
+         SUBPARTITION p1sub2                                    +
      ),                                                         +
-     PARTITION p2 VALUES LESS THAN (3000) TABLESPACE pg_default +
+     PARTITION p2 VALUES LESS THAN (3000)                       +
      (                                                          +
-         SUBPARTITION p2sub1 TABLESPACE pg_default,             +
-         SUBPARTITION p2sub2 TABLESPACE pg_default              +
+         SUBPARTITION p2sub1,                                   +
+         SUBPARTITION p2sub2                                    +
      ),                                                         +
-     PARTITION p3 VALUES LESS THAN (4000) TABLESPACE pg_default +
+     PARTITION p3 VALUES LESS THAN (4000)                       +
      (                                                          +
-         SUBPARTITION p3_subpartdefault1 TABLESPACE pg_default  +
+         SUBPARTITION p3_subpartdefault1                        +
      )                                                          +
  )                                                              +
  ENABLE ROW MOVEMENT;
@@ -739,15 +739,15 @@ select pg_get_tabledef('subpart_list_add');
  WITH (orientation=row, compression=no)                        +
  PARTITION BY LIST (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
  (                                                             +
-     PARTITION p1 VALUES (2000) TABLESPACE pg_default          +
+     PARTITION p1 VALUES (2000)                                +
      (                                                         +
-         SUBPARTITION p1sub1 TABLESPACE pg_default,            +
-         SUBPARTITION p1sub2 TABLESPACE pg_default             +
+         SUBPARTITION p1sub1,                                  +
+         SUBPARTITION p1sub2                                   +
      ),                                                        +
-     PARTITION p2 VALUES (3000) TABLESPACE pg_default          +
+     PARTITION p2 VALUES (3000)                                +
      (                                                         +
-         SUBPARTITION p2sub1 TABLESPACE pg_default,            +
-         SUBPARTITION p2sub2 TABLESPACE pg_default             +
+         SUBPARTITION p2sub1,                                  +
+         SUBPARTITION p2sub2                                   +
      )                                                         +
  )                                                             +
  ENABLE ROW MOVEMENT;
@@ -765,19 +765,19 @@ select pg_get_tabledef('subpart_list_add');
  WITH (orientation=row, compression=no)                        +
  PARTITION BY LIST (abs(col2)) SUBPARTITION BY HASH (abs(col1))+
  (                                                             +
-     PARTITION p1 VALUES (2000) TABLESPACE pg_default          +
+     PARTITION p1 VALUES (2000)                                +
      (                                                         +
-         SUBPARTITION p1sub1 TABLESPACE pg_default,            +
-         SUBPARTITION p1sub2 TABLESPACE pg_default             +
+         SUBPARTITION p1sub1,                                  +
+         SUBPARTITION p1sub2                                   +
      ),                                                        +
-     PARTITION p2 VALUES (3000) TABLESPACE pg_default          +
+     PARTITION p2 VALUES (3000)                                +
      (                                                         +
-         SUBPARTITION p2sub1 TABLESPACE pg_default,            +
-         SUBPARTITION p2sub2 TABLESPACE pg_default             +
+         SUBPARTITION p2sub1,                                  +
+         SUBPARTITION p2sub2                                   +
      ),                                                        +
-     PARTITION p3 VALUES (4000) TABLESPACE pg_default          +
+     PARTITION p3 VALUES (4000)                                +
      (                                                         +
-         SUBPARTITION p3_subpartdefault1 TABLESPACE pg_default +
+         SUBPARTITION p3_subpartdefault1                       +
      )                                                         +
  )                                                             +
  ENABLE ROW MOVEMENT;
@@ -798,76 +798,76 @@ create table testnormalsubpart(a int, b int) partition by range(a) subpartition 
     partition p1 values less than(2000)(subpartition p10 values less than(200))
 );
 select pg_get_tabledef('testrangepart');
-                        pg_get_tabledef                         
-----------------------------------------------------------------
- SET search_path = public;                                     +
- CREATE TABLE testrangepart (                                  +
-     a integer,                                                +
-     b integer                                                 +
- )                                                             +
- WITH (orientation=row, compression=no)                        +
- PARTITION BY RANGE (abs((a * 2)))                             +
- (                                                             +
-     PARTITION p0 VALUES LESS THAN (100) TABLESPACE pg_default,+
-     PARTITION p1 VALUES LESS THAN (200) TABLESPACE pg_default +
- )                                                             +
+             pg_get_tabledef              
+------------------------------------------
+ SET search_path = public;               +
+ CREATE TABLE testrangepart (            +
+     a integer,                          +
+     b integer                           +
+ )                                       +
+ WITH (orientation=row, compression=no)  +
+ PARTITION BY RANGE (abs((a * 2)))       +
+ (                                       +
+     PARTITION p0 VALUES LESS THAN (100),+
+     PARTITION p1 VALUES LESS THAN (200) +
+ )                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testlistpart');
-                     pg_get_tabledef                      
-----------------------------------------------------------
- SET search_path = public;                               +
- CREATE TABLE testlistpart (                             +
-     a integer,                                          +
-     b integer                                           +
- )                                                       +
- WITH (orientation=row, compression=no)                  +
- PARTITION BY LIST (abs((a * 2)))                        +
- (                                                       +
-     PARTITION p0 VALUES (100,200) TABLESPACE pg_default,+
-     PARTITION p1 VALUES (300,400) TABLESPACE pg_default +
- )                                                       +
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = public;             +
+ CREATE TABLE testlistpart (           +
+     a integer,                        +
+     b integer                         +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+ PARTITION BY LIST (abs((a * 2)))      +
+ (                                     +
+     PARTITION p0 VALUES (100,200),    +
+     PARTITION p1 VALUES (300,400)     +
+ )                                     +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testhashpart');
-             pg_get_tabledef             
------------------------------------------
- SET search_path = public;              +
- CREATE TABLE testhashpart (            +
-     a integer,                         +
-     b integer                          +
- )                                      +
- WITH (orientation=row, compression=no) +
- PARTITION BY HASH (abs((a * 2)))       +
- (                                      +
-     PARTITION p0 TABLESPACE pg_default,+
-     PARTITION p1 TABLESPACE pg_default +
- )                                      +
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = public;             +
+ CREATE TABLE testhashpart (           +
+     a integer,                        +
+     b integer                         +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+ PARTITION BY HASH (abs((a * 2)))      +
+ (                                     +
+     PARTITION p0,                     +
+     PARTITION p1                      +
+ )                                     +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testrangesubpart');
-                            pg_get_tabledef                            
------------------------------------------------------------------------
- SET search_path = public;                                            +
- CREATE TABLE testrangesubpart (                                      +
-     a integer,                                                       +
-     b integer                                                        +
- )                                                                    +
- WITH (orientation=row, compression=no)                               +
- PARTITION BY RANGE ((a + b)) SUBPARTITION BY RANGE ((a - b))         +
- (                                                                    +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
-     ),                                                               +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
-     )                                                                +
- )                                                                    +
+                       pg_get_tabledef                        
+--------------------------------------------------------------
+ SET search_path = public;                                   +
+ CREATE TABLE testrangesubpart (                             +
+     a integer,                                              +
+     b integer                                               +
+ )                                                           +
+ WITH (orientation=row, compression=no)                      +
+ PARTITION BY RANGE ((a + b)) SUBPARTITION BY RANGE ((a - b))+
+ (                                                           +
+     PARTITION p0 VALUES LESS THAN (1000)                    +
+     (                                                       +
+         SUBPARTITION p00 VALUES LESS THAN (100)             +
+     ),                                                      +
+     PARTITION p1 VALUES LESS THAN (2000)                    +
+     (                                                       +
+         SUBPARTITION p10 VALUES LESS THAN (200)             +
+     )                                                       +
+ )                                                           +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -882,63 +882,63 @@ select pg_get_tabledef('testlistsubpart');
  WITH (orientation=row, compression=no)                               +
  PARTITION BY RANGE (abs((a * 2))) SUBPARTITION BY LIST (abs((b * 2)))+
  (                                                                    +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     PARTITION p0 VALUES LESS THAN (1000)                             +
      (                                                                +
-         SUBPARTITION p00 VALUES (100) TABLESPACE pg_default          +
+         SUBPARTITION p00 VALUES (100)                                +
      ),                                                               +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     PARTITION p1 VALUES LESS THAN (2000)                             +
      (                                                                +
-         SUBPARTITION p10 VALUES (200) TABLESPACE pg_default          +
+         SUBPARTITION p10 VALUES (200)                                +
      )                                                                +
  )                                                                    +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testhashsubpart');
-                        pg_get_tabledef                         
-----------------------------------------------------------------
- SET search_path = public;                                     +
- CREATE TABLE testhashsubpart (                                +
-     a integer,                                                +
-     b integer                                                 +
- )                                                             +
- WITH (orientation=row, compression=no)                        +
- PARTITION BY RANGE (a) SUBPARTITION BY HASH (abs((b * 2)))    +
- (                                                             +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default+
-     (                                                         +
-         SUBPARTITION p00 TABLESPACE pg_default,               +
-         SUBPARTITION p01 TABLESPACE pg_default                +
-     ),                                                        +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default+
-     (                                                         +
-         SUBPARTITION p10 TABLESPACE pg_default,               +
-         SUBPARTITION p11 TABLESPACE pg_default                +
-     )                                                         +
- )                                                             +
+                      pg_get_tabledef                       
+------------------------------------------------------------
+ SET search_path = public;                                 +
+ CREATE TABLE testhashsubpart (                            +
+     a integer,                                            +
+     b integer                                             +
+ )                                                         +
+ WITH (orientation=row, compression=no)                    +
+ PARTITION BY RANGE (a) SUBPARTITION BY HASH (abs((b * 2)))+
+ (                                                         +
+     PARTITION p0 VALUES LESS THAN (1000)                  +
+     (                                                     +
+         SUBPARTITION p00,                                 +
+         SUBPARTITION p01                                  +
+     ),                                                    +
+     PARTITION p1 VALUES LESS THAN (2000)                  +
+     (                                                     +
+         SUBPARTITION p10,                                 +
+         SUBPARTITION p11                                  +
+     )                                                     +
+ )                                                         +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testnormalsubpart');
-                            pg_get_tabledef                            
------------------------------------------------------------------------
- SET search_path = public;                                            +
- CREATE TABLE testnormalsubpart (                                     +
-     a integer,                                                       +
-     b integer                                                        +
- )                                                                    +
- WITH (orientation=row, compression=no)                               +
- PARTITION BY RANGE (a) SUBPARTITION BY RANGE (b)                     +
- (                                                                    +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
-     ),                                                               +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
-     )                                                                +
- )                                                                    +
+                 pg_get_tabledef                  
+--------------------------------------------------
+ SET search_path = public;                       +
+ CREATE TABLE testnormalsubpart (                +
+     a integer,                                  +
+     b integer                                   +
+ )                                               +
+ WITH (orientation=row, compression=no)          +
+ PARTITION BY RANGE (a) SUBPARTITION BY RANGE (b)+
+ (                                               +
+     PARTITION p0 VALUES LESS THAN (1000)        +
+     (                                           +
+         SUBPARTITION p00 VALUES LESS THAN (100) +
+     ),                                          +
+     PARTITION p1 VALUES LESS THAN (2000)        +
+     (                                           +
+         SUBPARTITION p10 VALUES LESS THAN (200) +
+     )                                           +
+ )                                               +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -997,76 +997,76 @@ drop table testnormalsubpart;
 \! @abs_bindir@/gsql -p @portstring@ -d part_expr_key_db -f @abs_bindir@/gs_dump_partition_expr.sql >/dev/null 2>&1; echo $?
 0
 select pg_get_tabledef('testrangepart');
-                        pg_get_tabledef                         
-----------------------------------------------------------------
- SET search_path = public;                                     +
- CREATE TABLE testrangepart (                                  +
-     a integer,                                                +
-     b integer                                                 +
- )                                                             +
- WITH (orientation=row, compression=no)                        +
- PARTITION BY RANGE (abs((a * 2)))                             +
- (                                                             +
-     PARTITION p0 VALUES LESS THAN (100) TABLESPACE pg_default,+
-     PARTITION p1 VALUES LESS THAN (200) TABLESPACE pg_default +
- )                                                             +
+             pg_get_tabledef              
+------------------------------------------
+ SET search_path = public;               +
+ CREATE TABLE testrangepart (            +
+     a integer,                          +
+     b integer                           +
+ )                                       +
+ WITH (orientation=row, compression=no)  +
+ PARTITION BY RANGE (abs((a * 2)))       +
+ (                                       +
+     PARTITION p0 VALUES LESS THAN (100),+
+     PARTITION p1 VALUES LESS THAN (200) +
+ )                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testlistpart');
-                     pg_get_tabledef                      
-----------------------------------------------------------
- SET search_path = public;                               +
- CREATE TABLE testlistpart (                             +
-     a integer,                                          +
-     b integer                                           +
- )                                                       +
- WITH (orientation=row, compression=no)                  +
- PARTITION BY LIST (abs((a * 2)))                        +
- (                                                       +
-     PARTITION p0 VALUES (100,200) TABLESPACE pg_default,+
-     PARTITION p1 VALUES (300,400) TABLESPACE pg_default +
- )                                                       +
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = public;             +
+ CREATE TABLE testlistpart (           +
+     a integer,                        +
+     b integer                         +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+ PARTITION BY LIST (abs((a * 2)))      +
+ (                                     +
+     PARTITION p0 VALUES (100,200),    +
+     PARTITION p1 VALUES (300,400)     +
+ )                                     +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testhashpart');
-             pg_get_tabledef             
------------------------------------------
- SET search_path = public;              +
- CREATE TABLE testhashpart (            +
-     a integer,                         +
-     b integer                          +
- )                                      +
- WITH (orientation=row, compression=no) +
- PARTITION BY HASH (abs((a * 2)))       +
- (                                      +
-     PARTITION p0 TABLESPACE pg_default,+
-     PARTITION p1 TABLESPACE pg_default +
- )                                      +
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = public;             +
+ CREATE TABLE testhashpart (           +
+     a integer,                        +
+     b integer                         +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+ PARTITION BY HASH (abs((a * 2)))      +
+ (                                     +
+     PARTITION p0,                     +
+     PARTITION p1                      +
+ )                                     +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testrangesubpart');
-                            pg_get_tabledef                            
------------------------------------------------------------------------
- SET search_path = public;                                            +
- CREATE TABLE testrangesubpart (                                      +
-     a integer,                                                       +
-     b integer                                                        +
- )                                                                    +
- WITH (orientation=row, compression=no)                               +
- PARTITION BY RANGE ((a + b)) SUBPARTITION BY RANGE ((a - b))         +
- (                                                                    +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
-     ),                                                               +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
-     )                                                                +
- )                                                                    +
+                       pg_get_tabledef                        
+--------------------------------------------------------------
+ SET search_path = public;                                   +
+ CREATE TABLE testrangesubpart (                             +
+     a integer,                                              +
+     b integer                                               +
+ )                                                           +
+ WITH (orientation=row, compression=no)                      +
+ PARTITION BY RANGE ((a + b)) SUBPARTITION BY RANGE ((a - b))+
+ (                                                           +
+     PARTITION p0 VALUES LESS THAN (1000)                    +
+     (                                                       +
+         SUBPARTITION p00 VALUES LESS THAN (100)             +
+     ),                                                      +
+     PARTITION p1 VALUES LESS THAN (2000)                    +
+     (                                                       +
+         SUBPARTITION p10 VALUES LESS THAN (200)             +
+     )                                                       +
+ )                                                           +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -1081,63 +1081,63 @@ select pg_get_tabledef('testlistsubpart');
  WITH (orientation=row, compression=no)                               +
  PARTITION BY RANGE (abs((a * 2))) SUBPARTITION BY LIST (abs((b * 2)))+
  (                                                                    +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     PARTITION p0 VALUES LESS THAN (1000)                             +
      (                                                                +
-         SUBPARTITION p00 VALUES (100) TABLESPACE pg_default          +
+         SUBPARTITION p00 VALUES (100)                                +
      ),                                                               +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     PARTITION p1 VALUES LESS THAN (2000)                             +
      (                                                                +
-         SUBPARTITION p10 VALUES (200) TABLESPACE pg_default          +
+         SUBPARTITION p10 VALUES (200)                                +
      )                                                                +
  )                                                                    +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testhashsubpart');
-                        pg_get_tabledef                         
-----------------------------------------------------------------
- SET search_path = public;                                     +
- CREATE TABLE testhashsubpart (                                +
-     a integer,                                                +
-     b integer                                                 +
- )                                                             +
- WITH (orientation=row, compression=no)                        +
- PARTITION BY RANGE (a) SUBPARTITION BY HASH (abs((b * 2)))    +
- (                                                             +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default+
-     (                                                         +
-         SUBPARTITION p00 TABLESPACE pg_default,               +
-         SUBPARTITION p01 TABLESPACE pg_default                +
-     ),                                                        +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default+
-     (                                                         +
-         SUBPARTITION p10 TABLESPACE pg_default,               +
-         SUBPARTITION p11 TABLESPACE pg_default                +
-     )                                                         +
- )                                                             +
+                      pg_get_tabledef                       
+------------------------------------------------------------
+ SET search_path = public;                                 +
+ CREATE TABLE testhashsubpart (                            +
+     a integer,                                            +
+     b integer                                             +
+ )                                                         +
+ WITH (orientation=row, compression=no)                    +
+ PARTITION BY RANGE (a) SUBPARTITION BY HASH (abs((b * 2)))+
+ (                                                         +
+     PARTITION p0 VALUES LESS THAN (1000)                  +
+     (                                                     +
+         SUBPARTITION p00,                                 +
+         SUBPARTITION p01                                  +
+     ),                                                    +
+     PARTITION p1 VALUES LESS THAN (2000)                  +
+     (                                                     +
+         SUBPARTITION p10,                                 +
+         SUBPARTITION p11                                  +
+     )                                                     +
+ )                                                         +
  ENABLE ROW MOVEMENT;
 (1 row)
 
 select pg_get_tabledef('testnormalsubpart');
-                            pg_get_tabledef                            
------------------------------------------------------------------------
- SET search_path = public;                                            +
- CREATE TABLE testnormalsubpart (                                     +
-     a integer,                                                       +
-     b integer                                                        +
- )                                                                    +
- WITH (orientation=row, compression=no)                               +
- PARTITION BY RANGE (a) SUBPARTITION BY RANGE (b)                     +
- (                                                                    +
-     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
-     ),                                                               +
-     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
-     (                                                                +
-         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
-     )                                                                +
- )                                                                    +
+                 pg_get_tabledef                  
+--------------------------------------------------
+ SET search_path = public;                       +
+ CREATE TABLE testnormalsubpart (                +
+     a integer,                                  +
+     b integer                                   +
+ )                                               +
+ WITH (orientation=row, compression=no)          +
+ PARTITION BY RANGE (a) SUBPARTITION BY RANGE (b)+
+ (                                               +
+     PARTITION p0 VALUES LESS THAN (1000)        +
+     (                                           +
+         SUBPARTITION p00 VALUES LESS THAN (100) +
+     ),                                          +
+     PARTITION p1 VALUES LESS THAN (2000)        +
+     (                                           +
+         SUBPARTITION p10 VALUES LESS THAN (200) +
+     )                                           +
+ )                                               +
  ENABLE ROW MOVEMENT;
 (1 row)
 

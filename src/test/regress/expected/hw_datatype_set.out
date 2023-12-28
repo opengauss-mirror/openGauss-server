@@ -5241,20 +5241,20 @@ create table test_part_tab1(c1 int, c2 set('a', 'b', 'A', 'B'))charset utf8 coll
 );
 NOTICE:  CREATE TABLE will create implicit set "test_part_tab1_c2_set" for column "test_part_tab1.c2"
 select pg_get_tabledef('test_part_tab1');
-                              pg_get_tabledef                              
----------------------------------------------------------------------------
- SET search_path = public;                                                +
- CREATE TABLE test_part_tab1 (                                            +
-     c1 integer,                                                          +
-     c2 SET('a', 'b', 'A', 'B') CHARACTER SET "UTF8" COLLATE utf8_bin     +
- )                                                                        +
- CHARACTER SET = "UTF8" COLLATE = "utf8_bin"                              +
- WITH (orientation=row, compression=no)                                   +
- PARTITION BY RANGE (c1)                                                  +
- (                                                                        +
-     PARTITION test_set_tab_p1 VALUES LESS THAN (5) TABLESPACE pg_default,+
-     PARTITION test_set_tab_p2 VALUES LESS THAN (10) TABLESPACE pg_default+
- )                                                                        +
+                           pg_get_tabledef                            
+----------------------------------------------------------------------
+ SET search_path = public;                                           +
+ CREATE TABLE test_part_tab1 (                                       +
+     c1 integer,                                                     +
+     c2 SET('a', 'b', 'A', 'B') CHARACTER SET "UTF8" COLLATE utf8_bin+
+ )                                                                   +
+ CHARACTER SET = "UTF8" COLLATE = "utf8_bin"                         +
+ WITH (orientation=row, compression=no)                              +
+ PARTITION BY RANGE (c1)                                             +
+ (                                                                   +
+     PARTITION test_set_tab_p1 VALUES LESS THAN (5),                 +
+     PARTITION test_set_tab_p2 VALUES LESS THAN (10)                 +
+ )                                                                   +
  ENABLE ROW MOVEMENT;
 (1 row)
 

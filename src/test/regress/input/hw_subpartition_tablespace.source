@@ -972,3 +972,34 @@ drop tablespace hw_subpartition_tablespace_ts3;
 
 DROP SCHEMA hw_subpartition_tablespace CASCADE;
 RESET CURRENT_SCHEMA;
+
+CREATE TABLESPACE sub_partition_tablespace relative location 'sub_partition_tablespace'; 
+CREATE DATABASE sub_partition_tablespace tablespace sub_partition_tablespace;
+\c sub_partition_tablespace
+CREATE TABLE t_range_list(c1 int, c2 int, c3 int) TABLESPACE sub_partition_tablespace
+PARTITION BY RANGE (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE sub_partition_tablespace
+    (
+        SUBPARTITION P_RANGE1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE sub_partition_tablespace,
+        SUBPARTITION P_RANGE1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE pg_default,
+        SUBPARTITION P_RANGE1_3 VALUES (DEFAULT)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE pg_default
+    (
+        SUBPARTITION P_RANGE2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE sub_partition_tablespace,
+        SUBPARTITION P_RANGE2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE pg_default,
+        SUBPARTITION P_RANGE2_3 VALUES (DEFAULT)
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15)
+    (
+        SUBPARTITION P_RANGE3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE sub_partition_tablespace,
+        SUBPARTITION P_RANGE3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE pg_default,
+        SUBPARTITION P_RANGE3_4 VALUES (DEFAULT)
+    )
+);
+
+select pg_get_tabledef('t_range_list');
+\c regression
+drop database sub_partition_tablespace;
+drop tablespace sub_partition_tablespace;

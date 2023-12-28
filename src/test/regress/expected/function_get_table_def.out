@@ -39,22 +39,22 @@ partition by range (id)
     partition table_range1_p4 values less than(maxvalue)
 );
 select * from pg_get_tabledef('table_range1');
-                                 pg_get_tabledef                                 
----------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                          +
- CREATE TABLE table_range1 (                                                    +
-     id integer,                                                                +
-     a timestamp(0) without time zone,                                          +
-     b character varying                                                        +
- )                                                                              +
- WITH (orientation=row, compression=no)                                         +
- PARTITION BY RANGE (id)                                                        +
- (                                                                              +
-     PARTITION table_range1_p1 VALUES LESS THAN (10) TABLESPACE pg_default,     +
-     PARTITION table_range1_p2 VALUES LESS THAN (50) TABLESPACE pg_default,     +
-     PARTITION table_range1_p3 VALUES LESS THAN (100) TABLESPACE pg_default,    +
-     PARTITION table_range1_p4 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
- )                                                                              +
+                      pg_get_tabledef                      
+-----------------------------------------------------------
+ SET search_path = test_get_table_def;                    +
+ CREATE TABLE table_range1 (                              +
+     id integer,                                          +
+     a timestamp(0) without time zone,                    +
+     b character varying                                  +
+ )                                                        +
+ WITH (orientation=row, compression=no)                   +
+ PARTITION BY RANGE (id)                                  +
+ (                                                        +
+     PARTITION table_range1_p1 VALUES LESS THAN (10),     +
+     PARTITION table_range1_p2 VALUES LESS THAN (50),     +
+     PARTITION table_range1_p3 VALUES LESS THAN (100),    +
+     PARTITION table_range1_p4 VALUES LESS THAN (MAXVALUE)+
+ )                                                        +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -68,22 +68,22 @@ partition by range (a)
     partition table_range2_p4 values less than(maxvalue)
 );
 select * from pg_get_tabledef('table_range2');
-                                   pg_get_tabledef                                    
---------------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                               +
- CREATE TABLE table_range2 (                                                         +
-     id integer,                                                                     +
-     a timestamp(0) without time zone,                                               +
-     b character varying                                                             +
- )                                                                                   +
- WITH (orientation=row, compression=no)                                              +
- PARTITION BY RANGE (a)                                                              +
- (                                                                                   +
-     PARTITION table_range2_p1 VALUES LESS THAN ('2020-03-01') TABLESPACE pg_default,+
-     PARTITION table_range2_p2 VALUES LESS THAN ('2020-05-01') TABLESPACE pg_default,+
-     PARTITION table_range2_p3 VALUES LESS THAN ('2020-07-01') TABLESPACE pg_default,+
-     PARTITION table_range2_p4 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default     +
- )                                                                                   +
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = test_get_table_def;                         +
+ CREATE TABLE table_range2 (                                   +
+     id integer,                                               +
+     a timestamp(0) without time zone,                         +
+     b character varying                                       +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY RANGE (a)                                        +
+ (                                                             +
+     PARTITION table_range2_p1 VALUES LESS THAN ('2020-03-01'),+
+     PARTITION table_range2_p2 VALUES LESS THAN ('2020-05-01'),+
+     PARTITION table_range2_p3 VALUES LESS THAN ('2020-07-01'),+
+     PARTITION table_range2_p4 VALUES LESS THAN (MAXVALUE)     +
+ )                                                             +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -97,22 +97,22 @@ partition by range (id, a)
     partition table_range3_p4 values less than(maxvalue, maxvalue)
 );
 select * from pg_get_tabledef('table_range3');
-                                      pg_get_tabledef                                      
--------------------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                                    +
- CREATE TABLE table_range3 (                                                              +
-     id integer,                                                                          +
-     a timestamp(0) without time zone,                                                    +
-     b character varying                                                                  +
- )                                                                                        +
- WITH (orientation=row, compression=no)                                                   +
- PARTITION BY RANGE (id, a)                                                               +
- (                                                                                        +
-     PARTITION table_range3_p1 VALUES LESS THAN (10, '2020-03-01') TABLESPACE pg_default, +
-     PARTITION table_range3_p2 VALUES LESS THAN (50, '2020-05-01') TABLESPACE pg_default, +
-     PARTITION table_range3_p3 VALUES LESS THAN (100, '2020-07-01') TABLESPACE pg_default,+
-     PARTITION table_range3_p4 VALUES LESS THAN (MAXVALUE, MAXVALUE) TABLESPACE pg_default+
- )                                                                                        +
+                           pg_get_tabledef                           
+---------------------------------------------------------------------
+ SET search_path = test_get_table_def;                              +
+ CREATE TABLE table_range3 (                                        +
+     id integer,                                                    +
+     a timestamp(0) without time zone,                              +
+     b character varying                                            +
+ )                                                                  +
+ WITH (orientation=row, compression=no)                             +
+ PARTITION BY RANGE (id, a)                                         +
+ (                                                                  +
+     PARTITION table_range3_p1 VALUES LESS THAN (10, '2020-03-01'), +
+     PARTITION table_range3_p2 VALUES LESS THAN (50, '2020-05-01'), +
+     PARTITION table_range3_p3 VALUES LESS THAN (100, '2020-07-01'),+
+     PARTITION table_range3_p4 VALUES LESS THAN (MAXVALUE, MAXVALUE)+
+ )                                                                  +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -127,28 +127,28 @@ partition by range (id)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "table_range4_pkey" for table "table_range4"
 select * from pg_get_tabledef('table_range4');
-                                pg_get_tabledef                                
--------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                        +
- CREATE TABLE table_range4 (                                                  +
-     id integer NOT NULL,                                                     +
-     a timestamp(0) without time zone,                                        +
-     b character varying                                                      +
- )                                                                            +
- WITH (orientation=row, compression=no)                                       +
- PARTITION BY RANGE (id)                                                      +
- (                                                                            +
-     PARTITION table_range4_p1_0 VALUES LESS THAN (10) TABLESPACE pg_default, +
-     PARTITION table_range4_p1_1 VALUES LESS THAN (20) TABLESPACE pg_default, +
-     PARTITION table_range4_p1_2 VALUES LESS THAN (30) TABLESPACE pg_default, +
-     PARTITION table_range4_p1_3 VALUES LESS THAN (40) TABLESPACE pg_default, +
-     PARTITION table_range4_p2 VALUES LESS THAN (70) TABLESPACE pg_default,   +
-     PARTITION table_range4_p3 VALUES LESS THAN (100) TABLESPACE pg_default,  +
-     PARTITION table_range4_p4_1 VALUES LESS THAN (120) TABLESPACE pg_default,+
-     PARTITION table_range4_p4_2 VALUES LESS THAN (140) TABLESPACE pg_default,+
-     PARTITION table_range4_p4_3 VALUES LESS THAN (150) TABLESPACE pg_default +
- )                                                                            +
- ENABLE ROW MOVEMENT;                                                         +
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_get_table_def;                                      +
+ CREATE TABLE table_range4 (                                                +
+     id integer NOT NULL,                                                   +
+     a timestamp(0) without time zone,                                      +
+     b character varying                                                    +
+ )                                                                          +
+ WITH (orientation=row, compression=no)                                     +
+ PARTITION BY RANGE (id)                                                    +
+ (                                                                          +
+     PARTITION table_range4_p1_0 VALUES LESS THAN (10),                     +
+     PARTITION table_range4_p1_1 VALUES LESS THAN (20),                     +
+     PARTITION table_range4_p1_2 VALUES LESS THAN (30),                     +
+     PARTITION table_range4_p1_3 VALUES LESS THAN (40),                     +
+     PARTITION table_range4_p2 VALUES LESS THAN (70),                       +
+     PARTITION table_range4_p3 VALUES LESS THAN (100),                      +
+     PARTITION table_range4_p4_1 VALUES LESS THAN (120),                    +
+     PARTITION table_range4_p4_2 VALUES LESS THAN (140),                    +
+     PARTITION table_range4_p4_3 VALUES LESS THAN (150)                     +
+ )                                                                          +
+ ENABLE ROW MOVEMENT;                                                       +
  ALTER TABLE table_range4 ADD CONSTRAINT table_range4_pkey PRIMARY KEY (id);
 (1 row)
 
@@ -164,23 +164,23 @@ interval ('1 day')
     partition table_interval1_p4 values less than(maxvalue)
 );
 select * from pg_get_tabledef('table_interval1');
-                                     pg_get_tabledef                                     
------------------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                                  +
- CREATE TABLE table_interval1 (                                                         +
-     id integer,                                                                        +
-     a timestamp(0) without time zone,                                                  +
-     b character varying                                                                +
- )                                                                                      +
- WITH (orientation=row, compression=no)                                                 +
- PARTITION BY RANGE (a)                                                                 +
- INTERVAL ('1 day')                                                                     +
- (                                                                                      +
-     PARTITION table_interval1_p1 VALUES LESS THAN ('2020-03-01') TABLESPACE pg_default,+
-     PARTITION table_interval1_p2 VALUES LESS THAN ('2020-05-01') TABLESPACE pg_default,+
-     PARTITION table_interval1_p3 VALUES LESS THAN ('2020-07-01') TABLESPACE pg_default,+
-     PARTITION table_interval1_p4 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default     +
- )                                                                                      +
+                          pg_get_tabledef                          
+-------------------------------------------------------------------
+ SET search_path = test_get_table_def;                            +
+ CREATE TABLE table_interval1 (                                   +
+     id integer,                                                  +
+     a timestamp(0) without time zone,                            +
+     b character varying                                          +
+ )                                                                +
+ WITH (orientation=row, compression=no)                           +
+ PARTITION BY RANGE (a)                                           +
+ INTERVAL ('1 day')                                               +
+ (                                                                +
+     PARTITION table_interval1_p1 VALUES LESS THAN ('2020-03-01'),+
+     PARTITION table_interval1_p2 VALUES LESS THAN ('2020-05-01'),+
+     PARTITION table_interval1_p3 VALUES LESS THAN ('2020-07-01'),+
+     PARTITION table_interval1_p4 VALUES LESS THAN (MAXVALUE)     +
+ )                                                                +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -194,21 +194,21 @@ partition by list (id)
     partition table_list1_p3 values (9, 10, 11, 12)
 );
 select * from pg_get_tabledef('table_list1');
-                            pg_get_tabledef                             
-------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                 +
- CREATE TABLE table_list1 (                                            +
-     id integer,                                                       +
-     a timestamp(0) without time zone,                                 +
-     b character varying                                               +
- )                                                                     +
- WITH (orientation=row, compression=no)                                +
- PARTITION BY LIST (id)                                                +
- (                                                                     +
-     PARTITION table_list1_p1 VALUES (1,2,3,4) TABLESPACE pg_default,  +
-     PARTITION table_list1_p2 VALUES (5,6,7,8) TABLESPACE pg_default,  +
-     PARTITION table_list1_p3 VALUES (9,10,11,12) TABLESPACE pg_default+
- )                                                                     +
+                 pg_get_tabledef                  
+--------------------------------------------------
+ SET search_path = test_get_table_def;           +
+ CREATE TABLE table_list1 (                      +
+     id integer,                                 +
+     a timestamp(0) without time zone,           +
+     b character varying                         +
+ )                                               +
+ WITH (orientation=row, compression=no)          +
+ PARTITION BY LIST (id)                          +
+ (                                               +
+     PARTITION table_list1_p1 VALUES (1,2,3,4),  +
+     PARTITION table_list1_p2 VALUES (5,6,7,8),  +
+     PARTITION table_list1_p3 VALUES (9,10,11,12)+
+ )                                               +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -221,21 +221,21 @@ partition by list (b)
     partition table_list2_p3 values ('9', '10', '11', '12')
 );
 select * from pg_get_tabledef('table_list2');
-                                pg_get_tabledef                                 
---------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                         +
- CREATE TABLE table_list2 (                                                    +
-     id integer,                                                               +
-     a timestamp(0) without time zone,                                         +
-     b character varying                                                       +
- )                                                                             +
- WITH (orientation=row, compression=no)                                        +
- PARTITION BY LIST (b)                                                         +
- (                                                                             +
-     PARTITION table_list2_p1 VALUES ('1','2','3','4') TABLESPACE pg_default,  +
-     PARTITION table_list2_p2 VALUES ('5','6','7','8') TABLESPACE pg_default,  +
-     PARTITION table_list2_p3 VALUES ('9','10','11','12') TABLESPACE pg_default+
- )                                                                             +
+                     pg_get_tabledef                      
+----------------------------------------------------------
+ SET search_path = test_get_table_def;                   +
+ CREATE TABLE table_list2 (                              +
+     id integer,                                         +
+     a timestamp(0) without time zone,                   +
+     b character varying                                 +
+ )                                                       +
+ WITH (orientation=row, compression=no)                  +
+ PARTITION BY LIST (b)                                   +
+ (                                                       +
+     PARTITION table_list2_p1 VALUES ('1','2','3','4'),  +
+     PARTITION table_list2_p2 VALUES ('5','6','7','8'),  +
+     PARTITION table_list2_p3 VALUES ('9','10','11','12')+
+ )                                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -249,22 +249,22 @@ partition by list (b)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "table_list3_pkey" for table "table_list3"
 select * from pg_get_tabledef('table_list3');
-                               pg_get_tabledef                                
-------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                       +
- CREATE TABLE table_list3 (                                                  +
-     id integer NOT NULL,                                                    +
-     a timestamp(0) without time zone,                                       +
-     b character varying                                                     +
- )                                                                           +
- WITH (orientation=row, compression=no)                                      +
- PARTITION BY LIST (b)                                                       +
- (                                                                           +
-     PARTITION table_list3_p1 VALUES ('1','2','3','4') TABLESPACE pg_default,+
-     PARTITION table_list3_p2 VALUES ('5','6','7','8') TABLESPACE pg_default,+
-     PARTITION table_list3_p3 VALUES (DEFAULT) TABLESPACE pg_default         +
- )                                                                           +
- ENABLE ROW MOVEMENT;                                                        +
+                              pg_get_tabledef                              
+---------------------------------------------------------------------------
+ SET search_path = test_get_table_def;                                    +
+ CREATE TABLE table_list3 (                                               +
+     id integer NOT NULL,                                                 +
+     a timestamp(0) without time zone,                                    +
+     b character varying                                                  +
+ )                                                                        +
+ WITH (orientation=row, compression=no)                                   +
+ PARTITION BY LIST (b)                                                    +
+ (                                                                        +
+     PARTITION table_list3_p1 VALUES ('1','2','3','4'),                   +
+     PARTITION table_list3_p2 VALUES ('5','6','7','8'),                   +
+     PARTITION table_list3_p3 VALUES (DEFAULT)                            +
+ )                                                                        +
+ ENABLE ROW MOVEMENT;                                                     +
  ALTER TABLE table_list3 ADD CONSTRAINT table_list3_pkey PRIMARY KEY (id);
 (1 row)
 
@@ -278,21 +278,21 @@ partition by hash (id)
     partition table_hash1_p3
 );
 select * from pg_get_tabledef('table_hash1');
-                   pg_get_tabledef                   
------------------------------------------------------
- SET search_path = test_get_table_def;              +
- CREATE TABLE table_hash1 (                         +
-     id integer,                                    +
-     a timestamp(0) without time zone,              +
-     b character varying                            +
- )                                                  +
- WITH (orientation=row, compression=no)             +
- PARTITION BY HASH (id)                             +
- (                                                  +
-     PARTITION table_hash1_p1 TABLESPACE pg_default,+
-     PARTITION table_hash1_p2 TABLESPACE pg_default,+
-     PARTITION table_hash1_p3 TABLESPACE pg_default +
- )                                                  +
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = test_get_table_def; +
+ CREATE TABLE table_hash1 (            +
+     id integer,                       +
+     a timestamp(0) without time zone, +
+     b character varying               +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+ PARTITION BY HASH (id)                +
+ (                                     +
+     PARTITION table_hash1_p1,         +
+     PARTITION table_hash1_p2,         +
+     PARTITION table_hash1_p3          +
+ )                                     +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -343,62 +343,62 @@ PARTITION BY LIST (col_1) SUBPARTITION BY RANGE (col_2)
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "list_range_1_pkey" for table "list_range_1"
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "list_range_1_col_3_tableoid_key" for table "list_range_1"
 select * from pg_get_tabledef('list_range_1');
-                                         pg_get_tabledef                                         
--------------------------------------------------------------------------------------------------
- SET search_path = test_get_table_def;                                                          +
- CREATE TABLE list_range_1 (                                                                    +
-     col_1 integer NOT NULL,                                                                    +
-     col_2 integer,                                                                             +
-     col_3 character varying(30),                                                               +
-     col_4 integer                                                                              +
- )                                                                                              +
- WITH (orientation=row, compression=no)                                                         +
- PARTITION BY LIST (col_1) SUBPARTITION BY RANGE (col_2)                                        +
- (                                                                                              +
-     PARTITION p_list_1 VALUES (-1,-2,-3,-4,-5,-6,-7,-8,-9,-10) TABLESPACE pg_default           +
-     (                                                                                          +
-         SUBPARTITION p_range_1_1 VALUES LESS THAN (-10) TABLESPACE pg_default,                 +
-         SUBPARTITION p_range_1_2 VALUES LESS THAN (0) TABLESPACE pg_default,                   +
-         SUBPARTITION p_range_1_3 VALUES LESS THAN (10) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_1_4 VALUES LESS THAN (20) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_1_5 VALUES LESS THAN (50) TABLESPACE pg_default                   +
-     ),                                                                                         +
-     PARTITION p_list_2 VALUES (1,2,3,4,5,6,7,8,9,10) TABLESPACE pg_default                     +
-     (                                                                                          +
-         SUBPARTITION p_list_2_subpartdefault1 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
-     ),                                                                                         +
-     PARTITION p_list_3 VALUES (11,12,13,14,15,16,17,18,19,20) TABLESPACE pg_default            +
-     (                                                                                          +
-         SUBPARTITION p_range_3_1 VALUES LESS THAN (15) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_3_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default             +
-     ),                                                                                         +
-     PARTITION p_list_4 VALUES (21,22,23,24,25,26,27,28,29,30) TABLESPACE pg_default            +
-     (                                                                                          +
-         SUBPARTITION p_range_4_1 VALUES LESS THAN (-10) TABLESPACE pg_default,                 +
-         SUBPARTITION p_range_4_2 VALUES LESS THAN (0) TABLESPACE pg_default,                   +
-         SUBPARTITION p_range_4_3 VALUES LESS THAN (10) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_4_4 VALUES LESS THAN (20) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_4_5 VALUES LESS THAN (50) TABLESPACE pg_default                   +
-     ),                                                                                         +
-     PARTITION p_list_5 VALUES (31,32,33,34,35,36,37,38,39,40) TABLESPACE pg_default            +
-     (                                                                                          +
-         SUBPARTITION p_list_5_subpartdefault1 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
-     ),                                                                                         +
-     PARTITION p_list_6 VALUES (41,42,43,44,45,46,47,48,49,50) TABLESPACE pg_default            +
-     (                                                                                          +
-         SUBPARTITION p_range_6_1 VALUES LESS THAN (-10) TABLESPACE pg_default,                 +
-         SUBPARTITION p_range_6_2 VALUES LESS THAN (0) TABLESPACE pg_default,                   +
-         SUBPARTITION p_range_6_3 VALUES LESS THAN (10) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_6_4 VALUES LESS THAN (20) TABLESPACE pg_default,                  +
-         SUBPARTITION p_range_6_5 VALUES LESS THAN (50) TABLESPACE pg_default                   +
-     ),                                                                                         +
-     PARTITION p_list_7 VALUES (DEFAULT) TABLESPACE pg_default                                  +
-     (                                                                                          +
-         SUBPARTITION p_list_7_subpartdefault1 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
-     )                                                                                          +
- )                                                                                              +
- ENABLE ROW MOVEMENT;                                                                           +
- ALTER TABLE list_range_1 ADD CONSTRAINT list_range_1_col_3_tableoid_key UNIQUE (col_3);        +
+                                     pg_get_tabledef                                     
+-----------------------------------------------------------------------------------------
+ SET search_path = test_get_table_def;                                                  +
+ CREATE TABLE list_range_1 (                                                            +
+     col_1 integer NOT NULL,                                                            +
+     col_2 integer,                                                                     +
+     col_3 character varying(30),                                                       +
+     col_4 integer                                                                      +
+ )                                                                                      +
+ WITH (orientation=row, compression=no)                                                 +
+ PARTITION BY LIST (col_1) SUBPARTITION BY RANGE (col_2)                                +
+ (                                                                                      +
+     PARTITION p_list_1 VALUES (-1,-2,-3,-4,-5,-6,-7,-8,-9,-10)                         +
+     (                                                                                  +
+         SUBPARTITION p_range_1_1 VALUES LESS THAN (-10),                               +
+         SUBPARTITION p_range_1_2 VALUES LESS THAN (0),                                 +
+         SUBPARTITION p_range_1_3 VALUES LESS THAN (10),                                +
+         SUBPARTITION p_range_1_4 VALUES LESS THAN (20),                                +
+         SUBPARTITION p_range_1_5 VALUES LESS THAN (50)                                 +
+     ),                                                                                 +
+     PARTITION p_list_2 VALUES (1,2,3,4,5,6,7,8,9,10)                                   +
+     (                                                                                  +
+         SUBPARTITION p_list_2_subpartdefault1 VALUES LESS THAN (MAXVALUE)              +
+     ),                                                                                 +
+     PARTITION p_list_3 VALUES (11,12,13,14,15,16,17,18,19,20)                          +
+     (                                                                                  +
+         SUBPARTITION p_range_3_1 VALUES LESS THAN (15),                                +
+         SUBPARTITION p_range_3_2 VALUES LESS THAN (MAXVALUE)                           +
+     ),                                                                                 +
+     PARTITION p_list_4 VALUES (21,22,23,24,25,26,27,28,29,30)                          +
+     (                                                                                  +
+         SUBPARTITION p_range_4_1 VALUES LESS THAN (-10),                               +
+         SUBPARTITION p_range_4_2 VALUES LESS THAN (0),                                 +
+         SUBPARTITION p_range_4_3 VALUES LESS THAN (10),                                +
+         SUBPARTITION p_range_4_4 VALUES LESS THAN (20),                                +
+         SUBPARTITION p_range_4_5 VALUES LESS THAN (50)                                 +
+     ),                                                                                 +
+     PARTITION p_list_5 VALUES (31,32,33,34,35,36,37,38,39,40)                          +
+     (                                                                                  +
+         SUBPARTITION p_list_5_subpartdefault1 VALUES LESS THAN (MAXVALUE)              +
+     ),                                                                                 +
+     PARTITION p_list_6 VALUES (41,42,43,44,45,46,47,48,49,50)                          +
+     (                                                                                  +
+         SUBPARTITION p_range_6_1 VALUES LESS THAN (-10),                               +
+         SUBPARTITION p_range_6_2 VALUES LESS THAN (0),                                 +
+         SUBPARTITION p_range_6_3 VALUES LESS THAN (10),                                +
+         SUBPARTITION p_range_6_4 VALUES LESS THAN (20),                                +
+         SUBPARTITION p_range_6_5 VALUES LESS THAN (50)                                 +
+     ),                                                                                 +
+     PARTITION p_list_7 VALUES (DEFAULT)                                                +
+     (                                                                                  +
+         SUBPARTITION p_list_7_subpartdefault1 VALUES LESS THAN (MAXVALUE)              +
+     )                                                                                  +
+ )                                                                                      +
+ ENABLE ROW MOVEMENT;                                                                   +
+ ALTER TABLE list_range_1 ADD CONSTRAINT list_range_1_col_3_tableoid_key UNIQUE (col_3);+
  ALTER TABLE list_range_1 ADD CONSTRAINT list_range_1_pkey PRIMARY KEY (col_1);
 (1 row)
 
@@ -461,44 +461,44 @@ select * from pg_get_tabledef('list_hash_2');
  WITH (orientation=row, compression=no)                                                      +
  PARTITION BY LIST (col_2) SUBPARTITION BY HASH (col_3)                                      +
  (                                                                                           +
-     PARTITION p_list_1 VALUES (-1,-2,-3,-4,-5,-6,-7,-8,-9,-10) TABLESPACE pg_default        +
+     PARTITION p_list_1 VALUES (-1,-2,-3,-4,-5,-6,-7,-8,-9,-10)                              +
      (                                                                                       +
-         SUBPARTITION p_hash_1_1 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_1_2 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_1_3 TABLESPACE pg_default                                       +
+         SUBPARTITION p_hash_1_1,                                                            +
+         SUBPARTITION p_hash_1_2,                                                            +
+         SUBPARTITION p_hash_1_3                                                             +
      ),                                                                                      +
-     PARTITION p_list_2 VALUES (1,2,3,4,5,6,7,8,9,10) TABLESPACE pg_default                  +
+     PARTITION p_list_2 VALUES (1,2,3,4,5,6,7,8,9,10)                                        +
      (                                                                                       +
-         SUBPARTITION p_list_2_subpartdefault1 TABLESPACE pg_default                         +
+         SUBPARTITION p_list_2_subpartdefault1                                               +
      ),                                                                                      +
-     PARTITION p_list_3 VALUES (11,12,13,14,15,16,17,18,19,20) TABLESPACE pg_default         +
+     PARTITION p_list_3 VALUES (11,12,13,14,15,16,17,18,19,20)                               +
      (                                                                                       +
-         SUBPARTITION p_hash_3_1 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_3_2 TABLESPACE pg_default                                       +
+         SUBPARTITION p_hash_3_1,                                                            +
+         SUBPARTITION p_hash_3_2                                                             +
      ),                                                                                      +
-     PARTITION p_list_4 VALUES (21,22,23,24,25,26,27,28,29,30) TABLESPACE pg_default         +
+     PARTITION p_list_4 VALUES (21,22,23,24,25,26,27,28,29,30)                               +
      (                                                                                       +
-         SUBPARTITION p_hash_4_1 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_4_2 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_4_3 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_4_4 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_4_5 TABLESPACE pg_default                                       +
+         SUBPARTITION p_hash_4_1,                                                            +
+         SUBPARTITION p_hash_4_2,                                                            +
+         SUBPARTITION p_hash_4_3,                                                            +
+         SUBPARTITION p_hash_4_4,                                                            +
+         SUBPARTITION p_hash_4_5                                                             +
      ),                                                                                      +
-     PARTITION p_list_5 VALUES (31,32,33,34,35,36,37,38,39,40) TABLESPACE pg_default         +
+     PARTITION p_list_5 VALUES (31,32,33,34,35,36,37,38,39,40)                               +
      (                                                                                       +
-         SUBPARTITION p_list_5_subpartdefault1 TABLESPACE pg_default                         +
+         SUBPARTITION p_list_5_subpartdefault1                                               +
      ),                                                                                      +
-     PARTITION p_list_6 VALUES (41,42,43,44,45,46,47,48,49,50) TABLESPACE pg_default         +
+     PARTITION p_list_6 VALUES (41,42,43,44,45,46,47,48,49,50)                               +
      (                                                                                       +
-         SUBPARTITION p_hash_6_1 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_6_2 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_6_3 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_6_4 TABLESPACE pg_default,                                      +
-         SUBPARTITION p_hash_6_5 TABLESPACE pg_default                                       +
+         SUBPARTITION p_hash_6_1,                                                            +
+         SUBPARTITION p_hash_6_2,                                                            +
+         SUBPARTITION p_hash_6_3,                                                            +
+         SUBPARTITION p_hash_6_4,                                                            +
+         SUBPARTITION p_hash_6_5                                                             +
      ),                                                                                      +
-     PARTITION p_list_7 VALUES (DEFAULT) TABLESPACE pg_default                               +
+     PARTITION p_list_7 VALUES (DEFAULT)                                                     +
      (                                                                                       +
-         SUBPARTITION p_list_7_subpartdefault1 TABLESPACE pg_default                         +
+         SUBPARTITION p_list_7_subpartdefault1                                               +
      )                                                                                       +
  )                                                                                           +
  ENABLE ROW MOVEMENT;                                                                        +
@@ -644,15 +644,15 @@ select pg_get_tabledef('range_list');
  WITH (orientation=row, compression=no)                                                       +
  PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)                             +
  (                                                                                            +
-     PARTITION p_201901 VALUES LESS THAN ('201903') TABLESPACE pg_default                     +
+     PARTITION p_201901 VALUES LESS THAN ('201903')                                           +
      (                                                                                        +
-         SUBPARTITION p_201901_a VALUES ('1') TABLESPACE pg_default,                          +
-         SUBPARTITION p_201901_b VALUES ('2') TABLESPACE pg_default                           +
+         SUBPARTITION p_201901_a VALUES ('1'),                                                +
+         SUBPARTITION p_201901_b VALUES ('2')                                                 +
      ),                                                                                       +
-     PARTITION p_201902 VALUES LESS THAN ('201910') TABLESPACE pg_default                     +
+     PARTITION p_201902 VALUES LESS THAN ('201910')                                           +
      (                                                                                        +
-         SUBPARTITION p_201902_a VALUES ('1') TABLESPACE pg_default,                          +
-         SUBPARTITION p_201902_b VALUES ('2') TABLESPACE pg_default                           +
+         SUBPARTITION p_201902_a VALUES ('1'),                                                +
+         SUBPARTITION p_201902_b VALUES ('2')                                                 +
      )                                                                                        +
  )                                                                                            +
  ENABLE ROW MOVEMENT;                                                                         +

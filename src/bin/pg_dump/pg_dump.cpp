@@ -18320,9 +18320,9 @@ static void GenerateSubPartitionDetail(PQExpBuffer result, Archive *fout, TableI
             }
             free(parttblspc);
             parttblspc = NULL;
-        } else {
-            appendPQExpBuffer(result, " TABLESPACE pg_default");
         }
+        /* If the tablespace is null, the table uses the default tablespace of the database or schema. */
+
         free(pname);
         pname = NULL;
     }
@@ -18644,9 +18644,9 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                     appendPQExpBuffer(result, " TABLESPACE %s", fmtId(parttblspc));
                 free(parttblspc);
                 parttblspc = NULL;
-            } else {
-                appendPQExpBuffer(result, " TABLESPACE pg_default");
             }
+            /* If the tablespace is null, the table uses the default tablespace of the database or schema. */
+            
             free(pname);
             pname = NULL;
 
