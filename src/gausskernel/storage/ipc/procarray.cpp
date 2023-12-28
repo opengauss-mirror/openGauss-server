@@ -3049,8 +3049,9 @@ VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
         volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
         volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
 
-        /* Exclude prepared transactions */
-        if (proc->pid == 0 || (OidIsValid(dbOid) && proc->databaseId != dbOid)) {
+        /* Exclude prepared transactions and Statement flush thread */
+        if (proc->pid == 0 || (OidIsValid(dbOid) && proc->databaseId != dbOid) ||
+            strcmp((const char*)(proc->myProgName), "Statement flush thread") == 0) {
             continue;
         }
 
