@@ -3263,14 +3263,14 @@ CREATE TABLE test1.test(a int primary key, b int not null);
 CREATE INDEX ON test1.test using btree(b);
 INSERT INTO test1.test VALUES (1, 1);
 \d+ test1.test
-SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt') order by c.relname;
 SELECT * FROM test1.test;
 -- check about type
 SELECT n.nspname, t.typname FROM pg_type t, pg_namespace n where t.typnamespace = n.oid and t.typname in ('test','tttt');
 ALTER TABLE test1.test RENAME TO test2.tttt;
 \d+ test1.test
 \d+ test2.tttt
-SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt') order by c.relname;
 INSERT INTO test2.tttt VALUES (2, 2);
 SELECT * FROM test1.test;
 SELECT * FROM test2.tttt;
@@ -3388,5 +3388,128 @@ CREATE TABLE t_after_first ( c4 INT , c5 INT ) ;
 INSERT INTO t_after_first VALUES ( 1 , 2 ) , ( 3 , 4 ) ;
 ALTER TABLE t_after_first ADD COLUMN c11 VARCHAR ( 2 ) , ADD COLUMN c22 VARCHAR ( 2 ) AFTER c11 , ADD COLUMN c57 INT FIRST;
 select * from t_after_first;
+
+drop table if exists test_dts;
+create table test_dts(
+        f1 int primary key,
+        f2 varchar(8),
+        f3 timestamp
+);
+insert into test_dts(f1, f2, f3) values(1, 'data1', '2023-07-31 12:34:56'), (2, 'date2', '2023-07-31 13:45:30'),
+(3, 'data3', '2023-07-31 14:56:15'), (4, 'data1', '2023-07-31 12:34:56'), (5, 'date2', '2023-07-31 13:45:30'),
+(6, 'data3', '2023-07-31 14:56:15');
+analyze test_dts;
+analyze test_dts((f1, f3));
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+alter table test_dts add column f4 int default 0 after f1;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+alter table test_dts add column f5 varchar(20) default 'f5' first;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+alter table test_dts modify f5 varchar(20) after f4;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+alter table test_dts modify f1 int first;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+drop table if exists test_dts;
+
+drop table if exists t_after_first;
+create table t_after_first(c4 int, c5 int);
+insert into t_after_first values(1, 2), (3, 4);
+alter table t_after_first add column c11 varchar(2), add column c22 varchar(2) after c11, add column c57 int first;
+select * from t_after_first;
+drop table if exists t_after_first;
+
+-- test for modify type
+drop table if exists fat0;
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify column c17 int first, modify column c41 text, add column c4 int after c17, add column c61 int after c41, add constraint cc0 unique fai0(c17);
+insert into fat0 values(-51, 2, -20, default), (-34, 81, -24, default);
+select * from fat0;
+drop table if exists fat0;
+
+create table fat0(c41 int, c17 text);
+insert into fat0 values(-104 not in(58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify column c41 int, add column c4 int after c17;
+select * from fat0;
+drop table if exists fat0;
+
+create table fat0(c41 int, c17 int, c21 int);
+insert into fat0 values(-104 not in(58, -123, -109), -49, -12),(64, -28, 20);
+alter table fat0 modify column c17 text, modify column c41 text, add column c21 int after c41;
+insert into fat0 values(-51, 2, -20), (-34, 81, -24);
+select * from fat0;
+drop table if exists fat0;
+
+create table fat0(c41 int, c17 int, c21 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49, -12), (64, -28, 20);
+alter table fat0 modify column c17 text first, modify column c41 text, add column c21 int after c41;
+insert into fat0 values(-51, 2, -20), (-34, 81, -24);
+select * from fat0;
+drop table if exists fat0;
+
+-- test for modify type not has column
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in(58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify c41 text, add c4 int after c17, add c61 int after c41, add constraint cc0 unique fai0(c17);
+select * from fat0;
+drop table if exists fat0;
+
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify column c17 int first, modify column c41 text;
+drop table if exists fat0;
+
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify c41 text;
+drop table if exists fat0;
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values (55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify column c59 bigint;
+select * from t0;
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify column c59 bigint;
+select * from t0;
+alter table t0 change column c6 c int first, add x int default 11 first, modify column c text;
+select * from t0;
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+alter table t0 add x int default 11 first, change column c6 c int first, modify c text;
+select * from t0;
+drop table if exists t0;
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring(-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+alter table t0 change column c6 c int first, add x int default 11 first, modify c text;
+select * from t0;
+drop table if exists t0;
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+alter table t0 add x int default 11 first;
+select * from t0;
+alter table t0 change column c6 c int first, modify c text after x, change column c59 c32 bigint first, modify column c32 text after c;
+select * from t0;
+drop table if exists t0;
+
 \c postgres
 drop database test_first_after_B;
