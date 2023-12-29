@@ -254,10 +254,8 @@ static void InitStorageConfigureNamesEnum();
 
 static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source);
 static void assign_logical_decode_options_default(const char* newval, void* extra);
-static bool check_nodeid(int* newval, void** extra, GucSource source);
 static bool check_uwal_devices_path(char** newval, void** extra, GucSource source);
 static bool check_uwal_log_path(char** newval, void** extra, GucSource source);
-static bool check_uwal_protocol(char** newval, void** extra, GucSource source);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -345,16 +343,6 @@ static const struct config_enum_entry dcf_run_mode_options[] = {
 };
 #endif
 
-static const struct config_enum_entry uwal_protocol_options[] = {
-    {"tcp", TCP, false},
-    {"rdma", RDMA, false},
-    {NULL, TCP, false}
-};
-static const struct config_enum_entry uwal_nic_type_options[] = {
-    {"tcp", TCP, false},
-    {"rdma", RDMA, false},
-    {NULL, TCP, false}
-};
 /*
  * Contents of GUC tables
  *
@@ -1302,7 +1290,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
         {{"enable_uwal",
             PGC_POSTMASTER,
-            NODE_SINGLENODE, 
+            NODE_SINGLENODE,
             UWAL,
             gettext_noop("Whether to enable uwal"),
             NULL},
@@ -1312,32 +1300,32 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
         {{"uwal_rpc_compression_switch",
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Whether to compress RPC messages"), 
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Whether to compress RPC messages"),
             NULL},
             &g_instance.attr.attr_storage.uwal_rpc_compression_switch,
             false,
             NULL,
             NULL,
             NULL},
-        {{"uwal_rpc_rndv_switch", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Whether to use the rndv mode to transmit RPC messages"), 
+        {{"uwal_async_append_switch",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Whether to append uwal async"),
             NULL},
-            &g_instance.attr.attr_storage.uwal_rpc_rndv_switch,
+            &g_instance.attr.attr_storage.uwal_async_append_switch,
             false,
             NULL,
             NULL,
             NULL},
-        {{"uwal_rpc_flowcontrol_switch", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Whether to limit RPC traffic"), 
+        {{"uwal_rpc_flowcontrol_switch",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Whether to limit RPC traffic"),
             NULL},
             &g_instance.attr.attr_storage.uwal_rpc_flowcontrol_switch,
             false,
@@ -3904,70 +3892,6 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"uwal_port", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Uwal listen port."), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_port,
-            9999,
-            9000,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_nodeid",
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE,
-            UWAL, 
-            gettext_noop("Unique node id in uwal"), NULL},
-            &g_instance.attr.attr_storage.uwal_nodeid,
-            NULL,
-            0,
-            7,
-            check_nodeid,
-            NULL,
-            NULL},
-        {{"uwal_batch_io_size", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Specifies the I/O size(Byte) for concurrent uwal writes"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_batch_io_size,
-            262144,
-            8192,
-            2097152,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_rpc_worker_thread_num", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Number of RPC connections"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_rpc_worker_thread_num,
-            1,
-            0,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_rpc_timeout", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Maximum time(ms) for processing RPC messages"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_rpc_timeout,
-            1,
-            0,
-            65535,
-            NULL,
-            NULL,
-            NULL},
         {{"uwal_rpc_flowcontrol_value", 
             PGC_POSTMASTER, 
             NODE_SINGLENODE, 
@@ -3975,9 +3899,9 @@ static void InitStorageConfigureNamesInt()
             gettext_noop("RPC traffic limit per second(MB/s)"), 
             NULL},
             &g_instance.attr.attr_storage.uwal_rpc_flowcontrol_value,
-            1,
-            0,
-            65535,
+            128,
+            8,
+            2048,
             NULL,
             NULL,
             NULL},
@@ -4306,21 +4230,8 @@ static void InitStorageConfigureNamesInt64()
             NULL},
             &g_instance.attr.attr_storage.uwal_disk_size,
             8589934592,
-            0,
-            9223372036854775807 ,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_disk_block_size", 
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            UWAL, 
-            gettext_noop("Size(Byte) of a single uwal object, align 2MB"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_disk_block_size,
-            8589934592,
-            0,
-            9223372036854775807 ,
+            8589934592,        /* 8GB */
+            4398046511104,   /* 4TB */
             NULL,
             NULL,
             NULL},
@@ -4947,28 +4858,6 @@ static void InitStorageConfigureNamesString()
             check_ss_rdma_work_config,
             NULL,
             NULL},
-        {{"uwal_ip",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            UWAL,
-            gettext_noop("IP address used by uwal"),
-            NULL},
-            &g_instance.attr.attr_storage.uwal_ip,
-            "127.0.0.1",
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_protocol",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            UWAL,
-            gettext_noop("Transmission mode used by uwal"),
-            NULL},
-            &g_instance.attr.attr_storage.uwal_protocol,
-            "rdma",
-            check_uwal_protocol,
-            NULL,
-            NULL},
         {{"uwal_devices_path",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -4978,6 +4867,17 @@ static void InitStorageConfigureNamesString()
             &g_instance.attr.attr_storage.uwal_devices_path,
             "",
             check_uwal_devices_path,
+            NULL,
+            NULL},
+        {{"uwal_config",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Sets config string for uwal."),
+            NULL},
+            &g_instance.attr.attr_storage.uwal_config,
+            "",
+            NULL,
             NULL,
             NULL},
         {{"uwal_log_path",
@@ -6811,18 +6711,6 @@ static void assign_logical_decode_options_default(const char* newval, void* extr
     u_sess->attr.attr_storage.logical_decode_options_default = extra;
 }
 
-static bool check_nodeid(int* newval, void** extra, GucSource source)
-{
-    if (source == PGC_S_DEFAULT) {
-        return true;
-    }
-    if (g_instance.attr.attr_storage.enable_uwal && NULL == newval) {
-        ereport(ERROR, (errmsg("enabled uwal but nodeid is not configured")));
-        return false;
-    }
-    return true;
-}
-
 static bool check_uwal_devices_path(char **newval, void **extra, GucSource source)
 {
     if (source == PGC_S_DEFAULT) {
@@ -6845,20 +6733,6 @@ static bool check_uwal_log_path(char **newval, void **extra, GucSource source)
     if (g_instance.attr.attr_storage.enable_uwal) {
         if (newval == NULL || *newval == NULL || **newval == '\0') {
             ereport(ERROR, (errmsg("enabled uwal but uwal_log_path is not configured")));
-            return false;
-        }
-    }
-    return true;
-}
-
-static bool check_uwal_protocol(char **newval, void **extra, GucSource source)
-{
-    if (source == PGC_S_DEFAULT) {
-        return true;
-    }
-    if (g_instance.attr.attr_storage.enable_uwal) {
-        if (newval == NULL || *newval == NULL || **newval == '\0') {
-            ereport(ERROR, (errmsg("enabled uwal but uwal_protocol is not configured")));
             return false;
         }
     }

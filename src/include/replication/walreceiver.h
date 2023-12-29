@@ -113,9 +113,20 @@ typedef struct WalRcvCtlBlock {
 typedef struct UwalrcvWriterState {
     XLogRecPtr startPtr;
     XLogRecPtr flushPtr;
-    XLogRecPtr truncatePtr;	
+    XLogRecPtr truncatePtr;
+    XLogRecPtr writePtr;
+    XLogRecPtr readPtr;
+    XLogRecPtr renamePtr;
+    XLogRecPtr expectTruncate;
     uint64_t startTimeLine;
     slock_t mutex;
+    slock_t writeMutex;
+    bool writeNoWait;
+    bool needQuery;
+    bool needXlogCatchup = true;
+    bool fullSync = false;
+
+    char uwalReceiverBuffer[FLEXIBLE_ARRAY_MEMBER];
 } UwalrcvWriterState;
 
 typedef enum { 
@@ -246,7 +257,6 @@ typedef struct WalRcvData {
     struct ArchiveSlotConfig *archive_slot;
     uint32 rcvDoneFromShareStorage;
     uint32 shareStorageTerm;
-    bool needCatchup;
     bool flagAlreadyNotifyCatchup;
 } WalRcvData;
 

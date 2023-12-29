@@ -27,6 +27,7 @@
 #include "knl/knl_session.h"
 #include "replication/walsender_private.h"
 #include "storage/gs_uwal/gs_uwal.h"
+#include "cjson/cJSON.h"
 #include <access/xact.h>
 #include <sys/signalfd.h>
 #include <signal.h>
@@ -40,6 +41,16 @@
 #define UWAL_CERT_VERIFY_SUCCESS 1
 #define UWAL_CERT_VERIFY_FAILED (-1)
 #define UWAL_GET_KEY_PASS_SUCCESS 0
+#define UWAL_DISK_POOL_ID "1"
+#define UWAL_ASYNC_THREAD_NUM "4"
+#define UWAL_SYNC_THREAD_NUM "1"
+#define UWAL_TIMEOUT "30000"
+#define UWAL_MIN_PAGES 4
+#define UWAL_WORKER_NUM 4
+
+int64 uwal_size = XLogSegSize;
+
+UwalConfig g_uwalConfig;
 
 int ock_uwal_init(IN const char *path, IN const UwalCfgElem *elems, IN int cnt, IN const char *ulogPath);
 void ock_uwal_exit(void);
@@ -131,7 +142,7 @@ static int32_t get_expire_and_early_day_from_cert(X509 *cert)
         return UWAL_CERT_VERIFY_FAILED;
     }
 
-    if (X509_cmp_time(asnEarlyTime, nullptr) == UWAL_CERT_VERIFY_FAILED) {
+    if (X509_cmp_time(asnEarlyTime, nullptr) != UWAL_CERT_VERIFY_FAILED) {
         return UWAL_CERT_VERIFY_FAILED;
     }
 
@@ -236,6 +247,99 @@ int32_t uwal_get_key_pass(char *keyPassBuff, uint32_t keyPassBuffLen, char *keyP
     return UWAL_GET_KEY_PASS_SUCCESS;
 }
 
+static void ParseUwalCpuBindInfo(cJSON *uwalConfJSON)
+{
+    g_uwalConfig.bindCpuSwitch = false;
+
+    cJSON *bindJSON = cJSON_GetObjectItem(uwalConfJSON, "cpu_bind_switch");
+    if (bindJSON == nullptr) {
+        return;
+    }
+    if (!strcasecmp(bindJSON->valuestring, "true")) {
+        g_uwalConfig.bindCpuSwitch = true;
+    }
+
+    if (!g_uwalConfig.bindCpuSwitch) {
+        return;
+    }
+
+    g_uwalConfig.bindCpuStart = UWAL_CPU_BIND_START_DEF;
+    cJSON *bindStartJSON = cJSON_GetObjectItem(uwalConfJSON, "cpu_bind_start");
+    if (bindStartJSON != nullptr &&
+        (bindStartJSON->valueint >= UWAL_CPU_BIND_START_MIN && bindStartJSON->valueint <= UWAL_CPU_BIND_START_MAX)) {
+        g_uwalConfig.bindCpuStart = bindStartJSON->valueint;
+    } else {
+        ereport(WARNING, (errmsg("cpu_bind_start not provided or not in range [%d, %d], use the default value %d",
+            UWAL_CPU_BIND_START_MIN, UWAL_CPU_BIND_START_MAX, UWAL_CPU_BIND_START_DEF)));
+    }
+
+    g_uwalConfig.bindCpuNum = UWAL_CPU_BIND_NUM_DEF;
+    cJSON *bindNumJSON = cJSON_GetObjectItem(uwalConfJSON, "cpu_bind_num");
+    if (bindNumJSON != nullptr &&
+        (bindNumJSON->valueint >= UWAL_CPU_BIND_NUM_MIN && bindNumJSON->valueint <= UWAL_CPU_BIND_NUM_MAX)) {
+        g_uwalConfig.bindCpuNum = bindNumJSON->valueint;
+    } else {
+        ereport(WARNING, (errmsg("cpu_bind_num not provided or not in range [%d, %d], use the default value %d",
+                UWAL_CPU_BIND_NUM_MIN, UWAL_CPU_BIND_NUM_MAX, UWAL_CPU_BIND_NUM_DEF)));
+    }
+
+    return;
+}
+
+static bool GsUwalParseConfig(cJSON *uwalConfJSON)
+{
+    errno_t rc = EOK;
+    cJSON *idJSON = cJSON_GetObjectItem(uwalConfJSON, "uwal_nodeid");
+    if (idJSON == nullptr) {
+        ereport(ERROR, (errmsg("No item uwal_nodeid in uwal_config")));
+        return false;
+    }
+    if (idJSON->valueint < 0 || idJSON->valueint >= MAX_GAUSS_NODE) {
+        ereport(ERROR, (errmsg("uwal_nodeid out of range [0, 7]")));
+        return false;
+    }
+    g_uwalConfig.id = idJSON->valueint;
+
+    cJSON *ipJSON = cJSON_GetObjectItem(uwalConfJSON, "uwal_ip");
+    if (ipJSON == nullptr) {
+        ereport(ERROR, (errmsg("No item uwal_ip in uwal_config")));
+        return false;
+    }
+    rc = strcpy_s(g_uwalConfig.ip, UWAL_IP_LEN, ipJSON->valuestring);
+    securec_check(rc, "\0", "\0");
+
+    cJSON *portJSON = cJSON_GetObjectItem(uwalConfJSON, "uwal_port");
+    if (portJSON == nullptr) {
+        ereport(ERROR, (errmsg("No item uwal_port in uwal_config")));
+        return false;
+    }
+    if (portJSON->valueint < UWAL_PORT_MIN || portJSON->valueint > UWAL_PORT_MAX) {
+        ereport(ERROR, (errmsg("uwal_port out of range [%d, %d]", UWAL_PORT_MIN, UWAL_PORT_MAX)));
+        return false;
+    }
+    g_uwalConfig.port = portJSON->valueint;
+
+    cJSON *protocolJSON = cJSON_GetObjectItem(uwalConfJSON, "uwal_protocol");
+    if (protocolJSON == nullptr) {
+        ereport(WARNING, (errmsg("No item uwal_protocol in uwal_config, will use the default protocol tcp")));
+        rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "tcp");
+        securec_check(rc, "\0", "\0");
+    } else if (!strcasecmp(protocolJSON->valuestring, "rdma")) {
+        rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "rdma");
+        securec_check(rc, "\0", "\0");
+    } else if (!strcasecmp(protocolJSON->valuestring, "tcp")) {
+        rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "tcp");
+        securec_check(rc, "\0", "\0");
+    } else {
+        ereport(WARNING, (errmsg("uwal_protocol only support tcp and rdma, will use the default protocol tcp")));
+        rc = strcpy_s(g_uwalConfig.protocol, UWAL_PROTOCOL_LEN, "tcp");
+        securec_check(rc, "\0", "\0");
+    }
+
+    ParseUwalCpuBindInfo(uwalConfJSON);
+    return true;
+}
+
 /**
  * must called after SetHaShmemData
  */
@@ -264,119 +368,149 @@ int GsUwalInit(ServerMode serverMode)
         return ret;
     }
 
+    cJSON *uwalConfJSON = cJSON_Parse(g_instance.attr.attr_storage.uwal_config);
+    if (uwalConfJSON == nullptr) {
+        const char* errorPtr = cJSON_GetErrorPtr();
+        if (errorPtr != nullptr) {
+            ereport(ERROR, (errmsg("Failed to parse uwal config: %s", errorPtr)));
+        } else {
+            ereport(ERROR, (errmsg("Failed to parse uwal config: unKnown error")));
+        }
+        return ret;
+    }
+    if (!GsUwalParseConfig(uwalConfJSON)) {
+        cJSON_Delete(uwalConfJSON);
+        return ret;
+    }
+    cJSON_Delete(uwalConfJSON);
+
     UwalCfgElem elem[100];
 
     int index = 0;
     elem[index].substr = "ock.uwal.ip";
-    elem[index].value = g_instance.attr.attr_storage.uwal_ip;
+    elem[index].value = g_uwalConfig.ip;
 
-    ++index;
-    elem[index].substr = "ock.uwal.port";
+    elem[++index].substr = "ock.uwal.port";
     char uwal_port_buff[UWAL_PORT_LEN];
-    rc = sprintf_s(uwal_port_buff, UWAL_PORT_LEN, "%d\0", g_instance.attr.attr_storage.uwal_port);
+    rc = sprintf_s(uwal_port_buff, UWAL_PORT_LEN, "%d\0", g_uwalConfig.port);
     securec_check_ss_c(rc, "", "");
     elem[index].value = uwal_port_buff;
 
-    ++index;
-    elem[index].substr = "ock.uwal.protocol";
-    elem[index].value = g_instance.attr.attr_storage.uwal_protocol;
+    elem[++index].substr = "ock.uwal.protocol";
+    elem[index].value = g_uwalConfig.protocol;
 
     /* uwal disk pool */
-    ++index;
-    elem[index].substr = "ock.uwal.disk.poolid";
-    elem[index].value = "1";
+    elem[++index].substr = "ock.uwal.disk.poolid";
+    elem[index].value = UWAL_DISK_POOL_ID;
 
-    ++index;
-    elem[index].substr = "ock.uwal.disk.size";
+    elem[++index].substr = "ock.uwal.disk.size";
     char uwalDiskSizeBuff[UWAL_BYTE_SIZE_LEN];
     rc = sprintf_s(uwalDiskSizeBuff, UWAL_BYTE_SIZE_LEN, "%lld\0", g_instance.attr.attr_storage.uwal_disk_size);
     securec_check_ss_c(rc, "", "");
     elem[index].value = uwalDiskSizeBuff;
 
-    ++index;
-    elem[index].substr = "ock.uwal.disk.min.block";
+    int64 uwal_aligned_disk_size = g_instance.attr.attr_storage.uwal_disk_size / XLogSegSize * XLogSegSize;
+    uwal_size = ((uwal_aligned_disk_size / XLogSegSize - 1) / 2) * XLogSegSize;
+
+    elem[++index].substr = "ock.uwal.disk.min.block";
     char uwalDiskMinBlockBuff[UWAL_BYTE_SIZE_LEN];
-    rc = sprintf_s(uwalDiskMinBlockBuff, UWAL_BYTE_SIZE_LEN, "%lld\0", g_instance.attr.attr_storage.uwal_disk_block_size);
+    rc = sprintf_s(uwalDiskMinBlockBuff, UWAL_BYTE_SIZE_LEN, "%lu\0", XLogSegSize);
     securec_check_ss_c(rc, "", "");
     elem[index].value = uwalDiskMinBlockBuff;
 
-    ++index;
-    elem[index].substr = "ock.uwal.disk.max.block";
+    elem[++index].substr = "ock.uwal.disk.max.block";
     char uwalDiskMaxBlockBuff[UWAL_BYTE_SIZE_LEN];
-    rc = sprintf_s(uwalDiskMaxBlockBuff, UWAL_BYTE_SIZE_LEN, "%lld\0", g_instance.attr.attr_storage.uwal_disk_block_size);
+    rc = sprintf_s(uwalDiskMaxBlockBuff, UWAL_BYTE_SIZE_LEN, "%lld\0", uwal_size);
     securec_check_ss_c(rc, "", "");
     elem[index].value = uwalDiskMaxBlockBuff;
 
-    ++index;
-    elem[index].substr = "ock.uwal.devices.path";
+    elem[++index].substr = "ock.uwal.devices.path";
     elem[index].value = g_instance.attr.attr_storage.uwal_devices_path;
 
-    ++index;
-    elem[index].substr = "ock.uwal.rpc.worker.thread.num";
-    char uwalRpcWorkerThreadNumBuff[UWAL_INT_SIZE_LEN];
-    rc = sprintf_s(uwalRpcWorkerThreadNumBuff, UWAL_INT_SIZE_LEN, "%d\0",
-                   g_instance.attr.attr_storage.uwal_rpc_worker_thread_num);
-    securec_check_ss_c(rc, "", "");
-    elem[index].value = uwalRpcWorkerThreadNumBuff;
+    elem[++index].substr = "ock.uwal.rpc.worker.thread.num";
+    if (g_instance.attr.attr_storage.uwal_async_append_switch) {
+        elem[index].value = UWAL_ASYNC_THREAD_NUM;
+    } else {
+        elem[index].value = UWAL_SYNC_THREAD_NUM;
+    }
 
-    ++index;
-    elem[index].substr = "ock.uwal.rpc.timeout";
-    char uwalRpcTimeoutBuff[UWAL_INT_SIZE_LEN];
-    rc = sprintf_s(uwalRpcTimeoutBuff, UWAL_INT_SIZE_LEN, "%d\0", g_instance.attr.attr_storage.uwal_rpc_timeout);
-    securec_check_ss_c(rc, "", "");
-    elem[index].value = uwalRpcTimeoutBuff;
+    elem[++index].substr = "ock.uwal.rpc.timeout";
+    elem[index].value = UWAL_TIMEOUT;
 
-    ++index;
-    elem[index].substr = "ock.uwal.rpc.rndv.switch";
-    elem[index].value = g_instance.attr.attr_storage.uwal_rpc_rndv_switch ? "true" : "false";
+    elem[++index].substr = "ock.uwal.rpc.rndv.switch";
+    if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
+        elem[index].value = "true";
+    } else {
+        elem[index].value = "false";
+    }
 
-    ++index;
-    elem[index].substr = "ock.uwal.rpc.compression.switch";
+    elem[++index].substr = "ock.uwal.rpc.compression.switch";
     elem[index].value = g_instance.attr.attr_storage.uwal_rpc_compression_switch ? "true" : "false";
 
-    ++index;
-    elem[index].substr = "ock.uwal.rpc.flowcontrol.switch";
+    elem[++index].substr = "ock.uwal.rpc.flowcontrol.switch";
     elem[index].value = g_instance.attr.attr_storage.uwal_rpc_flowcontrol_switch ? "true" : "false";
 
-    ++index;
-    elem[index].substr = "ock.uwal.rpc.flowcontrol.value";
+    elem[++index].substr = "ock.uwal.rpc.flowcontrol.value";
     char uwalRpcFlowControlValueBuff[UWAL_INT_SIZE_LEN];
     rc = sprintf_s(uwalRpcFlowControlValueBuff, UWAL_INT_SIZE_LEN, "%d\0",
                    g_instance.attr.attr_storage.uwal_rpc_flowcontrol_value);
     securec_check_ss_c(rc, "", "");
     elem[index].value = uwalRpcFlowControlValueBuff;
 
+    elem[++index].substr = "ock.uwal.devices.split.switch";
+    elem[index].value = "true";
+
+    elem[++index].substr = "ock.uwal.devices.split.size";
+    char uwalSplitSizeBuff[UWAL_BYTE_SIZE_LEN];
+    rc = sprintf_s(uwalSplitSizeBuff, UWAL_BYTE_SIZE_LEN, "%lu\0", XLogSegSize);
+    securec_check_ss_c(rc, "", "");
+    elem[index].value = uwalSplitSizeBuff;
+
+    elem[++index].substr = "ock.uwal.devices.split.path";
+    elem[index].value = g_instance.attr.attr_storage.uwal_devices_path;
+
+    // cpu bind info
+    char uwalCpuBindNumBuff[UWAL_INT_SIZE_LEN];
+    char uwalCpuBindStartBuff[UWAL_INT_SIZE_LEN];
+    if (g_uwalConfig.bindCpuSwitch) {
+        elem[++index].substr = "ock.uwal.cpu.bind.switch";
+        elem[index].value = "true";
+
+        elem[++index].substr = "ock.uwal.cpu.bind.num";
+        rc = sprintf_s(uwalCpuBindNumBuff, UWAL_INT_SIZE_LEN, "%d\0", g_uwalConfig.bindCpuNum);
+        securec_check_ss_c(rc, "", "");
+        elem[index].value = uwalCpuBindNumBuff;
+
+        elem[++index].substr = "ock.uwal.cpu.bind.start";
+        rc = sprintf_s(uwalCpuBindStartBuff, UWAL_INT_SIZE_LEN, "%d\0", g_uwalConfig.bindCpuStart);
+        securec_check_ss_c(rc, "", "");
+        elem[index].value = uwalCpuBindStartBuff;
+    }
+
     if (g_instance.attr.attr_security.EnableSSL) {
         comm_initialize_SSL();
 
         ock_uwal_register_cert_verify_func(uwal_cert_verify, uwal_get_key_pass);
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.switch";
+        elem[++index].substr = "ock.uwal.rpc.tls.switch";
         elem[index].value = "true";
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.ca.cert.path";
+        elem[++index].substr = "ock.uwal.rpc.tls.ca.cert.path";
         elem[index].value = g_instance.attr.attr_security.ssl_ca_file;
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.crl.path";
+        elem[++index].substr = "ock.uwal.rpc.tls.crl.path";
         elem[index].value = g_instance.attr.attr_security.ssl_crl_file;
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.cert.path";
+        elem[++index].substr = "ock.uwal.rpc.tls.cert.path";
         elem[index].value = g_instance.attr.attr_security.ssl_cert_file;
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.key.path";
+        elem[++index].substr = "ock.uwal.rpc.tls.key.path";
         elem[index].value = g_instance.attr.attr_security.ssl_key_file;
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.key.pass.path";
+        elem[++index].substr = "ock.uwal.rpc.tls.key.pass.path";
         elem[index].value = g_instance.attr.attr_security.ssl_key_file;
 
-        ++index;
-        elem[index].substr = "ock.uwal.rpc.tls.cipher_suites";
+        elem[++index].substr = "ock.uwal.rpc.tls.cipher_suites";
         elem[index].value = g_instance.attr.attr_security.SSLCipherSuites;
     }
 
@@ -390,16 +524,16 @@ int GsUwalInit(ServerMode serverMode)
 
 void GetLocalStateInfo(OUT NodeStateInfo *nodeStateInfo)
 {
-    nodeStateInfo->nodeId = g_instance.attr.attr_storage.uwal_nodeid;
+    nodeStateInfo->nodeId = g_uwalConfig.id;
     nodeStateInfo->state = NODE_STATE_UP;
     nodeStateInfo->groupId = 0;
     nodeStateInfo->groupLevel = 0;
 
     NetInfo netInfo;
-    netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int(g_instance.attr.attr_storage.uwal_ip);
-    netInfo.port = g_instance.attr.attr_storage.uwal_port;
+    netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int(g_uwalConfig.ip);
+    netInfo.port = g_uwalConfig.port;
     netInfo.protocol = NET_PROTOCOL_TCP;
-    if (!strcasecmp(g_instance.attr.attr_storage.uwal_protocol, "rdma")) {
+    if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
         netInfo.protocol = NET_PROTOCOL_RDMA;
     }
 
@@ -457,13 +591,21 @@ int GsUwalPrimaryInitNotify()
 {
     NodeStateInfo primaryStateInfo;
     GetLocalStateInfo(&primaryStateInfo);
+    UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
 
     NodeStateList *nodeList = (NodeStateList *)palloc0(sizeof(NodeStateList) + sizeof(NodeStateInfo));
-    nodeList->localNodeId = g_instance.attr.attr_storage.uwal_nodeid;
-    nodeList->masterNodeId = g_instance.attr.attr_storage.uwal_nodeid;
+    nodeList->localNodeId = g_uwalConfig.id;
+    nodeList->masterNodeId = g_uwalConfig.id;
     nodeList->nodeNum = 1;
     nodeList->nodeList[0] = primaryStateInfo;
     int ret = GsUwalSyncNotify(nodeList);
+    if (uwalrcv != NULL) {
+        SpinLockAcquire(&uwalrcv->mutex);
+        uwalrcv->fullSync = false;
+        SpinLockRelease(&uwalrcv->mutex);
+        ereport(LOG, (errmsg("GsUwalPrimaryInitNotify fullSync false")));
+    }
+
     pfree(nodeList);
     return ret;
 }
@@ -471,7 +613,7 @@ int GsUwalPrimaryInitNotify()
 bool FindSyncRepConfig(IN const char *applicationName, OUT int *group, OUT uint8 *syncrepMethod, OUT unsigned *numSync)
 {
     if (!group && !syncrepMethod && !numSync) {
-        return true;
+        return false;
     }
     const char *standbyName = NULL;
     for (int index = 0; index < t_thrd.syncrep_cxt.SyncRepConfigGroups; index++) {
@@ -502,10 +644,11 @@ bool FindSyncRepConfig(IN const char *applicationName, OUT int *group, OUT uint8
  */
 int GsUwalWalSenderNotify(bool exceptSelf)
 {
+    UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
     NodeStateList *nodeList = (NodeStateList *)palloc0(
         sizeof(NodeStateList) + sizeof(NodeStateInfo) * g_instance.attr.attr_storage.max_wal_senders);
-    nodeList->localNodeId = g_instance.attr.attr_storage.uwal_nodeid;
-    nodeList->masterNodeId = g_instance.attr.attr_storage.uwal_nodeid;
+    nodeList->localNodeId = g_uwalConfig.id;
+    nodeList->masterNodeId = g_uwalConfig.id;
 
     unsigned statSendersGroupLevel[SYNC_REP_MAX_GROUPS] = {0};
     unsigned statSendersGroupNumSync[SYNC_REP_MAX_GROUPS] = {0};
@@ -528,21 +671,32 @@ int GsUwalWalSenderNotify(bool exceptSelf)
         securec_check(rc, "", "");
         channelGetReplc = walsnd->channel_get_replc;
         SpinLockRelease(&walsnd->mutex);
+        if (channelGetReplc == 0) {
+            continue;
+        }
 
         int group = 0;
         unsigned numSync = 0;
         NodeStateInfo standbyStateInfo;
+        bool standbyInSyncRepConfig = false;
         if (strcmp(u_sess->attr.attr_storage.SyncRepStandbyNames, "*") == 0) {
             standbyStateInfo.groupId = 0;
             standbyStateInfo.groupLevel = 1;
+            standbyInSyncRepConfig = true;
         } else if (FindSyncRepConfig(remoteApplicationName, &group, NULL, &numSync)) {
             statSendersGroupLevel[group] += 1;
             statSendersGroupNumSync[group] = numSync;
             standbyStateInfo.groupId = group;
+            standbyInSyncRepConfig = true;
         } else {
             standbyStateInfo.groupId = 0;
             standbyStateInfo.groupLevel = 0;
+            standbyInSyncRepConfig = false;
         }
+
+        SpinLockAcquire(&walsnd->mutex);
+        walsnd->standbyInSyncRepConfig = standbyInSyncRepConfig;
+        SpinLockRelease(&walsnd->mutex);
 
         ReplConnInfo *replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[channelGetReplc];
 
@@ -563,7 +717,7 @@ int GsUwalWalSenderNotify(bool exceptSelf)
         netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int((char *)replConnInfo->remoteuwalhost);
         netInfo.port = replConnInfo->remoteuwalport;
         netInfo.protocol = NET_PROTOCOL_TCP;
-        if (!strcasecmp(g_instance.attr.attr_storage.uwal_protocol, "rdma")) {
+        if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
             netInfo.protocol = NET_PROTOCOL_RDMA;
         }
 
@@ -574,11 +728,20 @@ int GsUwalWalSenderNotify(bool exceptSelf)
         nodeList->nodeList[count++] = standbyStateInfo;
     }
 
+    bool fullSync = true;
     for (int i = 0; i < count; i++) {
         unsigned group_index = nodeList->nodeList[i].groupId;
-        nodeList->nodeList[i].groupLevel = statSendersGroupLevel[group_index] <= statSendersGroupNumSync[group_index]
-                                               ? statSendersGroupLevel[group_index]
-                                               : statSendersGroupNumSync[group_index];
+        if (statSendersGroupLevel[group_index] < statSendersGroupNumSync[group_index]) {
+            nodeList->nodeList[i].groupLevel = statSendersGroupLevel[group_index];
+            fullSync = false;
+        } else {
+            nodeList->nodeList[i].groupLevel = statSendersGroupNumSync[group_index];
+        }
+    }
+    if (!exceptSelf && uwalrcv != NULL) {
+        SpinLockAcquire(&uwalrcv->mutex);
+        uwalrcv->fullSync = fullSync;
+        SpinLockRelease(&uwalrcv->mutex);
     }
 
     NodeStateInfo primaryStateInfo;
@@ -602,7 +765,7 @@ int GsUwalWalReceiverNotify(bool isConnectedToPrimary)
 
     NodeStateList *nodeList = (NodeStateList *)palloc0(sizeof(NodeStateList) + sizeof(NodeStateInfo) * 2);
     nodeList->nodeNum = 1;
-    nodeList->localNodeId = g_instance.attr.attr_storage.uwal_nodeid;
+    nodeList->localNodeId = g_uwalConfig.id;
 
     // local state info
     NodeStateInfo localStateInfo;
@@ -622,7 +785,7 @@ int GsUwalWalReceiverNotify(bool isConnectedToPrimary)
         netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int((char *)replConnInfo->remotehost);
         netInfo.port = replConnInfo->remoteuwalport;
         netInfo.protocol = NET_PROTOCOL_TCP;
-        if (!strcasecmp(g_instance.attr.attr_storage.uwal_protocol, "rdma")) {
+        if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
             netInfo.protocol = NET_PROTOCOL_RDMA;
         }
 
@@ -650,7 +813,7 @@ int GsUwalStandbyInitNotify()
 {
     NodeStateList *nodeList = (NodeStateList *)palloc0(sizeof(NodeStateList) + sizeof(NodeStateInfo) * 2);
     nodeList->nodeNum = 1;
-    nodeList->localNodeId = g_instance.attr.attr_storage.uwal_nodeid;
+    nodeList->localNodeId = g_uwalConfig.id;
     nodeList->masterNodeId = NODE_ID_INVALID;
 
     // local state info
@@ -676,24 +839,12 @@ void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn, UwalNodeInfo *infos)
             continue;
         }
 
-        // find the replConnInfo->remotenodeid
-        int channel_get_replc = walSnd->channel_get_replc;
-        uint32_t remotenodeid = (uint32_t)(t_thrd.postmaster_cxt.ReplConnArray[channel_get_replc]->remotenodeid);
-
-        // find the remote node in infos
-        bool find = false;
-        for (uint32_t nodeIndex = 0; nodeIndex < infos->num; ++nodeIndex) {
-            if (infos->status[nodeIndex].nodeId == remotenodeid && infos->status[nodeIndex].ret == U_OK) {
-                find = true;
-            }
-        }
-
-        if (!find) {
+        SpinLockAcquire(&walSnd->mutex);
+        if (!walSnd->standbyInSyncRepConfig) {
+            SpinLockRelease(&walSnd->mutex);
             continue;
         }
 
-        walSnd->log_ctrl.prev_send_time = GetCurrentTimestamp();
-        SpinLockAcquire(&walSnd->mutex);
         walSnd->sentPtr = lsn;
         walSnd->receive = lsn;
         walSnd->write = lsn;
@@ -701,6 +852,7 @@ void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn, UwalNodeInfo *infos)
         walSnd->peer_role = STANDBY_MODE;
         walSnd->peer_state = NORMAL_STATE;
         SpinLockRelease(&walSnd->mutex);
+        walSnd->log_ctrl.prev_send_time = GetCurrentTimestamp();
     }
 }
 
@@ -750,11 +902,11 @@ int GsUwalQueryByUser(TimeLineID thisTimeLineID, bool needHistoryList)
     return ret;
 }
 
-int GsUwalQuery(UwalId id, UwalBaseInfo *info)
+int GsUwalQuery(UwalId *id, UwalBaseInfo *info)
 {
     int ret;
     UwalInfo *uwalInfos = (UwalInfo *)palloc0(sizeof(UwalInfo));
-    UwalQueryParam params = {&id, UWAL_ROUTE_LOCAL, NULL};
+    UwalQueryParam params = {id, UWAL_ROUTE_LOCAL, NULL};
 
     ret = ock_uwal_query(&params, uwalInfos);
     if (ret == 0) {
@@ -788,7 +940,7 @@ int GsUwalCreate(uint64_t startOffset)
     desc.perfType = UWAL_PERF_TYPE_SSD;
     desc.stripe = UWAL_STRIPE_BUTT;
     desc.io = UWAL_IO_RANDOM;
-    desc.dataSize = g_instance.attr.attr_storage.uwal_disk_block_size;
+    desc.dataSize = uwal_size;
     desc.startTimeLine = t_thrd.xlog_cxt.ThisTimeLineID;
     desc.startWriteOffset = startOffset;
     desc.durability = dura;
@@ -824,35 +976,45 @@ int GsUwalCreate(uint64_t startOffset)
     return ret;
 }
 
-int GsUwalRead(UwalId id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen)
+int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos)
 {
-    errno_t errorno = EOK;
+    UwalBuffer uBuff;
+    UwalBufferList buffList;
+    uint64_t offset;
+    UwalAppendParam params;
 
+    uBuff.buf = buf;
+    uBuff.len = nBytes;
+    buffList.buffers = &uBuff;
+    buffList.cnt = 1;
+
+    params.bufferList = &buffList;
+    params.uwalId = id;
+    params.cb = NULL;
+
+    int ret = ock_uwal_append(&params, &offset, infos);
+    return ret;
+}
+
+int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen)
+{
     UwalDataToRead *dataToRead = (UwalDataToRead *)palloc0(sizeof(UwalDataToRead));
     dataToRead->offset = targetPagePtr;
     dataToRead->length = readlen;
     UwalDataToReadVec *datav = (UwalDataToReadVec *)palloc0(sizeof(UwalDataToReadVec));
     datav->cnt = 1;
     datav->dataToRead = dataToRead;
-    UwalReadParam params = {&id, UWAL_ROUTE_LOCAL, datav, NULL};
+    UwalReadParam params = {id, UWAL_ROUTE_LOCAL, datav, NULL};
 
     UwalBufferList *bufflist = (UwalBufferList *)palloc0(sizeof(UwalBufferList));
     bufflist->cnt = 1;
     UwalBuffer *buffers = (UwalBuffer *)palloc0(sizeof(UwalBuffer));
-    char *buf = (char *)palloc0(sizeof(char) * XLOG_BLCKSZ);
-    errorno = memset_s(buf, XLOG_BLCKSZ, 0, XLOG_BLCKSZ);
-    securec_check(errorno, "", "");
-
-    buffers->buf = buf;
+    buffers->buf = readBuf;
     buffers->len = readlen;
     bufflist->buffers = buffers;
 
     int ret = ock_uwal_read(&params, bufflist);
 
-    errno_t rc = memcpy_s(readBuf, readlen, bufflist->buffers->buf, readlen);
-    securec_check(rc, "", "");
-
-    pfree(buf);
     pfree(buffers);
     pfree(bufflist);
     pfree(dataToRead);
@@ -894,22 +1056,15 @@ void GsUwalWriteAsyncCallBack(void *cbCtx, int retCode)
     } else {
         commonCbCtx->curCount += 1;
         if (commonCbCtx->curCount == commonCbCtx->interruptCount) {
+            pthread_cond_signal(&(commonCbCtx->cond));
             pthread_mutex_unlock(&(commonCbCtx->mutex));
-            pthread_mutex_destroy(&(commonCbCtx->mutex));
-            pthread_cond_destroy(&(commonCbCtx->cond));
-            free(commonCbCtx);
         } else {
             pthread_mutex_unlock(&(commonCbCtx->mutex));
         }
     }
-
-    free(curCbCtx->infos);
-    free(curCbCtx->appendParam->cb);
-    free(curCbCtx->appendParam);
-    free(curCbCtx);
 }
 
-int GsUwalWriteAsync(UwalId id, int nBytes, char *buf, UwalNodeInfo *infos)
+int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos)
 {
     uint64_t offset;
     int bufferOffset = 0;
@@ -917,80 +1072,131 @@ int GsUwalWriteAsync(UwalId id, int nBytes, char *buf, UwalNodeInfo *infos)
     int batchIONumber = 0;
     int batchLastIOSize = 0;
     int ret = 0;
-
-    batchIOSize = g_instance.attr.attr_storage.uwal_batch_io_size;
-    batchIONumber = nBytes / batchIOSize;
-    if (nBytes % batchIOSize != 0) {
-        batchIONumber += 1;
+    int pageSize = XLOG_BLCKSZ;
+    int totalPages = nBytes / pageSize;
+    int minPages = UWAL_MIN_PAGES;
+    int workerThreadNum = UWAL_WORKER_NUM;
+    if (nBytes % pageSize > 0) {
+        totalPages += 1;
     }
+
+    if (totalPages <= workerThreadNum * minPages) {
+        batchIONumber = totalPages / minPages;
+        if (totalPages % minPages > 0) {
+            batchIONumber += 1;
+        }
+        batchIOSize = minPages * pageSize;
+    } else {
+        batchIONumber = workerThreadNum;
+        int batchPageNumber = totalPages / batchIONumber;
+        if (batchPageNumber > 128 && totalPages % batchIONumber > 0) {
+            batchPageNumber += 1;
+        }
+        batchIOSize = batchPageNumber * pageSize;
+    }
+
     batchLastIOSize = nBytes - (batchIONumber - 1) * batchIOSize;
 
-    UwalAsyncAppendCbCtx *cbCtx = (UwalAsyncAppendCbCtx *)malloc(sizeof(UwalAsyncAppendCbCtx));
-    cbCtx->ret = 0;
-    cbCtx->curCount = 0;
-    cbCtx->opCount = batchIONumber;
-    cbCtx->infos = infos;
-    cbCtx->interrupted = false;
-    cbCtx->interruptCount = 0;
-    pthread_mutex_init(&(cbCtx->mutex), 0);
-    pthread_cond_init(&(cbCtx->cond), 0);
+    UwalAsyncAppendCbCtx cbCtx = {0};
+    cbCtx.opCount = batchIONumber;
+    cbCtx.infos = infos;
+    pthread_mutex_init(&(cbCtx.mutex), 0);
+    pthread_cond_init(&(cbCtx.cond), 0);
+
+    UwalNodeInfo uwalInfoList[batchIONumber];
+    UwalSingleAsyncCbCtx uwalCbCtxList[batchIONumber];
 
     for (int i = 0; i < batchIONumber; i++) {
-        UwalAppendParam *appendParam = (UwalAppendParam *)malloc(sizeof(UwalAppendParam));
-        UwalNodeInfo *uwalInfos = (UwalNodeInfo *)malloc(sizeof(UwalNodeInfo) + MAX_GAUSS_NODE * sizeof(UwalNodeStatus));
-        UwalCallBack *uwalCB = (UwalCallBack *)malloc(sizeof(UwalCallBack));
-        UwalSingleAsyncCbCtx *uwalCbCtx = (UwalSingleAsyncCbCtx *)malloc(sizeof(UwalSingleAsyncCbCtx));
+        UwalNodeInfo *uwalInfos = &uwalInfoList[i];
+        UwalSingleAsyncCbCtx *uwalCbCtx = &uwalCbCtxList[i];
+
         UwalBuffer buffers[1] = {{buf + bufferOffset, batchIOSize}};
         UwalBufferList bufferList = {1, buffers};
+        UwalCallBack uwalCB = {GsUwalWriteAsyncCallBack, uwalCbCtx};
+        UwalAppendParam appendParam = {id, &bufferList, &uwalCB};
 
-        uwalCbCtx->commonCbCtx = cbCtx;
+        uwalCbCtx->commonCbCtx = &cbCtx;
         uwalCbCtx->infos = uwalInfos;
         uwalCbCtx->ret = 0;
-        uwalCbCtx->appendParam = appendParam;
-
-        uwalCB->cb = GsUwalWriteAsyncCallBack;
-        uwalCB->cbCtx = uwalCbCtx;
-
-        if (i == batchIONumber - 1) {
+        uwalCbCtx->appendParam = &appendParam;
+        if (i == 0) {
             buffers[0].len = batchLastIOSize;
             bufferOffset += batchLastIOSize;
         } else {
             bufferOffset += batchIOSize;
         }
 
-        appendParam->uwalId = &id;
-        appendParam->bufferList = &bufferList;
-        appendParam->cb = uwalCB;
-
-        ret = ock_uwal_append(appendParam, &offset, (void *)uwalInfos);
+        ret = ock_uwal_append(&appendParam, &offset, (void *)uwalInfos);
         if (ret != 0) {
-            free(appendParam);
-            free(uwalInfos);
-            free(uwalCB);
-            free(uwalCbCtx);
-            pthread_mutex_lock(&(cbCtx->mutex));
-            cbCtx->interrupted = true;
-            cbCtx->interruptCount = i;
-            if (cbCtx->interruptCount == cbCtx->curCount) {
-                pthread_mutex_unlock(&(cbCtx->mutex));
-                pthread_mutex_destroy(&(cbCtx->mutex));
-                pthread_cond_destroy(&(cbCtx->cond));
-                free(cbCtx);
-            } else {
-                pthread_mutex_unlock(&(cbCtx->mutex));
+            pthread_mutex_lock(&(cbCtx.mutex));
+            cbCtx.interrupted = true;
+            cbCtx.interruptCount = i;
+            while (cbCtx.interruptCount < cbCtx.curCount) {
+                pthread_cond_wait(&(cbCtx.cond), &(cbCtx.mutex));
             }
+            pthread_mutex_unlock(&(cbCtx.mutex));
+            pthread_mutex_destroy(&(cbCtx.mutex));
+            pthread_cond_destroy(&(cbCtx.cond));
             return ret;
         }
     }
-    pthread_mutex_lock(&(cbCtx->mutex));
-    while (cbCtx->curCount < cbCtx->opCount) {
-        pthread_cond_wait(&(cbCtx->cond), &(cbCtx->mutex));
+    pthread_mutex_lock(&(cbCtx.mutex));
+    while (cbCtx.curCount < cbCtx.opCount) {
+        pthread_cond_wait(&(cbCtx.cond), &(cbCtx.mutex));
     }
-    pthread_mutex_unlock(&(cbCtx->mutex));
-    pthread_mutex_destroy(&(cbCtx->mutex));
-    pthread_cond_destroy(&(cbCtx->cond));
+    pthread_mutex_unlock(&(cbCtx.mutex));
+    pthread_mutex_destroy(&(cbCtx.mutex));
+    pthread_cond_destroy(&(cbCtx.cond));
 
-    ret = cbCtx->ret;
-    free(cbCtx);
+    ret = cbCtx.ret;
+    return ret;
+}
+
+void GsUwalRcvStateUpdate(XLogRecPtr lastWrited)
+{
+    UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
+    if (uwalrcv == NULL) {
+        return;
+    }
+
+    SpinLockAcquire(&uwalrcv->writeMutex);
+    uwalrcv->writePtr = lastWrited;
+    SpinLockRelease(&uwalrcv->writeMutex);
+    return;
+}
+
+UwalrcvWriterState *GsGetCurrentUwalRcvState(void)
+{
+    UwalrcvWriterState *uwalrcv = NULL;
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    if (walrcv == NULL) {
+        return NULL;
+    }
+    SpinLockAcquire(&walrcv->mutex);
+    uwalrcv = walrcv->uwalRcvState;
+    SpinLockRelease(&walrcv->mutex);
+    return uwalrcv;
+}
+
+void GsUwalRcvFlush()
+{
+    UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
+    if (uwalrcv == NULL) {
+        return;
+    }
+    SpinLockAcquire(&uwalrcv->mutex);
+    uwalrcv->writeNoWait = true;
+    SpinLockRelease(&uwalrcv->mutex);
+    return;
+}
+
+int GsUwalTruncate(UwalId *id, uint64_t offset)
+{
+    int ret;
+    ret = ock_uwal_truncate(id, offset);
+    if (ret != 0) {
+        ereport(WARNING, (errmsg("GsUwalTruncate return failed ret: %d",ret)));
+    }
     return ret;
 }

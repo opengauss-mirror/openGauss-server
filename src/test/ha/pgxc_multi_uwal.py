@@ -61,6 +61,17 @@ class Pterodb():
             self.__modify_conf_standby(conf_file, i)
             self.__modify_conf_application_name(conf_file, "dn_p" + str(i))
             self.__modify_conf_uwal(conf_file, i)
+            self.__modify_conf_synchronous_standby_names(conf_file, self.level, i)
+
+            uwal_path = self.node_data_path_arr[i] + "/uwal"
+            uwal_path_create = "mkdir -p " + uwal_path
+            print(uwal_path_create)
+            os.system(uwal_path_create)
+
+            uwal_log_path = self.node_data_path_arr[i] + "/uwal_log"
+            uwal_log_path_create = "mkdir -p " + uwal_log_path
+            print(uwal_log_path_create)
+            os.system(uwal_log_path_create)
 
             os.system("chmod 0600 " + g_codebase + "/src/test/regress/sslcert/cacert.pem")
             datanode_pem_copy = "cp " + g_codebase + "/src/test/regress/sslcert/cacert.pem " + self.node_data_path_arr[i]
@@ -78,9 +89,6 @@ class Pterodb():
             datanode_hba_modify = "sed -i " + " 's#host.*all.*all.*127.0.0.1/32.*#hostssl    all             all             127.0.0.1/32               sha256#g' "  + self.node_data_path_arr[i] +"/pg_hba.conf"
             print(datanode_hba_modify)
             os.system(datanode_hba_modify)
-
-        # modify primary conf synchronous_standby_names
-        self.__modify_conf_synchronous_standby_names(self.node_data_path_arr[0] + "/postgresql.conf", self.level)
     
     def  __generate_conf(self):
         self.__generate_port()
@@ -138,25 +146,14 @@ class Pterodb():
         file_handler.write(string)
         string = "enable_uwal = on" + "\n"
         file_handler.write(string)
-        string = "uwal_nodeid = " + str(index) +  "\n"
-        file_handler.write(string)
-        string = "uwal_ip = '127.0.0.1'" + "\n"
-        file_handler.write(string)
-        string = "uwal_port = " + str(self.uwal_port_arr[index]) + "\n"
-        file_handler.write(string)
-        string = "uwal_protocol = tcp" + "\n"
-        file_handler.write(string)
         string = "uwal_disk_size = 8589934592" + "\n"
         file_handler.write(string)
-        string = "uwal_disk_block_size = 134217728" + "\n"
+        string = "uwal_config = '{\"uwal_nodeid\": %d, \"uwal_ip\": \"127.0.0.1\", \"uwal_port\": %d, \"uwal_protocol\": \"tcp\"}'\n" % \
+            (index, self.uwal_port_arr[index])
         file_handler.write(string)
-        string = "uwal_devices_path = '" + self.node_data_path_arr[index] + '/uwal_device_file' + "'\n"
+        string = "uwal_devices_path = '" + self.node_data_path_arr[index] + '/uwal' + "'\n"
         file_handler.write(string)
         string = "uwal_log_path = '" + self.node_data_path_arr[index] + '/uwal_log' + "'\n"
-        file_handler.write(string)
-        string = "uwal_rpc_worker_thread_num = 4" + "\n"
-        file_handler.write(string)
-        string = "uwal_rpc_timeout = 30000" + "\n"
         file_handler.write(string)
         string = "uwal_rpc_compression_switch = false" + "\n"
         file_handler.write(string)
@@ -172,6 +169,8 @@ class Pterodb():
         file_handler.write(string)
         string = "ssl_key_file = 'server.key'" + "\n"
         file_handler.write(string)
+        string = "synchronous_commit = on\n"
+        file_handler.write(string)
         file_handler.close()
 
     def __modify_conf_port(self, conf_file, port):
@@ -180,12 +179,14 @@ class Pterodb():
         file_handler.write(string)
         file_handler.close()
 
-    def __modify_conf_synchronous_standby_names(self, conf_file, level):
+    def __modify_conf_synchronous_standby_names(self, conf_file, level, cur_node_id):
         if (self.standby_node_num == 0):
             return
         file_handler = open(conf_file, "a")
         standby_appname_arr = []
-        for i in range(1, self.standby_node_num + 1):
+        for i in range(0, self.standby_node_num + 1):
+            if i == cur_node_id:
+                continue
             standby_appname_arr.append("dn_p" + str(i))
         standby_appname = ", ".join(standby_appname_arr)
         string = "synchronous_standby_names = 'ANY " + str(level) + " (" + standby_appname + ")'\n"

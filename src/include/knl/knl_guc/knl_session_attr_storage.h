@@ -273,17 +273,6 @@ typedef struct knl_session_attr_storage {
     int64 max_standby_lsn_info_size;
     
     bool enable_uwal;
-    int uwal_batch_io_size;
-    int uwal_port;
-    int uwal_nodeid;
-    int uwal_connect_type;
-    int uwal_connect_timeout;
-    int uwal_connect_retries;
-    int64 uwal_pool_size;
-    int uwal_thread_groups;
-    bool uwal_enable_compression;
-    bool uwal_enable_flowcontrol;
-    int uwal_flowthreshold;
     char* uwal_path;
 } knl_session_attr_storage;
 

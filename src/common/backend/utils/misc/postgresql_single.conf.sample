@@ -859,19 +859,13 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 # UWAL OPTIONS
 #------------------------------------------------------------------------------
 #enable_uwal = on
-#uwal_nodeid = 0
-#uwal_ip = '127.0.0.1'
-#uwal_port = 9891
-#uwal_protocol = tcp
 #uwal_disk_size = 8589934592
-#uwal_disk_block_size = 134217728
 #uwal_devices_path = 'uwal_device_file'
 #uwal_log_path = 'uwal_log'
-#uwal_rpc_worker_thread_num = 4
-#uwal_rpc_timeout = 30000
 #uwal_rpc_compression_switch = false
 #uwal_rpc_flowcontrol_switch = false
 #uwal_rpc_flowcontrol_value = 128
+#uwal_config = '{"uwal_nodeid": 0, "uwal_ip": "127.0.0.1", "uwal_port": 9991, "uwal_protocol": "tcp", "cpu_bind_switch": "true", "cpu_bind_start": 1, "cpu_bind_num": 3}'
 
 # These settings must be set when enable_uwal is on by standby node, 
 # and it be add in ANY params in synchronous_standby_names by primary node.

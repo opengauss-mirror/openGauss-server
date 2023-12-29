@@ -165,6 +165,7 @@ typedef struct WalSnd {
     TimestampTz lastApplyChangeTime;
 
     char remote_application_name[NAMEDATALEN];
+    bool standbyInSyncRepConfig;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;

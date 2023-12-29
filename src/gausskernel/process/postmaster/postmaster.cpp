@@ -3128,7 +3128,8 @@ int PostmasterMain(int argc, char* argv[])
             if (ret != 0) {
                 ereport(PANIC, (errmsg("uwal primary init notify failed, ret: %d", ret)));
             }
-        } else if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        } else if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
+                   t_thrd.postmaster_cxt.HaShmData->current_mode == PENDING_MODE) {
             ret = GsUwalStandbyInitNotify();
             if (ret != 0) {
                 ereport(PANIC, (errmsg("uwal standby init notify failed, ret: %d", ret)));
@@ -4166,6 +4167,22 @@ static int ServerLoop(void)
          */
         if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN && !SS_REPLICATION_STANDBY_CLUSTER) {
             g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                if (t_thrd.postmaster_cxt.audit_standby_switchover || t_thrd.postmaster_cxt.audit_primary_failover) {
+                    int ret = GsUwalPrimaryInitNotify();
+                    if (ret != 0) {
+                        ereport(PANIC, (errmsg("uwal primary init notify failed. uwal ret: %d", ret)));
+                    }
+                }
+            }
+        }
+
+        if (g_instance.attr.attr_storage.enable_uwal) {
+            if (g_instance.pid_cxt.WalRcvWriterPID == 0 && pmState == PM_RUN &&
+                (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
+                 t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE)) {
+                g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
+            }
         }
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && (pmState == PM_RUN ||
@@ -7047,8 +7064,26 @@ static void reaper(SIGNAL_ARGS)
                 }
             }
 
-            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_REPLICATION_STANDBY_CLUSTER)
+            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_REPLICATION_STANDBY_CLUSTER) {
                 g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+                if (g_instance.attr.attr_storage.enable_uwal) {
+                    if (t_thrd.postmaster_cxt.audit_standby_switchover ||
+                        t_thrd.postmaster_cxt.audit_primary_failover) {
+                        int ret = GsUwalPrimaryInitNotify();
+                        if (ret != 0) {
+                            ereport(PANIC, (errmsg("uwal primary init notify failed at reaper. uwal ret: %d", ret)));
+                        }
+                    }
+                }
+            }
+
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                if (g_instance.pid_cxt.WalRcvWriterPID == 0 && pmState == PM_RUN &&
+                    (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
+                     t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE)) {
+                    g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
+                }
+            }
 
             if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0)
                 g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
