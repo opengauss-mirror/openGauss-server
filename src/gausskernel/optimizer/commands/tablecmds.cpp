@@ -277,6 +277,7 @@ typedef struct NewColumnValue {
                                > 0 denote modify with first|after */
     char *col_name;
     AttrNumber generate_attnum;
+    bool is_updated;
 } NewColumnValue;
 
 /*
@@ -497,6 +498,8 @@ static void ExecChangeTableSpaceForCStorePartition(AlteredTableInfo*, LOCKMODE);
 
 static int GetAfterColumnAttnum(Oid attrelid, const char *after_name);
 static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endattnum, bool is_increase);
+static void UpdatePgStatisticFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
+static void UpdatePgStatisticExtFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgDescriptionFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase);
 static void UpdatePgAttributeFirstAfter(Relation attr_rel, Oid attrelid, int startattnum, int endattnum,
     bool is_increase);
@@ -11055,6 +11058,111 @@ static Node *UpdateVarattnoAfterAddColumn(Node *node, int startattnum, int endat
 }
 
 /*
+ * update pg_statistic
+ * 1. add column with first or after column
+ * 2. modify column to first or after column
+ */
+static void UpdatePgStatisticFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase)
+{
+    Relation stat_rel;
+    HeapTuple stat_tuple;
+    ScanKeyData key[3];
+    SysScanDesc scan;
+    Form_pg_statistic stat_form;
+
+    stat_rel = heap_open(StatisticRelationId, RowExclusiveLock);
+
+    for (int i = (is_increase ? endattnum : startattnum);
+        (is_increase ? i >= startattnum : i <= endattnum); (is_increase ? i-- : i++)) {
+        ScanKeyInit(&key[0], Anum_pg_statistic_starelid, BTEqualStrategyNumber, F_OIDEQ,
+            ObjectIdGetDatum(RelationGetRelid(rel)));
+        ScanKeyInit(&key[1], Anum_pg_statistic_starelkind, BTEqualStrategyNumber, F_CHAREQ, ObjectIdGetDatum(STARELKIND_CLASS));
+        ScanKeyInit(&key[2], Anum_pg_statistic_staattnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(i));
+
+        scan = systable_beginscan(stat_rel, StatisticRelidKindAttnumInhIndexId, true, NULL, 3, key);
+
+       while (HeapTupleIsValid(stat_tuple = systable_getnext(scan))) {
+            Datum values[Natts_pg_statistic] = { 0 };
+            bool nulls[Natts_pg_statistic] = { 0 };
+            bool replaces[Natts_pg_statistic] = { 0 };
+            HeapTuple new_stat_tuple;
+
+            stat_form = (Form_pg_statistic)GETSTRUCT(stat_tuple);
+
+            values[Anum_pg_statistic_staattnum - 1] = is_increase ? Int16GetDatum(stat_form->staattnum + 1) :
+                Int16GetDatum(stat_form->staattnum - 1);
+            replaces[Anum_pg_statistic_staattnum - 1] = true;
+
+            new_stat_tuple = heap_modify_tuple(stat_tuple, RelationGetDescr(stat_rel), values, nulls, replaces);
+            simple_heap_update(stat_rel, &new_stat_tuple->t_self, new_stat_tuple);
+            CatalogUpdateIndexes(stat_rel, new_stat_tuple);
+
+            heap_freetuple_ext(new_stat_tuple);
+        }
+        systable_endscan(scan);
+    }
+    heap_close(stat_rel, RowExclusiveLock);
+}
+
+/*
+ * update pg_statistic_ext
+ * 1. add column with first or after column
+ * 2. modify column to first or after column
+ */
+static void UpdatePgStatisticExtFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase)
+{
+    Relation stat_ext_rel;
+    HeapTuple stat_ext_tuple;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    int curattnum = is_increase ? endattnum + 1 : startattnum - 1;
+    int newattnum = is_increase ? startattnum : endattnum;
+
+    ScanKeyInit(&key[0], Anum_pg_statistic_ext_starelid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(RelationGetRelid(rel)));
+    ScanKeyInit(&key[1], Anum_pg_statistic_ext_starelkind, BTEqualStrategyNumber, F_CHAREQ, ObjectIdGetDatum(STARELKIND_CLASS));
+    stat_ext_rel = heap_open(StatisticExtRelationId, RowExclusiveLock);
+    scan = systable_beginscan(stat_ext_rel, StatisticExtRelidKindInhKeyIndexId, true, NULL, 2, key);
+
+    while (HeapTupleIsValid(stat_ext_tuple = systable_getnext(scan))) {
+        bool is_null = false;
+        Datum values[Natts_pg_statistic_ext] = { 0 };
+        bool nulls[Natts_pg_statistic_ext] = { 0 };
+        bool replaces[Natts_pg_statistic_ext] = { 0 };
+        int2vector *stakey = NULL;
+        int2vector *new_stakey = NULL;
+        HeapTuple new_stat_ext_tuple;
+
+        Datum stakey_datum = fastgetattr(stat_ext_tuple, Anum_pg_statistic_ext_stakey, RelationGetDescr(stat_ext_rel), &is_null);
+        stakey = (int2vector *)DatumGetPointer(stakey_datum);
+        int2 *stakey_values = (int2 *)palloc0(stakey->dim1 * sizeof(int2));
+        for (int i = 0; i < stakey->dim1; i++) {
+            if (stakey->values[i] >= startattnum && stakey->values[i] <= endattnum) {
+                stakey_values[i] = is_increase ? (stakey->values[i] + 1) : (stakey->values[i] - 1);
+            } else if (stakey->values[i] == curattnum) {
+                stakey_values[i] = newattnum;
+            } else {
+                stakey_values[i] = stakey->values[i];
+            }
+        }
+        new_stakey = buildint2vector(stakey_values, stakey->dim1);
+        values[Anum_pg_statistic_ext_stakey - 1] = PointerGetDatum(new_stakey);
+        replaces[Anum_pg_statistic_ext_stakey - 1] = true;
+
+        new_stat_ext_tuple = heap_modify_tuple(stat_ext_tuple, RelationGetDescr(stat_ext_rel), values, nulls, replaces);
+        simple_heap_update(stat_ext_rel, &new_stat_ext_tuple->t_self, new_stat_ext_tuple);
+        CatalogUpdateIndexes(stat_ext_rel, new_stat_ext_tuple);
+
+        pfree_ext(new_stakey);
+        pfree_ext(stakey_values);
+        heap_freetuple_ext(new_stat_ext_tuple);
+    }
+
+    systable_endscan(scan);
+    heap_close(stat_ext_rel, RowExclusiveLock);
+}
+
+/*
  * update pg_description
  * 1. add column with first or after col_name.
  * 2. modify column to first or after column.
@@ -11209,16 +11317,17 @@ static void UpdatePgIndexFirstAfter(Relation rel, int startattnum, int endattnum
         AssertEreport(!is_null, MOD_OPT, "");
         indkey = (int2vector *)DatumGetPointer(indkey_datum);
         Assert(indkey->dim1 == numatts);
-        new_indkey = buildint2vector(NULL, numatts);
+        int2 *indkey_values = (int2 *)palloc0(numatts * sizeof(int2));
         for (int i = 0; i < numatts; i++) {
             if (indkey->values[i] >= startattnum && indkey->values[i] <= endattnum) {
-                new_indkey->values[i] = is_increase ? (indkey->values[i] + 1) : (indkey->values[i] - 1);
+                indkey_values[i] = is_increase ? (indkey->values[i] + 1) : (indkey->values[i] - 1);
             } else if (indkey->values[i] == curattnum) {
-                new_indkey->values[i] = newattnum;
+                indkey_values[i] = newattnum;
             } else {
-                new_indkey->values[i] = indkey->values[i];
+                indkey_values[i] = indkey->values[i];
             }
         }
+        new_indkey = buildint2vector(indkey_values, numatts);
         values[Anum_pg_index_indkey - 1] = PointerGetDatum(new_indkey);
         replaces[Anum_pg_index_indkey - 1] = true;
 
@@ -11267,6 +11376,7 @@ static void UpdatePgIndexFirstAfter(Relation rel, int startattnum, int endattnum
         CatalogUpdateIndexes(index_rel, new_index_tuple);
 
         pfree_ext(new_indkey);
+        pfree_ext(indkey_values);
         heap_freetuple_ext(new_index_tuple);
     }
 
@@ -11507,7 +11617,7 @@ static void UpdateIndexFirstAfter(Relation rel)
     HeapTuple index_tuple;
     ScanKeyData key;
     SysScanDesc scan;
-    Form_pg_index index_form;
+    MemoryContext oldcontext;
 
     /* Prepare to scan pg_index for entries having indrelid = this rel. */
     ScanKeyInit(&key, Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ,
@@ -11516,11 +11626,15 @@ static void UpdateIndexFirstAfter(Relation rel)
     scan = systable_beginscan(pg_index_rel, IndexIndrelidIndexId, true, NULL, 1, &key);
 
     while (HeapTupleIsValid(index_tuple = systable_getnext(scan))) {
-        index_form = (Form_pg_index)GETSTRUCT(index_tuple);
+        Form_pg_index index_form = (Form_pg_index)GETSTRUCT(index_tuple);
 
         table_index_rel = index_open(index_form->indexrelid, RowExclusiveLock);
 
-        table_index_rel->rd_index = index_form;
+        oldcontext = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
+        pfree_ext(table_index_rel->rd_indextuple);
+        table_index_rel->rd_indextuple = heap_copytuple(index_tuple);
+        table_index_rel->rd_index = (Form_pg_index)GETSTRUCT(table_index_rel->rd_indextuple);
+        (void)MemoryContextSwitchTo(oldcontext);
 
         index_close(table_index_rel, RowExclusiveLock);
     }
@@ -11703,23 +11817,25 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
             HeapTuple new_par_tuple;
 
             partkey = (int2vector *)DatumGetPointer(partkey_datum);
-            new_partKey = buildint2vector(NULL, partkey->dim1);
+            int2 *partkey_values = (int2 *)palloc0(partkey->dim1 * sizeof(int2));
+            
             for (int i = 0; i < partkey->dim1; i++) {
                 if (partkey->values[i] >= startattnum && partkey->values[i] <= endattnum) {
-                    new_partKey->values[i] = is_increase ? (partkey->values[i] + 1) : (partkey->values[i] - 1);
+                    partkey_values[i] = is_increase ? (partkey->values[i] + 1) : (partkey->values[i] - 1);
                 } else if (partkey->values[i] == curattnum) {
                     if (is_modified) {
                         if (has_partition != NULL) {
                             *has_partition = true;
                         }
-                        new_partKey->values[i] = 0;
+                        partkey_values[i] = 0;
                     } else {
-                        new_partKey->values[i] = newattnum;
+                        partkey_values[i] = newattnum;
                     }
                 } else {
-                    new_partKey->values[i] = partkey->values[i];
+                    partkey_values[i] = partkey->values[i];
                 }
             }
+            new_partKey = buildint2vector(partkey_values, partkey->dim1);
             values[Anum_pg_partition_partkey - 1] = PointerGetDatum(new_partKey);
             replaces[Anum_pg_partition_partkey - 1] = true;
 
@@ -11728,6 +11844,7 @@ static void UpdatePgPartitionFirstAfter(Relation rel, int startattnum, int endat
             CatalogUpdateIndexes(par_rel, new_par_tuple);
 
             pfree_ext(new_partKey);
+            pfree_ext(partkey_values);
             heap_freetuple_ext(new_par_tuple);
         }
     }
@@ -12002,21 +12119,24 @@ static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattn
         bool nulls[Natts_pg_trigger] = { 0 };
         bool replaces[Natts_pg_trigger] = { 0 };
         HeapTuple new_tri_tuple;
+        int2vector *new_tgattr = NULL;
+        int2 *tgattr_values = NULL;
 
         Datum tgattr_datum = fastgetattr(tri_tuple, Anum_pg_trigger_tgattr, tri_rel->rd_att, &is_null);
         if (!is_null) {
             int2vector *tgattr = (int2vector *)DatumGetPointer(tgattr_datum);
-            int2vector *new_tgattr = buildint2vector(NULL, tgattr->dim1);
+            int2 *tgattr_values = (int2 *)palloc0(tgattr->dim1 * sizeof(int2));
             for (int i = 0; i < tgattr->dim1; i++) {
                 if (tgattr->values[i] >= startattnum && tgattr->values[i] <= endattnum) {
-                    new_tgattr->values[i] = is_increase ? (tgattr->values[i] + 1) : (tgattr->values[i] - 1);
+                    tgattr_values[i] = is_increase ? (tgattr->values[i] + 1) : (tgattr->values[i] - 1);
                 } else if (tgattr->values[i] == curattnum) {
-                    new_tgattr->values[i] = newattnum;
+                    tgattr_values[i] = newattnum;
                 } else {
-                    new_tgattr->values[i] = tgattr->values[i];
+                    tgattr_values[i] = tgattr->values[i];
                 }
             }
 
+            new_tgattr = buildint2vector(tgattr_values, tgattr->dim1);
             values[Anum_pg_trigger_tgattr - 1] = PointerGetDatum(new_tgattr);
             replaces[Anum_pg_trigger_tgattr - 1] = true;
         }
@@ -12040,6 +12160,10 @@ static void UpdatePgTriggerFirstAfter(Relation rel, int startattnum, int endattn
         new_tri_tuple = heap_modify_tuple(tri_tuple, RelationGetDescr(tri_rel), values, nulls, replaces);
         simple_heap_update(tri_rel, &new_tri_tuple->t_self, new_tri_tuple);
         CatalogUpdateIndexes(tri_rel, new_tri_tuple);
+
+        pfree_ext(tgattr_values);
+        pfree_ext(new_tgattr);
+        heap_freetuple_ext(new_tri_tuple);
     }
 
     systable_endscan(scan);
@@ -12090,6 +12214,8 @@ static void UpdatePgRlspolicyFirstAfter(Relation rel, int startattnum, int endat
         new_rls_tuple = heap_modify_tuple(rls_tuple, RelationGetDescr(rls_rel), values, nulls, replaces);
         simple_heap_update(rls_rel, &new_rls_tuple->t_self, new_rls_tuple);
         CatalogUpdateIndexes(rls_rel, new_rls_tuple);
+
+        heap_freetuple_ext(new_rls_tuple);
     }
 
     systable_endscan(scan);
@@ -12336,6 +12462,8 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     if (is_addloc) {
         UpdatePgAttributeFirstAfter(attrdesc, myrelid, newattnum, currattnum, true);
         UpdatePgDescriptionFirstAfter(rel, newattnum, currattnum, true);
+        UpdatePgStatisticFirstAfter(rel, newattnum, currattnum, true);
+        UpdatePgStatisticExtFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgIndexFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgConstraintFirstAfter(rel, newattnum, currattnum, true);
         UpdatePgConstraintConfkeyFirstAfter(rel, newattnum, currattnum, true);
@@ -15918,6 +16046,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
         newval->newattnum = 0;
         newval->col_name = pstrdup(colName);
         newval->generate_attnum = 0;
+        newval->is_updated = false;
 
         tab->newvals = lappend(tab->newvals, newval);
         if (ATColumnChangeRequiresRewrite(transform, attnum))
@@ -16345,6 +16474,8 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     UpdatePgPartitionFirstAfter(rel, startattnum, endattnum, is_increase, true, &has_partition);
     UpdatePgAttributeFirstAfter(attr_rel, myrelid, startattnum, endattnum, is_increase);
     UpdatePgDescriptionFirstAfter(rel, startattnum, endattnum, is_increase);
+    UpdatePgStatisticFirstAfter(rel, startattnum, endattnum, is_increase);
+    UpdatePgStatisticExtFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgIndexFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgConstraintFirstAfter(rel, startattnum, endattnum, is_increase);
     UpdatePgConstraintConfkeyFirstAfter(rel, startattnum, endattnum, is_increase);
@@ -16435,7 +16566,7 @@ static void UpdateNewvalsAttnum(AlteredTableInfo* tab, Relation rel, AlterTableC
             continue;
         }
 
-        if (strcmp(ex->col_name, col_name) == 0) {
+        if (strcmp(ex->col_name, col_name) == 0 && !ex->is_updated) {
             HeapTuple heap_tup;
             Form_pg_attribute att_tup;
 
@@ -16447,8 +16578,10 @@ static void UpdateNewvalsAttnum(AlteredTableInfo* tab, Relation rel, AlterTableC
             att_tup = (Form_pg_attribute)GETSTRUCT(heap_tup);
             ex->attnum = att_tup->attnum;
             ex->newattnum = GetNewattnumFirstAfter(rel, cmd, ex->attnum);
+            ex->is_updated = true;
 
             tableam_tops_free_tuple(heap_tup);
+            return;
         }
     }
 }
@@ -16871,6 +17004,10 @@ static ObjectAddress ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, 
     DelDependencONDataType(rel, depRel, attTup);
 
     heap_close(depRel, RowExclusiveLock);
+
+    if (tab->is_first_after) {
+        UpdateNewvalsAttnum(tab, rel, cmd, colName);
+    }
 
     /*
      * Here we go --- change the recorded column type and collation.  (Note
@@ -32815,7 +32952,7 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
         tab->new_notnull = true;
     }
 
-    if (is_first_after) {
+    if (is_first_after || tab->is_first_after) {
         UpdateNewvalsAttnum(tab, rel, cmd, col_name);
     }
 
