@@ -1081,11 +1081,15 @@ static void pgaudit_write_file(char* buffer, int count)
     /* if record time is earlier than current file's create time,
      * create a new audit file to avoid the confusion caused by system clock change */
     FILE* fh = NULL;
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
+    bool haslock = true;
     if (g_instance.audit_cxt.audit_indextbl) {
         AuditIndexItem *cur_item =
         g_instance.audit_cxt.audit_indextbl->data +
         g_instance.audit_cxt.audit_indextbl->curidx[t_thrd.audit.cur_thread_idx];
         if (curtime < cur_item->ctime) {
+            LWLockRelease(AuditIndexFileLock);
+            haslock = false;
             auditfile_close(SYSAUDITFILE_TYPE);
             fh = auditfile_open((pg_time_t)time(NULL), "a", true);
             if (fh != NULL) {
@@ -1095,6 +1099,9 @@ static void pgaudit_write_file(char* buffer, int count)
     }
 
     uint32 retry_cnt = 0;
+    if (haslock) {
+        LWLockRelease(AuditIndexFileLock);
+    }
 retry1:
     rc = fwrite(buffer, 1, count, t_thrd.audit.sysauditFile);
 
