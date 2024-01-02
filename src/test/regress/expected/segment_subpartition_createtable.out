@@ -1403,30 +1403,30 @@ select pg_get_tabledef('range_range_03');
  WITH (orientation=row, parallel_workers=10, segment=on, compression=no)                           +
  PARTITION BY RANGE (c_int) SUBPARTITION BY RANGE (c_char1)                                        +
  (                                                                                                 +
-     PARTITION p1 VALUES LESS THAN (50) TABLESPACE pg_default                                      +
+     PARTITION p1 VALUES LESS THAN (50)                                                            +
      (                                                                                             +
-         SUBPARTITION p1_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                           +
-         SUBPARTITION p1_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                       +
+         SUBPARTITION p1_1 VALUES LESS THAN ('c'),                                                 +
+         SUBPARTITION p1_2 VALUES LESS THAN (MAXVALUE)                                             +
      ),                                                                                            +
-     PARTITION p2 VALUES LESS THAN (100) TABLESPACE pg_default                                     +
+     PARTITION p2 VALUES LESS THAN (100)                                                           +
      (                                                                                             +
-         SUBPARTITION p2_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                           +
-         SUBPARTITION p2_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                       +
+         SUBPARTITION p2_1 VALUES LESS THAN ('c'),                                                 +
+         SUBPARTITION p2_2 VALUES LESS THAN (MAXVALUE)                                             +
      ),                                                                                            +
-     PARTITION p3 VALUES LESS THAN (150) TABLESPACE pg_default                                     +
+     PARTITION p3 VALUES LESS THAN (150)                                                           +
      (                                                                                             +
-         SUBPARTITION p3_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                           +
-         SUBPARTITION p3_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                       +
+         SUBPARTITION p3_1 VALUES LESS THAN ('c'),                                                 +
+         SUBPARTITION p3_2 VALUES LESS THAN (MAXVALUE)                                             +
      ),                                                                                            +
-     PARTITION p4 VALUES LESS THAN (200) TABLESPACE pg_default                                     +
+     PARTITION p4 VALUES LESS THAN (200)                                                           +
      (                                                                                             +
-         SUBPARTITION p4_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                           +
-         SUBPARTITION p4_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                       +
+         SUBPARTITION p4_1 VALUES LESS THAN ('c'),                                                 +
+         SUBPARTITION p4_2 VALUES LESS THAN (MAXVALUE)                                             +
      ),                                                                                            +
-     PARTITION p5 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                +
+     PARTITION p5 VALUES LESS THAN (MAXVALUE)                                                      +
      (                                                                                             +
-         SUBPARTITION p5_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                           +
-         SUBPARTITION p5_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                       +
+         SUBPARTITION p5_1 VALUES LESS THAN ('c'),                                                 +
+         SUBPARTITION p5_2 VALUES LESS THAN (MAXVALUE)                                             +
      )                                                                                             +
  )                                                                                                 +
  ENABLE ROW MOVEMENT;                                                                              +

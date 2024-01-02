@@ -1616,9 +1616,8 @@ static void AppendTablespaceInfo(const char *spcname, StringInfo buf, tableInfo 
 {
     if (spcname != NULL) {
         appendStringInfo(buf, " TABLESPACE %s", quote_identifier(spcname));
-    } else {
-        appendStringInfo(buf, " TABLESPACE pg_default");
     }
+    /* If the tablespace is null, the table uses the default tablespace of the database or schema. */
 }
 
 /*
