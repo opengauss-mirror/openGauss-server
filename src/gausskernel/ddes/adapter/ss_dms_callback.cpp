@@ -374,6 +374,9 @@ static int CBSwitchoverDemote(void *db_handle)
             return DMS_SUCCESS;
         } else {
             if (ntries >= WAIT_DEMOTE || dms_reform_failed()) {
+                SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
+                t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
+                SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
                 ereport(WARNING,
                     (errmodule(MOD_DMS), errmsg("[SS switchover] Failure in %s primary demote, need reform recovery.",
                         DemoteModeDesc(demote_mode))));
