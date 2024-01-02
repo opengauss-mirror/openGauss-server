@@ -1517,5 +1517,30 @@ insert into inttest values(1::myint),(null);
 
 select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null);
 
+-- test change behavior_compat_options
+reset behavior_compat_options;
+drop type if exists test_inout_type;
+create type test_inout_type as (curr_str varchar(32));
+create or replace function test_inout_func(a inout test_inout_type) return number
+is
+begin
+    return 0;
+end;
+/
+create or replace function test_inout_func2() return number
+is
+declare
+    a test_inout_type;
+begin
+    return test_inout_func(a);
+end;
+/
+select test_inout_func2();
+set behavior_compat_options="proc_outparam_override";
+select test_inout_func2();
+drop function test_inout_func2();
+drop function test_inout_func();
+drop type test_inout_type;
+
 -- clean
 drop schema if exists plpgsql_inout cascade;

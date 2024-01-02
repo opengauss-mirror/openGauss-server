@@ -5948,8 +5948,9 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
         return PLPGSQL_RC_RETURN;
     }
 
-    bool need_param_seperation = estate->func->is_plpgsql_func_with_outparam;
-    if (need_param_seperation && stmt->expr == NULL) {
+    bool needParamSeperation = estate->func->is_plpgsql_func_with_outparam &&
+                               ((estate->func->guc_stat & OPT_PROC_OUTPARAM_OVERRIDE) != 0);
+    if (needParamSeperation && stmt->expr == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PLSQL),
                         errmsg("Value assignment for the out parameter in plpgsql language functions, Unsupported "
                                "return nothing in PL/pgSQL function"),
@@ -5983,7 +5984,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
             }
         }
 
-        if (!need_param_seperation) {
+        if (!needParamSeperation) {
             return PLPGSQL_RC_RETURN;
         }
     }
@@ -6001,7 +6002,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("huge clob do not support as return parameter")));
                 }
-                if (need_param_seperation) {
+                if (needParamSeperation) {
                     estate->paramval = value;
                     estate->paramtype = var->datatype->typoid;
                     estate->paramisnull = var->isnull;
@@ -6053,7 +6054,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
                 PLpgSQL_rec* rec = (PLpgSQL_rec*)retvar;
 
                 if (HeapTupleIsValid(rec->tup)) {
-                    if (need_param_seperation) {
+                    if (needParamSeperation) {
                         estate->paramval = PointerGetDatum(rec->tup);
                         estate->paramtupdesc = rec->tupdesc;
                         estate->paramisnull = false;
@@ -6071,7 +6072,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
                 PLpgSQL_row* row = (PLpgSQL_row*)retvar;
 
                 AssertEreport(row->rowtupdesc != NULL, MOD_PLSQL, "row's tuple description is required.");
-                if (need_param_seperation) {
+                if (needParamSeperation) {
                     set_outparam_info_of_record_type(estate, row);
                 } else {
                     estate->retval = PointerGetDatum(make_tuple_from_row(estate, row, row->rowtupdesc));

@@ -777,6 +777,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->fn_searchpath->addCatalog = true;
     func->fn_searchpath->addTemp = true;
     func->ns_top = curr_compile->ns_top;
+    func->guc_stat = u_sess->utils_cxt.behavior_compat_flags;
 
     if (is_dml_trigger)
         func->fn_is_trigger = PLPGSQL_DML_TRIGGER;
