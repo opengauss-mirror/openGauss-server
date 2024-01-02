@@ -86,6 +86,7 @@ static int lengthCompareJsonbStringValue(const void* a, const void* b, void* bin
 static int lengthCompareJsonbPair(const void* a, const void* b, void* binequal);
 static void uniqueifyJsonbObject(JsonbValue* object);
 static void uniqueifyJsonbArray(JsonbValue* array);
+static JsonbValue *pushJsonbValueScalar(JsonbParseState **pstate, int seq, JsonbValue *scalarVal);
 
 /*
  * Turn an in-memory JsonbValue into a Jsonb for on-disk storage.
@@ -497,7 +498,74 @@ JsonbValue *getIthJsonbValueFromSuperHeader(JsonbSuperHeader sheader, uint32 i)
  * JsonbValue.  There is one exception -- WJB_BEGIN_ARRAY callers may pass a
  * "raw scalar" pseudo array to append that.
  */
-JsonbValue *pushJsonbValue(JsonbParseState **pstate, int seq, JsonbValue *scalarVal)
+JsonbValue *pushJsonbValue(JsonbParseState **pstate, int seq, JsonbValue *jbval)
+{
+    JsonbIterator *it;
+    JsonbValue *res = NULL;
+    JsonbValue	v;
+    int tok;
+    int			i;
+
+    if (jbval && (seq == WJB_ELEM || seq == WJB_VALUE) && jbval->type == jbvObject) {
+        pushJsonbValue(pstate, WJB_BEGIN_OBJECT, NULL);
+        for (i = 0; i < jbval->object.nPairs; i++) {
+            pushJsonbValue(pstate, WJB_KEY, &jbval->object.pairs[i].key);
+            pushJsonbValue(pstate, WJB_VALUE, &jbval->object.pairs[i].value);
+        }
+
+        return pushJsonbValue(pstate, WJB_END_OBJECT, NULL);
+    }
+
+    if (jbval && (seq == WJB_ELEM || seq == WJB_VALUE) && jbval->type == jbvArray) {
+        pushJsonbValue(pstate, WJB_BEGIN_ARRAY, NULL);
+        for (i = 0; i < jbval->array.nElems; i++) {
+            pushJsonbValue(pstate, WJB_ELEM, &jbval->array.elems[i]);
+        }
+
+        return pushJsonbValue(pstate, WJB_END_ARRAY, NULL);
+    }
+
+    if (!jbval || (seq != WJB_ELEM && seq != WJB_VALUE) || jbval->type != jbvBinary) {
+        /* drop through */
+        return pushJsonbValueScalar(pstate, seq, jbval);
+    }
+
+    /* unpack the binary and add each piece to the pstate */
+    it = JsonbIteratorInit(jbval->binary.data);
+
+    if ((*(uint32 *)jbval->binary.data & JB_FSCALAR) && *pstate) {
+        tok = JsonbIteratorNext(&it, &v, true);
+        Assert(tok == WJB_BEGIN_ARRAY);
+        Assert(v.type == jbvArray && v.array.rawScalar);
+
+        tok = JsonbIteratorNext(&it, &v, true);
+        Assert(tok == WJB_ELEM);
+
+        res = pushJsonbValueScalar(pstate, seq, &v);
+
+        tok = JsonbIteratorNext(&it, &v, true);
+        Assert(tok == WJB_END_ARRAY);
+        Assert(it == NULL);
+
+        return res;
+    }
+
+    while ((tok = JsonbIteratorNext(&it, &v, false)) != WJB_DONE) {
+        res = pushJsonbValueScalar(pstate, tok,
+                                    tok < WJB_BEGIN_ARRAY ||
+                                    (tok == WJB_BEGIN_ARRAY &&
+                                    v.array.rawScalar) ? &v : NULL);
+    }
+
+	return res;
+}
+
+/*
+ * Do the actual pushing, with only scalar or pseudo-scalar-array values
+ * accepted.
+ */
+static JsonbValue *
+pushJsonbValueScalar(JsonbParseState **pstate, int seq, JsonbValue *scalarVal)
 {
     JsonbValue *result = NULL;
 
@@ -509,8 +577,7 @@ JsonbValue *pushJsonbValue(JsonbParseState **pstate, int seq, JsonbValue *scalar
             (*pstate)->contVal.type = jbvArray;
             (*pstate)->contVal.estSize = 3 * sizeof(JEntry);
             (*pstate)->contVal.array.nElems = 0;
-            (*pstate)->contVal.array.rawScalar = (scalarVal &&
-                                                  scalarVal->array.rawScalar);
+            (*pstate)->contVal.array.rawScalar = (scalarVal && scalarVal->array.rawScalar);
             if (scalarVal && scalarVal->array.nElems > 0) {
                 /* Assume that this array is still really a scalar */
                 Assert(scalarVal->type == jbvArray);
@@ -535,24 +602,25 @@ JsonbValue *pushJsonbValue(JsonbParseState **pstate, int seq, JsonbValue *scalar
             appendKey(*pstate, scalarVal);
             break;
         case WJB_VALUE:
-            Assert(IsAJsonbScalar(scalarVal) || scalarVal->type == jbvBinary);
+            Assert(IsAJsonbScalar(scalarVal));
             appendValue(*pstate, scalarVal);
             break;
         case WJB_ELEM:
-            Assert(IsAJsonbScalar(scalarVal) || scalarVal->type == jbvBinary);
+            Assert(IsAJsonbScalar(scalarVal));
             appendElement(*pstate, scalarVal);
             break;
         case WJB_END_OBJECT:
             uniqueifyJsonbObject(&(*pstate)->contVal);
+            /* fall through! */
         case WJB_END_ARRAY:
             /* Steps here common to WJB_END_OBJECT case */
             Assert(!scalarVal);
             result = &(*pstate)->contVal;
 
             /*
-             * Pop stack and push current array/object as value in parent
-             * array/object
-             */
+            * Pop stack and push current array/object as value in parent
+            * array/object
+            */
             *pstate = (*pstate)->next;
             if (*pstate) {
                 switch ((*pstate)->contVal.type) {
