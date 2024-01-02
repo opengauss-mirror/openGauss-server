@@ -799,7 +799,8 @@ int MainLoop(FILE* source, char* querystring)
             successResult = EXIT_USER;
         } else if (pset.db == NULL) {
             successResult = EXIT_BADCONN;
-        }
+        } else
+            successResult = success ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     /*
