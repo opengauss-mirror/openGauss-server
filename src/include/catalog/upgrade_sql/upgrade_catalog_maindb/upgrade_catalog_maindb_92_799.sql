@@ -1,3 +1,6 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92608 then
 /*------ add sys fuction gs_undo_meta_dump_zone ------*/
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_zone(int4, boolean, OUT zone_id oid, OUT persist_type oid, OUT insert text, OUT discard text, OUT forcediscard text, OUT lsn text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4433;
@@ -58,3 +61,5 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_undo_dump_parsepage_mv(relpath text, bl
     STABLE STRICT NOT FENCED NOT SHIPPABLE
 AS $function$gs_undo_dump_parsepage_mv$function$;
 comment on function PG_CATALOG.gs_undo_dump_parsepage_mv(relpath text, blkno bigint, reltype text, rmem boolean) is 'parse uheap data page and undo to output file based on given filepath';
+END IF;
+END $upgrade$;
