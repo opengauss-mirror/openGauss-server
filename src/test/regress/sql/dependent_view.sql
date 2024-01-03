@@ -177,5 +177,42 @@ select * from master_view1;
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
 \d base_table
 
+-- test 3: join方式创建视图
+drop view if exists v_view_independent_1;
+drop table if exists t_view_independent_1;
+drop table if exists t_view_independent_2;
+create table t_view_independent_1(c1 int primary key,c2 text);
+insert into t_view_independent_1 select a,a || 'x' from generate_series(1,3) as a;
+create table t_view_independent_2(c1 int primary key,c2 text);
+insert into t_view_independent_2 select a,a || 'y' from generate_series(2,4) as a;
+create view v_view_independent_1(vc1,vc2,vc3,vc4) as select * from t_view_independent_1 a inner join t_view_independent_2 b on a.c1 = b.c1 ;
+select * from v_view_independent_1;
+--- 删除字段
+ALTER TABLE t_view_independent_1 DROP COLUMN c2;
+--- 查看视图为失效状态
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+select * from v_view_independent_1;
+ALTER TABLE t_view_independent_1 ADD COLUMN c2 text;
+--- 查询视图
+select * from v_view_independent_1;
+-- 查看视图为有效状态
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+--- 修改字段类型
+ALTER TABLE t_view_independent_1 ALTER COLUMN c1 TYPE text;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+select * from v_view_independent_1;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+--- 删除字段类型
+ALTER TABLE t_view_independent_2 DROP COLUMN c1;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+select * from v_view_independent_1;
+ALTER TABLE t_view_independent_2 ADD COLUMN c1 text;
+select * from v_view_independent_1;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+--- 清理环境
+drop view v_view_independent_1;
+drop table t_view_independent_1;
+drop table t_view_independent_2;
+
 --- clean
 drop schema dependent_view cascade;

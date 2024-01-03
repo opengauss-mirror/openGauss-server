@@ -41,7 +41,7 @@
  * Given an RTE and an attribute number, return the appropriate
  * variable name or alias for that attribute of that RTE.
  */
-extern char* get_rte_attribute_name(RangeTblEntry* rte, AttrNumber attnum);
+extern char* get_rte_attribute_name(RangeTblEntry* rte, AttrNumber attnum, bool allowDroppeed = false);
 
 /*
  * Given an RTE and an attribute number, return the appropriate
