@@ -1466,6 +1466,37 @@ my_table h WHERE @r<> 0;
 ------------
 (0 rows)
 
+drop table my_table_1162670;
+ERROR:  table "my_table_1162670" does not exist
+create table my_table_1162670(
+col_1 varchar(50),
+col_2 date,
+col_3 varchar(50) default 'default col_3'
+);
+insert into my_table_1162670 values(NULL, '2023-1-23'),
+('bbbb', '2020-1-23'),
+('cccc', '2021-2-23'),
+('dddd', '2023-3-23'),
+('eeee', NULL);
+SET @date_threshold = '2022-01-01';
+WITH RECURSIVE recursive_query AS (
+SELECT col_1, col_2, col_3
+FROM my_table_1162670
+WHERE col_2 >= @date_threshold
+UNION ALL
+SELECT e.col_1, e.col_2, e.col_3
+FROM my_table_1162670 e
+INNER JOIN recursive_query r ON e.col_2 = (r.col_2 + INTERVAL '1year')
+)
+SELECT col_1, col_2, col_3
+FROM recursive_query
+ORDER BY col_2 ASC;
+ col_1 |   col_2    |     col_3     
+-------+------------+---------------
+       | 01-23-2023 | default col_3
+ dddd  | 03-23-2023 | default col_3
+(2 rows)
+
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
