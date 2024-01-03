@@ -1967,7 +1967,9 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
     int segmentNo = 0;
     UndoFileType undoFileType = UNDO_INVALID;
     if (!is_row_data_file(tablePath, &segmentNo, &undoFileType)) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("%s is not a relation file.", tablePath)));
+        /* file is deleted during backup */
+        FreeFile(fp);
+        return;
     }
 
     char pcaFilePath[MAXPGPATH];
