@@ -1648,6 +1648,33 @@ select @a_1131028:=cast(2 as number);
         2
 (1 row)
 
+DROP PROCEDURE IF EXISTS load_tbtest_WITH_REPLACE;
+NOTICE:  function load_tbtest_with_replace() does not exist, skipping
+CREATE PROCEDURE load_tbtest_WITH_REPLACE(id_count IN INT) AS
+BEGIN
+    SET @id = 1;
+    WHILE @id <= id_count LOOP
+        raise info 'id is %',@id;
+        IF @id % 10 = 0 THEN
+            SET @lsql = '';
+        END IF;
+        SET @id = @id + 1;
+        raise info 'id+ is %',@id;
+    END LOOP;
+END;
+/
+call load_tbtest_WITH_REPLACE(3);
+INFO:  id is 1
+INFO:  id+ is 2
+INFO:  id is 2
+INFO:  id+ is 3
+INFO:  id is 3
+INFO:  id+ is 4
+ load_tbtest_with_replace 
+--------------------------
+ 
+(1 row)
+
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;
 ERROR:  syntax error at or near ":="

@@ -634,6 +634,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 					if (found) {
 						if (entry->isParse) {
 							con = (Const *)uservar->value;
+                            entry->isParse = false;
 						} else {
 							Node *node_tmp = coerce_type(NULL, (Node *)entry->value, entry->value->consttype,
 								((Const *)uservar->value)->consttype, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
