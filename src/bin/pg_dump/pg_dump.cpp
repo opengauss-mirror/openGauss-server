@@ -4818,7 +4818,7 @@ static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
     }
 
     if (strcmp(subinfo->submatchddlowner, "f") == 0) {
-        appendPQExpBuffer(query, ", match_ddl_owner = false");
+        appendPQExpBuffer(query, ", matchddlowner = false");
     }
 
     if (strcmp(subinfo->subsynccommit, "off") != 0) {
