@@ -539,7 +539,21 @@ select @a_1131028:=cast('x' as text);
 select @a_1131028:=cast(2 as int);
 select @a_1131028:=cast(2 as number);
 
-
+DROP PROCEDURE IF EXISTS load_tbtest_WITH_REPLACE;
+CREATE PROCEDURE load_tbtest_WITH_REPLACE(id_count IN INT) AS
+BEGIN
+    SET @id = 1;
+    WHILE @id <= id_count LOOP
+        raise info 'id is %',@id;
+        IF @id % 10 = 0 THEN
+            SET @lsql = '';
+        END IF;
+        SET @id = @id + 1;
+        raise info 'id+ is %',@id;
+    END LOOP;
+END;
+/
+call load_tbtest_WITH_REPLACE(3);
 
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;
