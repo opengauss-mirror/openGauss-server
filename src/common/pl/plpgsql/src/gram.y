@@ -11682,8 +11682,10 @@ read_into_array_table_scalar_list(char *initial_name,
 
     if (type_flag == PLPGSQL_TOK_TABLE_VAR) {
         isarrayelem = read_into_using_add_tableelem(fieldnames, varnos, &nfields, tmpdno, &tok);
-    } else {
+    } else if (type_flag == PLPGSQL_TOK_VARRAY_VAR) {
         isarrayelem = read_into_using_add_arrayelem(fieldnames, varnos, &nfields, tmpdno, &tok);
+    } else {
+        isarrayelem = false;
     }
     if (!isarrayelem)
     {
