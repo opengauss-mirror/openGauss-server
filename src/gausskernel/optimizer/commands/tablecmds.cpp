@@ -2026,6 +2026,25 @@ void UpdatePartKeyExpr(Relation rel, PartitionState *partTableState, Oid partOid
     }
 }
 
+/*Check whether tables or partition stored in segment are created
+in limited tablespaces */
+void CheckSegmentIsInLimitTablespace(char* tablespacename, char* relname) 
+{
+    Oid tablespaceId = InvalidOid;
+    if (tablespacename != NULL) {
+        tablespaceId = get_tablespace_oid(tablespacename, false);
+    }
+    Oid tbspcId = (tablespaceId == InvalidOid) ? u_sess->proc_cxt.MyDatabaseTableSpace : tablespaceId;
+    uint64 tablespaceMaxSize = 0;
+    bool isLimit = TableSpaceUsageManager::IsLimited(tbspcId, &tablespaceMaxSize);
+    if (isLimit) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
+            errmsg("The partition %s do not support segment-page storage", relname != NULL ? relname : ""),
+            errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(tbspcId)),
+            errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+    }
+}
+
 /* ----------------------------------------------------------------
  *		DefineRelation
  *				Creates a new relation.
@@ -2894,6 +2913,40 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 errmsg("The table %s do not support segment-page storage", stmt->relation->relname),
                 errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(tbspcId)),
                 errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+        }
+        if (stmt->partTableState) {
+            ListCell* cell = NULL;
+            Oid partTablespaceId = InvalidOid;
+            char* partitionName = NULL;
+            char* tablespacename = NULL;
+            foreach (cell, stmt->partTableState->partitionList) {
+                char* partitionName = NULL;
+                char* tablespacename = NULL;
+                if (IsA((lfirst(cell)), IntervalPartitionDefState)) {
+                    IntervalPartitionDefState* partition = (IntervalPartitionDefState*)lfirst(cell);
+                    ListCell* speccell = NULL;
+                    foreach(speccell, partition->intervalTablespaces) {
+                        tablespacename = ((Value*)lfirst(speccell))->val.str;
+                        CheckSegmentIsInLimitTablespace(tablespacename, NULL);                     
+                    }
+                    continue;
+                } else if (IsA((lfirst(cell)), RangePartitionDefState) || IsA((lfirst(cell)), HashPartitionDefState) || IsA((lfirst(cell)), ListPartitionDefState)) {
+                    PartitionDefState* partition = (PartitionDefState*)lfirst(cell);
+                    tablespacename = partition->tablespacename;
+                    partitionName = partition->partitionName;
+                } else if (IsA((lfirst(cell)), RangePartitionStartEndDefState)) {
+                    RangePartitionStartEndDefState* partition = (RangePartitionStartEndDefState*)lfirst(cell);
+                    tablespacename = partition->tableSpaceName;
+                    partitionName = partition->partitionName;
+                } else if (IsA((lfirst(cell)), RangePartitionindexDefState)) {
+                    RangePartitionindexDefState* partition = (RangePartitionindexDefState*)lfirst(cell);
+                    tablespacename = partition->tablespace;
+                    partitionName = partition->name;
+                } else {
+                    Assert(false);
+                }
+                CheckSegmentIsInLimitTablespace(tablespacename, partitionName);
+            }
         }
     }
 
