@@ -194,6 +194,8 @@ static void AddRlsUsingQuals(
         rlsExpr = (Expr*)linitial(permissiveQuals);
     } else if (list_length(permissiveQuals) > 1) {
         rlsExpr = makeBoolExpr(OR_EXPR, permissiveQuals, -1);
+    } else {
+        return;
     }
     ChangeVarNodes((Node*)rlsExpr, 1, rtIndex, 0);
     *rlsUsingQuals = list_append_unique(*rlsUsingQuals, rlsExpr);
