@@ -1441,6 +1441,9 @@ int128 nextval_internal(Oid relid)
     if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
         ereport(ERROR, (errmsg("Standby do not support nextval, please do it in primary!")));
     }
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("Shared storage standby do not support nextval, please do it in shared storage primary!")));
+    }
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
