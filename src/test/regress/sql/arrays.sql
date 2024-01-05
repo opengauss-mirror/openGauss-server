@@ -295,6 +295,30 @@ select * from arr_tbl where f1 >= '{1,2,3}' and f1 < '{1,5,3}' ORDER BY 1;
 reset enable_seqscan;
 reset enable_bitmapscan;
 
+-- test subscript overflow detection
+
+-- The normal error message includes a platform-dependent limit,
+-- so suppress it to avoid needing multiple expected-files.
+\set VERBOSITY sqlstate
+create temp table arr_pk_tbl (pk int4 primary key, f1 int[]);
+insert into arr_pk_tbl values(10, '[-2147483648:-2147483647]={1,2}');
+update arr_pk_tbl set f1[2147483647] = 42 where pk = 10;
+select * from arr_pk_tbl;
+update arr_pk_tbl set f1[-2147483644] = 42 where pk = 10;
+select * from arr_pk_tbl;
+update arr_pk_tbl set f1[2147483646:2147483647] = array[4,2] where pk = 10;
+drop table arr_pk_tbl;
+
+-- also exercise the expanded-array case
+do $$ declare a int[];
+begin
+  a := '[-2147483648:-2147483647]={1,2}'::int[];
+  a[2147483647] := 42;
+  raise info '%', a;
+end $$;
+
+\set VERBOSITY default
+
 -- test [not] (like|ilike) (any|all) (...)
 select 'foo' like any (array['%a', '%o']); -- t
 select 'foo' like any (array['%a', '%b']); -- f
