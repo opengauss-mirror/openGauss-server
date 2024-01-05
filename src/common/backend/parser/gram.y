@@ -16311,7 +16311,8 @@ pkg_body_subprogram: {
 						} else if (block_level == 0 && tok != ';') {
 							in_procedure = false;
 						}
-                        if (tok == ';')
+                        if (tok == ';' || 
+							(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && pre_tok == ';' && tok == IDENT && in_procedure))
                         {
                             block_level = block_level - 1;
                             if (block_level == 0)
@@ -16943,6 +16944,11 @@ subprogram_body: 	{
 							&& tok != WHILE_P
 							&& tok != REPEAT)
 						{
+							if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';')
+							{
+								proc_e = yylloc;
+								break;
+							}
 							tok = END_P;
 							continue;
 						}

@@ -736,6 +736,21 @@ end pkg2;
 /
 call pkg2.f1(5);
 
+-- create package which has func with end name
+create or replace package trigger_test as
+    function tri_insert_func() return trigger;
+end trigger_test;
+/
+create or replace package body trigger_test as
+    function tri_insert_func() return trigger as 
+    begin
+        insert into test_trigger_des_tbl values(new.id1, new.id2, new.id3);
+        return new;
+    end tri_insert_func;
+end trigger_test;
+/
+
+DROP PACKAGE trigger_test;
 \c regression
 drop database db;
 drop user pkg_user1;

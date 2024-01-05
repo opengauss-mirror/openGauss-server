@@ -9438,6 +9438,13 @@ get_proc_str(int tok)
             {
                 blocklevel--;
             }
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';' && tok == T_WORD)
+            {
+                curloc = yylloc;
+                plpgsql_append_source_text(&ds, loc, curloc);
+                tok = yylex();
+                break;
+            }
         }
         pre_tok = tok;
 
