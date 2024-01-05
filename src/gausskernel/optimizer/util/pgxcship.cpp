@@ -1941,8 +1941,9 @@ static bool pgxc_shippability_walker(Node* node, Shippability_context* sc_contex
                 if (contain_column_store)
                     sc_context->sc_contain_column_store = contain_column_store;
                 /* once need to use star, always use */
-                if (use_star_targets && sc_context->sc_query)
+                if (use_star_targets && sc_context->sc_query){
                     sc_context->sc_query->use_star_targets = use_star_targets;
+                }
             } else
                 sublink_en = NULL;
 
