@@ -169,6 +169,9 @@ test: single_node_create_function_1
 # ----------
 #test: single_node_copy single_node_copyselect
 
+# pre-Read test
+test: preread_test
+
 # ----------
 # More groups of parallel tests
 # ----------

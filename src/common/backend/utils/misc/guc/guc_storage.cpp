@@ -245,6 +245,9 @@ static void assign_ss_log_level(int newval, void *extra);
 static void assign_ss_log_max_file_size(int newval, void *extra);
 static void assign_ss_log_backup_file_count(int newval, void *extra);
 
+static void assign_vacuum_bulk_read_buffer_reallocate(int newval, void* extra);
+static void assign_heap_bulk_read_buffer_reallocate(int newval, void* extra);
+
 static void InitStorageConfigureNamesBool();
 static void InitStorageConfigureNamesInt();
 static void InitStorageConfigureNamesInt64();
@@ -1387,6 +1390,34 @@ static void InitStorageConfigureNamesInt()
             INT_MAX / 2,
             NULL,
             NULL,
+            NULL},
+        {{"vacuum_bulk_read_size",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            RESOURCES_MEM,
+            gettext_noop("bulk blocks number for vacuum pre-read."),
+            NULL,
+            GUC_UNIT_BLOCKS},
+            &g_instance.attr.attr_storage.vacuum_bulk_read_size,
+            0,
+            0,
+            64,
+            NULL,
+            assign_vacuum_bulk_read_buffer_reallocate,
+            NULL},
+        {{"heap_bulk_read_size",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            RESOURCES_MEM,
+            gettext_noop("bulk blocks number for seqscan pre-read."),
+            NULL,
+            GUC_UNIT_BLOCKS},
+            &u_sess->attr.attr_storage.heap_bulk_read_size,
+            0,
+            0,
+            64,
+            NULL,
+            assign_heap_bulk_read_buffer_reallocate,
             NULL},
         {{"huge_page_size",
             PGC_POSTMASTER,
@@ -6682,6 +6713,37 @@ static void assign_ss_log_backup_file_count(int newval, void *extra)
     }
 }
 
+static void assign_vacuum_bulk_read_buffer_reallocate(int newval, void* extra)
+{
+    /* If pre_read_mem_cxt is NULL, it means we naver use heap bulk read, buffer will init later */
+    if (u_sess->storage_cxt.max_vacuum_bulk_read_size <= newval && u_sess->pre_read_mem_cxt != NULL) {
+        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        /* It be safe to charge again */
+        if (u_sess->storage_cxt.bulk_buf_vacuum != NULL) {
+            pfree(u_sess->storage_cxt.bulk_buf_vacuum);
+            u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(newval * BLCKSZ); 
+        }
+        (void) MemoryContextSwitchTo(oldContext);
+    }
+    /* Whever we resize the buffer, we always record the max heap bulk extend size for farther compare*/
+    u_sess->storage_cxt.max_vacuum_bulk_read_size = Max(u_sess->storage_cxt.max_vacuum_bulk_read_size, newval);
+}
+
+static void assign_heap_bulk_read_buffer_reallocate(int newval, void* extra)
+{
+    /* If pre_read_mem_cxt is NULL, it means we naver use heap bulk read, buffer will init later */
+    if (u_sess->storage_cxt.max_heap_bulk_read_size <= newval && u_sess->pre_read_mem_cxt != NULL) {
+        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        /* It be safe to charge again */
+        if (u_sess->storage_cxt.bulk_buf_read != NULL) {
+            pfree(u_sess->storage_cxt.bulk_buf_read);
+            u_sess->storage_cxt.bulk_buf_read = (char*)palloc(newval * BLCKSZ); 
+        }
+        (void) MemoryContextSwitchTo(oldContext);
+    }
+    /* Whever we resize the buffer, we always record the max heap bulk extend size for farther compare*/
+    u_sess->storage_cxt.max_heap_bulk_read_size = Max(u_sess->storage_cxt.max_heap_bulk_read_size, newval);
+}
 
 static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source)
 {

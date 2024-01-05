@@ -276,6 +276,8 @@ extern void PageListPrefetch(
 extern Buffer ReadBuffer(Relation reln, BlockNumber blockNum);
 extern Buffer ReadBufferExtended(
     Relation reln, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode, BufferAccessStrategy strategy);
+extern Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                                     BufferAccessStrategy strategy, int maxBulkCount, bool isVacuum);
 extern Buffer ReadBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, const XLogPhyBlock *pblk);
 extern Buffer ReadUndoBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
@@ -436,6 +438,8 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
                         BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
 Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber firstBlockNum,
+    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, int maxBulkCount, const XLogPhyBlock *pblk, int paramNum, char* bufRead);
 void buffer_in_progress_pop();
 void buffer_in_progress_push();
 void SSTryEliminateBuf(uint64 times);

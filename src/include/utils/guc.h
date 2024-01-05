@@ -224,6 +224,8 @@ typedef struct {
 
 #define GUC_NOT_WHILE_SEC_REST 0x8000 /* can't set if security restricted */
 
+#define MAX_BULK_IO_SIZE  64 /* bulk process IO size */
+
 extern THR_LOCAL int log_min_messages;
 extern THR_LOCAL bool force_backtrace_messages;
 extern THR_LOCAL int client_min_messages;

@@ -53,6 +53,7 @@ typedef struct f_smgr {
     void (*smgr_extend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, char *buffer, bool skipFsync);
     void (*smgr_prefetch)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
     SMGR_READ_STATUS (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
+    void (*smgr_bulkread)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char *buffer);
     void (*smgr_write)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
     void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
     BlockNumber (*smgr_nblocks)(SMgrRelation reln, ForkNumber forknum);
@@ -74,6 +75,7 @@ static const f_smgr smgrsw[] = {
       mdextend,
       mdprefetch,
       mdread,
+      mdreadbatch,
       mdwrite,
       mdwriteback,
       mdnblocks,
@@ -95,6 +97,7 @@ static const f_smgr smgrsw[] = {
         ExtendUndoFile,
         PrefetchUndoFile,
         ReadUndoFile,
+        NULL,
         WriteUndoFile,
         WritebackUndoFile,
         GetUndoFileNblocks,
@@ -113,6 +116,7 @@ static const f_smgr smgrsw[] = {
         seg_extend,
         seg_prefetch,
         seg_read,
+        NULL,
         seg_write,
         seg_writeback,
         seg_nblocks,
@@ -134,6 +138,7 @@ static const f_smgr smgrsw[] = {
         exrto_extend,
         NULL,
         exrto_read,
+        NULL,
         exrto_write,
         exrto_writeback,
         exrto_nblocks,
@@ -744,6 +749,11 @@ void smgrasyncread(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **dL
 void smgrasyncwrite(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **dList, int32 dn)
 {
     (*(smgrsw[reln->smgr_which].smgr_async_write))(reln, forknum, dList, dn);
+}
+
+void smgrbulkread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char* buffer)
+{
+    (*(smgrsw[reln->smgr_which].smgr_bulkread))(reln, forknum, blocknum, blockCount, buffer);
 }
 
 /*

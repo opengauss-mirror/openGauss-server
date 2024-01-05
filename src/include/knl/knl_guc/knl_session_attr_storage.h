@@ -274,6 +274,9 @@ typedef struct knl_session_attr_storage {
     
     bool enable_uwal;
     char* uwal_path;
+
+    /* pre-read/pre-extend parms */
+    int heap_bulk_read_size;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */
