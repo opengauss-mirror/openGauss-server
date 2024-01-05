@@ -2740,8 +2740,8 @@ addJsonbToParseState(JsonbParseState **jbps, Jsonb *jb)
                 elog(ERROR, "unexpected parent oe nested structure.");
         }
     } else {
-        while((type == JsonbIteratorNext(&it, &v, false)) != WJB_DONE) {
-            if (type = WJB_ELEM || type == WJB_KEY || type == WJB_VALUE) {
+        while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE) {
+            if (type == WJB_ELEM || type == WJB_KEY || type == WJB_VALUE) {
                 (void)pushJsonbValue(jbps, type, &v);
             } else {
                 (void)pushJsonbValue(jbps, type, NULL);
@@ -2886,7 +2886,6 @@ static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_null
 
         if (!done && k.string.len == VARSIZE_ANY_EXHDR(pathelem) &&
             memcmp(k.string.val, VARDATA_ANY(pathelem), k.string.len) == 0) {
-            done = true;
 
             if (level == path_len - 1) {
                 /*
@@ -2905,6 +2904,7 @@ static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_null
                     (void) pushJsonbValue(st, WJB_KEY, &k);
                     addJsonbToParseState(st, newval);
                 }
+                done = true;
             } else {
                 (void) pushJsonbValue(st, r, &k);
                 setPath(it, path_elems, path_nulls, path_len,
@@ -3014,7 +3014,6 @@ static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls
         int r;
 
         if (i == idx && level < path_len) {
-            done = true;
 
             if (level == path_len - 1) {
                 r = JsonbIteratorNext(it, &v, true);	/* skip */
@@ -3032,6 +3031,7 @@ static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls
 
                 if (op_type & (JB_PATH_INSERT_AFTER | JB_PATH_REPLACE))
                     addJsonbToParseState(st, newval);
+                done = true;
             } else
                 (void) setPath(it, path_elems, path_nulls, path_len, st, level + 1, newval, op_type);
         } else {

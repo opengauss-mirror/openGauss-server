@@ -504,6 +504,10 @@ select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::j
 select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '"test"');
 select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '{"f": "test"}');
 
+select jsonb_set('[{"f1":1,"f2":null},2,null,3]', '{0,f1}', '[2,3,4]', true);
+select jsonb_set('[{"f1":1,"f2":null},{"2":9},{"null":90},{"3":87}]', '{1,2}', '[2,3,4]', true);
+select jsonb_set('[{"f1":1,"f2":null},{"2":9},{"null":90},{"3":87}]', '{-1,3}', '[2,3,4]', true);
+
 -- prepend to array
 select jsonb_set('{"a":1,"b":[0,1,2],"c":{"d":4}}','{b,-33}','{"foo":123}');
 -- append to array
