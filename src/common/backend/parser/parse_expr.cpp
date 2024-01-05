@@ -463,6 +463,7 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
 
         case T_UserVar: {
             result = transformUserVar((UserVar *)expr);
+            pstate->has_uservar = true;
             break;
         }
 

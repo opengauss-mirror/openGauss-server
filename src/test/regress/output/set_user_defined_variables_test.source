@@ -1275,6 +1275,11 @@ call test(1,1);
 (1 row)
 
 \c test_set
+drop view v1;
+ERROR:  view "v1" does not exist
+create view v1 as select @a = 1;
+ERROR:  View's SELECT contains a variable or parameter
+\c test_set
 set @a := 1, @b := @a;
 select @a, @b;
  @a | @b 

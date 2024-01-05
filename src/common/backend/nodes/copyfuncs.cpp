@@ -4885,6 +4885,9 @@ static Query* _copyQuery(const Query* from)
         COPY_SCALAR_FIELD(isReplace);
     }
     COPY_NODE_FIELD(indexhintList);
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
+        COPY_SCALAR_FIELD(has_uservar);
+    }
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 
