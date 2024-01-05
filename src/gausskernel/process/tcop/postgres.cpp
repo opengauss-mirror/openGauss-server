@@ -1278,6 +1278,11 @@ static List* pg_rewrite_query(Query* query)
             PrepareStmt *stmt = (PrepareStmt *)query->utilityStmt;
             if (IsA(stmt->query, UserVar)) {
                 querytree_list = QueryRewritePrepareStmt(query);
+            } else if (IsA(stmt->query, Const)) {
+                if (((Const *)stmt->query)->constisnull) {
+                    ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("userdefined variable in prepare statement must be text type.")));
+                }
             } else {
                 querytree_list = list_make1(query);
             }
