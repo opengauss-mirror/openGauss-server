@@ -604,6 +604,7 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
     /* Mark as original query until we learn differently */
     result->querySource = QSRC_ORIGINAL;
     result->canSetTag = true;
+    result->has_uservar = pstate->has_uservar;
 
     /* Mark whether synonym object is in rtables or not. */
     result->hasSynonyms = pstate->p_hasSynonyms;

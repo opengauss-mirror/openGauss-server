@@ -618,6 +618,10 @@ end;
 call test(1,1);
 
 \c test_set
+drop view v1;
+create view v1 as select @a = 1;
+
+\c test_set
 set @a := 1, @b := @a;
 select @a, @b;
 set @a := @c := 2, @b := @d := @a;

@@ -1648,6 +1648,10 @@ static Query* _readQuery(void)
     IF_EXIST(indexhintList) {
         READ_NODE_FIELD(indexhintList);
     }
+    IF_EXIST(has_uservar)
+    {
+        READ_BOOL_FIELD(has_uservar);
+    }
 
     READ_DONE();
 }

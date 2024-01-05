@@ -74,8 +74,7 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92858;
-
+const uint32 GRAND_VERSION_NUM = 92859;
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
@@ -93,6 +92,7 @@ const uint32 DOLPHIN_ENABLE_DROP_NUM = 92853; /* 5.0.1 ver */
 #else
 const uint32 DOLPHIN_ENABLE_DROP_NUM = 92830; /* 3.1.0 ver */
 #endif
+const uint32 SELECT_STMT_HAS_USERVAR = 92859;
 const uint32 SQL_PATCH_VERSION_NUM = 92675;
 const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM = 92522;
 const uint32 UPSERT_WHERE_VERSION_NUM = 92514;
