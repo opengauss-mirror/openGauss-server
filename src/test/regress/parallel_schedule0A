@@ -175,6 +175,7 @@ test: single_node_triggers
 
 # Synonym tests
 #test: single_node_synonym
+test: sw_bugfix
 
 # unsupported view tests
 test: single_node_unsupported_view

@@ -1,0 +1,32 @@
+drop table if exists t_connectby_0037 cascade;
+NOTICE:  table "t_connectby_0037" does not exist, skipping
+create table t_connectby_0037 (
+org_parent_no varchar2(32),
+org_no varchar2(32) not null,
+org_rela_type varchar2(32) not null);
+insert into t_connectby_0037 (org_no, org_parent_no, org_rela_type) values('201855', '201844', 'administaration'),('201856', '201844', 'administaration'),('119208', '119200', 'administaration'),
+('201953', '201932', 'administaration'),('201954', '201932', 'administaration'),('201955', '201932', 'administaration'),('201956', '201932', 'administaration'),('120301', '120300', 'administaration'),
+('201957', '202573', 'administaration'),('201958', '201957', 'administaration');
+--step2:创建同义词;expect:成功
+drop synonym if exists sy_connectby_0037 cascade;
+NOTICE:  synonym "sy_connectby_0037" does not exist, skipping
+create synonym sy_connectby_0037 for t_connectby_0037;
+--step3:connect by查询;expect:成功
+select org_no from t_connectby_0037 start with org_no = '201957' and org_rela_type = 'administaration' connect by prior org_no = org_parent_no and org_rela_type = 'administaration';
+ org_no 
+--------
+ 201957
+ 201958
+(2 rows)
+
+--step4:connect by使用同义词查询;expect:成功
+select org_no from sy_connectby_0037 start with org_no = '201957' and org_rela_type = 'administaration' connect by prior org_no = org_parent_no and org_rela_type = 'administaration';
+ org_no 
+--------
+ 201957
+ 201958
+(2 rows)
+
+--step5:清理环境;expect:成功
+drop table if exists t_connectby_0037 cascade;
+drop synonym if exists sy_connectby_0037 cascade;
