@@ -2429,29 +2429,11 @@ WARNING:  LINE 1: unsupport distributed hint at ')'
 (3 rows)
 
 explain (costs off) select /*+indexscan(''')*/ 1;
-WARNING:  LINE 1: unterminated quoted string at ''
-WARNING:  LINE 1: syntax error at ''
- QUERY PLAN 
-------------
- Result
-(1 row)
-
+ERROR:  LINE 1: unterminated quoted string at ''
 explain (costs off) select /*+indexscan(""")*/ 1;
-WARNING:  LINE 1: unterminated quoted identifier at ''
-WARNING:  LINE 1: syntax error at ''
- QUERY PLAN 
-------------
- Result
-(1 row)
-
+ERROR:  LINE 1: unterminated quoted identifier at ''
 explain (costs off) select /*+indexscan($$$)*/ 1;
-WARNING:  LINE 1: unterminated dollar-quoted string at ''
-WARNING:  LINE 1: syntax error at ''
- QUERY PLAN 
-------------
- Result
-(1 row)
-
+ERROR:  LINE 1: unterminated dollar-quoted string at ''
 create table subpartition_hash_hash (
     c1 int,
     c2 int,
