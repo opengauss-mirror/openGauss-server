@@ -393,18 +393,6 @@ void HandlePageRedoInterruptsImpl(uint64 clearRedoFdCountInc = 1)
 
         proc_exit(1);
     }
-
-    static uint64 clearRedoFdCount = 0;
-    const uint64 clearRedoFdCountMask = 0x7FFFFFF;
-    clearRedoFdCount += clearRedoFdCountInc;
-    if (clearRedoFdCount > clearRedoFdCountMask && GetSMgrRelationHash() != NULL &&
-        (g_redoWorker->role == REDO_PAGE_WORKER || g_redoWorker->role == REDO_PAGE_MNG)) {
-        clearRedoFdCount = 0;
-        long hash_num = hash_get_num_entries(GetSMgrRelationHash());
-        if (hash_num >= MAX_CLEAR_SMGR_NUM) {
-            smgrcloseall();
-        }
-    }
 }
 
 void HandlePageRedoInterrupts()
@@ -972,15 +960,21 @@ void PageManagerProcSegFullSyncState(XLogRecParseState *parseState)
 
 void PageManagerProcSegPipeLineSyncState(XLogRecParseState *parseState)
 {
-    if (!SS_DISASTER_STANDBY_CLUSTER) {
-        WaitCurrentPipeLineRedoWorkersQueueEmpty();   
+    if (SS_DISASTER_STANDBY_CLUSTER) {
+        PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
+        const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
+        uint32 work_id = WorkerNumPerMng - 1;
+        parseState->nextrecord = NULL;
+        AddPageRedoItem(myRedoLine->redoThd[work_id], parseState);
+    } else {
+        WaitCurrentPipeLineRedoWorkersQueueEmpty();
+        MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+
+        RedoPageManagerDdlAction(parseState);
+
+        (void)MemoryContextSwitchTo(oldCtx);
+        XLogBlockParseStateRelease(parseState);
     }
-    MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
-
-    RedoPageManagerDdlAction(parseState);
-
-    (void)MemoryContextSwitchTo(oldCtx);
-    XLogBlockParseStateRelease(parseState);
 }
 
 static void WaitNextBarrier(XLogRecParseState *parseState)
@@ -1633,6 +1627,9 @@ void RedoPageWorkerMain()
                                            redoblockstate->blockparse.blockhead.end_ptr);
                     CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
                     break;
+                case BLOCK_DATA_SEG_EXTEND:
+                    ProcSegPageCommonRedo(redoblockstate);
+                    break;
                 default:
                     break;
             }
@@ -2141,7 +2138,6 @@ void XLogReadPageWorkerMain()
         g_redoWorker->lastReplayedReadRecPtr = xlogreader->ReadRecPtr;
         g_redoWorker->lastReplayedEndRecPtr = xlogreader->EndRecPtr;
         PushToWorkerLsn(send_lsn_forwarder_for_check_to_hot_standby(g_redoWorker->lastReplayedEndRecPtr));
-        
         if (FORCE_FINISH_ENABLED) {
             CheckAndDoForceFinish(xlogreader);
         }
