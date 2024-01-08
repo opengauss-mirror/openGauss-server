@@ -1739,15 +1739,45 @@ static void SetUpsertAttrnoState(ParseState* pstate, List *targetList)
     }
 }
 
+static bool isSubExprSupportRightRef(Node* node)
+{
+    if (!node) {
+        return true;
+    }
+    if (IsA(node, A_Expr)) {
+        A_Expr* expr = (A_Expr*)node;
+        return isSubExprSupportRightRef(expr->lexpr) &&
+               isSubExprSupportRightRef(expr->rexpr);
+    } else if (IsA(node, SubLink)) {
+        SubLink* sl = (SubLink*)node;
+        if (sl->subselect) {
+            SelectStmt* subsel = (SelectStmt*)sl->subselect;
+            return (!subsel->whereClause || subsel->fromClause);
+        }
+    }
+    return true;
+}
+
 static RightRefState* MakeRightRefStateIfSupported(SelectStmt* selectStmt)
 {
     bool isSupported = DB_IS_CMPT(B_FORMAT) && selectStmt && selectStmt->valuesLists && !IsInitdb;
-    if (isSupported) {
-        RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
-        refState->isSupported = true;
-        return refState;
+    if (!isSupported) {
+        return nullptr;
     }
-    return nullptr;
+    ListCell* lc = NULL;
+    ListCell* lc2 = NULL;
+    foreach (lc, selectStmt->valuesLists) {
+        List* sublist = (List*)lfirst(lc);
+        foreach(lc2, sublist) {
+            Node* col  = (Node*)lfirst(lc2);
+            if (!isSubExprSupportRightRef(col)) {
+                return nullptr;
+            }
+        }
+    }
+    RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
+    refState->isSupported = true;
+    return refState;
 }
 
 /*

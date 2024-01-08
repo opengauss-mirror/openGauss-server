@@ -323,6 +323,13 @@ insert into t2 select @num + 10 from t1;
 select * from t2;
 select @num;
 
+-- test insert right ref
+drop table if exists ins_sel_t0;
+CREATE TABLE ins_sel_t0 ( c3 INT , c10 INT ) ;
+INSERT INTO ins_sel_t0 VALUES ( -66 , 54 ) ,
+    ( EXISTS ( SELECT 76 AS c42 WHERE c3 = 12 IS NOT FALSE ) NOT IN ( 75 >= -80 ) , -99 ) ; -- should error
+drop table ins_sel_t0;
+
 --test as function parameter
 set @num := 1;
 select sin(@num := @num + 1) from t1;
