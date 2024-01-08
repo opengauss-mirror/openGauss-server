@@ -197,6 +197,7 @@ void copy_file_internal(char* fromfile, char* tofile, bool trunc_file)
     /*
      * Do the data copying.
      */
+    int copy_step_size = ENABLE_DSS ? COPY_BUF_SIZE_FOR_DSS : COPY_BUF_SIZE;
     struct stat stat_buf;
     (void)stat(fromfile, &stat_buf);
     for (offset = 0;offset < stat_buf.st_size; offset += nbytes) {
@@ -204,7 +205,7 @@ void copy_file_internal(char* fromfile, char* tofile, bool trunc_file)
         CHECK_FOR_INTERRUPTS();
 
         pgstat_report_waitevent(WAIT_EVENT_COPY_FILE_READ);
-        nbytes = read(srcfd, buffer, COPY_BUF_SIZE);
+        nbytes = read(srcfd, buffer, copy_step_size);
         pgstat_report_waitevent(WAIT_EVENT_END);
         if (nbytes < 0) {
             (void)close(srcfd);
