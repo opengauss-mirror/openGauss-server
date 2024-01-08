@@ -85,6 +85,7 @@ void XLogBeginInsert(void)
     Assert(t_thrd.xlog_cxt.max_registered_block_id == 0);
     Assert(t_thrd.xlog_cxt.mainrdata_last == (XLogRecData *)&t_thrd.xlog_cxt.mainrdata_head);
     Assert(t_thrd.xlog_cxt.mainrdata_len == 0);
+    Assert(!(SS_CLUSTER_ONDEMAND_RECOVERY && SS_STANDBY_MODE));
 
     /* cross-check on whether we should be here or not */
     if (!XLogInsertAllowed())
