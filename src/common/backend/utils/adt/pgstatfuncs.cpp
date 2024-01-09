@@ -14993,6 +14993,7 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
     ss_reform_info_t reform_info = iterate->reform_info;
     for (uint64 i = iterate->iterate_idx; i < DMS_MAX_INSTANCE; i++) {
         if (!((reform_info.old_bitmap | reform_info.new_bitmap) & (((uint64)1) << i))) {
+            iterate->iterate_idx++;
             continue;
         }
 
@@ -15000,7 +15001,7 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
         char tmp_buf[MAX_BUF_SIZE] = {0};
         Datum values[10];
         bool nulls[10] = {false};
-        values[0] = UInt16GetDatum(i);
+        values[0] = UInt64GetDatum(i);
         if (i == (uint64)SS_MY_INST_ID) {
             switch (reform_info.reform_type) {
                 case DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS:
