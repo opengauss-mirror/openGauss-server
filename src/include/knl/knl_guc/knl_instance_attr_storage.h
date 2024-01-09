@@ -126,6 +126,8 @@ typedef struct knl_instance_attr_dms {
     int parallel_thread_num;
     int32 txnstatus_cache_size;
     bool enable_bcast_snapshot;
+    char* work_thread_pool_attr;
+    int32 work_thread_pool_max_cnt;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {

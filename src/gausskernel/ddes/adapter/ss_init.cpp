@@ -39,10 +39,11 @@
 #include "ddes/dms/ss_reform_common.h"
 #include "postmaster/postmaster.h"
 
+#define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')
+
 #define FIXED_NUM_OF_INST_IP_PORT 3
 #define BYTES_PER_KB 1024
 #define NON_PROC_NUM 4
-
 
 const int MAX_CPU_STR_LEN = 5;
 const int DEFAULT_DIGIT_RADIX = 10;
@@ -358,6 +359,19 @@ static void SetOckLogPath(knl_instance_attr_dms* dms_attr, char *ock_log_path)
     }
 }
 
+static void SetWorkThreadpoolConfig(dms_profile_t *profile) 
+{    
+    char* attr = TrimStr(g_instance.attr.attr_storage.dms_attr.work_thread_pool_attr);
+    if (IS_NULL_STR(attr)) {
+        profile->enable_mes_task_threadpool = false;
+        profile->mes_task_worker_max_cnt = 0;
+        return;
+    }
+
+    profile->enable_mes_task_threadpool = true;
+    profile->mes_task_worker_max_cnt = g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt;
+}
+
 static void setDMSProfile(dms_profile_t* profile)
 {
     knl_instance_attr_dms* dms_attr = &g_instance.attr.attr_storage.dms_attr;
@@ -384,6 +398,7 @@ static void setDMSProfile(dms_profile_t* profile)
         InitDmsSSL();
     }
     parseInternalURL(profile);
+    SetWorkThreadpoolConfig(profile);
 
     /* some callback initialize */
     DmsInitCallback(&profile->callback);
@@ -406,6 +421,9 @@ void DMSInit()
     }
     if (dms_register_thread_init(DmsCallbackThreadShmemInit)) {
         ereport(FATAL, (errmsg("failed to register dms memcxt callback!")));
+    }
+    if (dms_register_thread_deinit(DmsThreadDeinit)) {
+        ereport(FATAL, (errmsg("failed to register DmsThreadDeinit!")));
     }
 
     uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);

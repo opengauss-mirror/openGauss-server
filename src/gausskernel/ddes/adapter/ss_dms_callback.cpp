@@ -49,6 +49,7 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/ipc.h"
 
 /*
  * Wake up startup process to replay WAL, or to notice that
@@ -962,9 +963,50 @@ static int CBSetBufLoadStatus(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dm
 
 static void *CBGetHandle(unsigned int *db_handle_index, dms_session_type_e session_type)
 {
-    void *db_handle = g_instance.proc_base->allProcs[g_instance.dms_cxt.dmsProcSid];
-    *db_handle_index = pg_atomic_fetch_add_u32(&g_instance.dms_cxt.dmsProcSid, 1);
-    return db_handle;
+    ss_fake_seesion_context_t *fs_cxt = &g_instance.dms_cxt.SSFakeSessionCxt;
+    SpinLockAcquire(&fs_cxt->lock);
+    if (!fs_cxt->fake_sessions[fs_cxt->quickFetchIndex]) {
+        int index = fs_cxt->quickFetchIndex;
+        fs_cxt->fake_sessions[index] = true;
+        fs_cxt->quickFetchIndex++;
+        if (fs_cxt->quickFetchIndex >= NUM_DMS_CALLBACK_PROCS) {
+            fs_cxt->quickFetchIndex = 0;
+        }
+        SpinLockRelease(&fs_cxt->lock);
+        *db_handle_index = index + fs_cxt->session_start;
+        return &g_instance.proc_base->allProcs[index + fs_cxt->session_start];
+    }
+
+    int start_index = fs_cxt->quickFetchIndex;
+    int cur_index = 0;
+    bool found = false;
+    for (int i = 0; i < NUM_DMS_CALLBACK_PROCS; i++) {
+        cur_index = (start_index + i) % NUM_DMS_CALLBACK_PROCS;
+        if (!fs_cxt->fake_sessions[cur_index]) {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        SpinLockRelease(&fs_cxt->lock);
+        ereport(PANIC, (errmsg("[SS] can not find a session. please check")));
+    }
+
+    fs_cxt->quickFetchIndex = cur_index + 1;
+    if (fs_cxt->quickFetchIndex >= NUM_DMS_CALLBACK_PROCS) {
+       fs_cxt->quickFetchIndex = 0;
+    }
+    SpinLockRelease(&fs_cxt->lock);
+    *db_handle_index = cur_index;
+    return &g_instance.proc_base->allProcs[cur_index + fs_cxt->session_start];
+}
+
+static void CBReleaseHandle(void *db_handle)
+{
+    ss_fake_seesion_context_t *fs_cxt = &g_instance.dms_cxt.SSFakeSessionCxt;
+    int index = ((char*)db_handle - (char*)&g_instance.proc_base->allProcs[fs_cxt->session_start]) / sizeof(PGPROC*);
+    fs_cxt->fake_sessions[index] = false;
 }
 
 static char *CBMemAlloc(void *context, unsigned int size)
@@ -2118,6 +2160,11 @@ static void CBBufCtrlRecycle(void *db_handle)
     SSTryEliminateBuf(TRY_ELIMINATE_BUF_TIMES);
 }
 
+void DmsThreadDeinit()
+{
+    proc_exit(0);
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2149,6 +2196,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->remove_buf_load_status = CBRemoveBufLoadStatus;
     callback->invalidate_page = CBInvalidatePage;
     callback->get_db_handle = CBGetHandle;
+    callback->release_db_handle = CBReleaseHandle;
     callback->display_pageid = CBDisplayBufferTag;
     callback->verify_page = CBVerifyPage;
 
@@ -2185,4 +2233,5 @@ void DmsInitCallback(dms_callback_t *callback)
 
     callback->get_buf_info = CBGetBufInfo;
     callback->buf_ctrl_recycle = CBBufCtrlRecycle;
+    callback->dms_thread_deinit = DmsThreadDeinit;
 }

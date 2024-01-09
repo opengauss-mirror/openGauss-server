@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           123
+#define DMS_LOCAL_VERSION           126
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -421,7 +421,7 @@ typedef struct st_dms_buf_ctrl {
     volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
     volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
     volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
-    volatile unsigned char break_wal;
+    volatile unsigned char unused;
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
@@ -827,6 +827,7 @@ typedef void (*dms_ckpt_unblock_rcy_local)(void *db_handle, unsigned long long l
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
+typedef void (*dms_thread_deinit_t)(void);
 typedef int (*dms_get_db_primary_id)(void *db_handle, unsigned int *primary_id);
 typedef int (*dms_opengauss_ondemand_redo_buffer)(void *block_key, int *redo_status);
 
@@ -870,8 +871,8 @@ typedef int (*dms_end_xa)(void *db_handle, void *knl_xa_xid, unsigned long long 
     unsigned char is_commit);
 typedef unsigned char (*dms_xa_inuse)(void *db_handle, void *knl_xa_xid);
 typedef int (*dms_get_part_changed)(void *db_handle, char* resid);
-typedef void (*dms_edpp_func_t)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef void (*dms_buf_ctrl_recycle)(void *db_handle);
+typedef int (*dms_get_kernel_error_code)();
 typedef struct st_dms_callback {
     // used in reform
     dms_get_list_stable get_list_stable;
@@ -909,6 +910,7 @@ typedef struct st_dms_callback {
 
     // used in reform for opengauss
     dms_thread_init_t dms_thread_init;
+    dms_thread_deinit_t dms_thread_deinit;
     dms_get_db_primary_id get_db_primary_id;
     dms_opengauss_startup opengauss_startup;
     dms_opengauss_recovery_standby opengauss_recovery_standby;
@@ -1020,8 +1022,8 @@ typedef struct st_dms_callback {
     dms_xa_inuse xa_inuse;
     dms_get_part_changed get_part_changed;
 
-    dms_edpp_func_t cache_page;
     dms_buf_ctrl_recycle buf_ctrl_recycle;
+    dms_get_kernel_error_code db_get_kernel_error_code;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1078,6 +1080,8 @@ typedef struct st_dms_profile {
     unsigned char parallel_thread_num;
     unsigned int max_wait_time;
     char gsdb_home[DMS_LOG_PATH_LEN];
+    unsigned char enable_mes_task_threadpool;
+    unsigned int mes_task_worker_max_cnt;
 } dms_profile_t;
 
 typedef struct st_logger_param {

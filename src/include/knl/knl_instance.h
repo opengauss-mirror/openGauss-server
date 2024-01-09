@@ -74,6 +74,7 @@
 #include "pgxc/barrier.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_xmin.h"
+#include "ddes/dms/ss_dms_callback.h"
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -1286,6 +1287,7 @@ typedef struct knl_g_dms_context {
     char conninfo[MAXPGPATH];
     ss_dfx_stats_t SSDFxStats;
     ss_xmin_info_t SSXminInfo;
+    ss_fake_seesion_context_t SSFakeSessionCxt;
 } knl_g_dms_context;
 
 #ifdef USE_SPQ
