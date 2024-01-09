@@ -127,6 +127,7 @@ static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* 
 static void CheckDeleteRelation(Relation targetrel);
 static void CheckUpdateRelation(Relation targetrel);
 static void transformVariableSetValueStmt(ParseState* pstate, VariableSetStmt* stmt);
+static bool ContainColStoreWalker(Node* node, Oid targetOid);
 #ifdef PGXC
 static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt);
 static bool IsExecDirectUtilityStmt(const Node* node);
@@ -5300,21 +5301,50 @@ static bool CheckViewBasedOnCstore(Relation targetrel)
 
     Query* viewquery = get_view_query(targetrel);
     ListCell* l = NULL;
-
-    foreach (l, viewquery->jointree->fromlist) {
-        RangeTblRef* rtr = (RangeTblRef*)lfirst(l);
-        RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
-        Relation base_rel = try_relation_open(base_rte->relid, AccessShareLock);
-
-        if (RelationIsColStore(base_rel) || (RelationIsView(base_rel) && CheckViewBasedOnCstore(base_rel))) {
-            heap_close(base_rel, AccessShareLock);
+    foreach (l, viewquery->rtable) {
+        Node* rte = (Node*)lfirst(l);
+        if (ContainColStoreWalker(rte, targetrel->rd_id)) {
             return true;
         }
-
-        heap_close(base_rel, AccessShareLock);
     }
-
     return false;
+}
+
+static bool ContainColStoreWalker(Node* node, Oid targetOid)
+{
+    if (node == NULL) {
+        return false;
+    }
+    uintptr_t ptrOid = (uintptr_t)targetOid;
+
+    /* Check range table entry */
+    if (IsA(node, RangeTblEntry)) {
+        RangeTblEntry* rte = (RangeTblEntry*)node;
+        /* only check ordinary relation */
+        if ((rte->rtekind != RTE_RELATION)) {
+            List* rtable = list_make1(node);
+            return range_table_walker(rtable, (bool (*)())ContainColStoreWalker, (void*)ptrOid, 0);
+        }
+        Assert(OidIsValid(rte->relid));
+        if (rte->relid == targetOid) {
+            return false;
+        }
+        Relation rel = relation_open(rte->relid, AccessShareLock);
+        if (!RelationIsValid(rel)) {
+            return false;
+        }
+        if (RelationIsColStore(rel) || (RelationIsView(rel) && CheckViewBasedOnCstore(rel))) {
+            relation_close(rel, AccessShareLock);
+            return true;
+        }
+        relation_close(rel, AccessShareLock);
+        return false;
+    }
+    /* Check query */
+    if (IsA(node, Query)) {
+        return query_tree_walker((Query*)node, (bool (*)())ContainColStoreWalker, (void*)ptrOid, QTW_EXAMINE_RTES);
+    }
+    return expression_tree_walker(node, (bool (*)())ContainColStoreWalker, (void*)ptrOid);
 }
 
 /*
