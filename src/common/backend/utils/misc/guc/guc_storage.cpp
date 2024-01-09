@@ -3806,7 +3806,7 @@ static void InitStorageConfigureNamesInt()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.scrlock_server_port,
             8000,
-            0,
+            1024,
             65535,
             NULL,
             NULL,
