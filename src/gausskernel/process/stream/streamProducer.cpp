@@ -2350,9 +2350,7 @@ void StreamProducer::roundRobinStream(VectorBatch* batch)
 void StreamProducer::dmlStream(TupleTableSlot* tuple, DestReceiver* self)
 {
     assembleStreamMessage(tuple, self, &m_tupleBuffer);
-
-    int write_node_index = u_sess->attr.attr_spq.spq_wr_node_index;
-    sendByteStream(write_node_index + m_roundRobinIdx * m_plan->num_nodes);
+    sendByteStream(m_plan->write_node_index + m_roundRobinIdx * m_plan->num_nodes);
 
     m_roundRobinIdx++;
     /* only send to write node. */

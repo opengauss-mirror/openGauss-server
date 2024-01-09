@@ -188,6 +188,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(current_id);
     COPY_SCALAR_FIELD(enable_adaptive_scan);
     COPY_SCALAR_FIELD(is_spq_optmized);
+    COPY_SCALAR_FIELD(write_node_index);
     COPY_SCALAR_FIELD(numSlices);
     if (from->numSlices > 0) {
         newnode->slices = (PlanSlice*)palloc0(from->numSlices * sizeof(PlanSlice));
@@ -200,6 +201,9 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
             COPY_SCALAR_FIELD(slices[i].directDispatch.isDirectDispatch);
             COPY_NODE_FIELD(slices[i].directDispatch.contentIds);
         }
+    }
+    if (from->subplans != NULL && from->subplan_sliceIds != NULL) {
+        COPY_POINTER_FIELD(subplan_sliceIds, list_length(from->subplans) * sizeof(*from->subplan_sliceIds));
     }
 #endif
     /*
