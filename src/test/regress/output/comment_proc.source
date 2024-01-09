@@ -2156,10 +2156,6 @@ END;
 10      END;
 11      /
 \! /data/pengjiong/openGauss-server/src/test/regress/./tmp_check/install//data/pengjiong/openGauss-server/dest/bin/gs_dump -f /data/pengjiong/openGauss-server/src/test/regress/./tmp_check/install//data/pengjiong/openGauss-server/dest/bin/test_comment.tar -c -n test_comment -p 11222 test_comment -F t --disable-progress >>/dev/null
-Begin scanning database. 
-Finish scanning database. 
-Start dumping objects 
-Finish dumping objects 
 drop database if exists test_comment1;
 NOTICE:  database "test_comment1" does not exist, skipping
 create database test_comment1;

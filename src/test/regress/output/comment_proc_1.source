@@ -2156,10 +2156,6 @@ END;
 10      END;
 11      /
 \! @abs_bindir@/gs_dump -f @abs_bindir@/test_comment.tar -c -n test_comment -p @portstring@ test_comment -F t --disable-progress >>/dev/null
-Begin scanning database. 
-Finish scanning database. 
-Start dumping objects 
-Finish dumping objects 
 drop database if exists test_comment1;
 NOTICE:  database "test_comment1" does not exist, skipping
 create database test_comment1;

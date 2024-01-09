@@ -1037,7 +1037,7 @@ int main(int argc, char** argv)
      * Now scan the database and create DumpableObject structs for all the
      * objects we intend to dump.
      */
-    fprintf(stderr, "Begin scanning database. \n");
+    write_msg(NULL, "Begin scanning database. \n");
     pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReportScanDatabase, NULL);
 
@@ -1049,7 +1049,7 @@ int main(int argc, char** argv)
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThread, NULL);
 
-    fprintf(stderr, "Finish scanning database. \n");
+    write_msg(NULL, "Finish scanning database. \n");
 
     if (fout->remoteVersion < 80400)
         guessConstraintInheritance(tblinfo, numTables);
@@ -1115,7 +1115,7 @@ int main(int argc, char** argv)
         dumpAnyPrivilege(fout);
     }
     g_totalObjNums = numObjs;
-    fprintf(stderr, "Start dumping objects \n");
+    write_msg(NULL, "Start dumping objects \n");
     pthread_t progressThreadDumpProgress;
     pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
 
@@ -1129,7 +1129,7 @@ int main(int argc, char** argv)
     pthread_cond_signal(&g_condDump);
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThreadDumpProgress, NULL);
-    fprintf(stderr, "Finish dumping objects \n");
+    write_msg(NULL, "Finish dumping objects \n");
 
     /*
      * Synonym now only support for table/view/function/procedure. When dump all object, it will be dumped.
@@ -1137,8 +1137,6 @@ int main(int argc, char** argv)
     if (include_everything && !dataOnly) {
         dumpSynonym(fout);
     }
-    if (!dataOnly)
-        write_msg(NULL, "[100.00%%] %d objects have been dumped.\n", g_totalObjNums);
 
     /*
      * Set up options info to ensure we dump what we want.
@@ -23734,7 +23732,7 @@ static void *ProgressReportDump(void *arg)
         /* progress report */
         percent = (int)(100 * g_dumpObjNums / g_totalObjNums);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \r",
             progressBar, percent, g_dumpObjNums, g_totalObjNums);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -23752,7 +23750,7 @@ static void *ProgressReportDump(void *arg)
     } while ((g_dumpObjNums < g_totalObjNums) && !g_progressFlagDump);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \n",
             progressBar, percent, g_dumpObjNums, g_totalObjNums);
     return nullptr;
 }
@@ -23770,7 +23768,7 @@ static void *ProgressReportScanDatabase(void *arg)
         /* progress report */
         percent = (int)(g_curStep * 100 / g_totalSteps);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). %s \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, cur_step/total_step). %s \r",
             progressBar, percent, g_curStep, g_totalSteps, g_progressDetails[g_curStep]);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -23788,7 +23786,7 @@ static void *ProgressReportScanDatabase(void *arg)
     } while ((g_curStep < g_totalSteps) && !g_progressFlagScan);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). finish scanning database                       \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, cur_step/total_step). finish scanning database                       \n",
             progressBar, percent, g_curStep, g_totalSteps);
     return nullptr;
 }

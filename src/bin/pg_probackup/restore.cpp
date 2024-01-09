@@ -1076,7 +1076,7 @@ static void *ProgressReportRestore(void *arg)
         /* progress report */
         percent = (int)(g_doneFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \r",
             progressBar, percent, g_doneFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -1094,7 +1094,7 @@ static void *ProgressReportRestore(void *arg)
     } while (((g_doneFiles + g_directoryFiles) < g_totalFiles) && g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
     return nullptr;
 }
@@ -1110,7 +1110,7 @@ static void *ProgressReportSyncRestoreFile(void *arg)
         /* progress report */
         percent = (int)(g_syncFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync restore file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync restore file \r",
             progressBar, percent, g_syncFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -1128,7 +1128,7 @@ static void *ProgressReportSyncRestoreFile(void *arg)
     } while ((g_syncFiles < g_totalFiles) && !g_progressFlagSync);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync restore file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync restore file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
     return nullptr;
 }
