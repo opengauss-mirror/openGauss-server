@@ -64,7 +64,7 @@ static void *ProgressReportValidate(void *arg)
         /* progress report */
         percent = (int)(g_doneFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \r",
             progressBar, percent, g_doneFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -82,7 +82,7 @@ static void *ProgressReportValidate(void *arg)
     } while (((g_doneFiles + g_inregularFiles) < g_totalFiles) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
     return nullptr;
 }

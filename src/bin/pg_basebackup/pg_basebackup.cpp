@@ -619,7 +619,7 @@ static void *ProgressReport(void *arg)
             snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
         securec_check_ss_c(errorno, "", "");
 
-        fprintf(stderr,
+        fprintf(stdout,
             ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\r",
             "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\r", tblspaceCount),
             progressBar, totaldone_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
@@ -642,7 +642,7 @@ static void *ProgressReport(void *arg)
     errorno =
         snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
         securec_check_ss_c(errorno, "", "");
-    fprintf(stderr,
+    fprintf(stdout,
         ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\n",
         "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\n", tblspaceCount),
         progressBar, totalsize_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
@@ -1410,7 +1410,7 @@ static void BaseBackup(void)
     PQfreemem(sysidentifier);
     sysidentifier = NULL;
 
-    fprintf(stderr, "Start receiving chunks\n");
+    fprintf(stdout, "Start receiving chunks\n");
     /* Print the progress of the tool execution through a new thread. */
     pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReport, NULL);
@@ -1433,7 +1433,7 @@ static void BaseBackup(void)
     pthread_cond_signal(&g_cond);
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThread, NULL);
-    fprintf(stderr, "Finish receiving chunks\n");
+    fprintf(stdout, "Finish receiving chunks\n");
 
     /*
      * Get the stop position

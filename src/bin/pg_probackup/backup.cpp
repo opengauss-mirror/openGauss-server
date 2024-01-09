@@ -2156,7 +2156,7 @@ static void *ProgressReportProbackup(void *arg)
         /* progress report */
         percent = (int)(g_doneFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \r",
             progressBar, percent, g_doneFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -2174,7 +2174,7 @@ static void *ProgressReportProbackup(void *arg)
     } while ((g_doneFiles < g_totalFiles) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \n",
             progressBar, percent, g_doneFiles, g_totalFiles);
     return nullptr;
 }
@@ -2190,7 +2190,7 @@ static void *ProgressReportSyncBackupFile(void *arg)
         /* progress report */
         percent = (int)(g_syncFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync backup file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync backup file \r",
             progressBar, percent, g_syncFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -2208,7 +2208,7 @@ static void *ProgressReportSyncBackupFile(void *arg)
     } while ((g_syncFiles < g_totalFiles) && !g_progressFlagSync);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync backup file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync backup file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
     return nullptr;
 }

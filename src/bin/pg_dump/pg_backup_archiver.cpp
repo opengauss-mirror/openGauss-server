@@ -420,7 +420,7 @@ static void *ProgressReportRestore(void *arg)
         /* progress report */
         percent = (int)(g_restoredEntries * 100 / g_totalEntries);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \r",
             progressBar, percent, g_restoredEntries, g_totalEntries);
                 pthread_mutex_lock(&g_mutex);
         timespec timeout;
@@ -438,7 +438,7 @@ static void *ProgressReportRestore(void *arg)
     } while ((g_restoredEntries  < g_totalEntries) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
             progressBar, percent, g_restoredEntries, g_totalEntries);
     return nullptr;
 }
