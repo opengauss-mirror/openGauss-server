@@ -5269,7 +5269,22 @@ TypeInfo* getTypes(Archive* fout, int* numTypes)
 
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, "pg_catalog");
-    if (fout->remoteVersion >= 90200) {
+    if (GetVersionNum(fout) >= 92838 && findDBCompatibility(fout, PQdb(GetConnection(fout))) &&
+        hasSpecificExtension(fout, "dolphin")) {
+        appendPQExpBuffer(query,
+            "SELECT tableoid, oid, typname, "
+            "typnamespace, typacl, "
+            "(%s typowner) AS rolname, "
+            "typinput::oid AS typinput, "
+            "typoutput::oid AS typoutput, typelem, typrelid, "
+            "CASE WHEN typrelid = 0 THEN ' '::`char` "
+            "ELSE (SELECT relkind FROM pg_class WHERE oid = typrelid) END AS typrelkind, "
+            "typtype, typisdefined, "
+            "typname[0] = '_' AND typelem != 0 AND "
+            "(SELECT typarray FROM pg_type te WHERE oid = pg_type.typelem) = oid AS isarray "
+            "FROM pg_type",
+            username_subquery);
+    } else if (fout->remoteVersion >= 90200) {
         appendPQExpBuffer(query,
             "SELECT tableoid, oid, typname, "
             "typnamespace, typacl, "
