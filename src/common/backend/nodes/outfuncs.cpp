@@ -646,6 +646,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_INT_FIELD(current_id);
     WRITE_BOOL_FIELD(enable_adaptive_scan);
     WRITE_BOOL_FIELD(is_spq_optmized);
+    WRITE_INT_FIELD(write_node_index);
 #endif
 }
 

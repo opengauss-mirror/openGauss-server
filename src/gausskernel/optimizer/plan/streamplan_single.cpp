@@ -538,6 +538,7 @@ void SpqSerializePlan(Plan* node, PlannedStmt* planned_stmt, StringInfoData* str
 
 #ifdef USE_SPQ
     ShipPlannedStmt->enable_adaptive_scan = planned_stmt->enable_adaptive_scan;
+    ShipPlannedStmt->write_node_index = planned_stmt->write_node_index;
 #endif
     appendStringInfoString(str, nodeToString(ShipPlannedStmt));
 }

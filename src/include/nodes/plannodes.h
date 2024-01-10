@@ -199,6 +199,7 @@ typedef struct PlannedStmt {
     int current_id;
     bool enable_adaptive_scan;
     bool is_spq_optmized;
+    int write_node_index;
     int	numSlices;
     struct PlanSlice *slices;
     int *subplan_sliceIds;

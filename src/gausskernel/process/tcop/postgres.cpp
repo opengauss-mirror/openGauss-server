@@ -1608,6 +1608,33 @@ const char* CreateCommandTagForPlan(CmdType commandType)
     }
     return tag;
 }
+
+#ifdef USE_SPQ
+void ChangeDMLPlanForRONode(PlannedStmt* plan)
+{
+    if (IS_SPQ_EXECUTOR && !SS_PRIMARY_MODE &&
+        (plan->commandType == CMD_INSERT || plan->commandType == CMD_UPDATE || plan->commandType == CMD_DELETE)) {
+        if (IsA(plan->planTree, ModifyTable)) {
+            ModifyTable* node = (ModifyTable*)plan->planTree;
+            ListCell* l = NULL;
+            foreach (l, node->plans) {
+                plan->planTree = (Plan*)lfirst(l);
+            }
+        }
+        ListCell *rtcell;
+        RangeTblEntry *rte;
+        AclMode removeperms = ACL_INSERT | ACL_UPDATE | ACL_DELETE | ACL_SELECT_FOR_UPDATE;
+
+        /* Just reading, so don't check INS/DEL/UPD permissions. */
+        foreach(rtcell, plan->rtable) {
+            rte = (RangeTblEntry *)lfirst(rtcell);
+            if (rte->rtekind == RTE_RELATION &&
+                0 != (rte->requiredPerms & removeperms))
+                rte->requiredPerms &= ~removeperms;
+        }
+    }
+}
+#endif
 /*
  * exec_simple_plan
  *
@@ -1624,6 +1651,8 @@ void exec_simple_plan(PlannedStmt* plan)
     if (plan == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("Invaild parameter.")));
     }
+
+    ChangeDMLPlanForRONode(plan);
 
     plpgsql_estate = NULL;
 
@@ -3197,6 +3226,8 @@ static void exec_plan_with_params(StringInfo input_message)
     if (planstmt == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("Invaild parameter.")));
     }
+
+    ChangeDMLPlanForRONode(planstmt);
 
     if (ThreadIsDummy(planstmt->planTree)) {
         u_sess->stream_cxt.dummy_thread = true;

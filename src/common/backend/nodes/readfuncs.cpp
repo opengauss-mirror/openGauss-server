@@ -4724,6 +4724,7 @@ static PlannedStmt* _readPlannedStmt(void)
     READ_INT_FIELD(current_id);
     READ_BOOL_FIELD(enable_adaptive_scan);
     READ_BOOL_FIELD(is_spq_optmized);
+    READ_INT_FIELD(write_node_index);
 #endif
 
     READ_DONE();
