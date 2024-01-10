@@ -227,7 +227,11 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
                  * and return it --- unless we find we can project no tuples
                  * from this scan tuple, in which case continue scan.
                  */
+#ifdef ENABLE_DFX_OPT
+                result_slot = ExecProjectByFlatten(proj_info, &is_done);
+#else
                 result_slot = ExecProject(proj_info, &is_done);
+#endif
 #ifdef PGXC
                 /* Copy the xcnodeoid if underlying scanned slot has one */
                 result_slot->tts_xcnodeoid = slot->tts_xcnodeoid;

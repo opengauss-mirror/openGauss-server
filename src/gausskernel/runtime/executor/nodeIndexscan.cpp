@@ -63,7 +63,6 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     IndexScanDesc scandesc;
     HeapTuple tuple;
     TupleTableSlot* slot = NULL;
-    bool isUstore = false;
 
     /*
      * extract necessary information from index scan node
@@ -77,26 +76,28 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
         else if (ScanDirectionIsBackward(direction))
             direction = ForwardScanDirection;
     }
-    scandesc = node->iss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+    scandesc = node->iss_ScanDesc;
 
+#ifndef ENABLE_DFX_OPT
+    bool isUstore = false;
     isUstore = RelationIsUstoreFormat(node->ss.ss_currentRelation);
-
+#endif
     /*
      * ok, now that we have what we need, fetch the next tuple.
      */
     // we should change abs_idx_getnext to call IdxScanAm(scan)->idx_getnext and channge .idx_getnext in g_HeapIdxAm to
     // IndexGetnextSlot
     while (true) {
-        CHECK_FOR_INTERRUPTS();
-
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
+#ifndef ENABLE_DFX_OPT
         if (isUstore) {
             if (!IndexGetnextSlot(scandesc, direction, slot, &node->ss.ps.state->have_current_xact_date)) {
                 break;
             }
         } else {
+#endif
             if ((tuple = scan_handler_idx_getnext(scandesc, direction, InvalidOid, InvalidBktId,
                                                   &node->ss.ps.state->have_current_xact_date)) == NULL) {
                 break;
@@ -107,12 +108,16 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
              * Store the scanned tuple in the scan tuple slot of the scan state.
              * Note: we pass 'false' because tuples returned by amgetnext are
              * pointers onto disk pages and must not be pfree_ext()'d.
-             */
+             */               /* don't pfree */
+#ifndef ENABLE_DFX_OPT
             (void)ExecStoreTuple(tuple, /* tuple to store */
                 slot,                   /* slot to store in */
                 indexScan->xs_cbuf,     /* buffer containing tuple */
-                false);                 /* don't pfree */
+                false); 
         }
+#else
+            tableam_tslot_store_tuple(tuple, slot, indexScan->xs_cbuf, false, false);
+#endif
 
         /*
          * If the index was lossy, we have to recheck the index quals using
@@ -124,6 +129,7 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
             if (!ExecQual(node->indexqualorig, econtext, false)) {
                 /* Fails recheck, so drop it and loop back for another */
                 InstrCountFiltered2(node, 1);
+                CHECK_FOR_INTERRUPTS();
                 continue;
             }
         }
