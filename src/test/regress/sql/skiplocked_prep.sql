@@ -17,3 +17,10 @@ create table IF NOT EXISTS skiplocked_t2(
     primary key (id)
 )with (STORAGE_TYPE=USTORE);
 insert into skiplocked_t2 values (1, 'one');
+
+create table IF NOT EXISTS skiplocked_t3(
+    id int,
+    info text,
+    primary key (id)
+)with (ORIENTATION=COLUMN);
+insert into skiplocked_t3 values (1, 'one');

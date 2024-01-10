@@ -16,3 +16,10 @@ create table IF NOT EXISTS skiplocked_t2(
 )with (STORAGE_TYPE=USTORE);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "skiplocked_t2_pkey" for table "skiplocked_t2"
 insert into skiplocked_t2 values (1, 'one');
+create table IF NOT EXISTS skiplocked_t3(
+    id int,
+    info text,
+    primary key (id)
+)with (ORIENTATION=COLUMN);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "skiplocked_t3_pkey" for table "skiplocked_t3"
+insert into skiplocked_t3 values (1, 'one');
