@@ -410,8 +410,6 @@ ExecProjectByFlatten(ProjectionInfo *projInfo, ExprDoneCond* isDone = NULL)
 	ExprState  *state = &projInfo->pi_state;
 	TupleTableSlot *slot = state->resultslot;
 	bool		isnull;
-    ListCell *lc;
-    char* resname = NULL;
 
     if (isDone) {
         *isDone = ExprSingleResult;
@@ -423,20 +421,22 @@ ExecProjectByFlatten(ProjectionInfo *projInfo, ExprDoneCond* isDone = NULL)
 	 */
 	ExecClearTuple(slot);
 
+#ifndef ENABLE_DFX_OPT
+    ListCell *lc;
+    char* resname = NULL;
     if (state->expr) {
         lc = list_head((List*)(state->expr));
         TargetEntry *te = (TargetEntry*)lfirst(lc);
         state->current_targetentry = lc;
         resname = te->resname;
     }
-
     ELOG_FIELD_NAME_START(resname);
-
+#endif
     /* Run the expression, discarding scalar result from the last column. */
 	(void) ExecEvalExprSwitchContext(state, econtext, &isnull);
-
+#ifndef ENABLE_DFX_OPT
     ELOG_FIELD_NAME_END;
-
+#endif
 	/*
 	 * Successfully formed a result row.  Mark the result slot as containing a
 	 * valid virtual tuple (inlined version of ExecStoreVirtualTuple()).
