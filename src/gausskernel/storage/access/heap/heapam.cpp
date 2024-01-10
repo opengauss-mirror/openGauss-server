@@ -10245,11 +10245,11 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
     ItemPointer tid = &scan->xs_ctup.t_self;
     bool got_heap_tuple = false;
 
+    /* Switch to correct buffer if we don't have it already */
+    Buffer prev_buf = scan->xs_cbuf;
+
     /* We can skip the buffer-switching logic if we're in mid-HOT chain. */
     if (!scan->xs_continue_hot) {
-        /* Switch to correct buffer if we don't have it already */
-        Buffer prev_buf = scan->xs_cbuf;
-
         scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, ItemPointerGetBlockNumber(tid));
 
         /* In single mode and hot standby, we may get a null buffer if index
@@ -10272,6 +10272,25 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
         ereport(ERROR, (errmsg("deadlock detected: requesting lock on pg_partition page while already holding it."),
                         errhint("retry this operation after other DDL operation finished.")));
     }
+
+#ifdef ENABLE_DFX_OPT
+    /* Prefetch whole page for batch search ordered index, but potentially lead to performance degradation with small result sets. */
+    if (prev_buf != scan->xs_cbuf) {
+        register char *dp = (char *)BufferGetPage(scan->xs_cbuf);
+        register char *end = dp + BLCKSZ;
+        while (dp < end) {
+            __builtin_prefetch(dp);
+            __builtin_prefetch(dp + 64);
+            __builtin_prefetch(dp + 128);
+            __builtin_prefetch(dp + 192);
+            __builtin_prefetch(dp + 256);
+            __builtin_prefetch(dp + 320);
+            __builtin_prefetch(dp + 384);
+            __builtin_prefetch(dp + 448);
+            dp += 512;
+        }
+    }
+#endif
 
     /* Obtain share-lock on the buffer so we can examine visibility */
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
