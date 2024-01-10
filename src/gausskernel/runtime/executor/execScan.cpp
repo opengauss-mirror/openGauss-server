@@ -228,7 +228,11 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
                  * from this scan tuple, in which case continue scan.
                  */
 #ifdef ENABLE_DFX_OPT
-                result_slot = ExecProjectByFlatten(proj_info, &is_done);
+                if (proj_info->pi_state.is_flt_frame){
+                    result_slot = ExecProjectByFlatten(proj_info, &is_done);
+                } else {
+                    result_slot = ExecProjectByRecursion(proj_info, &is_done);
+                }
 #else
                 result_slot = ExecProject(proj_info, &is_done);
 #endif
