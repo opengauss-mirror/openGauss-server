@@ -203,6 +203,8 @@ typedef struct knl_session_attr_spq {
     int spq_scan_unit_size;
     int spq_scan_unit_bit;
     char *gauss_cluster_map;
+    double spq_small_table_threshold;
+    bool spq_enable_direct_read;
  
     /* enable spq btbuild */
     bool spq_enable_btbuild;

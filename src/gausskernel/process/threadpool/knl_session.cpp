@@ -1432,6 +1432,7 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->mdcache_invalidation_counter_registered = false;
     spq_cxt->mdcache_invalidation_counter = 0;
     spq_cxt->last_mdcache_invalidation_counter = 0;
+    spq_cxt->direct_read_map = NIL;
 }
 #endif
 

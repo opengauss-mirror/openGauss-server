@@ -9965,6 +9965,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 /* Set top consumer at the very beginning. */
                 StreamTopConsumerIam();
+                List* oidlist = NIL;
+                int oidcount = 0;
 
                 /* Set the query id we were passed down */
                 errno_t rc = memcpy_s(&u_sess->debug_query_id,
@@ -9973,6 +9975,17 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     sizeof(uint64));
                 securec_check(rc, "\0", "\0");
                 ereport(DEBUG1, (errmsg("Received new query id %lu", u_sess->debug_query_id)));
+                rc = memcpy_s(&oidcount, sizeof(int),
+                    pq_getmsgbytes(&input_message, sizeof(int)), sizeof(int));
+                securec_check(rc,"\0","\0");
+                for (int i = 0; i < oidcount; i++) {
+                    Oid tmp = InvalidOid;
+                    rc = memcpy_s(&tmp, sizeof(Oid),
+                        pq_getmsgbytes(&input_message, sizeof(Oid)), sizeof(Oid));
+                    securec_check(rc,"\0","\0");
+                    oidlist = lappend_oid(oidlist, tmp);
+                }
+
                 pq_getmsgend(&input_message);
 
                 /*
@@ -9988,6 +10001,22 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_sendint16(&buf, g_instance.attr.attr_network.comm_control_port);
                 pq_sendint16(&buf, g_instance.attr.attr_network.comm_sctp_port);
                 pq_endmessage(&buf);
+                if (SS_PRIMARY_MODE && oidcount > 0) {
+                    StringInfoData bufoid;
+                    pq_beginmessage(&bufoid, 'i');
+                    pq_sendint(&bufoid, oidcount, 4);
+                    ListCell *oid;
+                    foreach (oid, oidlist) {
+                        Oid relOid = lfirst_oid(oid);
+                        Relation rel = heap_open(relOid, AccessShareLock);
+                        BlockNumber ReadBlkNum = RelationGetNumberOfBlocks(rel);
+                        heap_sync(rel);
+                        heap_close(rel, AccessShareLock);
+                        pq_sendint(&bufoid, (int)relOid, 4);
+                        pq_sendint(&bufoid, (int)ReadBlkNum, 4);
+                    }
+                    pq_endmessage(&bufoid);
+                }
                 pq_putemptymessage('O'); /* PlanIdComplete */
                 pq_flush();
             } break;

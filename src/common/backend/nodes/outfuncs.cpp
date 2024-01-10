@@ -1444,6 +1444,7 @@ static void _outSpqSeqScan(StringInfo str, SpqSeqScan* node)
     WRITE_BOOL_FIELD(isFullTableScan);
     WRITE_BOOL_FIELD(isAdaptiveScan);
     WRITE_BOOL_FIELD(isDirectRead);
+    WRITE_UINT_FIELD(DirectReadBlkNum);
 }
 
 static void _outAssertOp(StringInfo str, const AssertOp *node)
