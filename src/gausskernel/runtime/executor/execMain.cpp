@@ -2189,6 +2189,9 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
 #ifdef ENABLE_MOT
     bool motFinishedExecution = false;
 #endif
+    /* set the flag to false, prepare to record */
+    u_sess->storage_cxt.is_in_pre_read = false;
+    u_sess->storage_cxt.bulk_read_count = 0;
 
     /* Mark sync-up step is required */
     if (unlikely(NeedSyncUpProducerStep(planstate->plan))) {
@@ -2353,6 +2356,14 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
         if (numberTuples == current_tuple_count) {
             break;
         }
+    }
+
+    /* end of plan, we should flush the record for pre-read process */
+    if (u_sess->storage_cxt.is_in_pre_read) {
+        /* it's useless to record the record for last time, because it will be mod of the blocks */
+        int minValue = u_sess->storage_cxt.bulk_read_max == 1 ? 1 : u_sess->storage_cxt.bulk_read_min;
+        ereport(LOG, (errmsg("End of pre-Read, the max blocks batch is %d, the small blocks batch is %d.",
+                u_sess->storage_cxt.bulk_read_max, minValue)));
     }
 
     /*

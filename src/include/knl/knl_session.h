@@ -1964,6 +1964,11 @@ typedef struct knl_u_storage_context {
     int bulk_io_count;
     /* Error numbers of pre-read blocks */
     int bulk_io_error_count;
+    /* pre-read watch params */
+    bool is_in_pre_read;
+    int bulk_read_max;
+    int bulk_read_min;
+    int bulk_read_count;
 } knl_u_storage_context;
 
 
