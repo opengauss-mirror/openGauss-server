@@ -481,6 +481,39 @@ static void HandleLibcommPort(PGXCNodeHandle *conn, const char *msg_body, size_t
     conn->listenPort = ntohs(n16);
     elog(DEBUG1, "spq HandleLibcommPort get [%d:%d]", conn->tcpCtlPort, conn->listenPort);
 }
+static void HandleDirectRead(PGXCNodeHandle *conn, const char *msg_body, size_t len)
+{
+    Assert(msg_body != NULL);
+    Assert(len >= 4);
+    errno_t rc = 0;
+    uint32 n32;
+    int readlen = 0;
+    rc = memcpy_s(&n32, sizeof(uint32), msg_body, sizeof(uint32));
+    securec_check(rc, "", "");
+    int oidcount = ntohl(n32);
+    readlen += sizeof(uint32);
+    int checkLen = sizeof(uint32) + (sizeof(uint32) + sizeof(uint32)) * oidcount;
+    if (len != checkLen) {
+        elog(LOG, "HandleDirectRead len not match [%d:%d]", len, checkLen);
+        return;
+    }
+    ListCell *cell;
+    foreach (cell, u_sess->spq_cxt.direct_read_map) {
+        rc = memcpy_s(&n32, sizeof(uint32), msg_body + readlen, sizeof(uint32));
+        securec_check(rc, "", "");
+        Oid oid = ntohl(n32);
+        readlen += sizeof(uint32);
+
+        rc = memcpy_s(&n32, sizeof(uint32), msg_body + readlen, sizeof(uint32));
+        securec_check(rc, "", "");
+        uint32 ReadBlkNum = ntohl(n32);
+        readlen += sizeof(uint32);
+        SpqDirectReadEntry *entry = (SpqDirectReadEntry *)lfirst(cell);
+        if (entry->rel_id == oid) {
+            entry->nums = ReadBlkNum;
+        }
+    }
+}
 static void HandleLocalCsnMin(PGXCNodeHandle* conn, const char* msg_body, size_t len)
 {
     Assert(msg_body != NULL);
@@ -1008,6 +1041,9 @@ int spq_handle_response(PGXCNodeHandle* conn, RemoteQueryState* combiner, bool i
                 return RESPONSE_PLANID_OK;
             case 'l': /* libcomm port infomation */
                 HandleLibcommPort(conn, msg, msg_len);
+                break;
+            case 'i': /* Direct Read */
+                HandleDirectRead(conn, msg, msg_len);
                 break;
             case 'g': /* DN top xid */
                 HandleDatanodeGxid(conn, msg, msg_len);
@@ -1583,6 +1619,27 @@ void spq_cancel_query(void)
     }
 }
 
+static void spq_do_direct_read()
+{
+    if (u_sess->spq_cxt.direct_read_map != NIL) {
+        ListCell *cell;
+        foreach (cell, u_sess->spq_cxt.direct_read_map) {
+            SpqDirectReadEntry *entry = (SpqDirectReadEntry *)lfirst(cell);
+            if (entry->nums != InvalidBlockNumber) {
+                ListCell *nodecell;
+                foreach (nodecell, entry->spq_seq_scan_node_list) {
+                    SpqSeqScan *node = (SpqSeqScan *)lfirst(nodecell);
+                    node->isDirectRead = true;
+                    node->DirectReadBlkNum = entry->nums;
+                }
+                list_free(entry->spq_seq_scan_node_list);
+            }
+        }
+        list_free(u_sess->spq_cxt.direct_read_map);
+        u_sess->spq_cxt.direct_read_map = NIL;
+    }
+}
+
 void spq_do_query(RemoteQueryState* node)
 {
     RemoteQuery* step = (RemoteQuery*)node->ss.ps.plan;
@@ -1621,6 +1678,9 @@ void spq_do_query(RemoteQueryState* node)
      *  Current it should be RO transaction
      */
     pgxc_node_send_queryid_with_sync(connections, regular_conn_count, node->queryId);
+    if (u_sess->attr.attr_spq.spq_enable_direct_read) {
+        spq_do_direct_read();
+    }
     update_spq_port(connections, planstmt, regular_conn_count);
     spq_startQcThread(node);
 
@@ -5834,8 +5894,9 @@ static void pgxc_node_send_queryid_with_sync(PGXCNodeHandle** connections, int c
 
     Assert(queryId != 0);
 
+    int countOID = list_length(u_sess->spq_cxt.direct_read_map);
     for (i = 0; i < conn_count; i++) {
-        int msglen = 12;
+        int msglen = sizeof(int) + sizeof(uint64) + sizeof(int) + sizeof(Oid) * countOID;
 
         if (temp_connections[i]->state == DN_CONNECTION_STATE_QUERY)
             BufferConnection(temp_connections[i]);
@@ -5864,6 +5925,22 @@ static void pgxc_node_send_queryid_with_sync(PGXCNodeHandle** connections, int c
             sizeof(uint64));
         securec_check(ss_rc, "\0", "\0");
         temp_connections[i]->outEnd += sizeof(uint64);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd,
+                         &countOID,
+                         sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(int);
+        ListCell *cell;
+        foreach (cell, u_sess->spq_cxt.direct_read_map) {
+            SpqDirectReadEntry *entry = (SpqDirectReadEntry *)lfirst(cell);
+            ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                             temp_connections[i]->outSize - temp_connections[i]->outEnd,
+                             &(entry->rel_id), sizeof(Oid));
+            securec_check(ss_rc, "\0", "\0");
+            temp_connections[i]->outEnd += sizeof(Oid);
+        }
 
         if (pgxc_node_flush(temp_connections[i]) != 0) {
             temp_connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;

@@ -7466,6 +7466,7 @@ static SpqSeqScan* _copySpqSeqScan(const SpqSeqScan* from)
     newnode->isFullTableScan = from->isFullTableScan;
     newnode->isAdaptiveScan = from->isAdaptiveScan;
     newnode->isDirectRead = from->isDirectRead;
+    newnode->DirectReadBlkNum = from->DirectReadBlkNum;
 
     return newnode;
 }

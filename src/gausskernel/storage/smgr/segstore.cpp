@@ -1965,3 +1965,70 @@ bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 forkNum, ui
     return false;
 }
 
+/*
+ * to get direct read info
+ */
+BlockNumber seg_direct_read_get_range(BlockNumber logic_id)
+{
+    uint32 extent_id;
+    uint32 offset;
+    ExtentSize extent_size;
+
+    SegLogicPageIdToExtentId(logic_id, &extent_id, &offset, &extent_size);
+    return extent_size - offset;
+}
+
+/*
+ * IMPORTANT:
+ * pages during (blocknum) to (blocknum + blocknums) should be in one extent
+ * pages should be checked by PageIsVerified in future works
+ */
+void seg_direct_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber *blocknums, char *buffer,
+                     BlockNumber *locBlock)
+{
+    LOG_SMGR_API(reln->smgr_rnode, forknum, blocknum, "seg_direct_read");
+
+    Buffer seg_buffer = read_head_buffer(reln, forknum, false);
+    if (ENABLE_DMS) {
+        LockBuffer(seg_buffer, BUFFER_LOCK_SHARE);
+    }
+    SegmentCheck(BufferIsValid(seg_buffer));
+    SegmentHead *seg_head = (SegmentHead *)PageGetContents(BufferGetBlock(seg_buffer));
+    SegmentCheck(IsNormalSegmentHead(seg_head));
+
+    if (seg_head->nblocks < blocknum + (*blocknums)) {
+        if (ENABLE_DMS) {
+            LockBuffer(seg_buffer, BUFFER_LOCK_UNLOCK);
+        }
+        SegReleaseBuffer(seg_buffer);
+        ereport(ERROR, (errmodule(MOD_SEGMENT_PAGE), errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("seg_direct_read blocknum exceeds segment size"),
+                        errdetail("segment %s, head: %u, read block %u, read nums %u, but nblocks is %u",
+                                  relpathperm(reln->smgr_rnode.node, forknum), reln->seg_desc[forknum]->head_blocknum,
+                                  blocknum, *blocknums, seg_head->nblocks)));
+    }
+
+    if (ENABLE_DMS) {
+        LockBuffer(seg_buffer, BUFFER_LOCK_UNLOCK);
+    }
+
+    LockSegmentHeadPartition(reln->seg_space->spcNode, reln->seg_space->dbNode, reln->seg_desc[forknum]->head_blocknum,
+                             LW_SHARED);
+
+    SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, blocknum);
+    SegmentCheck(loc.blocknum != InvalidBlockNumber);
+
+    SegSpace *spc = reln->seg_space;
+    int egid = EXTENT_TYPE_TO_GROUPID(EXTENT_GROUP_RNODE(spc, loc.extent_size).relNode);
+    SegExtentGroup *seg = &spc->extent_group[egid][forknum];
+    *locBlock = loc.blocknum;
+    df_direct_pread_block(seg->segfile, buffer, loc.blocknum, blocknums);
+
+    UnlockSegmentHeadPartition(reln->seg_space->spcNode, reln->seg_space->dbNode,
+                               reln->seg_desc[forknum]->head_blocknum);
+
+    /* extent_size == 1 means segment metadata, which should not be used as heap data */
+    SegmentCheck(loc.extent_size != 1);
+
+    SegReleaseBuffer(seg_buffer);
+}

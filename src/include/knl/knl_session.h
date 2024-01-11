@@ -2756,6 +2756,12 @@ namespace spqopt {
     class CXformFactory;
 }
 
+typedef struct SpqDirectReadEntry {
+    Oid rel_id;
+    BlockNumber nums;
+    List *spq_seq_scan_node_list;
+} SpqDirectReadEntry;
+
 typedef struct knl_u_spq_context {
     /* dxl information */
     spqdxl::CDXLMemoryManager* dxl_memory_manager;
@@ -2793,6 +2799,7 @@ typedef struct knl_u_spq_context {
     List *remoteQuerys;
     List *adp_connections;
     struct SnapshotData* snapshot;
+    List *direct_read_map;
 } knl_u_spq_context;
 #endif
 

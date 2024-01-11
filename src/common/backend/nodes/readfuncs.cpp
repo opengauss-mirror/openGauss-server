@@ -4783,6 +4783,7 @@ static SpqSeqScan* _readSpqSeqScan(void)
     READ_BOOL_FIELD(isFullTableScan);
     READ_BOOL_FIELD(isAdaptiveScan);
     READ_BOOL_FIELD(isDirectRead);
+    READ_UINT_FIELD(DirectReadBlkNum);
  
     READ_END();
 }

@@ -663,6 +663,7 @@ typedef struct SpqSeqScan {
     bool isFullTableScan;
     bool isAdaptiveScan;
     bool isDirectRead;
+    uint32 DirectReadBlkNum;
 } SpqSeqScan;
 #endif
 /*
