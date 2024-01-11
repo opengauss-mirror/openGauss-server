@@ -6650,7 +6650,7 @@ void XLOGShmemInit(void)
 
     int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
     if (!IsUnderPostmaster && g_instance.attr.attr_storage.num_xloginsert_locks % nNumaNodes != 0) {
-        ereport(PANIC,
+        ereport(FATAL,
                 (errmsg("XLOGShmemInit num_xloginsert_locks should be multiple of NUMA node number in the system.")));
     }
     g_instance.wal_cxt.num_locks_in_group = g_instance.attr.attr_storage.num_xloginsert_locks / nNumaNodes;
