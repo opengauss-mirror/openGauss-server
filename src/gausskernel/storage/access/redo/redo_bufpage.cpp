@@ -779,7 +779,6 @@ OffsetNumber PageAddItem(Page page, Item item, Size size, OffsetNumber offsetNum
     if (offsetNumber > limit) {
         ereport(WARNING, (errmsg("specified item offset is too large")));
         return InvalidOffsetNumber;
-        return InvalidOffsetNumber;
     }
 
     if (is_heap && offsetNumber > MaxHeapTuplesPerPage) {
