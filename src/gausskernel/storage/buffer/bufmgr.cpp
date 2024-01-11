@@ -1667,11 +1667,8 @@ Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber blo
         u_sess->pre_read_mem_cxt = AllocSetContextCreate(
                 u_sess->top_mem_cxt, "Memory Context for pre-read and pre-extend", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
         oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
-        if (isVacuum) {
-            u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(u_sess->storage_cxt.max_vacuum_bulk_read_size * BLCKSZ);
-        } else {
-            u_sess->storage_cxt.bulk_buf_read = (char*)palloc(u_sess->storage_cxt.max_heap_bulk_read_size * BLCKSZ);
-        }
+        u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(u_sess->storage_cxt.max_vacuum_bulk_read_size * BLCKSZ);
+        u_sess->storage_cxt.bulk_buf_read = (char*)palloc(u_sess->storage_cxt.max_heap_bulk_read_size * BLCKSZ);
         (void) MemoryContextSwitchTo(oldContext);
     }
 
@@ -1681,6 +1678,17 @@ Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber blo
     if (hit) {
         /* Update pgstat counters to reflect a cache hit */
         pgstat_count_buffer_hit(reln);
+        u_sess->storage_cxt.bulk_read_count++;
+    } else if (u_sess->storage_cxt.is_in_pre_read) {
+        /* if not first to unhit, need to record */
+        u_sess->storage_cxt.bulk_read_max = Max(u_sess->storage_cxt.bulk_read_count + 1, u_sess->storage_cxt.bulk_read_max);
+        u_sess->storage_cxt.bulk_read_min = Min(u_sess->storage_cxt.bulk_read_count + 1, u_sess->storage_cxt.bulk_read_min);
+        u_sess->storage_cxt.bulk_read_count = 0;
+    } else {
+        /* if first time to unhit, it is normal to start */
+        u_sess->storage_cxt.is_in_pre_read = true;
+        u_sess->storage_cxt.bulk_read_max = 1;
+        u_sess->storage_cxt.bulk_read_min = MAX_BULK_IO_SIZE + 1;
     }
     return buf;
 
