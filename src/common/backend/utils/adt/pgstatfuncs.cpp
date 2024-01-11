@@ -15310,7 +15310,7 @@ Datum query_node_reform_info_from_dms(PG_FUNCTION_ARGS)
     dms_info_id_e reform_info_id =
         PG_GETARG_INT64(0) == 0 ? dms_info_id_e::DMS_INFO_REFORM_LAST : dms_info_id_e::DMS_INFO_REFORM_CURRENT;
     if (!ENABLE_DMS) {
-        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info_from_dms without shared storage deployment!")));
     }
 
     FuncCallContext *funcctx = NULL;
@@ -15409,7 +15409,7 @@ Datum query_all_drc_info(PG_FUNCTION_ARGS)
 {
     int type = PG_GETARG_INT64(0) == 0 ? en_drc_res_type::DRC_RES_PAGE_TYPE : en_drc_res_type::DRC_RES_LOCK_TYPE;
     if (!ENABLE_DMS) {
-        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info without shared storage deployment!")));
+        ereport(ERROR, (errmsg("[SS] cannot query query_all_drc_info without shared storage deployment!")));
     }
     if (!SS_PRIMARY_MODE) {
         ereport(WARNING, (errmsg("[SS] query only in primary node. current node is standby!")));
