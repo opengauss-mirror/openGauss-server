@@ -1970,24 +1970,11 @@ bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 forkNum, ui
  */
 BlockNumber seg_direct_read_get_range(BlockNumber logic_id)
 {
+    uint32 extent_id;
     uint32 offset;
     ExtentSize extent_size;
-    if (logic_id < EXT_SIZE_8_TOTAL_PAGES) {
-        extent_size = EXT_SIZE_8;
-        offset = logic_id % EXT_SIZE_8;
-    } else if (logic_id < EXT_SIZE_128_TOTAL_PAGES) {
-        extent_size = EXT_SIZE_128;
-        logic_id -= EXT_SIZE_8_TOTAL_PAGES;
-        offset = logic_id % EXT_SIZE_128;
-    } else if (logic_id < EXT_SIZE_1024_TOTAL_PAGES) {
-        extent_size = EXT_SIZE_1024;
-        logic_id -= EXT_SIZE_128_TOTAL_PAGES;
-        offset = logic_id % EXT_SIZE_1024;
-    } else {
-        extent_size = EXT_SIZE_8192;
-        logic_id -= EXT_SIZE_1024_TOTAL_PAGES;
-        offset = logic_id % EXT_SIZE_8192;
-    }
+
+    SegLogicPageIdToExtentId(logic_id, &extent_id, &offset, &extent_size);
     return extent_size - offset;
 }
 
