@@ -1903,6 +1903,10 @@ static int CBReformDoneNotify(void *db_handle)
                 g_instance.attr.attr_storage.dms_attr.instance_id)));
         }
     }
+
+    if (SS_REPLICATION_DORADO_CLUSTER) {
+        SSDoradoUpdateHAmode();
+    }
    
     /* SSClusterState and in_reform must be set atomically */
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;

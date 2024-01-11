@@ -138,32 +138,19 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
     Assert(readLen <= XLogPreReadSize);
 
     do {
-        /* 
-         * That source is XLOG_FROM_STREAM indicate that walreceiver receive xlog and walrecwriter have wrriten xlog
-         * into pg_xlog segment file in dss. There exists a condition which preReadBuf possibly is zero for some xlog
-         * record just writing into pg_xlog file when source is XLOG_FROM_STREAM and dms and dss are enabled. So we
-         * need to reread xlog from dss to preReadBuf.
-         */
-        if (SS_REPLICATION_MAIN_STANBY_NODE) {
-            volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-            if (XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) && 
-               ((targetRecPtr < xlogFlushPtrForPerRead && t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) || 
-               (!xlogctl->IsRecoveryDone) || (t_thrd.xlog_cxt.readSource != XLOG_FROM_STREAM))) {
-                   isReadFile = false;
-               }
-        }
-
-        if ((XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr) &&
-             !SS_REPLICATION_MAIN_STANBY_NODE) || (!isReadFile)) {
+        if ((XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr))) {
             preReadOff = targetPagePtr % XLogPreReadSize;
             int err = memcpy_s(buf, readLen, xlogreader->preReadBuf + preReadOff, readLen);
             securec_check(err, "\0", "\0");
             break;
         } else {
-            if (SS_REPLICATION_MAIN_STANBY_NODE) {
-                xlogreader->xlogFlushPtrForPerRead = GetWalRcvWriteRecPtr(NULL);
-                xlogFlushPtrForPerRead = xlogreader->xlogFlushPtrForPerRead;
+            /*
+             * That preReadStartPtr is InvalidXlogPreReadStartPtr has three kinds of occasions.
+             */
+            if (xlogreader->preReadStartPtr == InvalidXlogPreReadStartPtr && SS_REPLICATION_MAIN_STANBY_NODE) {
+                ereport(LOG, (errmsg("In ss replication daorao cluster mode, preReadStartPtr is 0.")));
             }
+
             // pre-reading for dss
             uint32 targetPageOff = targetPagePtr % XLogSegSize;
             preReadOff = targetPageOff - targetPageOff % XLogPreReadSize;

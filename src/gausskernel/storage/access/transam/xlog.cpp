@@ -5157,7 +5157,11 @@ static void ExecuteRecoveryCommand(char *command, char *commandName, bool failOn
  * a lot of segment creations by foreground processes, which is not so good.
  */
 static void PreallocXlogFiles(XLogRecPtr endptr)
-{
+{   
+    /* In ss repplication dorado cluster, standby cluster doesn't need to preallocate xlog files */
+    if (SS_REPLICATION_STANDBY_CLUSTER) {
+        return;
+    }
     XLogSegNo _logSegNo;
     int lf;
     bool use_existent = false;
@@ -5549,6 +5553,13 @@ XLogRecord *SSXLogReadRecordErgodic(XLogReaderState *state, XLogRecPtr RecPtr,
                 close(t_thrd.xlog_cxt.readFile);
                 t_thrd.xlog_cxt.readFile = -1;
             }
+            
+            /* If record which is read from file is NULL, when preReadStartPtr is not set InvalidXlogPreReadStartPtr
+             * then exhchanging file, due to preread 64M now RecPtr < preReadStartPtr, so record still is got from 
+             * preReadBuf and record still is bad. Therefore, preReadStartPtr need to set InvalidXlogPreReadStartPtr
+             * so that record is read from next file on disk instead of preReadBuf.
+             */
+            state->preReadStartPtr = InvalidXlogPreReadStartPtr;
         }
     }
     return record;
@@ -5647,6 +5658,8 @@ static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, in
         } else {
             if (SS_REPLICATION_DORADO_CLUSTER) {
                 t_thrd.xlog_cxt.ssXlogReadFailedTimes++;
+
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
             }
             /* No valid record available from this source */
             if (streamFailCount < XLOG_STREAM_READREC_MAXTRY) {
@@ -10677,15 +10690,14 @@ void StartupXLOG(void)
 
     EndOfLog = t_thrd.xlog_cxt.EndRecPtr;
     XLByteToPrevSeg(EndOfLog, endLogSegNo);
-    if ((ENABLE_DMS && SS_STANDBY_FAILOVER) || SS_STANDBY_PROMOTING) {
+    if (!SS_REPLICATION_STANDBY_CLUSTER && 
+        ((ENABLE_DMS && SS_STANDBY_FAILOVER) || SS_STANDBY_PROMOTING)) {
         bool use_existent = true;
         (void)XLogFileInit(endLogSegNo, &use_existent, true);
     }
     uint32 redoReadOff = t_thrd.xlog_cxt.readOff;
     
-    /* only primary mode can call getwritepermissionsharedstorage wnen dorado hyperreplication
-     * and dms enabled.
-     */
+    /* only primary mode can call getwritepermissionsharedstorage when dorado hyperreplication. */
     if(IS_SHARED_STORAGE_MODE) {
         GetWritePermissionSharedStorage();
         CheckShareStorageCtlInfo(EndOfLog);   
@@ -20234,8 +20246,13 @@ needread:
             goto next_record_is_invalid;
         }
     }
+    
+    if (xlogreader->preReadBuf == NULL) {
+        actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
+    } else {
+        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen);
+    }
 
-    actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
     if (actualBytes != t_thrd.xlog_cxt.readLen) {
         ereport(LOG, (errmsg("%s read failed, change xlog file.", xlog_path)));
         goto next_record_is_invalid;
