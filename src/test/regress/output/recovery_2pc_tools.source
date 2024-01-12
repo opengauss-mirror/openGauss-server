@@ -678,7 +678,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_scrlock_worker_bind_core                      | string  |      |           | 
  ss_scrlock_worker_count                          | integer |      | 2         | 16
  ss_txnstatus_cache_size                          | integer |      | 0         | 524288
- ss_work_thread_count                             | integer |      | 16        | 128
+ ss_work_thread_count                             | integer |      | 0         | 128
+ ss_work_thread_pool_attr                         | string  |      |           | 
  standard_conforming_strings                      | bool    |      |           | 
  standby_force_recyle_ratio                       | real    |      | 0         | 1
  standby_max_query_time                           | integer | s    | 0         | 86400

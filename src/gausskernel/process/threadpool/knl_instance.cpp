@@ -236,6 +236,13 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->latest_snapshot_xmax = 0;
     dms_cxt->latest_snapshot_csn = 0;
     SpinLockInit(&dms_cxt->set_snapshot_mutex);
+    {
+        ss_fake_seesion_context_t *fs_cxt = &g_instance.dms_cxt.SSFakeSessionCxt;
+        SpinLockInit(&fs_cxt->lock);
+        fs_cxt->fake_sessions = NULL;
+        fs_cxt->quickFetchIndex = 0;
+        fs_cxt->session_start = 0;
+    }
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)

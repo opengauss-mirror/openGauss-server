@@ -166,6 +166,8 @@ const int MS_PER_S = 1000;
 const int BUFSIZE = 1024;
 const int MAX_CPU_NUMS = 104;
 const int MAXLENS = 5;
+const int SS_WORK_THREAD_POOL_MAX_CNT_UPPER = 128;
+const int SS_WORK_THREAD_POOL_MAX_CNT_LOWER = 16;
 /* options for cstore_insert_mode */
 #define TO_AUTO 1  /* means enable_delta_store = true, tail data to delta table */
 #define TO_MAIN 2  /* means enable_delta_store = false, all data to hdfs store */
@@ -224,6 +226,7 @@ static bool check_ss_cluster_replication_control_para(bool* newval, void** extra
 static void assign_ss_enable_verify_page(bool newval, void *extra);
 #endif
 static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource source);
+static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSource source);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
@@ -4889,6 +4892,18 @@ static void InitStorageConfigureNamesString()
             check_ss_rdma_work_config,
             NULL,
             NULL},
+        {{"ss_work_thread_pool_attr",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the attr to work threadpool"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.work_thread_pool_attr,
+            "",
+            check_ss_work_thread_pool_attr,
+            NULL,
+            NULL},
         {{"uwal_devices_path",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -6798,5 +6813,37 @@ static bool check_uwal_log_path(char **newval, void **extra, GucSource source)
             return false;
         }
     }
+    return true;
+}
+
+static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSource source)
+{
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt = 0;
+        return true;
+    }
+
+    char* replStr = NULL;
+    replStr = pstrdup(*newval);
+
+    if (!check_str_is_digit(replStr)) {
+        ereport(ERROR, (errmsg("invalid parameter ss_work_thread_pool_attr:%s should be number",
+            replStr)));
+        pfree(replStr);
+        return false;
+    }
+
+    int max_cnt = pg_strtoint32(replStr);
+    if (max_cnt < SS_WORK_THREAD_POOL_MAX_CNT_LOWER ||
+        max_cnt > SS_WORK_THREAD_POOL_MAX_CNT_UPPER) {
+        ereport(ERROR, (errmsg("invalid parameter ss_work_thread_pool_attr:%s, max_cnt:%u should between "
+            "SS_WORK_THREAD_POOL_MAX_CNT_LOWER:%u and SS_WORK_THREAD_POOL_MAX_CNT_UPPER:%u",
+            replStr, max_cnt, SS_WORK_THREAD_POOL_MAX_CNT_LOWER, SS_WORK_THREAD_POOL_MAX_CNT_UPPER)));
+        pfree(replStr);
+        return false;
+    }
+
+    g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt = max_cnt;
+    pfree(replStr);
     return true;
 }

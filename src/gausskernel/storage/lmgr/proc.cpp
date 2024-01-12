@@ -274,6 +274,7 @@ void InitProcGlobal(void)
 #endif
     g_instance.proc_base->freeProcs = NULL;
     g_instance.proc_base->externalFreeProcs = NULL;
+    g_instance.proc_base->dmsFreeProcs = NULL;
     g_instance.proc_base->autovacFreeProcs = NULL;
     g_instance.proc_base->pgjobfreeProcs = NULL;
     g_instance.proc_base->cmAgentFreeProcs = NULL;
@@ -424,13 +425,20 @@ void InitProcGlobal(void)
             procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->pgjobfreeProcs;
             g_instance.proc_base->pgjobfreeProcs = procs[i];
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
-                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + \
-                   NUM_DMS_CALLBACK_PROCS) {
+                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS) {
             /* PGPROC for external thread, add to externalFreeProcs list */
             procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->externalFreeProcs;
             g_instance.proc_base->externalFreeProcs = procs[i];
-            if (!pg_atomic_read_u32(&g_instance.dms_cxt.dmsProcSid)) {
-                pg_atomic_write_u32(&g_instance.dms_cxt.dmsProcSid, (uint32)(i + NUM_DCF_CALLBACK_PROCS));
+        } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
+                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + \
+                   NUM_DMS_CALLBACK_PROCS) {
+            procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->dmsFreeProcs;
+            g_instance.proc_base->dmsFreeProcs = procs[i];
+            if (g_instance.dms_cxt.SSFakeSessionCxt.session_start == 0) {
+                g_instance.dms_cxt.SSFakeSessionCxt.session_start = i;
+                size_t size = NUM_DMS_CALLBACK_PROCS * sizeof(bool);
+                g_instance.dms_cxt.SSFakeSessionCxt.fake_sessions = 
+                    (bool*)CACHELINEALIGN(palloc0(size + PG_CACHE_LINE_SIZE));
             }
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
                    g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + NUM_CMAGENT_PROCS + \
@@ -627,8 +635,10 @@ static void GetProcFromFreeList()
         t_thrd.proc = g_instance.proc_base->pgjobfreeProcs;
     } else if (IsBgWorkerProcess()) {
         t_thrd.proc = g_instance.proc_base->bgworkerFreeProcs;
-    } else if (t_thrd.dcf_cxt.is_dcf_thread || t_thrd.role == DMS_WORKER) {
+    } else if (t_thrd.dcf_cxt.is_dcf_thread) {
         t_thrd.proc = g_instance.proc_base->externalFreeProcs;
+    } else if (t_thrd.role == DMS_WORKER) {
+        t_thrd.proc = g_instance.proc_base->dmsFreeProcs;
     } else if (u_sess->libpq_cxt.IsConnFromCmAgent) {
         t_thrd.proc = GetFreeCMAgentProc();
     } else {
@@ -744,8 +754,10 @@ void InitProcess(void)
             g_instance.proc_base->pgjobfreeProcs = (PGPROC*)t_thrd.proc->links.next;
         } else if (IsBgWorkerProcess()) {
             g_instance.proc_base->bgworkerFreeProcs = (PGPROC*)t_thrd.proc->links.next;
-        } else if (t_thrd.dcf_cxt.is_dcf_thread || t_thrd.role == DMS_WORKER) {
+        } else if (t_thrd.dcf_cxt.is_dcf_thread) {
             g_instance.proc_base->externalFreeProcs = (PGPROC*)t_thrd.proc->links.next;
+        } else if (t_thrd.role == DMS_WORKER) {
+            g_instance.proc_base->dmsFreeProcs = (PGPROC*)t_thrd.proc->links.next;
         } else if (u_sess->libpq_cxt.IsConnFromCmAgent) {
             g_instance.proc_base->cmAgentFreeProcs = (PGPROC *)t_thrd.proc->links.next;
         } else {
@@ -1365,9 +1377,12 @@ static void ProcPutBackToFreeList()
     } else if (IsJobSchedulerProcess() || IsJobWorkerProcess()) {
         t_thrd.proc->links.next = (SHM_QUEUE*)g_instance.proc_base->pgjobfreeProcs;
         g_instance.proc_base->pgjobfreeProcs = t_thrd.proc;
-    } else if (t_thrd.dcf_cxt.is_dcf_thread || t_thrd.role == DMS_WORKER) {
+    } else if (t_thrd.dcf_cxt.is_dcf_thread) {
         t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->externalFreeProcs;
         g_instance.proc_base->externalFreeProcs = t_thrd.proc;
+    } else if (t_thrd.role == DMS_WORKER) {
+        t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->dmsFreeProcs;
+        g_instance.proc_base->dmsFreeProcs = t_thrd.proc;
     } else if (u_sess->libpq_cxt.IsConnFromCmAgent) {
         t_thrd.proc->links.next = (SHM_QUEUE*)g_instance.proc_base->cmAgentFreeProcs;
         g_instance.proc_base->cmAgentFreeProcs = t_thrd.proc;

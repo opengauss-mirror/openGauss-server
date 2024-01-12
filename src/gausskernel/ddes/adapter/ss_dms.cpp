@@ -104,6 +104,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_of_master));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_page_status));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_thread_init));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_thread_deinit));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_owner));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_wait_reform));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_event));
@@ -265,6 +266,11 @@ void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch)
 int dms_register_thread_init(dms_thread_init_t thrd_init)
 {
     return g_ss_dms_func.dms_register_thread_init(thrd_init);
+}
+
+int dms_register_thread_deinit(dms_thread_deinit_t thrd_deinit)
+{
+    return g_ss_dms_func.dms_register_thread_deinit(thrd_deinit);
 }
 
 int dms_release_owner(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released)
