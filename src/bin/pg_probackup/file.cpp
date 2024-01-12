@@ -1371,6 +1371,8 @@ static void fio_send_pages_impl(int out, char* buf)
     char         read_buffer[BLCKSZ+1];
     char         in_buf[STDIO_BUFSIZE];
     fio_header   hdr;
+    int hdr_num;
+    parray *harray = NULL;
     fio_send_request *req = (fio_send_request*) buf;
     char             *from_fullpath = (char*) buf + sizeof(fio_send_request);
     bool with_pagemap = req->bitmapsize > 0;
@@ -1380,7 +1382,6 @@ static void fio_send_pages_impl(int out, char* buf)
     datapagemap_t *map = NULL;
     datapagemap_iterator_t *iter = NULL;
     /* page headers */
-    int32       hdr_num = -1;
     int32       cur_pos_out = 0;
     BackupPageHeader2 *headers = NULL;
     PageCompression* pageCompression = NULL;
@@ -1431,6 +1432,7 @@ static void fio_send_pages_impl(int out, char* buf)
     /* TODO: what is this barrier for? */
     read_buffer[BLCKSZ] = 1; /* barrier */
 
+    harray = parray_new();
     while (blknum < req->nblocks)
     {
         int    rc = 0;
@@ -1576,18 +1578,12 @@ static void fio_send_pages_impl(int out, char* buf)
             IO_CHECK(fio_write_all(out, write_buffer, hdr.size), hdr.size);
 
             /* set page header for this file */
-            hdr_num++;
-            if (!headers)
-                headers = (BackupPageHeader2 *) pgut_malloc(sizeof(BackupPageHeader2));
-            else
-                headers = (BackupPageHeader2 *) pgut_realloc(headers,
-                                                             (hdr_num) * sizeof(BackupPageHeader2),
-                                                             (hdr_num + 1) * sizeof(BackupPageHeader2));
-
-            headers[hdr_num].block = blknum;
-            headers[hdr_num].lsn = page_st.lsn;
-            headers[hdr_num].checksum = page_st.checksum;
-            headers[hdr_num].pos = cur_pos_out;
+            BackupPageHeader2 *header = pgut_new(BackupPageHeader2);
+            header->block = blknum;
+            header->lsn = page_st.lsn;
+            header->checksum = page_st.checksum;
+            header->pos = cur_pos_out;
+            parray_append(harray, header);
 
             cur_pos_out += hdr.size;
         }
@@ -1609,16 +1605,19 @@ eof:
     hdr.arg = n_blocks_read;
     hdr.size = 0;
 
-    if (headers)
-    {
-        hdr.size = (hdr_num+2) * sizeof(BackupPageHeader2);
-
-        /* add dummy header */
-        headers = (BackupPageHeader2 *) pgut_realloc(headers,
-                                                     (hdr_num + 1) * sizeof(BackupPageHeader2),
-                                                     (hdr_num + 2) * sizeof(BackupPageHeader2));
-        headers[hdr_num+1].pos = cur_pos_out;
+    hdr_num = parray_num(harray);
+    if (hdr_num > 0) {
+        hdr.size = (hdr_num + 1) * sizeof(BackupPageHeader2);
+        headers = (BackupPageHeader2 *)pgut_malloc((hdr_num + 1) * sizeof(BackupPageHeader2));
+        for (int i = 0; i < hdr_num; i++) {
+            auto *header = (BackupPageHeader2 *)parray_get(harray, i);
+            headers[i] = *header;
+            pg_free(header);
+        }
+        headers[hdr_num].pos = cur_pos_out;
     }
+    parray_free(harray);
+
     IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
 
     if (headers)
