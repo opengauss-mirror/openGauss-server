@@ -51,6 +51,38 @@
  * - joincond: (t1.c1=t2.c1) AND (t1.c2=t2.c2) AND (t1.c2=t2.2)..
  *
  */
+
+
+
+ /*
+ 函数/结构体	作用
+JoinTerm 结构体	表示可转换的 "(+)" 外连接的术语，包括左右 RangeTblEntry、单列连接表达式的列表、连接条件和连接类型。
+OperatorPlusProcessContext 结构体	在识别和处理查询中的 "(+)" 外连接的过程中保持上下文信息的结构体。
+preprocess_plus_outerjoin	预处理查询的 WHERE 子句，识别并提取 "(+)" 外连接条件。
+convert_plus_outerjoin	将预处理的 "(+)" 外连接条件转换为相应的 LEFT/RIGHT OUTER JOIN 表达式。
+aggregate_jointerms	将预处理的 "(+)" 外连接条件聚合为 JoinTerm 结构体的列表。
+plus_outerjoin_check	检查 WHERE 子句是否包含 "(+)" 外连接运算符，并相应地设置标志。
+getOperatorPlusFlag	获取标志，指示查询是否包含 "(+)" 外连接运算符。
+resetOperatorPlusFlag	重置指示是否存在 "(+)" 外连接运算符的标志。
+makePlusJoinInfo	创建 PlusJoinRTEInfo 结构体，用于记录 "(+)" 外连接的信息。
+makePlusJoinRTEItem	创建 PlusJoinRTEItem 结构体，用于记录 RangeTblEntry 的信息和是否具有 "(+)" 外连接。
+setIgnorePlusFlag	设置解析期间是否忽略 "(+)" 外连接运算符的标志。
+insert_jointerm	将连接表达式（例如 t1.c1 = t2.c1）插入到 JoinTerm 结构体中，并与相关的 RangeTblEntry 和条件关联。
+find_joinexpr	在 JoinExpr 中查找与给定的 RangeTblRef 关联的连接表达式。
+get_JoinArg	从指定的 RangeTblEntry 中获取连接参数（Node）。
+plus_outerjoin_get_rtindex	获取与指定节点和 RangeTblEntry 关联的 RangeTblRef 索引。
+convert_one_plus_outerjoin	将单个 (+) 外连接表达式转换为 LEFT/RIGHT OUTER JOIN。
+InitOperatorPlusProcessContext	初始化处理 "(+)" 外连接的上下文。
+contain_ColumnRefPlus	检查给定表达式是否在 ColumnRef 中包含 "(+)" 外连接运算符。
+contain_ExprSubLink	检查给定表达式是否包含 ExprSubLink。
+contain_JoinExpr	检查给定列表是否包含 JoinExpr。
+contain_AEXPR_AND_OR	检查给定表达式是否包含 AEXPR_AND/OR。
+unsupport_syntax_plus_outerjoin	处理与 "(+)" 外连接相关的不支持的语法。
+contain_ColumnRefPlus_walker	用于检查 ColumnRef 是否包含 "(+)" 外连接运算符的 Walker 函数。
+contain_ExprSubLink_walker	用于检查表达式是否包含 ExprSubLink 的 Walker 函数。
+contain_AEXPR_AND_OR_walker	用于检查表达式是否包含 AEXPR_AND/OR 的 Walker 函数。
+ 
+ */
 typedef struct JoinTerm {
     /* left/right range-table-entry */
     RangeTblEntry* lrte;
@@ -135,7 +167,10 @@ void setIgnorePlusFlag(ParseState* pstate, bool ignore)
 
 /*
  * - insert_jointerm()
- *
+insert_jointerm 函数的功能是将连接表达式插入到 JoinTerm 结构体中，
+其中 JoinTerm 表示可转换的 "(+)" 外连接的术语。函数会遍历已有的 JoinTerm 列表，查找与给定参数匹配的项。
+如果找到匹配项，则将表达式插入到该 JoinTerm 中；如果未找到匹配项，则创建新的 JoinTerm 并插入到列表中。
+如果 JoinTerm 的 rrte 为 NULL，则会被参数中的 rrte 覆盖。
  * - brief: Try to inert join_expr (t1.c1=t2.c1) into jointerm [RTE1,RTE, quals]
  */
 static void insert_jointerm(OperatorPlusProcessContext* ctx, Expr* expr, RangeTblEntry* lrte, RangeTblEntry* rrte)
@@ -189,6 +224,8 @@ static void insert_jointerm(OperatorPlusProcessContext* ctx, Expr* expr, RangeTb
 /*
  * - aggregate_jointerms()
  *
+aggregate_jointerms 函数的功能是整理连接条件，将连接条件聚合到 JoinTerm 结构体中的 joincond 字段中。
+该函数会遍历 JoinTerm 列表，对于每个 JoinTerm，它会将其中的连接条件合并成一个逻辑AND表达式，存储在 joincond 中。如果 JoinTerm 的 rrte 为 NULL，表示该项为 "(+)" 外连接的左表，此时会将连接条件放回到原始的 whereClause 中。
  * - brief: aggregate the quals(in list format) into one AND-ed connected A_Expr
  */
 static void aggregate_jointerms(OperatorPlusProcessContext* ctx)
@@ -241,7 +278,8 @@ static void aggregate_jointerms(OperatorPlusProcessContext* ctx)
 
 /*
  * - find_joinexpr_walker()
- *
+ *find_joinexpr_walker 函数的作用是在查询树中查找指定的 RangeTblRef，判断该引用是否存在于查询树中的 JoinExpr 中的左表或右表。
+ 该函数是一个递归遍历树的过程，通过深度优先搜索遍历树的每个节点，判断节点的类型，如果是 RangeTblRef，则比较其 rtindex 是否与目标一致，如果是 JoinExpr，则递归遍历其左右子树。
  * - brief: Recursive walker function for find_joinexpr(), if found returned in output
  *   parameter "found"
  */
@@ -293,8 +331,10 @@ static void find_joinexpr_walker(Node* node, const RangeTblRef* rtr, bool* found
 /*
  * - find_joinexpr()
  *
+find_joinexpr 函数的作用是在给定的 JoinExpr 中查找指定的 RangeTblRef 是否存在。函数内部通过调用 find_joinexpr_walker 函数，通过深度优先搜索遍历 JoinExpr 中的左右子树，查找目标 RangeTblRef 是否存在。如果找到了，将 found 设置为 true，表示找到了指定的 RangeTblRef。
  * - brief: Check if given RangeTblRef exists in jexpr(JoinExpr), major used in multi-table
  *          converted case where, e.g.
+ find_RangeTblRef 函数的作用是在给定的 p_rtable 中查找指定的 RangeTblEntry 的索引。函数通过遍历 p_rtable 列表，比较其中的每个 RangeTblEntry 是否与目标相等，如果相等则返回对应的索引（从 1 开始），如果未找到则返回 0。
  */
 static bool find_joinexpr(JoinExpr* jexpr, const RangeTblRef* rtr)
 {
@@ -330,6 +370,14 @@ static int find_RangeTblRef(RangeTblEntry* rte, List* p_rtable)
  * - brief: get Join arg by RTE.
  * 		Transform RTE to RTR firstly. The item of p_joinlist can be RTR or JoinExpr. So We
  * will walk through all the RTR and larg/rarg of JoinExpr in p_joinlist.
+ */
+
+ /*
+ get_JoinArg 函数的作用是在给定的查询上下文和范围表条目 rte 的情况下，获取与该范围表条目相关的 JoinExpr 或 RangeTblRef。
+
+首先，通过调用 find_RangeTblRef 函数获取范围表条目 rte 在查询上下文中范围表中的索引，构建 RangeTblRef 结构，并确保索引不为 0。
+然后，遍历查询上下文中的 p_joinlist 列表，查找其中与构建的 RangeTblRef 相同索引的 RangeTblRef，如果找到，从 p_joinlist 中删除该 RangeTblRef 并返回。
+如果在 p_joinlist 中没有找到与 RangeTblRef 相同索引的 RangeTblRef，再次遍历 p_joinlist，查找其中的 JoinExpr，调用 find_joinexpr 函数判断是否包含目标 RangeTblRef，如果找到，同样从 p_joinlist 中删除该 JoinExpr 并返回。
  */
 static Node* get_JoinArg(const OperatorPlusProcessContext* ctx, RangeTblEntry* rte)
 {
@@ -379,6 +427,20 @@ static Node* get_JoinArg(const OperatorPlusProcessContext* ctx, RangeTblEntry* r
  *           form joincond that will put into OnClause
  *      [3]. Check the collect JoinTerm and mark a convertable jointerm as valid
  */
+
+ /*
+ 
+preprocess_plus_outerjoin 函数的作用：
+
+调用 preprocess_plus_outerjoin_walker 函数对 whereClause 进行预处理，将其中的 "(+)" 转换为外连接条件。这是 "(+)" 外连接转换的入口。
+
+调用 aggregate_jointerms 函数将 preprocess_plus_outerjoin_walker 返回的连接条件进行聚合。连接条件形如 "t1.c1=t2.c1, t1.c2=t2.c1, t1.c2=t2.c2"，需要将其聚合成一个 JoinExpr。
+
+调用 plus_outerjoin_check 函数进行检查。
+
+如果 jointerms 列表非空，表示当前语句层次包含 "(+)" 连接转换，将 contain_plus_outerjoin 标记为 true。
+ 
+ */
 static void preprocess_plus_outerjoin(OperatorPlusProcessContext* ctx)
 {
     Assert(ctx != NULL);
@@ -407,6 +469,13 @@ static void preprocess_plus_outerjoin(OperatorPlusProcessContext* ctx)
         ctx->contain_plus_outerjoin = true;
     }
 }
+/*
+plus_outerjoin_get_rtindex 函数的作用：
+
+如果给定的节点是 RangeTblRef 类型，则返回其 rtindex。
+如果给定的节点是 JoinExpr 类型，则调用 find_RangeTblRef 函数获取对应的 rtindex。
+两个函数一起完成了 "(+)" 外连接的预处理和检查工作。
+*/
 
 static int plus_outerjoin_get_rtindex(const OperatorPlusProcessContext* ctx, Node* node, RangeTblEntry* rte)
 {
@@ -423,7 +492,19 @@ static int plus_outerjoin_get_rtindex(const OperatorPlusProcessContext* ctx, Nod
 /*
  * - convert_one_plus_outerjoin()
  *
- * - brief: convert jointerm to JoinExpr
+ * ChatGPT
+convert_one_plus_outerjoin 函数的作用：
+
+根据传入的 JoinTerm 结构，创建一个 JoinExpr 节点，并设置其左右子树为通过 get_JoinArg 函数获取的对应 RangeTblRef 或 JoinExpr。
+检查左右子树是否为空，如果有一个为空，则报错，因为 "(+)" 连接条件处理后应该形成一颗连接树。
+获取左右子树在 p_rtable 中的 rtindex。
+设置 JoinExpr 的 quals 为 JoinTerm 中存储的连接条件。
+设置 JoinExpr 的其他属性，如 jointype。
+根据左右子树的 rtindex 和连接条件创建新的 RangeTblEntry。
+将新的 RangeTblEntry 添加到 p_rtable 中，并将其 rtindex 设置为 JoinExpr 的 rtindex。
+将 JoinExpr 添加到 p_joinlist 中。
+最后，将 JoinExpr 添加到 p_joinexprs 中。
+这个函数完成了 "(+)" 外连接的转换工作，生成了 JoinExpr 表达式，并将其添加到相应的列表中。
  */
 static void convert_one_plus_outerjoin(const OperatorPlusProcessContext* ctx, JoinTerm* join_term)
 {
@@ -515,9 +596,10 @@ static void convert_one_plus_outerjoin(const OperatorPlusProcessContext* ctx, Jo
 
 /*
  * - plus_outerjoin_check()
- *
- * - brief: check the ctx->jointerms globally.
- *    Only forbid more than one left RTE with same right RTE for now.
+ *该函数用于检查 "(+)" 外连接条件的合法性，主要检查以下情况：
+是否存在多个左关系表与相同的右关系表进行外连接，例如 "t1.c1 = t2.c1(+) and t3.c1 = t2.c2(+)"。
+如果存在上述情况，报错，因为 "(+)" 连接条件在语法上不支持多个左表与相同的右表进行连接。
+该函数通过遍历 ctx->jointerms 中的每个 JoinTerm，并检查是否存在上述情况的冲突，如果存在，则报错。
  */
 static void plus_outerjoin_check(const OperatorPlusProcessContext* ctx)
 {
@@ -547,6 +629,15 @@ static void plus_outerjoin_check(const OperatorPlusProcessContext* ctx)
  * - plus_outerjoin_precheck()
  *
  * - brief: check the join condition is valid.
+ plus_outerjoin_precheck 函数的作用：
+
+该函数用于在进行 "(+)" 外连接转换之前进行预检查，主要检查以下情况：
+是否存在没有 "(+)" 的情况，如果是，则不进行外连接转换。
+是否在多个关系表上同时指定了 "(+)"，如果是，则报错。
+是否 "(+)" 与 JoinExpr 同时出现在 FROM 子句中，如果是，则报错。
+是否 "(+)" 与 OR 子句同时出现，如果是，则报错。
+是否在 OR 子句中存在 "(+)"，如果是，则报错。
+是否 "(+)" 出现在不同层次的查询中，如果是，则忽略 "(+)"。
  */
 bool plus_outerjoin_precheck(const OperatorPlusProcessContext* ctx, Node* expr, List* lhasplus, List* lnoplus)
 {
@@ -725,6 +816,16 @@ static bool contain_AEXPR_AND_OR_walker(Node* node, void* context)
     return raw_expression_tree_walker(node, (bool (*)())contain_AEXPR_AND_OR_walker, (void*)context);
 }
 
+/*
+
+unsupport_syntax_plus_outerjoin 函数的作用：
+
+该函数用于检查在外连接转换过程中不支持的语法结构，主要包括以下情况的检查：
+是否包含了外连接 "(+)" 和子查询 SubLink 结构的组合，如果是，则报错。
+是否包含了 "(+)" 和嵌套表达式 (AND/OR) 的组合，如果是，则报错。
+如果检查出不支持的语法结构，会报错并指出具体的位置。
+*/
+
 static void unsupport_syntax_plus_outerjoin(const OperatorPlusProcessContext* ctx, Node* expr)
 {
     /*
@@ -761,6 +862,16 @@ static void unsupport_syntax_plus_outerjoin(const OperatorPlusProcessContext* ct
     return;
 }
 
+/*
+plus_outerjoin_preprocess 函数的作用：
+
+该函数用于在进行 "(+)" 外连接转换之前的预处理。主要进行以下步骤：
+调用 unsupport_syntax_plus_outerjoin 检查语法结构，报错处理不支持的结构。
+设置解析状态中的标志，使其忽略 "(+)"，然后调用 transformExpr 遍历表达式。
+在遍历过程中，记录涉及到的关系表（RTE）信息，包括是否含有 "(+)"。
+根据记录的信息，进行外连接的预检查，如果通过，将信息插入到外连接项中，用于后续处理。
+该函数最终返回一个布尔值，表示是否成功进行了 "(+)" 外连接的预处理。
+*/
 bool plus_outerjoin_preprocess(const OperatorPlusProcessContext* ctx, Node* expr)
 {
     ListCell* lc1 = NULL;
@@ -826,6 +937,15 @@ bool plus_outerjoin_preprocess(const OperatorPlusProcessContext* ctx, Node* expr
  *
  * - brief: Function to recursively walk-thru the expression tree, if we found a portential
  * convertable col=col condition, we record into "ctx->jointerms".
+ preprocess_plus_outerjoin_walker 函数的作用：
+
+该函数是一个递归遍历表达式树的函数，用于在表达式中查找 "(+)" 外连接的语法结构，并进行相应的处理。
+遍历过程中，对于不同的 A_Expr 类型的节点，会有不同的处理逻辑：
+对于 AEXPR_OR 类型，标记当前在 OR 子句中，然后递归处理左右子表达式。
+对于 AEXPR_AND 类型，递归处理左右子表达式。
+对于其他 A_Expr 类型，调用 plus_outerjoin_preprocess 进行预处理，如果返回 true，说明发现了可以转换的外连接结构，将当前节点替换为一个始终为真的条件。
+对于其他节点类型，同样调用 plus_outerjoin_preprocess 进行预处理。
+最终达到的效果是将表达式中的 "(+)" 转换为对应的外连接条件，并将表达式中的 "(+)" 移到了连接条件中
  */
 static void preprocess_plus_outerjoin_walker(Node** expr, OperatorPlusProcessContext* ctx)
 {
@@ -912,6 +1032,11 @@ prerocess_exit:
  *
  * - brief: help function to lookup if ColumnRef is "(+)" operator attached
  */
+sColumnRefPlusOuterJoin 函数的作用：
+
+该函数用于判断给定的 ColumnRef 节点是否含有 "(+)"，即判断是否是外连接的语法结构。
+如果 ColumnRef 的最后一个元素是字符串 "(+)"，则返回 true，表示含有 "(+)"。
+
 bool IsColumnRefPlusOuterJoin(const ColumnRef* cf)
 {
     Assert(cf != NULL);
@@ -932,6 +1057,11 @@ bool IsColumnRefPlusOuterJoin(const ColumnRef* cf)
  * - convert_plus_outerjoin()
  *
  * - brief: Convert each JoinTerms collected at preprocess step into outer joins
+
+convert_plus_outerjoin 函数的作用：
+
+该函数用于将在预处理阶段收集到的外连接信息进行转换，将 "(+)" 转换为对应的外连接结构。
+通过循环遍历 ctx->jointerms 中的每一个 JoinTerm，调用 convert_one_plus_outerjoin 函数进行转换。
  */
 void convert_plus_outerjoin(const OperatorPlusProcessContext* ctx)
 {
@@ -950,7 +1080,14 @@ void convert_plus_outerjoin(const OperatorPlusProcessContext* ctx)
 /*
  * - InitOperatorPlusProcessContext()
  *
- * - brief: init OperatorPlusProcessContext
+ * InitOperatorPlusProcessContext 函数的作用：
+
+用于初始化 OperatorPlusProcessContext 结构体，设置初始的上下文信息。
+将 contain_plus_outerjoin 置为 false，表示当前上下文中还没有包含 "(+)" 外连接。
+将 jointerms 初始化为空列表。
+将 ps 字段设置为传入的 pstate。
+将 in_orclause 置为 false，表示当前不在 OR 子句中。
+将 whereClause 字段设置为传入的 whereClause。
  */
 static void InitOperatorPlusProcessContext(ParseState* pstate, Node** whereClause, OperatorPlusProcessContext* ctx)
 {
@@ -976,7 +1113,14 @@ static bool contain_JoinExpr(List* l)
 /*
  * - transformPlusOperator()
  *
- * - brief: transform operator "(+)" to outer join.
+ * transformOperatorPlus 函数的作用：
+
+是外部调用的主函数，用于将表达式中的 "(+)" 转换为相应的外连接结构。
+初始化 OperatorPlusProcessContext 上下文。
+备份原始的 whereClause。
+调用 preprocess_plus_outerjoin 进行预处理，收集可能的外连接信息。
+如果包含了 "(+)" 外连接，则调用 convert_plus_outerjoin 进行转换。
+如果没有包含 "(+)" 外连接，恢复原始的 whereClause。
  */
 void transformOperatorPlus(ParseState* pstate, Node** whereClause)
 {

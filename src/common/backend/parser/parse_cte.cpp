@@ -12,6 +12,26 @@
  *
  * -------------------------------------------------------------------------
  */
+
+
+/*
+这段代码是 PostgreSQL 数据库中处理 WITH RECURSIVE 查询的一部分。
+WITH RECURSIVE 允许在查询内部引用其自身，因此需要对查询进行分析和处理，以确保递归引用是正确的和可行的。
+*/
+
+/*
+RecursionContext	枚举类型，指定在 WITH RECURSIVE 查询中禁止自引用的上下文。
+recursion_errormsgs	包含与每个递归上下文相关的错误消息的数组。
+CteItem	结构体，表示 WITH RECURSIVE 查询中的一个公共表达式（Common Table Expression, CTE）及其相关信息。包括 CTE 指针、ID 编号以及依赖的其他 CTE 的位图。
+CteState	结构体，在分析 WITH RECURSIVE 查询期间传递状态信息。包括全局状态（ParseState、CTE 数组等）以及在树遍历期间的工作状态。
+analyzeCTE	用于分析 WITH RECURSIVE 查询中单个 CTE 的函数。
+makeDependencyGraph	构建 CTE 之间的依赖关系图的函数，以确定它们之间的关系。
+makeDependencyGraphWalker	递归函数，在树上遍历的过程中收集 CTE 之间的依赖关系。
+TopologicalSort	执行 CTE 的拓扑排序的函数，以确保建立一个有效的计算顺序。
+checkWellFormedRecursion	检查递归引用是否良好形成，即在给定上下文中是否允许。
+checkWellFormedRecursionWalker	递归函数，在树上遍历的过程中检查递归引用的有效性。
+checkWellFormedSelectStmt	检查 SELECT 语句中递归引用是否良好形成的函数。
+*/
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -95,6 +115,34 @@ static void checkWellFormedSelectStmt(SelectStmt* stmt, CteState* cstate);
  * Query.  (This is in fact the same as the ending value of p_ctenamespace,
  * but it seems cleaner to not expose that in the function's API.)
  */
+
+/*
+
+这个函数是 PostgreSQL 中负责处理 WITH 子句的函数，主要用于对 WITH 子句进行解析和分析。具体来说，它的作用包括：
+
+检查 WITH 子句的合法性：
+
+确保在一个查询层次中只能有一个 WITH 子句。
+检查 WITH 子句中是否存在重复的 CTE 名称。
+初始化 CTE：
+
+为每个 CTE 进行初始化，标记为非递归，引用计数为零，并初始化其他相关标记。
+如果 CTE 包含非查询语句（如插入、更新、删除等），则将 p_hasModifyingCTE 标记为 true。
+处理递归 WITH 子句（WITH RECURSIVE）：
+
+如果 WITH 子句是递归的，进行以下步骤：
+创建一个 CteState 结构，用于在递归查询处理过程中传递状态信息。
+构建依赖关系图，并对 CTE 进行拓扑排序，以确保没有循环依赖，并标记包含自引用的 CTE。
+检查递归查询的有效性。
+设置 ctenamespace，并按照安全的处理顺序将 CTE 添加到命名空间中。
+按照拓扑排序的顺序对每个 CTE 进行解析。
+处理非递归 WITH 子句：
+
+如果 WITH 子句不是递归的，按照顺序对每个 CTE 进行解析，并添加到命名空间中。
+返回 ctenamespace：
+
+返回最终的 ctenamespace，其中包含了所有解析后的 CTE。
+*/
 List* transformWithClause(ParseState* pstate, WithClause* withClause)
 {
     ListCell* lc = NULL;
@@ -217,6 +265,33 @@ List* transformWithClause(ParseState* pstate, WithClause* withClause)
  * Perform the actual parse analysis transformation of one CTE.  All
  * CTEs it depends on have already been loaded into pstate->p_ctenamespace,
  * and have been marked with the correct output column names/types.
+ */
+
+ /*
+ 这段代码定义了 PostgreSQL 中处理 WITH 子句中每个 Common Table Expression (CTE) 的解析过程。以下是代码的主要功能和关键步骤的解释：
+
+检查 CTE 是否已经被分析：
+
+使用 AssertEreport 断言确保 CTE 还没有被解析过。如果 CTE 的查询已经是一个完整的查询树（Query），则会报告错误，因为该函数假定 CTE 查询还没有被解析。
+解析 CTE 查询：
+
+使用 parse_sub_analyze 函数对 CTE 的查询进行解析。
+设置 CTE 的查询属性为解析后的查询树。
+检查查询的合法性：
+
+检查查询树的类型，确保是一个查询（Query），否则报告错误。
+检查查询树是否包含 utility 语句，如果包含则报告错误。
+限制数据修改的 WITH 子句位置：
+
+如果 CTE 包含数据修改语句（INSERT、UPDATE、DELETE），则要求该 WITH 子句必须位于查询的顶层，以防止不明确的执行时机。
+设置 canSetTag 标记：
+
+对于 CTE 查询，将 canSetTag 标记设置为 false，因为 CTE 查询不会设置命令标签。
+处理递归 CTE：
+
+如果 CTE 是递归的，验证之前确定的输出列类型和排序与实际查询的结果是否匹配。
+检查每个输出列的数据类型、类型修饰符和排序规则是否与之前的定义一致，如果不一致则报告错误。
+提供相应的错误提示和错误位置信息，以帮助用户调查问题。
  */
 static void analyzeCTE(ParseState* pstate, CommonTableExpr* cte)
 {
@@ -433,6 +508,29 @@ static void makeDependencyGraph(CteState* cstate)
  * Tree walker function to detect cross-references and self-references of the
  * CTEs in a WITH RECURSIVE list.
  */
+
+ /*
+ 
+ 这段代码是 PostgreSQL 中处理 WITH RECURSIVE 查询的一部分，具体负责分析 CTE 的输出列信息，包括列名、数据类型、类型修饰符和排序规则等，并确保递归 CTE 的输出列符合规范。同时，该代码还实现了构建 CTE 之间依赖关系图并进行拓扑排序的功能。
+
+以下是主要函数的解释：
+
+analyzeCTETargetList 函数：
+
+该函数用于分析 CTE 查询的输出列信息。
+检查并使用 CTE 的别名列表（如果存在）初始化 CTE 的列名，同时检查和设置每个输出列的数据类型、类型修饰符和排序规则。
+对于递归 CTE，如果存在 "unknown" 类型的列，将其强制转换为 "text" 类型，以保持与 UNION 的结果类型一致。
+makeDependencyGraph 函数：
+
+该函数用于构建 CTE 之间的依赖关系图，并确保没有循环依赖。
+遍历 CTE 列表，为每个 CTE 启动一个树遍历过程，检测 CTE 之间的依赖关系。
+调用 TopologicalSort 函数对 CTE 进行拓扑排序，确保没有前向引用。
+makeDependencyGraphWalker 函数：
+
+该函数是树遍历函数，用于检测 CTE 之间的交叉引用和自引用。
+通过递归地处理树的每个节点，收集内部引用的 CTE，以建立依赖关系。
+确保递归过程中不会出现循环引用，即一个 CTE 引用了它自身。
+ */
 static bool makeDependencyGraphWalker(Node* node, CteState* cstate)
 {
     if (node == NULL) {
@@ -537,6 +635,11 @@ static bool makeDependencyGraphWalker(Node* node, CteState* cstate)
 /*
  * Sort by dependencies, using a standard topological sort operation
  */
+
+
+ /*
+ 这段代码实现了一个拓扑排序算法，用于对 CTE 项进行排序，以确保不存在前向依赖关系。
+ */
 static void TopologicalSort(ParseState* pstate, CteItem* items, int numitems)
 {
     int i;
@@ -582,7 +685,38 @@ static void TopologicalSort(ParseState* pstate, CteItem* items, int numitems)
 }
 
 /*
- * Check that recursive queries are well-formed.
+ 这段代码是 PostgreSQL 中用于检查 WITH RECURSIVE 查询是否符合规范的函数。以下是该函数的主要功能和步骤解释：
+
+遍历每个 WITH RECURSIVE 项：
+
+使用循环遍历 CteState 结构中的每个 CTE 项。
+检查是否为递归项：
+
+如果 CTE 不是递归项（cterecursive 为 false），则跳过该项的检查。
+检查 CTE 的查询类型：
+
+确保 CTE 的查询是一个 SELECT 语句，因为递归查询必须是 SELECT 语句。
+检查 UNION 结构：
+
+确保 SELECT 语句使用 UNION 运算符，且左右操作数分别为 non-recursive term 和 recursive term。
+检查左操作数中的自引用：
+
+在左操作数中检查是否包含自引用。设置 context 为 RECURSION_NONRECURSIVETERM，表示在左操作数中检查自引用。
+使用 checkWellFormedRecursionWalker 函数遍历左操作数，确保不存在自引用。
+检查右操作数中的自引用：
+
+在右操作数中检查是否包含自引用。设置 context 为 RECURSION_OK，表示在右操作数中检查自引用。
+使用 checkWellFormedRecursionWalker 函数遍历右操作数，确保存在且只有一个自引用。
+检查 WITH 子句中的自引用：
+
+如果 SELECT 语句有 WITH 子句，检查 WITH 子句中是否包含自引用。设置 context 为 RECURSION_SUBLINK。
+使用 checkWellFormedRecursionWalker 函数遍历 WITH 子句，确保不存在自引用。
+禁止其他修饰子：
+
+禁止在 UNION 结构之上使用 ORDER BY、LIMIT、OFFSET 以及 FOR UPDATE/SHARE 修饰子。因为这些在递归查询中难以解释和实现。
+报告错误：
+
+如果发现递归查询不符合规范，报告相应的错误，包括但不限于查询类型错误、UNION 结构错误和其他修饰子的使用错误。
  */
 static void checkWellFormedRecursion(CteState* cstate)
 {
@@ -681,7 +815,36 @@ static void checkWellFormedRecursion(CteState* cstate)
 }
 
 /*
- * Tree walker function to detect invalid self-references in a recursive query.
+ * 这段代码是 PostgreSQL 中用于递归地遍历表达式树，检查 WITH RECURSIVE 查询中是否存在自引用的函数。以下是该函数的主要功能和步骤解释：
+
+保存递归上下文：
+
+保存当前递归上下文，以便在递归过程中进行恢复。
+处理特殊情况：
+
+如果节点为空，直接返回 false。
+如果节点是 RangeVar（表示关系变量），检查是否是 CTE 的引用，如果是则报错。
+处理 SelectStmt 节点：
+
+如果节点是 SelectStmt（SELECT 语句），检查是否包含 WITH 子句。根据 WITH 子句的类型，分别处理 RECURSIVE 和非 RECURSIVE 情况。
+调用 checkWellFormedSelectStmt 函数对 SelectStmt 进行检查。
+处理 WithClause 节点：
+
+防止 raw_expression_tree_walker 直接递归进 WITH 子句的内容，因为 WITH 子句的处理需要在特定的上下文下进行。
+处理 JoinExpr 节点：
+
+如果节点是 JoinExpr（JOIN 表达式），根据 JOIN 类型（INNER、LEFT、RIGHT、FULL）分别处理左右子树和连接条件。
+对于 LEFT JOIN，在检查右子树之前设置上下文为 RECURSION_OUTERJOIN。
+对于 FULL JOIN 和 RIGHT JOIN，在检查左子树之前和右子树之前分别设置上下文为 RECURSION_OUTERJOIN。
+处理 SubLink 节点：
+
+如果节点是 SubLink（子查询），设置上下文为 RECURSION_SUBLINK，然后递归处理子查询的主体和测试表达式。
+调用 raw_expression_tree_walker：
+
+对于其他节点类型，调用 raw_expression_tree_walker 递归处理子节点。
+恢复递归上下文：
+
+恢复保存的递归上下文。
  */
 static bool checkWellFormedRecursionWalker(Node* node, CteState* cstate)
 {
@@ -843,8 +1006,25 @@ static bool checkWellFormedRecursionWalker(Node* node, CteState* cstate)
 }
 
 /*
- * subroutine for checkWellFormedRecursionWalker: process a SelectStmt
- * without worrying about its WITH clause
+
+这段代码是用于检查 WITH RECURSIVE 查询中 SELECT 语句的格式是否正确的函数。以下是主要功能和步骤的解释：
+
+保存递归上下文：
+
+保存当前递归上下文，以便在递归过程中进行恢复。
+处理 SET 操作：
+
+根据 stmt->op 的不同值（SETOP_NONE、SETOP_UNION、SETOP_INTERSECT、SETOP_EXCEPT），分别进行处理。
+如果 stmt->op 为 SETOP_NONE 或 SETOP_UNION，或者递归上下文不是 RECURSION_OK，则调用 raw_expression_tree_walker 递归处理节点。
+处理 INTERSECT 和 EXCEPT：
+
+如果 stmt->op 为 SETOP_INTERSECT 或 SETOP_EXCEPT，并且 stmt->all 为真，设置递归上下文为 RECURSION_INTERSECT 或 RECURSION_EXCEPT。
+对左子树和右子树进行递归检查，并在检查后恢复递归上下文。
+分别对 stmt->sortClause、stmt->limitOffset、stmt->limitCount、stmt->lockingClause 进行递归检查。
+stmt->withClause 在这里被故意忽略。
+处理未知 SET 操作类型：
+
+如果 stmt->op 不是已知的 SETOP 类型，报告错误。
  */
 static void checkWellFormedSelectStmt(SelectStmt* stmt, CteState* cstate)
 {

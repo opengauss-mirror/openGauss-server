@@ -56,6 +56,37 @@
 #define GROUP_CLAUSE 1
 #define DISTINCT_ON_CLAUSE 2
 
+
+/*
+------------------------------------------------------------------------------
+函数                                          | 功能
+------------------------------------------------------------------------------
+extractRemainingColumns                         | 从源列中提取剩余的列
+transformJoinUsingClause                         | 转换连接的 USING 子句
+transformTableEntry                             | 将 RangeVar 转换为 RangeTblEntry
+transformCTEReference                           | 转换表示通用表达式 (CTE) 引用的 RangeVar
+transformRangeSubselect                         | 转换 RangeSubselect 节点
+transformRangeFunction                          | 转换 RangeFunction 节点
+transformRangeTableSample                       | 转换 RangeTableSample 节点
+transformRangeTimeCapsule                       | 转换 RangeTimeCapsule 节点
+setNamespaceLateralState                        | 为命名空间设置 lateral 状态
+buildMergedJoinVar                              | 构建合并的 JoinVar 用于连接列
+checkExprIsVarFree                              | 检查表达式是否不包含变量
+findTargetlistEntrySQL92                        | 在目标列表中查找 SQL-92 子句的目标项
+findTargetlistEntrySQL99                        | 在目标列表中查找 SQL:1999 子句的目标项
+get_matching_location                           | 获取在排序组引用列表中匹配的位置
+addTargetToGroupList                            | 将目标项添加到分组列表中
+findWindowClause                                | 根据名称在列表中查找 WindowClause
+transformFrameOffset                            | 转换帧偏移子句
+flatten_grouping_sets                           | 将分组集展平为列表
+transformGroupingSet                             | 转换 GroupingSet 节点
+transformGroupClauseExpr                        | 转换 GroupClause 表达式
+CheckOrderbyColumns                             | 检查 ORDER BY 子句中的列
+------------------------------------------------------------------------------
+
+*/
+
+
 static const char* const clauseText[] = {"ORDER BY", "GROUP BY", "DISTINCT ON"};
 
 static void extractRemainingColumns(
@@ -89,14 +120,16 @@ static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, 
 static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate);
 
 /*
- * @Description: append from clause item to the left tree
- * @in pstate: plan state
- * @in rte: the RTE to be appended
- * @inout top_rte: receives the RTE corresponding to the join tree item
- * @inout top_rti: received the rangetable index of the top_rte.
- * @inout relnamespace: receives a List of the RTEs exposed as relation names
- * @inout containedRels: receives a bitmap set of the rangetable indexes
- * @return: the range table reference of the RTE
+transformItem:
+
+功能：将RangeTblEntry转换为RangeTblRef，并添加到范围表中。
+参数：
+ParseState* pstate：解析状态。
+RangeTblEntry* rte：范围表条目。
+RangeTblEntry** top_rte：顶层范围表条目的指针。
+int* top_rti：顶层范围表索引的指针。
+List** relnamespace：命名空间的指针。
+返回值：转换后的RangeTblRef。
  */
 static RangeTblRef* transformItem(ParseState* pstate, RangeTblEntry* rte, RangeTblEntry** top_rte, int* top_rti,
     List** relnamespace)
@@ -117,19 +150,16 @@ static RangeTblRef* transformItem(ParseState* pstate, RangeTblEntry* rte, RangeT
 }
 
 /*
- * transformFromClause -
- *	  Process the FROM clause and add items to the query's range table,
- *	  joinlist, and namespaces.
- *
- * Note: we assume that pstate's p_rtable, p_joinlist, p_relnamespace, and
- * p_varnamespace lists were initialized to NIL when the pstate was created.
- * We will add onto any entries already present --- this is needed for rule
- * processing, as well as for UPDATE and DELETE.
- *
- * The range table may grow still further when we transform the expressions
- * in the query's quals and target list. (This is possible because in
- * POSTQUEL, we allowed references to relations not specified in the
- * from-clause.  openGauss keeps this extension to standard SQL.)
+transformFromClause:
+
+功能：处理FROM子句，将其中的关系转换为查询的范围表、连接列表和命名空间。
+参数：
+ParseState* pstate：解析状态。
+List* frmList：FROM子句中的关系列表。
+bool isFirstNode：标识是否是第一个节点。
+bool isCreateView：标识是否是创建视图的操作。
+bool addUpdateTable：标识是否将目标表添加到更新表的列表中。
+返回值：无。
  */
 void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bool isCreateView, bool addUpdateTable)
 {
@@ -177,26 +207,18 @@ void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bo
 }
 
 /*
- * setTargetTable
- *	  Add the target relation of INSERT/UPDATE/DELETE to the range table,
- *	  and make the special links to it in the ParseState.
- *
- *	  We also open the target relation and acquire a write lock on it.
- *	  This must be done before processing the FROM list, in case the target
- *	  is also mentioned as a source relation --- we want to be sure to grab
- *	  the write lock before any read lock.
- *
- *	  If alsoSource is true, add the target to the query's joinlist and
- *	  namespace.  For INSERT, we don't want the target to be joined to;
- *	  it's a destination of tuples, not a source.	For UPDATE/DELETE,
- *	  we do need to scan or join the target.  (NOTE: we do not bother
- *	  to check for namespace conflict; we assume that the namespace was
- *	  initially empty in these cases.)
- *
- *	  Finally, we mark the relation as requiring the permissions specified
- *	  by requiredPerms.
- *
- *	  Returns the rangetable index of the target relation.
+setTargetTable:
+
+功能：将INSERT/UPDATE/DELETE目标表添加到范围表中，并进行相关设置。
+参数：
+ParseState* pstate：解析状态。
+RangeVar* relRv：目标表的RangeVar。
+bool inh：标识是否包含继承表。
+bool alsoSource：标识是否将目标表添加到查询的连接列表和命名空间中。
+AclMode requiredPerms：目标表的权限要求。
+bool multiModify：标识是否为多表修改操作。
+返回值：目标表在范围表中的索引。
+
  */
 int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSource, AclMode requiredPerms,
                    bool multiModify)
@@ -339,6 +361,32 @@ int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSourc
     return index;
 }
 
+/*
+setTargetTables:
+
+功能：将目标表的RangeVar列表转换为范围表索引的列表，并对每个目标表进行设置。
+参数：
+ParseState* pstate：解析状态。
+List* relations：目标表的RangeVar列表。
+bool expandInh：标识是否扩展继承关系。
+bool alsoSource：标识是否将目标表添加到查询的连接列表和命名空间中。
+AclMode requiredPerms：目标表的权限要求。
+返回值：目标表在范围表中的索引列表。
+interpretInhOption:
+
+功能：根据InhOption的值（yes/no/default）解释成布尔值。
+参数：
+InhOption inhOpt：继承选项的枚举值。
+返回值：布尔值，表示继承选项是否为"yes"。
+interpretOidsOption:
+
+功能：根据表的选项列表（DefElem列表）判断表是否需要使用OIDs。
+参数：
+List* defList：表的选项列表。
+返回值：布尔值，表示是否需要使用OIDs。
+这些函数主要用于处理目标表的设置，包括继承选项、OIDs选项等，并最终返回目标表在范围表中的索引列表。其中，setTargetTables函数通过调用setTargetTable函数来处理每个目标表的设置。
+
+*/
 List* setTargetTables(ParseState* pstate, List* relations, bool expandInh, bool alsoSource, AclMode requiredPerms)
 {
     List* rtindex = NULL;
@@ -401,6 +449,8 @@ bool interpretInhOption(InhOption inhOpt)
  * parsing the query string because the return value can depend upon the
  * default_with_oids GUC var.
  */
+
+
 bool interpretOidsOption(List* defList)
 {
     ListCell* cell = NULL;
@@ -461,6 +511,31 @@ static void extractRemainingColumns(
  *	  We are given lists of nodes representing left and right match columns.
  *	  Result is a transformed qualification expression.
  */
+
+
+/*
+transformJoinUsingClause函数：
+
+功能：根据使用USING子句指定的列构建完整的ON条件。
+参数：
+ParseState* pstate：解析状态。
+RangeTblEntry* leftRTE：左侧关系表条目。
+RangeTblEntry* rightRTE：右侧关系表条目。
+List* leftVars：左侧关系表的列变量列表。
+List* rightVars：右侧关系表的列变量列表。
+返回值：一个已经经过转换的ON条件。
+transformJoinOnClause函数：
+
+功能：转换JOIN/ON子句中的条件表达式。
+参数：
+ParseState* pstate：解析状态。
+JoinExpr* j：JOIN表达式。
+RangeTblEntry* l_rte：左侧关系表条目。
+RangeTblEntry* r_rte：右侧关系表条目。
+List* relnamespace：关系表的命名空间。
+返回值：已转换的ON条件表达式。
+这两个函数主要用于处理JOIN操作中的条件部分。transformJoinUsingClause函数构建ON条件，通过对左右关系表的列进行匹配，生成等值比较的条件。而transformJoinOnClause函数用于转换JOIN/ON子句中的条件表达式，包括设置解析状态中的命名空间等操作。
+*/
 static Node* transformJoinUsingClause(
     ParseState* pstate, RangeTblEntry* leftRTE, RangeTblEntry* rightRTE, List* leftVars, List* rightVars)
 {
@@ -551,6 +626,34 @@ Node* transformJoinOnClause(ParseState* pstate, JoinExpr* j, RangeTblEntry* l_rt
 /*
  * transformTableEntry --- transform a RangeVar (simple relation reference)
  */
+
+/*
+transformTableEntry函数：
+
+功能：转换RangeVar（简单关系引用）为关系表条目（RangeTblEntry）。
+参数：
+ParseState* pstate：解析状态。
+RangeVar* r：RangeVar结构，表示关系引用。
+bool isFirstNode：标志是否是FROM子句中的第一个节点。
+bool isCreateView：标志是否是CREATE VIEW语句中的关系表。
+返回值：已转换的关系表条目。
+transformCTEReference函数：
+
+功能：转换引用公共表达式（Common Table Expression，CTE）的RangeVar。
+参数：
+ParseState* pstate：解析状态。
+RangeVar* r：RangeVar结构，表示关系引用。
+CommonTableExpr* cte：指向CommonTableExpr的指针。
+Index levelsup：CTE的层级。
+返回值：已转换的关系表条目。
+transformRangeSubselect函数：
+
+功能：转换出现在FROM子句中的子查询（sub-SELECT）为关系表条目。
+参数：
+ParseState* pstate：解析状态。
+RangeSubselect* r：RangeSubselect结构，表示子查询。
+返回值：已转换的关系表条目。
+*/
 static RangeTblEntry* transformTableEntry(ParseState* pstate, RangeVar* r, bool isFirstNode, bool isCreateView)
 {
     RangeTblEntry* rte = NULL;
@@ -638,6 +741,30 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
 /*
  * transformRangeFunction --- transform a function call appearing in FROM
  */
+/*
+transformRangeFunction函数：
+
+功能：转换RangeFunction（代表函数调用）为关系表条目（RangeTblEntry）。
+参数：
+ParseState* pstate：解析状态。
+RangeFunction* r：RangeFunction结构，表示函数调用。
+返回值：已转换的关系表条目。
+transformRangeTableSample函数：
+
+功能：转换RangeTableSample（代表TABLESAMPLE子句）为TableSampleClause。
+参数：
+ParseState* pstate：解析状态。
+RangeTableSample* rts：RangeTableSample结构，表示TABLESAMPLE子句。
+返回值：已转换的TableSampleClause。
+transformRangeTimeCapsule函数：
+
+功能：转换RangeTimeCapsule（代表TABLECAPSULE子句）为TimeCapsuleClause。
+参数：
+ParseState* pstate：解析状态。
+RangeTimeCapsule* rtc：RangeTimeCapsule结构，表示TABLECAPSULE子句。
+返回值：已转换的TimeCapsuleClause。
+这些函数主要用于处理FROM子句中的特殊元素，如函数调用、TABLESAMPLE子句和TABLECAPSULE子句。transformRangeFunction处理函数调用，为其创建关系表条目；transformRangeTableSample处理TABLESAMPLE子句，为其创建TableSampleClause；transformRangeTimeCapsule处理TABLECAPSULE子句，为其创建TimeCapsuleClause。
+*/
 static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* r)
 {
     Node* funcexpr = NULL;
@@ -838,39 +965,27 @@ static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTim
 }
 
 /*
- * transformFromClauseItem -
- *	  Transform a FROM-clause item, adding any required entries to the
- *	  range table list being built in the ParseState, and return the
- *	  transformed item ready to include in the joinlist and namespaces.
- *	  This routine can recurse to handle SQL92 JOIN expressions.
- *
- * The function return value is the node to add to the jointree (a
- * RangeTblRef or JoinExpr).  Additional output parameters are:
- *
- * *top_rte: receives the RTE corresponding to the jointree item.
- * (We could extract this from the function return node, but it saves cycles
- * to pass it back separately.)
- *
- * *top_rti: receives the rangetable index of top_rte.	(Ditto.)
- *
- * *right_rte: receives the RTE corresponding to the right side of the
- * jointree. Only MERGE really needs to know about this and only MERGE passes a
- * non-NULL pointer.
- *
- * *right_rti: receives the rangetable index of the right_rte.
- *
- * *relnamespace: receives a List of the RTEs exposed as relation names
- * by this item.
- *
- * *containedRels: receives a bitmap set of the rangetable indexes
- * of all the base and join relations represented in this jointree item.
- * This is needed for checking JOIN/ON conditions in higher levels.
- *
- * addUpdateTable: if has multiple relations to update, relationClause in
- * transformUpdateStmt need to setTargetTable.
- *
- * We do not need to pass back an explicit varnamespace value, because
- * in all cases the varnamespace contribution is exactly top_rte.
+该函数的目的是将 FROM 子句中的一个元素进行转换，可能是表引用、子查询、函数调用等，具体解释如下：
+
+参数解释：
+
+ParseState* pstate：解析状态。
+Node* n：要转换的解析树节点。
+RangeTblEntry** top_rte：返回顶层的关系表条目。
+int* top_rti：返回顶层关系表的索引。
+RangeTblEntry** right_rte：返回右侧关系表条目（在 JOIN 操作中使用）。
+int* right_rti：返回右侧关系表的索引。
+List** relnamespace：返回关系表命名空间的列表。
+bool isFirstNode：标志，指示是否是 FROM 子句的第一个元素。
+bool isCreateView：标志，指示是否在创建视图。
+bool isMergeInto：标志，指示是否在执行 MERGE INTO 语句。
+bool addUpdateTable：标志，指示是否在 UPDATE 语句中添加目标表。
+主要功能：
+
+通过判断节点的类型（IsA 宏），确定节点的种类，并调用相应的函数来完成转换。
+支持的节点类型包括 RangeVar（表引用）、RangeSubselect（子查询）、RangeFunction（函数调用）、RangeTableSample（TABLESAMPLE 子句）和 RangeTimeCapsule（TABLECAPSULE 子句）。
+对于 JoinExpr 节点（JOIN 操作），递归处理左右子树，并生成一个新的关系表条目，处理 JOIN 条件，并更新命名空间等信息。
+这个函数是解析阶段的一部分，负责将解析树中的 FROM 子句元素转换为内部表示的关系表条目等数据结构。
  */
 Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_rte, int* top_rti,
     RangeTblEntry** right_rte, int* right_rti, List** relnamespace, bool isFirstNode,
@@ -1339,8 +1454,26 @@ setNamespaceLateralState(List *l_namespace, bool lateral_only, bool lateral_ok)
 }
 
 /*
- * buildMergedJoinVar -
- *	  generate a suitable replacement expression for a merged join column
+该函数的目的是为 JOIN 操作构建合并后的 JoinVar，主要功能包括：
+
+参数解释：
+
+ParseState* pstate：解析状态。
+JoinType jointype：JOIN 操作的类型，如 INNER JOIN、LEFT JOIN 等。
+Var* l_colvar：左侧变量。
+Var* r_colvar：右侧变量。
+主要功能：
+
+根据左右变量的类型和类型修饰符，选择合适的输出类型（outcoltype 和 outcoltypmod）。
+如果左右变量的类型不同，进行类型强制转换，保持输出类型一致。
+如果左右变量的类型相同但类型修饰符不同，插入 RelabelType 表达式以明确标记输出的类型修饰符与输入不同。
+根据 JOIN 类型选择输出的节点：
+INNER JOIN：优先选择非强制转换的变量，如果都没有，则选择左变量。
+LEFT JOIN 或 LEFT ANTI JOIN：总是选择左变量。
+RIGHT JOIN 或 RIGHT ANTI JOIN：总是选择右变量。
+FULL JOIN：构建 COALESCE 表达式，确保 JOIN 输出在左右变量中任何一个非空时也非空。
+使用 assign_expr_collations 函数修复 coercion 和 CoalesceExpr 节点的排序信息。
+该函数的主要任务是确保 JOIN 操作输出的 JoinVar 具有合适的类型和表达式结构，以满足 JOIN 操作的要求。
  */
 static Node* buildMergedJoinVar(ParseState* pstate, JoinType jointype, Var* l_colvar, Var* r_colvar)
 {
@@ -1464,11 +1597,22 @@ static Node* buildMergedJoinVar(ParseState* pstate, JoinType jointype, Var* l_co
 }
 
 /*
- * transformWhereClause -
- *	  Transform the qualification and make sure it is of type boolean.
- *	  Used for WHERE and allied clauses.
- *
- * constructName does not affect the semantics, but is used in error messages
+ 1. transformWhereClause
+c
+Copy code
+Node* transformWhereClause(ParseState* pstate, Node* clause, ParseExprKind exprKind, const char* constructName)
+功能：
+
+对 WHERE 子句进行转换，确保其为布尔类型。
+transformExpr 用于转换表达式。
+coerce_to_boolean 用于将表达式强制转换为布尔类型。
+参数解释：
+
+ParseState* pstate：解析状态。
+Node* clause：待转换的 WHERE 子句。
+ParseExprKind exprKind：表达式的种类。
+const char* constructName：用于错误消息的构造名称。
+返回值：转换后的 WHERE 子句。
  */
 Node* transformWhereClause(ParseState* pstate, Node* clause, ParseExprKind exprKind, const char* constructName)
 {
@@ -1486,14 +1630,23 @@ Node* transformWhereClause(ParseState* pstate, Node* clause, ParseExprKind exprK
 }
 
 /*
- * transformLimitClause -
- *	  Transform the expression and make sure it is of type bigint.
- *	  Used for LIMIT and allied clauses.
- *
- * Note: as of Postgres 8.2, LIMIT expressions are expected to yield int8,
- * rather than int4 as before.
- *
- * constructName does not affect the semantics, but is used in error messages
+ transformLimitClause
+c
+Copy code
+Node* transformLimitClause(ParseState* pstate, Node* clause, ParseExprKind exprKind, const char* constructName)
+功能：
+
+对 LIMIT 子句进行转换，确保其为 bigint 类型。
+transformExpr 用于转换表达式。
+coerce_to_specific_type 用于将表达式强制转换为指定类型（INT8OID，即 bigint）。
+检查 LIMIT 子句中是否引用了当前查询的变量或聚合函数，如果有则报错。
+参数解释：
+
+ParseState* pstate：解析状态。
+Node* clause：待转换的 LIMIT 子句。
+ParseExprKind exprKind：表达式的种类。
+const char* constructName：用于错误消息的构造名称。
+返回值：转换后的 LIMIT 子句。
  */
 Node* transformLimitClause(ParseState* pstate, Node* clause, ParseExprKind exprKind, const char* constructName)
 {
@@ -1513,16 +1666,22 @@ Node* transformLimitClause(ParseState* pstate, Node* clause, ParseExprKind exprK
 }
 
 /*
- * checkExprIsVarFree
- *		Check that given expr has no Vars of the current query level
- *		(and no aggregates or window functions, either).
- *
- * This is used to check expressions that have to have a consistent value
- * across all rows of the query, such as a LIMIT.  Arguably it should reject
- * volatile functions, too, but we don't do that --- whatever value the
- * function gives on first execution is what you get.
- *
- * constructName does not affect the semantics, but is used in error messages
+这个函数用于检查表达式是否不包含变量、聚合函数以及窗口函数。如果表达式中包含了这些元素，函数将报错并指出具体的错误位置。
+
+函数签名和参数解释：
+c
+Copy code
+static void checkExprIsVarFree(ParseState* pstate, Node* n, const char* constructName)
+功能：
+
+检查表达式是否不包含变量、聚合函数和窗口函数。
+如果包含这些元素，则抛出相应的错误。
+参数解释：
+
+ParseState* pstate：解析状态。
+Node* n：待检查的表达式。
+const char* constructName：用于错误消息的构造名称。
+返回值：无（void）。
  */
 static void checkExprIsVarFree(ParseState* pstate, Node* n, const char* constructName)
 {
@@ -1550,21 +1709,28 @@ static void checkExprIsVarFree(ParseState* pstate, Node* n, const char* construc
 }
 
 /*
- *	findTargetlistEntrySQL92 -
- *	  Returns the targetlist entry matching the given (untransformed) node.
- *	  If no matching entry exists, one is created and appended to the target
- *	  list as a "resjunk" node.
- *
- * This function supports the old SQL92 ORDER BY interpretation, where the
- * expression is an output column name or number.  If we fail to find a
- * match of that sort, we fall through to the SQL99 rules.	For historical
- * reasons, openGauss also allows this interpretation for GROUP BY, though
- * the standard never did.	However, for GROUP BY we prefer a SQL99 match.
- * This function is *not* used for WINDOW definitions.
- *
- * node		the ORDER BY, GROUP BY, or DISTINCT ON expression to be matched
- * tlist	the target list (passed by reference so we can append to it)
- * clause	identifies clause type being processed
+ 这个函数的目的是在目标列表（targetlist）中查找与给定节点相匹配的目标条目（TargetEntry）。这是为了处理 SQL 查询中的特殊情况，如对列名、整数常量等的引用。
+
+函数签名和参数解释：
+c
+Copy code
+static TargetEntry* findTargetlistEntrySQL92(ParseState* pstate, Node* node, List** tlist, int clause, ParseExprKind exprKind)
+功能：
+
+在目标列表中查找与给定节点相匹配的目标条目。
+处理 SQL92 中的两个特殊情况：列名和整数常量。
+对于列名，遵循 SQL92 规范进行处理，尤其是在 GROUP BY 子句中。
+参数解释：
+
+ParseState* pstate：解析状态。
+Node* node：待查找的节点。
+List** tlist：目标列表。
+int clause：查询中的子句类型（例如，GROUP_CLAUSE、ORDER_CLAUSE）。
+ParseExprKind exprKind：表达式的类型。
+返回值：
+
+如果找到匹配的目标条目，则返回该目标条目。
+如果未找到匹配的目标条目，则返回 NULL。
  */
 static TargetEntry* findTargetlistEntrySQL92(ParseState* pstate, Node* node, List** tlist, int clause, ParseExprKind exprKind)
 {
@@ -1698,16 +1864,27 @@ static TargetEntry* findTargetlistEntrySQL92(ParseState* pstate, Node* node, Lis
 }
 
 /*
- *	findTargetlistEntrySQL99 -
- *	  Returns the targetlist entry matching the given (untransformed) node.
- *	  If no matching entry exists, one is created and appended to the target
- *	  list as a "resjunk" node.
- *
- * This function supports the SQL99 interpretation, wherein the expression
- * is just an ordinary expression referencing input column names.
- *
- * node		the ORDER BY, GROUP BY, etc expression to be matched
- * tlist	the target list (passed by reference so we can append to it)
+ 
+这个函数用于在目标列表（targetlist）中查找与给定节点（node）相匹配的目标条目（TargetEntry）。如果找到匹配的目标条目，直接返回该目标条目；如果没有找到匹配，创建一个新的目标条目，并将其追加到目标列表末尾，然后返回这个新创建的目标条目。
+
+函数签名和参数解释：
+c
+Copy code
+static TargetEntry* findTargetlistEntrySQL99(ParseState* pstate, Node* node, List** tlist, ParseExprKind exprKind)
+功能：
+
+在目标列表中查找与给定节点相匹配的目标条目。
+处理 SQL99 规则，允许匹配目标列表中的表达式，不仅限于 SQL92 中的列名或整数常量。
+参数解释：
+
+ParseState* pstate：解析状态。
+Node* node：待查找的节点。
+List** tlist：目标列表。
+ParseExprKind exprKind：表达式的类型。
+返回值：
+
+如果找到匹配的目标条目，则返回该目标条目。
+如果未找到匹配的目标条目，则创建一个新的目标条目，并将其追加到目标列表末尾，然后返回这个新创建的目标条目。
  */
 static TargetEntry* findTargetlistEntrySQL99(ParseState* pstate, Node* node, List** tlist, ParseExprKind exprKind)
 {
@@ -1756,39 +1933,19 @@ static TargetEntry* findTargetlistEntrySQL99(ParseState* pstate, Node* node, Lis
 }
 
 /* -------------------------------------------------------------------------
- * Flatten out parenthesized sublists in grouping lists, and some cases
- * of nested grouping sets.
- *
- * Inside a grouping set (ROLLUP, CUBE, or GROUPING SETS), we expect the
- * content to be nested no more than 2 deep: i.e. ROLLUP((a,b),(c,d)) is
- * ok, but ROLLUP((a,(b,c)),d) is flattened to ((a,b,c),d), which we then
- * (later) normalize to ((a,b,c),(d)).
- *
- * CUBE or ROLLUP can be nested inside GROUPING SETS (but not the reverse),
- * and we leave that alone if we find it. But if we see GROUPING SETS inside
- * GROUPING SETS, we can flatten and normalize as follows:
- *	 GROUPING SETS (a, (b,c), GROUPING SETS ((c,d),(e)), (f,g))
- * becomes
- *	 GROUPING SETS ((a), (b,c), (c,d), (e), (f,g))
- *
- * This is per the spec's syntax transformations, but these are the only such
- * transformations we do in parse analysis, so that queries retain the
- * originally specified grouping set syntax for CUBE and ROLLUP as much as
- * possible when deparsed. (Full expansion of the result into a list of
- * grouping sets is left to the planner.)
- *
- * When we're done, the resulting list should contain only these possible
- * elements:
- *	 - an expression
- *	 - a CUBE or ROLLUP with a list of expressions nested 2 deep
- *	 - a GROUPING SET containing any of:
- *		- expression lists
- *		- empty grouping sets
- *		- CUBE or ROLLUP nodes with lists nested 2 deep
- * The return is a new list, but doesn't deep-copy the old nodes except for
- * GroupingSet nodes.
- *
- * As a side effect, flag whether the list has any GroupingSet nodes.
+
+这个函数的主要目的是将表达式中的 GroupingSet 进行展开，处理成更容易处理的形式。在 SQL 中，GROUP BY 子句中可以使用 GROUPING SETS 子句指定多个分组，而这个函数用于将这些分组展开。
+
+函数签名和参数解释：
+c
+Copy code
+static Node* flatten_grouping_sets(Node* expr, bool toplevel, bool* hasGroupingSets)
+功能：
+将表达式中的 GroupingSet 进行展开，处理成更容易处理的形式。
+参数解释：
+Node* expr：待展开的表达式。
+bool toplevel：指示是否在顶层（top-level）进行展开。
+bool* hasGroupingSets：用于标识是否存在 GroupingSets。
  * -------------------------------------------------------------------------
  */
 static Node* flatten_grouping_sets(Node* expr, bool toplevel, bool* hasGroupingSets)
@@ -1871,23 +2028,24 @@ static Node* flatten_grouping_sets(Node* expr, bool toplevel, bool* hasGroupingS
 }
 
 /*
- * Transform a single expression within a GROUP BY clause or grouping set.
- *
- * The expression is added to the targetlist if not already present, and to the
- * flatresult list (which will become the groupClause) if not already present
- * there.  The sortClause is consulted for operator and sort order hints.
- *
- * Returns the ressortgroupref of the expression.
- *
- * flatresult	reference to flat list of SortGroupClause nodes
- * seen_local	bitmapset of sortgrouprefs already seen at the local level
- * pstate		ParseState
- * gexpr		node to transform
- * targetlist	reference to TargetEntry list
- * sortClause	ORDER BY clause (SortGroupClause nodes)
- * exprKind		expression kind
- * useSQL99		SQL99 rather than SQL92 syntax
- * toplevel		false if within any grouping set
+transformGroupClauseExpr 函数：
+函数签名和参数解释：
+c
+Copy code
+static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, ParseState* pstate, Node* gexpr,
+    List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel)
+功能：
+转换 GROUP BY 子句中的单个表达式，并处理排序信息。
+参数解释：
+List** flatresult：输出参数，用于保存 SortGroupClause 结构的平面化结果。
+Bitmapset* seen_local：已经处理过的 ressortgroupref 的集合，避免处理重复的表达式。
+ParseState* pstate：解析状态。
+Node* gexpr：待处理的表达式。
+List** targetlist：目标列表。
+List* sortClause：排序信息。
+ParseExprKind exprKind：表达式类型。
+bool useSQL99：是否使用 SQL99 语法。
+bool toplevel：是否在最顶层。
  */
 static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, ParseState* pstate, Node* gexpr,
     List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel)
@@ -1971,21 +2129,23 @@ static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, 
 }
 
 /*
- * Transform a list of expressions within a GROUP BY clause or grouping set.
- *
- * The list of expressions belongs to a single clause within which duplicates
- * can be safely eliminated.
- *
- * Returns an integer list of ressortgroupref values.
- *
- * flatresult	reference to flat list of SortGroupClause nodes
- * pstate		ParseState
- * list			nodes to transform
- * targetlist	reference to TargetEntry list
- * sortClause	ORDER BY clause (SortGroupClause nodes)
- * exprKind		expression kind
- * useSQL99		SQL99 rather than SQL92 syntax
- * toplevel		false if within any grouping set
+transformGroupClauseList 函数：
+函数签名和参数解释：
+c
+Copy code
+static List* transformGroupClauseList(List** flatresult, ParseState* pstate, List* list, List** targetlist,
+    List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel)
+功能：
+转换 GROUP BY 子句或 GROUPING SETS 中的表达式列表。
+参数解释：
+List** flatresult：输出参数，用于保存 SortGroupClause 结构的平面化结果。
+ParseState* pstate：解析状态。
+List* list：待处理的表达式列表。
+List** targetlist：目标列表。
+List* sortClause：排序信息。
+ParseExprKind exprKind：表达式类型。
+bool useSQL99：是否使用 SQL99 语法。
+bool toplevel：是否在最顶层。
  */
 static List* transformGroupClauseList(List** flatresult, ParseState* pstate, List* list, List** targetlist,
     List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel)
@@ -2009,23 +2169,23 @@ static List* transformGroupClauseList(List** flatresult, ParseState* pstate, Lis
 }
 
 /*
- * Transform a grouping set and (recursively) its content.
- *
- * The grouping set might be a GROUPING SETS node with other grouping sets
- * inside it, but SETS within SETS have already been flattened out before
- * reaching here.
- *
- * Returns the transformed node, which now contains SIMPLE nodes with lists
- * of ressortgrouprefs rather than expressions.
- *
- * flatresult	reference to flat list of SortGroupClause nodes
- * pstate		ParseState
- * gset			grouping set to transform
- * targetlist	reference to TargetEntry list
- * sortClause	ORDER BY clause (SortGroupClause nodes)
- * exprKind		expression kind
- * useSQL99		SQL99 rather than SQL92 syntax
- * toplevel		false if within any grouping set
+transformGroupingSet 函数：
+函数签名和参数解释：
+c
+Copy code
+static Node* transformGroupingSet(List** flatresult, ParseState* pstate, GroupingSet* gset, List** targetlist,
+    List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel)
+功能：
+转换 GROUPING SETS 子句。
+参数解释：
+List** flatresult：输出参数，用于保存 SortGroupClause 结构的平面化结果。
+ParseState* pstate：解析状态。
+GroupingSet* gset：待处理的 GroupingSet 结构。
+List** targetlist：目标列表。
+List* sortClause：排序信息。
+ParseExprKind exprKind：表达式类型。
+bool useSQL99：是否使用 SQL99 语法。
+bool toplevel：是否在最顶层。
  */
 static Node* transformGroupingSet(List** flatresult, ParseState* pstate, GroupingSet* gset, List** targetlist,
     List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel)
@@ -2068,41 +2228,22 @@ static Node* transformGroupingSet(List** flatresult, ParseState* pstate, Groupin
 }
 
 /*
- * transformGroupClause -
- *	  transform a GROUP BY clause
- *
- * GROUP BY items will be added to the targetlist (as resjunk columns)
- * if not already present, so the targetlist must be passed by reference.
- *
- * This is also used for window PARTITION BY clauses (which act almost the
- * same, but are always interpreted per SQL99 rules).
- *
- * Grouping sets make this a lot more complex than it was. Our goal here is
- * twofold: we make a flat list of SortGroupClause nodes referencing each
- * distinct expression used for grouping, with those expressions added to the
- * targetlist if needed. At the same time, we build the groupingSets tree,
- * which stores only ressortgrouprefs as integer lists inside GroupingSet nodes
- * (possibly nested, but limited in depth: a GROUPING_SET_SETS node can contain
- * nested SIMPLE, CUBE or ROLLUP nodes, but not more sets - we flatten that
- * out; while CUBE and ROLLUP can contain only SIMPLE nodes).
- *
- * We skip much of the hard work if there are no grouping sets.
- *
- * One subtlety is that the groupClause list can end up empty while the
- * groupingSets list is not; this happens if there are only empty grouping
- * sets, or an explicit GROUP BY (). This has the same effect as specifying
- * aggregates or a HAVING clause with no GROUP BY; the output is one row per
- * grouping set even if the input is empty.
- *
- * Returns the transformed (flat) groupClause.
- *
- * pstate		ParseState
- * grouplist	clause to transform
- * groupingSets reference to list to contain the grouping set tree
- * targetlist	reference to TargetEntry list
- * sortClause	ORDER BY clause (SortGroupClause nodes)
- * exprKind		expression kind
- * useSQL99		SQL99 rather than SQL92 syntax
+transformGroupClause 函数：
+函数签名和参数解释：
+c
+Copy code
+List* transformGroupClause(
+    ParseState* pstate, List* grouplist, List** groupingSets, List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99)
+功能：
+转换 GROUP BY 子句。
+参数解释：
+ParseState* pstate：解析状态。
+List* grouplist：待处理的 GROUP BY 子句。
+List** groupingSets：输出参数，用于保存 GroupingSet 结构的列表。
+List** targetlist：目标列表。
+List* sortClause：排序信息。
+ParseExprKind exprKind：表达式类型。
+bool useSQL99：是否使用 SQL99 语法。
  */
 List* transformGroupClause(
     ParseState* pstate, List* grouplist, List** groupingSets, List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99)
@@ -2175,14 +2316,33 @@ List* transformGroupClause(
     return result;
 }
 /*
- * transformSortClause -
- *	  transform an ORDER BY clause
- *
- * ORDER BY items will be added to the targetlist (as resjunk columns)
- * if not already present, so the targetlist must be passed by reference.
- *
- * This is also used for window and aggregate ORDER BY clauses (which act
- * almost the same, but are always interpreted per SQL99 rules).
+
+这部分代码主要处理窗口函数的定义，包括转换 ORDER BY 和 PARTITION BY 子句。主要包括以下两个函数：
+
+transformSortClause 函数：
+函数签名和参数解释：
+c
+Copy code
+List* transformSortClause(ParseState* pstate, List* orderlist, List** targetlist, ParseExprKind exprKind, bool resolveUnknown, bool useSQL99)
+功能：
+转换 ORDER BY 子句。
+参数解释：
+ParseState* pstate：解析状态。
+List* orderlist：待处理的 ORDER BY 子句。
+List** targetlist：目标列表。
+ParseExprKind exprKind：表达式类型。
+bool resolveUnknown：是否解析未知。
+bool useSQL99：是否使用 SQL99 语法。
+详细解释：
+遍历 orderlist 中的每个 SortBy 元素：
+
+对于每个 SortBy，调用 findTargetlistEntrySQL99 或 findTargetlistEntrySQL92 函数查找目标列表中的对应条目。
+调用 addTargetToSortList 函数：
+
+将查找到的目标条目添加到排序列表中。
+返回结果：
+
+返回排序列表。
  */
 List* transformSortClause(ParseState* pstate, List* orderlist, List** targetlist, ParseExprKind exprKind, bool resolveUnknown, bool useSQL99)
 {
@@ -2205,8 +2365,17 @@ List* transformSortClause(ParseState* pstate, List* orderlist, List** targetlist
 }
 
 /*
- * transformWindowDefinitions -
- *		transform window definitions (WindowDef to WindowClause)
+transformWindowDefinitions 函数：
+函数签名和参数解释：
+c
+Copy code
+List* transformWindowDefinitions(ParseState* pstate, List* windowdefs, List** targetlist)
+功能：
+转换窗口定义（WindowDef 到 WindowClause）。
+参数解释：
+ParseState* pstate：解析状态。
+List* windowdefs：待处理的窗口定义列表。
+List** targetlist：目标列表。
  */
 List* transformWindowDefinitions(ParseState* pstate, List* windowdefs, List** targetlist)
 {
@@ -2319,21 +2488,18 @@ List* transformWindowDefinitions(ParseState* pstate, List* windowdefs, List** ta
 }
 
 /*
- * transformDistinctClause -
- *	  transform a DISTINCT clause
- *
- * Since we may need to add items to the query's targetlist, that list
- * is passed by reference.
- *
- * As with GROUP BY, we absorb the sorting semantics of ORDER BY as much as
- * possible into the distinctClause.  This avoids a possible need to re-sort,
- * and allows the user to choose the equality semantics used by DISTINCT,
- * should she be working with a datatype that has more than one equality
- * operator.
- *
- * is_agg is true if we are transforming an aggregate(DISTINCT ...)
- * function call.  This does not affect any behavior, only the phrasing
- * of error messages.
+transformDistinctClause 函数：
+函数签名和参数解释：
+c
+Copy code
+List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortClause, bool is_agg)
+功能：
+转换 DISTINCT 子句中的 ORDER BY 部分。
+参数解释：
+ParseState* pstate：解析状态。
+List** targetlist：目标列表。
+List* sortClause：排序列表。
+bool is_agg：是否为聚合查询。
  */
 List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortClause, bool is_agg)
 {
@@ -2403,8 +2569,17 @@ List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortC
 }
 
 /*
- * CheckOrderbyColumns -
- *	  check ORDER BY column references if the statement has DISTINCT clause.
+ CheckOrderbyColumns 函数：
+函数签名和参数解释：
+c
+Copy code
+static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate)
+功能：
+检查 ORDER BY 中的列引用。
+参数解释：
+ParseState* pstate：解析状态。
+List* targetList：目标列表。
+bool isAggregate：是否为聚合查询。
  */
 static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate)
 {
@@ -2455,17 +2630,19 @@ static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAgg
 }
 
 /*
- * transformDistinctOnClause -
- *	  transform a DISTINCT ON clause
- *
- * Since we may need to add items to the query's targetlist, that list
- * is passed by reference.
- *
- * As with GROUP BY, we absorb the sorting semantics of ORDER BY as much as
- * possible into the distinctClause.  This avoids a possible need to re-sort,
- * and allows the user to choose the equality semantics used by DISTINCT,
- * should she be working with a datatype that has more than one equality
- * operator.
+transformDistinctOnClause 函数的主要目的是处理 SELECT DISTINCT ON 子句。以下是对该函数的详细解释：
+
+函数签名和参数解释：
+c
+Copy code
+List* transformDistinctOnClause(ParseState* pstate, List* distinctlist, List** targetlist, List* sortClause)
+功能：
+处理 SELECT DISTINCT ON 子句。
+参数解释：
+ParseState* pstate：解析状态。
+List* distinctlist：DISTINCT ON 子句中的表达式列表。
+List** targetlist：目标列表。
+List* sortClause：ORDER BY 子句中的排序列表。
  */
 List* transformDistinctOnClause(ParseState* pstate, List* distinctlist, List** targetlist, List* sortClause)
 {
@@ -2551,15 +2728,54 @@ List* transformDistinctOnClause(ParseState* pstate, List* distinctlist, List** t
 }
 
 /*
- * getMatchingLocation
- *		Get the exprLocation of the exprs member corresponding to the
- *		(first) member of sortgrouprefs that equals sortgroupref.
- *
- * This is used so that we can point at a troublesome DISTINCT ON entry.
- * (Note that we need to use the original untransformed DISTINCT ON list
- * item, as whatever TLE it corresponds to will very possibly have a
- * parse location pointing to some matching entry in the SELECT list
- * or ORDER BY list.)
+
+以下是对给出的三个函数的详细解释：
+
+1. get_matching_location 函数
+c
+Copy code
+static int get_matching_location(int sortgroupref, List* sortgrouprefs, List* exprs)
+功能：
+根据 sortgroupref 查找对应的表达式在 exprs 列表中的位置，并返回其位置信息。
+参数解释：
+int sortgroupref：要查找的排序组引用。
+List* sortgrouprefs：排序组引用的列表。
+List* exprs：表达式的列表。
+详细解释：
+使用 forboth 宏遍历 sortgrouprefs 和 exprs 列表。
+如果找到与 sortgroupref 匹配的排序组引用，则返回对应表达式的位置信息。
+如果没有找到匹配项，报错并返回 -1。
+返回值：
+匹配项的位置信息。
+2. has_not_null_constraint 函数
+c
+Copy code
+bool has_not_null_constraint(ParseState* pstate, TargetEntry* tle)
+功能：
+检查目标条目对应的表达式是否具有 NOT NULL 约束。
+参数解释：
+ParseState* pstate：解析状态。
+TargetEntry* tle：目标条目。
+详细解释：
+检查目标表达式是否为 Var 类型。
+获取变量的相关信息，包括表的 OID、列号等。
+通过系统缓存查找列的元数据，获取列的约束信息。
+返回该列是否具有 NOT NULL 约束。
+返回值：
+如果列具有 NOT NULL 约束，则返回 true，否则返回 false。
+3. is_single_table_query 函数
+c
+Copy code
+bool is_single_table_query(ParseState* pstate)
+功能：
+检查查询是否是单表查询。
+参数解释：
+ParseState* pstate：解析状态。
+详细解释：
+检查解析状态中的关系表列表（p_rtable）的长度是否为 1。
+如果长度为 1 且表的类型为 RTE_RELATION，则返回 true，否则返回 false。
+返回值：
+如果是单表查询，返回 true，否则返回 false。
  */
 static int get_matching_location(int sortgroupref, List* sortgrouprefs, List* exprs)
 {
@@ -2617,17 +2833,32 @@ bool is_single_table_query(ParseState* pstate)
 }
 
 /*
- * addTargetToSortList
- *		If the given targetlist entry isn't already in the SortGroupClause
- *		list, add it to the end of the list, using the given sort ordering
- *		info.
- *
- * If resolveUnknown is TRUE, convert TLEs of type UNKNOWN to TEXT.  If not,
- * do nothing (which implies the search for a sort operator will fail).
- * pstate should be provided if resolveUnknown is TRUE, but can be NULL
- * otherwise.
- *
- * Returns the updated SortGroupClause list.
+
+这是一个用于将目标条目添加到排序列表的函数。以下是对其主要部分的详细解释：
+
+addTargetToSortList 函数
+c
+Copy code
+List* addTargetToSortList(
+    ParseState* pstate, TargetEntry* tle, List* sortlist, List* targetlist, SortBy* sortby, bool resolveUnknown)
+功能：
+将目标条目添加到排序列表中，返回新的排序列表。
+参数解释：
+ParseState* pstate：解析状态。
+TargetEntry* tle：目标条目。
+List* sortlist：当前排序列表。
+List* targetlist：目标列表。
+SortBy* sortby：排序信息。
+bool resolveUnknown：如果目标条目的类型为 UNKNOWN，是否进行隐式类型转换。
+详细解释：
+如果目标条目的类型为 UNKNOWN 且 resolveUnknown 为 true，则将其隐式转换为 TEXT 类型。
+使用错误上下文回调，将错误报告与解析位置相关联。
+根据排序方向，获取排序和分组操作符的 Oid，以及是否可哈希。
+处理 SORTBY_USING 情况，使用指定的操作符，验证其为有效的排序操作符，并获取对应的等于操作符和方向。
+检查是否有重复的排序列表项，如果没有，则创建一个 SortGroupClause 并添加到排序列表中。
+在单表查询中，如果排序的列有约束且使用 NULLS FIRST/LAST 选项，将其改为默认选项以获得更好的查询计划。
+返回值：
+新的排序列表。
  */
 List* addTargetToSortList(
     ParseState* pstate, TargetEntry* tle, List* sortlist, List* targetlist, SortBy* sortby, bool resolveUnknown)
@@ -2753,27 +2984,28 @@ List* addTargetToSortList(
 }
 
 /*
- * addTargetToGroupList
- *		If the given targetlist entry isn't already in the SortGroupClause
- *		list, add it to the end of the list, using default sort/group
- *		semantics.
- *
- * This is very similar to addTargetToSortList, except that we allow the
- * case where only a grouping (equality) operator can be found, and that
- * the TLE is considered "already in the list" if it appears there with any
- * sorting semantics.
- *
- * location is the parse location to be fingered in event of trouble.  Note
- * that we can't rely on exprLocation(tle->expr), because that might point
- * to a SELECT item that matches the GROUP BY item; it'd be pretty confusing
- * to report such a location.
- *
- * If resolveUnknown is TRUE, convert TLEs of type UNKNOWN to TEXT.  If not,
- * do nothing (which implies the search for an equality operator will fail).
- * pstate should be provided if resolveUnknown is TRUE, but can be NULL
- * otherwise.
- *
- * Returns the updated SortGroupClause list.
+addTargetToGroupList 函数
+c
+Copy code
+static List* addTargetToGroupList(
+    ParseState* pstate, TargetEntry* tle, List* grouplist, List* targetlist, int location, bool resolveUnknown)
+功能：
+将目标条目添加到分组列表中，返回新的分组列表。
+参数解释：
+ParseState* pstate：解析状态。
+TargetEntry* tle：目标条目。
+List* grouplist：当前分组列表。
+List* targetlist：目标列表。
+int location：目标条目的位置信息。
+bool resolveUnknown：如果目标条目的类型为 UNKNOWN，是否进行隐式类型转换。
+详细解释：
+如果目标条目的类型为 UNKNOWN 且 resolveUnknown 为 true，则将其隐式转换为 TEXT 类型。
+检查是否有重复的分组列表项，如果没有，则创建一个 SortGroupClause 并添加到分组列表中。
+使用错误上下文回调，将错误报告与解析位置相关联。
+根据目标条目的数据类型，获取相应的等于操作符和排序操作符。
+创建 SortGroupClause 并添加到分组列表中。
+返回值：
+新的分组列表。
  */
 static List* addTargetToGroupList(
     ParseState* pstate, TargetEntry* tle, List* grouplist, List* targetlist, int location, bool resolveUnknown)
@@ -2815,11 +3047,20 @@ static List* addTargetToGroupList(
 }
 
 /*
- * assignSortGroupRef
- *	  Assign the targetentry an unused ressortgroupref, if it doesn't
- *	  already have one.  Return the assigned or pre-existing refnumber.
- *
- * 'tlist' is the targetlist containing (or to contain) the given targetentry.
+ assignSortGroupRef 函数
+c
+Copy code
+Index assignSortGroupRef(TargetEntry* tle, List* tlist)
+功能：
+为目标条目分配或获取一个未使用的 ressortgroupref（排序分组参考编号）。
+参数解释：
+TargetEntry* tle：目标条目。
+List* tlist：目标列表。
+详细解释：
+如果目标条目已经有 ressortgroupref，则直接返回该值。
+否则，遍历目标列表中的每个条目，找到已使用的最大 ressortgroupref 值，并为目标条目分配一个未使用的值（即最大值加一）。
+返回值：
+分配或获取的 ressortgroupref。
  */
 Index assignSortGroupRef(TargetEntry* tle, List* tlist)
 {
@@ -2844,23 +3085,24 @@ Index assignSortGroupRef(TargetEntry* tle, List* tlist)
 }
 
 /*
- * targetIsInSortList
- *		Is the given target item already in the sortlist?
- *		If sortop is not InvalidOid, also test for a match to the sortop.
- *
- * It is not an oversight that this function ignores the nulls_first flag.
- * We check sortop when determining if an ORDER BY item is redundant with
- * earlier ORDER BY items, because it's conceivable that "ORDER BY
- * foo USING <, foo USING <<<" is not redundant, if <<< distinguishes
- * values that < considers equal.  We need not check nulls_first
- * however, because a lower-order column with the same sortop but
- * opposite nulls direction is redundant.  Also, we can consider
- * ORDER BY foo ASC, foo DESC redundant, so check for a commutator match.
- *
- * Works for both ordering and grouping lists (sortop would normally be
- * InvalidOid when considering grouping).  Note that the main reason we need
- * this routine (and not just a quick test for nonzeroness of ressortgroupref)
- * is that a TLE might be in only one of the lists.
+
+targetIsInSortList 函数
+c
+Copy code
+bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList)
+功能：
+检查目标条目是否在排序列表中。
+参数解释：
+TargetEntry* tle：目标条目。
+Oid sortop：排序操作符的OID。
+List* sortList：排序列表。
+详细解释：
+获取目标条目的 ressortgroupref（排序分组参考编号）。
+如果 ressortgroupref 为 0，表示目标条目没有排序标记，直接返回 false。
+遍历排序列表中的每个 SortGroupClause，检查其 tleSortGroupRef 是否等于目标条目的 ressortgroupref，且排序操作符匹配。
+如果找到匹配项，返回 true，否则返回 false。
+返回值：
+如果目标条目在排序列表中，则返回 true，否则返回 false。
  */
 bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList)
 {
@@ -2883,8 +3125,24 @@ bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList)
 }
 
 /*
- * findWindowClause
- *		Find the named WindowClause in the list, or return NULL if not there
+
+targetIsInSortList 函数
+c
+Copy code
+bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList)
+功能：
+检查目标条目是否在排序列表中。
+参数解释：
+TargetEntry* tle：目标条目。
+Oid sortop：排序操作符的OID。
+List* sortList：排序列表。
+详细解释：
+获取目标条目的 ressortgroupref（排序分组参考编号）。
+如果 ressortgroupref 为 0，表示目标条目没有排序标记，直接返回 false。
+遍历排序列表中的每个 SortGroupClause，检查其 tleSortGroupRef 是否等于目标条目的 ressortgroupref，且排序操作符匹配。
+如果找到匹配项，返回 true，否则返回 false。
+返回值：
+如果目标条目在排序列表中，则返回 true，否则返回 false。
  */
 static WindowClause* findWindowClause(List* wclist, const char* name)
 {
@@ -2902,8 +3160,25 @@ static WindowClause* findWindowClause(List* wclist, const char* name)
 }
 
 /*
- * transformFrameOffset
- *		Process a window frame offset expression
+transformFrameOffset 函数
+c
+Copy code
+static Node* transformFrameOffset(ParseState* pstate, int frameOptions, Node* clause)
+功能：
+转换窗口帧的偏移表达式。
+参数解释：
+ParseState* pstate：解析状态。
+int frameOptions：窗口帧的选项，包括 FRAMEOPTION_ROWS 和 FRAMEOPTION_RANGE。
+Node* clause：窗口帧的偏移表达式。
+详细解释：
+如果偏移表达式为 NULL，直接返回 NULL，表示没有偏移表达式。
+如果窗口帧选项包括 FRAMEOPTION_ROWS，则对表达式进行变换，然后将其强制转换为 INT8OID 类型。
+使用 transformExpr 对原始表达式树进行转换。
+将表达式强制转换为 INT8OID 类型，类似于 LIMIT 子句。
+如果窗口帧选项包括 FRAMEOPTION_RANGE，则对表达式进行变换，然后抛出错误，因为 FRAMEOPTION_RANGE 中的值偏移在 PostgreSQL 中尚未实现。
+使用 checkExprIsVarFree 检查偏移表达式中是否包含变量或聚合函数，如果有，则抛出错误。
+返回值：
+返回转换后的偏移表达式。如果偏移表达式为 NULL，则返回 NULL。
  */
 static Node* transformFrameOffset(ParseState* pstate, int frameOptions, Node* clause)
 {
