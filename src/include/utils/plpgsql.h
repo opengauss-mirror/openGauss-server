@@ -1223,6 +1223,7 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     struct DebugInfo* debug;
     struct PLpgSQL_nsitem* ns_top;
 
+    uint64 guc_stat;
     bool is_autonomous;
     bool is_plpgsql_func_with_outparam;
     bool is_insert_gs_source;
