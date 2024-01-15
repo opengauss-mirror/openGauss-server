@@ -2114,6 +2114,7 @@ typedef struct Query {
     void* intoPolicy;
     ParentStmtType parentStmtType;
 #endif
+    bool has_uservar;
 } Query;
 
 /* ----------------------

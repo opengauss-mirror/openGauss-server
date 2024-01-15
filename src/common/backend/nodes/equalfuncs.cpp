@@ -983,6 +983,10 @@ static bool _equalQuery(const Query* a, const Query* b)
     }
     
     COMPARE_NODE_FIELD(indexhintList);
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
+        COMPARE_SCALAR_FIELD(has_uservar);
+    }
+    
     return true;
 }
 

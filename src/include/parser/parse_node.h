@@ -284,6 +284,7 @@ struct ParseState {
      */
     List* orderbyCols; 
     List* p_indexhintLists; /*Force or use index in index hint list*/
+    bool has_uservar;
 };
 
 /* An element of p_relnamespace or p_varnamespace */
