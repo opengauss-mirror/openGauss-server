@@ -184,7 +184,7 @@ char* pretty_format_node_dump(const char* dump)
                     /* force line break after ), unless another ) follows */
                     if (dump[i + 1] != ')') {
                         line[j + 1] = '\0';
-                        format_debug_print_plan(line, indentDist, j);
+                        format_debug_print_plan(line, indentDist, j + 1);
                         appendStringInfo(&str, "%s\n", line);
                         j = indentDist - 1;
                         while (dump[i + 1] == ' ') {
