@@ -26,7 +26,7 @@
 #include "storage/proc.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_reform_common.h"
@@ -735,12 +735,12 @@ dms_session_e DMSGetProcType4RequestPage()
     // proc type used in DMS request page
     if (AmDmsReformProcProcess() || (AmPageRedoProcess() && !SS_ONDEMAND_BUILD_DONE) ||
         (AmStartupProcess() && !SS_ONDEMAND_BUILD_DONE)) {
-        /* When xlog_file_path is not null and enable_dms is set on, main standby always is in recovery.
+        /* When SS double cluster, main standby always is in recovery.
          * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
          * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
          * page in recovery state.
          */
-        if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
+        if (SS_DISASTER_MAIN_STANDBY_NODE && pmState == PM_HOT_STANDBY) {
             return DMS_SESSION_RECOVER_HOT_STANDBY;
         } else {
             return DMS_SESSION_RECOVER;

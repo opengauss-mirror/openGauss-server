@@ -46917,8 +46917,8 @@ msgstr "获取主节点replconninfo失败, 请检查replconninfo配置!"
 
 #: ddes/adapter/ss_reform_common.cpp:442
 #, c-format
-msgid "zatest: SSDoradoRefreshMode change control file cluster run mode to: %d"
-msgstr "zatest: SSDoradoRefreshMode将控制文件集群运行模式更改为:%d"
+msgid "zatest: SSDisasterRefreshMode change control file cluster run mode to: %d"
+msgstr "zatest: SSDisasterRefreshMode将控制文件集群运行模式更改为:%d"
 
 #: ddes/adapter/ss_switchover.cpp:59
 #
@@ -102966,8 +102966,8 @@ msgstr "SEG_STORE_EXTEND_EXTENT%s:分段扩展一个范围!\n"
 
 #: storage/smgr/segstore.cpp:374
 #, c-format
-msgid "can segment address translation when role is SS_REPLICATION_MAIN_STANBY_NODE"
-msgstr "当角色为SS_REPLICATION_MAIN_STANBY_NODE时, 可以进行段地址转换吗"
+msgid "can segment address translation when role is SS_DISASTER_STANDBY_CLUSTER"
+msgstr "当角色为SS_DISASTER_STANDBY_CLUSTER时, 可以进行段地址转换吗"
 
 #: storage/smgr/segstore.cpp:378
 #, c-format

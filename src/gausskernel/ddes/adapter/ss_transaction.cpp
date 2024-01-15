@@ -32,6 +32,7 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/sinvaladt.h"
 #include "replication/libpqsw.h"
+#include "replication/walsender.h"
 
 static inline void txnstatusNetworkStats(uint64 timeDiff);
 static inline void txnstatusHashStats(uint64 timeDiff);
@@ -60,6 +61,10 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
         if (dms_request_opengauss_txn_snapshot(&dms_ctx, &dms_snapshot) == DMS_SUCCESS) {
             break;
+        } 
+
+        if (AM_WAL_SENDER && SS_IN_REFORM) {
+            return NULL;
         }
         pg_usleep(USECS_PER_SEC);
 

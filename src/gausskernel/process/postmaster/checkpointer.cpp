@@ -47,7 +47,7 @@
 #include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "replication/syncrep.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
@@ -543,7 +543,7 @@ void CheckpointerMain(void)
                 } else {
                     CheckPointBuffers(flags, true);
                 }
-            } else if (!do_restartpoint && !SS_REPLICATION_STANDBY_CLUSTER) {
+            } else if (!do_restartpoint && !SS_DISASTER_STANDBY_CLUSTER) {
                 CreateCheckPoint(flags);
                 ckpt_performed = true;
                 if (!bgwriter_first_startup && CheckFpwBeforeFirstCkpt()) {

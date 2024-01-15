@@ -33,7 +33,7 @@
 #include "storage/smgr/segment.h"
 #include "postmaster/postmaster.h"
 #include "storage/file/fio_device.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_reform_common.h"
@@ -128,7 +128,7 @@ bool SSRecoveryNodes()
          * recovery phase could be regarded successful in hot_standby thus set pmState = PM_HOT_STANDBY, which
          * indicate database systerm is ready to accept read only connections.
          */
-        if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
+        if (SS_DISASTER_MAIN_STANDBY_NODE && pmState == PM_HOT_STANDBY) {
             result = true;
             break;
         }
@@ -149,7 +149,7 @@ bool SSRecoveryApplyDelay()
         return false;
     }
     
-    if (SS_REPLICATION_STANDBY_CLUSTER) {
+    if (SS_DISASTER_STANDBY_CLUSTER) {
         return true;
     }
 

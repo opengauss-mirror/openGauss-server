@@ -41,7 +41,7 @@
 #include "storage/sinvaladt.h"
 #include "replication/walsender_private.h"
 #include "replication/walreceiver.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "ddes/dms/ss_switchover.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -60,7 +60,7 @@ void SSWakeupRecovery(void)
     /* need make sure pagewriter started first */
     bool need_recovery = true;
 
-    if (SS_REPLICATION_STANDBY_CLUSTER) {
+    if (SS_DISASTER_MAIN_STANDBY_NODE) {
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
         return;
     }
@@ -210,8 +210,12 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
 
 static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot, uint8 inst_id)
 {   
-    /* SS_REPLICATION_MAIN_STANBY_NODE always is in recovery progress, but it can acquire snapshot*/
-    if (RecoveryInProgress() && !(SS_NORMAL_PRIMARY && SS_REPLICATION_MAIN_STANBY_NODE)) {
+    /* SS_MAIN_STANDBY_NODE always is in recovery progress, but it can acquire snapshot*/
+    if (RecoveryInProgress() && !(SS_NORMAL_PRIMARY && SS_DISASTER_MAIN_STANDBY_NODE)) {
+        return DMS_ERROR;
+    }
+
+    if (!SSCanFetchLocalSnapshotTxnRelatedInfo()) {
         return DMS_ERROR;
     }
 
@@ -437,7 +441,7 @@ static void CBSwitchoverResult(void *db_handle, int result)
     } else {
         /* abort and restore state */
         g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-        if (SS_REPLICATION_STANDBY_CLUSTER) {
+        if (SS_DISASTER_STANDBY_CLUSTER) {
             g_instance.dms_cxt.SSReformInfo.in_reform = false;
         }
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
@@ -1713,6 +1717,10 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS switchover]role and lock switched, updated inst:%d with role:%d success",
             SS_MY_INST_ID, reform_info->dms_role)));
+    /* we need change ha cur mode for switchover in ss double cluster here */
+    if (SS_DISASTER_CLUSTER) {
+        SSDisasterUpdateHAmode();
+    }
 }
 
 static void ReformCleanBackends()
@@ -1889,8 +1897,8 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
         ReformCleanBackends();
     }
 
-    if (SS_REPLICATION_DORADO_CLUSTER) {
-        SSDoradoUpdateHAmode();
+    if (SS_DISASTER_CLUSTER && reform_info->reform_type != DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS) {
+        SSDisasterUpdateHAmode();
     }
 }
 
@@ -1904,8 +1912,8 @@ static int CBReformDoneNotify(void *db_handle)
         }
     }
 
-    if (SS_REPLICATION_DORADO_CLUSTER) {
-        SSDoradoUpdateHAmode();
+    if (SS_DISASTER_CLUSTER) {
+        SSDisasterUpdateHAmode();
     }
    
     /* SSClusterState and in_reform must be set atomically */
@@ -2004,7 +2012,7 @@ static int CBUpdateNodeOldestXmin(void *db_handle, uint8 inst_id, unsigned long 
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
     /* in dorado mode, we need to wait sharestorageinit finished */
-    while (!g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited && SS_REPLICATION_DORADO_CLUSTER) {
+    while (!g_instance.dms_cxt.SSRecoveryInfo.dorado_sharestorage_inited && SS_DORADO_CLUSTER) {
         pg_usleep(REFORM_WAIT_TIME);
     }
     IsUnderPostmaster = true;

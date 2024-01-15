@@ -219,6 +219,7 @@ static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
 static bool check_normal_cluster_replication_config_para(char** newval, void** extra, GucSource source);
 static bool check_ss_cluster_replication_control_para(bool* newval, void** extra, GucSource source);
+static bool check_ss_cluster_disaster_control_para(bool* newval, void** extra, GucSource source);
 
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
@@ -1168,6 +1169,7 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+
         {{"ss_enable_dorado",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -1178,6 +1180,19 @@ static void InitStorageConfigureNamesBool()
             &g_instance.attr.attr_storage.ss_enable_dorado,
             false,
             check_ss_cluster_replication_control_para,
+            NULL,
+            NULL},
+
+        {{"ss_stream_cluster",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("Use to enabel disaster in ss disaster recovery cluster mode."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.ss_stream_cluster,
+            false,
+            check_ss_cluster_disaster_control_para,
             NULL,
             NULL},
 
@@ -6336,6 +6351,13 @@ static bool check_normal_cluster_replication_config_para(char** newval, void** e
         return false; 
     }
 
+    if (g_instance.attr.attr_storage.ss_stream_cluster) {
+        ereport(ERROR, (errmsg("Do not allow both enable normal cluster replication "
+            "and disaster replication with \"ss_stream_cluster\" = %d", \
+            g_instance.attr.attr_storage.ss_stream_cluster)));
+        return false;
+    }
+
     return true;
 }
 
@@ -6345,9 +6367,39 @@ static bool check_ss_cluster_replication_control_para(bool* newval, void** extra
         return true;
     }
 
+    if (*newval && g_instance.attr.attr_storage.ss_stream_cluster) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and disaster replication with \"ss_stream_cluster\" = %d", \
+            g_instance.attr.attr_storage.ss_stream_cluster)));
+        return false;
+    }
+
     if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
         ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
             "and normal cluster repliction with \"xlog_file_path\" = %s", \
+            g_instance.attr.attr_storage.xlog_file_path)));
+        return false;
+    }
+
+    return true;
+}
+
+static bool check_ss_cluster_disaster_control_para(bool* newval, void** extra, GucSource source)
+{
+    if (!(*newval)) {
+        return true;
+    }
+    
+    if (g_instance.attr.attr_storage.ss_enable_dorado) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and dorado replication with \"ss_enable_dorado\" = %d", \
+            g_instance.attr.attr_storage.ss_enable_dorado)));
+        return false;
+    }
+
+    if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and normal cluster replication with \"xlog_file_path\" = %s", \
             g_instance.attr.attr_storage.xlog_file_path)));
         return false;
     }

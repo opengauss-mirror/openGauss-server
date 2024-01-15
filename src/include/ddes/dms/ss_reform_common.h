@@ -43,7 +43,8 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
     int readLen);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSGetRecoveryXlogPath();
-void SSDoradoGetXlogPathList();
+char* SSGetNextXLogPath(TimeLineID tli, XLogRecPtr startptr);
+void SSDisasterGetXlogPathList();
 void SSUpdateReformerCtrl();
 void SSReadControlFile(int id, bool updateDmsCtx = false);
 void SSClearSegCache();
@@ -51,6 +52,6 @@ int SSCancelTransactionOfAllStandby(SSBroadcastOp type);
 int SSProcessCancelTransaction(SSBroadcastOp type);
 int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path);
 void SSStandbySetLibpqswConninfo();
-void SSDoradoRefreshMode();
-void SSDoradoUpdateHAmode();
+void SSDisasterRefreshMode();
+void SSDisasterUpdateHAmode();
 bool SSPerformingStandbyScenario();

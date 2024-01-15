@@ -40,7 +40,7 @@
 #include "storage/procarray.h"
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 /*
  * This code manages relations that reside on segment-page storage. It implements functions used for smgr.cpp.
  *
@@ -370,8 +370,8 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     BlockNumber blocknum;
 
     /* Recovery thread should use physical location to read data directly. */
-    if (SS_REPLICATION_MAIN_STANBY_NODE) {
-        ereport(DEBUG1, (errmsg("can segment address translation when role is SS_REPLICATION_MAIN_STANBY_NODE")));
+    if (SS_DISASTER_MAIN_STANDBY_NODE) {
+        ereport(DEBUG1, (errmsg("can segment address translation when role is SS_DISASTER_MAIN_STANDBY_NODE")));
     } else {
         if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
