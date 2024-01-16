@@ -28,8 +28,8 @@
 #include "ddes/dms/ss_reform_common.h"
 #include "replication/walreceiver.h"
 #include "replication/dcf_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "replication/shared_storage_walreceiver.h"
-#include "replication/ss_cluster_replication.h"
 #include "storage/ipc.h"
 
 namespace extreme_rto {
@@ -551,15 +551,11 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
 
     for (;;) {
         uint32 readSource = pg_atomic_read_u32(&(g_recordbuffer->readSource));
-        if (readSource & XLOG_FROM_STREAM && !SS_REPLICATION_DORADO_CLUSTER) {
+        if (readSource & XLOG_FROM_STREAM && !SS_DISASTER_STANDBY_CLUSTER) {
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
             if (ENABLE_DMS && ENABLE_DSS) {
-                /*
-                 * when ss_enable_dorado = on, traversing xlog directory to read xlog record.
-                 * Loop doesn't quit until it find valid xlog record.
-                 */
-                if (SS_REPLICATION_DORADO_CLUSTER) {
+                if (SS_DORADO_CLUSTER) {
                     for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
                         if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
                             break;
@@ -1005,16 +1001,16 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
             latestRecordCrc = record->xl_crc;
             latestRecordLen = record->xl_tot_len;
             ADD_ABNORMAL_POSITION(9);
-            if (SS_REPLICATION_DORADO_CLUSTER) {
+            if (SS_DORADO_CLUSTER) {
                 t_thrd.xlog_cxt.ssXlogReadFailedTimes = 0;
             }
             /* Great, got a record */
             return record;
         } else {
-            if (SS_REPLICATION_DORADO_CLUSTER) {
+            if (SS_DORADO_CLUSTER) {
                 t_thrd.xlog_cxt.ssXlogReadFailedTimes++;
 
-                /* In SS_REPLICATION_DORADO_CLUSTER mode, loop back to retry. */
+                /* In SS_DISASTER_STANDBY_CLUSTER mode, loop back to retry. */
                 xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
             }
            

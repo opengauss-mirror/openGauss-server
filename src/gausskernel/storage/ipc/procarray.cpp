@@ -124,7 +124,7 @@
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_reform_common.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 
 #ifdef ENABLE_UT
     #define static
@@ -2378,7 +2378,7 @@ GROUP_GET_SNAPSHOT:
     }
 
     /* Check whether there's a standby requiring an older xmin when dms is enabled. */
-    if (SS_NORMAL_PRIMARY && SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (SS_NORMAL_PRIMARY && SS_DISASTER_MAIN_STANDBY_NODE) {
         uint64 global_xmin = SSGetGlobalOldestXmin(u_sess->utils_cxt.RecentGlobalXmin);
         u_sess->utils_cxt.RecentGlobalXmin = global_xmin;
     }

@@ -22,7 +22,7 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "access/xlog_internal.h"
 #include "storage/file/fio_device.h"
 #include "storage/smgr/fd.h"
@@ -174,7 +174,7 @@ void SSClusterDoradoStorageInit()
 
 void UpdateSSDoradoCtlInfoAndSync()
 {
-    if (!SS_REPLICATION_PRIMARY_NODE) {
+    if (!SS_DORADO_PRIMARY_NODE) {
         return;
     }
 
@@ -202,7 +202,7 @@ void InitSSDoradoCtlInfo(ShareStorageXLogCtl *ctlInfo, uint64 sysidentifier)
 
 void CheckSSDoradoCtlInfo(XLogRecPtr localEnd)
 {
-    if (!SS_REPLICATION_DORADO_CLUSTER) {
+    if (!SS_DORADO_CLUSTER) {
         return;
     }
 

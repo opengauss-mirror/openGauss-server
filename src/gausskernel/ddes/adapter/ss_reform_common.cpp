@@ -36,7 +36,7 @@
 #include "storage/file/fio_device.h"
 #include "storage/smgr/segment_internal.h"
 #include "replication/walreceiver.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 
 /*
  * Add xlog reader private structure for page read.
@@ -46,23 +46,6 @@ typedef struct XLogPageReadPrivate {
     bool fetching_ckpt; /* are we fetching a checkpoint record? */
     bool randAccess;
 } XLogPageReadPrivate;
-
-std::vector<int> SSGetAllStableNodeId()
-{
-    std::vector<int> posList;
-    int pos = 0;
-    uint64 stableInstId = g_instance.dms_cxt.SSReformerControl.list_stable;
-    while (stableInstId) {
-        uint64 res = stableInstId & 0x01;
-        if (res) {
-            posList.emplace_back(pos);
-        }
-        pos++;
-        stableInstId = stableInstId >> 1;
-    }
-
-    return posList;
-}
 
 int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_path)
 {
@@ -101,10 +84,10 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
         }
 
         /* 
-        * When SS_REPLICATION_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
+        * When SS_DORADO_CLUSTER enabled, current xlog dictionary may be not the correct dictionary,
         * because all xlog dictionaries are in the same LUN, we need loop over other dictionaries.
         */
-        if (fd < 0 && SS_REPLICATION_DORADO_CLUSTER) {
+        if (fd < 0 && SS_DORADO_CLUSTER) {
             return -1;
         }
 
@@ -147,8 +130,8 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
             /*
              * That preReadStartPtr is InvalidXlogPreReadStartPtr has three kinds of occasions.
              */
-            if (xlogreader->preReadStartPtr == InvalidXlogPreReadStartPtr && SS_REPLICATION_MAIN_STANBY_NODE) {
-                ereport(LOG, (errmsg("In ss replication daorao cluster mode, preReadStartPtr is 0.")));
+            if (xlogreader->preReadStartPtr == InvalidXlogPreReadStartPtr && SS_DISASTER_CLUSTER) {
+                ereport(LOG, (errmsg("In ss disaster cluster mode, preReadStartPtr is 0.")));
             }
 
             // pre-reading for dss
@@ -207,7 +190,43 @@ void SSGetRecoveryXlogPath()
     securec_check_ss(rc, "", "");
 }
 
-void SSDoradoGetXlogPathList()
+char* SSGetNextXLogPath(TimeLineID tli, XLogRecPtr startptr)
+{
+    char path[MAXPGPATH];
+    char fileName[MAXPGPATH];
+    char temp[MAXPGPATH];
+    struct stat buffer;
+    errno_t rc = EOK;
+    XLogSegNo segno;
+    XLByteToSeg(startptr, segno);
+    rc = snprintf_s(fileName, MAXPGPATH, MAXPGPATH - 1, "%08X%08X%08X", tli,
+                        (uint32)((segno) / XLogSegmentsPerXLogId),
+                        (uint32)((segno) % XLogSegmentsPerXLogId));
+    securec_check_ss_c(rc, "\0", "\0");
+
+    for (int i = 1; i < DMS_MAX_INSTANCE; i++) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
+            ereport(LOG, (errmsg("No valid next xlog file path")));
+            break;
+        }
+        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], fileName);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        if (stat(path, &buffer) == 0) {
+            rc = strcpy_s(temp, sizeof(temp), g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i]);
+            securec_check_c(rc, "\0", "\0");
+            rc = strcpy_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0]);
+            securec_check_c(rc, "\0", "\0");
+            rc = strcpy_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0], MAXPGPATH, temp);
+            securec_check_c(rc, "\0", "\0");
+            break;
+        }
+    }
+
+    return g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0];
+}
+
+void SSDisasterGetXlogPathList()
 {
     errno_t rc = EOK;
     for (int i = 0; i < DMS_MAX_INSTANCE; i++) {
@@ -242,7 +261,7 @@ void SSDoradoGetXlogPathList()
 
 void SSUpdateReformerCtrl()
 {
-    Assert(SS_PRIMARY_MODE);
+    Assert(SS_PRIMARY_MODE || SS_DISASTER_CLUSTER);
     int fd = -1;
     int len;
     errno_t err = EOK;
@@ -459,25 +478,26 @@ static void SSReadClusterRunMode()
     LWLockRelease(ControlFileLock);
 }
 
-void SSDoradoRefreshMode()
+void SSDisasterRefreshMode()
 {
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+
     SSUpdateReformerCtrl();
     LWLockRelease(ControlFileLock);
-    ereport(LOG, (errmsg("SSDoradoRefreshMode change control file cluster run mode to: %d",
+    ereport(LOG, (errmsg("SSDisasterRefreshMode change control file cluster run mode to: %d",
         g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
 }
 
-void SSDoradoUpdateHAmode() 
+void SSDisasterUpdateHAmode() 
 {
     SSReadClusterRunMode();
-    if (SS_REFORM_REFORMER && SS_REPLICATION_DORADO_CLUSTER) {
-        if (SS_REPLICATION_PRIMARY_CLUSTER) {
+    if (SS_REFORM_REFORMER) {
+        if (SS_DISASTER_PRIMARY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
-        } else if (SS_REPLICATION_STANDBY_CLUSTER) {
+        } else if (SS_DISASTER_STANDBY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
         }
-        ereport(LOG, (errmsg("SSDoradoUpdateHAmode change control file cluster run mode to: %d",
+        ereport(LOG, (errmsg("SSDisasterUpdateHAmode change Ha current mode to: %d",
             t_thrd.postmaster_cxt.HaShmData->current_mode)));
     }
 }

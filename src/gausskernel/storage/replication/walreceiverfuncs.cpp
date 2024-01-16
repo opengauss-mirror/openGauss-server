@@ -36,7 +36,7 @@
 #include "replication/replicainternal.h"
 #include "replication/walreceiver.h"
 #include "replication/slot.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "replication/dcf_replication.h"
 #include "replication/walsender_private.h"
 #include "storage/pmsignal.h"
@@ -260,7 +260,7 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         SpinLockRelease(&walrcv->mutex);
         ereport(LOG, (errmsg("wal receiver try to connect to %s index %d .", walrcv->conninfo, useIndex)));
         SpinLockAcquire(&hashmdata->mutex);
-        if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE)
+        if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_DISASTER_MAIN_STANDBY_NODE)
             hashmdata->current_repl = useIndex;
         else
             hashmdata->current_repl = MAX_REPLNODE_NUM + useIndex;
@@ -418,7 +418,7 @@ static void set_rcv_slot_name(const char *slotname)
     SpinLockAcquire(&hashmdata->mutex);
     replIdx = hashmdata->current_repl;
     SpinLockRelease(&hashmdata->mutex);
-    if ((IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || SS_REPLICATION_MAIN_STANBY_NODE)       
+    if ((IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE || SS_DISASTER_MAIN_STANDBY_NODE)       
             && replIdx >= MAX_REPLNODE_NUM) {
         replIdx = replIdx - MAX_REPLNODE_NUM;
     }
@@ -897,7 +897,7 @@ ReplConnInfo *GetRepConnArray(int *cur_idx)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid replication node index:%d", *cur_idx)));
     }
-    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_REPLICATION_MAIN_STANBY_NODE)
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && !SS_DISASTER_MAIN_STANDBY_NODE)
         replConnInfoArray = &t_thrd.postmaster_cxt.ReplConnArray[0];
     else
         replConnInfoArray = &t_thrd.postmaster_cxt.CrossClusterReplConnArray[0];

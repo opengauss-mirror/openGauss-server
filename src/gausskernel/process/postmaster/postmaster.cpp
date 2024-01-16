@@ -153,7 +153,7 @@
 #include "replication/dcf_replication.h"
 #include "replication/logicallauncher.h"
 #include "replication/logicalworker.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/cbmwriter.h"
 #include "postmaster/startup.h"
@@ -3052,10 +3052,10 @@ int PostmasterMain(int argc, char* argv[])
     if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
         /* load primary id and reform stable list from control file */
         SSReadControlFile(REFORM_CTRL_PAGE);
-        if (SS_REPLICATION_DORADO_CLUSTER) {
+        if (SS_DISASTER_CLUSTER) {
             /* fresh ss dorado cluster run mode */
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
-            SSDoradoRefreshMode();
+            SSDisasterRefreshMode();
         }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
         ereport(LOG, (errmsg("[SS reform] node%d starts, found cluster PRIMARY:%d",
@@ -3838,7 +3838,7 @@ static int ServerLoop(void)
         fd_set rmask;
         int selres;
 
-        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE || IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE || IS_SHARED_STORAGE_MODE || SS_DISASTER_CLUSTER) {
             check_and_reset_ha_listen_port();
 
 #ifdef HAVE_POLL
@@ -4159,7 +4159,7 @@ static int ServerLoop(void)
          * one.  But this is needed only in normal operation (else we cannot
          * be writing any new WAL).
          */
-        if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN && !SS_REPLICATION_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN && !SS_DORADO_STANDBY_CLUSTER) {
             g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
             if (g_instance.attr.attr_storage.enable_uwal) {
                 if (t_thrd.postmaster_cxt.audit_standby_switchover || t_thrd.postmaster_cxt.audit_primary_failover) {
@@ -6742,7 +6742,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
                     }
 
-                    if (g_instance.pid_cxt.StartupPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+                    if (g_instance.pid_cxt.StartupPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
                         signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
                     }
                     
@@ -6751,7 +6751,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                     StopAliveBuildSender();
 
-                    if (g_instance.pid_cxt.WalReceiverPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
+                    if (g_instance.pid_cxt.WalReceiverPID != 0 && SS_DISASTER_STANDBY_CLUSTER) {
                         signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
                     }
 
@@ -7058,7 +7058,7 @@ static void reaper(SIGNAL_ARGS)
                 }
             }
 
-            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_REPLICATION_STANDBY_CLUSTER) {
+            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_DORADO_STANDBY_CLUSTER) {
                 g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
                 if (g_instance.attr.attr_storage.enable_uwal) {
                     if (t_thrd.postmaster_cxt.audit_standby_switchover ||
@@ -10122,14 +10122,14 @@ static void sigusr1_handler(SIGNAL_ARGS)
          * update cluster_run_mode from pg_control file,
          * in case failover has been performed between two dorado cluster.
          */
-        if (SS_REPLICATION_DORADO_CLUSTER) {
+        if (SS_DISASTER_CLUSTER) {
             SSReadControlFile(REFORM_CTRL_PAGE);
         }
-        if (SS_REPLICATION_MAIN_STANBY_NODE) {
+        if (SS_DISASTER_MAIN_STANDBY_NODE) {
             ereport(LOG,
                 (errmsg("Failover between two dorado cluster start, change current run mode and dssserver mode to primary_cluster")));
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
-            SSDoradoRefreshMode();
+            SSDisasterRefreshMode();
             while (dss_set_server_status_wrapper() != GS_SUCCESS) {
                 pg_usleep(REFORM_WAIT_LONG);
                 ereport(WARNING, (errmodule(MOD_DMS),
@@ -10261,9 +10261,9 @@ static void sigusr1_handler(SIGNAL_ARGS)
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
         g_instance.status == NoShutdown &&
-        (!ENABLE_DMS || SS_REPLICATION_DORADO_CLUSTER)) {
-        /* when SS_REPLICATION_DORADO_CLUSTER enabled, don't start walrecwrite */
-        if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_REPLICATION_DORADO_CLUSTER) {
+        (!ENABLE_DMS || SS_DORADO_CLUSTER || SS_DISASTER_CLUSTER)) {
+        /* when SS_DORADO_CLUSTER enabled, don't start walrecwrite */
+        if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_DORADO_CLUSTER) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
         }
@@ -10357,7 +10357,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && SS_DISASTER_STANDBY_CLUSTER) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -10393,23 +10393,23 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.UndoLauncherPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.UndoLauncherPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
         }
 #ifndef ENABLE_MULTIPLE_NODES
-        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
         }
 #endif
-        if (g_instance.pid_cxt.GlobalStatsPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.GlobalStatsPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.FaultMonitorPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.FaultMonitorPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
         }
 
@@ -10527,7 +10527,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && SS_DISASTER_STANDBY_CLUSTER) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -12859,7 +12859,7 @@ const char* wal_get_db_state_string(DbState db_state)
 
 static ServerMode get_cur_mode(void)
 {
-    if (SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (SS_DISASTER_MAIN_STANDBY_NODE) {
         return STANDBY_MODE;
     } else if (ENABLE_DMS) {
         return SS_OFFICIAL_PRIMARY ? PRIMARY_MODE : STANDBY_MODE;
@@ -15200,7 +15200,7 @@ void InitShmemForDmsCallBack()
 
 const char *GetSSServerMode(ServerMode mode)
 {
-    if (SS_REPLICATION_DORADO_CLUSTER) {
+    if (SS_DISASTER_CLUSTER) {
         if (SS_OFFICIAL_PRIMARY && mode == PRIMARY_MODE) { 
             return "Primary";
         }

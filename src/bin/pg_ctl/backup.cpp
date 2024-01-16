@@ -1026,12 +1026,22 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 continue;
             }
             
-            /* pg_control will be written into pages of each interconnect nodes in stanby cluster corresponding to */
+            /* pg_control will be written into pages of each interconnect nodes in dorado stanby cluster corresponding to */
             if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                int node;
-                for (node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
-                    off_t seekpos = (off_t)BLCKSZ * node;
+                if (ss_instance_config.dss.enable_dorado) {
+                    for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
+                        off_t seekpos = (off_t)BLCKSZ * node;
+                        fseek(file, seekpos, SEEK_SET);
+                        if (fwrite(copybuf, r, 1, file) != 1) {
+                            pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                            DisconnectConnection();
+                            FREE_AND_RESET(copybuf);
+                            return false;
+                        }
+                    }
+                } else {
+                    off_t seekpos = (off_t)BLCKSZ * ss_instance_config.dss.instance_id;
                     fseek(file, seekpos, SEEK_SET);
                     if (fwrite(copybuf, r, 1, file) != 1) {
                         pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));

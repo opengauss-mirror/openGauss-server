@@ -227,6 +227,7 @@ typedef struct knl_instance_attr_storage {
     int parallel_recovery_timeout;
     int parallel_recovery_batch;
     bool ss_enable_dorado;
+    bool ss_stream_cluster;
     
     bool enable_uwal;
     char* uwal_config;

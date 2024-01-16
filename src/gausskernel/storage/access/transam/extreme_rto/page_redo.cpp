@@ -73,7 +73,7 @@
 #include "access/multi_redo_api.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "pgxc/barrier.h"
 #include "storage/file/fio_device.h"
 #include "utils/timestamp.h"
@@ -972,7 +972,7 @@ void PageManagerProcSegFullSyncState(XLogRecParseState *parseState)
 
 void PageManagerProcSegPipeLineSyncState(XLogRecParseState *parseState)
 {
-    if (!SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (!SS_DISASTER_STANDBY_CLUSTER) {
         WaitCurrentPipeLineRedoWorkersQueueEmpty();   
     }
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
