@@ -100,6 +100,7 @@ typedef struct knl_instance_attr_dms {
     bool enable_catalog_centralized;
     bool enable_dss_aio;
     bool enable_verify_page;
+    bool enable_ondemand_realtime_build;
     bool enable_ondemand_recovery;
     int ondemand_recovery_mem_size;
     int instance_id;

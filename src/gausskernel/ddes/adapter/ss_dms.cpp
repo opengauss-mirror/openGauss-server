@@ -134,6 +134,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_info));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_buf_res));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_cmd_stat));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_req_opengauss_immediate_ckpt));
 
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
@@ -392,4 +393,9 @@ void dms_get_buf_res(unsigned long long *row_id, dv_drc_buf_info *drc_info, int 
 void dms_get_cmd_stat(int index, wait_cmd_stat_result_t *cmd_stat_result)
 {
     g_ss_dms_func.dms_get_cmd_stat(index, cmd_stat_result);
+}
+
+int dms_req_opengauss_immediate_checkpoint(dms_context_t *dms_ctx, unsigned long long *redo_lsn)
+{
+    return g_ss_dms_func.dms_req_opengauss_immediate_ckpt(dms_ctx, redo_lsn);
 }

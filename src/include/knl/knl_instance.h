@@ -757,7 +757,7 @@ typedef struct knl_g_parallel_redo_context {
     char* ali_buf;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoCpuBindControl redoCpuBindcontrl;
-    HTAB **redoItemHash; /* used in ondemand extreme RTO */
+    ondemand_htab_ctrl_t **redoItemHashCtrl; /* used in ondemand extreme RTO */
     /* extreme-rto standby read */
     TransactionId exrto_recyle_xmin;
     XLogRecPtr global_recycle_lsn;

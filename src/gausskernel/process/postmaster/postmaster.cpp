@@ -3442,6 +3442,15 @@ static void CheckExtremeRtoGUCConflicts(void)
                     errhint("Either turn off ss_enable_ondemand_recovery, or set extreme rto param.")));
         }
     }
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build) {
+        if (!g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("ondemand realtime build only support in ondemand recovery mode."),
+                    errhint("Either turn on ss_enable_ondemand_recovery, or turn off ss_enable_ondemand_realtime_build.")));
+        }
+    }
 }
 static void CheckRecoveryParaConflict()
 {
@@ -3899,6 +3908,16 @@ static int ServerLoop(void)
             } else {
                 ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform success.", SS_MY_INST_ID)));
                 startup_reform_finish = true;
+            }
+        }
+
+        if (startup_reform_finish && ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_DISABLED &&
+            SS_NORMAL_STANDBY && SS_CLUSTER_ONDEMAND_NORMAL) {
+            if (g_instance.pid_cxt.StartupPID == 0) {
+                g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
+                Assert(g_instance.pid_cxt.StartupPID != 0);
+                g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = READY_TO_BUILD;
+                ereport(LOG, (errmsg("[On-demand] Node:%d ondemand realtime build start", SS_MY_INST_ID)));
             }
         }
 

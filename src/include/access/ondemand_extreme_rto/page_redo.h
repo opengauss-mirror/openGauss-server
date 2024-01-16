@@ -41,13 +41,24 @@
 
 namespace ondemand_extreme_rto {
 
-#define ONDEMAND_DISTRIBUTE_RATIO 0.9
+#define ONDEMAND_DISTRIBUTE_RATIO 0.95
+#define ONDEMAND_FORCE_PRUNE_RATIO 0.99
+#define ONDEMAND_HASHTAB_SWITCH_LIMIT 100000
+#define SEG_PROC_PIPELINE_SLOT 0
 
 static const uint32 PAGE_WORK_QUEUE_SIZE = 65536;
+static const uint32 REALTIME_BUILD_RECORD_QUEUE_SIZE = 4194304;
 
 static const uint32 ONDEMAND_EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
 static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
 static const uint32 ADVANCE_GLOBALLSN_INTERVAL = 1; /* unit second */
+
+extern uint32 g_ondemandXLogParseMemFullValue;
+extern uint32 g_ondemandXLogParseMemApproachFullVaule;
+extern uint32 g_ondemandRealtimeBuildQueueFullValue;
+
+typedef bool (*OndemandCheckPauseCB)(void);
+typedef void (*OndemandRefreshPauseStatusCB)(void);
 
 typedef enum {
     REDO_BATCH,
@@ -58,10 +69,13 @@ typedef enum {
     REDO_READ_WORKER,
     REDO_READ_PAGE_WORKER,
     REDO_READ_MNG,
+    REDO_SEG_WORKER,
+    REDO_HTAB_MNG,
+    REDO_CTRL_WORKER,
     REDO_ROLE_NUM,
 } RedoRole;
 
-typedef struct BadBlockRecEnt{
+typedef struct BadBlockRecEnt {
     RepairBlockKey key;
     XLogPhyBlock pblk;
     XLogRecPtr rec_min_lsn;
@@ -173,7 +187,7 @@ struct PageRedoWorker {
     PosixSemaphore phaseMarker;
     MemoryContext oldCtx;
 
-    HTAB *redoItemHash;
+    ondemand_htab_ctrl_t *redoItemHashCtrl;
     TimeLineID recoveryTargetTLI;
     bool ArchiveRecoveryRequested;
     bool StandbyModeRequested;
@@ -186,6 +200,11 @@ struct PageRedoWorker {
     RedoBufferManager bufferManager;
     RedoTimeCost timeCostList[TIME_COST_NUM];
     char page[BLCKSZ];
+
+    /* for ondemand realtime build */
+    XLogRecPtr nextPrunePtr;
+    bool inRealtimeBuild;
+    uint32 currentHtabBlockNum;
 };
 
 
@@ -223,7 +242,7 @@ void ClearBTreeIncompleteActions(PageRedoWorker *worker);
 void *GetXLogInvalidPages(PageRedoWorker *worker);
 bool RedoWorkerIsIdle(PageRedoWorker *worker);
 void DumpPageRedoWorker(PageRedoWorker *worker);
-PageRedoWorker *CreateWorker(uint32 id);
+PageRedoWorker *CreateWorker(uint32 id, bool inRealtimeBuild);
 extern void UpdateRecordGlobals(RedoItem *item, HotStandbyState standbyState);
 void ReferenceRedoItem(void *item);
 void DereferenceRedoItem(void *item);
@@ -250,6 +269,11 @@ void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType
 const char *RedoWokerRole2Str(RedoRole role);
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock);
+void RedoWorkerQueueCallBack();
+void OndemandRequestPrimaryDoCkptIfNeed();
+void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
+void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState);
+bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate);
 
 }  // namespace ondemand_extreme_rto
 #endif

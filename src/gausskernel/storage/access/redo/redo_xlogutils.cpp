@@ -1141,7 +1141,7 @@ void XLogRedoBufferSetState(RedoBufferManager *buffermanager, RedoMemSlot *buffe
 void XLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOperate *refOperate,
                          InterruptFunc interruptOperte)
 {
-    if (SS_IN_ONDEMAND_RECOVERY) {
+    if (IsExtremeRedo() && IsOndemandExtremeRtoMode()) {
         return OndemandXLogParseBufferInit(parsemanager, buffernum, refOperate, interruptOperte);
     }
 
@@ -1159,7 +1159,7 @@ void XLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOpera
 
 void XLogParseBufferDestory(RedoParseManager *parsemanager)
 {
-    if (SS_IN_ONDEMAND_RECOVERY) {
+    if (IsExtremeRedo() && IsOndemandExtremeRtoMode()) {
         OndemandXLogParseBufferDestory(parsemanager);
         return;
     }
@@ -1175,7 +1175,7 @@ void XLogParseBufferDestory(RedoParseManager *parsemanager)
 XLogRecParseState *XLogParseBufferAllocList(RedoParseManager *parsemanager, XLogRecParseState *blkstatehead,
                                             void *record)
 {
-    if (SS_IN_ONDEMAND_RECOVERY) {
+    if (IsExtremeRedo() && IsOndemandExtremeRtoMode()) {
         return OndemandXLogParseBufferAllocList(parsemanager, blkstatehead, record);
     }
 
@@ -1230,7 +1230,7 @@ XLogRecParseState *XLogParseBufferCopy(XLogRecParseState *srcState)
 
 void XLogParseBufferRelease(XLogRecParseState *recordstate)
 {
-    if (SS_IN_ONDEMAND_RECOVERY) {
+    if (IsExtremeRedo() && IsOndemandExtremeRtoMode()) {
         OndemandXLogParseBufferRelease(recordstate);
         return;
     }

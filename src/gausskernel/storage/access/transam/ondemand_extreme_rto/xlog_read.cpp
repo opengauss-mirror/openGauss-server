@@ -600,6 +600,7 @@ err:
 XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
 {
     XLogRecord *record = NULL;
+    int retry = 0;
 
     /* This is the first try to read this page. */
     t_thrd.xlog_cxt.failedSources = 0;
@@ -618,7 +619,7 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
              * In StandbyMode that only happens if we have been triggered, so
              * we shouldn't loop anymore in that case.
              */
-            if (errormsg != NULL)
+            if (errormsg != NULL && ++retry > 3)
                 ereport(emode_for_corrupt_record(LOG, t_thrd.xlog_cxt.EndRecPtr),
                         (errmsg_internal("%s", errormsg) /* already translated */));
         }
@@ -659,42 +660,21 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
             /* No valid record available from this source */
             t_thrd.xlog_cxt.failedSources |= t_thrd.xlog_cxt.readSource;
 
-            if (t_thrd.xlog_cxt.readFile >= 0) {
-                close(t_thrd.xlog_cxt.readFile);
-                t_thrd.xlog_cxt.readFile = -1;
+            /* In ondemand realtime build mode, loop back to retry. Otherwise, give up. */
+            if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
+                retry = 0;
             }
 
-            /*
-             * If archive recovery was requested, but we were still doing
-             * crash recovery, switch to archive recovery and retry using the
-             * offline archive. We have now replayed all the valid WAL in
-             * pg_xlog, so we are presumably now consistent.
-             *
-             * We require that there's at least some valid WAL present in
-             * pg_xlog, however (!fetch_ckpt). We could recover using the WAL
-             * from the archive, even if pg_xlog is completely empty, but we'd
-             * have no idea how far we'd have to replay to reach consistency.
-             * So err on the safe side and give up.
-             */
-            if (!t_thrd.xlog_cxt.InArchiveRecovery && t_thrd.xlog_cxt.ArchiveRecoveryRequested) {
-                t_thrd.xlog_cxt.InArchiveRecovery = true;
-                if (t_thrd.xlog_cxt.StandbyModeRequested)
-                    t_thrd.xlog_cxt.StandbyMode = true;
-                /* construct a minrecoverypoint, update LSN */
-                UpdateMinrecoveryInAchive();
-                /*
-                 * Before we retry, reset lastSourceFailed and currentSource
-                 * so that we will check the archive next.
-                 */
-                t_thrd.xlog_cxt.failedSources = 0;
+            if (retry <= 3) {
                 continue;
-            }
-
-            /* In standby mode, loop back to retry. Otherwise, give up. */
-            if (t_thrd.xlog_cxt.StandbyMode && !t_thrd.xlog_cxt.recoveryTriggered && !DoEarlyExit())
-                continue;
-            else
+            } else {
+                if (t_thrd.xlog_cxt.readFile >= 0) {
+                    close(t_thrd.xlog_cxt.readFile);
+                    t_thrd.xlog_cxt.readFile = -1;
+                }
                 return NULL;
+            }
         }
     }
 }

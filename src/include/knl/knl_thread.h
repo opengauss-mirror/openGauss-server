@@ -212,6 +212,16 @@ read page worker    get a record           make lsn forwarder   get new item    
 startup             get a record           check stop           delay redo                 dispatch(total)
          decode                  null                  null          null
 
+for ondemand extreme rto
+thread                step1                     step2                 step3                 step4
+               step5                 step6                step7        step8
+seg redo worker     get a record           redo record(total)     redo seg xlog          get a record
+               null                  null                 null         null
+hashmap manager   prune seg record    prune hashmap(history)    prune hashmap(lastest)   get a record(instruct)
+               null                  null                 null          null
+ctrl worker       update usedblknum         request primary ckpt       null                  null
+               null                  null                 null          null
+
 for parallel redo
 thread     step1            step2               step3                 step4                step5
           step6              step7                  step8                    step9

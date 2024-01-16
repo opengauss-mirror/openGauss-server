@@ -85,6 +85,7 @@
 #include "ddes/dms/ss_dms_recovery.h"
 #include "utils/json.h"
 #include "utils/jsonapi.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -96,6 +97,7 @@
 #define DISPLACEMENTS_VALUE 32
 #define MAX_DURATION_TIME 60
 #define DSS_IO_STAT_COLUMN_NUM 3
+#define ONDEMAND_RECOVERY_STAT_COLUMN_NUM 10
 
 const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
@@ -14754,6 +14756,113 @@ Datum track_memory_context_detail(PG_FUNCTION_ARGS)
     }
 }
 
+Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_ONDEMAND_RECOVERY) {
+        ereport(ERROR, (errmsg("This function only supports when enable ss_enable_ondemand_recovery.")));
+    }
+    Datum result;
+    TupleDesc tupdesc;
+    ondemand_recovery_stat stat;
+    errno_t errorno = EOK;
+
+    ondemand_extreme_rto::GetOndemandRecoveryStatus(&stat);
+    // tuple header
+    int i = 1;
+    tupdesc = CreateTemplateTupleDesc(ONDEMAND_RECOVERY_STAT_COLUMN_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "primary_checkpoint_redo_lsn", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "realtime_build_replayed_lsn", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_used_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_total_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "trxn_queue_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "seg_queue_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "in_ondemand_recovery", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "ondemand_recovery_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "realtime_build_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "recovery_pause_status", TEXTOID, -1, 0);
+
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    // tuple body
+    char redoLocation[MAXFNAMELEN];
+    char replayedLocation[MAXFNAMELEN];
+
+    errorno = snprintf_s(redoLocation, sizeof(redoLocation), sizeof(redoLocation) - 1, "%X/%X",
+                         (uint32)(stat.checkpointPtr >> 32), (uint32)stat.checkpointPtr);
+    securec_check_ss(errorno, "", "");
+    errorno = snprintf_s(replayedLocation, sizeof(replayedLocation), sizeof(replayedLocation) - 1, "%X/%X",
+                         (uint32)(stat.replayedPtr >> 32), (uint32)stat.replayedPtr);
+    securec_check_ss(errorno, "", "");
+
+    Datum values[ONDEMAND_RECOVERY_STAT_COLUMN_NUM];
+    bool nulls[ONDEMAND_RECOVERY_STAT_COLUMN_NUM] = {false};
+    i = 0;
+    values[i++] = CStringGetTextDatum(redoLocation);
+    values[i++] = CStringGetTextDatum(replayedLocation);
+    values[i++] = UInt32GetDatum(stat.hmpUsedBlkNum);
+    values[i++] = UInt32GetDatum(stat.hmpTotalBlkNum);
+    values[i++] = UInt32GetDatum(stat.trxnQueueNum);
+    values[i++] = UInt32GetDatum(stat.segQueueNum);
+    values[i++] = BoolGetDatum(stat.inOndemandRecovery);
+
+    switch (stat.ondemandRecoveryStatus) {
+        case CLUSTER_IN_ONDEMAND_BUILD:
+            values[i++] = CStringGetTextDatum("ONDEMAND_RECOVERY_BUILD");
+            break;
+        case CLUSTER_IN_ONDEMAND_REDO:
+            values[i++] = CStringGetTextDatum("ONDEMAND_RECOVERY_REDO");
+            break;
+        case CLUSTER_NORMAL:
+            values[i++] = CStringGetTextDatum("NORMAL");
+            break;
+        default:
+            ereport(ERROR, (errmsg("Invalid ondemand recovery status.")));
+            break;
+    }
+
+    switch (stat.realtimeBuildStatus) {
+        case DISABLED:
+            values[i++] = CStringGetTextDatum("DISABLED");
+            break;
+        case BUILD_NORMAL:
+            values[i++] = CStringGetTextDatum("BUILD_NORMAL");
+            break;
+        case BUILD_TO_DISABLED:
+            values[i++] = CStringGetTextDatum("BUILD_TO_DISABLED");
+            break;
+        case BUILD_TO_REDO:
+            values[i++] = CStringGetTextDatum("BUILD_TO_REDO");
+            break;
+        default:
+            ereport(ERROR, (errmsg("Invalid realtime build status.")));
+            break;
+    }
+
+    switch (stat.recoveryPauseStatus) {
+        case NOT_PAUSE:
+            values[i] = CStringGetTextDatum("NOT PAUSE");
+            break;
+        case PAUSE_FOR_SYNC_REDO:
+            values[i] = CStringGetTextDatum("PAUSE(for sync record)");
+            break;
+        case PAUSE_FOR_PRUNE_HASHMAP:
+            values[i] = CStringGetTextDatum("PAUSE(for hashmap full)");
+            break;
+        case PAUSE_FOR_PRUNE_TRXN_QUEUE:
+            values[i] = CStringGetTextDatum("PAUSE(for trxn queue full)");
+            break;
+        case PAUSE_FOR_PRUNE_SEG_QUEUE:
+            values[i] = CStringGetTextDatum("PAUSE(for seg queue full)");
+            break;
+        default:
+            ereport(ERROR, (errmsg("Invalid recovery pause status.")));
+            break;
+    }
+
+    HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(heap_tuple);
+    PG_RETURN_DATUM(result);
+}
 
 /*
  * @Description : Get the statistical information for DSS IO, including read bytes, write bytes and io times.

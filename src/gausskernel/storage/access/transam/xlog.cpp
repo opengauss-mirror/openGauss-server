@@ -56,6 +56,7 @@
 #include "access/xlogproc.h"
 #include "access/parallel_recovery/dispatcher.h"
 #include "access/extreme_rto/page_redo.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 
 #include "commands/tablespace.h"
 #include "commands/matview.h"
@@ -5653,6 +5654,10 @@ static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, in
                 t_thrd.xlog_cxt.readFile = -1;
             }
 
+            if (xlogreader->preReadBuf != NULL) {
+                xlogreader->preReadStartPtr = InvalidXlogPreReadStartPtr;
+            }
+
             /*
              * If archive recovery was requested, but we were still doing
              * crash recovery, switch to archive recovery and retry using the
@@ -5708,7 +5713,8 @@ static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, in
             ProcTxnWorkLoad(false);
 
             /* In standby mode, loop back to retry. Otherwise, give up. */
-            if (t_thrd.xlog_cxt.StandbyMode && !dummyStandbyMode && !t_thrd.xlog_cxt.recoveryTriggered) {
+            if ((t_thrd.xlog_cxt.StandbyMode && !dummyStandbyMode && !t_thrd.xlog_cxt.recoveryTriggered) ||
+                SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
                 continue;
             } else {
                 if (u_sess->attr.attr_storage.HaModuleDebug) {
@@ -9289,7 +9295,7 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("[On-demand]: Ondemand recovery do not finish in last reform, "
                                  "reading control file of original primary:%d", src_id)));
             SSOndemandRecoveryExitNormal = false;
-        } else if (SS_DORADO_CLUSTER) {
+        } else if (SS_DORADO_CLUSTER || SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) {
             src_id = SSGetPrimaryInstId();
         } else {
             if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
@@ -9507,7 +9513,7 @@ void StartupXLOG(void)
         }
         xlogreader = SSXLogReaderAllocate(&SSXLogPageRead, &readprivate, ALIGNOF_BUFFER);
         close_readFile_if_open();
-        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING || SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) {
             // init shared memory set page empty
             SSCSNLOGShmemClear();
             SSCLOGShmemClear();
@@ -9966,7 +9972,7 @@ void StartupXLOG(void)
         }
     }
 
-    if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true) {
+    if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
         /* do not need replay anything in SS standby mode */
         ereport(LOG, (errmsg("[SS] Skip redo replay in standby mode")));
         t_thrd.xlog_cxt.InRecovery = false;
@@ -9977,16 +9983,7 @@ void StartupXLOG(void)
     if (SS_PRIMARY_MODE && ENABLE_ONDEMAND_RECOVERY && (SS_STANDBY_FAILOVER || SS_PRIMARY_NORMAL_REFORM) &&
         t_thrd.xlog_cxt.InRecovery == true) {
         if (SSOndemandRecoveryExitNormal) {
-            g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
-            g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_IN_ONDEMAND_BUILD;
-            /* for other nodes in cluster and ondeamnd recovery failed */
-            LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
-            g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
-            g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
-            SSUpdateReformerCtrl();
-            LWLockRelease(ControlFileLock);
-            SSRequestAllStandbyReloadReformCtrlPage();
-            SetOndemandExtremeRtoMode();
+            StartupOndemandRecovery();
             ereport(LOG, (errmsg("[On-demand] replayed in extreme rto ondemand recovery mode")));
         } else {
             ereport(LOG, (errmsg("[On-demand] do not allow replay in ondemand recovery if last ondemand recovery "
@@ -9999,6 +9996,17 @@ void StartupXLOG(void)
         SSUpdateReformerCtrl();
         LWLockRelease(ControlFileLock);
     }
+
+    if (SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) {
+        t_thrd.xlog_cxt.InRecovery = true;
+        SetOndemandExtremeRtoMode();
+        g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
+        g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_NORMAL;
+        ereport(LOG, (errmsg("[On-demand] realtime build start finish, set status to BUILD_NORMAL")));
+    }
+
+    /* refresh recovery parallelism */
+    ConfigRecoveryParallelism();
 
     ReadRemainSegsFile();
     /* Determine whether it is currently in the switchover of streaming disaster recovery */
@@ -10098,7 +10106,7 @@ void StartupXLOG(void)
         }
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
         /* No need to hold ControlFileLock yet, we aren't up far enough */
-        if (!SS_STANDBY_FAILOVER) {
+        if (!SS_STANDBY_FAILOVER && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
             UpdateControlFile();
         }
 
@@ -11065,6 +11073,7 @@ void StartupXLOG(void)
 
     if (SS_PRIMARY_MODE) {
         g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_NORMAL;
+        g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
         /* for other nodes in cluster */
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
         g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;

@@ -2534,6 +2534,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
     bool isExtend = false;
     bool isLocalBuf = SmgrIsTemp(smgr);
     bool need_repair = false;
+    dms_buf_ctrl_t *buf_ctrl = NULL;
 
     *hit = false;
 
@@ -2605,6 +2606,13 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
         }
     }
 
+    if (ENABLE_DMS) {
+        buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+        if (mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) {
+            buf_ctrl->state |= BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        }
+    }
+
 found_branch:
     /* At this point we do NOT hold any locks.
      *
@@ -2633,7 +2641,7 @@ found_branch:
             if (!isLocalBuf) {
                 if (mode == RBM_ZERO_AND_LOCK) {
                     if (ENABLE_DMS) {
-                        GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+                        buf_ctrl->state |= BUF_READ_MODE_ZERO_LOCK;
                         LockBuffer(BufferDescriptorGetBuffer(bufHdr), BUFFER_LOCK_EXCLUSIVE);
                     } else {
                         LWLockAcquire(bufHdr->content_lock, LW_EXCLUSIVE);
@@ -2649,7 +2657,7 @@ found_branch:
                     BufferDescSetPBLK(bufHdr, pblk);
                 } else if (mode == RBM_ZERO_AND_CLEANUP_LOCK) {
                     if (ENABLE_DMS) {
-                        GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+                        buf_ctrl->state |= BUF_READ_MODE_ZERO_LOCK;
                     }
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
                 }
@@ -2753,7 +2761,6 @@ found_branch:
                     goto found_branch;
                 }
 
-                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
                 LWLockMode req_lock_mode = isExtend ? LW_EXCLUSIVE : LW_SHARED;
                 if (!LockModeCompatible(buf_ctrl, req_lock_mode)) {
                     if (!StartReadPage(bufHdr, req_lock_mode)) {
@@ -2783,7 +2790,13 @@ found_branch:
                 break;
             } while (true);
 
-            return TerminateReadPage(bufHdr, mode, pblk);
+            Buffer tmp_buffer =  TerminateReadPage(bufHdr, mode, pblk);
+            if (BufferIsInvalid(tmp_buffer) && (mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) &&
+                !(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
+                SSUnPinBuffer(bufHdr);
+                return InvalidBuffer;
+            }
+            return tmp_buffer;
         }
         ClearReadHint(bufHdr->buf_id);
     }
@@ -3074,7 +3087,7 @@ retry:
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
 
-        if (!SSHelpFlushBufferIfNeed(buf)) {
+        if (!SSHelpFlushBufferIfNeed(buf) || !SSOndemandRealtimeBuildAllowFlush(buf)) {
             // for dms this page cannot eliminate, get another one 
             UnpinBuffer(buf, true);
             continue;
@@ -6203,10 +6216,14 @@ retry:
     if (ENABLE_DMS && mode != BUFFER_LOCK_UNLOCK) {
         LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
         Buffer tmp_buffer;
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         ReadBufferMode read_mode = RBM_NORMAL;
-        if (lock_mode == LW_EXCLUSIVE && (GetDmsBufCtrl(buffer - 1)->state & BUF_READ_MODE_ZERO_LOCK)) {
+        if (lock_mode == LW_EXCLUSIVE && (buf_ctrl->state & BUF_READ_MODE_ZERO_LOCK)) {
             read_mode = RBM_ZERO_AND_LOCK;
-            GetDmsBufCtrl(buffer - 1)->state &= ~BUF_READ_MODE_ZERO_LOCK;
+            buf_ctrl->state &= ~BUF_READ_MODE_ZERO_LOCK;
+        }
+        if (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD) {
+            read_mode = RBM_FOR_ONDEMAND_REALTIME_BUILD;
         }
         bool with_io_in_progress = true;
 
@@ -6225,7 +6242,7 @@ retry:
                     TerminateBufferIO(buf, false, 0);
                 }
             }
-            
+
             LWLockRelease(buf->content_lock);
 
             if (AmDmsReformProcProcess() && dms_reform_failed()) {
@@ -6235,6 +6252,11 @@ retry:
 
             if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
                 g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
+            }
+
+            if ((read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) &&
+                !(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
+                return;
             }
 
             dms_retry_times++;
@@ -6248,6 +6270,9 @@ retry:
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf->buf_id))));
                 t_thrd.postgres_cxt.whereToSendOutput = output_backup;
+            }
+            if (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) {
+                sleep_time = SS_BUF_WAIT_TIME_IN_ONDEMAND_REALTIME_BUILD;
             }
             pg_usleep(sleep_time);
             goto retry;

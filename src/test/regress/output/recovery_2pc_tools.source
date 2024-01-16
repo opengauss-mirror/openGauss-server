@@ -648,6 +648,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 
+ ss_enable_ondemand_realtime_build                | bool    |      |           | 
  ss_enable_ondemand_recovery                      | bool    |      |           | 
  ss_enable_reform                                 | bool    |      |           | 
  ss_enable_scrlock                                | bool    |      |           | 

@@ -49,6 +49,10 @@ void ConfigRecoveryParallelism()
                                             g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker *
                                                 g_instance.attr.attr_storage.batch_redo_num +
                                             TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM;
+        if (IsOndemandExtremeRtoMode()) {
+            total_recovery_parallelism = total_recovery_parallelism + ONDEMAND_AUXILIARY_WORKER_NUM + 
+                g_instance.attr.attr_storage.batch_redo_num; // hashmap prune worker of each redo pipeline
+        }
         sprintf_s(buf, sizeof(buf), "%u", total_recovery_parallelism);
 
         ereport(LOG, (errmsg("ConfigRecoveryParallelism, parse workers:%d, "

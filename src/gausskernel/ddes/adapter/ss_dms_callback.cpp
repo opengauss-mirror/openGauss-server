@@ -34,6 +34,7 @@
 #include "access/transam.h"
 #include "access/csnlog.h"
 #include "access/xlog.h"
+#include "access/multi_redo_api.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/buf/buf_internals.h"
 #include "ddes/dms/ss_transaction.h"
@@ -549,15 +550,6 @@ static unsigned long long CBGetPageLSN(const dms_buf_ctrl_t *buf_ctrl)
 static unsigned long long CBGetGlobalLSN(void *db_handle)
 {
     return GetInsertRecPtr();
-}
-
-static void DmsReleaseBuffer(int buffer, bool is_seg)
-{
-    if (is_seg) {
-        SegReleaseBuffer(buffer);
-    } else {
-        ReleaseBuffer(buffer);
-    }
 }
 
 static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
@@ -1639,17 +1631,11 @@ static int CBFlushCopy(void *db_handle, char *pageid)
 
     BufferTag* tag = (BufferTag*)pageid;
     Buffer buffer;
-    SegSpace *spc = NULL;
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        if (IsSegmentPhysicalRelNode(tag->rnode)) {
-            spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false, false);
-            buffer = ReadBufferFast(spc, tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL);
-        } else {
-            buffer = ReadBufferWithoutRelcache(tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL, NULL, NULL);
-        }
+        buffer = SSReadBuffer(tag, RBM_NORMAL);
     }
     PG_CATCH();
     {
@@ -2122,18 +2108,12 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     }
 
     Buffer buffer;
-    SegSpace *spc = NULL;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     *redo_status = ONDEMAND_REDO_DONE;
     smgrcloseall();
     PG_TRY();
     {
-        if (IsSegmentPhysicalRelNode(tag->rnode)) {
-            spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false, false);
-            buffer = ReadBufferFast(spc, tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL);
-        } else {
-            buffer = ReadBufferWithoutRelcache(tag->rnode, tag->forkNum, tag->blockNum, RBM_NORMAL, NULL, NULL);
-        }
+        buffer = SSReadBuffer(tag, RBM_NORMAL);
         ReleaseBuffer(buffer);
     }
     PG_CATCH();
@@ -2175,6 +2155,15 @@ static void CBBufCtrlRecycle(void *db_handle)
 void DmsThreadDeinit()
 {
     proc_exit(0);
+}
+
+int CBDoCheckpointImmediately(unsigned long long *ckpt_lsn)
+{
+    Assert(SS_PRIMARY_MODE);
+
+    RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
+    *ckpt_lsn = (unsigned long long)t_thrd.shemem_ptr_cxt.ControlFile->checkPoint;
+    return GS_SUCCESS;
 }
 
 void DmsInitCallback(dms_callback_t *callback)
@@ -2246,4 +2235,5 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->get_buf_info = CBGetBufInfo;
     callback->buf_ctrl_recycle = CBBufCtrlRecycle;
     callback->dms_thread_deinit = DmsThreadDeinit;
+    callback->opengauss_do_ckpt_immediate = CBDoCheckpointImmediately;
 }
