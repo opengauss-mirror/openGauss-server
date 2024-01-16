@@ -10031,6 +10031,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_beginmessage(&buf, 'l');
                 pq_sendint16(&buf, g_instance.attr.attr_network.comm_control_port);
                 pq_sendint16(&buf, g_instance.attr.attr_network.comm_sctp_port);
+                uint16 len = strlen(g_instance.attr.attr_common.PGXCNodeName) + 1;
+                pq_sendint16(&buf, len);
+                pq_sendbytes(&buf, g_instance.attr.attr_common.PGXCNodeName, len);
                 pq_endmessage(&buf);
                 if (SS_PRIMARY_MODE && oidcount > 0) {
                     StringInfoData bufoid;
