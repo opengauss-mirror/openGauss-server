@@ -511,5 +511,22 @@ WITH with_t1 AS ( SELECT TRUE AS c23 , -9213573085711696683 AS c49 ) DELETE with
 DELETE subq_t1 FROM (SELECT 100 AS A) subq_t1;
 DELETE func_t1 FROM generate_series(1, 10) func_t1;
 
+-- support syntax like t.*
+drop table  if exists delete_1;
+create table delete_1(a int);
+insert into delete_1 values(1),(1),(2),(2);
+select * from delete_1;
+delete t.* from delete_1 t where a = 1;
+select * from delete_1;
+
+drop table  if exists delete_2;
+create table public.delete_2(a int);
+insert into delete_2 values(1),(1),(2),(2);
+select * from delete_2;
+delete public.t.* from delete_2 t where a = 1;    -- mysql is error, can't recognize t is alias
+select * from delete_2;
+delete public.delete_2.* from delete_2 where a = 2;
+select * from delete_2;
+
 \c regression
 drop database multidelete;
