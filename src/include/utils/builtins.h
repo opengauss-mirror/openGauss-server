@@ -1876,6 +1876,7 @@ extern Datum compress_ratio_info(PG_FUNCTION_ARGS);
 extern Datum compress_statistic_info(PG_FUNCTION_ARGS);
 extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 extern Datum dss_io_stat(PG_FUNCTION_ARGS);
+extern Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS);
 
 /* plhandler.cpp */
 extern Datum generate_procoverage_report(PG_FUNCTION_ARGS);

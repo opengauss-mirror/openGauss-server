@@ -202,9 +202,11 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.in_flushcopy = false;
     dms_cxt->SSRecoveryInfo.no_backend_left = false;
     dms_cxt->SSRecoveryInfo.in_ondemand_recovery = false;
+    dms_cxt->SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
     dms_cxt->SSRecoveryInfo.startup_need_exit_normally = false;
     dms_cxt->SSRecoveryInfo.recovery_trapped_in_page_request = false;
     dms_cxt->SSRecoveryInfo.dorado_sharestorage_inited = false;
+    dms_cxt->SSRecoveryInfo.ondemand_recovery_pause_status = NOT_PAUSE;
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
@@ -348,7 +350,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->exrto_recyle_xmin = 0;
     predo_cxt->exrto_snapshot = (ExrtoSnapshot)MemoryContextAllocZero(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ExrtoSnapshotData));
-    predo_cxt->redoItemHash = NULL;
+    predo_cxt->redoItemHashCtrl = NULL;
 
     predo_cxt->standby_read_delay_ddl_stat.delete_stat = 0;
     predo_cxt->standby_read_delay_ddl_stat.next_index_can_insert = 0;

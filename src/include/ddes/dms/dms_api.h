@@ -32,7 +32,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           126
+#define DMS_LOCAL_VERSION           127
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -582,6 +582,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_DCS_REQ_XA_OWNER_ID,
     DMS_EVT_DCS_REQ_XA_IN_USE,
     DMS_EVT_DCS_REQ_END_XA,
+    DMS_EVT_REQ_CKPT,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -830,6 +831,7 @@ typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
 typedef void (*dms_thread_deinit_t)(void);
 typedef int (*dms_get_db_primary_id)(void *db_handle, unsigned int *primary_id);
 typedef int (*dms_opengauss_ondemand_redo_buffer)(void *block_key, int *redo_status);
+typedef int (*dms_opengauss_do_ckpt_immediate)(unsigned long long *ckpt_loc);
 
 // for ssl
 typedef int(*dms_decrypt_pwd_t)(const char *cipher, unsigned int len, char *plain, unsigned int size);
@@ -965,6 +967,7 @@ typedef struct st_dms_callback {
     dms_get_opengauss_update_xid get_opengauss_update_xid;
     dms_get_opengauss_txn_status get_opengauss_txn_status;
     dms_opengauss_lock_buffer opengauss_lock_buffer;
+    dms_opengauss_do_ckpt_immediate opengauss_do_ckpt_immediate;
     dms_get_txn_snapshot get_txn_snapshot;
     dms_get_opengauss_txn_snapshot get_opengauss_txn_snapshot;
     dms_get_opengauss_txn_of_master get_opengauss_txn_of_master;

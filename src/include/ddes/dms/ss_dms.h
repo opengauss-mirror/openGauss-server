@@ -91,6 +91,7 @@ typedef struct st_ss_dms_func {
     int (*dms_info)(char *buf, unsigned int len, dms_info_id_e id);
     void (*dms_get_buf_res)(unsigned long long *row_id, dv_drc_buf_info *drc_info, int type);
     void (*dms_get_cmd_stat)(int index, wait_cmd_stat_result_t *cmd_stat_result);
+    int (*dms_req_opengauss_immediate_ckpt)(dms_context_t *dms_ctx, unsigned long long *ckpt_loc);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -140,7 +141,7 @@ int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *
                                                   int *redo_status);
 unsigned int dms_get_mes_max_watting_rooms(void);
 int dms_send_opengauss_oldest_xmin(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id);
-
+int dms_req_opengauss_immediate_checkpoint(dms_context_t *dms_ctx, unsigned long long *redo_lsn);
 int get_drc_info(int *is_found, dv_drc_buf_info *drc_info);
 int dms_info(char *buf, unsigned int len, dms_info_id_e id);
 void dms_get_buf_res(unsigned long long *row_id, dv_drc_buf_info *drc_info, int type);

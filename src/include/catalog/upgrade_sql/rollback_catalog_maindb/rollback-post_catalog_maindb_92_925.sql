@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.ondemand_recovery_status() CASCADE;

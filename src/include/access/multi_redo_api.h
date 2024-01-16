@@ -38,9 +38,12 @@
 
 #ifdef ENABLE_LITE_MODE
 #define ENABLE_ONDEMAND_RECOVERY false
+#define ENABLE_ONDEMAND_REALTIME_BUILD false
 #else
 #define ENABLE_ONDEMAND_RECOVERY (ENABLE_DMS && IsExtremeRedo() \
     && g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery)
+#define ENABLE_ONDEMAND_REALTIME_BUILD (ENABLE_ONDEMAND_RECOVERY \
+    && g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build)
 #endif
 
 typedef enum {
@@ -98,14 +101,12 @@ inline bool IsParallelRedo()
     return g_instance.comm_cxt.predo_cxt.redoType == PARALLEL_REDO && (get_real_recovery_parallelism() > 1);
 }
 
-
 static inline bool IsMultiThreadRedo()
 {
     return (get_real_recovery_parallelism() > 1);
 }
 
 uint32 GetRedoWorkerCount();
-
 bool IsMultiThreadRedoRunning();
 void DispatchRedoRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
 void GetThreadNameIfMultiRedo(int argc, char* argv[], char** threadNamePtr);

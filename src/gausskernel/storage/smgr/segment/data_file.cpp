@@ -528,6 +528,12 @@ void df_extend_internal(SegLogicFile *sf)
         }
 
         SegmentCheck(new_size <= DF_FILE_SLICE_SIZE);
+        if (fd < 0) {
+            char *filename = slice_filename(sf->filename, sf->file_num - 1);
+            int fd = dv_open_file(filename, O_RDONLY | PG_BINARY, SEGMENT_FILE_MODE);
+            sf->segfiles[sf->file_num - 1].fd = fd;
+            pfree(filename);
+        }
 
         if (ftruncate(fd, new_size) != 0) {
             char *filename = slice_filename(sf->filename, sf->file_num - 1);

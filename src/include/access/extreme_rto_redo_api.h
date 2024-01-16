@@ -55,9 +55,6 @@ inline bool IsOndemandExtremeRtoMode()
 {
     return (g_extreme_rto_type == ONDEMAND_EXTREME_RTO);
 }
-inline void SetOndemandExtremeRtoMode();
-inline bool IsDefaultExtremeRtoMode();
-inline bool IsOndemandExtremeRtoMode();
 void ExtremeWaitAllReplayWorkerIdle();
 void ExtremeDispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key);
 void ExtremeDispatchClosefdMarkToAllRedoWorker();

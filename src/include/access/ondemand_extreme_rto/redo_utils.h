@@ -26,6 +26,12 @@
 
 #include "access/xlogproc.h"
 
+typedef enum {
+    PARSE_TYPE_DATA = 0,
+    PARSE_TYPE_DDL,
+    PARSE_TYPE_SEG,
+} XLogRecParseType;
+
 Size OndemandRecoveryShmemSize(void);
 void OndemandRecoveryShmemInit(void);
 void OndemandXlogFileIdCacheInit(void);
@@ -39,5 +45,10 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstat
 void OndemandRedoReleaseXLogRecord(XLogRecParseState *reloadBlockState);
 void OnDemandSendRecoveryEndMarkToWorkersAndWaitForReach(int code);
 void OnDemandWaitRedoFinish();
+void OnDemandWaitRealtimeBuildShutDown();
+XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record);
+void OnDemandUpdateRealtimeBuildPrunePtr();
+XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState);
+void WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
 
 #endif /* ONDEMAND_EXTREME_RTO_REDO_UTILS_H */

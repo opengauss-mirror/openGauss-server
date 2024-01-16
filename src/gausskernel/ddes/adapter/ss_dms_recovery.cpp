@@ -37,7 +37,9 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_reform_common.h"
+#include "ddes/dms/ss_transaction.h"
 #include "access/double_write.h"
+#include "access/twophase.h"
 #include <sys/types.h>
 #include <dirent.h>
 #include <string.h>
@@ -153,7 +155,7 @@ bool SSRecoveryApplyDelay()
         return true;
     }
 
-    while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag) {
+    while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag || SS_ONDEMAND_RECOVERY_PAUSE) {
         /* might change the trigger file's location */
         RedoInterruptCallBack();
 
@@ -231,7 +233,9 @@ void SSInitReformerControlPages(void)
 void SShandle_promote_signal()
 {
     if (pmState == PM_WAIT_BACKENDS) {
-        g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
+        if (SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
+            g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
+        }
         Assert(g_instance.pid_cxt.StartupPID != 0);
         pmState = PM_STARTUP;
     }
@@ -299,4 +303,66 @@ void ss_switchover_promoting_dw_init()
     dw_init();
     g_instance.dms_cxt.dw_init = true;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] dw init finished")));
+}
+
+XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn()
+{
+    XLogRecPtr primaryRedoLsn = InvalidXLogRecPtr;
+
+    ereport(DEBUG1, (errmodule(MOD_DMS),
+        errmsg("[On-demand] start request primary node %d do checkpoint", SS_PRIMARY_ID)));
+    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        dms_context_t dms_ctx;
+        InitDmsContext(&dms_ctx);
+        dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
+        if (dms_req_opengauss_immediate_checkpoint(&dms_ctx, (unsigned long long *)&primaryRedoLsn) == GS_SUCCESS) {
+            ereport(DEBUG1, (errmodule(MOD_DMS),
+                errmsg("[On-demand] request primary node %d checkpoint success, redoLoc %X/%X", SS_PRIMARY_ID,
+                    (uint32)(primaryRedoLsn << 32), (uint32)primaryRedoLsn)));
+            return primaryRedoLsn;
+        }
+        ereport(DEBUG1, (errmodule(MOD_DMS),
+            errmsg("[On-demand] request primary node %d checkpoint failed", SS_PRIMARY_ID)));
+    }
+
+    // read from DMS failed, so read from DSS
+    SSReadControlFile(SS_PRIMARY_ID, true);
+    primaryRedoLsn = g_instance.dms_cxt.ckptRedo;
+    ereport(DEBUG1, (errmodule(MOD_DMS),
+        errmsg("[On-demand] read primary node %d checkpoint loc in control file, redoLoc %X/%X", SS_PRIMARY_ID,
+            (uint32)(primaryRedoLsn << 32), (uint32)primaryRedoLsn)));
+    return primaryRedoLsn;
+}
+
+void StartupOndemandRecovery()
+{
+    g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = true;
+    g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_IN_ONDEMAND_BUILD;
+    /* for other nodes in cluster and ondeamnd recovery failed */
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+    g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
+    g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
+    SSUpdateReformerCtrl();
+    LWLockRelease(ControlFileLock);
+    SSRequestAllStandbyReloadReformCtrlPage();
+    SetOndemandExtremeRtoMode();
+}
+
+void OndemandRealtimeBuildHandleFailover()
+{
+    Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL);
+
+    SSReadControlFile(SSGetPrimaryInstId());
+    ss_failover_dw_init();
+    StartupOndemandRecovery();
+    StartupReplicationSlots();
+    restoreTwoPhaseData();
+    OnDemandUpdateRealtimeBuildPrunePtr();
+    SendPostmasterSignal(PMSIGNAL_RECOVERY_STARTED);
+    while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag) {
+        pg_usleep(REFORM_WAIT_TIME);
+    }
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_REDO;
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[On-demand] Node:%d receive failover signal, "
+        "close realtime build and start ondemand build", SS_MY_INST_ID)));
 }

@@ -131,6 +131,10 @@
 #define BUF_DIRTY_NEED_FLUSH    0x100
 #define BUF_ERTO_NEED_MARK_DIRTY    0x200
 
+#define BUF_READ_MODE_ONDEMAND_REALTIME_BUILD    0x400
+/* mark buffer is pinned in ondemand realtime build, which do not allow eliminated */
+#define BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED    0x800
+
 #define SS_BROADCAST_FAILED_RETRYCOUNTS 4
 #define SS_BROADCAST_WAIT_INFINITE (0xFFFFFFFF)
 #define SS_BROADCAST_WAIT_FIVE_SECONDS (5000)

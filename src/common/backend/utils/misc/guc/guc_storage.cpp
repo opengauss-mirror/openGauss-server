@@ -263,6 +263,7 @@ static bool check_logical_decode_options_default(char** newval, void** extra, Gu
 static void assign_logical_decode_options_default(const char* newval, void* extra);
 static bool check_uwal_devices_path(char** newval, void** extra, GucSource source);
 static bool check_uwal_log_path(char** newval, void** extra, GucSource source);
+static void assign_recovery_parallelism(int newval, void* extra);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -1076,6 +1077,19 @@ static void InitStorageConfigureNamesBool()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.enable_dss_aio,
             true,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ss_enable_ondemand_realtime_build",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use on-demand real time build"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build,
+            false,
             NULL,
             NULL,
             NULL},
@@ -3275,7 +3289,7 @@ static void InitStorageConfigureNamesInt()
             1,
             INT_MAX,
             NULL,
-            NULL,
+            assign_recovery_parallelism,
             NULL},
         
         {{"parallel_recovery_batch",
@@ -6635,6 +6649,14 @@ static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource s
         return false;
     }
     return true;
+}
+
+static void assign_recovery_parallelism(int newval, void* extra)
+{
+    if (IsUnderPostmaster && !(t_thrd.role == STARTUP && t_thrd.is_inited)) {
+        return;
+    }
+    g_instance.attr.attr_storage.real_recovery_parallelism = newval;
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
