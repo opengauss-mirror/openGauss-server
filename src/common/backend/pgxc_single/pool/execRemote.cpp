@@ -470,16 +470,27 @@ HandleDatanodeGxid(PGXCNodeHandle* conn, const char* msg_body, size_t len)
 static void HandleLibcommPort(PGXCNodeHandle *conn, const char *msg_body, size_t len)
 {
     Assert(msg_body != NULL);
-    Assert(len == sizeof(uint16) + sizeof(uint16));
     errno_t rc = 0;
     uint16 n16;
     rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
     securec_check(rc, "\0", "\0");
     conn->tcpCtlPort = ntohs(n16);
-    rc = memcpy_s(&n16, sizeof(uint16), msg_body + sizeof(uint16), sizeof(uint16));
+    msg_body += sizeof(uint16);
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
     securec_check(rc, "\0", "\0");
     conn->listenPort = ntohs(n16);
+    msg_body += sizeof(uint16);
     elog(DEBUG1, "spq HandleLibcommPort get [%d:%d]", conn->tcpCtlPort, conn->listenPort);
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
+    securec_check(rc, "\0", "\0");
+    uint16 nodenamelen = ntohs(n16);
+    msg_body += sizeof(uint16);
+    char nodename[NAMEDATALEN];
+    rc = memcpy_s(nodename, NAMEDATALEN * sizeof(char), msg_body, nodenamelen * sizeof(char));
+    securec_check(rc, "\0", "\0");
+    if (strcmp(conn->remoteNodeName, nodename) != 0) {
+        elog(ERROR, "remote name [%s] not match cluster map: [%s].", nodename, conn->remoteNodeName);
+    }
 }
 static void HandleDirectRead(PGXCNodeHandle *conn, const char *msg_body, size_t len)
 {
