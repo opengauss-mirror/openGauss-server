@@ -118,3 +118,9 @@ CONTEXT:  referenced column: int8mod
 select numeric_mod(1234.5678,0.0);
 ERROR:  division by zero
 CONTEXT:  referenced column: numeric_mod
+select '10'::interval;
+ interval  
+-----------
+ @ 10 secs
+(1 row)
+
