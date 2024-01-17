@@ -43,8 +43,10 @@
 #include "access/twophase.h"
 #include "access/htup.h"
 #include "access/multixact.h"
+#include "access/multi_redo_api.h"
 #include "catalog/pg_database.h"
 #include "access/xlog_internal.h"
+#include "postmaster/startup.h"
 
 #include "ddes/dms/ss_dms_callback.h"
 #include "ddes/dms/ss_dms_bufmgr.h"

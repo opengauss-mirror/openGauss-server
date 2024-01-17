@@ -178,6 +178,12 @@ typedef struct {
     volatile XLogRecPtr syncRecordPtr;
     SPSCBlockingQueue *trxnQueue;
     SPSCBlockingQueue *segQueue;
+
+    /**
+     * used in ondemand real-time build, to avoid write primary node's
+     * control file into standby node's, when standby node shutdown.
+     */
+    ControlFileData* restoreControlFile;
 } LogDispatcher;
 
 typedef struct {
@@ -234,6 +240,7 @@ void FreeRedoItem(RedoItem *item);
 void SendRecoveryEndMarkToWorkersAndWaitForReach(int code);
 void WaitRedoFinish();
 void WaitRealtimeBuildShutdown();
+void BackupControlFileForRealtimeBuild(ControlFileData* controlFile);
 
 /* Dispatcher states. */
 int GetDispatcherExitCode();

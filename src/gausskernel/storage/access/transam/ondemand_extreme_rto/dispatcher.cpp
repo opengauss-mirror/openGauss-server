@@ -109,6 +109,8 @@ static const int invalid_worker_id = -1;
 static const int UNDO_START_BLK = 1;
 static const int UHEAP_UPDATE_UNDO_START_BLK = 2; 
 
+struct ControlFileData restoreControlFile;
+
 typedef void *(*GetStateFunc)(PageRedoWorker *worker);
 
 static void AddSlotToPLSet(uint32);
@@ -170,6 +172,8 @@ static inline uint32 GetUndoSpaceWorkerId(int zid);
 static XLogReaderState *GetXlogReader(XLogReaderState *readerState);
 void CopyDataFromOldReader(XLogReaderState *newReaderState, const XLogReaderState *oldReaderState);
 void SendSingalToPageWorker(int signal);
+
+static void RestoreControlFileForRealtimeBuild();
 
 /* dispatchTable must consistent with RmgrTable */
 static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
@@ -413,7 +417,15 @@ void HandleStartupInterruptsForExtremeRto()
 
     if (t_thrd.startup_cxt.shutdown_requested) {
         if (g_instance.status != SmartShutdown) {
-            proc_exit(1);
+            if (ENABLE_ONDEMAND_REALTIME_BUILD &&
+                (SS_PERFORMING_SWITCHOVER || (SS_STANDBY_MODE && DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS))) {
+                Assert(!SS_ONDEMAND_REALTIME_BUILD_DISABLED);
+                ereport(LOG, (errmsg("[On-demand] start to shutdown realtime build, set status to BUILD_TO_DISABLED.")));
+                g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_DISABLED;
+                proc_exit(0);
+            } else {
+                proc_exit(1);
+            }
         } else {
             g_dispatcher->smartShutdown = true;
         }
@@ -422,7 +434,7 @@ void HandleStartupInterruptsForExtremeRto()
         t_thrd.startup_cxt.check_repair = false;
     }
 
-    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL && SS_STANDBY_FAILOVER && pmState == PM_STARTUP) {
+    if (SS_STANDBY_FAILOVER && pmState == PM_STARTUP && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
         OndemandRealtimeBuildHandleFailover();
     }
 }
@@ -453,6 +465,12 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
             ALLOCSET_DEFAULT_MAXSIZE,
             SHARED_CONTEXT);
         g_instance.comm_cxt.predo_cxt.redoItemHashCtrl = PRInitRedoItemHashForAllPipeline(g_instance.comm_cxt.redoItemCtx);
+        if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+            errno_t rc = EOK;
+            g_dispatcher->restoreControlFile = (ControlFileData *)palloc(sizeof(ControlFileData));
+            rc = memcpy_s(g_dispatcher->restoreControlFile, (size_t)sizeof(ControlFileData), &restoreControlFile, (size_t)sizeof(ControlFileData));
+            securec_check(rc, "", "");
+        }
         g_dispatcher->maxItemNum = (get_batch_redo_num() + 4) * PAGE_WORK_QUEUE_SIZE *
                                    ITEM_QUQUE_SIZE_RATIO;  // 4: a startup, readmanager, txnmanager, txnworker
         uint32 maxParseBufNum = (uint32)((uint64)g_instance.attr.attr_storage.dms_attr.ondemand_recovery_mem_size *
@@ -527,6 +545,7 @@ STATIC LogDispatcher *CreateDispatcher()
     newDispatcher->batchThrdEnterNum = 0;
     newDispatcher->batchThrdExitNum = 0;
     newDispatcher->segpageXactDoneFlag = 0;
+    newDispatcher->restoreControlFile = NULL; 
 
     pg_atomic_init_u32(&(newDispatcher->standbyState), STANDBY_INITIALIZED);
     newDispatcher->needImmediateCheckpoint = false;
@@ -690,6 +709,12 @@ static void StopRecoveryWorkers(int code, Datum arg)
     ShutdownWalRcv();
     CloseAllXlogFileInFdCache();
     FreeAllocatedRedoItem();
+    if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN) {
+        Assert(g_dispatcher->restoreControlFile != NULL);
+        RestoreControlFileForRealtimeBuild();
+        g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
+        ereport(LOG, (errmsg("[On-demand] realtime build shutdown, set status to DISABLED.")));
+    }
     SSDestroyRecoveryWorkers();
     g_startupTriggerState = TRIGGER_NORMAL;
     g_readManagerTriggerFlag = TRIGGER_NORMAL;
@@ -724,6 +749,10 @@ static void SSDestroyRecoveryWorkers()
         pfree(g_dispatcher->rtoXlogBufState.readprivate);
         SPSCBlockingQueueDestroy(g_dispatcher->trxnQueue);
         SPSCBlockingQueueDestroy(g_dispatcher->segQueue);
+
+        if (ENABLE_ONDEMAND_REALTIME_BUILD && g_dispatcher->restoreControlFile != NULL) {
+            pfree(g_dispatcher->restoreControlFile);
+        }
 #ifdef USE_ASSERT_CHECKING
         if (g_dispatcher->originLsnCheckAddr != NULL) {
             pfree(g_dispatcher->originLsnCheckAddr);
@@ -736,6 +765,13 @@ static void SSDestroyRecoveryWorkers()
             MemoryContextDelete(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
             g_instance.comm_cxt.predo_cxt.parallelRedoCtx = NULL;
         }
+        
+        if (g_instance.comm_cxt.predo_cxt.redoItemHashCtrl != NULL) {
+            (void)MemoryContextSwitchTo(g_dispatcher->oldCtx);
+            MemoryContextDelete(g_instance.comm_cxt.redoItemCtx);
+            g_instance.comm_cxt.predo_cxt.redoItemHashCtrl = NULL;
+        }
+
         g_dispatcher = NULL;
         SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     }
@@ -1965,10 +2001,8 @@ void WaitRealtimeBuildShutdown()
         if (g_instance.pid_cxt.StartupPID == 0) {
             break;
         }
-        pg_usleep(5000L);
+        pg_usleep(100L);
     }
-
-    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
 }
 
 /* Run from each page worker and the txn worker thread. */
@@ -2431,5 +2465,26 @@ static inline uint32 GetUndoSpaceWorkerId(int zid)
     return (tag_hash(&zid, sizeof(zid)) % undoSpaceWorkersNum + firstUndoLogWorker);
 }
 
+void BackupControlFileForRealtimeBuild(ControlFileData* controlFile) {
+    Assert(controlFile != NULL);
+    int len = sizeof(ControlFileData);
+    errno_t rc = EOK;
+    rc = memcpy_s(&restoreControlFile, (size_t)len, controlFile, (size_t)len);
+    securec_check(rc, "", "");
+}
+
+/*
+ * standby node need to read control file when realtime build start,
+ * so restore control file when ondemand realtime build shutdown.
+ */
+static void RestoreControlFileForRealtimeBuild() {
+    Assert(g_dispatcher->restoreControlFile != NULL);
+    errno_t rc = EOK;
+    int len = sizeof(ControlFileData);
+    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+    rc = memcpy_s(t_thrd.shemem_ptr_cxt.ControlFile, (size_t)len, g_dispatcher->restoreControlFile, (size_t)len);
+    securec_check(rc, "", "");
+    LWLockRelease(ControlFileLock);
+}
 
 }  // namespace ondemand_extreme_rto

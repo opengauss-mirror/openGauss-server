@@ -190,7 +190,10 @@ void OndemandXLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, 
 void OndemandXLogParseBufferDestory(RedoParseManager *parsemanager)
 {
     g_parseManager = NULL;
-    // do not free parsebuffers, which is managed in shared memory
+    // do not free parsebuffers, but memset it to 0, which is managed in shared memory
+    if (parsemanager->memctl.isInit) {
+        memset(t_thrd.storage_cxt.ondemandXLogMem, 0, OndemandRecoveryShmemSize());
+    }
     parsemanager->parsebuffers = NULL;
     parsemanager->memctl.isInit = false;
 }
@@ -512,6 +515,32 @@ void OnDemandWaitRedoFinish()
     ondemand_extreme_rto::WaitRedoFinish();
 }
 
+/**
+ * Shutdown real-time build when standby node switchover promoting,
+ * it will wait until StartUp Thread shutdown.
+ */
+void OnDemandWaitRealtimeBuildShutDownInSwitchoverPromoting()
+{
+    if (g_instance.pid_cxt.StartupPID != 0) {
+        Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL);
+        OnDemandWaitRealtimeBuildShutDown();
+        ereport(LOG, (errmsg("[SS reform] Shutdown real-time build when switchover promoting.")));
+    }
+}
+
+/**
+ * Reform partner shutdown real-time build when failover,
+ * it will wait until Startup Thread shutdown.
+ */
+void OnDemandWaitRealtimeBuildShutDownInPartnerFailover()
+{
+    if (g_instance.pid_cxt.StartupPID != 0) {
+        Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL && SS_STANDBY_MODE);
+        OnDemandWaitRealtimeBuildShutDown();
+        ereport(LOG, (errmsg("[SS reform] Partner node shutdown real-time build when failover.")));
+    }
+}
+
 void OnDemandWaitRealtimeBuildShutDown() 
 {
     ondemand_extreme_rto::WaitRealtimeBuildShutdown();
@@ -520,6 +549,10 @@ void OnDemandWaitRealtimeBuildShutDown()
 void OnDemandUpdateRealtimeBuildPrunePtr()
 {
     ondemand_extreme_rto::UpdateCheckpointRedoPtrForPrune(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo);
+}
+
+void OnDemandBackupControlFile(ControlFileData* controlFile) {
+    ondemand_extreme_rto::BackupControlFileForRealtimeBuild(controlFile);
 }
 
 XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record)

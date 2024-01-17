@@ -45,7 +45,10 @@ XLogRecParseState *OndemandRedoReloadXLogRecord(XLogRecParseState *redoblockstat
 void OndemandRedoReleaseXLogRecord(XLogRecParseState *reloadBlockState);
 void OnDemandSendRecoveryEndMarkToWorkersAndWaitForReach(int code);
 void OnDemandWaitRedoFinish();
+void OnDemandWaitRealtimeBuildShutDownInSwitchoverPromoting();
+void OnDemandWaitRealtimeBuildShutDownInPartnerFailover();
 void OnDemandWaitRealtimeBuildShutDown();
+void OnDemandBackupControlFile(ControlFileData* controlFile);
 XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record);
 void OnDemandUpdateRealtimeBuildPrunePtr();
 XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState);
