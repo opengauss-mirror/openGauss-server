@@ -2761,7 +2761,7 @@ int DecodeInterval(char** field, const int* ftype, int nf, int range, int* dtype
                             type = DTK_SECOND;
                             break;
                         default:
-                            type = DTK_DAY;
+                            type = DB_IS_CMPT(PG_FORMAT) ? DTK_SECOND : DTK_DAY;
                             break;
                     }
                 }
