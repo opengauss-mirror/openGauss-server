@@ -80,6 +80,7 @@ typedef struct knl_instance_attr_network {
 #endif
     bool enable_dolphin_proto;
     int dolphin_server_port;
+    bool dolphin_hot_standby;
 } knl_instance_attr_network;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_NETWORK_H_ */
