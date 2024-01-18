@@ -9005,6 +9005,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
 {
     ModifyTable* node = makeNode(ModifyTable);
     Plan* plan = &node->plan;
+    node->is_dist_insertselect = root->parse->is_dist_insertselect;
     double total_size;
     ListCell* subnode = NULL;
     double local_rows = 0;

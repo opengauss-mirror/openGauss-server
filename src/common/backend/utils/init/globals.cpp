@@ -81,6 +81,7 @@ const uint32 GRAND_VERSION_NUM = 92938;
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 INSERT_INTO_SELECT_VERSION_NUM = 92938;
 const uint32 ROTATE_UNROTATE_VERSION_NUM = 92937;
 const uint32 PIPELINED_FUNCTION_VERSION_NUM = 92936;
 const uint32 DISABLE_CONSTRAINT_VERSION_NUM = 92931;

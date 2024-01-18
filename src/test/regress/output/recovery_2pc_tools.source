@@ -282,6 +282,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_hashagg                                   | bool    |      |           | 
  enable_hashjoin                                  | bool    |      |           | 
  enable_hdfs_predicate_pushdown                   | bool    |      |           | 
+ enable_heap_multi_insert_for_insert_select       | bool    |      |           | 
  enable_huge_pages                                | bool    |      |           | 
  enable_hypo_index                                | bool    |      |           | 
  enable_ignore_case_in_dquotes                    | bool    |      |           | 

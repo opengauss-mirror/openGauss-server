@@ -310,7 +310,7 @@ typedef struct knl_session_attr_storage {
     /* pre-read parms */
     int heap_bulk_read_size;
     int vacuum_bulk_read_size;
-
+    bool enable_heap_multi_insert_for_insert_select;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

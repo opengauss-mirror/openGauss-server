@@ -1121,6 +1121,8 @@ test: slow_sql
 # test user@host
 test: user_host_test
 
+# test for batchcmd insert for IUD
+test: iud_heap_multi_insert
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
 # test for on update timestamp and generated column

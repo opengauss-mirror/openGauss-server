@@ -1629,6 +1629,10 @@ static Query* _readQuery(void)
     {
         READ_BOOL_FIELD(can_push);
     }
+    IF_EXIST(is_dist_insertselect)
+    {
+        READ_BOOL_FIELD(is_dist_insertselect);
+    }
 
     IF_EXIST(unique_check)
     {
