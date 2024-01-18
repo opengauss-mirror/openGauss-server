@@ -22414,6 +22414,12 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 				$6->hintState = create_hintstate($3);
 				$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 				$$ = (Node *) $6;
+                if ($7 != NULL) {
+                    $6->is_dist_insertselect = false;
+                }
+                if ($5 != NULL && ($5->ispartition || $5->issubpartition)) {
+                    $6->is_dist_insertselect = false;
+                }
 			}
             | REPLACE hint_string INTO insert_target insert_rest returning_clause
             {
@@ -22484,6 +22490,9 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 							 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
 					}
+                    if (($7 != NULL || $8 != NULL) && $6 != NULL) {
+                        $6->is_dist_insertselect = false;
+                    }
 
 					if (u_sess->attr.attr_sql.enable_upsert_to_merge
 #ifdef ENABLE_MULTIPLE_NODES					
@@ -22611,6 +22620,8 @@ insert_rest:
 					$$->cols = NIL;
 					$$->selectStmt = $1;
 					$$->isRewritten = false;
+                    if (((SelectStmt*)$1)->valuesLists == NULL)
+                      $$->is_dist_insertselect = true;
 				}
 			| '(' insert_column_list ')' SelectStmt
 				{
@@ -22618,6 +22629,8 @@ insert_rest:
 					$$->cols = $2;
 					$$->selectStmt = $4;
 					$$->isRewritten = false;
+                    if (((SelectStmt*)$4)->valuesLists == NULL)
+                        $$->is_dist_insertselect = true;
 				}
 			| DEFAULT VALUES
 				{
@@ -22625,6 +22638,7 @@ insert_rest:
 					$$->cols = NIL;
 					$$->selectStmt = NULL;
 					$$->isRewritten = false;
+                    $$->is_dist_insertselect = false;
 				}
 		;
 

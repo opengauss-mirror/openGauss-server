@@ -3961,6 +3961,7 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
     if (t_thrd.proc->workingVersionNum >= KEYWORD_IGNORE_COMPART_VERSION_NUM) {
         WRITE_BOOL_FIELD(hasIgnore);
     }
+    WRITE_BOOL_FIELD(is_dist_insertselect);
 }
 
 static void _outUpdateStmt(StringInfo str, UpdateStmt* node)
@@ -4729,6 +4730,7 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= PARTIALPUSH_VERSION_NUM) {
         WRITE_BOOL_FIELD(can_push);
     }
+    WRITE_BOOL_FIELD(is_dist_insertselect);
     if (t_thrd.proc->workingVersionNum >= SUBLINKPULLUP_VERSION_NUM) {
         WRITE_BOOL_FIELD(unique_check);
     }

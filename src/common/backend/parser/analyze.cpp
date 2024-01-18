@@ -1757,10 +1757,12 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         pstate->p_relnamespace = NIL;
         sub_varnamespace = pstate->p_varnamespace;
         pstate->p_varnamespace = NIL;
+        qry->is_dist_insertselect = stmt->is_dist_insertselect;
     } else {
         sub_rtable = NIL; /* not used, but keep compiler quiet */
         sub_relnamespace = NIL;
         sub_varnamespace = NIL;
+        qry->is_dist_insertselect = false;
     }
 
     /*
@@ -1774,7 +1776,14 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     }
 
     qry->resultRelations = setTargetTables(pstate, list_make1(stmt->relation), false, false, targetPerms);
+
     targetrel = (Relation)linitial(pstate->p_target_relation);
+    /* do not support partition table heap_multi_insert for partition table */
+    if (targetrel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION ||
+            targetrel->rd_rel->parttype == PARTTYPE_SUBPARTITIONED_RELATION ||
+            targetrel->rd_rel->parttype == PARTTYPE_VALUE_PARTITIONED_RELATION ) {
+        qry->is_dist_insertselect = false;
+    }
     /*
      * Insert into relation pg_auth_history is not allowed.
      * We update it only when some user's password has been changed.

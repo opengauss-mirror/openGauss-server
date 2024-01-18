@@ -68,4 +68,8 @@ extern void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *est
 extern bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, Tuple tuple,
     CmdType cmdtype, ItemPointer otid, Oid oldPartitionOid, int2 bucketid);
 
+extern bool isSingleMode;
+extern bool isRestoreMode;
+#define ENABLE_HEAP_MULTI_INSERT_FOR_INSERT_SELECT ((!isSingleMode) && (!isRestoreMode) && (u_sess->attr.attr_storage.enable_heap_multi_insert_for_insert_select))
+
 #endif /* NODEMODIFYTABLE_H */
