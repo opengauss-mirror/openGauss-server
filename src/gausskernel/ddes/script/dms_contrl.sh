@@ -236,8 +236,15 @@ function Check()
 function Clean()
 {
     log "stop ${GSDB_BIN}..."
-    kill_program ${GSDB_BIN} ${GSDB_HOME}
-    sleep 3
+    ${BIN_PATH}/gs_ctl stop -D ${GSDB_HOME}
+
+    if [ $? -eq 0 ]
+    then
+        log "${GSDB_BIN} stopped in dir ${GSDB_HOME}..."
+    else
+        log "Killing ${GSDB_BIN} if running..."
+        kill_program ${GSDB_BIN} ${GSDB_HOME}
+    fi
 }
 
 function Main()
