@@ -461,10 +461,10 @@ extern int16 pg_strtoint16(const char* s, bool can_ignore = false);
 extern int32 pg_strtoint32(const char* s, bool can_ignore);
 extern void pg_itoa(int16 i, char* a);
 extern void pg_ltoa(int32 l, char* a);
-extern char* pg_ltoa2(int32 l);
+extern char* pg_ltoa2(int32 l, int* len);
 extern void pg_ctoa(uint8 i, char* a);
 extern void pg_lltoa(int64 ll, char* a);
-extern char* pg_lltoa2(int64 ll);
+extern char* pg_lltoa2(int64 ll, int* len);
 extern void pg_i128toa(int128 value, char* a, int length);
 
 /*
@@ -1005,8 +1005,8 @@ extern bytea *cstring_to_bytea_with_len(const char *s, int len);
 extern BpChar* cstring_to_bpchar_with_len(const char* s, int len);
 extern char* text_to_cstring(const text* t);
 extern char* output_text_to_cstring(const text* t);
-extern char* output_int32_to_cstring(int32 value);
-extern char* output_int64_to_cstring(int64 value);
+extern char* output_int32_to_cstring(int32 value, int* len);
+extern char* output_int64_to_cstring(int64 value, int* len);
 extern char* output_int128_to_cstring(int128 value);
 extern char* output_date_out(int32 date);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);

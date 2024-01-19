@@ -1885,8 +1885,7 @@ static inline int btree_setup_posting_items(BTScanOpaque so, int item_idx, Offse
         itupsz = MAXALIGN(itupsz);
         curr_item->tupleOffset = so->currPos.nextTupleOffset;
         IndexTuple base = (IndexTuple)(so->currTuples + so->currPos.nextTupleOffset);
-        errno_t rc = memcpy_s(base, itupsz, tuple, itupsz);
-        securec_check(rc, "", "");
+        memcpy(base, tuple, itupsz);
         base->t_info &= ~INDEX_SIZE_MASK;
         base->t_info |= itupsz;
         so->currPos.nextTupleOffset += itupsz;
