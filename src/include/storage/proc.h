@@ -478,12 +478,12 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 #define NUM_DMS_PRIO_CNT 4
 #define NUM_DMS_RECV_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.channel_count * \
     (g_instance.attr.attr_storage.dms_attr.inst_count - 1) * NUM_DMS_PRIO_CNT)
-#define NUM_DMS_MAX_WORK_THREAD_PROCS (128)
+#define NUM_DMS_MAX_WORK_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt)
 #define NUM_DMS_WORK_SCHEDULER_PROC (1)
-#define NUM_DMS_RDMA_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_count == 0 ? \
+#define NUM_DMS_RDMA_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt != 0 ? \
     NUM_DMS_MAX_WORK_THREAD_PROCS * 2 + NUM_DMS_WORK_SCHEDULER_PROC : \
     g_instance.attr.attr_storage.dms_attr.work_thread_count * 2)
-#define NUM_DMS_WORK_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_count == 0 ? \
+#define NUM_DMS_WORK_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt != 0 ? \
     NUM_DMS_MAX_WORK_THREAD_PROCS + NUM_DMS_WORK_SCHEDULER_PROC : \
     g_instance.attr.attr_storage.dms_attr.work_thread_count)
 #define NUM_DMS_CALLBACK_PROCS \
