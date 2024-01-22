@@ -291,7 +291,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
          * do not allow pageredo workers read buffer from disk if standby node in ondemand
          * realtime build status, because some buffer need init directly in recovery mode
          */
-        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_STANDBY_FAILOVER)) {
+        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
             buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
             buffer = InvalidBuffer;
         } else {
@@ -454,7 +454,7 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
          * do not allow pageredo workers read buffer from disk if standby node in ondemand
          * realtime build status, because some buffer need init directly in recovery mode
          */
-        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_STANDBY_FAILOVER)) {
+        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
             buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
             SegTerminateBufferIO(buf_desc, false, BM_VALID);
             buffer = InvalidBuffer;
@@ -499,7 +499,7 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
         return buffer;
     }
 
-    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_STANDBY_FAILOVER)) {
+    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
         buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
         *with_io = false;
         return InvalidBuffer;
@@ -535,7 +535,7 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
         return buffer;
     }
 
-    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_STANDBY_FAILOVER)) {
+    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
         buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
         *with_io = false;
         return InvalidBuffer;
@@ -1169,4 +1169,21 @@ bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recor
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     DmsReleaseBuffer(buffer, IsSegmentPhysicalRelNode(bufferTag->rnode));
     return true;
+}
+
+bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
+{
+    if (AmDmsReformProcProcess() && dms_reform_failed()) {
+        return true;
+    }
+
+    if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+        return true;
+    }
+
+    if (AmPageRedoProcess() && SS_IN_REFORM && (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
+        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        return true;
+    }
+    return false;
 }

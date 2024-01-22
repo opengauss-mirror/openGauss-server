@@ -93,4 +93,5 @@ Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode);
 void DmsReleaseBuffer(int buffer, bool is_seg);
 bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recordLsn, XLogRecPtr *pageLsn);
 bool SSOndemandRealtimeBuildAllowFlush(BufferDesc *buf);
+bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl);
 #endif
