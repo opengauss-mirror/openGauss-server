@@ -338,6 +338,16 @@ static void SpecialWorkOfRelationLocInfo(Relation rel)
 
 static void SpecialWorkForLocalRel(Relation rel)
 {
+    if (rel->partMap != NULL && rel->partMap->type == PART_TYPE_LIST) {
+        ListPartitionMap *rel_lpm = (ListPartitionMap *)rel->partMap;
+        /* copy part key hash-table */
+        BuildPartKeyHashTable(rel_lpm);
+        for (int partSeq = 0; partSeq < rel_lpm->listElementsNum; partSeq++) {
+            ListPartElement *lpe = &(rel_lpm->listElements[partSeq]);
+            InsertPartKeyHashTable(rel_lpm, lpe, partSeq);
+        }
+    }
+
     if (RelationIsIndex(rel)) {
         rel->rd_aminfo = (RelationAmInfo *)MemoryContextAllocZero(rel->rd_indexcxt, sizeof(RelationAmInfo));
     }

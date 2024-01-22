@@ -1240,7 +1240,7 @@ restart:
                  */
                 innerTupleSlot = GetNextBatchTuple<INNER_VAR>(node);
                 node->mj_InnerOffset = innerTupleSlot;
-                MJ_DEBUG_PROC_NODE(innerTupleSlot);
+                VEC_MJ_DEBUG_PROC_NODE(innerTupleSlot);
                 node->mj_MatchedInner = false;
 
                 /* Compute join values and check for unmatchability */
@@ -1326,7 +1326,7 @@ restart:
                  */
                 outerTupleSlot = GetNextBatchTuple<OUTER_VAR>(node);
                 node->mj_OuterOffset = outerTupleSlot;
-                MJ_DEBUG_PROC_NODE(outerTupleSlot);
+                VEC_MJ_DEBUG_PROC_NODE(outerTupleSlot);
                 node->mj_MatchedOuter = false;
                 /* Compute join values and check for unmatchability */
                 switch (MJGetOuterValues(node, outerTupleSlot)) {
@@ -1553,7 +1553,7 @@ restart:
                  */
                 outerTupleSlot = GetNextBatchTuple<OUTER_VAR>(node);
                 node->mj_OuterOffset = outerTupleSlot;
-                MJ_DEBUG_PROC_NODE(outerTupleSlot);
+                VEC_MJ_DEBUG_PROC_NODE(outerTupleSlot);
                 node->mj_MatchedOuter = false;
 
                 /* Compute join values and check for unmatchability */
@@ -1607,7 +1607,7 @@ restart:
                  */
                 innerTupleSlot = GetNextBatchTuple<INNER_VAR>(node);
                 node->mj_InnerOffset = innerTupleSlot;
-                MJ_DEBUG_PROC_NODE(innerTupleSlot);
+                VEC_MJ_DEBUG_PROC_NODE(innerTupleSlot);
                 node->mj_MatchedInner = false;
                 /* Compute join values and check for unmatchability */
                 switch (MJGetInnerValues(node, innerTupleSlot)) {
@@ -1663,7 +1663,7 @@ restart:
                  */
                 innerTupleSlot = GetNextBatchTuple<INNER_VAR>(node);
                 node->mj_InnerOffset = innerTupleSlot;
-                MJ_DEBUG_PROC_NODE(innerTupleSlot);
+                VEC_MJ_DEBUG_PROC_NODE(innerTupleSlot);
                 node->mj_MatchedInner = false;
                 if (BatchTupleIsNull(innerTupleSlot)) {
                     MJ_printf("ExecMergeJoin: end of inner subplan\n");
@@ -1694,7 +1694,7 @@ restart:
                  */
                 outerTupleSlot = GetNextBatchTuple<OUTER_VAR>(node);
                 node->mj_OuterOffset = outerTupleSlot;
-                MJ_DEBUG_PROC_NODE(outerTupleSlot);
+                VEC_MJ_DEBUG_PROC_NODE(outerTupleSlot);
                 node->mj_MatchedOuter = false;
                 if (BatchTupleIsNull(outerTupleSlot)) {
                     MJ_printf("ExecMergeJoin: end of outer subplan\n");

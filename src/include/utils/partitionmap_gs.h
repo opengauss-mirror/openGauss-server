@@ -159,6 +159,8 @@ typedef struct HashPartitionMap {
         }                                                                              \
     } while (0)
 
+extern void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo);
+extern HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap);
 extern bool IsDefaultValueListPartition(ListPartitionMap *listMap, ListPartElement *partElem);
 char *PartKeyGetCstring(PartitionKey* partkeys);
 extern bool ConstEqual(Const *c1, Const *c2);
