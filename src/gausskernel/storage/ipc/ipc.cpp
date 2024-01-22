@@ -446,13 +446,6 @@ void sess_exit_prepare(int code)
     t_thrd.proc_cxt.sess_exit_inprogress = true;
     old_sigset = gs_signal_block_sigusr2();
 
-    /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
-    for (int i = 0; i < MAX_TYPE_FDW; i++) {
-        if (u_sess->ext_fdw_ctx[i].fdwExitFunc != NULL) {
-            (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
-        }
-    }
-
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++) {
         if (EnableLocalSysCache() && on_sess_exit_list[u_sess->on_sess_exit_index] == AtProcExit_Files) {
             // we close this only on proc exit
@@ -460,7 +453,14 @@ void sess_exit_prepare(int code)
         }
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
     }
-    
+
+    /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
+    for (int i = 0; i < MAX_TYPE_FDW; i++) {
+        if (u_sess->ext_fdw_ctx[i].fdwExitFunc != NULL) {
+            (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
+        }
+    }
+
     t_thrd.storage_cxt.on_proc_exit_index = 0;
     RESUME_INTERRUPTS();
     gs_signal_recover_mask(old_sigset);
