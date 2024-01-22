@@ -1293,13 +1293,7 @@ void check_short_optOfVoid(char *optstring, int argc, char *const *argv)
     int i;
     for (i = 0; i < argc; i++) {
         char *optstr = argv[i];
-        int is_only_shortbar;
-        if (strlen(optstr) == 1) {
-            is_only_shortbar = optstr[0] == '-' ? 1 : 0;
-        } else {
-            is_only_shortbar = 0;
-        }
-        if (is_only_shortbar) {
+        if (strlen(optstr) == 1 && *optstr == '-') {
             fprintf(stderr, _("[%s] FATAL: The option '-' is not a valid option.\n"), progname);
             exit(1);
         }
