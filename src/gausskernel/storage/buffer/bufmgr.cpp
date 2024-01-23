@@ -2766,16 +2766,10 @@ found_branch:
                     if (!StartReadPage(bufHdr, req_lock_mode)) {
                         TerminateBufferIO(bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
-                        if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                        if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
-
-                        if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
-                            SSUnPinBuffer(bufHdr);
-                            return InvalidBuffer;
-                        }
-
                         pg_usleep(5000L);
                         continue;
                     }
