@@ -10318,7 +10318,9 @@ void StartupXLOG(void)
             ResourceManagerStartup();
             StartUpMultiRedo(xlogreader, sizeof(readprivate));
 
-            if (IsExtremeRedo()) {
+            if (SS_STANDBY_PROMOTING) {
+                /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
+            } else if (IsExtremeRedo()) {
                 xlogreader->isPRProcess = true;
                 record = ExtremeReadNextXLogRecord(&xlogreader, LOG);
                 if (record == NULL) {

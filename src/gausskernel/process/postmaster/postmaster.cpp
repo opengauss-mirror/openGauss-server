@@ -3070,15 +3070,7 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     if (SS_PRIMARY_MODE) {
-        while (dss_set_server_status_wrapper() != GS_SUCCESS) {
-            pg_usleep(REFORM_WAIT_LONG);
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                    errhint("Check vgname and socketpath and restart later.")));
-        }
-        ereport(LOG, (errmsg("set dss server status as primary")));
+        SSGrantDSSWritePermission();
     }
 
     /*
@@ -10146,15 +10138,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
                 (errmsg("Failover between two dorado cluster start, change current run mode and dssserver mode to primary_cluster")));
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
             SSDisasterRefreshMode();
-            while (dss_set_server_status_wrapper() != GS_SUCCESS) {
-                pg_usleep(REFORM_WAIT_LONG);
-                ereport(WARNING, (errmodule(MOD_DMS),
-                    errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                        g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                        g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                        errhint("Check vgname and socketpath and restart later.")));
-            }
-            ereport(LOG, (errmsg("set dss server status as primary")));
+            SSGrantDSSWritePermission();
         }
 
         /* promote cascade standby */
@@ -10446,6 +10430,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
+        /* avoid panics caused by concurreny between startup processes and recovery */
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmsg("[SS Reform] request startup proc exit")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
+
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
@@ -10533,6 +10523,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+        /* avoid panics caused by concurreny between startup processes and recovery */
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmsg("[SS Reform] request startup proc exit")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
 
         //active check once
         if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {

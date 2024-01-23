@@ -40,6 +40,10 @@ uint32 g_startupTriggerState = TRIGGER_NORMAL;
 
 void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
 {
+    if (SS_STANDBY_PROMOTING) {
+        return;
+    }
+
     if (IsExtremeRedo()) {
         ExtremeStartRecoveryWorkers(xlogreader, privateLen);
     } else if (IsParallelRedo()) {

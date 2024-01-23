@@ -514,3 +514,16 @@ bool SSPerformingStandbyScenario()
     }
     return false;
 }
+
+void SSGrantDSSWritePermission(void)
+{
+    while (dss_set_server_status_wrapper() != GS_SUCCESS) {
+        pg_usleep(REFORM_WAIT_LONG);
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                errhint("Check vgname and socketpath and restart later.")));
+    }
+    ereport(LOG, (errmsg("set dss server status as primary")));
+}

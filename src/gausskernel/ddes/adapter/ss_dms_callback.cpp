@@ -1734,14 +1734,7 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     dms_role_t new_dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover]begin to set currrent DSS as primary")));
-        while (dss_set_server_status_wrapper() != GS_SUCCESS) {
-            pg_usleep(REFORM_WAIT_LONG);
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                    errhint("Check vgname and socketpath and restart later.")));
-        }
+        SSGrantDSSWritePermission();
         g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     }
 
@@ -1763,6 +1756,17 @@ static void ReformCleanBackends()
     }
 
     while (true) {
+        int ticks = 0;
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            if (ticks++ > REFORM_START_CLEAN_TICKS) {
+                ereport(WARNING, (errmodule(MOD_DMS),
+                    errmsg("[SS reform] StartupXLOG debris sigterm timeout 10s, exit now")));
+                _exit(0);
+            }
+            pg_usleep(REFORM_WAIT_LONG);
+            continue;
+        }
+        
         if (dms_reform_failed()) {
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform]reform failed during caneling backends")));
             return;
@@ -1797,7 +1801,7 @@ static void FailoverCleanBackends()
     long max_wait_time = 30000000L;
     long wait_time = 0;
     while (true) {
-        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && g_instance.pid_cxt.StartupPID == 0) {
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] backends exit successfully")));
             break;
         }
@@ -1866,16 +1870,9 @@ static void SSXminInfoPrepare()
     xmin_info->bitmap_active_nodes = 0;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_cxt)
+static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
 {
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
-    reform_info->is_hashmap_constructed = false;
-    reform_info->reform_type = rs_cxt->reform_type;
-    g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-    g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
-    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
-    g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = false;
-    g_instance.dms_cxt.resetSyscache = true;
     if (reform_info->reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
@@ -1895,11 +1892,27 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
             pmState = PM_WAIT_BACKENDS;
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] failover trigger.")));
         }
-    } else {
-        g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
     }
-    reform_info->reform_start_time = GetCurrentTimestamp();
+}
 
+static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_cxt)
+{
+    ereport(LOG, (errmsg("[SS Reform] starts, pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
+        pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+        t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
+
+    ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    reform_info->is_hashmap_constructed = false;
+    reform_info->reform_type = rs_cxt->reform_type;
+    g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
+    g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
+    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
+    g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = false;
+    g_instance.dms_cxt.resetSyscache = true;
+    g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
+    FailoverStartNotify(rs_cxt);
+
+    reform_info->reform_start_time = GetCurrentTimestamp();
     reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
     reform_info->dms_role = rs_cxt->role;
@@ -1909,17 +1922,10 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
-        errmsg("[SS reform] dms reform start, role:%d, reform type:%s, standby scenario:%d",
+        errmsg("[SS reform] dms reform start, role:%d, reform type:SS %s, standby scenario:%d",
             reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario())));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
-        while (dss_set_server_status_wrapper() != GS_SUCCESS) {
-            pg_usleep(REFORM_WAIT_LONG);
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                    errhint("Check vgname and socketpath and restart later.")));
-        }
+        SSGrantDSSWritePermission();
     }
 
     int old_primary = SSGetPrimaryInstId();
