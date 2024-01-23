@@ -2919,6 +2919,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
             Oid partTablespaceId = InvalidOid;
             char* partitionName = NULL;
             char* tableSpaceName = NULL;
+            IntervalPartitionDefState* interValPartDef = stmt->partTableState->intervalPartDef;
             foreach (cell, stmt->partTableState->partitionList) {
                 if (IsA((lfirst(cell)), IntervalPartitionDefState)) {
                     IntervalPartitionDefState* partition = (IntervalPartitionDefState*)lfirst(cell);
@@ -2944,6 +2945,14 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                     Assert(false);
                 }
                 CheckSegmentIsInLimitTablespace(tableSpaceName, partitionName);
+            }
+
+            /* check for interval limited table for segment */
+            if (interValPartDef && interValPartDef->intervalTablespaces && interValPartDef->intervalTablespaces->length != 0) {
+                foreach (cell, interValPartDef->intervalTablespaces) {
+                    tableSpaceName = ((Value*)lfirst(cell))->val.str;
+                    CheckSegmentIsInLimitTablespace(tableSpaceName, partitionName);
+                }
             }
         }
     }
@@ -19310,7 +19319,16 @@ static void atexecset_table_space_internal(Relation rel, RelFileNode& newrnode, 
 
     /* open rel storage avoid relcache invalided*/
     RelationOpenSmgr(rel);
-
+    
+    /* we should not copy relation to the limited space tablespace */
+    RelFileNode newFileNode = dstrel->smgr_rnode.node;
+    uint64 tablespaceMaxSize = 0;
+    if (IsSegmentFileNode(newFileNode) && TableSpaceUsageManager::IsLimited(newFileNode.spcNode, &tablespaceMaxSize)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
+            errmsg("Dont support relation movement to limited tablespace segment-page storage!"),
+            errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(newFileNode.spcNode)),
+            errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+    }
     /* copy main fork */
     copy_relation_data(rel, &dstrel, MAIN_FORKNUM, rel->rd_rel->relpersistence);
 
