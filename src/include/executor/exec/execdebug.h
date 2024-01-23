@@ -17,6 +17,7 @@
 #ifndef EXECDEBUG_H
 #define EXECDEBUG_H
 
+#include "access/printtup.h"
 #include "executor/executor.h"
 #include "nodes/print.h"
 
@@ -118,7 +119,6 @@
  * ----------------
  */
 #ifdef EXEC_MERGEJOINDEBUG
-
 #define MJ_nodeDisplay(l) nodeDisplay(l)
 #define MJ_printf(s) printf(s)
 #define MJ1_printf(s, p) printf(s, p)
@@ -129,6 +129,10 @@
 #define MJ_DEBUG_QUAL(clause, res) MJ2_printf("  ExecQual(%s, econtext) returns %s\n", CppAsString(clause), T_OR_F(res))
 #define MJ_DEBUG_PROC_NODE(slot) \
     MJ2_printf("  %s = ExecProcNode(...) returns %s\n", CppAsString(slot), NULL_OR_TUPLE(slot))
+/* merge join vector */
+#define VEC_NULL_OR_TUPLE(slot) ((slot.m_fEmpty) ?  "null" : "a tuple")
+#define VEC_MJ_DEBUG_PROC_NODE(slot) \
+    MJ2_printf("  %s = ExecProcNode(...) returns %s\n", CppAsString(slot), VEC_NULL_OR_TUPLE(slot))
 #else
 
 #define MJ_nodeDisplay(l)
@@ -140,6 +144,8 @@
 #define MJ_DEBUG_COMPARE(res)
 #define MJ_DEBUG_QUAL(clause, res)
 #define MJ_DEBUG_PROC_NODE(slot)
+#define VEC_NULL_OR_TUPLE(slot)
+#define VEC_MJ_DEBUG_PROC_NODE(slot)
 #endif /* EXEC_MERGEJOINDEBUG */
 
 #endif /* ExecDebugIncluded */

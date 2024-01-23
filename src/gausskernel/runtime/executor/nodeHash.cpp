@@ -1208,11 +1208,6 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
             idx += MAXALIGN(HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(hashTuple)->t_len);
         }
     }
-
-#ifdef HJDEBUG
-    printf("Nbuckets increased to %d, average items per bucket %.1f\n", hashtable->nbuckets,
-           batchTuples / hashtable->nbuckets);
-#endif
 }
 
 /*

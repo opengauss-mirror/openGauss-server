@@ -62,8 +62,6 @@
 #include "utils/datum.h"
 #include "utils/knl_relcache.h"
 
-static void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo);
-static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap);
 static uint32 PartKeyHashFunc(const void *key, Size keysize);
 static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize);
 
@@ -1300,13 +1298,6 @@ ListPartitionMap *CopyListPartitionMap(ListPartitionMap *src_lpm)
     dst_lpm->listElementsNum = src_lpm->listElementsNum;
     dst_lpm->listElements = CopyListElements(src_lpm->listElements, src_lpm->listElementsNum);
 
-    /* copy part key hash-table */
-    dst_lpm->ht = BuildPartKeyHashTable(dst_lpm);
-    for (int partSeq = 0; partSeq < dst_lpm->listElementsNum; partSeq++) {
-        ListPartElement *lpe = &(dst_lpm->listElements[partSeq]);
-        InsertPartKeyHashTable(dst_lpm, lpe, partSeq);
-    }
-
     return dst_lpm;
 }
 
@@ -1726,7 +1717,7 @@ static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize)
     return ret;
 }
 
-static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap)
+HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap)
 {
     HASHCTL hashCtl;
     errno_t rc;
@@ -1742,8 +1733,10 @@ static HTAB *BuildPartKeyHashTable(ListPartitionMap *listMap)
     hashCtl.entrysize = sizeof(PartElementHashEntry);
     hashCtl.hash = PartKeyHashFunc;
     hashCtl.match = PartKeyMatchFunc;
-    listMap->ht = hash_create(si.data, 1024L, &hashCtl, HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+    hashCtl.hcxt = LocalMyDBCacheMemCxt();
+    listMap->ht = hash_create(si.data, 1024L, &hashCtl, HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);
 
+    FreeStringInfo(&si);
     return listMap->ht;
 }
 
@@ -1756,7 +1749,7 @@ static inline void DeepCopyPartKey(PartitionKey* src, PartitionKey* dst)
     }
 }
 
-static void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo)
+void InsertPartKeyHashTable(ListPartitionMap *listMap, ListPartElement *partElem, int partSeqNo)
 {
     Assert (listMap != NULL && partElem != NULL);
 
