@@ -70,6 +70,8 @@
 #include "tcop/dest.h"
 #include "og_record_time.h"
 
+#define TSRANK_WEIGHTS_LEN    4
+
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
 /* all session level attribute which expose to user. */
@@ -691,6 +693,9 @@ typedef struct knl_u_utils_context {
 	
     HTAB* set_user_params_htab;
     DestReceiver* spi_printtupDR;
+
+    /* var in tsrank.cpp */
+    float tsrankWs[TSRANK_WEIGHTS_LEN];
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
