@@ -2033,28 +2033,28 @@ static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple 
 }
 
 template<typename T_Int, bool large>
-static void check_value_min_max(T_Int value, T_Int min_value, T_Int max_value)
+static void CheckValueMinMax(T_Int value, T_Int minValue, T_Int maxValue, bool isStart)
 {
     char* bufs = NULL;
     char* bufm = NULL;
     /* crosscheck RESTART (or current value, if changing MIN/MAX) */
-    if (value < min_value) {
+    if (value < minValue) {
         bufs = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(value))) :
             DatumGetCString(DirectFunctionCall1(int8out, value));
-        bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(min_value))) :
-            DatumGetCString(DirectFunctionCall1(int8out, min_value));
+        bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(minValue))) :
+            DatumGetCString(DirectFunctionCall1(int8out, minValue));
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("RESTART value (%s) cannot be less than MINVALUE (%s)", bufs, bufm)));
+                errmsg("%s value (%s) cannot be less than MINVALUE (%s)", isStart? "START":"RESTART", bufs, bufm)));
     }
-    if (value > max_value) {
+    if (value > maxValue) {
         bufs = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(value))) :
             DatumGetCString(DirectFunctionCall1(int8out, value));
-        bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(max_value))) :
-            DatumGetCString(DirectFunctionCall1(int8out, max_value));
+        bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(maxValue))) :
+            DatumGetCString(DirectFunctionCall1(int8out, maxValue));
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("RESTART value (%s) cannot be greater than MAXVALUE (%s)", bufs, bufm)));
+                errmsg("%s value (%s) cannot be greater than MAXVALUE (%s)", isStart? "START":"RESTART", bufs, bufm)));
     }
 }
 
@@ -2329,14 +2329,14 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
     ProcessSequenceOptStartWith<T_Form, T_Int, large>(elms[DEF_IDX_START_VALUE], newm, isInit);
 
     /* crosscheck START */
-    check_value_min_max<T_Int, large>(newm->start_value, newm->min_value, newm->max_value);
+    CheckValueMinMax<T_Int, large>(newm->start_value, newm->min_value, newm->max_value, true);
 
     ProcessSequenceOptReStartWith<T_Form, T_Int, large>(
         elms[DEF_IDX_RESTART_VALUE], newm, isInit, is_restart, isUseLocalSeq);
 
     if (isUseLocalSeq) {
         /* crosscheck RESTART (or current value, if changing MIN/MAX) */
-        check_value_min_max<T_Int, large>(newm->last_value, newm->min_value, newm->max_value);
+        CheckValueMinMax<T_Int, large>(newm->last_value, newm->min_value, newm->max_value, false);
     }
 
     ProcessSequenceOptCache<T_Form, T_Int, large>(
