@@ -662,8 +662,7 @@ HeapTuple heap_copytuple_impl(HeapTuple tuple)
     newTuple->t_xc_node_id = tuple->t_xc_node_id;
 #endif
     newTuple->t_data = (HeapTupleHeader)((char *)newTuple + HEAPTUPLESIZE);
-    rc = memcpy_s((char *)newTuple->t_data, tuple->t_len, (char *)tuple->t_data, tuple->t_len);
-    securec_check(rc, "\0", "\0");
+    memcpy((char *)newTuple->t_data, (char *)tuple->t_data, tuple->t_len);
     return newTuple;
 }
 
