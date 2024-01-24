@@ -1462,6 +1462,20 @@ bool FirstCallSinceLastCheckpoint(void)
     return FirstCall;
 }
 
+bool CheckpointInProgress(void)
+{
+    bool inProgress = false;
+    volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
+    SpinLockAcquire(&cps->ckpt_lck);
+    if (cps->ckpt_done != cps->ckpt_started) {
+        inProgress = true;
+    }
+    SpinLockRelease(&cps->ckpt_lck);
+    ereport(LOG, (errmsg("CheckpointInProgress: ckpt_done=%d, ckpt_started=%d",
+        cps->ckpt_done, cps->ckpt_started)));
+    return inProgress;
+}
+
 #ifdef ENABLE_MOT
 void RegisterCheckpointCallback(CheckpointCallback callback, void* arg)
 {

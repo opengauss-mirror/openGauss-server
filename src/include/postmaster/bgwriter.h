@@ -49,6 +49,7 @@ extern Size CheckpointerShmemSize(void);
 extern void CheckpointerShmemInit(void);
 
 extern bool FirstCallSinceLastCheckpoint(void);
+extern bool CheckpointInProgress(void);
 extern bool IsBgwriterProcess(void);
 
 /* incremental checkpoint bgwriter thread */

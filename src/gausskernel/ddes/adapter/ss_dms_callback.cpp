@@ -342,6 +342,28 @@ static int CBGetCurrModeAndLockBuffer(void *db_handle, int buffer, unsigned char
     return DMS_SUCCESS;
 }
 
+static inline void SSResetDemoteReqType(void)
+{
+    SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
+    t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
+    SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
+}
+
+static inline void SSHandleDemoteFailure(DemoteMode demote_mode)
+{
+    ereport(WARNING,
+        (errmodule(MOD_DMS),
+            errmsg("[SS switchover] Failure in %s primary demote, pmState=%d, need reform rcy.",
+                DemoteModeDesc(demote_mode), pmState)));
+
+    /* backends exiting, simply rollback */
+    if (pmState == PM_WAIT_BACKENDS) {
+        pmState = PM_RUN;
+    }
+    g_instance.demotion = NoDemote;
+    SSResetDemoteReqType();
+}
+
 static int CBSwitchoverDemote(void *db_handle)
 {
     DemoteMode demote_mode = FastDemote;
@@ -371,21 +393,14 @@ static int CBSwitchoverDemote(void *db_handle)
     const int WAIT_DEMOTE = 6000;  /* wait up to 10 min in case of too many dirty pages to be flushed */
     for (int ntries = 0;; ntries++) {
         if (pmState == PM_RUN && g_instance.dms_cxt.SSClusterState == NODESTATE_PROMOTE_APPROVE) {
-            SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
-            t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
-            SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
+            SSResetDemoteReqType();
             ereport(LOG,
                 (errmodule(MOD_DMS), errmsg("[SS switchover] Success in %s primary demote, running as standby,"
                     " waiting for reformer setting new role.", DemoteModeDesc(demote_mode))));
             return DMS_SUCCESS;
         } else {
             if (ntries >= WAIT_DEMOTE || dms_reform_failed()) {
-                SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
-                t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
-                SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
-                ereport(WARNING,
-                    (errmodule(MOD_DMS), errmsg("[SS switchover] Failure in %s primary demote, need reform recovery.",
-                        DemoteModeDesc(demote_mode))));
+                SSHandleDemoteFailure(demote_mode);
                 return DMS_ERROR;
             }
             ntries = 0;
@@ -1801,7 +1816,8 @@ static void FailoverCleanBackends()
     long max_wait_time = 30000000L;
     long wait_time = 0;
     while (true) {
-        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && g_instance.pid_cxt.StartupPID == 0) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && g_instance.pid_cxt.StartupPID == 0 &&
+            !CheckpointInProgress()) {
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] backends exit successfully")));
             break;
         }
