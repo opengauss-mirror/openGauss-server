@@ -965,6 +965,7 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_SCALAR_FIELD(use_star_targets);
     COMPARE_SCALAR_FIELD(is_from_full_join_rewrite);
     COMPARE_SCALAR_FIELD(can_push);
+    COMPARE_SCALAR_FIELD(is_dist_insertselect);
     COMPARE_SCALAR_FIELD(unique_check);
     COMPARE_NODE_FIELD(resultRelations);
     COMPARE_NODE_FIELD(withCheckOptions);
@@ -993,6 +994,7 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
     }
     COMPARE_NODE_FIELD(upsertClause);   
     COMPARE_SCALAR_FIELD(hasIgnore);
+    COMPARE_SCALAR_FIELD(is_dist_insertselect);
 
     return true;
 }
