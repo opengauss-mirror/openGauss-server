@@ -4269,7 +4269,7 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     READ_NODE_FIELD(remote_update_plans);
     READ_NODE_FIELD(remote_delete_plans);
 #endif
-    READ_BOOL_FILED(is_dist_insertselect);
+    READ_BOOL_FIELD(is_dist_insertselect);
     READ_NODE_FIELD(cacheEnt);
 
     IF_EXIST(mergeTargetRelation) {
