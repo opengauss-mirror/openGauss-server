@@ -114,6 +114,11 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
     ExprDoneCond is_done;
     TupleTableSlot* result_slot = NULL;
 
+#ifdef ENABLE_DFX_OPT
+    __builtin_prefetch(&node->ps);
+    __builtin_prefetch((char *)(&node->ps) + 64);
+#endif
+
     if (node->isPartTbl && !PointerIsValid(node->partitions))
         return NULL;
 
@@ -121,8 +126,8 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
      * Fetch data from node
      */
     qual = node->ps.qual;
-    proj_info = node->ps.ps_ProjInfo;
     econtext = node->ps.ps_ExprContext;
+    proj_info = node->ps.ps_ProjInfo;
 
     /*
      * If we have neither a qual to check nor a projection to do, just skip

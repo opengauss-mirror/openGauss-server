@@ -119,8 +119,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     TupleTableSlot* slot = NULL;
     TupleTableSlot* tmpslot = NULL;
     ItemPointer tid;
-    bool isVersionScan = node->ss.isVersionScan;
     bool isUHeap = false;
+    bool isVersionScan;
 
     /*
      * extract necessary information from index scan node
@@ -136,6 +136,7 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     }
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+    isVersionScan = node->ss.isVersionScan;
     scandesc = node->ioss_ScanDesc;
 #ifndef ENABLE_DFX_OPT
     isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);

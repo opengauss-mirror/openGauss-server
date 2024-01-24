@@ -1312,7 +1312,24 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
             return NULL;
         }
 
+#ifdef ENABLE_DFX_OPT
+        isNull = false;
+        if (!IndexTupleHasNulls(tuple)) {
+            FormData_pg_attribute* attr = &tupdesc->attrs[key->sk_attno - 1];
+            if (attr->attcacheoff >= 0)
+                datum = (fetchatt(attr,
+                        (char*)(tuple) + IndexInfoFindDataOffset((tuple)->t_info) + attr->attcacheoff));
+            else
+                datum = nocache_index_getattr((tuple), (key->sk_attno), (tupdesc));
+        } else {
+            if ((att_isnull((key->sk_attno)-1, (char*)(tuple) + sizeof(IndexTupleData))))
+                datum = (isNull = true, (Datum)NULL);
+            else
+                datum = nocache_index_getattr((tuple), (key->sk_attno), (tupdesc));
+        }
+#else
         datum = index_getattr(tuple, key->sk_attno, tupdesc, &isNull);
+#endif
 
         if (key->sk_flags & SK_ISNULL) {
             /* Handle IS NULL/NOT NULL tests */
