@@ -134,14 +134,16 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
         else if (ScanDirectionIsBackward(direction))
             direction = ForwardScanDirection;
     }
-    scandesc = node->ioss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+    scandesc = node->ioss_ScanDesc;
+#ifndef ENABLE_DFX_OPT
     isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);
     if (isUHeap) {
         tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scandesc->heapRelation),
         false, scandesc->heapRelation->rd_tam_ops);
     }
+#endif
     /*
      * OK, now that we have what we need, fetch the next tuple.
      */
@@ -237,8 +239,13 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
         /*
          * Fill the scan tuple slot with data from the index.
          */
+#ifdef ENABLE_DFX_OPT
+        (void)ExecClearTuple(slot);
+        index_deform_tuple(indexScan->xs_itup, indexScan->xs_itupdesc, slot->tts_values, slot->tts_isnull);
+        ExecStoreVirtualTuple(slot);
+#else
         StoreIndexTuple(slot, indexScan->xs_itup, indexScan->xs_itupdesc);
-
+#endif
         /*
          * If the index was lossy, we have to recheck the index quals.
          * (Currently, this can never happen, but we should support the case
