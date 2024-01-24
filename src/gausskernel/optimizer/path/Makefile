@@ -8,7 +8,6 @@
 subdir = src/gausskernel/optimizer/path
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
-$(info $(CPPFLAGS))
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"

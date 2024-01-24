@@ -90,7 +90,11 @@ VPATH += $(srcdir)/libstemmer
 NAME := dict_snowball
 rpath =
 
-all: all-shared-lib $(SQLSCRIPT)
+all: all-shared-lib $(SQLSCRIPT) objfiles.txt
+
+# generate snowball objfiles.txt to suspend duplicate make of gaussdb
+objfiles.txt: $(OBJS)
+	@echo "" > objfiles.txt
 
 include $(top_srcdir)/src/Makefile.shlib
 
@@ -150,4 +154,4 @@ uninstall: uninstall-lib
 	done
 
 clean distclean maintainer-clean: clean-lib
-	rm -f $(OBJS) $(SQLSCRIPT) *.depend
+	rm -f $(OBJS) $(SQLSCRIPT) *.depend objfiles.txt

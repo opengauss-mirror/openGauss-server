@@ -93,7 +93,7 @@ ecpg_kwlist_d.h: ecpg_kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --varname ScanECPGKeywords $<
 
 # Force these dependencies to be known even without dependency info built:
-ecpg_keywords.o c_keywords.o keywords.o preproc.o parser.o: preproc.hpp submake-kwlist
+ecpg_keywords.o c_keywords.o keywords.o preproc.o parser.o: preproc.hpp $(top_srcdir)/src/include/parser/kwlist_d.h
 ecpg_keywords.o: ecpg_kwlist_d.h
 c_keywords.o: c_kwlist_d.h
 keywords.o: $(top_srcdir)/src/include/parser/kwlist.h

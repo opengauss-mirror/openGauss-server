@@ -14,6 +14,17 @@ REGRESS = postgres_fdw
 # the db name is hard-coded in the tests
 override USE_MODULE_DB =
 
+all: objfiles.txt
+     
+ # generate postgres_fdw objfiles.txt to suspend duplicate make of gaussdb
+objfiles.txt: $(OBJS)
+	@echo "" > objfiles.txt
+
+objfiles_clean:
+	rm -f objfiles.txt
+
+clean: objfiles_clean
+
 ifdef USE_PGXS
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

@@ -75,6 +75,18 @@ isolationcheck-install-force: all | submake-isolation submake-mppdb_decoding
 	    --extra-install=contrib/mppdb_decoding \
 	    $(ISOLATIONCHECKS)
 
+
+all: objfiles.txt
+     
+ # generate mppdb_decoding objfiles.txt to suspend duplicate make of gaussdb
+objfiles.txt: $(OBJS)
+	@echo "" > objfiles.txt
+
+objfiles_clean:
+	rm -f objfiles.txt
+
+clean: objfiles_clean
+
 PHONY: submake-mppdb_decoding submake-regress check \
 	regresscheck regresscheck-install-force \
 	isolationcheck isolationcheck-install-force
