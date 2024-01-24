@@ -1055,8 +1055,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
      */
     for (i = 0; i < natts; ++i) {
         PrinttupAttrInfo *thisState = myState->myinfo + i;
-        if (thisState->format != 0)
+        if (thisState->format != 0) {
             binary = true;
+            break;
+        }
     }
 
     /*
@@ -1116,12 +1118,32 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 #endif
                 need_free = false;
                 switch (thisState->typoutput) {
-                    case F_INT4OUT: 
-                        outputstr = output_int32_to_cstring(DatumGetInt32(attr));
+                    case F_INT4OUT: {
+                        int length32 = 0;
+                        outputstr = output_int32_to_cstring(DatumGetInt32(attr), &length32);
+#ifndef ENABLE_MULTIPLE_NODES
+                        t_thrd.xact_cxt.callPrint = false;
+#endif
+                        pq_sendcountedtext_printtup(buf, outputstr, length32);
+                        if (need_free) {
+                            pfree(outputstr);
+                        }
+                        continue;
                         break;
-                    case F_INT8OUT:
-                        outputstr = output_int64_to_cstring(DatumGetInt64(attr));
+                    }
+                    case F_INT8OUT: {
+                        int length64 = 0;
+                        outputstr = output_int64_to_cstring(DatumGetInt64(attr), &length64);
+#ifndef ENABLE_MULTIPLE_NODES
+                        t_thrd.xact_cxt.callPrint = false;
+#endif
+                        pq_sendcountedtext_printtup(buf, outputstr, length64);
+                        if (need_free) {
+                            pfree(outputstr);
+                        }
+                        continue;
                         break;
+                    }
                     case F_BPCHAROUT: 
                         /* support dolphin customizing bpcharout */
                         if (u_sess->attr.attr_sql.dolphin) {

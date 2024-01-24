@@ -59,6 +59,31 @@ decimalLength32(const uint32 v)
     return t + (v >= PowersOfTen[t]);
 }
 
+static inline int
+decimalLength64(const uint64 v)
+{
+	int			t;
+	static const uint64 PowersOfTen[] = {
+		UINT64CONST(1), UINT64CONST(10),
+		UINT64CONST(100), UINT64CONST(1000),
+		UINT64CONST(10000), UINT64CONST(100000),
+		UINT64CONST(1000000), UINT64CONST(10000000),
+		UINT64CONST(100000000), UINT64CONST(1000000000),
+		UINT64CONST(10000000000), UINT64CONST(100000000000),
+		UINT64CONST(1000000000000), UINT64CONST(10000000000000),
+		UINT64CONST(100000000000000), UINT64CONST(1000000000000000),
+		UINT64CONST(10000000000000000), UINT64CONST(100000000000000000),
+		UINT64CONST(1000000000000000000), UINT64CONST(10000000000000000000)
+	};
+
+	/*
+	 * Compute base-10 logarithm by dividing the base-2 logarithm by a
+	 * good-enough approximation of the base-2 logarithm of 10
+	 */
+	t = (pg_leftmost_one_pos64(v) + 1) * 1233 / 4096;
+	return t + (v >= PowersOfTen[t]);
+}
+
 /*
  * pg_atoi: convert string to integer
  *
@@ -407,54 +432,62 @@ void pg_ltoa(int32 value, char* a)
     }
 }
 
-char* pg_ltoa2(int32 value)
+char *pg_ltoa2(int32 value, int *len)
 {
     u_sess->utils_cxt.int4output_buffer[0] = '\0';
-    char* a = u_sess->utils_cxt.int4output_buffer;
-    char* start = a;
-    bool neg = false;
-    errno_t ss_rc;
+    char *a = u_sess->utils_cxt.int4output_buffer;
+    int olength = 0, i = 0;
 
-    if (a == NULL)
-        return u_sess->utils_cxt.int4output_buffer;
-
-    /*
-     * Avoid problems with the most negative integer not being representable
-     * as a positive integer.
-     */
-    if (value == (-2147483647 - 1)) {
-        const int a_len = 12;
-        ss_rc = memcpy_s(a, a_len, "-2147483648", a_len);
-        securec_check(ss_rc, "\0", "\0");
-        return u_sess->utils_cxt.int4output_buffer;
-    } else if (value < 0) {
-        value = -value;
-        neg = true;
+    if (value < 0) {
+        value = 0 - value;
+        a[olength++] = '-';
     }
 
-    /* Compute the result string backwards. */
-    do {
-        int32 remainder;
-        int32 oldval = value;
-
-        value /= 10;
-        remainder = oldval - value * 10;
-        *a++ = '0' + remainder;
-    } while (value != 0);
-
-    if (neg)
-        *a++ = '-';
-
-    /* Add trailing NUL byte, and back up 'a' to the last character. */
-    *a-- = '\0';
-
-    /* Reverse string. */
-    while (start < a) {
-        char swap = *start;
-
-        *start++ = *a;
-        *a-- = swap;
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        *len = 1;
+        return u_sess->utils_cxt.int4output_buffer;
     }
+
+    olength = decimalLength32(value);
+
+    /* Compute the result string. */
+    while (value >= 10000) {
+        const uint32 c = value - 10000 * (value / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value /= 10000;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        i += 4;
+    }
+    if (value >= 100) {
+        const uint32 c = (value % 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value /= 100;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+        i += 2;
+    }
+    if (value >= 10) {
+        const uint32 c = value << 1;
+
+        char *pos = a + olength - i;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+    } else {
+        *a = (char)('0' + value);
+    }
+
+    *len = olength;
+    a[olength] = '\0';
 
     return u_sess->utils_cxt.int4output_buffer;
 }
@@ -514,55 +547,84 @@ void pg_lltoa(int64 value, char* a)
     }
 }
 
-char* pg_lltoa2(int64 value)
+char *pg_lltoa2(int64 value, int *len)
 {
     u_sess->utils_cxt.int8output_buffer[0] = '\0';
-    char* a = u_sess->utils_cxt.int8output_buffer;
-    char* start = a;
-    bool neg = false;
+    char *a = u_sess->utils_cxt.int8output_buffer;
+    int olength = 0, i = 0;
 
-    if (a == NULL) {
+    if (value < 0) {
+        value = 0 - value;
+        a[olength++] = '-';
+    }
+
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        *len = 1;
         return u_sess->utils_cxt.int8output_buffer;
     }
 
-    /*
-     * Avoid problems with the most negative integer not being representable
-     * as a positive integer.
-     */
-    if (value == (-INT64CONST(0x7FFFFFFFFFFFFFFF) - 1)) {
-        const int a_len = 21;
-        errno_t ss_rc = memcpy_s(a, a_len, "-9223372036854775808", a_len);
-        securec_check(ss_rc, "\0", "\0");
-        return u_sess->utils_cxt.int8output_buffer;
-    } else if (value < 0) {
-        value = -value;
-        neg = true;
+    olength = decimalLength64(value);
+
+    /* Compute the result string. */
+    while (value >= 100000000) {
+        const uint64 q = value / 100000000;
+        uint32 value2 = (uint32)(value - 100000000 * q);
+
+        const uint32 c = value2 % 10000;
+        const uint32 d = value2 / 10000;
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+        const uint32 d0 = (d % 100) << 1;
+        const uint32 d1 = (d / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value = q;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        memcpy(pos - 6, DIGIT_TABLE + d0, 2);
+        memcpy(pos - 8, DIGIT_TABLE + d1, 2);
+        i += 8;
     }
 
-    /* Compute the result string backwards. */
-    do {
-        int64 remainder;
-        int64 oldval = value;
+    /* Switch to 32-bit for speed */
+    uint32 value2 = (uint32)value;
 
-        value /= 10;
-        remainder = oldval - value * 10;
-        *a++ = '0' + remainder;
-    } while (value != 0);
+    if (value2 >= 10000) {
+        const uint32 c = value2 - 10000 * (value2 / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
 
-    if (neg) {
-        *a++ = '-';
+        char *pos = a + olength - i;
+
+        value2 /= 10000;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        i += 4;
     }
+    if (value2 >= 100) {
+        const uint32 c = (value2 % 100) << 1;
+        char *pos = a + olength - i;
 
-    /* Add trailing NUL byte, and back up 'a' to the last character. */
-    *a-- = '\0';
+        value2 /= 100;
 
-    /* Reverse string. */
-    while (start < a) {
-        char swap = *start;
-
-        *start++ = *a;
-        *a-- = swap;
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+        i += 2;
     }
+    if (value2 >= 10) {
+        const uint32 c = value2 << 1;
+        char *pos = a + olength - i;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+    } else
+        *a = (char)('0' + value2);
+
+    *len = olength;
+    a[olength] = '\0';
 
     return u_sess->utils_cxt.int8output_buffer;
 }

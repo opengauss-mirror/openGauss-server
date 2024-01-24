@@ -1901,9 +1901,18 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             List* rowMarks = NIL;
             Relation mainRel = NULL;
             Oid taleOid = rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->relid;
-            bool partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
+            bool partKeyUpdated;
+            bool isPartitioned;
+
             mainRel = RelationIdGetRelation(taleOid);
+            isPartitioned = RELATION_IS_PARTITIONED(mainRel);
             RelationClose(mainRel);
+
+            if (isPartitioned) {
+                partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
+            } else {
+                partKeyUpdated = false;
+            }
 
             /*
              * Set up the WITH CHECK OPTION and RETURNING lists-of-lists, if
