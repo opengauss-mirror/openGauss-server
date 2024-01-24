@@ -1120,7 +1120,11 @@ bool _bt_next(IndexScanDesc scan, ScanDirection dir)
      * step to the next page with data.
      */
     if (ScanDirectionIsForward(dir)) {
-        if (++so->currPos.itemIndex > so->currPos.lastItem) {
+#ifdef ENABLE_DFX_OPT
+        __builtin_prefetch(&scan->xs_ctup);
+        __builtin_prefetch(&so->currPos.items[++so->currPos.itemIndex]);
+#endif
+        if (so->currPos.itemIndex > so->currPos.lastItem) {
             /* We must acquire lock before applying _bt_steppage */
             Assert(BufferIsValid(so->currPos.buf));
             LockBuffer(so->currPos.buf, BT_READ);

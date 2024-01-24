@@ -649,6 +649,10 @@ ItemPointer scan_handler_idx_getnext_tid(IndexScanDesc scan, ScanDirection direc
 {
     Assert(scan != NULL);
 
+#ifdef ENABLE_DFX_OPT
+    __builtin_prefetch(&scan->indexRelation->rd_aminfo->amgettuple);
+#endif
+
     if (unlikely(RELATION_OWN_BUCKET(scan->indexRelation))) {
         return hbkt_idx_getnext_tid(scan, direction, bktchg);
     } else {

@@ -484,6 +484,7 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
     bool found = false;
 
     SCAN_CHECKS;
+
     GET_SCAN_PROCEDURE(amgettuple);
 
     Assert(TransactionIdIsValid(u_sess->utils_cxt.RecentGlobalXmin));
@@ -504,7 +505,7 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
     scan->kill_prior_tuple = false;
 
     /* If we're out of index entries, we're done */
-    if (!found) {
+    if (unlikely(!found)) {
         /* Release resources (like buffer pins) from table accesses */
         if (scan->xs_heapfetch)
             tableam_scan_index_fetch_reset(scan->xs_heapfetch);
