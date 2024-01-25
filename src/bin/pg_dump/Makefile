@@ -67,7 +67,7 @@ COMMON_OBJS = $(top_builddir)/src/lib/elog/elog.a
 EXTRA_OBJS =  $(top_builddir)/src/gausskernel/cbb/utils/aes/aes.o
 KEYWRDOBJS = keywords.o kwlookup.o
 
-keywords.o: submake-kwlist
+keywords.o: $(top_srcdir)/src/include/parser/kwlist_d.h
 
 kwlookup.cpp: % : $(top_srcdir)/src/common/backend/parser/%
 	rm -f $@ && $(LN_S) $< .

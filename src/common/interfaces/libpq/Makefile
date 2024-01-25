@@ -32,6 +32,7 @@ endif
 
 ifeq "$(ENABLE_CE)" "1"
 override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
+override CPPFLAGS += -I"$(JAVA_HOME)/include" -I"$(JAVA_HOME)/include/linux" 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)
     override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
@@ -174,14 +175,20 @@ subsystem:
 #libpq.a: subsystem  all-lib
 
 ifneq "$(ENABLE_CE)" "1"
-all-lib-depends: frontend_parser_basic
+all-lib-depends: frontend_parser_basic $(OBJS)
 	$(MAKE) all-lib
+all: all-lib-depends | nce_objfiles.txt
+nce_objfiles.txt: $(OBJS)
+	echo "" > nce_objfiles.txt
+	@if [ -e ce_objfiles.txt ]; then echo "echo "" > objfiles.txt" && echo "" > objfiles.txt; fi
 else
-all-lib-depends: gs_ktool libpq_ce subsystem
+all-lib-depends: gs_ktool libpq_ce subsystem $(OBJS)
 	$(MAKE) all-lib
+all: all-lib-depends | ce_objfiles.txt
+ce_objfiles.txt: $(OBJS)
+	echo "" > ce_objfiles.txt
+	@if [ -e nce_objfiles.txt ]; then echo "echo "" > objfiles.txt" && echo "" > objfiles.txt; fi
 endif
-
-all: all-lib-depends
 
 utlibpq: all-lib
 	cp libpq.so $(top_builddir)/../distribute/test/ut/lib/libutlibpq.so
@@ -258,6 +265,7 @@ clean distclean: clean-lib
 	rm -f $(OBJS) pthread.h libpq.rc
 # Might be left over from a Win32 client-only build
 	rm -f pg_config_paths.h
+	rm -f ce_objfiles.txt nce_objfiles.txt objfiles.txt
 	rm -f inet_net_ntop.cpp noblock.cpp pgstrcasecmp.cpp thread.cpp cipher.cpp path.cpp
 	rm -f chklocale.cpp crypt.cpp getaddrinfo.cpp getpeereid.cpp inet_aton.cpp open.cpp snprintf.cpp strerror.cpp strlcpy.cpp win32error.cpp win32setlocale.cpp
 	rm -f pgsleep.cpp
