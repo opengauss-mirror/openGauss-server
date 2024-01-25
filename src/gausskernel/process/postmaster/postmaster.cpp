@@ -302,6 +302,7 @@ static bool isNeedGetLCName = true;
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
 #define CHECK_TIMES 10
+#define InvalidPid ((ThreadId)(-1))
 
 static char gaussdb_state_file[MAXPGPATH] = {0};
 static char AddMemberFile[MAXPGPATH] = {0};
@@ -410,6 +411,7 @@ static int initPollfd(struct pollfd* ufds);
 static void report_fork_failure_to_client(Port* port, int errnum, const char* specialErrorInfo = NULL);
 void signal_child(ThreadId pid, int signal, int be_mode = -1);
 static bool SignalSomeChildren(int signal, int targets);
+static bool SignalSpecialChildren(int signal, int target, ThreadId pid);
 
 static bool IsChannelAdapt(Port* port, ReplConnInfo* repl);
 static bool IsLocalPort(Port* port);
@@ -8899,17 +8901,22 @@ void signal_child(ThreadId pid, int signal, int be_mode)
 }
 
 /*
- * Send a signal to the targeted children (but NOT special children;
- * dead_end children are never signaled, either).
+ * Send a signal to the special children;
+ * And we should not care about dead_end children.
+ * This function is also a sub entry for 'SignalSomeChildren'.
  */
-static bool SignalSomeChildren(int signal, int target)
-{
+static bool SignalSpecialChildren(int signal, int target, ThreadId pid) {
     Dlelem* curr = NULL;
     bool signaled = false;
 
     for (curr = DLGetHead(g_instance.backend_list); curr; curr = DLGetSucc(curr)) {
         Backend* bp = (Backend*)DLE_VAL(curr);
         int child = BACKEND_TYPE_ALL;
+
+        /* if we want to shut special pid */
+        if (pid != InvalidPid && bp->pid != pid) {
+            continue;
+        }
 
         /*
          * we want to know the type of this backend thread, so
@@ -8946,6 +8953,15 @@ static bool SignalSomeChildren(int signal, int target)
     }
 
     return signaled;
+}
+
+/*
+ * Send a signal to the targeted children (but NOT special children;
+ * dead_end children are never signaled, either).
+ */
+static bool SignalSomeChildren(int signal, int target)
+{
+    return SignalSpecialChildren(signal, target, InvalidPid);
 }
 
 bool SignalCancelAllBackEnd()
@@ -13307,6 +13323,15 @@ static void check_and_reset_ha_listen_port(void)
 
         if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == OLD_REPL_CHANGE_IP_OR_PORT ||
             t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j]) {
+            /* now we should shut the WalSender which connection changed */
+            for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+                volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+
+                if (walsnd->pid == 0 || walsnd->channel_get_replc != j) {
+                    continue;
+                }
+                SignalSpecialChildren(SIGTERM, BACKEND_TYPE_WALSND, walsnd->pid);
+            }
             needToRestart = true;
             refreshListenSocket = true;
         }
@@ -13335,7 +13360,6 @@ static void check_and_reset_ha_listen_port(void)
 
     if (needToRestart) {
         /* send SIGTERM to end process senders and receiver */
-        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_WALSND);
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_DATASND);
         if (g_instance.pid_cxt.WalRcvWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalRcvWriterPID, SIGTERM);
