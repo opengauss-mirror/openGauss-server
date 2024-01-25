@@ -2921,6 +2921,7 @@ typedef struct knl_u_hook_context {
     void *pluginMultiResExceptionHook;
     void *getTypeZeroValueHook;
     void *deparseQueryHook;
+    void *checkSqlFnRetvalHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
