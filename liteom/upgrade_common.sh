@@ -693,7 +693,7 @@ function stop_dbnode() {
 }
 
 function start_dbnode() {
-  start_cmd="gs_ctl start  -D ${PGDATA} "
+  start_cmd="gs_ctl start  -D ${PGDATA} -t 600 "
   if [[ X"$dn_role" = X ]]; then
     return 1
   fi
