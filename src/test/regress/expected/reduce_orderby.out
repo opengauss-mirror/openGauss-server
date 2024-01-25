@@ -213,6 +213,66 @@ explain (costs off) select t1.a from reduce_orderby_t1 t1 where t1.b in (select 
 --drop table
 drop table reduce_orderby_t1;
 drop table reduce_orderby_t2;
+CREATE TABLE orders (user_id int, order_id int, order_date date, quantity int, revenue float, product text);
+INSERT INTO orders VALUES
+(1, 1, '2021-03-05', 1, 15, 'books'),
+(1, 2, '2022-03-07', 1, 3, 'music'),
+(1, 3, '2022-06-15', 1, 900, 'travel'),
+(1, 4, '2021-11-17', 2, 25, 'books'),
+(2, 5, '2022-08-03', 2, 32, 'books'),
+(2, 6, '2021-04-12', 2, 4, 'music'),
+(2, 7, '2021-06-29', 3, 9, 'books'),
+(2, 8, '2022-11-03', 1, 8, 'music'),
+(3, 9, '2022-11-07', 1, 575, 'food'),
+(3, 10, '2022-11-20', 2, 95, 'food'),
+(3, 11, '2022-11-20', 1, 95, 'food'),
+(4, 12, '2022-11-20', 2, 95, 'books'),
+(4, 13, '2022-11-21', 1, 95, 'food'),
+(4, 14, '2022-11-23', 4, 17, 'books'),
+(5, 15, '2022-11-20', 1, 95, 'food'),
+(5, 16, '2022-11-25', 2, 95, 'books'),
+(5, 17, '2022-11-29', 1, 95, 'food');
+explain (costs off) SELECT avg(o.quantity) AS avg_quantity,
+sum(o.revenue) AS total_revenue
+FROM (
+SELECT DISTINCT ON (user_id)
+user_id, product
+FROM orders
+ORDER BY user_id, order_date
+) init
+JOIN orders o USING (user_id, product)
+WHERE init.product = 'books';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         Join Filter: (init.user_id = o.user_id)
+         ->  Subquery Scan on init
+               Filter: (init.product = 'books'::text)
+               ->  Unique
+                     ->  Sort
+                           Sort Key: orders.user_id, orders.order_date
+                           ->  Seq Scan on orders
+         ->  Seq Scan on orders o
+               Filter: (product = 'books'::text)
+(11 rows)
+
+SELECT avg(o.quantity) AS avg_quantity,
+sum(o.revenue) AS total_revenue
+FROM (
+SELECT DISTINCT ON (user_id)
+user_id, product
+FROM orders
+ORDER BY user_id, order_date
+) init
+JOIN orders o USING (user_id, product)
+WHERE init.product = 'books';
+    avg_quantity    | total_revenue 
+--------------------+---------------
+ 2.2500000000000000 |           152
+(1 row)
+
+drop table orders;
 --drop schema
 reset current_schema;
 drop schema reduce_orderby cascade;

@@ -2202,7 +2202,8 @@ static void reduce_orderby_final(RangeTblEntry* rte, bool reduce)
 {
     /* Reduce orderby clause in subquery for join or from clause of more than one rte */
     if (rte->rtekind == RTE_SUBQUERY) {
-        if (reduce && rte->subquery->sortClause && !rte->subquery->limitOffset && !rte->subquery->limitCount) {
+        if (reduce && rte->subquery->sortClause && !rte->subquery->limitOffset
+            && !rte->subquery->limitCount && !rte->subquery->hasDistinctOn) {
             pfree_ext(rte->subquery->sortClause);
             rte->subquery->sortClause = NULL;
         }
