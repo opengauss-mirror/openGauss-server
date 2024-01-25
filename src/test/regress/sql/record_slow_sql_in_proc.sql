@@ -25,8 +25,8 @@ call test_slow_sql();
 -- record slow sql
 set track_stmt_stat_level = 'OFF,L1';
 call test_slow_sql();
-call pg_sleep(0.1);
-select query, query_plan, is_slow_sql from statement_history where query_plan is not null order by start_time;
+call pg_sleep(0.2);
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
 set track_stmt_stat_level = 'L1,L1';
@@ -40,7 +40,7 @@ INSERT INTO big_table (column1, column2) SELECT generate_series(1, 10000), 'data
 end;
 /
 call test_exec_plsql();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -53,7 +53,7 @@ PERFORM pg_sleep(0.1);
 END;
 /
 call test_exec_perform();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -67,7 +67,7 @@ RETURN QUERY SELECT column1, column2 FROM big_table WHERE column1 = 9909 ORDER B
 END;
 $$;
 call test_return_query();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -88,7 +88,7 @@ CLOSE cur;
 END;
 /
 call test_exec_open();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -104,7 +104,7 @@ END LOOP;
 END;
 /
 call test_exec_fors();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -122,7 +122,7 @@ END LOOP;
 END;
 /
 call test_exec_forc();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -137,7 +137,7 @@ EXECUTE sql_stmt;
 END;
 /
 call test_exec_dynexecsql(1);
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -155,7 +155,7 @@ END LOOP;
 END;
 /
 call test_exec_dynfors();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;
 
@@ -178,6 +178,6 @@ proc_pkg();
 end test_proc_in_pkg;
 /
 select test_proc_in_pkg.proc_pkg();
-call pg_sleep(0.1);
+call pg_sleep(0.2);
 select query, query_plan from statement_history where parent_query_id != 0 order by start_time;
 delete from statement_history;

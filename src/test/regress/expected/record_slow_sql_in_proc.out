@@ -36,36 +36,28 @@ call test_slow_sql();
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
 (1 row)
 
-select query, query_plan, is_slow_sql from statement_history where query_plan is not null order by start_time;
-         query         |                            query_plan                            | is_slow_sql 
------------------------+------------------------------------------------------------------+-------------
- call test_slow_sql(); | Datanode Name: datanode1                                        +| t
-                       | Function Scan on test_slow_sql  (cost=0.25..0.26 rows=1 width=4)+| 
-                       |                                                                 +| 
-                       |                                                                  | 
- SELECT ?              | Datanode Name: datanode1                                        +| f
-                       | Result  (cost=0.00..0.01 rows=1 width=0)                        +| 
-                       |                                                                 +| 
-                       |                                                                  | 
- SELECT pg_sleep(?)    | Datanode Name: datanode1                                        +| t
-                       | Result  (cost=0.00..0.01 rows=1 width=0)                        +| 
-                       |                                                                 +| 
-                       |                                                                  | 
- call test_slow_sql(); | Datanode Name: datanode1                                        +| t
-                       | Function Scan on test_slow_sql  (cost=0.25..0.26 rows=1 width=4)+| 
-                       |                                                                 +| 
-                       |                                                                  | 
- SELECT pg_sleep(?)    | Datanode Name: datanode1                                        +| t
-                       | Result  (cost=0.00..0.01 rows=1 width=0)                        +| 
-                       |                                                                 +| 
-                       |                                                                  | 
-(5 rows)
+select query, query_plan, is_slow_sql from statement_history where parent_query_id != 0 order by start_time;
+       query        |                query_plan                | is_slow_sql 
+--------------------+------------------------------------------+-------------
+ SELECT ?           | Datanode Name: datanode1                +| f
+                    | Result  (cost=0.00..0.01 rows=1 width=0)+| 
+                    |                                         +| 
+                    |                                          | 
+ SELECT pg_sleep(?) | Datanode Name: datanode1                +| t
+                    | Result  (cost=0.00..0.01 rows=1 width=0)+| 
+                    |                                         +| 
+                    |                                          | 
+ SELECT pg_sleep(?) | Datanode Name: datanode1                +| t
+                    | Result  (cost=0.00..0.01 rows=1 width=0)+| 
+                    |                                         +| 
+                    |                                          | 
+(3 rows)
 
 delete from statement_history;
 set track_stmt_stat_level = 'L1,L1';
@@ -83,7 +75,7 @@ call test_exec_plsql();
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -114,7 +106,7 @@ call test_exec_perform();
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -145,7 +137,7 @@ call test_return_query();
     9909 | data9909
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -185,7 +177,7 @@ NOTICE:  id: 9909, name: data9909
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -220,7 +212,7 @@ NOTICE:  column_value: data9909
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -257,7 +249,7 @@ NOTICE:  (9909)
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -290,7 +282,7 @@ call test_exec_dynexecsql(1);
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -326,7 +318,7 @@ NOTICE:  column_value: data9909
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
@@ -368,7 +360,7 @@ referenced column: proc_pkg
  
 (1 row)
 
-call pg_sleep(0.1);
+call pg_sleep(0.2);
  pg_sleep 
 ----------
  
