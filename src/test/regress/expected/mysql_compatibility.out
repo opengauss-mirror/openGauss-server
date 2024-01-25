@@ -842,6 +842,45 @@ begin
 perform @plg := @plg + 1 from t_plg;
 end;
 $$;
+-- bugfix for in plpgsql
+prepare stmtabv as select 123;
+CREATE OR REPLACE PROCEDURE pppabc (id text) as 
+begin
+ set @abcttt = concat('select ' , id );
+ DEALLOCATE prepare stmtabv;
+ prepare stmtabv as @abcttt;
+end;
+/
+execute stmtabv;
+ ?column? 
+----------
+      123
+(1 row)
+
+call pppabc(12334);
+ pppabc 
+--------
+ 
+(1 row)
+
+execute stmtabv;
+ ?column? 
+----------
+    12334
+(1 row)
+
+call pppabc(123345);
+ pppabc 
+--------
+ 
+(1 row)
+
+execute stmtabv;
+ ?column? 
+----------
+   123345
+(1 row)
+
 --test in where 
 CREATE TABLE employee (
    id int ,

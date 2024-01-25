@@ -134,6 +134,60 @@ void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Quer
     }
 }
 #endif
+/*
+ * User_defined variables is a string in prepareStmt.
+ * Get selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt from user_defined variables by pg_parse_query.
+ * Then, execute SQL: PREPARE stmt AS selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt.
+ */
+static void QueryRewritePrepareStmt(Node* parsetree)
+{
+    char *sqlstr = NULL;
+    List* raw_parsetree_list = NIL;
+    PrepareStmt *stmt = (PrepareStmt *)parsetree;
+    ParseState* state = make_parsestate(NULL);
+    UserVar *uservar = (UserVar *)transformExpr(state, (Node *)stmt->query, EXPR_KIND_EXECUTE_PARAMETER);
+    free_parsestate(state);
+    Const* value = (Const *)uservar->value;
+
+    if (value->consttype != TEXTOID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("userdefined variable in prepare statement must be text type.")));
+    }
+    if (value->constvalue == (Datum)0) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
+    }
+
+    sqlstr = TextDatumGetCString(value->constvalue);
+
+    raw_parsetree_list = pg_parse_query(sqlstr);
+    if (raw_parsetree_list == NIL) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
+    }
+
+    if (raw_parsetree_list->length != 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("prepare user_defined variable can contain only one SQL statement.")));
+    }
+
+    switch (nodeTag(linitial(raw_parsetree_list))) {
+        case T_SelectStmt:
+        case T_InsertStmt:
+        case T_UpdateStmt:
+        case T_DeleteStmt:
+        case T_MergeStmt:
+            stmt->query = (Node *)copyObject((Node *)linitial(raw_parsetree_list));
+            break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("the statement in prepare is not supported.")));
+            break;
+    }
+
+    return ;
+}
 
 /*
  * Implements the 'PREPARE' utility statement.
@@ -155,6 +209,9 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PSTATEMENT_DEFINITION), errmsg("invalid statement name: must not be empty")));
 
+    if (IsA(stmt->query, UserVar)) {
+        QueryRewritePrepareStmt((Node*)stmt);
+    }
     /*
      * Create the CachedPlanSource before we do parse analysis, since it needs
      * to see the unmodified raw parse tree.

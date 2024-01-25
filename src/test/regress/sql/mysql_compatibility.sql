@@ -250,6 +250,25 @@ begin
 perform @plg := @plg + 1 from t_plg;
 end;
 $$;
+-- bugfix for in plpgsql
+prepare stmtabv as select 123;
+CREATE OR REPLACE PROCEDURE pppabc (id text) as 
+begin
+ set @abcttt = concat('select ' , id );
+ DEALLOCATE prepare stmtabv;
+ prepare stmtabv as @abcttt;
+end;
+/
+
+execute stmtabv;
+
+call pppabc(12334);
+
+execute stmtabv;
+
+call pppabc(123345);
+
+execute stmtabv;
 
 --test in where 
 CREATE TABLE employee (
