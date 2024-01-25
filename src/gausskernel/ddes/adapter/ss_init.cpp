@@ -368,8 +368,10 @@ static void SetWorkThreadpoolConfig(dms_profile_t *profile)
         return;
     }
 
+    char* replStr = NULL;
+    replStr = pstrdup(attr);
+    profile->mes_task_worker_max_cnt = (unsigned int)pg_strtoint32(replStr);
     profile->enable_mes_task_threadpool = true;
-    profile->mes_task_worker_max_cnt = g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt;
 }
 
 static void setDMSProfile(dms_profile_t* profile)

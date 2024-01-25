@@ -439,6 +439,7 @@ void InitProcGlobal(void)
                 size_t size = NUM_DMS_CALLBACK_PROCS * sizeof(bool);
                 g_instance.dms_cxt.SSFakeSessionCxt.fake_sessions = 
                     (bool*)CACHELINEALIGN(palloc0(size + PG_CACHE_LINE_SIZE));
+                g_instance.dms_cxt.SSFakeSessionCxt.fake_session_cnt = NUM_DMS_CALLBACK_PROCS;
             }
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
                    g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + NUM_CMAGENT_PROCS + \

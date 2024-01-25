@@ -242,6 +242,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
         ss_fake_seesion_context_t *fs_cxt = &g_instance.dms_cxt.SSFakeSessionCxt;
         SpinLockInit(&fs_cxt->lock);
         fs_cxt->fake_sessions = NULL;
+        fs_cxt->fake_session_cnt = 0;
         fs_cxt->quickFetchIndex = 0;
         fs_cxt->session_start = 0;
     }

@@ -36,6 +36,7 @@
 typedef struct st_ss_fake_seesion_context {
     slock_t lock;
     bool *fake_sessions;
+    uint32 fake_session_cnt;
     uint32 quickFetchIndex;
     uint32 session_start;
 } ss_fake_seesion_context_t;
