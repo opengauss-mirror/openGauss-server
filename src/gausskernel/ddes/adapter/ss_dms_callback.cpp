@@ -969,7 +969,7 @@ static void *CBGetHandle(unsigned int *db_handle_index, dms_session_type_e sessi
         int index = fs_cxt->quickFetchIndex;
         fs_cxt->fake_sessions[index] = true;
         fs_cxt->quickFetchIndex++;
-        if (fs_cxt->quickFetchIndex >= NUM_DMS_CALLBACK_PROCS) {
+        if (fs_cxt->quickFetchIndex >= fs_cxt->fake_session_cnt) {
             fs_cxt->quickFetchIndex = 0;
         }
         SpinLockRelease(&fs_cxt->lock);
@@ -980,8 +980,8 @@ static void *CBGetHandle(unsigned int *db_handle_index, dms_session_type_e sessi
     int start_index = fs_cxt->quickFetchIndex;
     int cur_index = 0;
     bool found = false;
-    for (int i = 0; i < NUM_DMS_CALLBACK_PROCS; i++) {
-        cur_index = (start_index + i) % NUM_DMS_CALLBACK_PROCS;
+    for (int i = 0; i < fs_cxt->fake_session_cnt; i++) {
+        cur_index = (start_index + i) % fs_cxt->fake_session_cnt;
         if (!fs_cxt->fake_sessions[cur_index]) {
             found = true;
             break;
@@ -994,7 +994,7 @@ static void *CBGetHandle(unsigned int *db_handle_index, dms_session_type_e sessi
     }
 
     fs_cxt->quickFetchIndex = cur_index + 1;
-    if (fs_cxt->quickFetchIndex >= NUM_DMS_CALLBACK_PROCS) {
+    if (fs_cxt->quickFetchIndex >= fs_cxt->fake_session_cnt) {
        fs_cxt->quickFetchIndex = 0;
     }
     SpinLockRelease(&fs_cxt->lock);
