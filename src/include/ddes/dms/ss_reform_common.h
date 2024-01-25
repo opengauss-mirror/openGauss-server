@@ -55,3 +55,4 @@ void SSStandbySetLibpqswConninfo();
 void SSDisasterRefreshMode();
 void SSDisasterUpdateHAmode();
 bool SSPerformingStandbyScenario();
+void SSGrantDSSWritePermission(void);

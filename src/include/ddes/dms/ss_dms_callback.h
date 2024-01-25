@@ -31,6 +31,7 @@
 #define REFORM_CONFIRM_INTERVAL 5000
 #define GET_US(tv) ((int64)tv.tv_sec * 1000000U + tv.tv_usec)
 #define DMS_LOGGER_BUFFER_SIZE 2048
+#define REFORM_START_CLEAN_TICKS 100
 
 typedef struct st_ss_fake_seesion_context {
     slock_t lock;
