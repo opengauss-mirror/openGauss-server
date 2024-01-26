@@ -14827,6 +14827,9 @@ Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS)
         case BUILD_NORMAL:
             values[i++] = CStringGetTextDatum("BUILD_NORMAL");
             break;
+        case READY_TO_BUILD:
+            values[i++] = CStringGetTextDatum("READY_TO_BUILD");
+            break;
         case BUILD_TO_DISABLED:
             values[i++] = CStringGetTextDatum("BUILD_TO_DISABLED");
             break;
