@@ -1379,7 +1379,7 @@ XLogRecPtr XLogInsertRecord(XLogRecData *rdata, XLogRecPtr fpw_lsn)
      */
     XLogRecord *rechdr = (XLogRecord *)rdata->data;
     bool isLogSwitch = (rechdr->xl_rmid == RM_XLOG_ID && rechdr->xl_info == XLOG_SWITCH);
-    if (isLogSwitch) {
+    if (isLogSwitch || !u_sess->attr.attr_storage.enable_xlog_insert_record_group) {
         return XLogInsertRecordSingle(rdata, fpw_lsn);
     } else {
         return XLogInsertRecordGroup(rdata, fpw_lsn);

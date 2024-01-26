@@ -1865,6 +1865,20 @@ static void InitConfigureNamesBool()
 	        NULL,
 	        NULL,
 	        NULL},
+        {{
+            "enable_xlog_insert_record_group",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable xlog insert record group, More-friendly to high-concurrency queries"),
+            NULL
+            },
+            &u_sess->attr.attr_storage.enable_xlog_insert_record_group,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"enable_ts_outorder",
             PGC_SIGHUP,
 	        NODE_DISTRIBUTE,
