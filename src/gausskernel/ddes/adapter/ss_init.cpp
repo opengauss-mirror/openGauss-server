@@ -524,12 +524,12 @@ void DMSUninit()
         return;
     }
 
-    ereport(LOG, (errmsg("dms xmin maintainer thread exit")));
-    signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
-
     g_instance.dms_cxt.dmsInited = false;
     ereport(LOG, (errmsg("DMS uninit worker threads, DRC, errdesc and DL")));
     dms_uninit();
+
+    ereport(LOG, (errmsg("dms xmin maintainer thread exit")));
+    signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
 }
 
 // order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)
