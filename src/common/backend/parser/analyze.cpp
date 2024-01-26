@@ -128,6 +128,7 @@ static void CheckDeleteRelation(Relation targetrel);
 static void CheckUpdateRelation(Relation targetrel);
 static void transformVariableSetValueStmt(ParseState* pstate, VariableSetStmt* stmt);
 static bool ContainColStoreWalker(Node* node, Oid targetOid);
+static bool ContainAStoreWalker(Node* node, Oid targetOid);
 #ifdef PGXC
 static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt);
 static bool IsExecDirectUtilityStmt(const Node* node);
@@ -5378,6 +5379,55 @@ static bool ContainColStoreWalker(Node* node, Oid targetOid)
     return expression_tree_walker(node, (bool (*)())ContainColStoreWalker, (void*)ptrOid);
 }
 
+static bool CheckViewBasedOnAstore(Relation targetrel)
+{
+    Assert(RelationIsView(targetrel));
+
+    Query* viewquery = get_view_query(targetrel);
+    ListCell* l = NULL;
+    foreach (l, viewquery->rtable) {
+        Node* rte = (Node*)lfirst(l);
+        if (ContainAStoreWalker(rte, targetrel->rd_id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ContainAStoreWalker(Node* node, Oid targetOid)
+{
+    if (node == NULL) {
+        return false;
+    }
+    uintptr_t ptrOid = (uintptr_t)targetOid;
+
+    if (IsA(node, RangeTblEntry)) {
+        RangeTblEntry* rte = (RangeTblEntry*)node;
+        if ((rte->rtekind != RTE_RELATION)) {
+            List* rtable = list_make1(node);
+            return range_table_walker(rtable, (bool (*)())ContainAStoreWalker, (void*)ptrOid, 0);
+        }
+        Assert(OidIsValid(rte->relid));
+        if (rte->relid == targetOid) {
+            return false;
+        }
+        Relation rel = relation_open(rte->relid, AccessShareLock);
+        if (!RelationIsValid(rel)) {
+            return false;
+        }
+        if (RelationIsAstoreFormat(rel) || (RelationIsView(rel) && CheckViewBasedOnAstore(rel))) {
+            relation_close(rel, AccessShareLock);
+            return true;
+        }
+        relation_close(rel, AccessShareLock);
+        return false;
+    }
+    if (IsA(node, Query)) {
+        return query_tree_walker((Query*)node, (bool (*)())ContainAStoreWalker, (void*)ptrOid, QTW_EXAMINE_RTES);
+    }
+    return expression_tree_walker(node, (bool (*)())ContainAStoreWalker, (void*)ptrOid);
+}
+
 /*
  * Transform a FOR [KEY] UPDATE/SHARE clause
  *
@@ -5447,7 +5497,8 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                 errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
                                        "view \"%s\" based on column table", rte->eref->aliasname)));
                     } else {
-                        if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
+                        if (!(RelationIsView(rel) && CheckViewBasedOnAstore(rel)) &&
+                            !RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE with skip locked "
@@ -5520,7 +5571,8 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                                " column table", NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
                                         parser_errposition(pstate, thisrel->location)));
                             } else {
-                                if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
+                                if (!(RelationIsView(rel) && CheckViewBasedOnAstore(rel)) &&
+                                    !RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
                                     ereport(ERROR,
                                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                             errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE with skip locked "
