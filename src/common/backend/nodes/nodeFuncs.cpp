@@ -3443,6 +3443,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             return p2walker(((CommonTableExpr*)node)->ctequery, context);
         case T_AutoIncrement:
             return p2walker(((AutoIncrement*)node)->expr, context);
+        case T_UserVar:
+            /* @var do not need recursion */
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
