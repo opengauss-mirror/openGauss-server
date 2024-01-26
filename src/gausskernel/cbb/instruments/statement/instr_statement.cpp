@@ -887,7 +887,6 @@ static void FlushAllStatement()
 
 static void StatementFlush()
 {
-    const int flush_usleep_interval = 100000;
     int count = 0;
     bool is_readonly_log_needed = false;
 
@@ -899,7 +898,7 @@ static void StatementFlush()
                 ereport(WARNING, (errmodule(MOD_INSTR),
                     errmsg("[Statement] cannot flush suspend list to statement_history in a read-only transaction")));
             }
-            pg_usleep(flush_usleep_interval);
+            pg_usleep(FLUSH_USLEEP_INTERVAL);
             continue;
         }
         if (is_readonly_log_needed) {
@@ -919,7 +918,7 @@ static void StatementFlush()
         /* report statement_history state to pgstat */
         if (OidIsValid(u_sess->proc_cxt.MyDatabaseId))
             pgstat_report_stat(true);
-        pg_usleep(flush_usleep_interval);
+        pg_usleep(FLUSH_USLEEP_INTERVAL);
     }
 }
 
