@@ -37,6 +37,8 @@ extern void sql_fn_replace(struct ParseState* pstate, SQLFunctionParseInfoPtr pi
 
 extern bool check_sql_fn_retval(Oid func_id, Oid rettype, List* queryTreeList, bool* modifyTargetList,
     JunkFilter** junkFilter, bool plpgsql_validation = false);
+typedef bool (*checkSqlFnRetval)(Oid func_id, Oid rettype, List* queryTreeList, bool* modifyTargetList,
+    JunkFilter** junkFilter, bool plpgsql_validation);
 
 extern DestReceiver* CreateSQLFunctionDestReceiver(void);
 
