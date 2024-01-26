@@ -51,6 +51,7 @@
 #include "utils/plog.h"
 #include "threadpool/threadpool.h"
 #include "instruments/instr_user.h"
+#include "instruments/instr_statement.h"
 #include "utils/postinit.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
@@ -166,6 +167,15 @@ void proc_exit(int code)
             // if some threads call DmsCallbackThreadShmemInit, wait until they finish
             pg_usleep(WAIT_DMS_INIT_TIMEOUT);
         }
+    }
+
+    /* Wait for all statements that have not been flushed to complete flushing.
+     * The flush usleep wait interval is 100,000 microseconds,
+     * therefore we set it here to 300,000 microseconds for a safe margin.
+     */
+    if (u_sess->statement_cxt.suspend_count != 0) {
+        int flushWaitInterval = 3 * FLUSH_USLEEP_INTERVAL;
+        pg_usleep(flushWaitInterval);
     }
 
     if (t_thrd.utils_cxt.backend_reserved) {
