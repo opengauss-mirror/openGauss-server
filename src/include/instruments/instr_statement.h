@@ -162,7 +162,7 @@ struct StatementDetail {
 #define STATEMENT_DETAIL_TYPE_PRETTY "pretty"
 
 #define Anum_statement_history_finish_time 12
-
+#define FLUSH_USLEEP_INTERVAL 100000
 /* entry for full/slow sql stat */
 typedef struct StatementStatContext {
     void *next;             /* next item if in free or suspend list */
