@@ -189,3 +189,20 @@ ERROR:  name no such label found
 drop table tab;
 reset current_schema;
 drop schema create_resource CASCADE;
+-- roach function
+select gs_roach_stop_backup('test');
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_stop_backup
+CONTEXT:  referenced column: gs_roach_stop_backup
+select gs_roach_switch_xlog(false);
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_switch_xlog
+CONTEXT:  referenced column: gs_roach_switch_xlog
+select gs_roach_enable_delay_ddl_recycle('test');
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_enable_delay_ddl_recycle
+CONTEXT:  referenced column: gs_roach_enable_delay_ddl_recycle
+select gs_roach_disable_delay_ddl_recycle('test');
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_disable_delay_ddl_recycle
+CONTEXT:  referenced column: gs_roach_disable_delay_ddl_recycle

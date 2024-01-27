@@ -113,3 +113,9 @@ alter resource label name add column(tab.a);
 drop table tab;
 reset current_schema;
 drop schema create_resource CASCADE;
+
+-- roach function
+select gs_roach_stop_backup('test');
+select gs_roach_switch_xlog(false);
+select gs_roach_enable_delay_ddl_recycle('test');
+select gs_roach_disable_delay_ddl_recycle('test');

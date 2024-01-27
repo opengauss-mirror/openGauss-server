@@ -319,6 +319,10 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
  */
 Datum gs_roach_stop_backup(PG_FUNCTION_ARGS)
 {
+#ifndef ROACH_COMMON
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-supported feature"),
+                    errdetail("unsupported function: gs_roach_stop_backup")));
+#endif
     text *backupid = PG_GETARG_TEXT_P(0);
     char *backupidstr = NULL;
     XLogRecPtr stoppoint;
@@ -378,6 +382,10 @@ Datum pg_switch_xlog(PG_FUNCTION_ARGS)
  */
 Datum gs_roach_switch_xlog(PG_FUNCTION_ARGS)
 {
+#ifndef ROACH_COMMON
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-supported feature"),
+                    errdetail("unsupported function: gs_roach_switch_xlog")));
+#endif
     bool request_ckpt = PG_GETARG_BOOL(0);
 
     XLogRecPtr switchpoint;
@@ -991,6 +999,10 @@ Datum pg_disable_delay_ddl_recycle(PG_FUNCTION_ARGS)
 
 Datum gs_roach_enable_delay_ddl_recycle(PG_FUNCTION_ARGS)
 {
+#ifndef ROACH_COMMON
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-supported feature"),
+                        errdetail("unsupported function: gs_roach_enable_delay_ddl_recycle")));
+#endif
     Name name = PG_GETARG_NAME(0);
     XLogRecPtr start_lsn;
     char location[MAXFNAMELEN];
@@ -1010,6 +1022,10 @@ Datum gs_roach_enable_delay_ddl_recycle(PG_FUNCTION_ARGS)
 
 Datum gs_roach_disable_delay_ddl_recycle(PG_FUNCTION_ARGS)
 {
+#ifndef ROACH_COMMON
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-supported feature"),
+                    errdetail("unsupported function: gs_roach_disable_delay_ddl_recycle")));
+#endif
     Name name = PG_GETARG_NAME(0);
     XLogRecPtr start_lsn;
     XLogRecPtr end_lsn;
