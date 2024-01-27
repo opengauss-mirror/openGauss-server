@@ -41,6 +41,7 @@
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
 #include "utils/builtins.h"
+#include "utils/bytea.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -5235,7 +5236,24 @@ Node* QueryRewriteNonConstant(Node *node)
     /* deparse the SQL statement from the subquery. */
     deparse_query(cparsetree, select_sql, NIL, false, false);
 
-    StmtResult *result = execute_stmt(select_sql->data, true);
+    StmtResult *result = NULL;
+    if (u_sess->attr.attr_sql.dolphin) {
+        int origin = u_sess->attr.attr_common.bytea_output;
+        u_sess->attr.attr_common.bytea_output = BYTEA_OUTPUT_HEX;
+        PG_TRY();
+        {
+            result = execute_stmt(select_sql->data, true);
+        }
+        PG_CATCH();
+        {
+            u_sess->attr.attr_common.bytea_output = origin;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+        u_sess->attr.attr_common.bytea_output = origin;
+    } else {
+        result = execute_stmt(select_sql->data, true);
+    }
 
     DestroyStringInfo(select_sql);
 
