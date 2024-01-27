@@ -795,6 +795,9 @@ static void heapgettup(HeapScanDesc scan, ScanDirection dir, int nkeys, ScanKey 
     int lines_left;
     ItemId lpp;
 
+    /* record the bulk read direction */
+    scan->bulk_scan_direction = dir;
+
     if (tuple != NULL) {
         Assert(TUPLE_IS_HEAP_TUPLE(tuple));
     }

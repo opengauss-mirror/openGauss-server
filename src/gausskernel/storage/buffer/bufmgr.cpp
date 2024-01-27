@@ -2331,7 +2331,8 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
 
     maxBulkCount = Min(paramNum, maxBulkCount);
 
-    if (firstBlockNum == P_NEW || maxBulkCount <= 1 || mode != RBM_NORMAL || ENABLE_DSS) {
+    if (firstBlockNum == P_NEW || maxBulkCount <= 1 || mode != RBM_NORMAL || IsSegmentFileNode(smgr->smgr_rnode.node) 
+        || IS_COMPRESSED_MAINFORK(smgr, forkNum) || ENABLE_DSS) {
         /* If dont have qualify to pre-read (PS: including DSS)*/
         return ReadBuffer_common(smgr, relpersistence, forkNum, firstBlockNum, mode, strategy, hit, pblk);
     }
