@@ -469,6 +469,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     if (u_sess->SPI_cxt._connected >= 0) {
         u_sess->pcache_cxt.cur_stmt_name = NULL;
     }
+    instr_stmt_report_query_plan(queryDesc);
     exec_explain_plan(queryDesc);
     if (u_sess->attr.attr_resource.use_workload_manager &&
         u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && 
@@ -530,7 +531,6 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
         }
     }
     print_duration(queryDesc);
-    instr_stmt_report_query_plan(queryDesc);
     instr_stmt_report_cause_type(queryDesc->plannedstmt->cause_type);
 
     /* sql active feature, opeartor history statistics */

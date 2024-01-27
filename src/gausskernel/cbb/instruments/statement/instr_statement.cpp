@@ -2136,6 +2136,10 @@ void instr_stmt_report_stat_at_handle_init()
     CURRENT_STMT_METRIC_HANDLE->level =
         (StatLevel)Max(u_sess->statement_cxt.statement_level[0], u_sess->statement_cxt.statement_level[1]);
 
+    /* unit: microseconds */
+    CURRENT_STMT_METRIC_HANDLE->slow_query_threshold =
+        (int64)u_sess->attr.attr_storage.log_min_duration_statement * 1000;
+
     /* fill basic information */
     instr_stmt_report_basic_info();
 
@@ -2162,11 +2166,6 @@ void instr_stmt_report_stat_at_handle_commit()
     MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
     CURRENT_STMT_METRIC_HANDLE->schema_name = pstrdup(u_sess->attr.attr_common.namespace_search_path);
     CURRENT_STMT_METRIC_HANDLE->application_name = pstrdup(u_sess->attr.attr_common.application_name);
-
-    /* unit: microseconds */
-    CURRENT_STMT_METRIC_HANDLE->slow_query_threshold =
-        (int64)u_sess->attr.attr_storage.log_min_duration_statement * 1000;
-
     CURRENT_STMT_METRIC_HANDLE->tid = t_thrd.proc_cxt.MyProcPid;
 
     /* sql from remote node */
@@ -2236,13 +2235,51 @@ void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
     }
 }
 
+static inline bool instr_stmt_level_fullsql_open()
+{
+    int fullsql_level = u_sess->statement_cxt.statement_level[0];
+    /* only record query plan when level >= L1 */
+    return fullsql_level >= STMT_TRACK_L1 && fullsql_level <= STMT_TRACK_L2;
+}
+
+static inline bool instr_stmt_level_slowsql_only_open()
+{
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->slow_query_threshold < 0) {
+        return false;
+    }
+
+    int slowsql_level = u_sess->statement_cxt.statement_level[1];
+    /* only record query plan when level >= L1 */
+    return slowsql_level >= STMT_TRACK_L1 && slowsql_level <= STMT_TRACK_L2;
+}
+
+static inline bool instr_stmt_is_slowsql()
+{
+    if (CURRENT_STMT_METRIC_HANDLE->slow_query_threshold == 0) {
+        return true;
+    }
+    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
+    if (ssctx->query_plan != NULL) {
+        return false;
+    }
+    TimestampTz cur_time = GetCurrentTimestamp();
+    int64 start_time = (int64)ssctx->start_time;
+    int64 elapse_time = (int64)(cur_time - start_time);
+
+    return CURRENT_STMT_METRIC_HANDLE->slow_query_threshold <= elapse_time;
+}
+
 bool instr_stmt_need_track_plan()
 {
-    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->level <= STMT_TRACK_L0 ||
-        CURRENT_STMT_METRIC_HANDLE->level > STMT_TRACK_L2)
+    if (CURRENT_STMT_METRIC_HANDLE == NULL) {
         return false;
+    }
 
-    return true;
+    if (instr_stmt_level_fullsql_open() || (instr_stmt_level_slowsql_only_open() && instr_stmt_is_slowsql())) {
+        return true;
+    }
+
+    return false;
 }
 
 void instr_stmt_report_query_plan(QueryDesc *queryDesc)
