@@ -173,7 +173,6 @@ frontend_parser_basic:
 subsystem: 
 	$(foreach DIR,$(SUBDIRS),make ENABLE_CE=1 -C $(DIR); )
 #libpq.a: subsystem  all-lib
-
 ifneq "$(ENABLE_CE)" "1"
 all-lib-depends: frontend_parser_basic $(OBJS)
 	$(MAKE) all-lib
@@ -182,6 +181,7 @@ nce_objfiles.txt: $(OBJS)
 	echo "" > nce_objfiles.txt
 	@if [ -e ce_objfiles.txt ]; then echo "echo "" > objfiles.txt" && echo "" > objfiles.txt; fi
 else
+$(OBJS): libpq_ce
 all-lib-depends: gs_ktool libpq_ce subsystem $(OBJS)
 	$(MAKE) all-lib
 all: all-lib-depends | ce_objfiles.txt
