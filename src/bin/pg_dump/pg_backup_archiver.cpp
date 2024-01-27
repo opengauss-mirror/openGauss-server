@@ -923,10 +923,11 @@ static int restore_toc_entry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ro
                          * TRUNCATE with ONLY so that child tables are not
                          * wiped.
                          */
-                        (void)ahprintf(AH,
-                            "TRUNCATE TABLE %s%s;\n\n",
-                            (PQserverVersion(AH->connection) >= 80400 ? "ONLY " : ""),
-                            fmtId(te->tag));
+                        if (PQserverVersion(AH->connection) >= 80400) {
+                            (void)ahprintf(AH, "TRUNCATE TABLE ONLY (%s);\n\n", fmtId(te->tag));
+                        } else {
+                            (void)ahprintf(AH, "TRUNCATE TABLE %s;\n\n", fmtId(te->tag));
+                        }
                     }
 
                     /*

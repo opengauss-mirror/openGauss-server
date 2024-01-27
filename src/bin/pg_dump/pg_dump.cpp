@@ -2782,7 +2782,7 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
         /*syntax changed from CURSOR declaration */
         appendPQExpBuffer(q,
             "CURSOR _pg_dump_cursor FOR "
-            "SELECT * FROM ONLY %s",
+            "SELECT * FROM ONLY (%s)",
             fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname));
     } else {
         appendPQExpBuffer(q,
@@ -20655,9 +20655,9 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
         if (tbinfo->relreplident == REPLICA_IDENTITY_INDEX) {
             /* nothing to do, will be set when the index is dumped */
         } else if (tbinfo->relreplident == REPLICA_IDENTITY_NOTHING) {
-            appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY NOTHING;\n", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY NOTHING;\n", fmtId(tbinfo->dobj.name));
         } else if (tbinfo->relreplident == REPLICA_IDENTITY_FULL) {
-            appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY FULL;\n", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY FULL;\n", fmtId(tbinfo->dobj.name));
         }
     }
 
@@ -20926,7 +20926,7 @@ static void dumpIndex(Archive* fout, IndxInfo* indxinfo)
         }
         /* If the index is clustered, we need to record that. */
         if (indxinfo->indisreplident) {
-            appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY USING", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY USING", fmtId(tbinfo->dobj.name));
             appendPQExpBuffer(q, " INDEX %s;\n", fmtId(indxinfo->dobj.name));
         }
 

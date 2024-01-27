@@ -167,14 +167,16 @@ frontend_parser/gram.hpp:
 frontend_parser/parser.o frontend_parser/kwlookup.o:frontend_parser/gram.hpp
 
 
-frontend_parser_basic:
+frontend_parser/fe-wchar.o: frontend_parser/fe-wchar.cpp
+frontend_parser/fe-wchar.cpp: $(backenddir)/utils/mb/wchar.cpp
 	make fe-wchar.cpp -C frontend_parser
 
 subsystem: 
 	$(foreach DIR,$(SUBDIRS),make ENABLE_CE=1 -C $(DIR); )
 #libpq.a: subsystem  all-lib
 ifneq "$(ENABLE_CE)" "1"
-all-lib-depends: frontend_parser_basic $(OBJS)
+# objs contains frontend_parser/fe-wchar.cpp
+all-lib-depends: $(OBJS)
 	$(MAKE) all-lib
 all: all-lib-depends | nce_objfiles.txt
 nce_objfiles.txt: $(OBJS)
