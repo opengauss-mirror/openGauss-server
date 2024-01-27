@@ -111,6 +111,8 @@ test: segment_subpartition_vacuum_partition segment_subpartition_select_1
 
 test: get_instr_unique_sql
 
+test: test_case_subselect
+
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
 # interferes with crash-recovery testing.
