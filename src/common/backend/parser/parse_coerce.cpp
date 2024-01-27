@@ -255,6 +255,9 @@ Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, 
  */
 Node *type_transfer(Node *node, Oid atttypid, bool isSelect)
 {
+    if (u_sess->hook_cxt.typeTransfer != NULL) {
+        return ((typeTransfer)(u_sess->hook_cxt.typeTransfer))(node, atttypid, isSelect);
+    }
     Node *result = NULL;
     Const *con = (Const *)node;
     if (con->constisnull) {
