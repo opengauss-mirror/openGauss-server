@@ -1055,7 +1055,6 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     bool old_running_in_fmgr = t_thrd.codegen_cxt.g_runningInFmgr;
     t_thrd.codegen_cxt.g_runningInFmgr = true;
     bool need_snapshot = !ActiveSnapshotSet();
-    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
 #ifdef ENABLE_MULTIPLE_NODES
     bool outer_is_stream = false;
@@ -1215,7 +1214,6 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
             pushed_snapshot = true;
         }
 
-        t_thrd.postgres_cxt.cur_command_tag = es->qd->operation == CMD_SELECT ? T_SelectStmt : T_CreateStmt;
         completed = postquel_getnext(es, fcache);
         /*
          * If we ran the command to completion, we can shut it down now. Any
@@ -1416,7 +1414,6 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     u_sess->opt_cxt.query_dop = outerDop;
 #endif
     t_thrd.codegen_cxt.g_runningInFmgr = old_running_in_fmgr;
-    t_thrd.postgres_cxt.cur_command_tag  = old_node_tag;
     return result;
 }
 
