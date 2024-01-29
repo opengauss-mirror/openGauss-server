@@ -1937,6 +1937,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         sub_pstate->p_resolve_unknowns = false;
 
         selectQuery = transformStmt(sub_pstate, stmt->selectStmt);
+        selectQuery->hasIgnore = stmt->hasIgnore;
         Assert(selectQuery != NULL);
 
         free_parsestate(sub_pstate);
