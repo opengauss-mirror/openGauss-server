@@ -238,8 +238,8 @@ select count(1) from pg_catalog.pg_total_autovac_tuples(true);
 (1 row)
 
 select * from pg_autovac_status('autovac_test.test_part'::regclass);
-   nspname    |  relname  |   nodename   | doanalyze | anltuples | anlthresh | dovacuum | vactuples | vacthresh 
---------------+-----------+--------------+-----------+-----------+-----------+----------+-----------+-----------
+   nspname    |  relname  | nodename  | doanalyze | anltuples | anlthresh | dovacuum | vactuples | vacthresh 
+--------------+-----------+-----------+-----------+-----------+-----------+----------+-----------+-----------
 --?.*
 (1 row)
 

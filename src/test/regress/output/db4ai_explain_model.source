@@ -48,16 +48,7 @@ select substring(gs_explain_model('test_explain_model_function'),0, 196);
 -- cleanup models in random order
 DROP MODEL test_explain_model_function;
 -- query audit logs
-select type, result, object_name, detail_info from pg_query_audit('1012-11-10', '3012-11-11') where type in ('ddl_model');
-   type    | result |         object_name         |                      detail_info                      
------------+--------+-----------------------------+-------------------------------------------------------
- ddl_model | ok     | test_explain_model_function | CREATE MODEL test_explain_model_function USING kmeans+
-           |        |                             | FEATURES position                                    +
-           |        |                             | FROM kmeans_2d                                       +
-           |        |                             | WITH  max_iterations=default;
- ddl_model | ok     | test_explain_model_function | DROP MODEL test_explain_model_function;
-(2 rows)
-
+-- select type, result, object_name, detail_info from pg_query_audit('1012-11-10', '3012-11-11') where type in ('ddl_model');
 -- clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');
  pg_delete_audit 

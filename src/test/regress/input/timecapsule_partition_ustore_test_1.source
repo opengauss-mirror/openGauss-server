@@ -1,4 +1,7 @@
 --新增看护用例
+CREATE DATABASE timecapsule_partition_ustore_test_1;
+\c timecapsule_partition_ustore_test_1
+
 set enable_default_ustore_table = on;
 
 show undo_retention_time;
@@ -293,3 +296,7 @@ drop function if exists findTime;
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1
 
 set enable_default_ustore_table = off;
+
+-- end
+\c regression
+DROP DATABASE IF EXISTS timecapsule_partition_ustore_test_1;

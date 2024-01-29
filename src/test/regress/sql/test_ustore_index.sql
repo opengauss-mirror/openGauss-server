@@ -1,3 +1,5 @@
+CREATE SCHEMA test_ustore_index;
+SET current_schema = test_ustore_index;
 set ustore_attr='ustore_verify_level=slow;ustore_verify_module=all';
 set enable_seqscan to false;
 set enable_indexonlyscan to true;
@@ -189,7 +191,7 @@ select a from t where a < 10;
 set enable_indexscan = off;
 
 set enable_indexonlyscan = on;
-explain select a from t where a < 10;
+explain (costs off) select a from t where a < 10;
 select a from t where a < 10;
 set enable_indexonlyscan = off;
 rollback;
@@ -288,3 +290,5 @@ reset enable_indexscan;
 reset enable_indexonlyscan;
 reset enable_seqscan;
 reset enable_bitmapscan;
+-- end
+DROP SCHEMA test_ustore_index cascade;

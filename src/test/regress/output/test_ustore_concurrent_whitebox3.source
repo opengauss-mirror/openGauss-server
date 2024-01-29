@@ -3,7 +3,7 @@ create table toasttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testin
 \! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast3a
 \! echo "UHEAP_TOAST_DELETE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast3a
 \! echo "UHEAP_TOAST_INSERT_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast3a
-set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheaptoast3a';
+set ustore_attr to 'ustore_unit_test=@abs_srcdir@/concurrent_uheaptoast3a';
 -- case 3a: concurrent toast updates; first update faster than second update
 truncate table toasttest;
 insert into toasttest values (30, 50, repeat('x', 100000000));

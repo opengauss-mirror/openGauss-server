@@ -1,4 +1,6 @@
 -- test update
+CREATE SCHEMA test_ustore_update;
+SET current_schema = test_ustore_update;
 drop table if exists t1;
 create table t1(c1 integer, c2 integer default 200) with (storage_type=USTORE);
 create index idx1 on t1(c1);
@@ -102,3 +104,5 @@ drop table t3;
 drop table t4;
 drop table t5;
 drop table t6;
+-- end
+DROP SCHEMA test_ustore_update cascade;

@@ -119,7 +119,7 @@ select '[ , ]'::textrange;
 (1 row)
 
 select '["",""]'::textrange;
-ERROR:  rangetypes.cpp : 2123 : The parameter destMax is equal to zero or larger than the macro : SECUREC_STRING_MAX_LEN.
+ERROR:  rangetypes.cpp : 2188 : The parameter destMax is equal to zero or larger than the macro : SECUREC_STRING_MAX_LEN.
 LINE 1: select '["",""]'::textrange;
                ^
 CONTEXT:  referenced column: textrange

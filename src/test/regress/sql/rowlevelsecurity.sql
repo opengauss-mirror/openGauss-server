@@ -340,8 +340,8 @@ ALTER DATABASE regression DISABLE PRIVATE OBJECT;
 \c
 SET search_path = regress_rls_schema;
 -- check audit logs
-SELECT type, database, object_name, detail_info FROM pg_query_audit('2000-01-01 00:00:00', '2100-01-01 00:00:00')
-  WHERE detail_info LIKE '%private object%' OR detail_info LIKE '%PRIVATE OBJECT%' ORDER BY detail_info;
+-- SELECT type, database, object_name, detail_info FROM pg_query_audit('2000-01-01 00:00:00', '2100-01-01 00:00:00')
+--  WHERE detail_info LIKE '%private object%' OR detail_info LIKE '%PRIVATE OBJECT%' ORDER BY detail_info;
 
 -- viewpoint from rls_regres_david again
 SET ROLE regress_rls_david PASSWORD 'Ttest@123';

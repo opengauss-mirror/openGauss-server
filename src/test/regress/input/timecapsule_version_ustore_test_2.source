@@ -125,10 +125,12 @@ create table tv_cities (
     altitude        int
 );
 drop table if exists tv_cities;
+create table cities ( id int4, name varchar(50) );
 create table tv_capitals (
     state           char(2)
 ) inherits (cities);
 drop table if exists tv_capitals;
+drop table if exists cities;
 
 
 drop table if exists tv_lineitem;

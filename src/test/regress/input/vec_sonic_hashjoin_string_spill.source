@@ -1,0 +1,161 @@
+-- To guarantee that all the tests (except for cound(*))
+-- are spilt or respilt, we had better to execute explain performance first.
+-- However, this will cost much longer time.
+-- Thus, we constructed those spill cases offline to avoid explain performance here.
+-- When any memory related modification committed,
+-- please make sure all the cases are still spilt or respilt
+-- by playing explain performance per case.
+
+-- Prepare Data
+CREATE SCHEMA sonic_hashjoin_test_string_spill;
+SET current_schema = sonic_hashjoin_test_string_spill;
+
+-- table with 10,000 rows
+CREATE TABLE sonic_hashjoin_test_string_spill.VEC_HASHJOIN_TABLE_STRING_01(
+ C_INT INT,					--0 serial number from 1
+ C_BIGINT BIGINT,			--1 big int positive or negative
+ C_SMALLINT SMALLINT,		--2 small int positive or negative
+ C_CHAR_1 CHAR,				--3 one char (store as dict in charDatumArray, NO NULL)
+ C_CHAR_2 CHAR(1),			--4 sex (store as dict in charDatumArray, HAS NULL)
+ C_CHAR_3 CHAR(10),			--5 only a-z (store as char in charDatumArray, NO NULL)
+ C_CHAR_4 CHAR(100),		--6 simple chinese (store as char in charDatumArray, NO NULL)
+ C_BPCHAR_1 BPCHAR,			--7 c_char_1 + c_char_3 (encodingDatumArray, NO NULL)
+ C_BPCHAR_2 BPCHAR(10),		--8 date (store as char in charDatumArray, HAS NULL)
+ C_VARCHAR_1 VARCHAR,		--9 simple chinese (encodingDatumArray, NO NULL)
+ C_VARCHAR_2 VARCHAR(20),	--10 date (encodingDatumArray, HAS NULL)
+ C_TEXT text,				--11 rare chinese +  random char + simple chinese (encodingDatumArray, NO NULL)
+ C_CHAR_5 CHAR(4),			--12 rare chinese (store as dict in charDatumArray, HAS NULL)
+ C_CHAR_6 CHAR(20),			--13 rare chinese (store as char in charDatumArray, HAS NULL)
+ C_VARCHAR_3 VARCHAR		--14 rare chinese (store as encodingDatumArray, HAS NULL)
+ --C_NAME name /not supported by column table
+ --notice: those stored in charDatumArray when simple, will store in encodingDatumArray when as key
+ ) with (orientation=column);
+
+-- table with 3,000 rows
+CREATE TABLE sonic_hashjoin_test_string_spill.VEC_HASHJOIN_TABLE_STRING_02(
+ C_INT INT,
+ C_BIGINT BIGINT,
+ C_SMALLINT SMALLINT,
+ C_CHAR_1 CHAR,
+ C_CHAR_2 CHAR(1),
+ C_CHAR_3 CHAR(10),
+ C_CHAR_4 CHAR(100),
+ C_BPCHAR_1 BPCHAR,
+ C_BPCHAR_2 BPCHAR(10),
+ C_VARCHAR_1 VARCHAR,
+ C_VARCHAR_2 VARCHAR(20),
+ C_TEXT text,
+ C_CHAR_5 CHAR(4),
+ C_CHAR_6 CHAR(20),
+ C_VARCHAR_3 VARCHAR
+ --C_NAME name /not supported by column table
+ ) WITH (orientation=column);
+
+-- table with 10,000 rows and all C_INT is same
+CREATE TABLE sonic_hashjoin_test_string_spill.VEC_HASHJOIN_TABLE_STRING_03(
+ C_INT INT,
+ C_BIGINT BIGINT,
+ C_SMALLINT SMALLINT,
+ C_CHAR_1 CHAR,
+ C_CHAR_2 CHAR(1),
+ C_CHAR_3 CHAR(10),
+ C_CHAR_4 CHAR(100),
+ C_BPCHAR_1 BPCHAR,
+ C_BPCHAR_2 BPCHAR(10),
+ C_VARCHAR_1 VARCHAR,
+ C_VARCHAR_2 VARCHAR(20),
+ C_TEXT text,
+ C_CHAR_5 CHAR(4),
+ C_CHAR_6 CHAR(20),
+ C_VARCHAR_3 VARCHAR
+ ) WITH (orientation=column);
+
+COPY VEC_HASHJOIN_TABLE_STRING_01 FROM '@abs_srcdir@/data/vec_sonic_hashjoin_string_1.data' DELIMITER AS '|';
+COPY VEC_HASHJOIN_TABLE_STRING_02 FROM '@abs_srcdir@/data/vec_sonic_hashjoin_string_2.data' DELIMITER AS '|';
+COPY VEC_HASHJOIN_TABLE_STRING_03 FROM '@abs_srcdir@/data/vec_sonic_hashjoin_string_3.data' DELIMITER AS '|';
+
+analyze VEC_HASHJOIN_TABLE_STRING_01;
+analyze VEC_HASHJOIN_TABLE_STRING_02;
+analyze VEC_HASHJOIN_TABLE_STRING_03;
+
+
+SET enable_nestloop to off;
+SET enable_mergejoin to off;
+SET enable_hashjoin to on;
+SET enable_sonic_hashjoin to on;
+SET query_mem = 0;
+SHOW enable_sonic_hashjoin;
+SET explain_perf_mode=pretty;
+
+-- TEST SPILL
+--- test data number of single DN > 64K
+SELECT COUNT(*) FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_01 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT;
+
+SET work_mem = '28MB';
+SELECT * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_01 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT
+ORDER BY 1,2,3,4,5,6,7,8,9,10,11 LIMIT 100;
+
+SET work_mem = '30MB';
+SELECT * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_01 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT AND
+A.C_CHAR_1 = B.C_CHAR_1 AND A.C_CHAR_2 = B.C_CHAR_2 AND A.C_CHAR_3 = B.C_CHAR_3 AND A.C_CHAR_4 = B.C_CHAR_4 AND
+A.C_BPCHAR_1 = B.C_BPCHAR_1 AND A.C_BPCHAR_2 = B.C_BPCHAR_2 AND
+A.C_VARCHAR_1 = B.C_VARCHAR_1 AND A.C_VARCHAR_2 = B.C_VARCHAR_2 AND A.C_TEXT = B.C_TEXT
+ORDER BY 1,2,3,4,5,6,7,8,9,10,11 LIMIT 100;
+
+SELECT COUNT(*) FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_01 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT AND
+A.C_CHAR_1 = B.C_CHAR_1 AND A.C_CHAR_2 = B.C_CHAR_2 AND A.C_CHAR_3 = B.C_CHAR_3 AND A.C_CHAR_4 = B.C_CHAR_4 AND
+A.C_BPCHAR_1 = B.C_BPCHAR_1 AND A.C_BPCHAR_2 = B.C_BPCHAR_2 AND
+A.C_VARCHAR_1 = B.C_VARCHAR_1 AND A.C_VARCHAR_2 = B.C_VARCHAR_2 AND A.C_TEXT = B.C_TEXT;
+
+SET work_mem = '28MB';
+--test complicate join key
+SELECT * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_01 B ON
+A.C_INT + 5 = B.C_INT AND substring(A.C_BPCHAR_1 FROM 1 FOR 1) = left(B.C_CHAR_1, 1)
+WHERE A.C_BPCHAR_2 IS NOT NULL AND A.C_INT > 1000 AND A.C_INT < 2000
+ORDER BY 1,2,3,4,5,6,7,8,9,10,11;
+
+-- TEST RESPILL
+SET work_mem = 3700;
+-- test data number of single DN > 16K
+SELECT COUNT(*) FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_02 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT;
+
+SELECT * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_02 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT
+ORDER BY 1,2,3,4,5,6,7,8,9,10,11 LIMIT 100;
+
+SET work_mem = 2400;
+SELECT * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_02 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT AND
+A.C_CHAR_1 = B.C_CHAR_1 AND A.C_CHAR_2 = B.C_CHAR_2 AND A.C_CHAR_3 = B.C_CHAR_3 AND A.C_CHAR_4 = B.C_CHAR_4 AND
+A.C_BPCHAR_1 = B.C_BPCHAR_1 AND A.C_BPCHAR_2 = B.C_BPCHAR_2 AND
+A.C_VARCHAR_1 = B.C_VARCHAR_1 AND A.C_VARCHAR_2 = B.C_VARCHAR_2 AND A.C_TEXT = B.C_TEXT
+ORDER BY 1,2,3,4,5,6,7,8,9,10,11 LIMIT 100;
+
+SELECT COUNT(*) FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_02 B ON
+A.C_INT = B.C_INT AND A.C_BIGINT = B.C_BIGINT AND A.C_SMALLINT = B.C_SMALLINT AND
+A.C_CHAR_1 = B.C_CHAR_1 AND A.C_CHAR_2 = B.C_CHAR_2 AND A.C_CHAR_3 = B.C_CHAR_3 AND A.C_CHAR_4 = B.C_CHAR_4 AND
+A.C_BPCHAR_1 = B.C_BPCHAR_1 AND A.C_BPCHAR_2 = B.C_BPCHAR_2 AND
+A.C_VARCHAR_1 = B.C_VARCHAR_1 AND A.C_VARCHAR_2 = B.C_VARCHAR_2 AND A.C_TEXT = B.C_TEXT;
+
+--test complicate join key
+SET work_mem = 3700;
+SELECT * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_02 B ON
+A.C_INT + 5 = B.C_INT AND substring(A.C_BPCHAR_1 FROM 1 FOR 1) = left(B.C_CHAR_1, 1)
+WHERE A.C_BPCHAR_2 IS NOT NULL AND A.C_INT > 1000 AND A.C_INT < 2000
+ORDER BY 1,2,3,4,5,6,7,8,9,10,11;
+
+-- test data number of one build side partition > 64k
+-- set work_mem='2MB';
+-- SELECT /*+ leading ((A B))*/ * FROM VEC_HASHJOIN_TABLE_STRING_01 A INNER JOIN VEC_HASHJOIN_TABLE_STRING_03 B ON
+-- A.C_INT = B.C_INT ORDER BY 1,2,3,4,5,6,7,8,9,10,11 LIMIT 100;
+
+RESET query_mem;
+RESET work_mem;
+
+-- end
+DROP SCHEMA sonic_hashjoin_test_string_spill cascade;

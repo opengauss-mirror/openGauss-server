@@ -1,3 +1,5 @@
+create database copy_error_log;
+\c copy_error_log;
 --case 1: test basic copy error log
 drop table if exists copy_create_err_tab_001_01;
 create table copy_create_err_tab_001_01
@@ -137,3 +139,5 @@ encoding 'utf8');
 drop table pgxc_copy_error_log;
 drop table copy_create_err_tab_001_01;
 drop table err_copy_create_err_tab_001_01;
+\c regression;
+drop database copy_error_log;
