@@ -3909,7 +3909,7 @@ static int ServerLoop(void)
                 g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
                 Assert(g_instance.pid_cxt.StartupPID != 0);
                 g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = READY_TO_BUILD;
-                ereport(LOG, (errmsg("[On-demand] Node:%d ondemand realtime build start", SS_MY_INST_ID)));
+                ereport(LOG, (errmsg("[On-demand] Node:%d ondemand realtime build start, set status to READY_TO_BUILD.", SS_MY_INST_ID)));
             }
         }
 

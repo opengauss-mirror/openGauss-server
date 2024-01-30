@@ -364,5 +364,5 @@ void OndemandRealtimeBuildHandleFailover()
     }
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_REDO;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[On-demand] Node:%d receive failover signal, "
-        "close realtime build and start ondemand build", SS_MY_INST_ID)));
+        "close realtime build and start ondemand build, set state to BUILD_TO_REDO.", SS_MY_INST_ID)));
 }
