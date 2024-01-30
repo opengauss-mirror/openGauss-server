@@ -93,11 +93,19 @@ static inline int get_recovery_undozidworkers_num()
 
 inline bool IsExtremeRedo()
 {
+    if (ENABLE_DMS && SS_STANDBY_PROMOTING) {
+        /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
+        return false;
+    }
     return g_instance.comm_cxt.predo_cxt.redoType == EXTREME_REDO && (get_real_recovery_parallelism() > 1);
 }
 
 inline bool IsParallelRedo()
 {
+    if (ENABLE_DMS && SS_STANDBY_PROMOTING) {
+        /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
+        return false;
+    }
     return g_instance.comm_cxt.predo_cxt.redoType == PARALLEL_REDO && (get_real_recovery_parallelism() > 1);
 }
 
