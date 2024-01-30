@@ -46,7 +46,7 @@ test: smp
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
-test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
+test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views test_cursor_arg_defexpr
 
 # test multiple statistics
 test: functional_dependency

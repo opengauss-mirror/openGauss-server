@@ -951,6 +951,9 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
             case PLPGSQL_DTYPE_RECORD:
             case PLPGSQL_DTYPE_ROW: {
                 PLpgSQL_row* row = (PLpgSQL_row*)d;
+                if (row->argDefExpr != NULL)
+                    for (int i = 0; i < row->nfields; i++)
+                        free_expr(row->argDefExpr[i]);
                 free_expr(row->default_val);
             } break;
             case PLPGSQL_DTYPE_REC:
@@ -1060,6 +1063,9 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
             case PLPGSQL_DTYPE_RECORD:
             case PLPGSQL_DTYPE_ROW: {
                 PLpgSQL_row* row = (PLpgSQL_row*)d;
+                if (row->argDefExpr != NULL)
+                    for (int i = 0; i < row->nfields; i++)
+                        free_expr(row->argDefExpr[i]);
                 free_expr(row->default_val);
             } break;
             case PLPGSQL_DTYPE_REC:

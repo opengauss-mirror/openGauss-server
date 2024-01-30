@@ -803,10 +803,14 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                                                                             true);
 
                         newp->cursor_explicit_expr = $8;
-                        if ($6 == NULL)
+                        if ($6 == NULL) {
                             newp->cursor_explicit_argrow = -1;
-                        else
+                            newp->cursor_implicit_argrow = -1;
+                        }
+                        else {
                             newp->cursor_explicit_argrow = $6->dno;
+                            newp->cursor_implicit_argrow = ((PLpgSQL_row*)$6)->needValDno;
+                        }
                         newp->cursor_options = CURSOR_OPT_FAST_PLAN | $4;
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
                         newp->datatype->cursorCompositeOid = IS_ANONYMOUS_BLOCK ? 
@@ -1344,10 +1348,13 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                                                             true);
 
                         newp->cursor_explicit_expr = $7;
-                        if ($5 == NULL)
+                        if ($5 == NULL) {
                             newp->cursor_explicit_argrow = -1;
-                        else
+                            newp->cursor_implicit_argrow = -1;
+                        } else {
                             newp->cursor_explicit_argrow = $5->dno;
+                            newp->cursor_implicit_argrow = ((PLpgSQL_row*)$5)->needValDno;
+                        }
                         newp->cursor_options = CURSOR_OPT_FAST_PLAN | $3;
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
                         newp->datatype->cursorCompositeOid = IS_ANONYMOUS_BLOCK ? 
@@ -2305,15 +2312,23 @@ decl_cursor_args :
                         newp->rowtupdesc = NULL;
                         newp->nfields = list_length($2);
                         newp->fieldnames = (char **)palloc(newp->nfields * sizeof(char *));
+                        newp->argDefExpr = (PLpgSQL_expr**)palloc(newp->nfields * sizeof(PLpgSQL_expr*));
                         newp->varnos = (int *)palloc(newp->nfields * sizeof(int));
                         newp->isImplicit = true;
                         newp->addNamespace = false;
                         i = 0;
+                        newp->needValDno = 0;
                         foreach (l, $2)
                         {
                             PLpgSQL_variable *arg = (PLpgSQL_variable *) lfirst(l);
                             newp->fieldnames[i] = arg->refname;
                             newp->varnos[i] = arg->dno;
+                            newp->argDefExpr[i] = arg->dtype == PLPGSQL_DTYPE_VAR ? ((PLpgSQL_var*)arg)->default_val :
+                                                  arg->dtype == PLPGSQL_DTYPE_ROW ? ((PLpgSQL_row*)arg)->default_val :
+                                                  arg->dtype == PLPGSQL_DTYPE_RECORD ? ((PLpgSQL_row*)arg)->default_val :
+                                                  arg->dtype == PLPGSQL_DTYPE_REC ? ((PLpgSQL_rec*)arg)->default_val: NULL ;
+                            if(newp->argDefExpr[i] == NULL)
+                                newp->needValDno = i+1;
                             i++;
                         }
                         list_free_ext($2);
@@ -2333,13 +2348,36 @@ decl_cursor_arglist : decl_cursor_arg
                     }
                 ;
 
-decl_cursor_arg : decl_varname cursor_in_out_option decl_datatype
+decl_cursor_arg : decl_varname cursor_in_out_option decl_datatype decl_rec_defval
                     {
-                        $$ = (PLpgSQL_datum *)
-                            plpgsql_build_variable($1->name, $1->lineno,
-                                                   $3, true);
+                        PLpgSQL_variable* arg = 
+                                plpgsql_build_variable($1->name, $1->lineno, $3, true);
+                        if (arg != NULL) {
+                            switch (arg->dtype) {
+                                case PLPGSQL_DTYPE_VAR: {
+                                    ((PLpgSQL_var*)arg)->default_val = $4;
+                                    break;
+                                }
+                                case PLPGSQL_DTYPE_ROW: 
+                                case PLPGSQL_DTYPE_RECORD: {
+                                    ((PLpgSQL_row*)arg)->default_val = $4;
+                                    break;
+                                }
+                                case PLPGSQL_DTYPE_REC: {
+                                    ((PLpgSQL_rec*)arg)->default_val = $4;
+                                    break;
+                                }
+                                default: {
+                                    ereport(ERROR,
+                                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                            errmodule(MOD_PLSQL), 
+                                            errmsg("unrecognized variable type for cursor argument.")));
+                                }
+                            }
+                        }
+                        $$ = (PLpgSQL_datum*)arg;
                         pfree_ext($1->name);
-						pfree($1);
+                        pfree($1);
                     }
                 ;
 cursor_in_out_option :  K_IN	|
@@ -13057,7 +13095,7 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
     }
 
     /* Else better provide arguments */
-    if (tok != '(') {
+    if (tok != '(' && cursor->cursor_implicit_argrow > 0) {
         const char* message = "cursor has arguments";
         InsertErrorMessage(message, plpgsql_yylloc);
         ereport(errstate,
@@ -13093,7 +13131,8 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
     }
     argv = (char **) palloc0(row->nfields * sizeof(char *));
 
-    for (argc = 0; argc < row->nfields; argc++)
+    /* No need to process value exprs in case of 'open c;' */
+    for (argc = 0; argc < row->nfields && tok == '('; argc++)
     {
         PLpgSQL_expr *item;
         int		endtoken;
@@ -13104,6 +13143,12 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
 
         /* Check if it's a named parameter: "param := value" */
         plpgsql_peek2(&tok1, &tok2, &arglocation, NULL);
+        /* Done reading value exprs */
+        if (tok1 == ')'){
+            /* read ')' */
+            yylex();
+            break;
+        }
         if (tok1 == IDENT && tok2 == COLON_EQUALS)
         {
             char   *argname;
@@ -13173,14 +13218,9 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
 
         argv[argpos] = item->query + strlen(sqlstart);
 
-        if (endtoken == ')' && !(argc == row->nfields - 1)) {
-            const char* message = "not enough arguments for cursor";
-            InsertErrorMessage(message, plpgsql_yylloc);
-            ereport(errstate,
-                    (errcode(ERRCODE_SYNTAX_ERROR),
-                     errmsg("not enough arguments for cursor \"%s\"",
-                            cursor->refname),
-                     parser_errposition(yylloc)));
+        if (endtoken == ')') {
+            argc++;
+            break;
         }
 
         if (endtoken == ',' && (argc == row->nfields - 1)) {
@@ -13192,6 +13232,24 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
                             cursor->refname),
                      parser_errposition(yylloc)));
         }
+    }
+
+    /* fill rest arguments with default values, if they have any */
+    for (argc = 0; argc < row->nfields; argc++)
+    {
+        if (argv[argc] != NULL)
+            continue;
+        PLpgSQL_expr* defexpr = row->argDefExpr[argc];
+        if(!defexpr){
+            const char* message = "not enough values for cursor arguments";
+            InsertErrorMessage(message, plpgsql_yylloc);
+            ereport(errstate,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("not enough values for arguments of cursor \"%s\"",
+                            cursor->refname),
+                    parser_errposition(yylloc)));
+        }
+        argv[argc] = defexpr->query + strlen(sqlstart);
     }
 
     /* Make positional argument list */
@@ -13227,7 +13285,8 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
     pfree_ext(ds.data);
 
     /* Next we'd better find the until token */
-    tok = yylex();
+    if(tok == '(')
+        tok = yylex();
     if (tok != until)
         yyerror("syntax error");
 

@@ -492,7 +492,8 @@ typedef struct PLpgSQL_var { /* Scalar variable */
     int notnull;
     PLpgSQL_expr* default_val;
     PLpgSQL_expr* cursor_explicit_expr;
-    int cursor_explicit_argrow;
+    int cursor_explicit_argrow; /* count of cursor's args including those with default exprs */
+    int cursor_implicit_argrow; /* count of cursor's args requiring values (those without default exprs) */
     int cursor_options;
 
     Datum value;
@@ -531,6 +532,8 @@ typedef struct { /* Row variable */
      */
     int nfields;
     char** fieldnames;
+    int needValDno; /* count of fields that require values (don't have defaults) */
+    PLpgSQL_expr** argDefExpr;
     int* varnos; /* only use for unpkg's var, pkg's var is in row->pkg->datums */
     int customErrorCode; /* only for exception variable. */
 
@@ -588,6 +591,7 @@ typedef struct { /* Record variable (non-fixed structure) */
     bool freetupdesc;
     List* pkg_name = NULL;
     PLpgSQL_package* pkg = NULL;
+    PLpgSQL_expr* default_val = NULL;
 } PLpgSQL_rec;
 
 typedef struct { /* Field in record */

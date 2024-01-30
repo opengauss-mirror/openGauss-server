@@ -1,0 +1,205 @@
+DROP SCHEMA IF EXISTS test_cursor_param_defexpr CASCADE;
+NOTICE:  schema "test_cursor_param_defexpr" does not exist, skipping
+CREATE SCHEMA test_cursor_param_defexpr;
+SET CURRENT_SCHEMA TO test_cursor_param_defexpr;
+CREATE TABLE tb1(a int, b char(10));
+INSERT INTO tb1 VALUES (1,'a'),(2,'b'),(3,'c'),(4,'d'),(5,'e');
+-- regular cursor without defexprs 
+DECLARE
+    rec RECORD;
+    CURSOR c FOR SELECT * FROM tb1 t; 
+BEGIN
+    OPEN c;
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  1, a         
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int) FOR SELECT * FROM tb1 t WHERE a>=arg1; 
+BEGIN
+    OPEN c(1);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  1, a         
+-- define cursor with defexprs, and open cursor without values specified
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int default 2) FOR SELECT * FROM tb1 t WHERE a>=arg1; 
+BEGIN
+    OPEN c();
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  2, b         
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int = 2) FOR SELECT * FROM tb1 t WHERE a>=arg1; 
+BEGIN
+    OPEN c;
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  2, b         
+-- default cursor composite type argv 
+CREATE OR REPLACE TYPE rectype AS (a int, b char(10));
+DECLARE
+    CURSOR c (r rectype default (3,'c')) FOR SELECT * from tb1 where a=r.a;
+    rec RECORD;
+BEGIN
+    OPEN c;
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  3, c         
+DECLARE
+    CURSOR c (r tb1%ROWTYPE default (4,'d')) FOR SELECT * from tb1 where a=r.a;
+    rec RECORD;
+BEGIN
+    OPEN c;
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  4, d         
+-- open cursor with values specified
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int default 2) FOR SELECT * FROM tb1 t WHERE a>=arg1; 
+BEGIN
+    OPEN c(arg1:=1);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  1, a         
+-- open cursor in functions
+CREATE OR REPLACE FUNCTION test_cursor RETURNS int as $$
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int default 2) FOR SELECT * FROM tb1 WHERE a>=arg1;
+    res INTEGER;
+BEGIN
+    OPEN c(3);
+    FETCH c INTO rec;
+    res := rec.a;
+    CLOSE c;
+    return res;
+END;
+$$ LANGUAGE plpgsql;
+CALL test_cursor();
+ test_cursor 
+-------------
+           3
+(1 row)
+
+-- error situation
+-- open cursor without value list while having args without defexpr
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c;
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+ERROR:  cursor "c" has arguments
+LINE 4:     OPEN c;
+                  ^
+QUERY:  DECLARE rec RECORD;
+    CURSOR c (arg1 int, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c;
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END
+-- open cursor without enough values specified
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c(1);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+ERROR:  not enough values for arguments of cursor "c"
+LINE 4:     OPEN c(1);
+                    ^
+QUERY:  DECLARE rec RECORD;
+    CURSOR c (arg1 int, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c(1);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END
+-- args with defexpr that defined ahead of those without defexpr
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int default 2, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c(2);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+ERROR:  not enough values for arguments of cursor "c"
+LINE 4:     OPEN c(2);
+                    ^
+QUERY:  DECLARE rec RECORD;
+    CURSOR c (arg1 int default 2, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c(2);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END
+DECLARE
+    rec RECORD;
+    CURSOR c (arg1 int default 2, arg2 int, arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c(5,2);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+NOTICE:  2, b         
+-- cursor arg type mismatch with the defexpr
+DECLARE
+    rec RECORD;
+    defarg int default 2;
+    CURSOR c (arg1 int default 2, arg2 int default 'arg', arg3 int default 3) FOR SELECT * FROM tb1 t WHERE a>=(arg1 - arg3); 
+BEGIN
+    OPEN c(5,2);
+    FETCH c INTO rec;
+    RAISE NOTICE '%, %', rec.a, rec.b;
+    CLOSE c;
+END;
+/
+ERROR:  invalid input syntax for integer: "arg"
+CONTEXT:  PL/pgSQL function inline_code_block line 4 during statement block local variable initialization
+DROP SCHEMA IF EXISTS test_cursor_param_defexpr CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table tb1
+drop cascades to type rectype
+drop cascades to function test_cursor()
