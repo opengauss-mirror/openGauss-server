@@ -402,9 +402,12 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
      * A Coordinator receiving a query from another Coordinator
      * is not allowed to go into PGXC planner.
      */
-    if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && !IsConnFromCoord())
+    if (u_sess->hook_cxt.pluginPlannerHook){
+        result = (*(planner_hook_type) u_sess->hook_cxt.pluginPlannerHook)\
+                 (parse, cursorOptions, boundParams);
+    } else if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && !IsConnFromCoord()){
         result = pgxc_planner(parse, cursorOptions, boundParams);
-    else
+    } else
 #endif
         result = standard_planner(parse, cursorOptions, boundParams);
 
@@ -1933,6 +1936,20 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             apply_tlist_labeling(plan->targetlist, root->processed_tlist);
         }
 
+        /* Change the targetlist chain */
+        ExtensiblePlan* tsdbExtensiblePlan;
+        bool planForInsertTsdb = u_sess->hook_cxt.forTsdbHook && parse->commandType == CMD_INSERT && IsA(plan, ExtensiblePlan);
+
+        if(planForInsertTsdb) {
+            tsdbExtensiblePlan = (ExtensiblePlan*)plan;
+
+            ListCell* lc;
+            foreach(lc,tsdbExtensiblePlan->extensible_plans) {
+                plan = (Plan*)lfirst(lc);
+                break;
+            }
+        }
+
         /* If it's not SELECT, we need a ModifyTable node */
         if (parse->commandType != CMD_SELECT) {
             List* withCheckOptionLists = NIL;
@@ -2000,6 +2017,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 #ifdef PGXC
             plan = pgxc_make_modifytable(root, plan);
 #endif
+            if(planForInsertTsdb) {
+                tsdbExtensiblePlan->extensible_plans = list_make1(plan);
+                plan = (Plan*)tsdbExtensiblePlan;
+            }
             ((ModifyTable*)plan)->isReplace = parse->isReplace;
         }
     }
@@ -2849,7 +2870,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     FDWUpperRelCxt* ufdwCxt = NULL;
     errno_t rc = EOK;
     PlannerTargets* planner_targets = NULL;
-
+    RelOptInfo* for_plugin_rel = NULL;
     if (parse->is_flt_frame) {
         planner_targets = (PlannerTargets*)palloc0(sizeof(PlannerTargets));
         Assert(!root->planner_targets);
@@ -3278,7 +3299,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                           &sorted_path, 
                                           dNumGroups, 
                                           has_groupby);
-
+        for_plugin_rel = final_rel;
         /* restore superset keys */
         root->dis_keys.superset_keys = superset_key;
 
@@ -4811,6 +4832,64 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     }
 #endif
     (void)MemoryContextSwitchTo(oldcontext);
+    if(u_sess->hook_cxt.forTsdbHook && parse->commandType == CMD_INSERT) {
+        
+        for_plugin_rel->reltarget->exprs = tlist;
+        List* newList = NIL;
+        
+        List* returningLists = NIL;
+        List* rowMarks = NIL;
+        
+
+        if (parse->rowMarks)
+            rowMarks = NIL;
+        else
+            rowMarks = root->rowMarks;
+
+        if (parse->returningList)
+            returningLists = list_make1(parse->returningList);
+        else
+            returningLists = NIL;
+
+        newList = (*(for_tsdb_hook_type)u_sess->hook_cxt.forTsdbHook)(root,
+               for_plugin_rel,
+               parse->commandType,
+               parse->canSetTag,
+               parse->resultRelation,
+               list_make1_int(parse->resultRelation),
+               for_plugin_rel->pathlist,
+               list_make1(root),
+               returningLists,
+               rowMarks,
+               SS_assign_special_param(root),
+               tlist);
+
+        /* If not a hypertable*/
+        if (newList == NIL)
+        return result_plan;
+
+        Path* bestPath;
+        bestPath = (Path*) linitial(newList);
+        
+        Plan* tsdbPlan = create_plan(root, bestPath);
+        /* Change targetlist of the last plan */
+        ExtensiblePlan* expPlan1 =(ExtensiblePlan*)tsdbPlan;
+        ExtensiblePlan* expPlan2;
+        ListCell* expL;
+        foreach(expL,expPlan1->extensible_plans) {
+            Plan* planTemp = (Plan*) lfirst(expL);
+
+            if (IsA(planTemp, ExtensiblePlan)) {
+                expPlan2 = (ExtensiblePlan*)planTemp;
+
+                expPlan2->extensible_plans = NIL;
+                result_plan->targetlist = tlist;
+                expPlan2->extensible_plans = lappend(expPlan2->extensible_plans, result_plan);
+            }
+            
+        }
+        return tsdbPlan;
+    }
     return result_plan;
 }
 
