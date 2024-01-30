@@ -6681,6 +6681,7 @@ static DropDirectoryStmt* _copyDropDirectoryStmt(const DropDirectoryStmt* from)
     DropDirectoryStmt* newnode = makeNode(DropDirectoryStmt);
 
     COPY_STRING_FIELD(directoryname);
+    COPY_SCALAR_FIELD(missing_ok);
 
     return newnode;
 }

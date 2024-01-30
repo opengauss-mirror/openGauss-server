@@ -3133,6 +3133,7 @@ static bool _equalCreateDirectoryStmt(const CreateDirectoryStmt* a, const Create
 static bool _equalDropDirectoryStmt(const DropDirectoryStmt* a, const DropDirectoryStmt* b)
 {
     COMPARE_STRING_FIELD(directoryname);
+    COMPARE_SCALAR_FIELD(missing_ok);
 
     return true;
 }
