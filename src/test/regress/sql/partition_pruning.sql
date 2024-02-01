@@ -48,4 +48,25 @@ explain (costs off)execute p1(2001,3001);
 execute p1(2001,3001);
 drop table test_range_pt;
 
+create table par4_1188069(id int,a1 text,a2 date,a3 varchar(30))
+partition by range (a3)
+(
+partition p1 values less than('d'),
+partition p2 values less than('k'),
+partition p3 values less than('q'),
+partition p4 values less than('z'));
+
+insert into par4_1188069 values(generate_series(1,100),'d',generate_series(DATE '2022-01-01', DATE '2022-4-10', '1 day'),chr(65 + (generate_series(1,100)-1)%25));
+insert into par4_1188069 values(generate_series(101,200),'k',generate_series(DATE '2022-01-01', DATE '2022-4-10', '1 day'),chr(65 + (generate_series(1,100)-1)%25));
+insert into par4_1188069 values(generate_series(201,300),'q',generate_series(DATE '2022-01-01', DATE '2022-4-10', '1 day'),chr(65 + (generate_series(1,100)-1)%25));
+insert into par4_1188069 values(generate_series(301,400),null,generate_series(DATE '2022-01-01', DATE '2022-4-10', '1 day'),chr(65 + (generate_series(1,100)-1)%25)); 
+
+prepare l7_1188069(varchar,varchar) as select * from par4_1188069 where a3 in($1,$2) limit 3;
+explain (analyze,costs off) execute l7_1188069('h','v');
+
+execute l7_1188069('H','V');
+
+deallocate l7_1188069;
+drop table par4_1188069;
+
 DROP SCHEMA partition_pruning;

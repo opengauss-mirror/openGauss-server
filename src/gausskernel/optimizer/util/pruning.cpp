@@ -1172,7 +1172,8 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr
         larg = ((RelabelType*)larg)->arg;
     }
 
-    if (T_Var != nodeTag(larg) || (T_ArrayExpr != nodeTag(rarg) && T_Const != nodeTag(rarg))) {
+    if (T_Var != nodeTag(larg) || (T_ArrayExpr != nodeTag(rarg) && T_Const != nodeTag(rarg) &&
+        T_ArrayCoerceExpr != nodeTag(rarg))) {
         result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_FULL;
         result->isPbeSinlePartition = false;
@@ -1265,6 +1266,37 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr
                 exprList = lappend(exprList, expr);
             }
 
+            if (arrayExpr->useOr) {
+                result = partitionPruningWalker(
+                    (Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
+            } else {
+                result = partitionPruningWalker(
+                    (Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
+            }
+            success = true;
+        }
+    } else if (T_ArrayCoerceExpr == nodeTag(rarg)) {
+        List* eleList = NULL;
+        ListCell* element = NULL;
+        ArrayCoerceExpr* rargExpr = (ArrayCoerceExpr*)rarg;
+        if (T_ArrayExpr == nodeTag(rargExpr->arg)) {
+            ArrayExpr* rarg_arg = (ArrayExpr*)(rargExpr->arg);
+            eleList = rarg_arg->elements;
+            foreach (element, eleList) {
+                Expr* eleExpr = (Expr*)lfirst(element);
+                List* eleArgs = NULL;
+                eleArgs = list_make2(copyObject(larg), copyObject(eleExpr));
+                expr = (OpExpr*)makeNode(OpExpr);
+                expr->args = eleArgs;
+                expr->inputcollid = arrayExpr->inputcollid;
+                expr->location = 0;
+                expr->opcollid = arrayExpr->opfuncid;
+                expr->opfuncid = arrayExpr->opfuncid;
+                expr->opno = arrayExpr->opno;
+                expr->opresulttype = BOOLOID;
+                expr->opretset = false;
+                exprList = lappend(exprList, expr);
+            }
             if (arrayExpr->useOr) {
                 result = partitionPruningWalker(
                     (Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
