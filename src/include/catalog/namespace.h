@@ -132,6 +132,8 @@ extern Oid TryLookForSynonymType(const char* typname, const Oid namespaceId);
 
 extern void SetTempFromSearchPath(List* namelist);
 
+extern bool CheckTableOfType(FuncCandidateList candidate, Oid* argtypes);
+
 extern FuncCandidateList FuncnameGetCandidates(List *names,
                       int nargs, List *argnames,
                       bool expand_variadic,

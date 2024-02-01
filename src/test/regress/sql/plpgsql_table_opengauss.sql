@@ -5,6 +5,47 @@ drop schema if exists plpgsql_table_opengauss;
 create schema plpgsql_table_opengauss;
 set current_schema = plpgsql_table_opengauss;
 
+create type parms as table of varchar2(4000);
+
+create type string_agg_type as
+(
+total varchar2(4000)
+);
+
+CREATE OR REPLACE FUNCTION sfunc(state string_agg_type, value parms)
+return string_agg_type
+is
+l_delimiter varchar2(30) := ',';
+begin
+if (value.count = 2)
+then
+l_delimiter := value(2);
+end if;
+state.total := state.total || l_delimiter || value(1);
+return state;
+end;
+/
+
+CREATE OR REPLACE FUNCTION ffunc(state string_agg_type)
+return varchar2
+is
+begin
+return ltrim(state.total,',');
+end;
+/
+
+CREATE AGGREGATE stragg ( parms ) (
+SFUNC = sfunc,
+STYPE = string_agg_type,
+FINALFUNC = ffunc
+);
+
+DROP AGGREGATE stragg( parms );
+DROP FUNCTION ffunc(string_agg_type);
+DROP FUNCTION sfunc(string_agg_type, parms);
+DROP type string_agg_type;
+drop type parms;
+
 --test inout param
 CREATE TABLE INT8_TBL(q1 int8, q2 int8);
 create view tt17v as select * from int8_tbl i where i in (values(i));
