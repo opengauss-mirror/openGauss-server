@@ -173,7 +173,7 @@ end pkg096;
 call pkg096.p2();
 INFO:  c1 is {123455,ABCDEF,012345}
 CONTEXT:  SQL statement "CALL p3(c1=>c1)"
-PL/pgSQL function public.p1(_blob[],_blob[]) line 2 at PERFORM
+PL/pgSQL function p1(_blob[],_blob[]) line 2 at PERFORM
 SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
 PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1 is {123455,ABCDEF,012345}
@@ -201,7 +201,7 @@ INFO:  r2 is {123455,ABCDEF,012345,678910}
 \! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "call pkg096.p2();";
 INFO:  c1 is {123455,ABCDEF,012345}
 CONTEXT:  SQL statement "CALL p3(c1=>c1)"
-PL/pgSQL function public.p1(_blob[],_blob[]) line 2 at PERFORM
+PL/pgSQL function p1(_blob[],_blob[]) line 2 at PERFORM
 SQL statement "CALL pkg096.p1(c1=>r1,c2=>r2)"
 PL/pgSQL function p2() line 9 at PERFORM
 INFO:  c1 is {123455,ABCDEF,012345}

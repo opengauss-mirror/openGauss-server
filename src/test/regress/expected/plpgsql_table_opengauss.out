@@ -5,6 +5,41 @@ drop schema if exists plpgsql_table_opengauss;
 NOTICE:  schema "plpgsql_table_opengauss" does not exist, skipping
 create schema plpgsql_table_opengauss;
 set current_schema = plpgsql_table_opengauss;
+create type parms as table of varchar2(4000);
+create type string_agg_type as
+(
+total varchar2(4000)
+);
+CREATE OR REPLACE FUNCTION sfunc(state string_agg_type, value parms)
+return string_agg_type
+is
+l_delimiter varchar2(30) := ',';
+begin
+if (value.count = 2)
+then
+l_delimiter := value(2);
+end if;
+state.total := state.total || l_delimiter || value(1);
+return state;
+end;
+/
+CREATE OR REPLACE FUNCTION ffunc(state string_agg_type)
+return varchar2
+is
+begin
+return ltrim(state.total,',');
+end;
+/
+CREATE AGGREGATE stragg ( parms ) (
+SFUNC = sfunc,
+STYPE = string_agg_type,
+FINALFUNC = ffunc
+);
+DROP AGGREGATE stragg( parms );
+DROP FUNCTION ffunc(string_agg_type);
+DROP FUNCTION sfunc(string_agg_type, parms);
+DROP type string_agg_type;
+drop type parms;
 --test inout param
 CREATE TABLE INT8_TBL(q1 int8, q2 int8);
 create view tt17v as select * from int8_tbl i where i in (values(i));
@@ -893,13 +928,13 @@ INFO:  plpgsql_table_opengauss.pck1.v2(2) is 3
 
 drop type typeA;
 ERROR:  cannot drop type _s_type[] because other objects depend on it
-DETAIL:  function plpgsql_table_opengauss.tableof_1(_s_type[]) depends on type _s_type[]
+DETAIL:  function tableof_1(_s_type[]) depends on type _s_type[]
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 drop type typeB;
 drop type s_type cascade;
 NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to type _s_type[]
-drop cascades to function plpgsql_table_opengauss.tableof_1(_s_type[])
+drop cascades to function tableof_1(_s_type[])
 drop cascades to function tableof_4()
 drop cascades to function tableof_5()
 drop cascades to function tableof_9()

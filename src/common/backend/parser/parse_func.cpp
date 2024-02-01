@@ -1633,6 +1633,10 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
         if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0) {
             break;
         }
+
+        if (CheckTableOfType(best_candidate, argtypes)) {
+            break;
+        }
     }
 
     if (best_candidate == NULL) {
