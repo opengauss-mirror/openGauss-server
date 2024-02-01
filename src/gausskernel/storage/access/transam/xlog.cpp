@@ -20503,22 +20503,19 @@ retry:
                         xlogctl->IsRecoveryDone = true;
                         SpinLockRelease(&xlogctl->info_lck);
                         static uint64 printFrequency = 0;                        
-                        if (!(IS_SHARED_STORAGE_MODE) ||
-                            pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage)) {
-                            knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL | REDO_FINISH_STATUS_CM);
-                            if ((printFrequency & 0xFF) == 0) {
-                                ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                                          errmsg("XLogPageRead set redo finish status,"
-                                                 "ReadRecPtr:%X/%X, EndRecPtr:%X/%X",
-                                                 (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32),
-                                                 (uint32)(t_thrd.xlog_cxt.ReadRecPtr),
-                                                 (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32),
-                                                 (uint32)(t_thrd.xlog_cxt.EndRecPtr))));
-                            }
-                            printFrequency++;
-
-                            pg_usleep(50000L);
+                        knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL | REDO_FINISH_STATUS_CM);
+                        if ((printFrequency & 0xFF) == 0) {
+                            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                        errmsg("XLogPageRead set redo finish status,"
+                                                "ReadRecPtr:%X/%X, EndRecPtr:%X/%X",
+                                                (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32),
+                                                (uint32)(t_thrd.xlog_cxt.ReadRecPtr),
+                                                (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32),
+                                                (uint32)(t_thrd.xlog_cxt.EndRecPtr))));
                         }
+                        printFrequency++;
+
+                        pg_usleep(50000L);
                         /*
                          * If primary_conninfo is set, launch walreceiver to
                          * try to stream the missing WAL, before retrying to
@@ -20561,7 +20558,11 @@ retry:
                     }
                     /* Don't try to read from a source that just failed */
                     sources &= ~t_thrd.xlog_cxt.failedSources;
-                    t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, xlog_path);
+                    if (xlogctl->IsRecoveryDone) {
+                        t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, SS_XLOGDIR);
+                    } else {
+                        t_thrd.xlog_cxt.readFile = SSXLogFileOpenAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources, xlog_path);
+                    }
                     if (t_thrd.xlog_cxt.readFile >= 0) {
                         break;
                     }
@@ -20651,7 +20652,11 @@ retry:
 
     actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
     if (actualBytes != t_thrd.xlog_cxt.readLen) {
-        ereport(LOG, (errmsg("%s read failed", xlog_path)));
+        if (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) {
+            ereport(LOG, (errmsg("%s read failed", SS_XLOGDIR)));
+        } else {
+            ereport(LOG, (errmsg("%s read failed", xlog_path)));
+        }
         goto next_record_is_invalid;
     }
 
