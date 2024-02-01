@@ -164,9 +164,9 @@ bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block)
         char *filename = slice_filename(sf->filename, 0);
         int fd = dv_open_file(filename, flags, (int)SEGMENT_FILE_MODE);
         if (fd < 0) {
-            pfree(filename);
             ereport(LOG,
                 (errmodule(MOD_SEGMENT_PAGE), errmsg("File \"%s\" does not exist, stop read here.", filename)));
+            pfree(filename);
             return false;
         }
         
