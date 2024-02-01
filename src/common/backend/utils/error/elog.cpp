@@ -313,7 +313,11 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
          */
         for (i = 0; i <= t_thrd.log_cxt.errordata_stack_depth; i++)
             elevel = Max(elevel, t_thrd.log_cxt.errordata[i].elevel);
-        if (elevel == FATAL && (t_thrd.role == JOB_WORKER || t_thrd.role == DMS_WORKER)) {
+        if (elevel == FATAL && (t_thrd.role == JOB_WORKER || t_thrd.role == DMS_WORKER
+#ifdef USE_SPQ
+        || t_thrd.spq_ctx.spq_in_processing
+#endif        
+        )) {
             elevel = ERROR;
         }
     }

@@ -267,6 +267,7 @@ typedef struct spq_qc_ctx {
  
 typedef struct knl_t_spq_context {
     SpqRole spq_role;
+    bool spq_in_processing;
     uint64 spq_session_id;
     int current_id;
     bool skip_direct_distribute_result;
