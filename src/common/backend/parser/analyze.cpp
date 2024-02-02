@@ -4383,6 +4383,13 @@ static int fixUpdateResTargetName(ParseState* pstate, List* resultRelations, Res
             /* Mark the target column as requiring update permissions */
             target_rte->updatedCols = bms_add_member(target_rte->updatedCols,
                                                      attrno - FirstLowInvalidHeapAttributeNumber);
+            if (DB_IS_CMPT(B_FORMAT) && ((strcmp(rangeVar->relname, res->name) == 0) ||
+                ((rangeVar->alias != NULL) && (strcmp((rangeVar->alias)->aliasname, res->name) == 0)))) {
+                if (matchRelname == true) {
+                    removeRelname = true;
+                }
+                break;
+            }
         }
         if (matchRelname == true) {
             removeRelname = true;
