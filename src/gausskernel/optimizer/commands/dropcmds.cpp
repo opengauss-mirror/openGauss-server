@@ -90,6 +90,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "db_c_parser",
         "db_pg_parser",
         "hdfs_fdw",
+        "age",
 #endif
     };
     int len = lengthof(supportList);

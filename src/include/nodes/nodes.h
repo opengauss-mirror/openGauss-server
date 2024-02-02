@@ -873,6 +873,7 @@ typedef enum NodeTag {
     T_UserSetElem,
     T_UserVar,
     T_CharsetCollateOptions,
+    T_EXTENSIBLE_NODE,
     T_FunctionSources,
     
     /* ndpplugin tag */

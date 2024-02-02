@@ -4076,6 +4076,7 @@ static A_Indices* _copyAIndices(const A_Indices* from)
 {
     A_Indices* newnode = makeNode(A_Indices);
 
+    COPY_SCALAR_FIELD(is_slice);
     COPY_NODE_FIELD(lidx);
     COPY_NODE_FIELD(uidx);
 
