@@ -24,6 +24,7 @@
 #ifndef __DMS_API_H__
 #define __DMS_API_H__
 
+#include <stdlib.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,7 +33,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           128
+#define DMS_LOCAL_VERSION           130
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -874,6 +875,8 @@ typedef int (*dms_end_xa)(void *db_handle, void *knl_xa_xid, unsigned long long 
 typedef unsigned char (*dms_xa_inuse)(void *db_handle, void *knl_xa_xid);
 typedef int (*dms_get_part_changed)(void *db_handle, char* resid);
 typedef void (*dms_buf_ctrl_recycle)(void *db_handle);
+typedef void *(*dms_malloc_prot_proc)(size_t size);
+typedef void (*dms_free_prot_proc)(void *ptr);
 typedef int (*dms_get_kernel_error_code)();
 typedef struct st_dms_callback {
     // used in reform
@@ -1026,6 +1029,8 @@ typedef struct st_dms_callback {
     dms_get_part_changed get_part_changed;
 
     dms_buf_ctrl_recycle buf_ctrl_recycle;
+    dms_malloc_prot_proc dms_malloc_prot;
+    dms_free_prot_proc dms_free_prot;
     dms_get_kernel_error_code db_get_kernel_error_code;
 } dms_callback_t;
 
@@ -1126,6 +1131,27 @@ typedef struct st_drc_local_lock_res_result {
     unsigned char      lock_mode;
     unsigned char      is_valid;
 } drc_local_lock_res_result_t;
+
+typedef enum en_reform_callback_stat {
+    REFORM_CALLBACK_STAT_CKPT_LATCH = 0,
+    REFORM_CALLBACK_STAT_BUCKET_LOCK,
+    REFORM_CALLBACK_STAT_SS_READ_LOCK,
+    REFORM_CALLBACK_STAT_GET_DISK_LSN,
+    REFORM_CALLBACK_STAT_DRC_EXIST,
+    REFORM_CALLBACK_STAT_CLEAN_EDP,
+    REFORM_CALLBACK_STAT_NEED_NOT_REBUILD,
+    REFORM_CALLBACK_STAT_EXPIRE,
+    REFORM_MES_TASK_STAT_CONFIRM_OWNER_BUCKET_LOCK,
+    REFORM_MES_TASK_STAT_CONFIRM_OWNER_GET_DISK_LSN,
+    REFORM_MES_TASK_STAT_CONFIRM_CVT_BUCKET_LOCK,
+    REFORM_MES_TASK_STAT_CONFIRM_CVT_SS_READ_LOCK,
+    REFORM_MES_TASK_STAT_NEED_FLUSH_ALLOC_CTRL,
+    REFORM_MES_TASK_STAT_NEED_FLUSH_SS_READ_LOCK,
+    REFORM_MES_TASK_STAT_EDP_TO_OWNER_GET_DISK_LSN,
+    REFORM_MES_TASK_STAT_EDP_TO_OWNER_ALLOC_CTRL,
+
+    REFORM_CALLBACK_STAT_COUNT
+} reform_callback_stat_e;
 
 #ifdef __cplusplus
 }
