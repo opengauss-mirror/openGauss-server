@@ -1803,6 +1803,7 @@ void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
 static void knlTSPQCxtInit(knl_t_spq_context *spqCxt)
 {
     spqCxt->spq_role = ROLE_UTILITY;
+    spqCxt->spq_in_processing = false;
     spqCxt->spq_session_id = 0;
     spqCxt->current_id = 0;
     spqCxt->skip_direct_distribute_result = false;
