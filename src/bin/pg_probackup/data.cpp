@@ -2305,7 +2305,6 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
 {
     FILE *in = NULL;
     FILE *out = NULL;
-    int   hdr_num = -1;
     off_t  cur_pos_out = 0;
     char  curr_page[BLCKSZ];
     int   n_blocks_read = 0;
@@ -2377,6 +2376,8 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     preReadBuf.data = (char*)malloc(DSS_BLCKSZ);
     if (preReadBuf.data == NULL)
         elog(ERROR, "malloc preReadBuf.data failed, size : %d", DSS_BLCKSZ);
+    
+    parray *harray = parray_new();;
     while (blknum < (BlockNumber)file->n_blocks)
     {
         PageState page_st;
@@ -2393,20 +2394,13 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
             /* lazily open backup file (useful for s3) */
             if (!out)
                 out = open_local_file_rw(to_fullpath, &out_buf, STDIO_BUFSIZE);
-
-            hdr_num++;
-
-            if (!*headers)
-                *headers = (BackupPageHeader2 *) pgut_malloc(sizeof(BackupPageHeader2));
-            else
-                *headers = (BackupPageHeader2 *) pgut_realloc(*headers,
-                                                              (hdr_num) * sizeof(BackupPageHeader2),
-                                                              (hdr_num + 1) * sizeof(BackupPageHeader2));
-
-            (*headers)[hdr_num].block = blknum;
-            (*headers)[hdr_num].pos = cur_pos_out;
-            (*headers)[hdr_num].lsn = page_st.lsn;
-            (*headers)[hdr_num].checksum = page_st.checksum;
+            
+            BackupPageHeader2 *header = pgut_new(BackupPageHeader2);
+            header->block = blknum;
+            header->pos = cur_pos_out;
+            header->lsn = page_st.lsn;
+            header->checksum = page_st.checksum;
+            parray_append(harray, header);
 
             /* make an assignment in page for judgement */
             if (file->compressed_file && read_len == BLCKSZ) {
@@ -2438,14 +2432,19 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     * Add dummy header, so we can later extract the length of last header
     * as difference between their offsets.
     */
-    if (*headers)
-    {
-        file->n_headers = hdr_num +1;
-        *headers = (BackupPageHeader2 *) pgut_realloc(*headers,
-                                                      (hdr_num + 1) * sizeof(BackupPageHeader2),
-                                                      (hdr_num + 2) * sizeof(BackupPageHeader2));
-        (*headers)[hdr_num+1].pos = cur_pos_out;
-    }
+    int hdr_num = parray_num(harray);
+    if (hdr_num > 0) {
+        file->n_headers = hdr_num;
+        *headers = (BackupPageHeader2 *) pgut_malloc((hdr_num + 1) * sizeof(BackupPageHeader2));
+        for (int i = 0; i < hdr_num; i++)
+        {
+            auto *header = (BackupPageHeader2 *)parray_get(harray, i);
+            (*headers)[i] = *header;
+            pg_free(header);
+        }
+        (*headers)[hdr_num].pos = cur_pos_out;
+    } 
+    parray_free(harray);
 
     /* cleanup */
     if (!file->compressed_file && in && fclose(in))
