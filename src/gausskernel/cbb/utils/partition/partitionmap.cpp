@@ -268,6 +268,31 @@ static int PartKeyMatchFunc(const void *key1, const void *key2, Size keysize);
                 break;                                                                                                 \
         }                                                                                                              \
     } while (0)
+
+static void PartMapHashEntryDestroy(ListPartitionMap* listMap);
+
+static void PartMapHashEntryDestroy(ListPartitionMap* listMap)
+{
+    Assert(listMap != NULL && listMap->ht != NULL);
+    HASH_SEQ_STATUS status;
+    PartElementHashEntry *entry;
+    hash_seq_init(&status, listMap->ht);
+    
+    while ((entry = (PartElementHashEntry*)hash_seq_search(&status)) != NULL) {
+        for (int i = 0; i < entry->key.partKey.count; i++) {
+            Const* value = entry->key.partKey.values[i];
+            if (!PointerIsValid(value)) {
+                continue;
+            }
+            if (!value->constbyval && !value->constisnull && PointerIsValid(DatumGetPointer(value->constvalue))) {
+                pfree(DatumGetPointer(value->constvalue));
+            }
+            pfree_ext(value);
+        }
+        pfree_ext(entry->key.partKey.values);
+    }
+}
+
 /*
  * @Description: partition value routing
  * @Param[IN] compare: returned value
@@ -1395,7 +1420,11 @@ void DestroyPartitionMap(PartitionMap* partMap)
         }
     } else if (partMap->type == PART_TYPE_LIST) {
         ListPartitionMap* listPartMap = (ListPartitionMap*)(partMap);
-
+        if (listPartMap->ht) {
+            PartMapHashEntryDestroy(listPartMap);
+            hash_destroy(listPartMap->ht);
+            listPartMap->ht = NULL;
+        }
         if (listPartMap->listElements) {
             DestroyListElements(listPartMap->listElements, listPartMap->listElementsNum);
             listPartMap->listElements = NULL;
