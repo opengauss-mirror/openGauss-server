@@ -1171,7 +1171,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
          * If we do it directly, we will read many blocks what we dont neet to
          * check, it is useless and meaningless.
          */
-        if (g_instance.attr.attr_storage.vacuum_bulk_read_size > 0 && !skipping_all_visible_blocks) {
+        if (u_sess->attr.attr_storage.vacuum_bulk_read_size > 0 && !skipping_all_visible_blocks) {
             int maxBLockCount = nblocks - blkno;
             buf = MultiReadBufferExtend(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy, maxBLockCount, true);
         } else {

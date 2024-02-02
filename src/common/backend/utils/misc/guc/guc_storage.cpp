@@ -1430,7 +1430,7 @@ static void InitStorageConfigureNamesInt()
             gettext_noop("bulk blocks number for vacuum pre-read."),
             NULL,
             GUC_UNIT_BLOCKS},
-            &g_instance.attr.attr_storage.vacuum_bulk_read_size,
+            &u_sess->attr.attr_storage.vacuum_bulk_read_size,
             0,
             0,
             64,
