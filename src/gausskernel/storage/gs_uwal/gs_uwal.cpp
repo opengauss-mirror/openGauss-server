@@ -336,6 +336,41 @@ static bool GsUwalParseConfig(cJSON *uwalConfJSON)
         securec_check(rc, "\0", "\0");
     }
 
+    cJSON *replinodesJSON = cJSON_GetObjectItem(uwalConfJSON, "uwal_replinodes");
+    if (cJSON_IsArray(replinodesJSON)) {
+        int arrLen = cJSON_GetArraySize(replinodesJSON);
+        for (int i = 0; i < arrLen; i++) {
+            cJSON *subObj = cJSON_GetArrayItem(replinodesJSON, i);
+            if (nullptr == subObj) {
+                continue;
+            } else {
+                cJSON *subIdJSON = cJSON_GetObjectItem(subObj, "id");
+                if (subIdJSON == nullptr) {
+                    ereport(ERROR, (errmsg("No item uwal_nodeid in uwal_replinodes")));
+                    return false;
+                }
+                if (subIdJSON->valueint < 0 || subIdJSON->valueint >= MAX_GAUSS_NODE) {
+                    ereport(ERROR, (errmsg("uwal_nodeid out of range [0, 7]")));
+                    return false;
+                }
+                int nodeId = subIdJSON->valueint;
+                cJSON *subProtocolJSON = cJSON_GetObjectItem(subObj, "protocol");
+                if (subProtocolJSON == nullptr) {
+                    ereport(WARNING, (errmsg("No item protocol in uwal_replinodes, use the default protocol tcp")));
+                    rc = strcpy_s(g_uwalConfig.repliNodes[nodeId], UWAL_PROTOCOL_LEN, "tcp");
+                    securec_check(rc, "\0", "\0");
+                } else if (strcasecmp(subProtocolJSON->valuestring, "rdma") && strcasecmp(subProtocolJSON->valuestring, "tcp")) {
+                    ereport(WARNING, (errmsg("protocol only support tcp and rdma, use the default protocol tcp")));
+                    rc = strcpy_s(g_uwalConfig.repliNodes[nodeId], UWAL_PROTOCOL_LEN, "tcp");
+                    securec_check(rc, "\0", "\0");
+                } else {
+                    rc = strcpy_s(g_uwalConfig.repliNodes[nodeId], UWAL_PROTOCOL_LEN, subProtocolJSON->valuestring);
+                    securec_check(rc, "\0", "\0");
+                }
+            }
+        }
+    }
+
     ParseUwalCpuBindInfo(uwalConfJSON);
     return true;
 }
@@ -717,7 +752,7 @@ int GsUwalWalSenderNotify(bool exceptSelf)
         netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int((char *)replConnInfo->remoteuwalhost);
         netInfo.port = replConnInfo->remoteuwalport;
         netInfo.protocol = NET_PROTOCOL_TCP;
-        if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
+        if (!strcasecmp(g_uwalConfig.protocol, "rdma") && !strcasecmp(g_uwalConfig.repliNodes[standbyStateInfo.nodeId], "rdma")) {
             netInfo.protocol = NET_PROTOCOL_RDMA;
         }
 
@@ -785,7 +820,7 @@ int GsUwalWalReceiverNotify(bool isConnectedToPrimary)
         netInfo.ipv4Addr = ock_uwal_ipv4_inet_to_int((char *)replConnInfo->remotehost);
         netInfo.port = replConnInfo->remoteuwalport;
         netInfo.protocol = NET_PROTOCOL_TCP;
-        if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
+        if (!strcasecmp(g_uwalConfig.protocol, "rdma") && !strcasecmp(g_uwalConfig.repliNodes[primaryStateInfo.nodeId], "rdma")) {
             netInfo.protocol = NET_PROTOCOL_RDMA;
         }
 

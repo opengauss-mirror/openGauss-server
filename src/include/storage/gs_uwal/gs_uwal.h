@@ -83,6 +83,7 @@ typedef struct {
     bool bindCpuSwitch;
     int bindCpuNum;
     int bindCpuStart;
+    char repliNodes[MAX_NODE_NUM][UWAL_PROTOCOL_LEN];
 } UwalConfig;
 
 int gs_uwal_load_symbols();
