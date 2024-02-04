@@ -9901,7 +9901,7 @@ void StartupXLOG(void)
      * At this moment, checkpoint would not happen so it is safe to do the desicion
      * without holding the control file lock.
      */
-    if (u_sess->attr.attr_storage.enable_cbm_tracking) {
+    if (u_sess->attr.attr_storage.enable_cbm_tracking && g_instance.pid_cxt.CBMWriterPID == 0) {
         CBMTrackInit(true, checkPoint.redo);
         t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
     } else {
