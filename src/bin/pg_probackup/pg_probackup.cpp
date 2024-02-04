@@ -1031,11 +1031,12 @@ static void dss_init(void)
                 MIN_INSTANCEID, MAX_INSTANCEID);
         }
 
-        int primary_instance_id = ss_get_primary_id();
-        if (id != primary_instance_id)
-        {
-            elog(ERROR, "backup only support on primary in dss mode, primary instance id: %d, backup instance id: %d",
-                primary_instance_id, id);
+        if (backup_subcmd == BACKUP_CMD || backup_subcmd == ADD_INSTANCE_CMD) {
+            int primary_instance_id = ss_get_primary_id();
+            if (id != primary_instance_id) {
+                elog(ERROR, "backup only support on primary in dss mode, primary instance id: %d, backup instance id: %d",
+                    primary_instance_id, id);
+            }
         }
 
         if (backup_subcmd != RESTORE_CMD) {
