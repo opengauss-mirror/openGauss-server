@@ -43,6 +43,13 @@ static void dms_auxiliary_request_shutdown_handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+static void dms_auxiliary_siguser1_handler(SIGNAL_ARGS)
+{
+    int save_errno = errno;
+    latch_sigusr1_handler();
+    errno = save_errno;
+}
+
 static void SetupDmsAuxiliarySignalHook(void)
 {
     /*
@@ -54,7 +61,7 @@ static void SetupDmsAuxiliarySignalHook(void)
     (void)gspqsignal(SIGQUIT, dms_auxiliary_request_shutdown_handler); /* hard crash time */
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
-    (void)gspqsignal(SIGUSR1, SIG_IGN);
+    (void)gspqsignal(SIGUSR1, dms_auxiliary_siguser1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
     (void)gspqsignal(SIGURG, print_stack);
     /*
