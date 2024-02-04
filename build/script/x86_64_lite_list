@@ -17,6 +17,7 @@
 ./bin/cluster_guc.conf
 ./bin/lz4
 ./bin/gs_plan_simulator.sh
+./bin/gs_retrieve
 ./share/postgresql/db4ai
 ./share/postgresql/snowball_create.sql
 ./share/postgresql/pg_hba.conf.sample

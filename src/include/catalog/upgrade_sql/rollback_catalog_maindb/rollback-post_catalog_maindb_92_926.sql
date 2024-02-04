@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.pg_create_logical_replication_slot(name, name, text, text);

@@ -27,6 +27,17 @@
 
 #define MAXPGPATH 1024
 #define SS_MAX_INST 64
+#define MAX_PARAM_LEN 1024
+#define INVALID_LINES_IDX (int)(~0)
+#define MAX_VALUE_LEN 1024
+#define MAX_CONFIG_FILE_SIZE 0xFFFFF /* max file size for configurations = 1M */
+
+#ifndef palloc
+#define palloc(sz) malloc(sz)
+#endif
+#ifndef pfree
+#define pfree(ptr) free(ptr)
+#endif
 
 #define T_SS_XLOGDIR \
     (g_enable_dss ? g_datadir.xlogDir : "pg_xlog")
@@ -130,5 +141,17 @@ extern datadir_t g_datadir;
 void initDataPathStruct(bool enable_dss);
 
 char *getSocketpathFromEnv();
+
+int find_gucoption(
+    const char** optlines, const char* opt_name, int* name_offset, int* name_len,
+    int* value_offset, int* value_len, unsigned char strip_char = ' ');
+int find_guc_optval(const char** optlines, const char* optname, char* optval);
+
+char** readfile(const char* path);
+void freefile(char** lines);
+
+bool ss_read_config(const char* pg_data);
+int SSInitXlogDir(char*** xlogDirs);
+void FreeXlogDir(char** xlogDirs);
 
 #endif

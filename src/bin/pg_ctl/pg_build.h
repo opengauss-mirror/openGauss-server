@@ -24,10 +24,6 @@
 #define CONFIG_REPL_UUID "repl_uuid"
 #define MAX_CONNINFO 8
 
-#define MAX_PARAM_LEN 1024
-#define MAX_VALUE_LEN 1024
-#define INVALID_LINES_IDX (int)(~0)
-#define MAX_CONFIG_FILE_SIZE 0xFFFFF /* max file size for configurations = 1M */
 #define MAX_QUERY_LEN 512
 #define REPL_AUTH_MODE_UUID "uuid"
 
@@ -55,10 +51,6 @@ extern char gaussdb_state_file[MAXPGPATH];
 
 void delete_datadir(const char* dirname);
 
-int find_gucoption(
-    const char** optlines, const char* opt_name, int* name_offset, int* name_len,
-    int* value_offset, int* value_len, unsigned char strip_char = ' ');
-
 void get_conninfo(const char* filename);
 
 extern PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term = 0);
@@ -68,7 +60,6 @@ int GetLengthAndCheckReplConn(const char* ConnInfoList);
 extern int replconn_num;
 extern int get_replconn_number(const char* filename);
 extern bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* repl);
-char** readfile(const char* path);
 extern char* pg_strdup(const char* in);
 extern void pg_free(void* ptr);
 extern bool GetPaxosValue(const char *filename);

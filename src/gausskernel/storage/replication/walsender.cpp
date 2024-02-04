@@ -1316,12 +1316,13 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
          * this transaction fails. We'll make it persistent at the end.
          */
         ReplicationSlotCreate(cmd->slotname, RS_EPHEMERAL, isDummyStandby, u_sess->proc_cxt.MyDatabaseId,
-                              InvalidXLogRecPtr);
+                              InvalidXLogRecPtr, InvalidXLogRecPtr);
     } else {
         /*
          * physical slot save init value if exist
          */
-        ReplicationSlotCreate(cmd->slotname, RS_PERSISTENT, isDummyStandby, InvalidOid, cmd->init_slot_lsn);
+        ReplicationSlotCreate(cmd->slotname, RS_PERSISTENT, isDummyStandby, InvalidOid, cmd->init_slot_lsn,
+                              InvalidXLogRecPtr);
     }
     slot_name = NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name);
 

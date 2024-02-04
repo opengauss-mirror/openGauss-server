@@ -989,10 +989,11 @@ static void AreaDecodingChange(ReorderBufferChange *change, LogicalDecodingConte
 
     Relation relation = NULL;
     Oid reloid;
-    Oid partitionReltoastrelid = InvalidOid;;
+    Oid partitionReltoastrelid = InvalidOid;
+    bool isSegment = IsSegmentFileNode(change->data.tp.relnode);
 
     reloid = HeapGetRelid(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, partitionReltoastrelid,
-        NULL, false);
+        NULL, isSegment);
     /*
      * Catalog tuple without data, emitted while catalog was
      * in the process of being rewritten.

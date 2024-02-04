@@ -266,7 +266,8 @@ extern void ReplicationSlotsShmemInit(void);
 
 /* management of individual slots */
 extern void ReplicationSlotCreate(const char* name, ReplicationSlotPersistency persistency, bool isDummyStandby,
-    Oid databaseId, XLogRecPtr restart_lsn, char* extra_content = NULL, bool encrypted = false);
+    Oid databaseId, XLogRecPtr restart_lsn, XLogRecPtr confirmed_lsn, char* extra_content = NULL,
+    bool encrypted = false);
 extern void ReplicationSlotPersist(void);
 extern void ReplicationSlotDrop(const char* name, bool for_backup = false, bool nowait = true);
 extern void ReplicationSlotAcquire(const char* name, bool isDummyStandby, bool allowDrop = false, bool nowait = true);
@@ -294,13 +295,15 @@ extern void CheckSlotRequirements(void);
 
 /* SQL callable functions */
 extern Datum pg_get_replication_slots(PG_FUNCTION_ARGS);
-extern void create_logical_replication_slot(
-    Name name, Name plugin, bool isDummyStandby, NameData* databaseName, char* str_tmp_lsn);
+void create_logical_replication_slot(const Name name, Name plugin, bool isDummyStandby, Oid databaseId,
+    NameData *databaseName, char *str_tmp_lsn, int str_length,
+    XLogRecPtr restart_lsn = InvalidXLogRecPtr, XLogRecPtr confirmed_lsn = InvalidXLogRecPtr);
 extern XLogRecPtr ReplicationSlotsComputeLogicalRestartLSN(void);
 extern bool ReplicationSlotsCountDBSlots(Oid dboid, int* nslots, int* nactive);
 extern Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS);
 extern Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS);
 extern Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS);
+extern Datum pg_create_logical_replication_slot_with_lsn(PG_FUNCTION_ARGS);
 extern Datum pg_drop_replication_slot(PG_FUNCTION_ARGS);
 extern Datum pg_get_replication_slot_name(PG_FUNCTION_ARGS);
 
