@@ -1,4 +1,10 @@
 --
+--FOR BLACKLIST FEATURE: WITH OIDS、INHERITS、CREATE TYPE/DOMAIN/AGGREGATE/OPERATOR/SEQUENCES is not supported.
+--
+create database test_privileges;
+\c test_privileges;
+GRANT CREATE ON SCHEMA public TO PUBLIC;
+--
 -- Test access privileges
 --
 -- Clean up in case a prior regression run failed
@@ -32,152 +38,173 @@ ALTER GROUP regressgroup1 ADD USER regressuser4;
 ALTER GROUP regressgroup2 ADD USER regressuser2;	-- duplicate
 NOTICE:  role "regressuser2" is already a member of role "regressgroup2"
 ALTER GROUP regressgroup2 DROP USER regressuser2;
-GRANT regressgroup2 TO regressuser4 WITH ADMIN OPTION;;
+GRANT regressgroup2 TO regressuser4 WITH ADMIN OPTION;
 -- test owner privileges
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+SET search_path to public;
 SELECT session_user, current_user;
  session_user | current_user 
 --------------+--------------
  regressuser1 | regressuser1
 (1 row)
 
-CREATE TABLE atest1 ( a int, b text );
-SELECT * FROM atest1;
+CREATE TABLE atest1_privileges_test ( a int, b text );
+SELECT * FROM atest1_privileges_test;
  a | b 
 ---+---
 (0 rows)
 
-INSERT INTO atest1 VALUES (1, 'one');
-DELETE FROM atest1;
-UPDATE atest1 SET a = 1 WHERE b = 'blech';
-TRUNCATE atest1;
+INSERT INTO atest1_privileges_test VALUES (1, 'one');
+DELETE FROM atest1_privileges_test;
+UPDATE atest1_privileges_test SET a = 1 WHERE b = 'blech';
+TRUNCATE atest1_privileges_test;
 START TRANSACTION;
-LOCK atest1 IN ACCESS EXCLUSIVE MODE;
+LOCK atest1_privileges_test IN ACCESS EXCLUSIVE MODE;
 COMMIT;
-REVOKE ALL ON atest1 FROM PUBLIC;
-SELECT * FROM atest1;
+REVOKE ALL ON atest1_privileges_test FROM PUBLIC;
+SELECT * FROM atest1_privileges_test;
  a | b 
 ---+---
 (0 rows)
 
-GRANT ALL ON atest1 TO regressuser2;
-GRANT SELECT ON atest1 TO regressuser3, regressuser4;
-SELECT * FROM atest1;
+GRANT ALL ON atest1_privileges_test TO regressuser2;
+GRANT SELECT ON atest1_privileges_test TO regressuser3, regressuser4;
+SELECT * FROM atest1_privileges_test;
  a | b 
 ---+---
 (0 rows)
 
-CREATE TABLE atest2 (col1 varchar(10), col2 boolean);
-GRANT SELECT ON atest2 TO regressuser2;
-GRANT UPDATE ON atest2 TO regressuser3;
-GRANT INSERT ON atest2 TO regressuser4;
-GRANT TRUNCATE ON atest2 TO regressuser5;
-SET SESSION AUTHORIZATION regressuser2;
+CREATE TABLE atest2_privileges_test (col1 varchar(10), col2 boolean);
+GRANT SELECT ON atest2_privileges_test TO regressuser2;
+GRANT UPDATE ON atest2_privileges_test TO regressuser3;
+GRANT INSERT ON atest2_privileges_test TO regressuser4;
+GRANT TRUNCATE ON atest2_privileges_test TO regressuser5;
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 SELECT session_user, current_user;
  session_user | current_user 
 --------------+--------------
  regressuser2 | regressuser2
 (1 row)
 
--- try various combinations of queries on atest1 and atest2
-SELECT * FROM atest1; -- ok
+-- try various combinations of queries on atest1_privileges_test and atest2_privileges_test
+SELECT * FROM atest1_privileges_test; -- ok
  a | b 
 ---+---
 (0 rows)
 
-SELECT * FROM atest2; -- ok
+SELECT * FROM atest2_privileges_test; -- ok
  col1 | col2 
 ------+------
 (0 rows)
 
-INSERT INTO atest1 VALUES (2, 'two'); -- ok
-INSERT INTO atest2 VALUES ('foo', true); -- fail
-ERROR:  permission denied for relation atest2
-INSERT INTO atest1 SELECT 1, b FROM atest1; -- ok
-UPDATE atest1 SET a = 1 WHERE a = 2; -- ok
-UPDATE atest2 SET col2 = NOT col2; -- fail
-ERROR:  permission denied for relation atest2
-SELECT * FROM atest1 FOR UPDATE; -- ok
+INSERT INTO atest1_privileges_test VALUES (2, 'two'); -- ok
+INSERT INTO atest2_privileges_test VALUES ('foo', true); -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+INSERT INTO atest1_privileges_test SELECT 1, b FROM atest1_privileges_test; -- ok
+UPDATE atest1_privileges_test SET a = 1 WHERE a = 2; -- ok
+UPDATE atest2_privileges_test SET col2 = NOT col2; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+SELECT * FROM atest1_privileges_test ORDER BY 1 FOR UPDATE; -- ok
  a |  b  
 ---+-----
  1 | two
  1 | two
 (2 rows)
 
-SELECT * FROM atest2 FOR UPDATE; -- fail
-ERROR:  permission denied for relation atest2
-DELETE FROM atest2; -- fail
-ERROR:  permission denied for relation atest2
-TRUNCATE atest2; -- fail
-ERROR:  permission denied for relation atest2
+SELECT * FROM atest2_privileges_test ORDER BY 1 FOR UPDATE; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+DELETE FROM atest2_privileges_test; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+TRUNCATE atest2_privileges_test; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
 START TRANSACTION;
-LOCK atest2 IN ACCESS EXCLUSIVE MODE; -- fail
-ERROR:  permission denied for relation atest2
+LOCK atest2_privileges_test IN ACCESS EXCLUSIVE MODE; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
 COMMIT;
-COPY atest2 FROM stdin; -- fail
-ERROR:  permission denied for relation atest2
-GRANT ALL ON atest1 TO PUBLIC; -- fail
-WARNING:  no privileges were granted for "atest1"
+COPY atest2_privileges_test FROM stdin; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+GRANT ALL ON atest1_privileges_test TO PUBLIC; -- fail
+ERROR:  no privileges were granted for "atest1_privileges_test"
 -- checks in subquery, both ok
-SELECT * FROM atest1 WHERE ( b IN ( SELECT col1 FROM atest2 ) );
+SELECT * FROM atest1_privileges_test WHERE ( b IN ( SELECT col1 FROM atest2_privileges_test ) );
  a | b 
 ---+---
 (0 rows)
 
-SELECT * FROM atest2 WHERE ( col1 IN ( SELECT b FROM atest1 ) );
+SELECT * FROM atest2_privileges_test WHERE ( col1 IN ( SELECT b FROM atest1_privileges_test ) );
  col1 | col2 
 ------+------
 (0 rows)
 
-SET SESSION AUTHORIZATION regressuser3;
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 SELECT session_user, current_user;
  session_user | current_user 
 --------------+--------------
  regressuser3 | regressuser3
 (1 row)
 
-SELECT * FROM atest1; -- ok
+SELECT * FROM atest1_privileges_test ORDER BY 1; -- ok
  a |  b  
 ---+-----
  1 | two
  1 | two
 (2 rows)
 
-SELECT * FROM atest2; -- fail
-ERROR:  permission denied for relation atest2
-INSERT INTO atest1 VALUES (2, 'two'); -- fail
-ERROR:  permission denied for relation atest1
-INSERT INTO atest2 VALUES ('foo', true); -- fail
-ERROR:  permission denied for relation atest2
-INSERT INTO atest1 SELECT 1, b FROM atest1; -- fail
-ERROR:  permission denied for relation atest1
-UPDATE atest1 SET a = 1 WHERE a = 2; -- fail
-ERROR:  permission denied for relation atest1
-UPDATE atest2 SET col2 = NULL; -- ok
-UPDATE atest2 SET col2 = NOT col2; -- fails; requires SELECT on atest2
-ERROR:  permission denied for relation atest2
-UPDATE atest2 SET col2 = true FROM atest1 WHERE atest1.a = 5; -- ok
-SELECT * FROM atest1 FOR UPDATE; -- fail
-ERROR:  permission denied for relation atest1
-SELECT * FROM atest2 FOR UPDATE; -- fail
-ERROR:  permission denied for relation atest2
-DELETE FROM atest2; -- fail
-ERROR:  permission denied for relation atest2
-TRUNCATE atest2; -- fail
-ERROR:  permission denied for relation atest2
+SELECT * FROM atest2_privileges_test; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+INSERT INTO atest1_privileges_test VALUES (2, 'two'); -- fail
+ERROR:  permission denied for relation atest1_privileges_test
+DETAIL:  N/A
+INSERT INTO atest2_privileges_test VALUES ('foo', true); -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+INSERT INTO atest1_privileges_test SELECT 1, b FROM atest1_privileges_test; -- fail
+ERROR:  permission denied for relation atest1_privileges_test
+DETAIL:  N/A
+UPDATE atest1_privileges_test SET a = 1 WHERE a = 2; -- fail
+ERROR:  permission denied for relation atest1_privileges_test
+DETAIL:  N/A
+UPDATE atest2_privileges_test SET col2 = NULL; -- ok
+UPDATE atest2_privileges_test SET col2 = NOT col2; -- fails; requires SELECT on atest2_privileges_test
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+UPDATE atest2_privileges_test SET col2 = true FROM atest1_privileges_test WHERE atest1_privileges_test.a = 5; -- ok
+SELECT * FROM atest1_privileges_test FOR UPDATE; -- fail
+ERROR:  permission denied for relation atest1_privileges_test
+DETAIL:  N/A
+SELECT * FROM atest2_privileges_test FOR UPDATE; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+DELETE FROM atest2_privileges_test; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+TRUNCATE atest2_privileges_test; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
 START TRANSACTION;
-LOCK atest2 IN ACCESS EXCLUSIVE MODE; -- ok
+LOCK atest2_privileges_test IN ACCESS EXCLUSIVE MODE; -- ok
 COMMIT;
-COPY atest2 FROM stdin; -- fail
-ERROR:  permission denied for relation atest2
+COPY atest2_privileges_test FROM stdin; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
 -- checks in subquery, both fail
-SELECT * FROM atest1 WHERE ( b IN ( SELECT col1 FROM atest2 ) );
-ERROR:  permission denied for relation atest2
-SELECT * FROM atest2 WHERE ( col1 IN ( SELECT b FROM atest1 ) );
-ERROR:  permission denied for relation atest2
-SET SESSION AUTHORIZATION regressuser4;
-COPY atest2 FROM stdin; -- ok
-SELECT * FROM atest1; -- ok
+SELECT * FROM atest1_privileges_test WHERE ( b IN ( SELECT col1 FROM atest2_privileges_test ) );
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+SELECT * FROM atest2_privileges_test WHERE ( col1 IN ( SELECT b FROM atest1_privileges_test ) );
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
+COPY atest2_privileges_test FROM stdin; -- ok
+SELECT * FROM atest1_privileges_test ORDER BY 1; -- ok
  a |  b  
 ---+-----
  1 | two
@@ -185,20 +212,21 @@ SELECT * FROM atest1; -- ok
 (2 rows)
 
 -- groups
-SET SESSION AUTHORIZATION regressuser3;
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 CREATE TABLE atest3 (one int, two int, three int);
 GRANT DELETE ON atest3 TO GROUP regressgroup2;
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 SELECT * FROM atest3; -- fail
 ERROR:  permission denied for relation atest3
+DETAIL:  N/A
 DELETE FROM atest3; -- ok
 -- views
-SET SESSION AUTHORIZATION regressuser3;
-CREATE VIEW atestv1 AS SELECT * FROM atest1; -- ok
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
+CREATE VIEW atestv1 AS SELECT * FROM atest1_privileges_test; -- ok
 /* The next *should* fail, but it's not implemented that way yet. */
-CREATE VIEW atestv2 AS SELECT * FROM atest2;
+CREATE VIEW atestv2 AS SELECT * FROM atest2_privileges_test;
 CREATE VIEW atestv3 AS SELECT * FROM atest3; -- ok
-SELECT * FROM atestv1; -- ok
+SELECT * FROM atestv1 order by 1, 2; -- ok
  a |  b  
 ---+-----
  1 | two
@@ -206,11 +234,12 @@ SELECT * FROM atestv1; -- ok
 (2 rows)
 
 SELECT * FROM atestv2; -- fail
-ERROR:  permission denied for relation atest2
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
 GRANT SELECT ON atestv1, atestv3 TO regressuser4;
 GRANT SELECT ON atestv2 TO regressuser2;
-SET SESSION AUTHORIZATION regressuser4;
-SELECT * FROM atestv1; -- ok
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
+SELECT * FROM atestv1 order by 1, 2; -- ok
  a |  b  
 ---+-----
  1 | two
@@ -219,6 +248,7 @@ SELECT * FROM atestv1; -- ok
 
 SELECT * FROM atestv2; -- fail
 ERROR:  permission denied for relation atestv2
+DETAIL:  N/A
 SELECT * FROM atestv3; -- ok
  one | two | three 
 -----+-----+-------
@@ -231,33 +261,37 @@ SELECT * FROM atestv4; -- ok
 (0 rows)
 
 GRANT SELECT ON atestv4 TO regressuser2;
-SET SESSION AUTHORIZATION regressuser2;
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 -- Two complex cases:
 SELECT * FROM atestv3; -- fail
 ERROR:  permission denied for relation atestv3
+DETAIL:  N/A
+-- fail due to issue 3520503, see above
 SELECT * FROM atestv4; -- ok (even though regressuser2 cannot access underlying atestv3)
  one | two | three 
 -----+-----+-------
 (0 rows)
 
-SELECT * FROM atest2; -- ok
+SELECT * FROM atest2_privileges_test; -- ok
  col1 | col2 
 ------+------
  bar  | t
 (1 row)
 
-SELECT * FROM atestv2; -- fail (even though regressuser2 can access underlying atest2)
-ERROR:  permission denied for relation atest2
+SELECT * FROM atestv2; -- fail (even though regressuser2 can access underlying atest2_privileges_test)
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
 -- Test column level permissions
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 CREATE TABLE atest5 (one int, two int, three int);
 CREATE TABLE atest6 (one int, two int, blue int);
 GRANT SELECT (one), INSERT (two), UPDATE (three) ON atest5 TO regressuser4;
 GRANT ALL (one) ON atest5 TO regressuser3;
 INSERT INTO atest5 VALUES (1,2,3);
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT * FROM atest5; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT one FROM atest5; -- ok
  one 
 -----
@@ -268,19 +302,23 @@ COPY atest5 (one) TO stdout; -- ok
 1
 SELECT two FROM atest5; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 COPY atest5 (two) TO stdout; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT atest5 FROM atest5; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 COPY atest5 (one,two) TO stdout; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT 1 FROM atest5; -- ok
  ?column? 
 ----------
         1
 (1 row)
 
-SELECT 1 FROM atest5 a JOIN atest5 b USING (one); -- ok
+SELECT 1 FROM atest5 a JOIN atest5 b USING (one); -- ok 
  ?column? 
 ----------
         1
@@ -288,31 +326,37 @@ SELECT 1 FROM atest5 a JOIN atest5 b USING (one); -- ok
 
 SELECT 1 FROM atest5 a JOIN atest5 b USING (two); -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT 1 FROM atest5 a NATURAL JOIN atest5 b; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT (j.*) IS NULL FROM (atest5 a JOIN atest5 b USING (one)) j; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT 1 FROM atest5 WHERE two = 2; -- fail
 ERROR:  permission denied for relation atest5
-SELECT * FROM atest1, atest5; -- fail
+DETAIL:  N/A
+SELECT * FROM atest1_privileges_test, atest5; -- fail
 ERROR:  permission denied for relation atest5
-SELECT atest1.* FROM atest1, atest5; -- ok
+DETAIL:  N/A
+SELECT atest1_privileges_test.* FROM atest1_privileges_test, atest5 order by 1, 2; -- ok
  a |  b  
 ---+-----
  1 | two
  1 | two
 (2 rows)
 
-SELECT atest1.*,atest5.one FROM atest1, atest5; -- ok
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test, atest5 order by 1, 2, 3; -- ok 
  a |  b  | one 
 ---+-----+-----
  1 | two |   1
  1 | two |   1
 (2 rows)
 
-SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.two); -- fail
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test JOIN atest5 ON (atest1_privileges_test.a = atest5.two); -- fail
 ERROR:  permission denied for relation atest5
-SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.one); -- ok
+DETAIL:  N/A
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test JOIN atest5 ON (atest1_privileges_test.a = atest5.one); -- ok 
  a |  b  | one 
 ---+-----+-----
  1 | two |   1
@@ -321,192 +365,256 @@ SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.one); -
 
 SELECT one, two FROM atest5; -- fail
 ERROR:  permission denied for relation atest5
-SET SESSION AUTHORIZATION regressuser1;
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 GRANT SELECT (one,two) ON atest6 TO regressuser4;
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT one, two FROM atest5 NATURAL JOIN atest6; -- fail still
 ERROR:  permission denied for relation atest5
-SET SESSION AUTHORIZATION regressuser1;
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 GRANT SELECT (two) ON atest5 TO regressuser4;
-SET SESSION AUTHORIZATION regressuser4;
-SELECT one, two FROM atest5 NATURAL JOIN atest6; -- ok now
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
+SELECT one, two FROM atest5 NATURAL JOIN atest6; -- ok now 
  one | two 
 -----+-----
 (0 rows)
 
 -- test column-level privileges for INSERT and UPDATE
-INSERT INTO atest5 (two) VALUES (3); -- ok
+INSERT INTO atest5 (two) VALUES (3); -- fail due to issue 3520503, see above
 COPY atest5 FROM stdin; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 COPY atest5 (two) FROM stdin; -- ok
 INSERT INTO atest5 (three) VALUES (4); -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 INSERT INTO atest5 VALUES (5,5,5); -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 UPDATE atest5 SET three = 10; -- ok
 UPDATE atest5 SET one = 8; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 UPDATE atest5 SET three = 5, one = 2; -- fail
 ERROR:  permission denied for relation atest5
-SET SESSION AUTHORIZATION regressuser1;
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 REVOKE ALL (one) ON atest5 FROM regressuser4;
 GRANT SELECT (one,two,blue) ON atest6 TO regressuser4;
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT one FROM atest5; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 UPDATE atest5 SET one = 1; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 SELECT atest6 FROM atest6; -- ok
  atest6 
 --------
 (0 rows)
 
 COPY atest6 TO stdout; -- ok
+-- check error reporting with column privs
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+CREATE TABLE t1 (c1 int, c2 int, c3 int check (c3 < 5), primary key (c1, c2));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+GRANT SELECT (c1) ON t1 TO regressuser2;
+GRANT INSERT (c1, c2, c3) ON t1 TO regressuser2;
+GRANT UPDATE (c1, c2, c3) ON t1 TO regressuser2;
+-- seed data
+INSERT INTO t1 VALUES (1, 1, 1);
+INSERT INTO t1 VALUES (1, 2, 1);
+INSERT INTO t1 VALUES (2, 1, 2);
+INSERT INTO t1 VALUES (2, 2, 2);
+INSERT INTO t1 VALUES (3, 1, 3);
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
+INSERT INTO t1 (c1, c2) VALUES (1, 1); -- fail, but row not shown
+ERROR:  duplicate key value violates unique constraint "t1_pkey"
+UPDATE t1 SET c2 = 1; -- fail, but row not shown
+ERROR:  duplicate key value violates unique constraint "t1_pkey"
+INSERT INTO t1 (c1, c2) VALUES (null, null); -- fail, but see columns being inserted
+ERROR:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (c1, c2) = (null, null).
+INSERT INTO t1 (c3) VALUES (null); -- fail, but see columns being inserted or have SELECT
+ERROR:  null value in column "c1" violates not-null constraint
+DETAIL:  Failing row contains (c1, c3) = (null, null).
+INSERT INTO t1 (c1) VALUES (5); -- fail, but see columns being inserted or have SELECT
+ERROR:  null value in column "c2" violates not-null constraint
+DETAIL:  Failing row contains (c1) = (5).
+UPDATE t1 SET c3 = 10 where c1 = 1; -- fail, but see columns with SELECT rights, or being modified
+ERROR:  new row for relation "t1" violates check constraint "t1_c3_check"
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+DROP TABLE t1;
 -- test column-level privileges when involved with DELETE
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 ALTER TABLE atest6 ADD COLUMN three integer;
 GRANT DELETE ON atest5 TO regressuser3;
 GRANT SELECT (two) ON atest5 TO regressuser3;
 REVOKE ALL (one) ON atest5 FROM regressuser3;
 GRANT SELECT (one) ON atest5 TO regressuser4;
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT atest6 FROM atest6; -- fail
 ERROR:  permission denied for relation atest6
+DETAIL:  N/A
 SELECT one FROM atest5 NATURAL JOIN atest6; -- fail
 ERROR:  permission denied for relation atest5
-SET SESSION AUTHORIZATION regressuser1;
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 ALTER TABLE atest6 DROP COLUMN three;
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT atest6 FROM atest6; -- ok
  atest6 
 --------
 (0 rows)
 
-SELECT one FROM atest5 NATURAL JOIN atest6; -- ok
+SELECT one FROM atest5 NATURAL JOIN atest6; -- ok 
  one 
 -----
 (0 rows)
 
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 ALTER TABLE atest6 DROP COLUMN two;
 REVOKE SELECT (one,blue) ON atest6 FROM regressuser4;
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT * FROM atest6; -- fail
 ERROR:  permission denied for relation atest6
+DETAIL:  N/A
 SELECT 1 FROM atest6; -- fail
 ERROR:  permission denied for relation atest6
-SET SESSION AUTHORIZATION regressuser3;
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 DELETE FROM atest5 WHERE one = 1; -- fail
 ERROR:  permission denied for relation atest5
+DETAIL:  N/A
 DELETE FROM atest5 WHERE two = 2; -- ok
 -- check inheritance cases
-SET SESSION AUTHORIZATION regressuser1;
-CREATE TABLE atestp1 (f1 int, f2 int) WITH OIDS;
-CREATE TABLE atestp2 (fx int, fy int) WITH OIDS;
-CREATE TABLE atestc (fz int) INHERITS (atestp1, atestp2);
-GRANT SELECT(fx,fy,oid) ON atestp2 TO regressuser2;
-GRANT SELECT(fx) ON atestc TO regressuser2;
-SET SESSION AUTHORIZATION regressuser2;
-SELECT fx FROM atestp2; -- ok
- fx 
-----
-(0 rows)
-
-SELECT fy FROM atestp2; -- ok
- fy 
-----
-(0 rows)
-
-SELECT atestp2 FROM atestp2; -- ok
- atestp2 
----------
-(0 rows)
-
-SELECT oid FROM atestp2; -- ok
- oid 
------
-(0 rows)
-
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+CREATE TABLE atestp1 (f1 int, f2 int) WITH OIDS;	-- to be failed
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
+CREATE TABLE atestp2 (fx int, fy int) WITH OIDS;	-- to be failed
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
+CREATE TABLE atestc (fz int) INHERITS (atestp1, atestp2);	-- to be failed
+ERROR:  relation "atestp1" does not exist
+GRANT SELECT(fx,fy,oid) ON atestp2 TO regressuser2;	-- to be failed
+ERROR:  relation "atestp2" does not exist
+GRANT SELECT(fx) ON atestc TO regressuser2;	-- to be failed
+ERROR:  relation "atestc" does not exist
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
+SELECT fx FROM atestp2; -- to be failed
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT fx FROM atestp2;
+                       ^
+SELECT fy FROM atestp2; -- fail due to issue 3520503, see above
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT fy FROM atestp2;
+                       ^
+SELECT atestp2 FROM atestp2; -- fail due to issue 3520503, see above
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT atestp2 FROM atestp2;
+                            ^
+SELECT oid FROM atestp2; -- fail due to issue 3520503, see above
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT oid FROM atestp2;
+                        ^
 SELECT fy FROM atestc; -- fail
-ERROR:  permission denied for relation atestc
-SET SESSION AUTHORIZATION regressuser1;
+ERROR:  relation "atestc" does not exist on datanode1
+LINE 1: SELECT fy FROM atestc;
+                       ^
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 GRANT SELECT(fy,oid) ON atestc TO regressuser2;
-SET SESSION AUTHORIZATION regressuser2;
+ERROR:  relation "atestc" does not exist
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 SELECT fx FROM atestp2; -- still ok
- fx 
-----
-(0 rows)
-
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT fx FROM atestp2;
+                       ^
 SELECT fy FROM atestp2; -- ok
- fy 
-----
-(0 rows)
-
-SELECT atestp2 FROM atestp2; -- ok
- atestp2 
----------
-(0 rows)
-
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT fy FROM atestp2;
+                       ^
+SELECT atestp2 FROM atestp2; -- fail due to issue 3520503, see above
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT atestp2 FROM atestp2;
+                            ^
 SELECT oid FROM atestp2; -- ok
- oid 
------
-(0 rows)
-
+ERROR:  relation "atestp2" does not exist on datanode1
+LINE 1: SELECT oid FROM atestp2;
+                        ^
 -- privileges on functions, languages
 -- switch to superuser
 \c -
 REVOKE ALL PRIVILEGES ON LANGUAGE sql FROM PUBLIC;
 GRANT USAGE ON LANGUAGE sql TO regressuser1; -- ok
 GRANT USAGE ON LANGUAGE c TO PUBLIC; -- fail
-ERROR:  language "c" is not trusted
-HINT:  Only superusers can use untrusted languages.
-SET SESSION AUTHORIZATION regressuser1;
+ERROR:  Forbid grant language c to public.
+DETAIL:  Only support grant language c to specified users.
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+SET search_path TO public;
 GRANT USAGE ON LANGUAGE sql TO regressuser2; -- fail
-WARNING:  no privileges were granted for "sql"
+ERROR:  no privileges were granted for "sql"
 CREATE FUNCTION testfunc1(int) RETURNS int AS 'select 2 * $1;' LANGUAGE sql;
+ERROR:  permission denied to create function "testfunc1"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE FUNCTION testfunc2(int) RETURNS int AS 'select 3 * $1;' LANGUAGE sql;
+ERROR:  permission denied to create function "testfunc2"
+HINT:  must be sysadmin to create a function in public schema.
 REVOKE ALL ON FUNCTION testfunc1(int), testfunc2(int) FROM PUBLIC;
+ERROR:  function testfunc1(integer) does not exist
 GRANT EXECUTE ON FUNCTION testfunc1(int), testfunc2(int) TO regressuser2;
+ERROR:  function testfunc1(integer) does not exist
 GRANT USAGE ON FUNCTION testfunc1(int) TO regressuser3; -- semantic error
-ERROR:  invalid privilege type USAGE for function
+ERROR:  function testfunc1(integer) does not exist
 GRANT ALL PRIVILEGES ON FUNCTION testfunc1(int) TO regressuser4;
+ERROR:  function testfunc1(integer) does not exist
 GRANT ALL PRIVILEGES ON FUNCTION testfunc_nosuch(int) TO regressuser4;
 ERROR:  function testfunc_nosuch(integer) does not exist
 CREATE FUNCTION testfunc4(boolean) RETURNS text
-  AS 'select col1 from atest2 where col2 = $1;'
+  AS 'select col1 from atest2_privileges_test where col2 = $1;'
   LANGUAGE sql SECURITY DEFINER;
+ERROR:  permission denied to create function "testfunc4"
+HINT:  must be sysadmin to create a function in public schema.
 GRANT EXECUTE ON FUNCTION testfunc4(boolean) TO regressuser3;
-SET SESSION AUTHORIZATION regressuser2;
+ERROR:  function testfunc4(boolean) does not exist
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 SELECT testfunc1(5), testfunc2(5); -- ok
- testfunc1 | testfunc2 
------------+-----------
-        10 |        15
-(1 row)
-
+ERROR:  function testfunc1(integer) does not exist
+LINE 1: SELECT testfunc1(5), testfunc2(5);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: testfunc1
 CREATE FUNCTION testfunc3(int) RETURNS int AS 'select 2 * $1;' LANGUAGE sql; -- fail
-ERROR:  permission denied for language sql
-SET SESSION AUTHORIZATION regressuser3;
+ERROR:  permission denied to create function "testfunc3"
+HINT:  must be sysadmin to create a function in public schema.
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 SELECT testfunc1(5); -- fail
-ERROR:  permission denied for function testfunc1
-SELECT col1 FROM atest2 WHERE col2 = true; -- fail
-ERROR:  permission denied for relation atest2
-SELECT testfunc4(true); -- ok
- testfunc4 
------------
- bar
-(1 row)
-
-SET SESSION AUTHORIZATION regressuser4;
+ERROR:  function testfunc1(integer) does not exist
+LINE 1: SELECT testfunc1(5);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: testfunc1
+SELECT col1 FROM atest2_privileges_test WHERE col2 = true; -- fail
+ERROR:  permission denied for relation atest2_privileges_test
+DETAIL:  N/A
+SELECT testfunc4(true); -- fail due to issue 3520503, see above
+ERROR:  function testfunc4(boolean) does not exist
+LINE 1: SELECT testfunc4(true);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: testfunc4
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SELECT testfunc1(5); -- ok
- testfunc1 
------------
-        10
-(1 row)
-
+ERROR:  function testfunc1(integer) does not exist
+LINE 1: SELECT testfunc1(5);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: testfunc1
 DROP FUNCTION testfunc1(int); -- fail
-ERROR:  must be owner of function testfunc1
+ERROR:  function testfunc1(integer) does not exist
 \c -
 DROP FUNCTION testfunc1(int); -- ok
+ERROR:  function testfunc1(integer) does not exist
 -- restore to sanity
 GRANT ALL PRIVILEGES ON LANGUAGE sql TO PUBLIC;
 -- privileges on types
@@ -517,64 +625,96 @@ REVOKE USAGE ON TYPE testtype1 FROM PUBLIC;
 GRANT USAGE ON TYPE testtype1 TO regressuser2;
 GRANT USAGE ON TYPE _testtype1 TO regressuser2; -- fail
 ERROR:  cannot set privileges of array types
-HINT:  Set the privileges of the element type instead.
+DETAIL:  Set the privileges of the element type instead.
 GRANT USAGE ON DOMAIN testtype1 TO regressuser2; -- fail
-ERROR:  "testtype1" is not a domain
+ERROR:  wrong object type
+DETAIL:  "testtype1" is not a domain
 CREATE DOMAIN testdomain1 AS int;
 REVOKE USAGE on DOMAIN testdomain1 FROM PUBLIC;
 GRANT USAGE ON DOMAIN testdomain1 TO regressuser2;
 GRANT USAGE ON TYPE testdomain1 TO regressuser2; -- ok
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+SET search_path TO public;
 -- commands that should fail
 CREATE AGGREGATE testagg1a(testdomain1) (sfunc = int4_sum, stype = bigint);
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 CREATE DOMAIN testdomain2a AS testdomain1;
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 CREATE DOMAIN testdomain3a AS int;
 CREATE FUNCTION castfunc(int) RETURNS testdomain3a AS $$ SELECT $1::testdomain3a $$ LANGUAGE SQL;
+ERROR:  permission denied to create function "castfunc"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE CAST (testdomain1 AS testdomain3a) WITH FUNCTION castfunc(int);
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 DROP FUNCTION castfunc(int) CASCADE;
+ERROR:  function castfunc(integer) does not exist
 DROP DOMAIN testdomain3a;
 CREATE FUNCTION testfunc5a(a testdomain1) RETURNS int LANGUAGE SQL AS $$ SELECT $1 $$;
-ERROR:  permission denied for type testdomain1
+ERROR:  permission denied to create function "testfunc5a"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE FUNCTION testfunc6a(b int) RETURNS testdomain1 LANGUAGE SQL AS $$ SELECT $1::testdomain1 $$;
-ERROR:  permission denied for type testdomain1
+ERROR:  permission denied to create function "testfunc6a"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE OPERATOR !+! (PROCEDURE = int4pl, LEFTARG = testdomain1, RIGHTARG = testdomain1);
-ERROR:  permission denied for type testdomain1
+ERROR:  permission denied to create operator "!+!"
+HINT:  must be initial user to create an operator in public schema.
 CREATE TABLE test5a (a int, b testdomain1);
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 CREATE TABLE test6a OF testtype1;
 ERROR:  permission denied for type testtype1
+DETAIL:  N/A
 CREATE TABLE test10a (a int[], b testtype1[]);
 ERROR:  permission denied for type testtype1
+DETAIL:  N/A
 CREATE TABLE test9a (a int, b int);
 ALTER TABLE test9a ADD COLUMN c testdomain1;
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 ALTER TABLE test9a ALTER COLUMN b TYPE testdomain1;
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 CREATE TYPE test7a AS (a int, b testdomain1);
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 CREATE TYPE test8a AS (a int, b int);
 ALTER TYPE test8a ADD ATTRIBUTE c testdomain1;
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 ALTER TYPE test8a ALTER ATTRIBUTE b TYPE testdomain1;
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 CREATE TABLE test11a AS (SELECT 1::testdomain1 AS a);
 ERROR:  permission denied for type testdomain1
+DETAIL:  N/A
 REVOKE ALL ON TYPE testtype1 FROM PUBLIC;
 ERROR:  permission denied for type testtype1
-SET SESSION AUTHORIZATION regressuser2;
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 -- commands that should succeed
 CREATE AGGREGATE testagg1b(testdomain1) (sfunc = int4_sum, stype = bigint);
+ERROR:  permission denied to create aggregate "testagg1b"
+HINT:  must be sysadmin to create a aggregate in public schema.
 CREATE DOMAIN testdomain2b AS testdomain1;
 CREATE DOMAIN testdomain3b AS int;
 CREATE FUNCTION castfunc(int) RETURNS testdomain3b AS $$ SELECT $1::testdomain3b $$ LANGUAGE SQL;
+ERROR:  permission denied to create function "castfunc"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE CAST (testdomain1 AS testdomain3b) WITH FUNCTION castfunc(int);
 WARNING:  cast will be ignored because the source data type is a domain
+ERROR:  function castfunc(integer) does not exist
 CREATE FUNCTION testfunc5b(a testdomain1) RETURNS int LANGUAGE SQL AS $$ SELECT $1 $$;
+ERROR:  permission denied to create function "testfunc5b"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE FUNCTION testfunc6b(b int) RETURNS testdomain1 LANGUAGE SQL AS $$ SELECT $1::testdomain1 $$;
+ERROR:  permission denied to create function "testfunc6b"
+HINT:  must be sysadmin to create a function in public schema.
 CREATE OPERATOR !! (PROCEDURE = testfunc5b, RIGHTARG = testdomain1);
+ERROR:  permission denied to create operator "!!"
+HINT:  must be initial user to create an operator in public schema.
 CREATE TABLE test5b (a int, b testdomain1);
 CREATE TABLE test6b OF testtype1;
 CREATE TABLE test10b (a int[], b testtype1[]);
@@ -587,13 +727,17 @@ ALTER TYPE test8b ADD ATTRIBUTE c testdomain1;
 ALTER TYPE test8b ALTER ATTRIBUTE b TYPE testdomain1;
 CREATE TABLE test11b AS (SELECT 1::testdomain1 AS a);
 REVOKE ALL ON TYPE testtype1 FROM PUBLIC;
-WARNING:  no privileges could be revoked for "testtype1"
+ERROR:  no privileges could be revoked for "testtype1"
 \c -
 DROP AGGREGATE testagg1b(testdomain1);
+ERROR:  aggregate testagg1b(testdomain1) does not exist
 DROP DOMAIN testdomain2b;
 DROP OPERATOR !! (NONE, testdomain1);
+ERROR:  operator does not exist: !! testdomain1
 DROP FUNCTION testfunc5b(a testdomain1);
+ERROR:  function testfunc5b(testdomain1) does not exist
 DROP FUNCTION testfunc6b(b int);
+ERROR:  function testfunc6b(integer) does not exist
 DROP TABLE test5b;
 DROP TABLE test6b;
 DROP TABLE test9b;
@@ -601,16 +745,20 @@ DROP TABLE test10b;
 DROP TYPE test7b;
 DROP TYPE test8b;
 DROP CAST (testdomain1 AS testdomain3b);
+ERROR:  cast from type testdomain1 to type testdomain3b does not exist
 DROP FUNCTION castfunc(int) CASCADE;
+ERROR:  function castfunc(integer) does not exist
 DROP DOMAIN testdomain3b;
 DROP TABLE test11b;
 DROP TYPE testtype1; -- ok
 DROP DOMAIN testdomain1; -- ok
 -- truncate
-SET SESSION AUTHORIZATION regressuser5;
-TRUNCATE atest2; -- ok
+SET SESSION AUTHORIZATION regressuser5 PASSWORD 'gauss@123';
+SET search_path TO public;
+TRUNCATE atest2_privileges_test; -- ok
 TRUNCATE atest3; -- fail
 ERROR:  permission denied for relation atest3
+DETAIL:  N/A
 -- has_table_privilege function
 -- bad-input checks
 select has_table_privilege(NULL,'pg_authid','select');
@@ -621,12 +769,17 @@ select has_table_privilege(NULL,'pg_authid','select');
 
 select has_table_privilege('pg_shad','select');
 ERROR:  relation "pg_shad" does not exist
+CONTEXT:  referenced column: has_table_privilege
 select has_table_privilege('nosuchuser','pg_authid','select');
 ERROR:  role "nosuchuser" does not exist
+CONTEXT:  referenced column: has_table_privilege
 select has_table_privilege('pg_authid','sel');
 ERROR:  unrecognized privilege type: "sel"
+CONTEXT:  referenced column: has_table_privilege
 select has_table_privilege(-999999,'pg_authid','update');
 ERROR:  role with OID 4293967297 does not exist
+DETAIL:  N/A
+CONTEXT:  referenced column: has_table_privilege
 select has_table_privilege(1,'select');
  has_table_privilege 
 ---------------------
@@ -726,7 +879,8 @@ from (select oid from pg_class where relname = 'pg_authid') as t1;
 (1 row)
 
 -- non-superuser
-SET SESSION AUTHORIZATION regressuser3;
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
+SET search_path TO public;
 select has_table_privilege(current_user,'pg_class','select');
  has_table_privilege 
 ---------------------
@@ -808,26 +962,26 @@ from (select oid from pg_class where relname = 'pg_class') as t1;
  f
 (1 row)
 
-select has_table_privilege(current_user,'atest1','select');
+select has_table_privilege(current_user,'atest1_privileges_test','select');
  has_table_privilege 
 ---------------------
  t
 (1 row)
 
-select has_table_privilege(current_user,'atest1','insert');
+select has_table_privilege(current_user,'atest1_privileges_test','insert');
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
-select has_table_privilege(t2.oid,'atest1','update')
+select has_table_privilege(t2.oid,'atest1_privileges_test','update')
 from (select oid from pg_roles where rolname = current_user) as t2;
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
-select has_table_privilege(t2.oid,'atest1','delete')
+select has_table_privilege(t2.oid,'atest1_privileges_test','delete')
 from (select oid from pg_roles where rolname = current_user) as t2;
  has_table_privilege 
 ---------------------
@@ -835,14 +989,14 @@ from (select oid from pg_roles where rolname = current_user) as t2;
 (1 row)
 
 select has_table_privilege(current_user,t1.oid,'references')
-from (select oid from pg_class where relname = 'atest1') as t1;
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1;
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
 select has_table_privilege(t2.oid,t1.oid,'select')
-from (select oid from pg_class where relname = 'atest1') as t1,
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1,
   (select oid from pg_roles where rolname = current_user) as t2;
  has_table_privilege 
 ---------------------
@@ -850,56 +1004,56 @@ from (select oid from pg_class where relname = 'atest1') as t1,
 (1 row)
 
 select has_table_privilege(t2.oid,t1.oid,'insert')
-from (select oid from pg_class where relname = 'atest1') as t1,
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1,
   (select oid from pg_roles where rolname = current_user) as t2;
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
-select has_table_privilege('atest1','update');
+select has_table_privilege('atest1_privileges_test','update');
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
-select has_table_privilege('atest1','delete');
+select has_table_privilege('atest1_privileges_test','delete');
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
-select has_table_privilege('atest1','truncate');
+select has_table_privilege('atest1_privileges_test','truncate');
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
 select has_table_privilege(t1.oid,'select')
-from (select oid from pg_class where relname = 'atest1') as t1;
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1;
  has_table_privilege 
 ---------------------
  t
 (1 row)
 
 select has_table_privilege(t1.oid,'trigger')
-from (select oid from pg_class where relname = 'atest1') as t1;
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1;
  has_table_privilege 
 ---------------------
  f
 (1 row)
 
 -- Grant options
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 CREATE TABLE atest4 (a int);
 GRANT SELECT ON atest4 TO regressuser2 WITH GRANT OPTION;
 GRANT UPDATE ON atest4 TO regressuser2;
 GRANT SELECT ON atest4 TO GROUP regressgroup1 WITH GRANT OPTION;
-SET SESSION AUTHORIZATION regressuser2;
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 GRANT SELECT ON atest4 TO regressuser3;
 GRANT UPDATE ON atest4 TO regressuser3; -- fail
-WARNING:  no privileges were granted for "atest4"
-SET SESSION AUTHORIZATION regressuser1;
+ERROR:  no privileges were granted for "atest4"
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 REVOKE SELECT ON atest4 FROM regressuser3; -- does nothing
 SELECT has_table_privilege('regressuser3', 'atest4', 'SELECT'); -- true
  has_table_privilege 
@@ -933,17 +1087,20 @@ SELECT has_table_privilege('regressuser1', 'atest4', 'SELECT WITH GRANT OPTION')
 \c -
 CREATE SEQUENCE x_seq;
 GRANT USAGE on x_seq to regressuser2;
-SELECT has_sequence_privilege('regressuser1', 'atest1', 'SELECT');
-ERROR:  "atest1" is not a sequence
+SELECT has_sequence_privilege('regressuser1', 'atest1_privileges_test', 'SELECT');
+ERROR:  "atest1_privileges_test" is not a (large) sequence
+CONTEXT:  referenced column: has_sequence_privilege
 SELECT has_sequence_privilege('regressuser1', 'x_seq', 'INSERT');
 ERROR:  unrecognized privilege type: "INSERT"
+CONTEXT:  referenced column: has_sequence_privilege
 SELECT has_sequence_privilege('regressuser1', 'x_seq', 'SELECT');
  has_sequence_privilege 
 ------------------------
  f
 (1 row)
 
-SET SESSION AUTHORIZATION regressuser2;
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
+SET search_path TO public;
 SELECT has_sequence_privilege('x_seq', 'USAGE');
  has_sequence_privilege 
 ------------------------
@@ -952,192 +1109,193 @@ SELECT has_sequence_privilege('x_seq', 'USAGE');
 
 -- largeobject privilege tests
 \c -
-SET SESSION AUTHORIZATION regressuser1;
-SELECT lo_create(1001);
- lo_create 
------------
-      1001
-(1 row)
-
-SELECT lo_create(1002);
- lo_create 
------------
-      1002
-(1 row)
-
-SELECT lo_create(1003);
- lo_create 
------------
-      1003
-(1 row)
-
-SELECT lo_create(1004);
- lo_create 
------------
-      1004
-(1 row)
-
-SELECT lo_create(1005);
- lo_create 
------------
-      1005
-(1 row)
-
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+SET search_path TO public;
+SELECT lo_create(1001);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
+SELECT lo_create(1002);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
+SELECT lo_create(1003);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
+SELECT lo_create(1004);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
+SELECT lo_create(1005);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
 GRANT ALL ON LARGE OBJECT 1001 TO PUBLIC;
+ERROR:  large object 1001 does not exist
+DETAIL:  N/A
 GRANT SELECT ON LARGE OBJECT 1003 TO regressuser2;
+ERROR:  large object 1003 does not exist
+DETAIL:  N/A
 GRANT SELECT,UPDATE ON LARGE OBJECT 1004 TO regressuser2;
+ERROR:  large object 1004 does not exist
+DETAIL:  N/A
 GRANT ALL ON LARGE OBJECT 1005 TO regressuser2;
+ERROR:  large object 1005 does not exist
+DETAIL:  N/A
 GRANT SELECT ON LARGE OBJECT 1005 TO regressuser2 WITH GRANT OPTION;
+ERROR:  large object 1005 does not exist
+DETAIL:  N/A
 GRANT SELECT, INSERT ON LARGE OBJECT 1001 TO PUBLIC;	-- to be failed
-ERROR:  invalid privilege type INSERT for large object
+ERROR:  large object 1001 does not exist
+DETAIL:  N/A
 GRANT SELECT, UPDATE ON LARGE OBJECT 1001 TO nosuchuser;	-- to be failed
-ERROR:  role "nosuchuser" does not exist
+ERROR:  large object 1001 does not exist
+DETAIL:  N/A
 GRANT SELECT, UPDATE ON LARGE OBJECT  999 TO PUBLIC;	-- to be failed
 ERROR:  large object 999 does not exist
+DETAIL:  N/A
 \c -
-SET SESSION AUTHORIZATION regressuser2;
+SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
+SET search_path TO public;
 SELECT lo_create(2001);
- lo_create 
------------
-      2001
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
 SELECT lo_create(2002);
- lo_create 
------------
-      2002
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_create
 SELECT loread(lo_open(1001, x'40000'::int), 32);
- loread 
---------
- \x
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
 SELECT loread(lo_open(1002, x'40000'::int), 32);	-- to be denied
-ERROR:  permission denied for large object 1002
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
 SELECT loread(lo_open(1003, x'40000'::int), 32);
- loread 
---------
- \x
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
 SELECT loread(lo_open(1004, x'40000'::int), 32);
- loread 
---------
- \x
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
 SELECT lowrite(lo_open(1001, x'20000'::int), 'abcd');
- lowrite 
----------
-       4
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lowrite
 SELECT lowrite(lo_open(1002, x'20000'::int), 'abcd');	-- to be denied
-ERROR:  permission denied for large object 1002
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lowrite
 SELECT lowrite(lo_open(1003, x'20000'::int), 'abcd');	-- to be denied
-ERROR:  permission denied for large object 1003
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lowrite
 SELECT lowrite(lo_open(1004, x'20000'::int), 'abcd');
- lowrite 
----------
-       4
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lowrite
 GRANT SELECT ON LARGE OBJECT 1005 TO regressuser3;
+ERROR:  large object 1005 does not exist
+DETAIL:  N/A
 GRANT UPDATE ON LARGE OBJECT 1006 TO regressuser3;	-- to be denied
 ERROR:  large object 1006 does not exist
+DETAIL:  N/A
 REVOKE ALL ON LARGE OBJECT 2001, 2002 FROM PUBLIC;
+ERROR:  large object 2001 does not exist
+DETAIL:  N/A
 GRANT ALL ON LARGE OBJECT 2001 TO regressuser3;
+ERROR:  large object 2001 does not exist
+DETAIL:  N/A
 SELECT lo_unlink(1001);		-- to be denied
-ERROR:  must be owner of large object 1001
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_unlink
 SELECT lo_unlink(2002);
- lo_unlink 
------------
-         1
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_unlink
 \c -
 -- confirm ACL setting
 SELECT oid, pg_get_userbyid(lomowner) ownername, lomacl FROM pg_largeobject_metadata;
- oid  |  ownername   |                                          lomacl                                          
-------+--------------+------------------------------------------------------------------------------------------
- 1002 | regressuser1 | 
- 1001 | regressuser1 | {regressuser1=rw/regressuser1,=rw/regressuser1}
- 1003 | regressuser1 | {regressuser1=rw/regressuser1,regressuser2=r/regressuser1}
- 1004 | regressuser1 | {regressuser1=rw/regressuser1,regressuser2=rw/regressuser1}
- 1005 | regressuser1 | {regressuser1=rw/regressuser1,regressuser2=r*w/regressuser1,regressuser3=r/regressuser2}
- 2001 | regressuser2 | {regressuser2=rw/regressuser2,regressuser3=rw/regressuser2}
-(6 rows)
+ oid | ownername | lomacl 
+-----+-----------+--------
+(0 rows)
 
-SET SESSION AUTHORIZATION regressuser3;
-SELECT loread(lo_open(1001, x'40000'::int), 32);
-   loread   
-------------
- \x61626364
-(1 row)
-
-SELECT loread(lo_open(1003, x'40000'::int), 32);	-- to be denied
-ERROR:  permission denied for large object 1003
-SELECT loread(lo_open(1005, x'40000'::int), 32);
- loread 
---------
- \x
-(1 row)
-
-SELECT lo_truncate(lo_open(1005, x'20000'::int), 10);	-- to be denied
-ERROR:  permission denied for large object 1005
-SELECT lo_truncate(lo_open(2001, x'20000'::int), 10);
- lo_truncate 
--------------
-           0
-(1 row)
-
+SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
+SET search_path TO public;
+SELECT loread(lo_open(1001, x'40000'::int), 32);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
+SELECT loread(lo_open(1003, x'40000'::int), 32);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
+SELECT loread(lo_open(1005, x'40000'::int), 32);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
+SELECT lo_truncate(lo_open(1005, x'20000'::int), 10);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_truncate
+SELECT lo_truncate(lo_open(2001, x'20000'::int), 10);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_truncate
 -- compatibility mode in largeobject permission
 \c -
 SET lo_compat_privileges = false;	-- default setting
-SET SESSION AUTHORIZATION regressuser4;
-SELECT loread(lo_open(1002, x'40000'::int), 32);	-- to be denied
-ERROR:  permission denied for large object 1002
-SELECT lowrite(lo_open(1002, x'20000'::int), 'abcd');	-- to be denied
-ERROR:  permission denied for large object 1002
-SELECT lo_truncate(lo_open(1002, x'20000'::int), 10);	-- to be denied
-ERROR:  permission denied for large object 1002
-SELECT lo_unlink(1002);					-- to be denied
-ERROR:  must be owner of large object 1002
-SELECT lo_export(1001, '/dev/null');			-- to be denied
-ERROR:  must be superuser to use server-side lo_export()
-HINT:  Anyone can use the client-side lo_export() provided by libpq.
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
+SET search_path TO public;
+SELECT loread(lo_open(1002, x'40000'::int), 32);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
+SELECT lowrite(lo_open(1002, x'20000'::int), 'abcd');	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lowrite
+SELECT lo_truncate(lo_open(1002, x'20000'::int), 10);	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_truncate
+SELECT lo_unlink(1002);					-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_unlink
+SELECT lo_export(1001, '/dev/null');	-- to be failed
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_export
 \c -
 SET lo_compat_privileges = true;	-- compatibility mode
-SET SESSION AUTHORIZATION regressuser4;
+SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
+SET search_path TO public;
 SELECT loread(lo_open(1002, x'40000'::int), 32);
- loread 
---------
- \x
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: loread
 SELECT lowrite(lo_open(1002, x'20000'::int), 'abcd');
- lowrite 
----------
-       4
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lowrite
 SELECT lo_truncate(lo_open(1002, x'20000'::int), 10);
- lo_truncate 
--------------
-           0
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_truncate
 SELECT lo_unlink(1002);
- lo_unlink 
------------
-         1
-(1 row)
-
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_unlink
 SELECT lo_export(1001, '/dev/null');			-- to be denied
-ERROR:  must be superuser to use server-side lo_export()
-HINT:  Anyone can use the client-side lo_export() provided by libpq.
+ERROR:  openGauss does not support large object yet
+DETAIL:  The feature is not currently supported
+CONTEXT:  referenced column: lo_export
 -- don't allow unpriv users to access pg_largeobject contents
 \c -
 SELECT * FROM pg_largeobject LIMIT 0;
@@ -1145,9 +1303,11 @@ SELECT * FROM pg_largeobject LIMIT 0;
 ------+--------+------
 (0 rows)
 
-SET SESSION AUTHORIZATION regressuser1;
+SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
+SET search_path TO public;
 SELECT * FROM pg_largeobject LIMIT 0;			-- to be denied
 ERROR:  permission denied for relation pg_largeobject
+DETAIL:  N/A
 -- test default ACLs
 \c -
 CREATE SCHEMA testns;
@@ -1343,9 +1503,6 @@ CREATE INDEX CONCURRENTLY sro_idx ON sro_tab ((sro_ifun(a) + sro_ifun(0)))
 REINDEX TABLE sro_tab;
 REINDEX INDEX sro_idx;
 REINDEX TABLE CONCURRENTLY sro_tab;  -- reindex does not support CONCURRENTLY
-ERROR:  syntax error at or near "CONCURRENTLY"
-LINE 1: REINDEX TABLE CONCURRENTLY sro_tab;
-                      ^
 DROP INDEX sro_idx;
 -- CLUSTER
 CREATE INDEX sro_cluster_idx ON sro_tab ((sro_ifun(a) + sro_ifun(0)));
@@ -1370,9 +1527,6 @@ INSERT INTO sro_ptab VALUES (1), (2), (3);
 CREATE INDEX sro_pidx ON sro_ptab ((sro_ifun(a) + sro_ifun(0))) local;
 REINDEX TABLE sro_ptab;
 REINDEX INDEX CONCURRENTLY sro_pidx;  -- reindex does not support CONCURRENTLY
-ERROR:  syntax error at or near "CONCURRENTLY"
-LINE 1: REINDEX INDEX CONCURRENTLY sro_pidx;
-                      ^
 DROP INDEX sro_pidx;
 DROP TABLE sro_ptab;
 DROP FUNCTION sro_ifun(int) cascade;
@@ -1398,14 +1552,18 @@ RESET client_min_messages;
 -- test that dependent privileges are revoked (or not) properly
 \c -
 set session role regressuser1 PASSWORD 'gauss@123';
+set search_path to public; 
 create table dep_priv_test (a int);
 grant select on dep_priv_test to regressuser2 with grant option;
 grant select on dep_priv_test to regressuser3 with grant option;
 set session role regressuser2 PASSWORD 'gauss@123';
+set search_path to public;
 grant select on dep_priv_test to regressuser4 with grant option;
 set session role regressuser3 PASSWORD 'gauss@123';
+set search_path to public;
 grant select on dep_priv_test to regressuser4 with grant option;
 set session role regressuser4 PASSWORD 'gauss@123';
+set search_path to public;
 grant select on dep_priv_test to regressuser5;
 \dp dep_priv_test
                                        Access privileges
@@ -1420,6 +1578,7 @@ grant select on dep_priv_test to regressuser5;
 (1 row)
 
 set session role regressuser2 PASSWORD 'gauss@123';
+set search_path to public;
 revoke select on dep_priv_test from regressuser4 cascade;
 \dp dep_priv_test
                                        Access privileges
@@ -1433,6 +1592,7 @@ revoke select on dep_priv_test from regressuser4 cascade;
 (1 row)
 
 set session role regressuser3 PASSWORD 'gauss@123';
+set search_path to public;
 revoke select on dep_priv_test from regressuser4 cascade;
 \dp dep_priv_test
                                        Access privileges
@@ -1444,12 +1604,15 @@ revoke select on dep_priv_test from regressuser4 cascade;
 (1 row)
 
 set session role regressuser1 PASSWORD 'gauss@123';
+set search_path to public;
 drop table dep_priv_test;
 -- clean up
 \c
 drop sequence x_seq;
 DROP FUNCTION testfunc2(int);
+ERROR:  function testfunc2(integer) does not exist
 DROP FUNCTION testfunc4(boolean);
+ERROR:  function testfunc4(boolean) does not exist
 DROP VIEW atestv1;
 DROP VIEW atestv2;
 -- this should cascade to drop atestv4
@@ -1458,24 +1621,22 @@ NOTICE:  drop cascades to view atestv4
 -- this should complain "does not exist"
 DROP VIEW atestv4;
 ERROR:  view "atestv4" does not exist
-DROP TABLE atest1;
-DROP TABLE atest2;
+DROP TABLE atest1_privileges_test;
+DROP TABLE atest2_privileges_test;
 DROP TABLE atest3;
 DROP TABLE atest4;
 DROP TABLE atest5;
 DROP TABLE atest6;
 DROP TABLE atestc;
+ERROR:  table "atestc" does not exist
 DROP TABLE atestp1;
+ERROR:  table "atestp1" does not exist
 DROP TABLE atestp2;
+ERROR:  table "atestp2" does not exist
 SELECT lo_unlink(oid) FROM pg_largeobject_metadata;
  lo_unlink 
 -----------
-         1
-         1
-         1
-         1
-         1
-(5 rows)
+(0 rows)
 
 DROP GROUP regressgroup1;
 DROP GROUP regressgroup2;
@@ -1489,3 +1650,165 @@ DROP USER regressuser4;
 DROP USER regressuser5;
 DROP USER regressuser6;
 ERROR:  role "regressuser6" does not exist
+--test the set role in transaction.
+create role setrole_in_transaction password 'Gauss@123';
+start transaction;
+set role setrole_in_transaction password 'Gauss@123';
+rollback;
+drop role setrole_in_transaction;
+--
+--test user's privileges when enableSeparationOfDuty is closed
+--
+create user sysadmin_user_001 sysadmin password 'Gauss@123';
+create user sysadmin_user_002 sysadmin password 'Gauss@123';
+create user createrole_user_001 createrole password 'Gauss@123';
+create user createrole_user_002 createrole password 'Gauss@123';
+create user audit_role_user_001 auditadmin password 'Gauss@123';
+create user normalrole_user_001 password 'Gauss@123';
+create user normalrole_user_002 password 'Gauss@123';
+create resource pool test_user_pool1;
+create resource pool test_user_pool2;
+create resource pool test_user_pool3;
+create resource pool test_user_pool4;
+create resource pool test_user_pool5;
+--1.test sysadmin change sysadmin
+set role sysadmin_user_001 password 'Gauss@123';
+alter role sysadmin_user_002 CREATEDB;
+alter role sysadmin_user_002 CREATEROLE;
+alter role sysadmin_user_002 NOINHERIT;
+alter role sysadmin_user_002 AUDITADMIN;
+alter role sysadmin_user_002 SYSADMIN;
+alter role sysadmin_user_002 LOGIN;
+alter role sysadmin_user_002 NOREPLICATION;
+alter role sysadmin_user_002 CONNECTION LIMIT 10;
+alter role sysadmin_user_002 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role sysadmin_user_002 valid begin '1111-11-11' valid until '2222-12-12';
+alter role sysadmin_user_002 set session_timeout = '5min';
+alter role sysadmin_user_002 ACCOUNT UNLOCK;
+alter role sysadmin_user_002 RESOURCE POOL 'test_user_pool1';
+alter role sysadmin_user_002 rename to normalrole_user_003;
+reset role;
+--2.test sysadmin change audit user
+set role sysadmin_user_001 password 'Gauss@123';
+alter role audit_role_user_001 CREATEDB;
+alter role audit_role_user_001 CREATEROLE;
+alter role audit_role_user_001 NOINHERIT;
+alter role audit_role_user_001 AUDITADMIN;
+alter role audit_role_user_001 SYSADMIN;
+alter role audit_role_user_001 LOGIN;
+alter role audit_role_user_001 NOREPLICATION;
+alter role audit_role_user_001 CONNECTION LIMIT 10;
+alter role audit_role_user_001 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role audit_role_user_001 valid begin '1111-11-11' valid until '2222-12-12';
+alter role audit_role_user_001 set session_timeout = '5min';
+alter role audit_role_user_001 ACCOUNT UNLOCK;
+alter role audit_role_user_001 RESOURCE POOL 'test_user_pool2';
+alter role audit_role_user_001 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+--3.test sysadmin change normal user
+set role sysadmin_user_001 password 'Gauss@123';
+alter role normalrole_user_001 CREATEDB;
+alter role normalrole_user_001 CREATEROLE;
+alter role normalrole_user_001 NOINHERIT;
+alter role normalrole_user_001 AUDITADMIN;
+alter role normalrole_user_001 SYSADMIN;
+alter role normalrole_user_001 LOGIN;
+alter role normalrole_user_001 NOREPLICATION;
+alter role normalrole_user_001 CONNECTION LIMIT 10;
+alter role normalrole_user_001 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role normalrole_user_001 valid begin '1111-11-11' valid until '2222-12-12';
+alter role normalrole_user_001 set session_timeout = '5min';
+alter role normalrole_user_001 ACCOUNT UNLOCK;
+alter role normalrole_user_001 RESOURCE POOL 'test_user_pool3';
+alter role normalrole_user_001 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+--4.test sysadmin change createrole user
+set role sysadmin_user_001 password 'Gauss@123';
+alter role createrole_user_001 CREATEDB;
+alter role createrole_user_001 CREATEROLE;
+alter role createrole_user_001 NOINHERIT;
+alter role createrole_user_001 AUDITADMIN;
+alter role createrole_user_001 SYSADMIN;
+alter role createrole_user_001 LOGIN;
+alter role createrole_user_001 NOREPLICATION;
+alter role createrole_user_001 CONNECTION LIMIT 10; 
+alter role createrole_user_001 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role createrole_user_001 valid begin '1111-11-11' valid until '2222-12-12';
+alter role createrole_user_001 set session_timeout = '5min';
+alter role createrole_user_001 ACCOUNT UNLOCK;
+alter role createrole_user_001 RESOURCE POOL 'test_user_pool4';
+alter role createrole_user_001 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+--5.test createrole change normal user
+set role createrole_user_002 password 'Gauss@123';
+alter role normalrole_user_002 CREATEDB;
+alter role normalrole_user_002 CREATEROLE;
+ERROR:  Permission denied.
+alter role normalrole_user_002 NOINHERIT;
+alter role normalrole_user_002 AUDITADMIN;
+alter role normalrole_user_002 SYSADMIN;
+ERROR:  Permission denied.
+alter role normalrole_user_002 LOGIN;
+alter role normalrole_user_002 NOREPLICATION;
+alter role normalrole_user_002 CONNECTION LIMIT 10;
+alter role normalrole_user_002 identified by 'Gauss@12302' replace 'Gauss@123';
+alter role normalrole_user_002 valid begin '1111-11-11' valid until '2222-12-12';
+alter role normalrole_user_002 set session_timeout = '5min';
+alter role normalrole_user_002 ACCOUNT UNLOCK;
+alter role normalrole_user_002 RESOURCE POOL 'test_user_pool5';
+alter role normalrole_user_002 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+drop user sysadmin_user_001;
+drop user sysadmin_user_002;
+ERROR:  role "sysadmin_user_002" does not exist
+drop user createrole_user_001;
+drop user createrole_user_002;
+drop user audit_role_user_001;
+drop user normalrole_user_001;
+drop user normalrole_user_002;
+drop user normalrole_user_003 cascade;
+drop resource pool test_user_pool1;
+drop resource pool test_user_pool2;
+drop resource pool test_user_pool3;
+drop resource pool test_user_pool4;
+drop resource pool test_user_pool5;
+--test internal select pg_statistic by ANALYZE.
+create user role_analyze password 'gauss@123';
+set session role role_analyze PASSWORD 'gauss@123';
+create table test_analyze_priv(a int);
+analyze test_analyze_priv;
+insert into test_analyze_priv select generate_series(1, 100);
+analyze test_analyze_priv;
+execute direct on (coordinator2)'select * from pg_statistic';
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+--pg_database is shared relation and can not be analyzed by non-superuser.
+analyze pg_database;
+WARNING:  skipping "pg_database" --- only system admin can analyze it
+drop table test_analyze_priv;
+reset role;
+drop user role_analyze;
+--test dml privilege on system catalog 
+update pg_authid set relpassword='123';
+ERROR:  permission denied: "pg_authid" is a system catalog
+insert into pg_authid values('along');
+ERROR:  permission denied: "pg_authid" is a system catalog
+delete from pg_authid;
+ERROR:  permission denied: "pg_authid" is a system catalog
+create user createrole_user01 with createrole password 'Gauss@123';
+set role createrole_user01 password 'Gauss@123';
+create user auditadmin_user02 with auditadmin password 'Gauss@123';
+drop user auditadmin_user02;
+reset role;
+drop user createrole_user01;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+\c regression;
+drop database test_privileges;

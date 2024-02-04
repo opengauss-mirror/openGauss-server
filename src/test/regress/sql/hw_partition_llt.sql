@@ -1,3 +1,5 @@
+create database hw_partition_llt_db;
+\c hw_partition_llt_db;
 ------ The file is for llt
 
 -- indexGetPartitionOidList
@@ -370,3 +372,6 @@ select pg_get_indexdef('t10_idx'::regclass::oid);
 \d+ t10
 
 drop table t10;
+
+\c regression;
+drop database hw_partition_llt_db;

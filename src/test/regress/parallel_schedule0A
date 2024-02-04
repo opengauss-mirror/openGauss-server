@@ -10,6 +10,18 @@
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
 #test: recovery_2pc_tools recovery_2pc_tools02
 #test: recovery_2pc_tools
+# --------------------------
+# usecases for improving coverage 
+# these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+# --------------------------
+test: timecapsule_partition_ustore_test_1
+test: timecapsule_partition_ustore_test_2
+test: ddl
+test: ustore_subpartition_vacuum_partition
+test: test_ustore_undo_tool
+test: privileges
+test: AMHeap_logical_scan
+test: copy
 
 test: sqlbypass_partition
 test: sqlpatch_base

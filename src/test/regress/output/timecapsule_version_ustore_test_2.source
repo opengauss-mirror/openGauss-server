@@ -195,12 +195,12 @@ create table tv_cities (
     altitude        int
 );
 drop table if exists tv_cities;
+create table cities ( id int4, name varchar(50) );
 create table tv_capitals (
     state           char(2)
 ) inherits (cities);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 drop table if exists tv_capitals;
-NOTICE:  table "tv_capitals" does not exist, skipping
+drop table if exists cities;
 drop table if exists tv_lineitem;
 NOTICE:  table "tv_lineitem" does not exist, skipping
 create table tv_lineitem

@@ -4,6 +4,135 @@
 -- CLASS POPULATION
 --	(any resemblance to real life is purely coincidental)
 --
+create database copy_test_db;
+\c copy_test_db;
+create schema copy_test;
+set current_schema='copy_test';
+CREATE TABLE aggtest (
+	a 			int2,
+	b			float4
+) with(autovacuum_enabled = off);
+CREATE TABLE onek (
+	unique1		int4,
+	unique2		int4,
+	two			int4,
+	four		int4,
+	ten			int4,
+	twenty		int4,
+	hundred		int4,
+	thousand	int4,
+	twothousand	int4,
+	fivethous	int4,
+	tenthous	int4,
+	odd			int4,
+	even		int4,
+	stringu1	name,
+	stringu2	name,
+	string4		name
+) with(autovacuum_enabled = off);
+CREATE TABLE tenk1 (
+	unique1		int4,
+	unique2		int4,
+	two			int4,
+	four		int4,
+	ten			int4,
+	twenty		int4,
+	hundred		int4,
+	thousand	int4,
+	twothousand	int4,
+	fivethous	int4,
+	tenthous	int4,
+	odd			int4,
+	even		int4,
+	stringu1	name,
+	stringu2	name,
+	string4		name
+) with(autovacuum_enabled = off);
+CREATE TABLE slow_emp4000 (
+	home_base	 box
+) with(autovacuum_enabled = off);
+CREATE TABLE person (
+	name 		text,
+	age			int4,
+	location 	point
+);
+CREATE TABLE emp (
+	name            text,
+	age		int4,
+	location	point,
+	salary 		int4,
+	manager 	name
+) with(autovacuum_enabled = off);
+CREATE TABLE student (
+	name 		text,
+	age			int4,
+	location 	point,
+	gpa		float8
+);
+CREATE TABLE stud_emp (
+	name 		text,
+	age			int4,
+	location 	point,
+	salary		int4,
+	manager		name,
+	gpa 		float8,
+	percent		int4
+) with(autovacuum_enabled = off);
+CREATE TABLE road (
+	name		text,
+	thepath 	path
+);
+CREATE TABLE real_city (
+	pop			int4,
+	cname		text,
+	outline 	path
+) with(autovacuum_enabled = off);
+CREATE TABLE hash_i4_heap (
+	seqno 		int4,
+	random 		int4
+) with(autovacuum_enabled = off);
+CREATE TABLE hash_name_heap (
+	seqno 		int4,
+	random 		name
+) with(autovacuum_enabled = off);
+CREATE TABLE hash_txt_heap (
+	seqno 		int4,
+	random 		text
+) with(autovacuum_enabled = off);
+CREATE TABLE hash_f8_heap (
+	seqno		int4,
+	random 		float8
+)  with(autovacuum_enabled = off);
+CREATE TABLE IF NOT EXISTS test_tsvector(
+	t text,
+	a tsvector
+);
+CREATE TABLE bt_i4_heap (
+	seqno 		int4,
+	random 		int4
+) with(autovacuum_enabled = off);
+CREATE TABLE bt_name_heap (
+	seqno 		name,
+	random 		int4
+) with(autovacuum_enabled = off);
+CREATE TABLE bt_txt_heap (
+	seqno 		text,
+	random 		int4
+);
+CREATE TABLE bt_f8_heap (
+	seqno 		float8,
+	random 		int4
+) with(autovacuum_enabled = off);
+CREATE TABLE array_op_test (
+	seqno		int4,
+	i			int4[],
+	t			text[]
+) with(autovacuum_enabled = off);
+CREATE TABLE array_index_op_test (
+	seqno		int4,
+	i			int4[],
+	t			text[]
+) with(autovacuum_enabled = off);
 COPY aggtest FROM '@abs_srcdir@/data/agg.data';
 COPY onek FROM '@abs_srcdir@/data/onek.data';
 COPY onek TO '@abs_builddir@/results/onek.data';
@@ -97,16 +226,13 @@ c1,"col with , comma","col with "" quote"
 CREATE FOREIGN TABLE int4_extern_invalid_1(a INT4 ,b int4)  SERVER gsmpp_server OPTIONS(format 'binary', location '@abs_builddir@/data/hash.data',mode 'shared');
 ERROR:  LOAD format "binary" not recognized
 select * from int4_extern_invalid_1 order by a limit 1;
-ERROR:  relation "int4_extern_invalid_1" does not exist
+ERROR:  relation "int4_extern_invalid_1" does not exist on datanode1
 LINE 1: select * from int4_extern_invalid_1 order by a limit 1;
                       ^
 CREATE FOREIGN TABLE int4_extern_invalid_2(a INT4 ,b int4)  SERVER gsmpp_server OPTIONS(format 'text', location '@abs_builddir@/data/hash.data', mode 'shared');
 select * from int4_extern_invalid_2 order by a limit 1;
- a |     b      
----+------------
- 0 | 1935401906
-(1 row)
-
+ERROR:  Un-support feature
+DETAIL:  foreign table scan can not direct execute on datanode
 DROP FOREIGN TABLE int4_extern_invalid_1;
 ERROR:  foreign table "int4_extern_invalid_1" does not exist
 DROP FOREIGN TABLE int4_extern_invalid_2;
@@ -212,10 +338,11 @@ drop table ignore_extra_data_test;
 ---- load data to oversize row/column table
 ----
 \! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/data/create_oversize_row_table.sql > /dev/null 2>&1;
-copy lineitem_large_row from '@abs_srcdir@/data/copy_oversize_tuple.data' delimiter '|';
-ERROR:  row is too big: size 13128, maximum size 8144
-CONTEXT:  COPY lineitem_large_row, line 2: ""
-DROP TABLE lineitem_large_row;
+---- ERROR not support distributed capability yet
+copy public.lineitem_large_row from '@abs_srcdir@/data/copy_oversize_tuple.data' delimiter '|';
+ERROR:  relation "public.lineitem_large_row" does not exist
+DROP TABLE public.lineitem_large_row;
+ERROR:  table "lineitem_large_row" does not exist
 ----
 ---- set noescaping to be 'true' for copy to
 ----
@@ -339,6 +466,7 @@ insert into TESTTABLE_tbl values(30,'F','U','College'             ,500,'Good'   
 update TESTTABLE_tbl set dp_text_tv=to_tsvector('ngram',coalesce(dp_text,''));
 ---- compressed row relation
 alter table TESTTABLE_tbl set  compress ;
+ERROR:  row-oriented table does not support compression
 select count(*) from TESTTABLE_tbl;
  count 
 -------
@@ -361,3 +489,30 @@ SELECT * FROM TESTTABLE_tbl;
 (1 row)
 
 DROP TABLE TESTTABLE_tbl;
+DROP TABLE aggtest;
+DROP TABLE onek;
+DROP TABLE tenk1;
+DROP TABLE slow_emp4000;
+DROP TABLE person;
+DROP TABLE emp;
+DROP TABLE student;
+DROP TABLE stud_emp;
+DROP TABLE road;
+DROP TABLE real_city;
+DROP TABLE hash_i4_heap;
+DROP TABLE hash_name_heap;
+DROP TABLE hash_txt_heap;
+DROP TABLE hash_f8_heap;
+DROP TABLE test_tsvector;
+DROP TABLE bt_i4_heap;
+DROP TABLE bt_name_heap;
+DROP TABLE bt_txt_heap;
+DROP TABLE bt_f8_heap;
+DROP TABLE array_op_test;
+DROP TABLE array_index_op_test;
+DROP TABLE tmp_cust_asset_sum_1;
+DROP TABLE base_tab_000;
+DROP TABLE base_type_tab_000;
+DROP SCHEMA copy_test CASCADE;
+\c regression;
+drop database copy_test_db;

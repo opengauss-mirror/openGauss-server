@@ -1,24 +1,24 @@
 -- predictability
 SET synchronous_commit = on;
 
-SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot_ddl', 'test_decoding');
 -- fail because of an already existing slot
-SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot_ddl', 'test_decoding');
 -- fail because of an invalid name
 SELECT 'init' FROM pg_create_logical_replication_slot('Invalid Name', 'test_decoding');
 
 -- fail twice because of an invalid parameter values
-SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', 'frakbar');
-SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'nonexistant-option', 'frakbar');
-SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', 'frakbar');
+SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', 'frakbar');
+SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'nonexistant-option', 'frakbar');
+SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', 'frakbar');
 
 -- succeed once
-SELECT pg_drop_replication_slot('regression_slot');
+SELECT pg_drop_replication_slot('regression_slot_ddl');
 -- fail
-SELECT pg_drop_replication_slot('regression_slot');
+SELECT pg_drop_replication_slot('regression_slot_ddl');
 
 
-SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot_ddl', 'test_decoding');
 
 /*
  * Check that changes are handled correctly when interleaved with ddl
@@ -34,14 +34,14 @@ INSERT INTO replication_example(somedata, text) VALUES (3, 3);
 COMMIT;
 
 -- collect all changes
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 /*
  * check that disk spooling works
  */
 /* display results, but hide most of the output */
 SELECT count(*), min(data), max(data)
-FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1')
+FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1')
 GROUP BY substring(data, 1, 24)
 ORDER BY 1,2;
 
@@ -69,7 +69,7 @@ INSERT INTO tr_sub(path) VALUES ('1-top-2-#1');
 RELEASE SAVEPOINT b;
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- check that we handle xlog assignments correctly
 START TRANSACTION;
@@ -98,7 +98,7 @@ RELEASE SAVEPOINT subtop;
 INSERT INTO tr_sub(path) VALUES ('2-top-#1');
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- make sure rollbacked subtransactions aren't decoded
 START TRANSACTION;
@@ -111,7 +111,7 @@ ROLLBACK TO SAVEPOINT b;
 INSERT INTO tr_sub(path) VALUES ('3-top-2-#2');
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- test whether a known, but not yet logged toplevel xact, followed by a
 -- subxact commit is handled correctly
@@ -129,7 +129,7 @@ SAVEPOINT a;
 INSERT INTO tr_sub(path) VALUES ('5-top-1-#1');
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 /*
  * check whether we handle updates/deletes correct with & without a pkey
@@ -167,7 +167,7 @@ UPDATE toasttable
     SET toasted_col1 = (SELECT string_agg(g.i::text, '') FROM generate_series(1, 2000) g(i))
 WHERE id = 1;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 INSERT INTO toasttable(toasted_col1) SELECT string_agg(g.i::text, '') FROM generate_series(1, 2000) g(i);
 
@@ -203,17 +203,17 @@ delete from bmsql_order_line;
 
 
 -- done, free logical replication slot
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
-SELECT pg_drop_replication_slot('regression_slot');
+SELECT pg_drop_replication_slot('regression_slot_ddl');
 
 create table t1(id1 int, id2 int, data text, primary key(id1, id2)) distribute by hash(id2);
 insert into t1 values (1, generate_series(1, 10000), 'gao');
-SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot_ddl', 'test_decoding');
 update t1 set id1= id1+10000 where id2 <=10000;
-SELECT data FROM pg_logical_slot_peek_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_peek_changes('regression_slot_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 drop table t1;
-SELECT pg_drop_replication_slot('regression_slot');
+SELECT pg_drop_replication_slot('regression_slot_ddl');
 drop table replication_example;
 drop table tr_sub;
 drop table table_without_key;

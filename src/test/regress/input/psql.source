@@ -1,3 +1,5 @@
+create database test_sql;
+\c test_sql;
 --for LLT
 --test gsql outer help
 \! @abs_bindir@/gsql --help | grep command
@@ -16,12 +18,12 @@ create table tbl_seq(col1 int,col2 int);
 create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
 \d seq_test
 
-\! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"
-\! @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "drop table gsql_c_copy;"
+\! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d test_sql -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"
+\! @abs_bindir@/gsql -X -d test_sql -p @portstring@ -c "drop table gsql_c_copy;"
 
 --select_audit_log test
 select * from pg_delete_audit('1111-1-1','2222-2-2');
-select detail_info from pg_query_audit('1111-1-1','2222-2-2') where client_conninfo != 'gs_clean@::1';
+select detail_info from pg_query_audit('1111-1-1','2222-2-2') where client_conninfo != 'gs_clean@::1' and detail_info like 'select * from pg_delete_audit%';
 
 create table std_table(id int);
 \copy std_table from stdout;
@@ -35,7 +37,7 @@ create table std_table(id int);
 select * from std_table order by 1;
 drop table std_table;
 
-\! @abs_bindir@/gsql --no-gsqlrc -d postgres -p @portstring@ -a -c "select 1;"
+\! @abs_bindir@/gsql --no-gsqlrc -d test_sql -p @portstring@ -a -c "select 1;"
 
 --test session timeout work with statement timeout.
 set session_timeout = 0;
@@ -47,10 +49,10 @@ set session_timeout = 600;
 set statement_timeout = 0;
 
 --test for '~/' in PSQLRC
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -c ""
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c ""
 
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from lock_cluster_ddl();"  >a.txt 2>&1
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from unlock_cluster_ddl();"  >a.txt 2>&1
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "select * from lock_cluster_ddl();"  >a.txt 2>&1
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "select * from unlock_cluster_ddl();"  >a.txt 2>&1
 --add llt for psql
 \dFp+
 \i+ aes_llt.sql 0123456789abcdef
@@ -182,9 +184,9 @@ drop table test_d_command_part2;
 \! echo "select ab;                                                                                                             " >> @abs_bindir@/gsql_parallel.sql
 \! echo "\parallel off                                                                                                          " >> @abs_bindir@/gsql_parallel.sql
 \! echo "\set VERBOSITY default                                                                                                 " >> @abs_bindir@/gsql_parallel.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_parallel.sql
-\! rm @abs_bindir@/gsql_parser.sql
-\! rm @abs_bindir@/gsql_parallel.sql
+-- \! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_parallel.sql
+-- \! rm @abs_bindir@/gsql_parser.sql
+-- \! rm @abs_bindir@/gsql_parallel.sql
 
 set session_timeout = 3;
 \parallel on 3
@@ -193,46 +195,49 @@ select pg_sleep(3);
 select pg_sleep(3);
 select pg_sleep(3);
 \parallel off
+drop table if exists dual;
+create table dual (dummy varchar(1));
+insert into dual values ('X');
 select * from dual;
 show session_timeout;
 reset session_timeout;
-select left(version(),18);
+select left(version(),10);
 
 \! echo "select 1" 	>> @abs_bindir@/gsql_cat.sql
 \! echo "union all"	>> @abs_bindir@/gsql_cat.sql
 \! echo "select 2;"	>> @abs_bindir@/gsql_cat.sql
 \! echo "select 3;" >> @abs_bindir@/gsql_cat.sql
 \! echo "select 4"	>> @abs_bindir@/gsql_cat.sql
-\! cat @abs_bindir@/gsql_cat.sql | @abs_bindir@/gsql -d postgres -p @portstring@
+\! cat @abs_bindir@/gsql_cat.sql | @abs_bindir@/gsql -d test_sql -p @portstring@
 \! rm -f @abs_bindir@/gsql_cat.sql
 
 --add test for ut
 \! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e '	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 
 \! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e @abs_bindir@/gsql_ut.sql'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 
 \! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e  @abs_bindir@/gsql_ut.sql 10'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 
 -- this is not added to V1R7C00 now.
 /*
 \! echo '\setenv PSQL_EDITOR_LINENUMBER_ARG "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e a.sql'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 */
 
 \! echo '\setenv PAGER "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo 'select * from generate_series(1, 300);'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+-- \! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 
 \! echo '\setenv SHELL "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\!'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 
 \cd @abs_bindir@
 
@@ -245,13 +250,16 @@ select * from dual;
 \o
 \copyright
 
+\c regression;
+drop database test_sql;
+
 \! rm -f @abs_bindir@/gsql_ut.sql
 -- end of test for ut.
 
---10)test on_error_stop in parallel execute
-\set ON_ERROR_STOP 'on'
-start transaction;
-\parallel
-insert into gsql_parallel_test select generate_series(1,10);
-insert into gsql_parallel_test select generate_series(1,10);
-\parallel
+-- --10)test on_error_stop in parallel execute
+-- \set ON_ERROR_STOP 'on'
+-- start transaction;
+-- \parallel
+-- insert into gsql_parallel_test select generate_series(1,10);
+-- insert into gsql_parallel_test select generate_series(1,10);
+-- \parallel

@@ -6,6 +6,23 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
+# --------------------------
+# usecases for improving coverage 
+# --------------------------
+# these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+test: timecapsule_partition_ustore_test_1
+test: timecapsule_partition_ustore_test_2
+test: ddl
+test: ustore_subpartition_vacuum_partition
+test: test_ustore_undo_tool
+test: privileges
+test: AMHeap_logical_scan
+test: copy
+
+test: vec_hashjoin1 single_node_rangetypes db4ai_explain_model test_ustore_toast ustore_ddl ts_utf8 test_ustore_update test_ustore_index
+test: sqlldr/gs_loader_basic psql parse_xlog cgin_test create_index_gist hw_user rowlevelsecurity query_self_tuning hw_partition_llt
+test: heap_copytuple partition_cost_model fulljoin_rewrite_row_2 auto_analyze_test vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill 
+
 # test for index deduplication
 test: btree_deduplication
 

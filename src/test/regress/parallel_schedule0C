@@ -1,6 +1,11 @@
 # ----------
 # Database security
 # ----------
+# --------------------------
+# usecases for improving coverage 
+# --------------------------
+test: heap_copytuple partition_cost_model fulljoin_rewrite_row_2 auto_analyze_test vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill 
+
 test: hw_pwd_reuse
 #test: hw_auditadmin
 

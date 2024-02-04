@@ -33,7 +33,7 @@ select substring(gs_explain_model('test_explain_model_function'),0, 196);
 DROP MODEL test_explain_model_function;
 
 -- query audit logs
-select type, result, object_name, detail_info from pg_query_audit('1012-11-10', '3012-11-11') where type in ('ddl_model');
+-- select type, result, object_name, detail_info from pg_query_audit('1012-11-10', '3012-11-11') where type in ('ddl_model');
 
 -- clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');

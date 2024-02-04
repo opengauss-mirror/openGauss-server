@@ -1,8 +1,10 @@
 -- predictability
+CREATE DATABASE ustore_ddl;
+\c ustore_ddl
 SET synchronous_commit = on;
 
 
-SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'mppdb_decoding');
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot_ustore_ddl', 'mppdb_decoding');
 /*
  * Check that changes are handled correctly when interleaved with ddl
  */
@@ -17,14 +19,14 @@ INSERT INTO replication_example(somedata, text) VALUES (3, 3);
 COMMIT;
 
 -- collect all changes
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 /*
  * check that disk spooling works
  */
 /* display results, but hide most of the output */
 SELECT count(*), min(data), max(data)
-FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1')
+FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1')
 GROUP BY substring(data, 1, 24)
 ORDER BY 1,2;
 
@@ -52,7 +54,7 @@ INSERT INTO tr_sub(path) VALUES ('1-top-2-#1');
 RELEASE SAVEPOINT b;
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- check that we handle xlog assignments correctly
 START TRANSACTION;
@@ -81,7 +83,7 @@ RELEASE SAVEPOINT subtop;
 INSERT INTO tr_sub(path) VALUES ('2-top-#1');
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- make sure rollbacked subtransactions aren't decoded
 START TRANSACTION;
@@ -94,7 +96,7 @@ ROLLBACK TO SAVEPOINT b;
 INSERT INTO tr_sub(path) VALUES ('3-top-2-#2');
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 -- test whether a known, but not yet logged toplevel xact, followed by a
 -- subxact commit is handled correctly
 START TRANSACTION;
@@ -111,7 +113,7 @@ SAVEPOINT a;
 INSERT INTO tr_sub(path) VALUES ('5-top-1-#1');
 COMMIT;
 
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 /*
  * check whether we handle updates/deletes correct with & without a pkey
@@ -150,10 +152,13 @@ delete from bmsql_order_line;
 
 
 -- done, free logical replication slot
-SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
-SELECT pg_drop_replication_slot('regression_slot');
+SELECT data FROM pg_logical_slot_get_changes('regression_slot_ustore_ddl', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+SELECT pg_drop_replication_slot('regression_slot_ustore_ddl');
 
 drop table replication_example;
 drop table tr_sub;
 drop table table_without_key;
 drop table bmsql_order_line;
+-- end
+\c regression
+DROP DATABASE IF EXISTS ustore_ddl;

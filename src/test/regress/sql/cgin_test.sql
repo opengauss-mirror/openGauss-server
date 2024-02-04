@@ -7,7 +7,6 @@ set current_schema = cgin_index;
 SET ENABLE_SEQSCAN=OFF;
 SET ENABLE_INDEXSCAN=OFF;
 SET ENABLE_BITMAPSCAN=ON;
-SET ENABLE_FAST_QUERY_SHIPPING=OFF;
 
 --case1 普通列存表的索引创建
 DROP TABLE IF EXISTS test_cgin_1;
@@ -142,10 +141,10 @@ insert into test_cgin_cbtree_1 values(3, 'apple pear');
 create index cbtree_idx_1 on test_cgin_cbtree_1 using btree(id);
 create index cbtree_idx_2 on test_cgin_cbtree_1 using btree(name);
 create index cgin_idx_1 on test_cgin_cbtree_1 using gin(to_tsvector('ngram',name)) with (fastupdate = on);
-EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+EXPLAIN (COSTS OFF)
 select count(*) from test_cgin_cbtree_1 where id =1 or to_tsvector('ngram',name)@@to_tsquery('ngram','pear');
 select count(*) from test_cgin_cbtree_1 where id =1 or to_tsvector('ngram',name)@@to_tsquery('ngram','pear');
-EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF) 
+EXPLAIN (COSTS OFF) 
 select count(*) from test_cgin_cbtree_1 where id in (1,3) and name in ('apple','pear');
 select count(*) from test_cgin_cbtree_1 where id in (1,3) and name in ('apple','pear');
 
@@ -154,6 +153,5 @@ DROP TABLE test_cgin_cbtree_1;
 RESET ENABLE_SEQSCAN;
 RESET ENABLE_INDEXSCAN;
 RESET ENABLE_BITMAPSCAN;
-RESET ENABLE_FAST_QUERY_SHIPPING;
 
 drop schema cgin_index CASCADE;
