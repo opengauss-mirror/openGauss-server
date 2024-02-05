@@ -518,6 +518,14 @@ void DMSRefreshLogger(char *log_field, unsigned long long *value)
     dms_refresh_logger(log_field, value);
 }
 
+static void SSWaitDmsAuxiliaryExit()
+{
+    while (g_instance.pid_cxt.DmsAuxiliaryPID != 0) {
+        pg_usleep(1);
+    }
+    ereport(LOG, (errmsg("[SS] dms auxiliary thread exit")));
+}
+
 void DMSUninit()
 {
     if (!ENABLE_DMS || !g_instance.dms_cxt.dmsInited) {
@@ -528,8 +536,11 @@ void DMSUninit()
     ereport(LOG, (errmsg("DMS uninit worker threads, DRC, errdesc and DL")));
     dms_uninit();
 
-    ereport(LOG, (errmsg("dms xmin maintainer thread exit")));
-    signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
+    if (g_instance.pid_cxt.DmsAuxiliaryPID != 0) {
+        ereport(LOG, (errmsg("[SS] notify dms auxiliary thread exit")));
+        signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
+        SSWaitDmsAuxiliaryExit();
+    }
 }
 
 // order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)

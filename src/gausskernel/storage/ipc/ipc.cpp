@@ -343,6 +343,10 @@ void proc_exit(int code)
 
     GlobalStatsCleanupFiles();
 
+    if (ENABLE_DMS && AmDmsAuxiliaryProcess()) {
+        g_instance.pid_cxt.DmsAuxiliaryPID = 0;
+    }
+
     gs_thread_exit(code);
 }
 

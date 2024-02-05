@@ -620,6 +620,7 @@ typedef enum {
 #define AmDmsReformProcProcess() (t_thrd.role == DMS_WORKER && t_thrd.dms_cxt.is_reform_proc)
 #define AmDmsProcess() (t_thrd.role == DMS_WORKER)
 #define AmErosRecyclerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == ExrtoRecyclerProcess)
+#define AmDmsAuxiliaryProcess() (t_thrd.role == DMS_AUXILIARY_THREAD)
 
 
 
