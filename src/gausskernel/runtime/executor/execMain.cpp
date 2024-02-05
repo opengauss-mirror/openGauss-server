@@ -1429,26 +1429,30 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         estate->dataDestRelIndex = plannedstmt->dataDestRelIndex;
     }
 
+    /* deprecated: explain_info_hashtbl/collected_info_hashtbl
+     * set false disable data insertion into the hash table.
+     * deprecated function: 
+     * - pg_stat_get_wlm_realtime_operator_info
+     * - pg_stat_get_wlm_realtime_ec_operator_info
+     * - pg_stat_get_wlm_ec_operator_info
+     * - gs_stat_get_wlm_plan_operator_info
+     * - pg_stat_get_wlm_operator_info
+     * */
     estate->es_can_realtime_statistics = false;
     estate->es_can_history_statistics = false;
 
     if (u_sess->attr.attr_resource.use_workload_manager &&
         u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && !IsInitdb) {
-        int max_plan_id = plannedstmt->num_plannodes;
         int current_realtime_num = hash_get_num_entries(g_operator_table.explain_info_hashtbl);
-        if (current_realtime_num + max_plan_id < g_operator_table.max_realtime_num) {
-            /* too many collect info now, ignore this time. */
-            estate->es_can_realtime_statistics = true;
-        } else {
+        if (current_realtime_num != 0) {
+            /* unreached branch */
             ereport(LOG, (errmsg("Too many realtime info in the memory, current realtime record num is %d.",
-                current_realtime_num)));
+                                 current_realtime_num)));
         }
 
         int current_collectinfo_num = hash_get_num_entries(g_operator_table.collected_info_hashtbl);
-        if (current_collectinfo_num + max_plan_id <= g_operator_table.max_collectinfo_num) {
-            /* too many collect info now, ignore this time. */
-            estate->es_can_history_statistics = true;
-        } else {
+        if (current_collectinfo_num != 0) {
+            /* unreached branch */
             ereport(LOG, (errmsg("Too many history info in the memory, current history record num is %d.",
                 current_collectinfo_num)));
         }
