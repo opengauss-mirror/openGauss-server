@@ -485,4 +485,7 @@ select * from dbe_pldebugger.continue();
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 select * from dbe_pldebugger.continue();
 
+select generate_procoverage_report(9223372036854775807,9223372036854775807);
+select generate_procoverage_report(9223372036854775805,9223372036854775806);
+
 select * from tmp_holder;
