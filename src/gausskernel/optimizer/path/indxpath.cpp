@@ -47,9 +47,12 @@
 #include "optimizer/gplanmgr.h"
 #include "instruments/instr_statement.h"
 #include "utils/expr_distinct.h"
+#include "catalog/gs_collation.h"
 
 #define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || \
     (opfamily) == BOOL_HASH_FAM_OID || (opfamily) == BOOL_UBTREE_FAM_OID)
+
+#define BTREE_AM_OID 403
 
 #define IndexCollMatchesExprColl(idxcollation, exprcollation) \
     ((idxcollation) == InvalidOid || (idxcollation) == (exprcollation))
@@ -99,6 +102,14 @@ typedef struct {
     int startPath;            /* check value for "AND group leader" */
 } ChooseBitmapAndInfo;
 
+/* Used to store the content needed for filling when converting the index conditions for operator like. */
+typedef struct {
+    int maxBufLen;
+    char maxSortBuf[4];
+    int minBufLen;
+    char minSortBuf[4];
+} PadContent;
+
 static void consider_index_join_clauses(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index,
     IndexClauseSet* rclauseset, IndexClauseSet* jclauseset, IndexClauseSet* eclauseset, List** bitindexpaths);
 static void consider_index_join_outer_rels(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index,
@@ -142,7 +153,8 @@ static void match_pathkeys_to_index(
     IndexOptInfo* index, List* pathkeys, List** orderby_clauses_p, List** clause_columns_p);
 static Expr* match_clause_to_ordering_op(IndexOptInfo* index, int indexcol, Expr* clause, Oid pk_opfamily);
 static bool match_boolean_index_clause(Node* clause, int indexcol, IndexOptInfo* index);
-static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcollation, bool indexkey_on_left);
+static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcollation,
+    bool indexkey_on_left, IndexOptInfo* index, int indexcol);
 static Expr* expand_boolean_index_clause(Node* clause, int indexcol, IndexOptInfo* index);
 static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo, Oid opfamily, Oid idxcollation,
     int indexcol);
@@ -158,8 +170,12 @@ static int get_index_column_prefix_lenth(IndexOptInfo *index, int indexcol);
 static Const* prefix_const_node(Const* con, int prefix_len, Oid datatype);
 static RestrictInfo* rewrite_opclause_for_prefixkey(
     RestrictInfo *rinfo, IndexOptInfo* index, Oid opfamily, int prefix_len);
+static Const *pad_string_in_like(PadContent content, const Const *strConst, int length, bool isPadMax);
+static int get_pad_length(Node *leftop, int prefixLen);
+static PadContent get_pad_content(Oid collation);
 void check_report_cause_type(FuncExpr *funcExpr, int indkey);
 Node* match_first_var_to_indkey(Node* node, int indkey);
+
 
 /*
  * create_index_paths
@@ -2413,8 +2429,9 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
          * If we didn't find a member of the index's opfamily, see whether it
          * is a "special" indexable operator.
          */
-        if (plain_op && match_special_index_operator(clause, opfamily, idxcollation, true))
+        if (plain_op && match_special_index_operator(clause, opfamily, idxcollation, true, index, indexcol)) {
             return true;
+        }
         return false;
     }
 
@@ -2427,8 +2444,9 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
          * If we didn't find a member of the index's opfamily, see whether it
          * is a "special" indexable operator.
          */
-        if (match_special_index_operator(clause, opfamily, idxcollation, false))
+        if (match_special_index_operator(clause, opfamily, idxcollation, false, index, indexcol)) {
             return true;
+        }
         return false;
     }
 
@@ -3208,6 +3226,36 @@ static bool match_boolean_index_clause(Node* clause, int indexcol, IndexOptInfo*
     return false;
 }
 
+
+static bool can_be_applyed_in_b_format(Oid idxcollation, IndexOptInfo* index, int indexcol)
+{
+    if (!is_b_format_collation(idxcollation)) {
+        return false;
+    }
+    TargetEntry* tle = (TargetEntry*)list_nth(index->indextlist, indexcol);
+    bool hasPrefix = false;
+    bool hasLength = false;
+    if (IsA(tle->expr, PrefixKey)) {
+        hasPrefix = true;
+    } else if (IsA(tle->expr, Var)) {
+        Var *var = (Var *)tle->expr;
+        hasLength = var->vartypmod > 0;
+    }
+    return (hasLength || hasPrefix);
+}
+
+static bool is_valid_expr_like_op_in_b_format(Oid expr_op)
+{
+    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+        return false;
+    }
+    Oid binaryOid = get_typeoid(PG_CATALOG_NAMESPACE, "binary");
+    Oid varbinaryOid = get_typeoid(PG_CATALOG_NAMESPACE, "varbinary");
+
+    return (expr_op == OpernameGetOprid(list_make1(makeString("~~")), binaryOid, binaryOid) ||
+            expr_op == OpernameGetOprid(list_make1(makeString("~~")), varbinaryOid, varbinaryOid));
+}
+
 /*
  * match_special_index_operator
  *	  Recognize restriction clauses that can be used to generate
@@ -3218,7 +3266,8 @@ static bool match_boolean_index_clause(Node* clause, int indexcol, IndexOptInfo*
  * but the OP proved not to be one of the index's opfamily operators.
  * Return 'true' if we can do something with it anyway.
  */
-static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcollation, bool indexkey_on_left)
+static bool match_special_index_operator(Expr* clause,
+    Oid opfamily, Oid idxcollation, bool indexkey_on_left, IndexOptInfo* index, int indexcol)
 {
     bool isIndexable = false;
     Node* rightop = NULL;
@@ -3289,7 +3338,12 @@ static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcoll
         case OID_INET_SUBEQ_OP:
             isIndexable = true;
             break;
+
         default:
+            if (is_valid_expr_like_op_in_b_format(expr_op)) {
+                pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll, &prefix, NULL);
+                isIndexable = (pstatus != Pattern_Prefix_None);
+            }
             break;
     }
 
@@ -3331,7 +3385,8 @@ static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcoll
                 (opfamily == TEXT_PATTERN_BTREE_FAM_OID) || (opfamily == TEXT_SPGIST_FAM_OID) ||
                 (opfamily == TEXT_PATTERN_UBTREE_FAM_OID) ||
                 ((opfamily == TEXT_BTREE_FAM_OID || opfamily == TEXT_UBTREE_FAM_OID) &&
-                 (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation)));
+                 (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation) ||
+                 can_be_applyed_in_b_format(idxcollation, index, indexcol)));
             break;
 
         case OID_BPCHAR_LIKE_OP:
@@ -3340,7 +3395,8 @@ static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcoll
         case OID_BPCHAR_ICREGEXEQ_OP:
             isIndexable = (opfamily == BPCHAR_PATTERN_BTREE_FAM_OID || opfamily == BPCHAR_PATTERN_UBTREE_FAM_OID) ||
                           ((opfamily == BPCHAR_BTREE_FAM_OID || opfamily == BPCHAR_UBTREE_FAM_OID) &&
-                              (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation)));
+                              (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation)||
+                              can_be_applyed_in_b_format(idxcollation, index, indexcol)));
             break;
 
         case OID_NAME_LIKE_OP:
@@ -3360,6 +3416,11 @@ static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcoll
             isIndexable = (opfamily == NETWORK_BTREE_FAM_OID || opfamily == NETWORK_UBTREE_FAM_OID);
             break;
         default:
+            if (is_valid_expr_like_op_in_b_format(expr_op)) {
+                isIndexable =
+                    (OpfamilynameGetOpfid(BTREE_AM_OID, "binary_ops") == opfamily ||
+                        OpfamilynameGetOpfid(BTREE_AM_OID, "varbinary_ops") == opfamily);
+            }
             break;
     }
 
@@ -3603,6 +3664,10 @@ static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo,
         default:
             if (prefixkey_len > 0 && op_in_opfamily(expr_op, opfamily)) {
                 return list_make1(rewrite_opclause_for_prefixkey(rinfo, index, opfamily, prefixkey_len));
+            }
+            if (is_valid_expr_like_op_in_b_format(expr_op)) {
+                pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll, &prefix, NULL);
+                return prefix_quals_with_encdoing(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
     }
@@ -3855,6 +3920,161 @@ Expr* adjust_rowcompare_for_index(
     }
 }
 
+
+static PadContent get_pad_content(Oid collation)
+{
+    unsigned long int maxSortCode;
+    unsigned long int minSortCode;
+    PadContent content;
+    switch (collation) {
+        case GBK_CHINESE_CI_COLLATION_OID: {
+            maxSortCode = 0xA967;
+            minSortCode = 0;
+            content.minBufLen = 1;
+            content.minSortBuf[0] = 0;
+            content.maxBufLen = 2;
+            content.maxSortBuf[0] = (char)(maxSortCode >> 8);
+            content.maxSortBuf[1] = maxSortCode & 0xFF;
+            break;
+        }
+        case GBK_BIN_COLLATION_OID: {
+            maxSortCode = 0xFEFE;
+            minSortCode = 0;
+            content.minBufLen = 1;
+            content.minSortBuf[0] = 0;
+            content.maxBufLen = 2;
+            content.maxSortBuf[0] = (char)(maxSortCode >> 8);
+            content.maxSortBuf[1] = maxSortCode & 0xFF;
+            break;
+        }
+        case UTF8_UNICODE_CI_COLLATION_OID:
+        case UTF8MB4_UNICODE_CI_COLLATION_OID: {
+            maxSortCode = 0xFFFF;
+            minSortCode = 0;
+            content.minBufLen = 1;
+            content.minSortBuf[0] = 9;
+            content.maxBufLen = 3;
+            content.maxSortBuf[2] = (unsigned char) (0x80 | (maxSortCode & 0x3f));
+            maxSortCode = maxSortCode >> 6;
+            maxSortCode |= 0x800;
+            content.maxSortBuf[1] = (unsigned char) (0x80 | (maxSortCode & 0x3f));
+            maxSortCode = maxSortCode >> 6;
+            maxSortCode |= 0xc0;
+            content.maxSortBuf[0] = (unsigned char)maxSortCode;
+            break;
+        }
+        case UTF8MB4_GENERAL_CI_COLLATION_OID:
+        case UTF8MB4_BIN_COLLATION_OID:
+        case UTF8_GENERAL_CI_COLLATION_OID:
+        case UTF8_BIN_COLLATION_OID: {
+            maxSortCode = 0xFFFF;
+            minSortCode = 0;
+            content.minBufLen = 1;
+            content.minSortBuf[0] = 0;
+            content.maxBufLen = 3;
+            content.maxSortBuf[2] = (unsigned char) (0x80 | (maxSortCode & 0x3f));
+            maxSortCode = maxSortCode >> 6;
+            maxSortCode |= 0x800;
+            content.maxSortBuf[1] = (unsigned char) (0x80 | (maxSortCode & 0x3f));
+            maxSortCode = maxSortCode >> 6;
+            maxSortCode |= 0xc0;
+            content.maxSortBuf[0] = (unsigned char)maxSortCode;
+            break;
+        }
+        case GB18030_CHINESE_CI_COLLATION_OID: {
+            maxSortCode = 0xFE39FE39;
+            content.minBufLen = 1;
+            content.minSortBuf[0] = 0;
+            content.maxSortBuf[0] = (maxSortCode >> 24) & 0xFF;
+            content.maxSortBuf[1] = (maxSortCode >> 16) & 0xFF;
+            content.maxSortBuf[2] = (maxSortCode >> 8) & 0xFF;
+            content.maxSortBuf[3] = maxSortCode & 0xFF;
+            content.maxBufLen = 4;
+            break;
+        }
+        case GB18030_BIN_COLLATION_OID: {
+            maxSortCode = 0xFEFEFEFE;
+            content.minBufLen = 1;
+            content.minSortBuf[0] = 0;
+            content.maxSortBuf[0] = (maxSortCode >> 24) & 0xFF;
+            content.maxSortBuf[1] = (maxSortCode >> 16) & 0xFF;
+            content.maxSortBuf[2] = (maxSortCode >> 8) & 0xFF;
+            content.maxSortBuf[3] = maxSortCode & 0xFF;
+            content.maxBufLen = 4;
+            break;
+        }
+        default:
+        /* shouldn't get here. */
+            ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_CASE_NOT_FOUND),
+                (errmsg(
+                    "Invalid collation oid during getting prefix quals in B format"))));
+            break;
+        }
+    return content;
+}
+
+static int get_pad_length(Node* leftop, int prefixLen)
+{
+    int len;
+    switch (nodeTag(leftop)) {
+        case T_Var: {
+            Var *var = (Var *)leftop;
+            len = var->vartypmod;
+            break;
+        }
+        case T_RelabelType: {
+            RelabelType *expr = (RelabelType *)leftop;
+            Var *var = (Var *)expr->arg;
+            len = var->vartypmod;
+            break;
+        }
+        default:
+            return 0;
+    }
+    if (len < 0) {
+        return prefixLen;
+    } else {
+        len -= VARHDRSZ;
+        if (prefixLen <= 0) {
+            return len;
+        }
+        return (len < prefixLen) ? len : prefixLen;
+    }
+}
+
+static Const* pad_string_in_like(PadContent content, const Const* strConst, int length, bool isPadMax)
+{
+    if (length <= 0) {
+        return NULL;
+    }
+    Oid datatype = strConst->consttype;
+    char* workstr = NULL;
+    workstr = TextDatumGetCString(strConst->constvalue);
+    int curLen = strlen(workstr);
+    char* buf = isPadMax ? content.maxSortBuf : content.minSortBuf;
+    int buflen = isPadMax ? content.maxBufLen : content.minBufLen;
+    int padLen = length - pg_mbstrlen_with_len(workstr, curLen);
+
+    errno_t rc = EOK;
+    
+    int totalLen = curLen + padLen * buflen;
+    char *originstr = (char*)palloc(totalLen + 1);
+    rc = memcpy_s(originstr, totalLen, workstr, curLen);
+    securec_check(rc, "\0", "\0");
+    
+    while ((curLen + buflen) <= totalLen) {
+        rc = memcpy_s(originstr + curLen, totalLen - curLen, buf, buflen);
+        securec_check(rc, "\0", "\0");
+        curLen += buflen;
+    }
+    originstr[curLen] = '\0';
+    Const *workstr_const = string_to_const(originstr, datatype);
+    pfree(workstr);
+    pfree(originstr);
+    return workstr_const;
+}
+
+
 /*
  * Given a fixed prefix that all the "leftop" values must have,
  * generate suitable indexqual condition(s).  opfamily is the index
@@ -3900,6 +4120,15 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
             break;
 
         default:
+            if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+                if (OpfamilynameGetOpfid(BTREE_AM_OID, "binary_ops") == opfamily) {
+                    datatype = get_typeoid(PG_CATALOG_NAMESPACE, "binary");
+                    break;
+                } else if (OpfamilynameGetOpfid(BTREE_AM_OID, "varbinary_ops") == opfamily) {
+                    datatype = get_typeoid(PG_CATALOG_NAMESPACE, "varbinary");
+                    break;
+                }
+            }
             /* shouldn't get here */
             ereport(ERROR,
                 (errmodule(MOD_OPT),
@@ -3912,7 +4141,9 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
      * If necessary, coerce the prefix constant to the right type. The given
      * prefix constant is either text or bytea type.
      */
-    if (prefix_const->consttype != datatype) {
+    if (prefix_const->consttype != datatype && (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT
+            || (datatype != get_typeoid(PG_CATALOG_NAMESPACE, "binary") &&
+            datatype != get_typeoid(PG_CATALOG_NAMESPACE, "varbinary")))) {
         char* prefix = NULL;
 
         switch (prefix_const->consttype) {
@@ -3972,43 +4203,92 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
     }
 
     /*
-     * Otherwise, we have a nonempty required prefix of the values.
-     *
-     * We can always say "x >= prefix".
-     */
-    oproid = get_opfamily_member(opfamily, datatype, datatype, BTGreaterEqualStrategyNumber);
-    if (oproid == InvalidOid)
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                (errmsg(
-                    "no >= operator for opfamily %u when generate indexqual condition by prefix quals", opfamily))));
-    expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)prefix_const, InvalidOid, collation);
-    result = list_make1(make_simple_restrictinfo(expr));
+     * In B format, we use a more universally applicable approach.
+     * We find the maximum and minimum characters sorted in the corresponding collation,
+     * and convert the index condition to x >= prefix\min\min... and x <= prefix\max\max.
+     * This approach eliminates the need to consider whether the character obtained from make_greater_string is larger,
+     * allowing us to use the index with confidence. Currently,
+     * this approach is only implemented for B format collations,
+     * but we will consider opening it up to all collations in the future.
+    */
+    if (is_b_format_collation(collation)) {
+        int padLen = get_pad_length(leftop, prefixkey_len);
+        if (padLen > 0) {
+            PadContent content = get_pad_content(collation);
+            Const *minstr = NULL;
+            oproid = get_opfamily_member(opfamily, datatype, datatype, BTGreaterEqualStrategyNumber);
+            if (oproid == InvalidOid)
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg(
+                            "no >= operator for opfamily %u when generate indexqual condition by prefix quals",
+                            opfamily))));
+            minstr = pad_string_in_like(content, prefix_const, padLen, false);
+            if (minstr != NULL) {
+                expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)minstr, InvalidOid, collation);
+                result = lappend(result, make_simple_restrictinfo(expr));
+            }
+            
+            oproid = get_opfamily_member(opfamily, datatype, datatype, BTLessEqualStrategyNumber);
+            if (oproid == InvalidOid)
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg(
+                            "no <= operator for opfamily %u when generate indexqual condition by prefix quals",
+                            opfamily))));
+            greaterstr = pad_string_in_like(content, prefix_const, padLen, true);
+            if (greaterstr != NULL) {
+                expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)greaterstr, InvalidOid, collation);
+                result = lappend(result, make_simple_restrictinfo(expr));
+            }
+        }
+    } else {
+        /*
+        * Otherwise, we have a nonempty required prefix of the values.
+        *
+        * We can always say "x >= prefix".
+        */
+        oproid = get_opfamily_member(opfamily, datatype, datatype, BTGreaterEqualStrategyNumber);
+        if (oproid == InvalidOid)
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                    (errmsg(
+                        "no >= operator for opfamily %u when generate indexqual condition by prefix quals",
+                        opfamily))));
+        expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)prefix_const, InvalidOid, collation);
+        result = list_make1(make_simple_restrictinfo(expr));
 
-    /* -------
-     * If we can create a string larger than the prefix, we can say
-     * "x < greaterstr".  NB: we rely on make_greater_string() to generate
-     * a guaranteed-greater string, not just a probably-greater string.
-     * In general this is only guaranteed in C locale, so we'd better be
-     * using a C-locale index collation.
-     * -------
-     */
-    oproid = get_opfamily_member(opfamily, datatype, datatype, BTLessStrategyNumber);
-    if (oproid == InvalidOid)
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                (errmsg("no < operator for opfamily %u when generate indexqual condition by prefix quals", opfamily))));
-    fmgr_info(get_opcode(oproid), &ltproc);
-    greaterstr = make_greater_string(prefix_const, &ltproc, collation);
-    if (greaterstr != NULL) {
-        expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)greaterstr, InvalidOid, collation);
-        result = lappend(result, make_simple_restrictinfo(expr));
+        /* -------
+        * If we can create a string larger than the prefix, we can say
+        * "x < greaterstr".  NB: we rely on make_greater_string() to generate
+        * a guaranteed-greater string, not just a probably-greater string.
+        * In general this is only guaranteed in C locale, so we'd better be
+        * using a C-locale index collation.
+        * -------
+        */
+
+        oproid = get_opfamily_member(opfamily, datatype, datatype, BTLessStrategyNumber);
+        if (oproid == InvalidOid)
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                    (errmsg(
+                        "no < operator for opfamily %u when generate indexqual condition by prefix quals",
+                        opfamily))));
+        fmgr_info(get_opcode(oproid), &ltproc);
+        greaterstr = make_greater_string(prefix_const, &ltproc, collation);
+        if (greaterstr != NULL) {
+            expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)greaterstr, InvalidOid, collation);
+            result = lappend(result, make_simple_restrictinfo(expr));
+        }
     }
 
     return result;
 }
+
 
 static List* prefix_quals_with_encdoing(Node* leftop, Oid opfamily, Oid collation, Const* prefix_const,
     Pattern_Prefix_Status pstatus, int prefixkey_len)
