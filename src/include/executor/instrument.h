@@ -893,9 +893,6 @@ typedef struct Qpid {
 } Qpid;
 
 typedef struct OperatorProfileTable {
-    int max_realtime_num;    /* max session info num in the hash table */
-    int max_collectinfo_num; /* max collect info num in list */
-
     HTAB* explain_info_hashtbl;   /* collect information hash table */
     HTAB* collected_info_hashtbl; /* collect information hash table */
 } OperatorProfileTable;
