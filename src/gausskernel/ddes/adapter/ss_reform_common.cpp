@@ -527,3 +527,26 @@ void SSGrantDSSWritePermission(void)
     }
     ereport(LOG, (errmsg("set dss server status as primary")));
 }
+
+bool SSPrimaryRestartScenario()
+{
+    if (SS_IN_REFORM) {
+        if (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS &&
+            ((uint64)(0x1 << SS_PRIMARY_ID) & g_instance.dms_cxt.SSReformInfo.bitmap_reconnect) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SSBackendNeedExitScenario()
+{
+    if (!SS_IN_REFORM) {
+        return false;
+    }
+
+    if (SSPerformingStandbyScenario() || SSPrimaryRestartScenario()) {
+        return false;
+    }
+    return true;
+}

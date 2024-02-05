@@ -56,3 +56,5 @@ void SSDisasterRefreshMode();
 void SSDisasterUpdateHAmode();
 bool SSPerformingStandbyScenario();
 void SSGrantDSSWritePermission(void);
+bool SSPrimaryRestartScenario();
+bool SSBackendNeedExitScenario();

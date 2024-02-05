@@ -326,6 +326,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             buf_desc->extra->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
+        buf_desc->extra->lsn_on_disk = InvalidXLogRecPtr;
     }
     if (BufferIsValid(buffer)) {
         buf_ctrl->been_loaded = true;

@@ -1302,4 +1302,9 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn
 void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);
 void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo);
 
+// shared-storage
+XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);
+XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);
+bool SSPageReplayNeedSkip(RedoBufferInfo *blockinfo, XLogRecPtr xlogLsn);
+
 #endif
