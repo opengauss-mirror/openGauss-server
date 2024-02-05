@@ -223,6 +223,8 @@ THR_LOCAL bool redo_oldversion_xlog = false;
 
 static const int ONE_SECOND = 1000000;
 
+const int UWAL_SLEEP_TIME = 10000;
+
 /*
  * XLOGfileslop is the maximum number of preallocated future XLOG segments.
  * When we are done with an old XLOG segment file, we will recycle it as a
@@ -3094,13 +3096,21 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
             pgstat_report_waitevent(WAIT_EVENT_WAL_WRITE);
             INSTR_TIME_SET_CURRENT(startTime);
             if (g_instance.attr.attr_storage.uwal_async_append_switch) {
-                while ((ret = GsUwalWriteAsync(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos)) ==
-                       REPLICA_APPEND_LOG_FAIL)
-                    ;
+                ret = GsUwalWriteAsync(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
+                while (ret == REPLICA_APPEND_LOG_FAIL || ret == U_CAPACITY_NOT_ENOUGH) {
+                    if (ret == U_CAPACITY_NOT_ENOUGH) {
+                        usleep(UWAL_SLEEP_TIME);
+                    }
+                    ret = GsUwalWriteAsync(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
+                }
             } else {
-                while ((ret = GsUwalWrite(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos)) ==
-                       REPLICA_APPEND_LOG_FAIL)
-                    ;
+                ret = GsUwalWrite(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
+                while (ret == REPLICA_APPEND_LOG_FAIL || ret == U_CAPACITY_NOT_ENOUGH) {
+                    if (ret == U_CAPACITY_NOT_ENOUGH) {
+                        usleep(UWAL_SLEEP_TIME);
+                    }
+                    ret = GsUwalWrite(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
+                }
             }
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
