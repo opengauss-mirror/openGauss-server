@@ -319,6 +319,8 @@ void FreeTupleDesc(TupleDesc tupdesc, bool need_check)
             for (i = tupdesc->constr->num_defval - 1; i >= 0; i--) {
                 if (attrdef[i].adbin)
                     pfree(attrdef[i].adbin);
+                if (attrdef[i].adbin_on_update)
+                    pfree(attrdef[i].adbin_on_update);
             }
             pfree(attrdef);
             pfree(tupdesc->constr->generatedCols);
