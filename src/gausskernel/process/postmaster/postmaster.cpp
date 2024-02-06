@@ -6997,6 +6997,15 @@ static void reaper(SIGNAL_ARGS)
                 continue;
             }
 
+            /**
+             * No need to set pmState to PM_RUN and initialize util threads when first-round reform failed,
+             * postmaster will send SIGTERM signal to itself and exit in this case.
+             */
+            if (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.startup_reform && (dms_reform_failed() || dms_reform_last_failed()))) {
+                write_stderr("first-round reform failed, no need to initialize util threads.\n");
+                continue;
+            }
+
             /* startup process exit, standby pagerepair thread can exit */
             if (g_instance.pid_cxt.PageRepairPID != 0) {
                 signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
