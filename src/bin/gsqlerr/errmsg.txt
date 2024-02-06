@@ -39641,49 +39641,49 @@ CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07586: "XLogMemCtlInit Allocated buffer failed!, taoalblknum:%d, itemsize:%lu"
+GAUSS-07586: "XLogMemCtlInit Allocated buffer failed!, totalblknum:%d, itemsize:%lu"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07587: "XLogMemRelease failed!, taoalblknum:%u, buf_id:%u"
+GAUSS-07587: "XLogMemRelease failed!, totalblknum:%u, buf_id:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07588: "XLogRedoBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u"
+GAUSS-07588: "XLogRedoBufferAlloc Allocated buffer failed!, totalblknum:%u, usedblknum:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07589: "XLogRedoBufferRelease failed!, taoalblknum:%u, buf_id:%u"
+GAUSS-07589: "XLogRedoBufferRelease failed!, totalblknum:%u, buf_id:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07590: "XLogRedoBufferGetBlkNumber get bufferblknum failed!, taoalblknum:%u, buf_id:%u"
+GAUSS-07590: "XLogRedoBufferGetBlkNumber get bufferblknum failed!, totalblknum:%u, buf_id:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07591: "XLogRedoBufferGetBlk get bufferblk failed!, taoalblknum:%u, buf_id:%u"
+GAUSS-07591: "XLogRedoBufferGetBlk get bufferblk failed!, totalblknum:%u, buf_id:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07592: "XLogRedoBufferGetPage get bufferblk failed!, taoalblknum:%u, buf_id:%u"
+GAUSS-07592: "XLogRedoBufferGetPage get bufferblk failed!, totalblknum:%u, buf_id:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"
 
 
-GAUSS-07593: "XLogRedoBufferSetState get bufferblk failed!, taoalblknum:%u, buf_id:%u"
+GAUSS-07593: "XLogRedoBufferSetState get bufferblk failed!, totalblknum:%u, buf_id:%u"
 SQLSTATE: DB010
 CAUSE: "invalid"
 ACTION: "invalid"

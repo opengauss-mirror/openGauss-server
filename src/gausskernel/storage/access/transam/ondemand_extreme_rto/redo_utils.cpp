@@ -157,7 +157,7 @@ void OndemandXLogMemRelease(RedoMemManager *memctl, Buffer bufferid)
     RedoMemSlot *bufferslot;
     if (!RedoMemIsValid(memctl, bufferid)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogMemRelease failed!, taoalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
+                        errmsg("XLogMemRelease failed!, totalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
         /* panic */
     }
     bufferslot = &(memctl->memslot[bufferid - 1]);
@@ -217,7 +217,7 @@ XLogRecParseState *OndemandXLogParseBufferAllocList(RedoParseManager *parsemanag
         allocslot = OndemandXLogMemAlloc(memctl);
         if (allocslot == NULL) {
             ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                            errmsg("XLogParseBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u",
+                            errmsg("XLogParseBufferAlloc Allocated buffer failed!, totalblknum:%u, usedblknum:%u",
                                     memctl->totalblknum, memctl->usedblknum)));
             return NULL;
         }
@@ -264,7 +264,7 @@ void OndemandXLogParseBufferRelease(XLogRecParseState *recordstate)
     descstate = (ParseBufferDesc *)((char *)recordstate - sizeof(ParseBufferDesc));
     if (!RedoMemIsValid(memctl, descstate->buff_id) || descstate->state == 0) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogParseBufferRelease failed!, taoalblknum:%u, buf_id:%u", memctl->totalblknum,
+                        errmsg("XLogParseBufferRelease failed!, totalblknum:%u, buf_id:%u", memctl->totalblknum,
                                descstate->buff_id)));
         /* panic */
     }

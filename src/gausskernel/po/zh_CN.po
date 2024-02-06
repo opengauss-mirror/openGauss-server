@@ -84000,56 +84000,56 @@ msgstr "XLogRecSetRollbackFinishBlockState: 未知操作码 %u"
 
 #: storage/access/redo/redo_xlogutils.cpp:935
 #, c-format
-msgid "XLogMemCtlInit Allocated buffer failed!, taoalblknum:%d, itemsize:%lu"
-msgstr "XLogMemCtlInit分配缓冲区失败! taoalblknum:%d, itemsize:%lu"
+msgid "XLogMemCtlInit Allocated buffer failed!, totalblknum:%d, itemsize:%lu"
+msgstr "XLogMemCtlInit分配缓冲区失败! totalblknum:%d, itemsize:%lu"
 
 #: storage/access/redo/redo_xlogutils.cpp:986
 #: storage/access/transam/ondemand_extreme_rto/redo_utils.cpp:130
 #, c-format
-msgid "XLogMemRelease failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogMemRelease failed!, taoalblknum:%u, buf_id:%u"
+msgid "XLogMemRelease failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogMemRelease failed!, totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1030
 #, c-format
-msgid "XLogRedoBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u"
-msgstr "XLogRedoBufferAlloc分配缓冲区失败! taoalblknum:%u, usedblknum:%u"
+msgid "XLogRedoBufferAlloc Allocated buffer failed!, totalblknum:%u, usedblknum:%u"
+msgstr "XLogRedoBufferAlloc分配缓冲区失败! totalblknum:%u, usedblknum:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1061
 #, c-format
-msgid "XLogRedoBufferRelease failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogRedoBufferRelease失败! taoalblknum:%u, buf_id:%u"
+msgid "XLogRedoBufferRelease failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogRedoBufferRelease失败! totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1078
 #, c-format
-msgid "XLogRedoBufferGetBlkNumber get bufferblknum failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogRedoBufferGetBlkNumber get bufferblknum failed! taoalblknum:%u, buf_id:%u"
+msgid "XLogRedoBufferGetBlkNumber get bufferblknum failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogRedoBufferGetBlkNumber get bufferblknum failed! totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1096
 #, c-format
-msgid "XLogRedoBufferGetBlk get bufferblk failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogRedoBufferGetBlk获取缓冲区失败! taoalblknum:%u, buf_id:%u"
+msgid "XLogRedoBufferGetBlk get bufferblk failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogRedoBufferGetBlk获取缓冲区失败! totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1114
 #, c-format
-msgid "XLogRedoBufferGetPage get bufferblk failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogRedoBufferGetPage获取缓冲区失败! taoalblknum:%u, buf_id:%u"
+msgid "XLogRedoBufferGetPage get bufferblk failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogRedoBufferGetPage获取缓冲区失败! totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1131
 #, c-format
-msgid "XLogRedoBufferSetState get bufferblk failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogRedoBufferSetState get bufferblk failed!, taoalblknum:%u, buf_id:%u"
+msgid "XLogRedoBufferSetState get bufferblk failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogRedoBufferSetState get bufferblk failed!, totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1190
 #: storage/access/transam/ondemand_extreme_rto/redo_utils.cpp:187
 #, c-format
-msgid "XLogParseBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u"
-msgstr "XLogParseBufferAlloc分配缓冲区失败! taoalblknum:%u, usedblknum:%u"
+msgid "XLogParseBufferAlloc Allocated buffer failed!, totalblknum:%u, usedblknum:%u"
+msgstr "XLogParseBufferAlloc分配缓冲区失败! totalblknum:%u, usedblknum:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1243
 #: storage/access/transam/ondemand_extreme_rto/redo_utils.cpp:234
 #, c-format
-msgid "XLogParseBufferRelease failed!, taoalblknum:%u, buf_id:%u"
-msgstr "XLogParseBufferRelease失败! taoalblknum:%u, buf_id:%u"
+msgid "XLogParseBufferRelease failed!, totalblknum:%u, buf_id:%u"
+msgstr "XLogParseBufferRelease失败! totalblknum:%u, buf_id:%u"
 
 #: storage/access/redo/redo_xlogutils.cpp:1256
 #, c-format

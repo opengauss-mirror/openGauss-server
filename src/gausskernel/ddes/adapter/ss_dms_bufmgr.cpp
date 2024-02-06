@@ -1147,6 +1147,11 @@ bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recor
     Buffer buffer = SSReadBuffer(bufferTag, RBM_FOR_ONDEMAND_REALTIME_BUILD);
     if (BufferIsInvalid(buffer)) {
         WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
+        ereport(DEBUG1, (errmodule(MOD_DMS),
+            errmsg("[On-demand] standby node request page failed in ondemand realtime build, step readbuffer, "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, ondemand realtime build status %d",
+            bufferTag->rnode.spcNode, bufferTag->rnode.dbNode, bufferTag->rnode.relNode, bufferTag->rnode.bucketNode,
+            bufferTag->forkNum, bufferTag->blockNum, g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status)));
         return false;
     }
 
@@ -1163,6 +1168,11 @@ bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recor
     } else {
         DmsReleaseBuffer(buffer, IsSegmentPhysicalRelNode(bufferTag->rnode));
         WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
+        ereport(DEBUG1, (errmodule(MOD_DMS),
+            errmsg("[On-demand] standby node request page failed in ondemand realtime build, step lockbuffer, "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, ondemand realtime build status %d",
+            bufferTag->rnode.spcNode, bufferTag->rnode.dbNode, bufferTag->rnode.relNode, bufferTag->rnode.bucketNode,
+            bufferTag->forkNum, bufferTag->blockNum, g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status)));
         return false;
     }
 

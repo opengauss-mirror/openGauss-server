@@ -932,7 +932,7 @@ void *XLogMemCtlInit(RedoMemManager *memctl, Size itemsize, int itemnum)
     if (allocdata == NULL) {
         ereport(PANIC,
                 (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                 errmsg("XLogMemCtlInit Allocated buffer failed!, taoalblknum:%d, itemsize:%lu", itemnum, itemsize)));
+                 errmsg("XLogMemCtlInit Allocated buffer failed!, totalblknum:%d, itemsize:%lu", itemnum, itemsize)));
         /* panic */
     }
 
@@ -983,7 +983,7 @@ void XLogMemRelease(RedoMemManager *memctl, Buffer bufferid)
     RedoMemSlot *bufferslot;
     if (!RedoMemIsValid(memctl, bufferid)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogMemRelease failed!, taoalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
+                        errmsg("XLogMemRelease failed!, totalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
         /* panic */
     }
     bufferslot = &(memctl->memslot[bufferid - 1]);
@@ -1027,7 +1027,7 @@ RedoMemSlot *XLogRedoBufferAlloc(RedoBufferManager *buffermanager, RelFileNode r
     allocslot = XLogMemAlloc(memctl);
     if (allocslot == NULL) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogRedoBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u",
+                        errmsg("XLogRedoBufferAlloc Allocated buffer failed!, totalblknum:%u, usedblknum:%u",
                                memctl->totalblknum, memctl->usedblknum)));
         /* panic */
     }
@@ -1058,7 +1058,7 @@ void XLogRedoBufferRelease(RedoBufferManager *buffermanager, Buffer bufferid)
     if (!RedoMemIsValid(memctl, bufferid)) {
         ereport(PANIC,
                 (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                 errmsg("XLogRedoBufferRelease failed!, taoalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
+                 errmsg("XLogRedoBufferRelease failed!, totalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
         /* panic */
     }
     Assert(memctl->itemsize == (BLCKSZ + sizeof(RedoBufferDesc)));
@@ -1075,7 +1075,7 @@ BlockNumber XLogRedoBufferGetBlkNumber(RedoBufferManager *buffermanager, Buffer 
 
     if (!RedoMemIsValid(memctl, bufferid)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogRedoBufferGetBlkNumber get bufferblknum failed!, taoalblknum:%u, buf_id:%u",
+                        errmsg("XLogRedoBufferGetBlkNumber get bufferblknum failed!, totalblknum:%u, buf_id:%u",
                                memctl->totalblknum, bufferid)));
         /* panic */
     }
@@ -1093,7 +1093,7 @@ Block XLogRedoBufferGetBlk(RedoBufferManager *buffermanager, RedoMemSlot *buffer
     RedoBufferDesc *bufferdesc;
     if (!RedoMemIsValid(memctl, bufferslot->buf_id)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogRedoBufferGetBlk get bufferblk failed!, taoalblknum:%u, buf_id:%u",
+                        errmsg("XLogRedoBufferGetBlk get bufferblk failed!, totalblknum:%u, buf_id:%u",
                                memctl->totalblknum, bufferslot->buf_id)));
         /* panic */
     }
@@ -1111,7 +1111,7 @@ Block XLogRedoBufferGetPage(RedoBufferManager *buffermanager, Buffer bufferid)
     RedoBufferDesc *bufferdesc;
     if (!RedoMemIsValid(memctl, bufferid)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogRedoBufferGetPage get bufferblk failed!, taoalblknum:%u, buf_id:%u",
+                        errmsg("XLogRedoBufferGetPage get bufferblk failed!, totalblknum:%u, buf_id:%u",
                                memctl->totalblknum, bufferid)));
         /* panic */
     }
@@ -1128,7 +1128,7 @@ void XLogRedoBufferSetState(RedoBufferManager *buffermanager, RedoMemSlot *buffe
     RedoBufferDesc *bufferdesc = NULL;
     if (!RedoMemIsValid(memctl, bufferslot->buf_id)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogRedoBufferSetState get bufferblk failed!, taoalblknum:%u, buf_id:%u",
+                        errmsg("XLogRedoBufferSetState get bufferblk failed!, totalblknum:%u, buf_id:%u",
                                memctl->totalblknum, bufferslot->buf_id)));
         /* panic */
     }
@@ -1187,7 +1187,7 @@ XLogRecParseState *XLogParseBufferAllocList(RedoParseManager *parsemanager, XLog
     allocslot = XLogMemAlloc(memctl);
     if (allocslot == NULL) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                          errmsg("XLogParseBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u",
+                          errmsg("XLogParseBufferAlloc Allocated buffer failed!, totalblknum:%u, usedblknum:%u",
                                  memctl->totalblknum, memctl->usedblknum)));
         return NULL;
     }
@@ -1224,7 +1224,6 @@ XLogRecParseState *XLogParseBufferCopy(XLogRecParseState *srcState)
     securec_check(rc, "\0", "\0");
 
     newState->isFullSync = srcState->isFullSync;
-    newState->distributeStatus = srcState->distributeStatus;
     return newState;
 }
 
@@ -1240,7 +1239,7 @@ void XLogParseBufferRelease(XLogRecParseState *recordstate)
     descstate = (ParseBufferDesc *)((char *)recordstate - sizeof(ParseBufferDesc));
     if (!RedoMemIsValid(memctl, descstate->buff_id) || descstate->state == 0) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                        errmsg("XLogParseBufferRelease failed!, taoalblknum:%u, buf_id:%u", memctl->totalblknum,
+                        errmsg("XLogParseBufferRelease failed!, totalblknum:%u, buf_id:%u", memctl->totalblknum,
                                descstate->buff_id)));
         /* panic */
     }
@@ -1823,6 +1822,12 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
         g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(blockhead, blockrecbody, bufferinfo);
         CountRedoTime(redoCost);
     }
+    ereport(DEBUG1, (errmsg("XLogBlockRedoForExtremeRTO: redo done, relation %u/%u/%u, forknum %u, blocknum %u, "
+        "recordlsn: %X/%X, block type %d, redoaction %d", redoblocktate->blockparse.blockhead.spcNode,
+        redoblocktate->blockparse.blockhead.dbNode, redoblocktate->blockparse.blockhead.relNode,
+        redoblocktate->blockparse.blockhead.forknum, redoblocktate->blockparse.blockhead.blkno,
+        (uint32)(redoblocktate->blockparse.blockhead.end_ptr >> 32), (uint32)redoblocktate->blockparse.blockhead.end_ptr,
+        XLogBlockHeadGetValidInfo(&redoblocktate->blockparse.blockhead), redoaction)));
 #ifdef USE_ASSERT_CHECKING
     if (block_valid != BLOCK_DATA_UNDO_TYPE && !bufferinfo->pageinfo.ignorecheck) {
         DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), true);
@@ -1852,6 +1857,12 @@ void XlogBlockRedoForOndemandExtremeRTOQuery(XLogRecParseState *redoBlockState, 
             DoRecordCheck(redoBlockState, PageGetLSN(bufferInfo->pageinfo.page), true);
         }
 #endif
+        ereport(DEBUG1, (errmsg("XLogBlockRedoForOndemandExtremeRTOQuery: redo done, thread role %d, "
+            "relation %u/%u/%u, forknum %u, blocknum %u, recordlsn: %X/%X, pagelsn: %X/%X, is_dirty: %d, block_type %d",
+            t_thrd.role, bufferInfo->blockinfo.rnode.spcNode, bufferInfo->blockinfo.rnode.dbNode,
+            bufferInfo->blockinfo.rnode.relNode, bufferInfo->blockinfo.forknum, bufferInfo->blockinfo.blkno,
+            (uint32)(blockHead->end_ptr >> 32), (uint32)(blockHead->end_ptr), (uint32)(bufferInfo->lsn >> 32),
+            (uint32)(bufferInfo->lsn), bufferInfo->dirtyflag, blockValid)));
     } else {
         ereport(WARNING, (errmsg("XLogBlockRedoForOndemandExtremeRTOQuery: unsuport type %u, lsn %X/%X",
                                  (uint32)blockValid,
