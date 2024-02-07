@@ -1072,6 +1072,7 @@ void PageManagerProcHashmapPrune()
 {
     XLogRecPtr ckptPtr = pg_atomic_read_u64(&g_dispatcher->ckptRedoPtr);
     if (XLByteLE(ckptPtr, g_redoWorker->nextPrunePtr)) {
+        RedoInterruptCallBack();
         return;
     }
 
