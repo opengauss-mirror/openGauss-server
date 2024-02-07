@@ -1363,6 +1363,10 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
         pgstat_report_appname("AutoVacWorker");
         pgstat_report_activity(STATE_IDLE, NULL);
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+        LoadSqlPlugin();
+#endif
+
         set_ps_display(dbname, false);
         ereport(GetVacuumLogLevel(), (errmsg("start autovacuum on database \"%s\"", dbname)));
 
