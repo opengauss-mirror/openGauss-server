@@ -1563,6 +1563,28 @@ select * from dbe_pldebugger.continue();
        0 | "anonymous block" |      0 | [EXECUTION FINISHED]
 (1 row)
 
+                                 generate_procoverage_report
+----------------------------------------------------------------------------------------------
+ <html lang="en"><head><title>openGauss Procedure Coverage Report</title>                    +
+ <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />                       +
+ <style>.unexecuted{background-color: #ff6230;}                                              +
+ .executed{background-color: #cad7fe;}.lineno{background-color: yellow;width: 120px;}</style>+
+ </head><body class="pcr">                                                                   +
+ <h1 class="wdr">Procedure Coverage Report</h1>                                              +
+ </body></html>
+(1 row)
+
+                                 generate_procoverage_report
+----------------------------------------------------------------------------------------------
+ <html lang="en"><head><title>openGauss Procedure Coverage Report</title>                    +
+ <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />                       +
+ <style>.unexecuted{background-color: #ff6230;}                                              +
+ .executed{background-color: #cad7fe;}.lineno{background-color: yellow;width: 120px;}</style>+
+ </head><body class="pcr">                                                                   +
+ <h1 class="wdr">Procedure Coverage Report</h1>                                              +
+ </body></html>
+(1 row)
+
 select * from tmp_holder;
  res  
 ------

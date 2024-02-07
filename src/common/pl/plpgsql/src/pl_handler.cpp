@@ -2137,8 +2137,8 @@ static void get_proc_coverage(Oid func_oid, int* coverage)
 
 Datum generate_procoverage_report(PG_FUNCTION_ARGS)
 {
-    int beginId = PG_GETARG_INT64(0);
-    int endId = PG_GETARG_INT64(1);
+    int64 beginId = PG_GETARG_INT64(0);
+    int64 endId = PG_GETARG_INT64(1);
     bool isDefault = false;
 
     if (!u_sess->attr.attr_common.enable_proc_coverage) {
