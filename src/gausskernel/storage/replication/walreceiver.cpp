@@ -924,7 +924,7 @@ static void WalRcvDie(int code, Datum arg)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if ((IS_SHARED_STORAGE_MODE || SS_DORADO_CLUSTER) && !t_thrd.walreceiver_cxt.termChanged) {
+    if ((IS_SHARED_STORAGE_MODE || SS_DISASTER_CLUSTER) && !t_thrd.walreceiver_cxt.termChanged) {
         SpinLockAcquire(&walrcv->mutex);
         walrcv->walRcvState = WALRCV_STOPPING;
         SpinLockRelease(&walrcv->mutex);

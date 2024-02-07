@@ -10285,13 +10285,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
      */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown &&
-        (!ENABLE_DMS || SS_DORADO_CLUSTER || SS_DISASTER_CLUSTER)) {
-        /* when SS_DORADO_CLUSTER enabled, don't start walrecwrite */
-        if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_DORADO_CLUSTER) {
-            g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
-            SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
-        }
+        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_DISASTER_CLUSTER)) {
+            /* when SS_DORADO_CLUSTER enabled, don't start walrecwrite */
+            if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_DORADO_CLUSTER) {
+                g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
+                SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
+            }
 
         /* Startup Process wants us to start the walreceiver process. */
         g_instance.pid_cxt.WalReceiverPID = initialize_util_thread(WALRECEIVER);

@@ -493,7 +493,7 @@ ServerMode IdentifyRemoteMode()
         !t_thrd.walreceiver_cxt.AmWalReceiverForFailover &&
         (!IS_PRIMARY_NORMAL(remoteMode)) &&
         /* remoteMode of cascade standby is a standby */
-        !t_thrd.xlog_cxt.is_cascade_standby && !(IS_SHARED_STORAGE_MODE || SS_DORADO_CLUSTER)) {
+        !t_thrd.xlog_cxt.is_cascade_standby && !(IS_SHARED_STORAGE_MODE || !SS_DISASTER_CLUSTER)) {
         PQclear(res);
 
         if (dummyStandbyMode) {
@@ -506,7 +506,7 @@ ServerMode IdentifyRemoteMode()
     }
 
     if (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby && remoteMode != STANDBY_MODE &&
-        !(IS_SHARED_STORAGE_MODE || SS_DORADO_CLUSTER)) {
+        !(IS_SHARED_STORAGE_MODE || SS_DISASTER_CLUSTER)) {
         PQclear(res);
 
         SpinLockAcquire(&walrcv->mutex);
@@ -524,7 +524,7 @@ ServerMode IdentifyRemoteMode()
         }
     }
 
-    if (SS_DORADO_CLUSTER && !CheckSSRemoteServerMode(remoteMode, res)) {
+    if (SS_DISASTER_CLUSTER && !CheckSSRemoteServerMode(remoteMode, res)) {
         return UNKNOWN_MODE;
     }
 
