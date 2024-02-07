@@ -1685,6 +1685,8 @@ void PostgresInitializer::InitAutoVacWorker()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 }
 
