@@ -3137,6 +3137,46 @@ bool CheckSegmentStorageOption(List *options)
     return result;
 }
 
+static bool ValidateSegmentOption(List *options)
+{
+    if (options == NULL) {
+        return true;
+    }
+
+    ListCell *opt = NULL;
+    bool result = true;
+    foreach (opt, options) {
+        DefElem *def = (DefElem *)lfirst(opt);
+
+        if (pg_strcasecmp(def->defname, "compresstype") == 0) {
+            /*
+             * def->arg is NULL, that means it's a RESET action. ignore it.
+             * def->arg is not NULL, that means it's a SET action, so check it.
+             */
+            if (def->arg) {
+                int cmpType = (int)strtol(defGetString(def), NULL, RS_CUSTOM_VALUE_TEN);
+                if (cmpType != COMPRESS_TYPE_NONE)
+                    result = false;
+            }
+            break;
+        }
+    }
+
+    return result;
+}
+
+void CheckSegmentCompressOption(List *options, char relkind, StorageType storage_type, char *storeChar)
+{
+    if (ValidateSegmentOption(options)) {
+        return;
+    }
+
+    if (!IsInitdb && (storage_type == SEGMENT_PAGE) && (relkind == RELKIND_RELATION) &&
+        (pg_strcasecmp(storeChar, ORIENTATION_ROW) == 0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("compresstype can not be used in segment table.")));
+    }
+}
+
 #ifdef USE_SPQ
 /*
  * before check spq reloption, make sure guc params of spq_enable_btbuild is on
