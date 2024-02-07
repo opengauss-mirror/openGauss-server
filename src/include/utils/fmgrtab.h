@@ -212,7 +212,7 @@ static_assert(sizeof(NULL) == sizeof(void*), "NULL must be a 8 byte-length point
 
 #define CUR_THR_IS_WORKER() (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER ||\
     t_thrd.role == STREAM_WORKER || t_thrd.role == THREADPOOL_STREAM || t_thrd.role == WAL_DB_SENDER||\
-    t_thrd.role == PARALLEL_DECODE || t_thrd.role == JOB_WORKER)
+    t_thrd.role == PARALLEL_DECODE || t_thrd.role == JOB_WORKER || t_thrd.role == AUTOVACUUM_WORKER)
 
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 /* for dolphin and whale plugin */
