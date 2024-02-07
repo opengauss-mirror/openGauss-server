@@ -21,6 +21,7 @@
 #include "access/xact.h"
 #include "commands/trigger.h"
 #include "commands/cluster.h"
+#include "commands/matview.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_publication.h"
 #include "executor/executor.h"
@@ -645,6 +646,16 @@ void ExecSimpleRelationInsert(EState *estate, TupleTableSlot *slot, FakeRelation
     ExecARInsertTriggers(estate, resultRelInfo, relAndPart->partOid, InvalidBktId, (HeapTuple)tuple, recheckIndexes);
 
     list_free_ext(recheckIndexes);
+
+    /* try to insert tuple into mlog-table. */
+    if (targetRel != NULL && targetRel->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        if (targetRel->rd_tam_ops == TableAmUstore) {
+            tuple = (Tuple)UHeapToHeap(targetRel->rd_att, (UHeapTuple)tuple);
+        }
+        insert_into_mlog_table(targetRel, targetRel->rd_mlogoid, (HeapTuple)tuple,
+                            &(((HeapTuple)tuple)->t_self), GetCurrentTransactionId(), 'I');
+    }
 }
 
 /*
@@ -769,6 +780,19 @@ void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot
         searchSlotTid, (HeapTuple)tuple, NULL, recheckIndexes);
 
     list_free(recheckIndexes);
+
+    /* update tuple from mlog of matview(delete + insert). */
+    if (rel != NULL && rel->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        /* 1. delete one tuple. */
+        insert_into_mlog_table(rel, rel->rd_mlogoid, NULL, searchSlotTid, tmfd.xmin, 'D');
+        /* 2. insert new tuple */
+        if (rel->rd_tam_ops == TableAmUstore) {
+            tuple = (Tuple)UHeapToHeap(rel->rd_att, (UHeapTuple)tuple);
+        }
+        insert_into_mlog_table(rel, rel->rd_mlogoid, (HeapTuple)tuple, &(((HeapTuple)tuple)->t_self),
+            GetCurrentTransactionId(), 'I');
+    }
 }
 
 /*
@@ -822,6 +846,12 @@ void ExecSimpleRelationDelete(EState *estate, EPQState *epqstate, TupleTableSlot
 
     /* AFTER ROW DELETE Triggers */
     ExecARDeleteTriggers(estate, resultRelInfo, relAndPart->partOid, InvalidBktId, NULL, tid);
+
+    /* delete tuple from mlog of matview */
+    if (rel != NULL && rel->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        insert_into_mlog_table(rel, rel->rd_mlogoid, NULL, tid, tmfd.xmin, 'D');
+    }
 }
 
 /*
