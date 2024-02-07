@@ -164,21 +164,24 @@ static void gistRedoPageSplitRecord(XLogReaderState *record)
             isrootsplit = true;
         }
 
-        XLogInitBufferForRedo(record, i + 1, &buffer);
-        data = XLogRecGetBlockData(record, i + 1, &datalen);
+        XLogRedoAction action = SSCheckInitPageXLog(record, i + 1, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, i + 1, &buffer);
+            data = XLogRecGetBlockData(record, i + 1, &datalen);
 
-        if (blkno != GIST_ROOT_BLKNO) {
-            if (i < xldata->npage - 1) {
-                XLogRecGetBlockTag(record, i + 2, NULL, NULL, &nextblkno);
-            } else
-                nextblkno = xldata->origrlink;
-            ;
-            if (i < xldata->npage - 1 && !isrootsplit && xldata->markfollowright)
-                markflag = true;
+            if (blkno != GIST_ROOT_BLKNO) {
+                if (i < xldata->npage - 1) {
+                    XLogRecGetBlockTag(record, i + 2, NULL, NULL, &nextblkno);
+                } else
+                    nextblkno = xldata->origrlink;
+                ;
+                if (i < xldata->npage - 1 && !isrootsplit && xldata->markfollowright)
+                    markflag = true;
+            }
+            GistRedoPageSplitOperatorPage(&buffer, (void *)xldata, data, datalen, markflag, nextblkno);
+
+            MarkBufferDirty(buffer.buf);
         }
-        GistRedoPageSplitOperatorPage(&buffer, (void *)xldata, data, datalen, markflag, nextblkno);
-
-        MarkBufferDirty(buffer.buf);
 
         if (i == 0)
             firstbuffer = buffer;
@@ -199,6 +202,9 @@ static void gistRedoCreateIndex(XLogReaderState *record)
 {
     RedoBufferInfo buffer;
 
+    if (SSCheckInitPageXLogSimple(record, GIST_ROOT_BLKNO, &buffer)) {
+        return;
+    }
     XLogInitBufferForRedo(record, GIST_ROOT_BLKNO, &buffer);
     GistRedoCreateIndexOperatorPage(&buffer);
 

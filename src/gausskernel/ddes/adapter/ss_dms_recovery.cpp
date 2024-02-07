@@ -45,6 +45,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include "access/xlogproc.h"
 
 int SSGetPrimaryInstId()
 {
@@ -365,4 +366,86 @@ void OndemandRealtimeBuildHandleFailover()
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_REDO;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[On-demand] Node:%d receive failover signal, "
         "close realtime build and start ondemand build, set status to BUILD_TO_REDO.", SS_MY_INST_ID)));
+}
+
+XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf)
+{
+    if (!ENABLE_DMS) {
+        return BLK_NEEDS_REDO;
+    }
+
+    XLogRedoAction action = BLK_NEEDS_REDO;
+    RedoBufferTag blockinfo;
+    if (!XLogRecGetBlockTag(record, block_id, &(blockinfo.rnode), &(blockinfo.forknum), &(blockinfo.blkno),
+        &(blockinfo.pblk))) {
+            ereport(PANIC, (errmsg("[SS redo] failed to locate backup block with ID %d", block_id)));
+    }
+    bool skip = false;
+    char pageid[DMS_PAGEID_SIZE] = {0};
+    errno_t rc = memcpy_s(pageid, DMS_PAGEID_SIZE, &blockinfo, sizeof(BufferTag));
+    securec_check(rc, "\0", "\0");
+    dms_recovery_page_need_skip(pageid, (unsigned char*)&skip, (unsigned int)false);
+
+    if (skip) {
+        XLogPhyBlock *pblk = (blockinfo.pblk.relNode != InvalidOid) ? &blockinfo.pblk : NULL;
+        bool tde = false;
+        if (record->isTde) {
+            tde = InsertTdeInfoToCache(blockinfo.rnode, record->blocks[block_id].tdeinfo);
+        }
+        Buffer buf = XLogReadBufferExtended(blockinfo.rnode, blockinfo.forknum, blockinfo.blkno,
+            RBM_NORMAL, pblk, tde);
+        if (BufferIsInvalid(buf)) {
+            ereport(PANIC, (errmsg("[SS redo][%u/%u/%u/%d %d-%u] buffer should be found",
+                blockinfo.rnode.spcNode, blockinfo.rnode.dbNode, blockinfo.rnode.relNode,
+                blockinfo.rnode.bucketNode, blockinfo.forknum, blockinfo.blkno))); 
+        }
+        redo_buf->buf = buf;
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        SSCheckBufferIfNeedMarkDirty(redo_buf->buf);
+        action = BLK_DONE;
+    }
+    return action;
+}
+
+XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf)
+{
+    XLogRedoAction action = SSCheckInitPageXLog(record, block_id, redo_buf);
+    if (action == BLK_DONE) {
+        if (IsSegmentBufferID(redo_buf->buf - 1)) {
+            SegUnlockReleaseBuffer(redo_buf->buf);
+        } else {
+            UnlockReleaseBuffer(redo_buf->buf);
+        }
+    }
+    return action;
+}
+
+// used for extreme recovery and on-demand recovery
+bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
+{
+    RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
+    XLogPhyBlock *pblk = (blockinfo->pblk.relNode != InvalidOid) ? &blockinfo->pblk : NULL;
+    Buffer buf = XLogReadBufferExtended(blockinfo->rnode, blockinfo->forknum, blockinfo->blkno,
+        RBM_NORMAL, pblk, false);
+    if (BufferIsValid(buf)) {
+        Page page = BufferGetPage(buf);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        if (XLByteLE(xlogLsn, PageGetLSN(page))) {
+            bufferinfo->buf = buf;
+            bufferinfo->lsn = xlogLsn;
+            bufferinfo->pageinfo.page = page;
+            bufferinfo->pageinfo.pagesize = BufferGetPageSize(buf);
+            ereport(LOG, (errmsg("[SS redo][%u/%u/%u/%d %d-%u] page skip replay",
+                blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
+                blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno)));
+            return true;
+        } else {
+            if (IsSegmentBufferID(buf - 1)) {
+                SegUnlockReleaseBuffer(buf);
+            } else {
+                UnlockReleaseBuffer(buf);
+            }
+        }
+    }
+    return false;
 }

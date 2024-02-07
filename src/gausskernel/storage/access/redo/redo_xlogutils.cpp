@@ -1621,6 +1621,11 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
             mode = RBM_ZERO_ON_ERROR;
         }
 
+        if (ENABLE_DMS && mode != RBM_NORMAL) {
+            if (SSPageReplayNeedSkip(bufferinfo, xlogLsn)) {
+                return BLK_DONE;
+            }
+        }
         redoaction = XLogReadBufferForRedoBlockExtend(&bufferinfo->blockinfo, mode, getCleanupLock, bufferinfo, xlogLsn,
                                                       XLogBlockDataGetLastBlockLSN(blockdatarec), willinit, readmethod);
     } else if (block_valid == BLOCK_DATA_VM_TYPE || block_valid == BLOCK_DATA_FSM_TYPE) {

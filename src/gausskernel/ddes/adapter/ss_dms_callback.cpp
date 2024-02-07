@@ -995,7 +995,7 @@ static void *CBGetHandle(unsigned int *db_handle_index, dms_session_type_e sessi
     int start_index = fs_cxt->quickFetchIndex;
     int cur_index = 0;
     bool found = false;
-    for (int i = 0; i < fs_cxt->fake_session_cnt; i++) {
+    for (int i = 0; i < (int)fs_cxt->fake_session_cnt; i++) {
         cur_index = (start_index + i) % fs_cxt->fake_session_cnt;
         if (!fs_cxt->fake_sessions[cur_index]) {
             found = true;
@@ -1951,7 +1951,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
 
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
         FailoverCleanBackends();
-    } else if (!SSPerformingStandbyScenario()) {
+    } else if (!SSPerformingStandbyScenario() && !SSPrimaryRestartScenario()) {
         ReformCleanBackends();
     }
 

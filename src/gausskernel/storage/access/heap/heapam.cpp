@@ -9167,8 +9167,10 @@ static void heap_xlog_insert(XLogReaderState* record)
      * the page from scratch.
      */
     if (isinit) {
-        XLogInitBufferForRedo(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
-        action = BLK_NEEDS_REDO;
+        action = SSCheckInitPageXLog(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
+        }
     } else {
         action = XLogReadBufferForRedo(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
     }
@@ -9238,8 +9240,10 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
     }
 
     if (isinit) {
-        XLogInitBufferForRedo(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
-        action = BLK_NEEDS_REDO;
+        action = SSCheckInitPageXLog(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
+        }
     } else {
         action = XLogReadBufferForRedo(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
     }
@@ -9345,8 +9349,10 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         nbuffer = obuffer;
         newaction = oldaction;
     } else if (isinit) {
-        XLogInitBufferForRedo(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
-        newaction = BLK_NEEDS_REDO;
+        newaction = SSCheckInitPageXLog(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
+        if (newaction == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
+        }
     } else {
         newaction = XLogReadBufferForRedo(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
     }

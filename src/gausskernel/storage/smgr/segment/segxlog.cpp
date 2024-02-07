@@ -581,14 +581,17 @@ static void redo_atomic_xlog(XLogReaderState *record)
         bool will_init = record->blocks[i].flags & BKPBLOCK_WILL_INIT;
         XLogRedoAction redo_action;
         if (will_init) {
-            XLogInitBufferForRedo(record, i, &redo_buf);
+            redo_action = SSCheckInitPageXLog(record, i, &redo_buf);
+            if (redo_action == BLK_NEEDS_REDO) {
+                XLogInitBufferForRedo(record, i, &redo_buf);
             /*
              * If tablespace is dropped, XLogInitBufferForRedo will return an invalid buffer.
              * We do not make a directoy in the place where the tablespace symlink would be like
              * heap-disk storage, otherwise space metadata block (like MapHead block) may be
              * inconsistent.
              */
-            redo_action = BufferIsValid(redo_buf.buf) ? BLK_NEEDS_REDO : BLK_NOTFOUND;
+                redo_action = BufferIsValid(redo_buf.buf) ? BLK_NEEDS_REDO : BLK_NOTFOUND;
+            }
         } else {
             redo_action = XLogReadBufferForRedo(record, i, &redo_buf);
         }
@@ -661,6 +664,9 @@ static void redo_seghead_extend(XLogReaderState *record)
         SegUnlockReleaseBuffer(redo_buf.buf);
     }
 
+    if (SSCheckInitPageXLogSimple(record, 1, &redo_buf) == BLK_DONE) {
+        return;
+    }
     XLogInitBufferForRedo(record, 1, &redo_buf);
     if (BufferIsValid(redo_buf.buf)) {
         memset_s(redo_buf.pageinfo.page, BLCKSZ, 0, BLCKSZ);
@@ -691,6 +697,9 @@ static void redo_create_extent_group(XLogReaderState *record)
 static void redo_init_map_page(XLogReaderState *record)
 {
     RedoBufferInfo redo_buf;
+    if (SSCheckInitPageXLogSimple(record, 0, &redo_buf) == BLK_DONE) {
+        return;
+    }
     XLogInitBufferForRedo(record, 0, &redo_buf);
     BlockNumber first_page = *(BlockNumber *)XLogRecGetData(record);
 
@@ -703,6 +712,9 @@ static void redo_init_map_page(XLogReaderState *record)
 static void redo_init_inverse_point_page(XLogReaderState *record)
 {
     RedoBufferInfo redo_buf;
+    if (SSCheckInitPageXLogSimple(record, 0, &redo_buf) == BLK_DONE) {
+        return;
+    }
     XLogInitBufferForRedo(record, 0, &redo_buf);
     SegPageInit(redo_buf.pageinfo.page, BLCKSZ);
     PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
