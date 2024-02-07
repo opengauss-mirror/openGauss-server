@@ -1663,11 +1663,18 @@ Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber blo
       * We will charge what parms we will use by isVacuum.
       * Two Branch is same, we will check cxt and bulk_buf.
       */
-    paramNum = isVacuum ? g_instance.attr.attr_storage.vacuum_bulk_read_size : u_sess->attr.attr_storage.heap_bulk_read_size;
+    paramNum = isVacuum ? u_sess->attr.attr_storage.vacuum_bulk_read_size : u_sess->attr.attr_storage.heap_bulk_read_size;
     if (u_sess->pre_read_mem_cxt == NULL) {
         u_sess->pre_read_mem_cxt = AllocSetContextCreate(
                 u_sess->top_mem_cxt, "Memory Context for pre-read and pre-extend", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
         oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        /*
+         * Due to vacuum_bulk_read_size can be writed into postgres.conf,
+         * we should try to load max_vacuum_bulk_read_size at first.
+         */
+        u_sess->storage_cxt.max_vacuum_bulk_read_size = Max(u_sess->storage_cxt.max_vacuum_bulk_read_size, 
+            u_sess->attr.attr_storage.vacuum_bulk_read_size);
+
         u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(u_sess->storage_cxt.max_vacuum_bulk_read_size * BLCKSZ);
         u_sess->storage_cxt.bulk_buf_read = (char*)palloc(u_sess->storage_cxt.max_heap_bulk_read_size * BLCKSZ);
         (void) MemoryContextSwitchTo(oldContext);
@@ -2443,7 +2450,7 @@ found_branch:
 
     Assert(index == u_sess->storage_cxt.bulk_io_in_progress_count);
 
-    /* 2023-10-25 The numbers of blocks we really need to pre-read */
+    /* The numbers of blocks we really need to pre-read */
     actual_bulk_count = u_sess->storage_cxt.bulk_io_in_progress_count;
 
     if (actual_bulk_count == 1) {
