@@ -393,7 +393,7 @@ XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, Redo
             tde = InsertTdeInfoToCache(blockinfo.rnode, record->blocks[block_id].tdeinfo);
         }
         Buffer buf = XLogReadBufferExtended(blockinfo.rnode, blockinfo.forknum, blockinfo.blkno,
-            RBM_NORMAL, pblk, tde);
+            RBM_NORMAL_NO_LOG, pblk, tde);
         if (BufferIsInvalid(buf)) {
             ereport(PANIC, (errmsg("[SS redo][%u/%u/%u/%d %d-%u] buffer should be found",
                 blockinfo.rnode.spcNode, blockinfo.rnode.dbNode, blockinfo.rnode.relNode,
@@ -426,7 +426,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
     RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
     XLogPhyBlock *pblk = (blockinfo->pblk.relNode != InvalidOid) ? &blockinfo->pblk : NULL;
     Buffer buf = XLogReadBufferExtended(blockinfo->rnode, blockinfo->forknum, blockinfo->blkno,
-        RBM_NORMAL, pblk, false);
+        RBM_NORMAL_NO_LOG, pblk, false);
     if (BufferIsValid(buf)) {
         Page page = BufferGetPage(buf);
         LockBuffer(buf, BUFFER_LOCK_SHARE);
