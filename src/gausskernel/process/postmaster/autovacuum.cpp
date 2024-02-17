@@ -1355,10 +1355,6 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
         pgstat_report_appname("AutoVacWorker");
         pgstat_report_activity(STATE_IDLE, NULL);
 
-#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-        LoadSqlPlugin();
-#endif
-
         set_ps_display(dbname, false);
         ereport(GetVacuumLogLevel(), (errmsg("start autovacuum on database \"%s\"", dbname)));
 
@@ -1383,6 +1379,9 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
          */
         t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "AutoVacuumWorker",
             THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+        LoadSqlPlugin();
+#endif
 
         oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
         if (u_sess->proc_cxt.MyProcPort->database_name)
