@@ -718,7 +718,6 @@ void RedoPageManagerDistributeToAllOneBlock(XLogRecParseState *ddlParseState)
 
     for (uint32 i = 0; i < WorkerNumPerMng; ++i) {
         XLogRecParseState *newState = XLogParseBufferCopy(ddlParseState);
-        newState->distributeStatus = XLOG_HEAD_DISTRIBUTE;
         AddPageRedoItem(myRedoLine->redoThd[i], newState);
     }
 }
