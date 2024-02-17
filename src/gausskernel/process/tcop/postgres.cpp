@@ -7686,7 +7686,12 @@ void RemoveTempNamespace()
 
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 #define INITIAL_USER_ID 10
-/* IMPORTANT: load plugin should call after process is normal, cause heap_create_with_catalog will check it */
+/*
+ * IMPORTANT:
+ * 1. load plugin should call after process is normal, cause heap_create_with_catalog will check it.
+ * 2. load plugin should call after mask_password_mem_cxt is created, cause maskPassword is called
+ *      when create extension, which need mask_password_mem_cxt.
+ */
 void LoadSqlPlugin()
 {
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
