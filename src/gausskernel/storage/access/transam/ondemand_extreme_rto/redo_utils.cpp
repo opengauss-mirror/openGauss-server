@@ -233,12 +233,11 @@ XLogRecParseState *OndemandXLogParseBufferAllocList(RedoParseManager *parsemanag
         recordstate = (XLogRecParseState *)((char *)descstate + sizeof(ParseBufferDesc));
         recordstate->manager = parsemanager;
         recordstate->distributeStatus = XLOG_NO_DISTRIBUTE;
-
-        if (parsemanager->refOperate != NULL) {
-            parsemanager->refOperate->refCount(record);
-        }
     }
 
+    if (recordstate->manager->refOperate != NULL) {
+        recordstate->manager->refOperate->refCount(record);
+    }
     recordstate->nextrecord = NULL;
     recordstate->refrecord = record;
     recordstate->isFullSync = false;
