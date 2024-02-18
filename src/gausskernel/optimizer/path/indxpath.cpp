@@ -4054,6 +4054,12 @@ static Const* pad_string_in_like(PadContent content, const Const* strConst, int 
     char* buf = isPadMax ? content.maxSortBuf : content.minSortBuf;
     int buflen = isPadMax ? content.maxBufLen : content.minBufLen;
     int padLen = length - pg_mbstrlen_with_len(workstr, curLen);
+    /* When the pad length is less than or equal to zero,
+     * we don't generate the index condition.
+     */
+    if (padLen <= 0) {
+        return NULL;
+    }
 
     errno_t rc = EOK;
     
