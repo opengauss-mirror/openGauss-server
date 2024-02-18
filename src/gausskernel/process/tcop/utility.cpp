@@ -3610,11 +3610,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                 }
                 TransformLoadDataToCopy(stmt);
                 break;
-            } 
+            }
+            char str[] = "age";
+            int result = strcmp(stmt->filename, str);
+            if (result != 0) {
 #ifdef PGXC
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("LOAD statement is not yet supported.")));
 #endif /* PGXC */
-
+            }
                 closeAllVfds(); /* probably not necessary... */
                 /* Allowed names are restricted if you're not superuser */
                 load_file(stmt->filename, !superuser());
