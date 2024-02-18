@@ -4288,7 +4288,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
                         XLByteEQ(t_thrd.walsender_cxt.sentPtr, t_thrd.walsender_cxt.MyWalSnd->flush))
                         t_thrd.walsender_cxt.walsender_shutdown_requested = true;
                 }
-                if (IS_SHARED_STORAGE_MODE || SS_DORADO_CLUSTER) {
+                if (IS_SHARED_STORAGE_MODE || SS_DISASTER_CLUSTER) {
                     t_thrd.walsender_cxt.walsender_shutdown_requested = true;
                 }
             }

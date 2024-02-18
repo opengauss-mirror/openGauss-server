@@ -75,7 +75,7 @@
 
 #define SS_IN_FLUSHCOPY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == true)
 
-#define SS_STANDBY_FAILOVER (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
+#define SS_STANDBY_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
 
 #define SS_PRIMARY_NORMAL_REFORM \
     (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))

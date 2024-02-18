@@ -861,7 +861,7 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #------------------------------------------------------------------------------
 # UWAL OPTIONS
 #------------------------------------------------------------------------------
-#enable_uwal = on
+#enable_uwal = off
 #uwal_disk_size = 8589934592
 #uwal_devices_path = 'uwal_device_file'
 #uwal_log_path = 'uwal_log'

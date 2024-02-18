@@ -4516,24 +4516,6 @@ static int XLogFileOpenInternal(XLogSegNo segno, const char *xlog_dir)
     return fd;
 }
 
-/*
- * Copy one page starting with targetpageptr of EndOfLog from old priamry to new primary.
- */
-void SSXLOGCopyFromOldPrimary(XLogReaderState *state, XLogRecPtr pageptr)
-{
-    ssize_t actualBytes = write(t_thrd.xlog_cxt.openLogFile, state->readBuf, XLOG_BLCKSZ);
-    if (actualBytes != XLOG_BLCKSZ) {
-        if (errno == 0) {
-            errno = ENOSPC;
-        }
-        uint32 shiftSize = 32;
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write xlog at start:%X/%X, length %d: %s",
-                                                          static_cast<uint32>(pageptr >> shiftSize),
-                                                          static_cast<uint32>(pageptr), XLOG_BLCKSZ,
-                                                          TRANSLATE_ERRNO)));
-    }
-}
-
 int XLogFileOpen(XLogSegNo segno)
 {
     return XLogFileOpenInternal(segno, SS_XLOGDIR);
@@ -10678,8 +10660,7 @@ void StartupXLOG(void)
 
     EndOfLog = t_thrd.xlog_cxt.EndRecPtr;
     XLByteToPrevSeg(EndOfLog, endLogSegNo);
-    if (!SS_DISASTER_STANDBY_CLUSTER && 
-        ((ENABLE_DMS && SS_STANDBY_FAILOVER) || SS_STANDBY_PROMOTING)) {
+    if (!SS_DISASTER_STANDBY_CLUSTER && (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING)) {
         bool use_existent = true;
         (void)XLogFileInit(endLogSegNo, &use_existent, true);
     }
@@ -20542,27 +20523,28 @@ retry:
                         if (CheckForFailoverTrigger()) {
                             goto triggered;
                         }
+                        if (!SS_IN_REFORM) {
+                            ProcTxnWorkLoad(false);
+                            /* use volatile pointer to prevent code rearrangement */
+                            volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+                            CheckMaxPageFlushLSN(targetRecPtr);
+                            rename_recovery_conf_for_roach();
+                            ereport(LOG, (errmsg("request xlog stream at %X/%X.",
+                                                    fetching_ckpt ? (uint32)(t_thrd.xlog_cxt.RedoStartLSN >> 32)
+                                                                : (uint32)(targetRecPtr >> 32),
+                                                    fetching_ckpt ? (uint32)t_thrd.xlog_cxt.RedoStartLSN
+                                                                : (uint32)targetRecPtr)));
+                            ShutdownWalRcv();
+                            t_thrd.xlog_cxt.receivedUpto = 0;
+                            SpinLockAcquire(&walrcv->mutex);
+                            walrcv->receivedUpto = 0;
+                            SpinLockRelease(&walrcv->mutex);
 
-                        ProcTxnWorkLoad(false);
-                        /* use volatile pointer to prevent code rearrangement */
-                        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-                        CheckMaxPageFlushLSN(targetRecPtr);
-                        rename_recovery_conf_for_roach();
-                        ereport(LOG, (errmsg("request xlog stream at %X/%X.",
-                                                fetching_ckpt ? (uint32)(t_thrd.xlog_cxt.RedoStartLSN >> 32)
-                                                            : (uint32)(targetRecPtr >> 32),
-                                                fetching_ckpt ? (uint32)t_thrd.xlog_cxt.RedoStartLSN
-                                                            : (uint32)targetRecPtr)));
-                        ShutdownWalRcv();
-                        t_thrd.xlog_cxt.receivedUpto = 0;
-                        SpinLockAcquire(&walrcv->mutex);
-                        walrcv->receivedUpto = 0;
-                        SpinLockRelease(&walrcv->mutex);
-
-                        RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr,
-                                                t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
-                                                u_sess->attr.attr_storage.PrimarySlotName);
-                        continue;       
+                            RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr,
+                                                    t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
+                                                    u_sess->attr.attr_storage.PrimarySlotName);
+                            continue;   
+                        }    
                     }
                     /* Don't try to read from a source that just failed */
                     sources &= ~t_thrd.xlog_cxt.failedSources;
