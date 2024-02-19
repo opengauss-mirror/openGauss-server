@@ -32,6 +32,7 @@
 #include "executor/node/nodeModifyTable.h"
 #include "executor/node/nodeSeqscan.h"
 #include "parser/parse_coerce.h"
+#include "utils/partitionmap.h"
 
 extern void ExecEndPlan(PlanState* planstate, EState* estate);
 
@@ -198,7 +199,7 @@ void InsertFusion::refreshParameterIfNecessary()
 }
 
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
-Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr)
+PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr)
 {
     bool isnull = false;
     Datum newval = 0;
@@ -233,7 +234,8 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
 
     if (!isnull)
         newval = datumCopy(newval, boundary[0]->constbyval, boundary[0]->constlen);
-    return newval;
+
+    return {newval, isnull};
 }
 
 static void ExecReleaseResource(Tuple tuple, TupleTableSlot *slot, ResultRelInfo *result_rel_info, EState *estate,

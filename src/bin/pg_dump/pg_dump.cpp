@@ -23523,19 +23523,15 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
     destroyPQExpBuffer(query);
     return evtinfo;
 }
- 
+
 static bool eventtrigger_filter(EventTriggerInfo *evtinfo)
 {
-    static const uint32 reserved_eventtrigger_prefix_len = 2;
-    static char *reserved_eventtrigger_prefix[] = {
-        PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_END,
-        PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START
-    };
-    
-    Assert(sizeof(reserved_eventtrigger_prefix)/sizeof(reserved_eventtrigger_prefix[0]) == reserved_eventtrigger_prefix_len);
+    static char *reserved_trigger_prefix[] = {PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_END,
+                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START};
+    static const size_t triggerPrefixLength = sizeof(reserved_trigger_prefix) / sizeof(reserved_trigger_prefix[0]);
 
-    for (int i = 0; i < reserved_eventtrigger_prefix_len; ++i) {
-        if (!strncmp(evtinfo->dobj.name, reserved_eventtrigger_prefix[i], strlen(reserved_eventtrigger_prefix[i]))) {
+    for (size_t i = 0; i < triggerPrefixLength; ++i) {
+        if (!strncmp(evtinfo->dobj.name, reserved_trigger_prefix[i], strlen(reserved_trigger_prefix[i]))) {
             return false;
         }
     }

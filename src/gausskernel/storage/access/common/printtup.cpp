@@ -452,7 +452,7 @@ DestReceiver *printtup_create_DR(CommandDest dest)
 {
     DR_printtup *self = (DR_printtup *)palloc0(sizeof(DR_printtup));
 
-    if (StreamTopConsumerAmI() == true)
+    if (StreamTopConsumerAmI())
         self->pub.receiveSlot = printtupStream;
     else
         self->pub.receiveSlot = printtup; /* might get changed later */
@@ -507,10 +507,7 @@ void SetRemoteDestReceiverParams(DestReceiver *self, Portal portal)
 void assembleSpqStreamMessage(TupleTableSlot *slot, DestReceiver *self, StringInfo buf)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    DR_printtup *myState = (DR_printtup *)self;
-    int natts = typeinfo->natts;
     MinimalTuple tuple;
-    int i;
 
     StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
 
@@ -541,7 +538,6 @@ void spq_printtupRemoteTuple(TupleTableSlot *slot, DestReceiver *self)
     DR_printtup *myState = (DR_printtup *)self;
     StringInfo buf = &myState->buf;
     MinimalTuple tuple;
-    int natts = typeinfo->natts;
 
     StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
 
@@ -701,7 +697,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
         /* Do we have a non-resjunk tlist item? */
         while (tlist_item &&
 #ifdef STREAMPLAN
-               StreamTopConsumerAmI() == false && StreamThreadAmI() == false &&
+               !StreamTopConsumerAmI() && !StreamThreadAmI() &&
 #endif
                ((TargetEntry *)lfirst(tlist_item))->resjunk)
             tlist_item = lnext(tlist_item);
@@ -730,7 +726,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
         if ((IsConnFromCoord() || IS_SPQ_EXECUTOR) && atttypid >= FirstBootstrapObjectId) {
-            char *typenameVar = "";
+            char *typenameVar;
             typenameVar = get_typename_with_namespace(atttypid);
             pq_writestring(buf, typenameVar);
         }
