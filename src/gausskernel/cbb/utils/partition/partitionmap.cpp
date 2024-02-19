@@ -2068,9 +2068,11 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     partitionMapDestroyRangeArray(range_eles, range_map->rangeElementsNum);
 }
 
-Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, Datum datumValue, bool isnull, Const* cnst)
+Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, PartKeyExprResult* result, Const* cnst)
 {
     Const* boundary = NULL;
+    bool isnull = result->isNull;
+    Datum datumValue = result-> value;
     if (partMap->type == PART_TYPE_RANGE)
         boundary = ((RangePartitionMap*)partMap)->rangeElements[0].boundary[0];
     else if (partMap->type == PART_TYPE_LIST)

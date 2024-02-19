@@ -35,6 +35,11 @@
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 
+typedef struct {
+    Datum value;
+    bool isNull;
+} PartKeyExprResult;
+
 typedef enum PartitionType {
     PART_TYPE_NONE = 0,
     PART_TYPE_RANGE,
@@ -119,7 +124,7 @@ extern int getNumberOfListPartitions(Relation rel);
 extern int getNumberOfHashPartitions(Relation rel);
 extern int getNumberOfPartitions(Relation rel);
 extern Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue, bool isnull, Const* cnst);
-Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, Datum datumValue, bool isnull, Const* cnst);
+Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, PartKeyExprResult* result, Const* cnst);
 
 extern int2vector* getPartitionKeyAttrNo(
     Oid** typeOids, HeapTuple pg_part_tup, TupleDesc tupledsc, TupleDesc rel_tupledsc);

@@ -23429,7 +23429,6 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
     destroyPQExpBuffer(query);
     return evtinfo;
 }
- 
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 {
     PQExpBuffer query;

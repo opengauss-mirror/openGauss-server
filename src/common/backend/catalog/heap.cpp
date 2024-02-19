@@ -7496,7 +7496,9 @@ int lookupHBucketid(oidvector *buckets, int low, int2 bktId)
     return -1;
 }
 
-extern Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr);
+extern PartKeyExprResult
+ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char *partExprKeyStr);
+
 Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTableSlot* slot, int *partitionno, bool isDDL, bool canIgnore)
 {
     char* partExprKeyStr = NULL;
@@ -7505,8 +7507,8 @@ Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTabl
     if (partExprKeyIsNull) {
         targetOid = heapTupleGetPartitionId(rel, tuple, partitionno, isDDL, canIgnore);
     } else {
-        Datum newval = ComputePartKeyExprTuple(rel, estate, slot, NULL, partExprKeyStr);
-        targetOid = heapTupleGetPartitionId(rel, (void*)newval, partitionno, isDDL, canIgnore, false);
+        PartKeyExprResult partKeyExprResult = ComputePartKeyExprTuple(rel, estate, slot, NULL, partExprKeyStr);
+        targetOid = heapTupleGetPartitionOid(rel, (void*)(&partKeyExprResult), partitionno, isDDL, canIgnore, false);
     }
     pfree_ext(partExprKeyStr);
     return targetOid;
