@@ -676,6 +676,9 @@ static void _outPlanInfo(StringInfo str, Plan* node)
     if (t_thrd.proc->workingVersionNum >= SUBPARTITION_VERSION_NUM) {
         WRITE_INT_FIELD(subparamno);
     }
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_DDL_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isinherit);
+    }
     WRITE_NODE_FIELD(initPlan);
     WRITE_NODE_FIELD(distributed_keys);
     WRITE_NODE_FIELD(exec_nodes);

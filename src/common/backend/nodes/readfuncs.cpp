@@ -3415,6 +3415,9 @@ static Plan* _readPlan(Plan* local_node)
     IF_EXIST(subparamno) {
         READ_INT_FIELD(subparamno);
     }
+    IF_EXIST(isinherit) {
+        READ_BOOL_FIELD(isinherit);
+    }
     READ_NODE_FIELD(initPlan);
     READ_NODE_FIELD(distributed_keys);
     READ_NODE_FIELD(exec_nodes);
