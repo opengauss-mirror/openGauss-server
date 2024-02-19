@@ -143,6 +143,7 @@ static void AddTrxnHashmap(void *item);
 static void AddSegHashmap(void *item);
 static void PageManagerPruneIfRealtimeBuildFailover();
 static void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg);
+static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState);
 
 RefOperate recordRefOperate = {
     AddRefRecord,
@@ -801,9 +802,17 @@ void RedoPageManagerDistributeToRedoThd(PageRedoPipeline *myRedoLine,
     return;
 }
 
+static void WaitSegRedoWorkersQueueEmpty()
+{
+    while (!SPSCBlockingQueueIsEmpty(g_dispatcher->auxiliaryLine.segRedoThd->queue)) {
+        RedoInterruptCallBack();
+    }
+}
+
 void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
 {
     PageManagerPruneIfRealtimeBuildFailover();
+    WaitSegRedoWorkersQueueEmpty();
     PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
     const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
     HASH_SEQ_STATUS status;
@@ -906,13 +915,18 @@ void RedoPageManagerDdlAction(XLogRecParseState *parsestate)
             xlog_drop_tblspc(parsestate->blockparse.blockhead.spcNode);
             break;
         case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
-        /* handle by seg worker, function SSProcSegPageCommonRedo */
+            {
+                Assert(0);
+            }
+            break;
         case BLOCK_DATA_SEG_SPACE_DROP:
         case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
         case BLOCK_DATA_SEG_EXTEND:
             {
-                Assert(0);
+                /* PARSE_TYPE_SEG will handle by seg worker, function SSProcSegPageCommonRedo */
+                Assert(GetCurrentXLogRecParseType(parsestate) == PARSE_TYPE_DDL);
             }
+            ProcSegPageCommonRedo(parsestate);
             break;
         default:
             break;
@@ -1210,6 +1224,16 @@ void PageManagerProcCreateTableSpace(XLogRecParseState *parseState)
     }
 }
 
+void OnDemandPageManagerProcSegFullSyncState(XLogRecParseState *parsestate)
+{
+    MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+    RedoPageManagerDdlAction(parsestate);
+    (void)MemoryContextSwitchTo(oldCtx);
+
+    parsestate->nextrecord = NULL;
+    XLogBlockParseStateRelease(parsestate);
+}
+
 static void SSProcSegPageRedoInSegPageRedoChildState(XLogRecParseState *redoblockstate)
 {
     if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
@@ -1360,13 +1384,24 @@ static void OnDemandDispatchSegParseStateToSegWorker(XLogRecParseState *preState
     AddPageRedoItem(g_dispatcher->auxiliaryLine.segRedoThd, preState);
 }
 
+static void OnDemandPageManagerProcSegParseState(XLogRecParseState *preState, XLogRecParseType type)
+{
+    if (type == PARSE_TYPE_SEG) {
+        OnDemandDispatchSegParseStateToSegWorker(preState);
+        return;
+    }
+
+    Assert(!SS_ONDEMAND_REALTIME_BUILD_NORMAL);
+    WaitSegRedoWorkersQueueEmpty();
+    OnDemandPageManagerRedoSegParseState(preState);
+}
+
 static bool WaitPrimaryDoCheckpointAndAllPRTrackEmpty(XLogRecParseState *preState, HTAB *redoItemHash)
 {
     if (SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
         return false;
     }
 
-    bool notifyDone = false;
     bool waitDone = false;
     XLogRecPtr ddlSyncPtr = preState->blockparse.blockhead.end_ptr;
 
@@ -1432,6 +1467,23 @@ static void OndemandSwitchHTABIfBlockNumUpperLimit()
     }
 }
 
+static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState)
+{
+    Assert(g_redoWorker->slotId == 0);
+    switch (preState->blockparse.blockhead.block_valid) {
+        case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
+            OnDemandPageManagerProcSegFullSyncState(preState);
+            break;
+        case BLOCK_DATA_SEG_EXTEND:
+        case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
+        default:
+            {
+                Assert(0);
+            }
+            break;
+    }
+}
+
 void PageManagerRedoParseState(XLogRecParseState *preState)
 {
     PageManagerPruneIfRealtimeBuildFailover();
@@ -1468,7 +1520,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             break;
         case BLOCK_DATA_SEG_EXTEND:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
-            OnDemandDispatchSegParseStateToSegWorker(preState);
+            OnDemandPageManagerProcSegParseState(preState, type);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
             break;
         case BLOCK_DATA_DROP_DATABASE_TYPE:
@@ -1492,7 +1544,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
         case BLOCK_DATA_SEG_FILE_EXTEND_TYPE:
         case BLOCK_DATA_SEG_FULL_SYNC_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
-            OnDemandDispatchSegParseStateToSegWorker(preState);
+            OnDemandPageManagerProcSegParseState(preState, type);
             CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             break;
         case BLOCK_DATA_CREATE_TBLSPC_TYPE:

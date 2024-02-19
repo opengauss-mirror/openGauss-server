@@ -10548,12 +10548,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
-        /* avoid panics caused by concurreny between startup processes and recovery */
-        if (g_instance.pid_cxt.StartupPID != 0) {
-            ereport(LOG, (errmsg("[SS Reform] request startup proc exit")));
-            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
-        }
-
         //active check once
         if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
             g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
