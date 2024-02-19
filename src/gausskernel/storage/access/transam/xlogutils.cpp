@@ -1162,17 +1162,6 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
                 LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
             }
             ReleaseBuffer(buffer);
-            if (ENABLE_DMS && IsExtremeRedo() && SSPrimaryRestartScenario()) {
-                /* page is empty on disk, but has xlog
-                 * in extreme recovery we read buffer with RBM_NORMAL(S) instead of RBM_ZERO_AND_LOCK(X) or other.
-                 * we will load empty page from disk with RBM_NORMAL, it is fine.
-                 * later we will use RBM_ZERO_AND_LOCK. so no need to log_invalid_page.
-                 */
-                if ((IsDefaultExtremeRtoMode() && SS_IN_REFORM) ||
-                    (IsOndemandExtremeRtoMode() && SS_IN_ONDEMAND_RECOVERY)) {
-                    return InvalidBuffer;
-                }
-            }
             RepairFileKey key;
             key.relfilenode = rnode;
             key.forknum = forknum;
@@ -1255,13 +1244,6 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
                     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
                 }
                 SegReleaseBuffer(buffer);
-                if (ENABLE_DMS && IsExtremeRedo() && SSPrimaryRestartScenario()) {
-                    // reason same as simliar location in XLogReadBufferExtendedForHeapDisk
-                    if ((IsDefaultExtremeRtoMode() && SS_IN_REFORM) ||
-                        (IsOndemandExtremeRtoMode() && SS_IN_ONDEMAND_RECOVERY)) {
-                        return InvalidBuffer;
-                    }
-                }
                 RepairFileKey key;
                 key.relfilenode = rnode;
                 key.forknum = forknum;
