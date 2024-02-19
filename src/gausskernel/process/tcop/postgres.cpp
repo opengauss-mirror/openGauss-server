@@ -7647,6 +7647,8 @@ void RemoveTempNamespace()
 void LoadSqlPlugin()
 {
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
+        /* start_xact_command will change CurrentResourceOwner, so save it here */
+        ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
         if (!u_sess->attr.attr_sql.dolphin &&
 #ifdef ENABLE_LITE_MODE
             u_sess->attr.attr_common.upgrade_mode == 0
@@ -7676,6 +7678,7 @@ void LoadSqlPlugin()
             PG_CATCH();
             {
                 pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+                t_thrd.utils_cxt.CurrentResourceOwner = save;
                 PG_RE_THROW();
             }
             PG_END_TRY();
@@ -7683,6 +7686,7 @@ void LoadSqlPlugin()
         } else if (u_sess->attr.attr_sql.dolphin) {
             InitBSqlPluginHookIfNeeded();
         }
+        t_thrd.utils_cxt.CurrentResourceOwner = save;
     } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
         InitASqlPluginHookIfNeeded();
     }
