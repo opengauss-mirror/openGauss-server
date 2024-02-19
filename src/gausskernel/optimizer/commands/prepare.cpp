@@ -909,8 +909,6 @@ void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource,
         StorePreparedStatementCNGPC(stmt_name, plansource, from_sql, false);
         return;
     }
-    PreparedStatement* entry = NULL;
-    TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
     bool found = false;
 
     /* Initialize the hash table, if necessary */

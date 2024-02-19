@@ -12738,7 +12738,7 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
     Oid oldtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename),
         ObjectIdGetDatum(pkgNamespaceOid));
     bool oldtypeoidIsValid = OidIsValid(oldtypeoid);
-    if (OidIsValid(oldtypeoid)) {
+    if (oldtypeoidIsValid) {
         /* alread build one, just return */
         if(IsPackageDependType(oldtypeoid, pkgOid)) {
             if (CompileWhich() == PLPGSQL_COMPILE_PACKAGE) {

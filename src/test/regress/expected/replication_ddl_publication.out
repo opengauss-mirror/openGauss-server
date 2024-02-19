@@ -41,9 +41,9 @@ select data from  pg_logical_slot_get_changes('test_decoding_slot', NULL, NULL);
 --?.*data.*
 --?.*
 --? BEGIN .*
---? message: prefix deparse, relid .*, cmdtype: Simple, sz: .* content: {"fmt": "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D (%{table_elements:, }s) WITH (%{with:, }s)", "with": [{"fmt": "%{label}s = %{value}L", "label": {"fmt": "%{label}I", "label": "orientation"}, "value": "row"}, {"fmt": "%{label}s = %{value}L", "label": {"fmt": "%{label}I", "label": "compression"}, "value": "no"}], "myowner": ".*", "identity": {"objname": "t4", "schemaname": "ddl_publication"}, "persistence": "", "if_not_exists": "", "table_elements": [{"fmt": "%{name}I %{coltype}T", "name": "a", "type": "column", "coltype": {"typmod": "", "typarray": false, "typename": "int4", "schemaname": "pg_catalog"}}, {"fmt": "%{name}I %{coltype}T COLLATE %{collate}D", "name": "b", "type": "column", "collate": {"objname": "default", "schemaname": "pg_catalog"}, "coltype": {"typmod": "", "typarray": false, "typename": "text", "schemaname": "pg_catalog"}}]}.*+
+--? message: prefix deparse, relid .*, cmdtype: Simple, sz: .* content: \{"fmt": "CREATE %\{persistence}s TABLE %\{if_not_exists}s %\{identity}D (%\{table_elements:, }s) WITH (%\{with:, }s)", "with": [{"fmt": "%{label}s = %{value}L", "label": {"fmt": "%{label}I", "label": "orientation"}, "value": "row"}, {"fmt": "%{label}s = %{value}L", "label": {"fmt": "%{label}I", "label": "compression"}, "value": "no"}], "myowner": ".*", "identity": \{"objname": "t4", "schemaname": "ddl_publication"}, "persistence": "", "if_not_exists": "", "table_elements": [{"fmt": "%{name}I %{coltype}T", "name": "a", "type": "column", "coltype": {"typmod": "", "typarray": false, "typename": "int4", "schemaname": "pg_catalog"}}, {"fmt": "%{name}I %{coltype}T COLLATE %{collate}D", "name": "b", "type": "column", "collate": {"objname": "default", "schemaname": "pg_catalog"}, "coltype": {"typmod": "", "typarray": false, "typename": "text", "schemaname": "pg_catalog"}}]}.*+
 --? decode to : CREATE  TABLE  ddl_publication.t4 (a pg_catalog.int4, b pg_catalog.text COLLATE pg_catalog."default") WITH (orientation = 'row', compression = 'no'), [owner .*]
---? message: prefix deparse, relid .*, cmdtype: Simple, sz: .* content: {"fmt": "CREATE %{unique}s INDEX %{concurrently}s %{name}I ON %{table}D USING %{index_am}s %{definition}s", "name": "idx_t4_1", "table": {"objname": "t4", "schemaname": "ddl_publication"}, "unique": "", "myowner": ".*", "index_am": "btree", "definition": "(a pg_catalog.int4_ops)", "concurrently": ""}.*+
+--? message: prefix deparse, relid .*, cmdtype: Simple, sz: .* content: \{"fmt": "CREATE %\{unique}s INDEX %\{concurrently}s %\{name}I ON %\{table}D USING %\{index_am}s %\{definition}s", "name": "idx_t4_1", "table": \{"objname": "t4", "schemaname": "ddl_publication"}, "unique": "", "myowner": ".*", "index_am": "btree", "definition": "(a pg_catalog.int4_ops)", "concurrently": ""}.*+
 --? decode to : CREATE  INDEX  idx_t4_1 ON ddl_publication.t4 USING btree (a pg_catalog.int4_ops), [owner .*]
  table ddl_publication.t4: INSERT: a[integer]:1 b[text]:'asd'
  table ddl_publication.t4: INSERT: a[integer]:2 b[text]:'asdd'
@@ -61,7 +61,7 @@ select data from  pg_logical_slot_get_changes('test_decoding_slot', NULL, NULL);
  table ddl_publication.t4: INSERT: a[integer]:3 b[text]:'ddasd'
  table ddl_publication.t4: INSERT: a[integer]:4 b[text]:'asdd'
 --? message: prefix deparse, relid .*, cmdtype: Drop table, sz: .* content: Drop table command start
---? message: prefix deparse, relid .*, cmdtype: Drop Table End, sz: .* content: {"fmt": "DROP %{objtype}s %{concurrently}s %{if_exists}s %{objidentity}s %{cascade}s", "cascade": "", "objtype": "table", "if_exists": "", "objidentity": "ddl_publication.t4", "concurrently": ""}.*+
+--? message: prefix deparse, relid .*, cmdtype: Drop Table End, sz: .* content: \{"fmt": "DROP %\{objtype}s %\{concurrently}s %\{if_exists}s %\{objidentity}s %\{cascade}s", "cascade": "", "objtype": "table", "if_exists": "", "objidentity": "ddl_publication.t4", "concurrently": ""}.*+
  decode to : DROP table   ddl_publication.t4 , [owner none]
 --? COMMIT .*
 (6 rows)
