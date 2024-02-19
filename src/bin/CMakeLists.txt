@@ -27,6 +27,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_plan_simulator
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_loader
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_persist
+    ${CMAKE_CURRENT_SOURCE_DIR}/gs_retrieve
 )
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON")
     add_subdirectory(gs_log)
@@ -57,3 +58,4 @@ else()
         add_subdirectory(gs_persist)
     endif()
 endif()
+add_subdirectory(gs_retrieve)

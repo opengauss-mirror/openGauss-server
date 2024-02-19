@@ -221,8 +221,6 @@ static char remove_member_file[MAXPGPATH];
 static char change_role_file[MAXPGPATH];
 static char* new_role = "passive";
 static char start_minority_file[MAXPGPATH];
-static int ss_get_inter_node_nums(const char* interconn_url);
-bool ss_read_config(void);
 static unsigned int vote_num = 0;
 static unsigned int xmode = 2;
 static char postport_lock_file[MAXPGPATH];
@@ -362,7 +360,6 @@ static void set_build_pid(pgpid_t pid);
 static void close_connection(void);
 static PGconn* get_connectionex(void);
 static ServerMode get_runmode(void);
-void freefile(char** lines);
 static char* get_localrole_string(ServerMode mode);
 static bool do_actual_build(uint32 term = 0);
 static bool do_incremental_build(uint32 term = 0);
@@ -376,7 +373,6 @@ static void SigAlarmHandler(int arg);
 static bool DoBuildCheck(uint32 term);
 int ExecuteCmd(const char* command, struct timeval timeout);
 
-int find_guc_optval(const char** optlines, const char* optname, char* optval);
 static void read_ssl_confval(void);
 static char* get_string_by_sync_mode(bool syncmode);
 static void free_ctl();
@@ -780,20 +776,6 @@ static ServerMode get_runmode(void)
         return UNKNOWN_MODE;
 
     return UNKNOWN_MODE;
-}
-
-void freefile(char** lines)
-{
-    char** line = NULL;
-    if (lines == NULL)
-        return;
-    line = lines;
-    while (*line != NULL) {
-        free(*line);
-        *line = NULL;
-        line++;
-    }
-    free(lines);
 }
 
 /*
@@ -5089,39 +5071,6 @@ static bool do_incremental_build(uint32 term)
  * Description		:
  * Notes			:
  */
-int find_guc_optval(const char** optlines, const char* optname, char* optval)
-{
-    int offset = 0;
-    int len = 0;
-    int lineno = 0;
-    char def_optname[64];
-    int ret;
-    errno_t rc = EOK;
-
-    lineno = find_gucoption(optlines, (const char*)optname, NULL, NULL, &offset, &len, '\'');
-    if (lineno != INVALID_LINES_IDX) {
-        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset, (size_t)(Min(len, MAX_VALUE_LEN)));
-        securec_check_c(rc, "", "");
-        return lineno;
-    }
-
-    ret = snprintf_s(def_optname, sizeof(def_optname), sizeof(def_optname) - 1, "#%s", optname, '\'');
-    securec_check_ss_c(ret, "\0", "\0");
-    lineno = find_gucoption(optlines, (const char*)def_optname, NULL, NULL, &offset, &len);
-    if (lineno != INVALID_LINES_IDX) {
-        rc = strncpy_s(optval, MAX_VALUE_LEN, optlines[lineno] + offset, (size_t)(Min(len, MAX_VALUE_LEN)));
-        securec_check_c(rc, "", "");
-        return lineno;
-    }
-    return INVALID_LINES_IDX;
-}
-
-/*
- * @@GaussDB@@
- * Brief			:
- * Description		:
- * Notes			:
- */
 static void read_ssl_confval(void)
 {
     char config_file[MAXPGPATH] = {0};
@@ -7053,7 +7002,7 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
-    enable_dss = ss_read_config();
+    enable_dss = ss_read_config(pg_data);
     if (ss_instance_config.dss.enable_dss) {
         // dss device init
         if (dss_device_init(ss_instance_config.dss.socketpath,
@@ -7353,79 +7302,4 @@ static void free_ctl()
     FREE_AND_RESET(pgxcCommand);
     FREE_AND_RESET(ss_instance_config.dss.vgname);
     FREE_AND_RESET(ss_instance_config.dss.vgdata);
-}
-
-static int ss_get_inter_node_nums(const char* interconn_url)
-{
-    errno_t rc;
-    int nodeNum = 0;
-    char* next_token = NULL;
-    char* token = NULL;
-    const char* delim = ",";
-    if (interconn_url == NULL || interconn_url[0] == '\0') {
-        pg_log(PG_WARNING, _("can not contain interconnect nodes.\n"));
-        return nodeNum;
-    }
-
-    char* strs = (char*)palloc(strlen(interconn_url) + 1);
-    rc = strncpy_s(strs, strlen(interconn_url) + 1, interconn_url, strlen(interconn_url));
-    securec_check_c(rc, "\0", "\0");
-
-    token = strtok_s(strs, delim, &next_token);
-    do {
-        nodeNum++;
-        token = strtok_s(NULL, delim, &next_token);
-    } while (token != NULL);
-    pfree(strs);
-    return nodeNum;
-}
-
-
-/*
-* read ss config, return enable_dss 
-* we will get ss_enable_dss, ss_dss_conn_path and ss_dss_vg_name.
-*/
-bool ss_read_config(void)
-{
-    char config_file[MAXPGPATH] = {0};
-    char enable_dss[MAXPGPATH] = {0};
-    char enable_dorado[MAXPGPATH] = {0};
-    char inst_id[MAXPGPATH] = {0};
-    char interconnect_url[MAXPGPATH] = {0};
-    char** optlines = NULL;
-    int ret = EOK;
-
-    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
-    securec_check_ss_c(ret, "\0", "\0");
-    config_file[MAXPGPATH - 1] = '\0';
-    optlines = readfile(config_file);
-
-    (void)find_guc_optval((const char**)optlines, "ss_enable_dss", enable_dss);
-
-    /* this is not enable_dss, wo do not need to do anythiny else */
-    if(strcmp(enable_dss, "on") != 0) {
-        freefile(optlines);
-        optlines = NULL;
-        return false;
-    }
-
-    (void)find_guc_optval((const char**)optlines, "ss_enable_dorado", enable_dorado);
-    if(strcmp(enable_dorado, "on") == 0) {
-        ss_instance_config.dss.enable_dorado = true;
-    }
-
-    ss_instance_config.dss.enable_dss = true;
-    ss_instance_config.dss.socketpath = (char*)malloc(sizeof(char) * MAXPGPATH);
-    ss_instance_config.dss.vgname = (char*)malloc(sizeof(char) * MAXPGPATH);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_conn_path", ss_instance_config.dss.socketpath);
-    (void)find_guc_optval((const char**)optlines, "ss_dss_vg_name", ss_instance_config.dss.vgname);
-    (void)find_guc_optval((const char**)optlines, "ss_instance_id", inst_id);
-    ss_instance_config.dss.instance_id = atoi(inst_id);
-
-    (void)find_guc_optval((const char**)optlines, "ss_interconnect_url", interconnect_url);
-    ss_instance_config.dss.interNodeNum = ss_get_inter_node_nums(interconnect_url);
-
-    freefile(optlines);
-    optlines = NULL;
-    return true;
 }

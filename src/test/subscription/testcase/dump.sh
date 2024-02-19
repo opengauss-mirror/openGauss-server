@@ -44,6 +44,8 @@ function test_1() {
 	fi
 
 	exec_dump_db $case_db $pub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.pub" "all"
+	sedcmd="sed -i -e s/gauss/${g_username}/g $dump_expected_dir/dump_db_pub${pub_ddl}.pub"
+	$sedcmd
 	diff $dump_result_dir/dump_db_pub${pub_ddl}.pub $dump_expected_dir/dump_db_pub${pub_ddl}.pub > ${dump_result_dir}/dump_pub${pub_ddl}_pub.diff
 	if [ -s ${dump_result_dir}/dump_puball_pub.diff ]; then
 		echo "$failed_keyword when dump publication"
@@ -53,6 +55,8 @@ function test_1() {
 	fi
 
     exec_dump_db $case_db $sub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.sub" "all"
+	sedcmd="sed -i -e s/gauss/${g_username}/g $dump_expected_dir/dump_db_pub${pub_ddl}.sub"
+	$sedcmd
 	diff $dump_result_dir/dump_db_pub${pub_ddl}.sub $dump_expected_dir/dump_db_pub${pub_ddl}.sub > ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff --ignore-matching-lines='password=encryptOpt'
 	if [ -s ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff ]; then
 		echo "$failed_keyword when dump subscription"

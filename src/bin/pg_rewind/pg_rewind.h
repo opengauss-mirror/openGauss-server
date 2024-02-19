@@ -33,7 +33,6 @@
 #define RT_WITH_MULTI_STANDBY 1
 #define MAX_ERR_MSG_LENTH 1024
 #define XLOG_FILE_NAME_LENGTH 25
-#define MAX_CONFIG_FILE_SIZE 0xFFFFF /* max file size for configurations = 1M */
 typedef enum { BUILD_SUCCESS = 0, BUILD_ERROR, BUILD_FATAL } BuildErrorCode;
 
 /* Configuration options */
