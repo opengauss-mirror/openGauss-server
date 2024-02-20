@@ -13306,7 +13306,13 @@ static void check_and_reset_ha_listen_port(void)
     bool refreshReplList = false;
     bool needToRestart = false;
     bool refreshListenSocket = false;
+    bool walRcvNeedRestart = false;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    int walreplindex = -1;
 
+    SpinLockAcquire(&hashmdata->mutex);
+    walreplindex = hashmdata->current_repl;
+    SpinLockRelease(&hashmdata->mutex);
     /*
      * when Ha replconninfo have changed and current_mode is not NORMAL,
      * dynamically modify the ha socket.
@@ -13321,7 +13327,7 @@ static void check_and_reset_ha_listen_port(void)
 
         if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == OLD_REPL_CHANGE_IP_OR_PORT ||
             t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j]) {
-            /* now we should shut the WalSender which connection changed */
+            /* Now we should shut the WalSender which connection changed */
             for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
                 volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
@@ -13329,6 +13335,13 @@ static void check_and_reset_ha_listen_port(void)
                     continue;
                 }
                 SignalSpecialChildren(SIGTERM, BACKEND_TYPE_WALSND, walsnd->pid);
+            }
+            /* 
+             * And the standby should shut the WalReciver when replication changed.
+             * We will not shut WalReciver when replication changed with other standby.
+             */
+            if (g_instance.pid_cxt.WalReceiverPID != 0 && walreplindex == j) {
+                walRcvNeedRestart = true;
             }
             needToRestart = true;
             refreshListenSocket = true;
@@ -13359,9 +13372,9 @@ static void check_and_reset_ha_listen_port(void)
     if (needToRestart) {
         /* send SIGTERM to end process senders and receiver */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_DATASND);
-        if (g_instance.pid_cxt.WalRcvWriterPID != 0)
+        if (g_instance.pid_cxt.WalRcvWriterPID != 0 && walRcvNeedRestart)
             signal_child(g_instance.pid_cxt.WalRcvWriterPID, SIGTERM);
-        if (g_instance.pid_cxt.WalReceiverPID != 0)
+        if (g_instance.pid_cxt.WalReceiverPID != 0 && walRcvNeedRestart)
             signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
         if (g_instance.pid_cxt.DataRcvWriterPID != 0)
             signal_child(g_instance.pid_cxt.DataRcvWriterPID, SIGTERM);
