@@ -2100,9 +2100,7 @@ retry:
     pgstat_report_waitevent(WAIT_EVENT_END);
     PROFILING_MDIO_END_READ((uint32)amount, returnCode);
 
-    if (returnCode >= 0)
-        vfdcache[file].seekPos += returnCode;
-    else {
+    if (returnCode < 0) {
         /*
          * Windows may run out of kernel buffers and return "Insufficient
          * system resources" error.  Wait a bit and retry to solve it.
@@ -2138,9 +2136,6 @@ retry:
                 goto retry;
             }
         }
-
-        /* Trouble, so assume we don't know the file position anymore */
-        vfdcache[file].seekPos = FileUnknownPos;
     }
 
     return returnCode;
@@ -2241,11 +2236,11 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
      * immediately anyway, so this is safe at present.
      */
     if (vfdcache[file].fdstate & FD_TEMP_FILE_LIMIT) {
-        off_t newPos = vfdcache[file].seekPos + amount;
+        off_t past_write = offset + amount;
 
-        if (newPos > vfdcache[file].fileSize) {
+        if (past_write > vfdcache[file].fileSize) {
             uint64 newTotal = u_sess->storage_cxt.temporary_files_size;
-            uint64 incSize = (uint64)(newPos - vfdcache[file].fileSize);
+            uint64 incSize = (uint64)(past_write - vfdcache[file].fileSize);
             WLMGeneralParam* g_wlm_params = &u_sess->wlm_cxt->wlm_params;
             unsigned char state = g_wlm_params->iostate;
             g_wlm_params->iostate = IOSTATE_WRITE;
@@ -2253,7 +2248,7 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
             g_wlm_params->iostate = state;
 
             if (u_sess->attr.attr_sql.temp_file_limit >= 0) {
-                newTotal += newPos - vfdcache[file].fileSize;
+                newTotal += incSize;
                 if (newTotal > (uint64)(uint32)u_sess->attr.attr_sql.temp_file_limit * (uint64)1024)
                     ereport(ERROR,
                             (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
@@ -2275,15 +2270,13 @@ retry:
         errno = ENOSPC;
 
     if (returnCode >= 0) {
-        vfdcache[file].seekPos += returnCode;
-
         /* maintain fileSize and temporary_files_size if it's a temp file */
         if (vfdcache[file].fdstate & FD_TEMP_FILE_LIMIT) {
-            off_t newPos = vfdcache[file].seekPos;
+            off_t past_write = offset + amount;
 
-            if (newPos > vfdcache[file].fileSize) {
-                u_sess->storage_cxt.temporary_files_size += newPos - vfdcache[file].fileSize;
-                vfdcache[file].fileSize = newPos;
+            if (past_write > vfdcache[file].fileSize) {
+                u_sess->storage_cxt.temporary_files_size += past_write - vfdcache[file].fileSize;
+                vfdcache[file].fileSize = past_write;
             }
         }
     } else {
@@ -2318,9 +2311,6 @@ retry:
                 goto retry;
             }
         }
-
-        /* Trouble, so assume we don't know the file position anymore */
-        vfdcache[file].seekPos = FileUnknownPos;
     }
 
     return returnCode;
