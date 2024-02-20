@@ -709,6 +709,18 @@ XLogRecPtr DoradoFindMaxLsn(char *workingPath, char *returnMsg, int msgLen, pg_c
     return maxLsn;
 }
 
+static bool checkIsDigit(const char* arg)
+{
+    int i = 0;
+    while (arg[i] != '\0') {
+        if (!isdigit(arg[i])) {
+            return false;
+        }
+        i++;
+    }
+    return true;
+}
+
 static int getOptions(const int argc, char* const* argv)
 {
 #define NEWHOST 1
@@ -749,6 +761,11 @@ static int getOptions(const int argc, char* const* argv)
                 newHost = pg_strdup(optarg);
                 break;
             case NEWPORT:
+                check_env_value_c(optarg);
+                if (checkIsDigit(optarg) == 0) {
+                    write_stderr(_("%s: invalid port number \"%s\"\n"), progname, optarg);
+                    return -1;
+                }
                 newPort = atoi(optarg);
                 break;
             case OLDHOST:
@@ -759,6 +776,11 @@ static int getOptions(const int argc, char* const* argv)
                 oldHost = pg_strdup(optarg);
                 break;
             case OLDPORT:
+                check_env_value_c(optarg);
+                if (checkIsDigit(optarg) == 0) {
+                    write_stderr(_("%s: invalid port number \"%s\"\n"), progname, optarg);
+                    return -1;
+                }
                 oldPort = atoi(optarg);
                 break;
             case 'U':
@@ -837,7 +859,7 @@ int main(int argc, char **argv)
     }
 
     if (newPort <= 0) {
-        write_stderr(_("%s: no newport specified\n"), progname);
+        write_stderr(_("%s: no newport specified or it must be a true value\n"), progname);
         do_advice();
         exit(1);
     }
@@ -849,7 +871,7 @@ int main(int argc, char **argv)
     }
 
     if (oldPort <= 0) {
-        write_stderr(_("%s: no oldport specified\n"), progname);
+        write_stderr(_("%s: no oldport specified or it must be a true value\n"), progname);
         do_advice();
         exit(1);
     }
