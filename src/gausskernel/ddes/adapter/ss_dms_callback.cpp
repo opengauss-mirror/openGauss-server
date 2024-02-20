@@ -1816,8 +1816,7 @@ static void FailoverCleanBackends()
     long max_wait_time = 30000000L;
     long wait_time = 0;
     while (true) {
-        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && g_instance.pid_cxt.StartupPID == 0 &&
-            !CheckpointInProgress()) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && !CheckpointInProgress()) {
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] backends exit successfully")));
             break;
         }
