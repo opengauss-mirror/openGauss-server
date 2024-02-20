@@ -3951,7 +3951,7 @@ void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat)
 }
 
 void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg) {
-    if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN) {
+    if (ENABLE_ONDEMAND_REALTIME_BUILD) {
         volatile Latch* latch = &t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch;
         if (latch->owner_pid == t_thrd.proc_cxt.MyProcPid && latch->is_shared) {
             DisownLatch(latch);

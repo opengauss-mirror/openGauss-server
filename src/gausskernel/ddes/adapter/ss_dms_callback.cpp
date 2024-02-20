@@ -423,10 +423,6 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] Starting to promote standby.")));
 
-    if (ENABLE_ONDEMAND_REALTIME_BUILD) { 
-        OnDemandWaitRealtimeBuildShutDownInSwitchoverPromoting();
-    }
-
     SSNotifySwitchoverPromote();
 
     const int WAIT_PROMOTE = 1200;  /* wait 120 sec */

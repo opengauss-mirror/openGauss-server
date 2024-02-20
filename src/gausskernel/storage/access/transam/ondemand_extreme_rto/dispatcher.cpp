@@ -420,8 +420,6 @@ void HandleStartupInterruptsForExtremeRto()
             if (ENABLE_ONDEMAND_REALTIME_BUILD &&
                 (SS_PERFORMING_SWITCHOVER || (SS_STANDBY_MODE && DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS))) {
                 Assert(!SS_ONDEMAND_REALTIME_BUILD_DISABLED);
-                ereport(LOG, (errmsg("[On-demand] start to shutdown realtime build, set status to BUILD_TO_DISABLED.")));
-                g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_DISABLED;
                 proc_exit(0);
             } else {
                 proc_exit(1);
@@ -689,6 +687,10 @@ static void StopRecoveryWorkers(int code, Datum arg)
                   errmsg("parallel redo workers are going to stop, code:%d, arg:%lu",
                          code, DatumGetUInt64(arg))));
     SendSingalToPageWorker(SIGTERM);
+    if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_DISABLED;
+        ereport(LOG, (errmsg("[On-demand] start to shutdown realtime build, set status to BUILD_TO_DISABLED.")));
+    }
 
     uint64 count = 0;
     while (!DispathCouldExit()) {
@@ -1993,8 +1995,6 @@ void WaitRedoFinish()
 
 void WaitRealtimeBuildShutdown()
 {
-    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_DISABLED;
-
     Assert(g_instance.pid_cxt.StartupPID != 0);
     SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
     while (true) {
