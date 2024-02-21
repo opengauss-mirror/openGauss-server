@@ -2226,10 +2226,11 @@ static void attach_info_to_plantree_list(List* plantree_list, AttachInfoContext*
             }
 #ifdef ENABLE_MOT
             case T_CreateStmt:  /* fall through */
-            case T_CreateForeignTableStmt: {
+            case T_CreateForeignTableStmt:
 #else
-            case T_CreateStmt: {
+            case T_CreateStmt:
 #endif
+            {
                 Node* l = (Node*)stringToNode(info_query_string);
                 CreateStmt* cstmt = (CreateStmt*)stmt;
 
