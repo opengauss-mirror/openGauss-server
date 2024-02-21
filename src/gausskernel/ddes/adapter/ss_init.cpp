@@ -38,6 +38,7 @@
 #include "ddes/dms/ss_dms.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "postmaster/postmaster.h"
+#include "ddes/dms/ss_dms_auxiliary.h"
 
 #define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')
 
@@ -518,29 +519,21 @@ void DMSRefreshLogger(char *log_field, unsigned long long *value)
     dms_refresh_logger(log_field, value);
 }
 
-static void SSWaitDmsAuxiliaryExit()
-{
-    while (g_instance.pid_cxt.DmsAuxiliaryPID != 0) {
-        pg_usleep(1);
-    }
-    ereport(LOG, (errmsg("[SS] dms auxiliary thread exit")));
-}
-
 void DMSUninit()
 {
     if (!ENABLE_DMS || !g_instance.dms_cxt.dmsInited) {
         return;
     }
 
-    g_instance.dms_cxt.dmsInited = false;
-    ereport(LOG, (errmsg("DMS uninit worker threads, DRC, errdesc and DL")));
-    dms_uninit();
-
     if (g_instance.pid_cxt.DmsAuxiliaryPID != 0) {
         ereport(LOG, (errmsg("[SS] notify dms auxiliary thread exit")));
         signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
         SSWaitDmsAuxiliaryExit();
     }
+
+    g_instance.dms_cxt.dmsInited = false;
+    ereport(LOG, (errmsg("DMS uninit worker threads, DRC, errdesc and DL")));
+    dms_uninit();
 }
 
 // order: DMS reform finish -> CBReformDoneNotify finish -> startup exit (if has)
