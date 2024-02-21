@@ -3372,6 +3372,28 @@ typedef struct knl_t_dms_auxiliary_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_dms_auxiliary_context;
 
+/*
+ * in_progress_list is a stack of ongoing RelationBuildDesc() calls.  CREATE
+ * INDEX CONCURRENTLY makes catalog changes under ShareUpdateExclusiveLock.
+ * It critically relies on each backend absorbing those changes no later than
+ * next transaction start.  Hence, RelationBuildDesc() loops until it finishes
+ * without accepting a relevant invalidation.  (Most invalidation consumers
+ * don't do this.)
+ */
+typedef struct InProgressEnt {
+    Oid reloid;         /* OID of relation/partition being built */
+    bool invalidated;   /* whether an invalidation arrived for it */
+} InProgressEnt;
+
+#define INVAL_MSG_CXT_LIST_INIT_SIZE 4
+#define INVAL_MSG_CXT_LIST_INCREMENTAL 2
+typedef struct knl_t_invalidation_message_context {
+    InProgressEnt *in_progress_list;
+    int in_progress_list_len;
+    int in_progress_list_maxlen;
+    bool b_can_not_process; /* Currently unable to process invalid messages */
+} knl_t_invalidation_message_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -3523,6 +3545,7 @@ typedef struct knl_thrd_context {
     knl_t_ondemand_xlog_copy_context ondemand_xlog_copy_cxt;
     knl_t_rc_context rc_cxt;
     knl_t_dms_auxiliary_context dms_aux_cxt;
+    knl_t_invalidation_message_context inval_msg_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT
@@ -3557,6 +3580,49 @@ inline bool WLMThreadAmI()
 inline bool ParallelLogicalWorkerThreadAmI()
 {
     return (t_thrd.role == LOGICAL_READ_RECORD || t_thrd.role == PARALLEL_DECODE);
+}
+
+/* Any RelationBuildDesc()/PartitionBuildDesc() on the stack must start over. */
+static inline void SetInvalMsgProcListInvalAll(void)
+{
+    for (int i = 0; i < t_thrd.inval_msg_cxt.in_progress_list_len; i++)
+        t_thrd.inval_msg_cxt.in_progress_list[i].invalidated = true;
+}
+
+static inline void SetInvalMsgProcListInval(Oid id)
+{
+    for (int i = 0; i < t_thrd.inval_msg_cxt.in_progress_list_len; i++)
+        if (t_thrd.inval_msg_cxt.in_progress_list[i].reloid == id)
+            t_thrd.inval_msg_cxt.in_progress_list[i].invalidated = true;
+}
+
+static inline void ResetInvalMsgProcListInval(int offset)
+{
+    Assert(offset < t_thrd.inval_msg_cxt.in_progress_list_maxlen);
+    t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated = false;
+}
+
+static inline int PushInvalMsgProcList(Oid id)
+{
+    int offset = 0;
+    Assert(t_thrd.inval_msg_cxt.b_can_not_process == false);
+    if (t_thrd.inval_msg_cxt.in_progress_list_len >= t_thrd.inval_msg_cxt.in_progress_list_maxlen) {
+        int allocsize = t_thrd.inval_msg_cxt.in_progress_list_maxlen * INVAL_MSG_CXT_LIST_INCREMENTAL;
+        t_thrd.inval_msg_cxt.in_progress_list =
+            (InProgressEnt *)repalloc(t_thrd.inval_msg_cxt.in_progress_list, allocsize * sizeof(InProgressEnt));
+        t_thrd.inval_msg_cxt.in_progress_list_maxlen = allocsize;
+    }
+    offset = t_thrd.inval_msg_cxt.in_progress_list_len++;
+    t_thrd.inval_msg_cxt.in_progress_list[offset].reloid = id;
+    t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated = false;
+
+    return offset;
+}
+
+static inline void PopInvalMsgProcList(int offset)
+{
+    Assert(offset + 1 == t_thrd.inval_msg_cxt.in_progress_list_len);
+    t_thrd.inval_msg_cxt.in_progress_list_len--;
 }
 
 RedoInterruptCallBackFunc RegisterRedoInterruptCallBack(RedoInterruptCallBackFunc func);
