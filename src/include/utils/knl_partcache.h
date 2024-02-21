@@ -43,7 +43,7 @@ extern void PartitionDestroyPartition(Partition partition);
 extern void PartitionClearPartition(Partition partition, bool rebuild);
 extern void PartitionInitPhysicalAddr(Partition partition);
 extern void PartitionReloadIndexInfo(Partition part);
-extern Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt);
+extern Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt, bool buildPartMap);
 
 
 #define PartitionIdCacheInsertIntoLocal(PARTITION)                                                           \

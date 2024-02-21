@@ -96,6 +96,8 @@ static bool CheckOidIsLiveInPgClass(Oid targetOId);
 bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid);
 
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple);
+static Partition PartitionBuildDescExtended(Oid targetPartId, StorageType storage_type, bool buildPartMap);
+static void PartitionReloadIndexInfoExtended(Partition part);
 
 static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot)
 {
@@ -223,7 +225,41 @@ StorageType PartitionGetStorageType(Partition partition, Oid parentOid)
     return storageType;
 }
 
-Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt)
+Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt, bool buildPartMap)
+{
+    int offset = 0;
+    Partition partition = NULL;
+
+    /* Register to catch invalidation messages */
+    offset = PushInvalMsgProcList(targetPartId);
+
+    while (true) {
+        partition = PartitionBuildDescExtended(targetPartId, storage_type, buildPartMap);
+
+        /* Annotations can be found in RelationBuildDesc() */
+        if (partition && t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            PartitionDestroyPartition(partition);
+            partition = NULL;
+            ResetInvalMsgProcListInval(offset);
+            continue;
+        }
+
+        break;
+    }
+
+    PopInvalMsgProcList(offset);
+
+    /*
+     * Insert newly created relation into partcache hash table, if requested.
+     */
+    if (partition && insertIt) {
+        PartitionIdCacheInsertIntoLocal(partition);
+    }
+
+    return partition;
+}
+
+static Partition PartitionBuildDescExtended(Oid targetPartId, StorageType storage_type, bool buildPartMap)
 {
     Partition partition;
     Oid partid;
@@ -319,11 +355,16 @@ Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool in
     heap_freetuple_ext(pg_partition_tuple);
     /* It's fully valid */
     partition->pd_isvalid = true;
-    /*
-     * Insert newly created relation into partcache hash table, if requested.
-     */
-    if (insertIt) {
-        PartitionIdCacheInsertIntoLocal(partition);
+
+    /* build partMap */
+    if (buildPartMap && PartitionHasSubpartition(partition) &&
+        partition->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION)
+    {
+        Oid parentOid = partid_get_parentid(partition->pd_id);
+        Relation rel = relation_open(parentOid, NoLock);
+        Relation partRel = partitionGetRelation(rel, partition);
+        releaseDummyRelation(&partRel);
+        relation_close(rel, NoLock);
     }
 
     return partition;
@@ -399,7 +440,7 @@ Partition PartitionIdGetPartition(Oid partitionId, StorageType storage_type)
      * no partdesc in the cache, so have PartitionBuildDesc() build one and add
      * it.
      */
-    pd = PartitionBuildDesc(partitionId, storage_type, true);
+    pd = PartitionBuildDesc(partitionId, storage_type, true, false);
     if (PartitionIsValid(pd)) {
         PartitionIncrementReferenceCount(pd);
     }
@@ -690,10 +731,46 @@ void PartitionClearPartition(Partition partition, bool rebuild)
         if (EnableLocalSysCache()) {
             // call build means local doesnt contain relation or it it invalid, so search from global directly
             newpart = t_thrd.lsc_cxt.lsc->partdefcache.SearchPartitionFromGlobalCopy<false>(save_partid);
+
+            /*
+             * In global partition cache, newpart->partmap == NULL.
+             * If partmap is in old partition, it is necessary to build partmap.
+             * If an invalid message is received during build, the newpart will
+             * be discarded and the partition will be rebuilt locally.
+             */
+            if (newpart && partition->partMap != NULL && 
+                PartitionHasSubpartition(newpart) && 
+                newpart->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION)
+            {
+                int offset = PushInvalMsgProcList(newpart->pd_id);
+
+                Oid parentOid = partid_get_parentid(newpart->pd_id);
+                Relation rel = relation_open(parentOid, NoLock);
+                Relation partRel = partitionGetRelation(rel, newpart);
+                releaseDummyRelation(&partRel);
+                relation_close(rel, NoLock);
+
+                if (t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+                    PartitionDestroyPartition(newpart);
+                    newpart = NULL;
+                }
+                PopInvalMsgProcList(offset);
+            }
         }
         if (!RelationIsValid(newpart)) {
-            newpart = PartitionBuildDesc(save_partid, INVALID_STORAGE, false);
+            newpart = PartitionBuildDesc(save_partid, INVALID_STORAGE, false, partition->partMap != NULL);
         }
+
+        /*
+         * Between here and the end of the swap, don't add code that does or
+         * reasonably could read system catalogs.  That range must be free
+         * from invalidation processing.  See RelationBuildDesc() manipulation
+         * of in_progress_list.
+         * 
+         * To avoid adding code to reset b_can_not_process when return
+         * in the newpart==NULL branch.
+         */
+        t_thrd.inval_msg_cxt.b_can_not_process = (newpart != NULL);
 
         if (NULL == newpart) {
             /* Should only get here if partition was deleted */
@@ -706,13 +783,6 @@ void PartitionClearPartition(Partition partition, bool rebuild)
         if (tempNode != partition->pd_node.bucketNode) {
             ereport(LOG, (errmsg("partition %u storage type changing from [%d] to [%d]", save_partid, tempNode,
                 partition->pd_node.bucketNode)));
-        }
-        if (PartitionHasSubpartition(newpart) && newpart->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
-            Oid parentOid = partid_get_parentid(newpart->pd_id);
-            Relation rel = relation_open(parentOid, NoLock);
-            Relation partRel = partitionGetRelation(rel, newpart);
-            releaseDummyRelation(&partRel);
-            relation_close(rel, NoLock);
         }
         /*
          * Perform swapping of the partcache entry contents.  Within this
@@ -766,6 +836,9 @@ void PartitionClearPartition(Partition partition, bool rebuild)
 
         SWAPFIELD(LocalPartitionEntry*, entry);
 #undef SWAPFIELD
+
+        /* swap ended, allow invalidation processing */
+        t_thrd.inval_msg_cxt.b_can_not_process = false;
 
         /* And now we can throw away the temporary entry */
         PartitionDestroyPartition(newpart);
@@ -846,6 +919,9 @@ void PartitionCacheInvalidateEntry(Oid partitionId)
 {
     Partition partition;
 
+    /* Annotations can be found in RelationCacheInvalidateEntry() */
+    SetInvalMsgProcListInval(partitionId);
+
     PartitionIdCacheLookupOnlyLocal(partitionId, partition);
 
     if (PointerIsValid(partition)) {
@@ -882,6 +958,8 @@ void PartitionCacheInvalidateEntry(Oid partitionId)
  *	 second pass processes nailed-in-cache items before other nondeletable
  *	 items.  This should ensure that system catalogs are up to date before
  *	 we attempt to use them to reload information about other open relations.
+ *
+ *	 Annotations can be found in RelationCacheInvalidate()
  */
 
 void PartitionCacheInvalidate(void)
@@ -936,6 +1014,9 @@ void PartitionCacheInvalidate(void)
         PartitionClearPartition(partition, true);
     }
     list_free_ext(rebuildList);
+
+    /* Any RelationBuildDesc()/PartitionBuildDesc() on the stack must start over. */
+    SetInvalMsgProcListInvalAll();
 }
 
 /*
@@ -1688,6 +1769,38 @@ void releaseDummyRelation(Relation* relation)
  * Description	:
  */
 void PartitionReloadIndexInfo(Partition part)
+{
+    int offset = 0;
+
+    /* Register to catch invalidation messages */
+    offset = PushInvalMsgProcList(part->pd_id);
+
+    while (true) {
+        Assert(part->pd_isvalid == false);
+        PartitionReloadIndexInfoExtended(part);
+
+        /*
+         * If an invalidation arrived mid-build, start over.  Between here and the
+         * end of this function, don't add code that does or reasonably could read
+         * system catalogs.  That range must be free from invalidation processing
+         * for the !insertIt case.  For the insertIt case, RelationCacheInsert()
+         * will enroll this relation in ordinary relcache invalidation processing,
+         */
+        if (t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            part->pd_isvalid = false;
+            ResetInvalMsgProcListInval(offset);
+            continue;
+        }
+
+        break;
+    }
+
+    PopInvalMsgProcList(offset);
+
+    return;
+}
+
+static void PartitionReloadIndexInfoExtended(Partition part)
 {
     HeapTuple pg_partition_tuple;
     Form_pg_partition partForm;

@@ -3542,12 +3542,11 @@ static int ServerLoop(void)
 
 #ifdef HAVE_POLL
 
-                if (ufds[i].revents & POLLIN) {
-                    ufds[i].revents = 0;
+                if (ufds[i].revents & POLLIN)
 #else
-
-                if (FD_ISSET(t_thrd.postmaster_cxt.ListenSocket[i], &rmask)) {
+                if (FD_ISSET(t_thrd.postmaster_cxt.ListenSocket[i], &rmask))
 #endif
+                {
                     Port* port = NULL;
 
                     ufds[i].revents = 0;
