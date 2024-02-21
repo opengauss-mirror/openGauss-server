@@ -83,6 +83,7 @@
 #include "commands/verify.h"
 #include "storage/cfs/cfs_buffers.h"
 #include "ddes/dms/ss_txnstatus.h"
+#include "ddes/dms/ss_dms_auxiliary.h"
 
 #ifdef USE_SPQ
 #include "executor/node/nodeShareInputScan.h"
@@ -329,6 +330,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         InitPredicateLocks();
 
         SSInitTxnStatusCache();
+        SSInitXminInfo();
     }
 
     /*
