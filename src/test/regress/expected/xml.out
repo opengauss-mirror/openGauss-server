@@ -955,3 +955,31 @@ SELECT XMLPARSE(DOCUMENT '<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4
 
 DROP VIEW xmlview4;
 DROP TABLE emp;
+create database xmlmysql_db dbcompatibility 'B';
+\c xmlmysql_db
+create table test(a xml);
+insert into test values('a<');
+ERROR:  invalid XML content
+LINE 1: insert into test values('a<');
+                                ^
+DETAIL:  line 1: StartTag: invalid element name
+a<
+  ^
+CONTEXT:  referenced column: a
+insert /*+ ignore_error */into test values('a<');
+WARNING:  invalid XML content
+LINE 1: insert /*+ ignore_error */into test values('a<');
+                                                   ^
+DETAIL:  line 1: StartTag: invalid element name
+a<
+  ^
+CONTEXT:  referenced column: a
+select * from test;
+ a  
+----
+ a<
+(1 row)
+
+drop table test;
+\c regression
+drop database xmlmysql_db;

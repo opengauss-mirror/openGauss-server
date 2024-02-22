@@ -280,3 +280,13 @@ SELECT XMLPARSE(DOCUMENT '<!DOCTYPE foo [<!ENTITY c SYSTEM "/etc/no.such.file">]
 SELECT XMLPARSE(DOCUMENT '<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd"><chapter>&nbsp;</chapter>');
 DROP VIEW xmlview4;
 DROP TABLE emp;
+
+create database xmlmysql_db dbcompatibility 'B';
+\c xmlmysql_db
+create table test(a xml);
+insert into test values('a<');
+insert /*+ ignore_error */into test values('a<');
+select * from test;
+drop table test;
+\c regression
+drop database xmlmysql_db;
