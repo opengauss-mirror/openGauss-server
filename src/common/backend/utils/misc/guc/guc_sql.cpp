@@ -248,6 +248,7 @@ static const struct config_enum_entry rewrite_options[] = {
     {"predpushforce", PRED_PUSH_FORCE, false},
     {"disable_pullup_expr_sublink", SUBLINK_PULLUP_DISABLE_EXPR, false},
     {"enable_sublink_pullup_enhanced", SUBLINK_PULLUP_ENHANCED, false},
+    {"remove_redundant_distinct_group_by", REMOVE_REDUNDANT_DISTINCT_GROUP_BY, false},
     {NULL, 0, false}
 };
 
