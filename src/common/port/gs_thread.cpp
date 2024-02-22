@@ -439,6 +439,12 @@ void gs_thread_exit(int code)
 
     /* check if proc lock need to be release */
     ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B]) {
+        pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+        t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
+    }
+#endif
 
     /* 
      * policy plugin is released when PM thread exit(existing as last one) 

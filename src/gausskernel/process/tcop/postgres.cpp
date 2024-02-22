@@ -7710,6 +7710,7 @@ void LoadSqlPlugin()
                     errmsg("Please use the original role to connect B-compatibility database first, to load extension dolphin")));
             }
             /* recheck and load dolphin within lock */
+            t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = true;
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
 
             PG_TRY();
@@ -7726,11 +7727,13 @@ void LoadSqlPlugin()
             PG_CATCH();
             {
                 pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+                t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
                 t_thrd.utils_cxt.CurrentResourceOwner = save;
                 PG_RE_THROW();
             }
             PG_END_TRY();
             pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+            t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
         } else if (u_sess->attr.attr_sql.dolphin) {
             InitBSqlPluginHookIfNeeded();
         }

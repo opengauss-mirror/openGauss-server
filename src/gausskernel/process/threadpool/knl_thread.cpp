@@ -910,6 +910,11 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
     utils_cxt->TopTransactionResourceOwner = NULL;
     utils_cxt->holdProcBaseLock = false;
     utils_cxt->SortColumnOptimize = false;
+#ifndef ENABLE_MULTIPLE_NODES
+    rc = memset_s(utils_cxt->holdLoadPluginLock, sizeof(utils_cxt->holdLoadPluginLock), 0,
+        sizeof(utils_cxt->holdLoadPluginLock));
+    securec_check(rc, "\0", "\0");
+#endif
     utils_cxt->sigTimerId = NULL;
     utils_cxt->pg_strtok_ptr = NULL;
 
