@@ -37,7 +37,7 @@ void TransitionFunction(AggState* aggstate,
                         FunctionCallInfoData* fcinfo);
 static void NdpAggSlotAppend(AggState* state, AggStatePerGroup pergroup, TupleTableSlot* slot);
 static void knl_u_ndp_init(knl_u_ndp_context* ndp_cxt);
-static void NdpReInitConetxt();
+static void NdpReInitContext();
 
 THR_LOCAL ndp_pushdown_hook_type backup_ndp_pushdown_hook_type = NULL;
 THR_LOCAL TableAmNdpRoutine_hook_type backup_ndp_tableam = NULL;
@@ -996,7 +996,7 @@ void NdpDestroyContext(NdpContext* context)
     context->channelCache = nullptr;
 }
 
-static void NdpReInitConetxt()
+static void NdpReInitContext()
 {
     if (u_sess->ndp_cxt.cxt == nullptr) {
         return;
@@ -1148,7 +1148,7 @@ NdpContext* GetNdpContext()
         u_sess->ndp_cxt.cxt = NdpCreateContext();
         MemoryContextSwitchTo(oldContext);
     } else {
-        NdpReInitConetxt();
+        NdpReInitContext();
     }
     return (NdpContext*)u_sess->ndp_cxt.cxt;
 }
@@ -1376,7 +1376,7 @@ static void NdpExecutorEnd(QueryDesc* queryDesc)
     else
         standard_ExecutorEnd(queryDesc);
     if (!StreamThreadAmI()) {
-        NdpReInitConetxt();
+        NdpReInitContext();
     }
 }
 
