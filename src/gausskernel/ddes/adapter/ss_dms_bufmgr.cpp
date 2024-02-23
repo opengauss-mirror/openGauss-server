@@ -589,30 +589,43 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
     }
 
     ereport(DEBUG1,
-        (errmodule(MOD_DMS),
-            errmsg("[On-demand] start request primary node redo page, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
-                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum,
-                tag.blockNum)));
+        (errmsg("[On-demand] Start request primary node redo page, spc/db/rel/bucket "
+            "fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+            tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
     InitDmsContext(&dms_ctx);
     dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
     if (dms_reform_req_opengauss_ondemand_redo_buffer(&dms_ctx, &tag,
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
         SSReadControlFile(REFORM_CTRL_PAGE);
         ereport(LOG,
-            (errmodule(MOD_DMS),
-                errmsg("[On-demand] request primary node redo page failed, page id [%d/%d/%d/%d/%d %d-%d], "
-                    "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, (int)tag.rnode.bucketNode,
-                    (int)tag.rnode.opt, tag.forkNum, tag.blockNum, redo_status)));
+            (errmsg("[On-demand] Request primary node redo page timeout, spc/db/rel/bucket "
+                "fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+                tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
         return false;
     }
-    ereport(DEBUG1,
-        (errmodule(MOD_DMS),
-            errmsg("[On-demand] end request primary node redo page, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, "
-                "redo status %d", tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode,
-                tag.forkNum, tag.blockNum, redo_status)));
 
-    if (redo_status != ONDEMAND_REDO_DONE) {
+    if (redo_status == ONDEMAND_REDO_DONE) {
+        ereport(DEBUG1,
+            (errmsg("[On-demand] Request primary node redo page done, spc/db/rel/bucket "
+                "fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+                tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
+    } else if (redo_status == ONDEMAND_REDO_SKIP) {
+        ereport(DEBUG1,
+            (errmsg("[On-demand] Primary node is not in ondemand recovery now and "
+                "ignore this redo request, so refresh reform control file")));
         SSReadControlFile(REFORM_CTRL_PAGE);
+    } else if (redo_status == ONDEMAND_REDO_ERROR) {
+        ereport(PANIC,
+            (errmsg("[On-demand] Error happend in request primary node redo page, read buffer crash, "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+                tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
+        return false;
+    } else if (redo_status == ONDEMAND_REDO_FAIL) {
+        ereport(WARNING,
+            (errmsg("[On-demand] Error happend in request primary node redo page, buffer is invalid, "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+                tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
+        return false;
     }
     return true;
 }
