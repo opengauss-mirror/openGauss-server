@@ -402,7 +402,8 @@ typedef enum {
     PRED_PUSH_NORMAL = (1 << 7),
     PRED_PUSH_FORCE = (1 << 8),
     SUBLINK_PULLUP_DISABLE_EXPR = (1 << 9), /* disable pull sublink in expr clause */
-    SUBLINK_PULLUP_ENHANCED = (1 << 10)
+    SUBLINK_PULLUP_ENHANCED = (1 << 10),
+    REMOVE_REDUNDANT_DISTINCT_GROUP_BY = (1 << 11)
 } rewrite_param;
 
 typedef enum {
@@ -460,6 +461,9 @@ typedef enum {
 
 #define ENABLE_PRED_PUSH_ALL(root) \
     ((ENABLE_PRED_PUSH(root) || ENABLE_PRED_PUSH_NORMAL(root) || ENABLE_PRED_PUSH_FORCE(root)) && permit_predpush(root))
+
+#define ENABLE_REMOVE_REDUNDANT_DISTINCT_GROUP_BY() \
+    ((REMOVE_REDUNDANT_DISTINCT_GROUP_BY) & (uint)u_sess->attr.attr_sql.rewrite_rule)
 
 #define ENABLE_SQL_BETA_FEATURE(feature) \
     ((bool)((uint)u_sess->attr.attr_sql.sql_beta_feature & feature))

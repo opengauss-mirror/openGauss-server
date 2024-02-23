@@ -387,3 +387,23 @@ drop table tab_sa2;
 drop table tab_sa3;
 drop table tab_sa4;
 drop table tab_sa5;
+
+set rewrite_rule = 'remove_redundant_distinct_group_by';
+create table subselect_t1 (a int);
+create table subselect_t2 (a int, b int);
+insert into subselect_t1 values (1);
+insert into subselect_t1 values (2);
+insert into subselect_t1 values (-1);
+insert into subselect_t2 values (1, 1);
+insert into subselect_t2 values (2, 2);
+insert into subselect_t2 values (-1, -1);
+
+explain (costs off) select * from subselect_t1 where a in (select distinct a from subselect_t2);
+select * from subselect_t1 where a in (select distinct a from subselect_t2);
+
+explain (costs off) select * from subselect_t1 where a in (select a from subselect_t2 group by a);
+select * from subselect_t1 where a in (select a from subselect_t2 group by a);
+
+explain (costs off) select * from subselect_t1 where a in (select distinct on (abs(a)) a from subselect_t2);
+select * from subselect_t1 where a in (select distinct on (abs(a)) a from subselect_t2);
+reset rewrite_rule;
