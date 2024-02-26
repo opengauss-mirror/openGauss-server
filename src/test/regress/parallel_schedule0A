@@ -93,7 +93,7 @@ test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
 test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
-test: partition_param_path
+test: partition_param_path null_in_partition
 #test: partition_cost_model
 test: row_partition_iterator_elimination col_partition_iterator_elimination
 
@@ -181,7 +181,7 @@ test: single_node_test_null_operator
 # ----------
 # Another group of parallel tests
 # ----------
-test: single_node_create_aggregate 
+test: single_node_create_aggregate
 #test: single_node_create_function_3 single_node_create_cast
 #test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
 test: single_node_vacuum
