@@ -74,6 +74,7 @@
 #include "pgxc/barrier.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_xmin.h"
+#include "ddes/dms/ss_dms_callback.h"
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -756,7 +757,7 @@ typedef struct knl_g_parallel_redo_context {
     char* ali_buf;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoCpuBindControl redoCpuBindcontrl;
-    HTAB **redoItemHash; /* used in ondemand extreme RTO */
+    ondemand_htab_ctrl_t **redoItemHashCtrl; /* used in ondemand extreme RTO */
     /* extreme-rto standby read */
     TransactionId exrto_recyle_xmin;
     XLogRecPtr global_recycle_lsn;
@@ -1286,6 +1287,7 @@ typedef struct knl_g_dms_context {
     char conninfo[MAXPGPATH];
     ss_dfx_stats_t SSDFxStats;
     ss_xmin_info_t SSXminInfo;
+    ss_fake_seesion_context_t SSFakeSessionCxt;
 } knl_g_dms_context;
 
 #ifdef USE_SPQ
@@ -1428,6 +1430,7 @@ typedef struct knl_instance_context {
     List* needCheckConflictSubIds;
     pthread_mutex_t subIdsLock;
 #endif
+    uint32 noNeedWaitForCatchup;
     pg_atomic_uint32 extensionNum;
     knl_g_audit_context audit_cxt;
     knl_g_abo_context abo_cxt;

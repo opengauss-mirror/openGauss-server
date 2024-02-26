@@ -55,19 +55,23 @@ static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void *ProgressReportValidate(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_doneFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \r",
             progressBar, percent, g_doneFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -78,8 +82,9 @@ static void *ProgressReportValidate(void *arg)
     } while (((g_doneFiles + g_inregularFiles) < g_totalFiles) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). validate file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
+    return nullptr;
 }
 
 bool pre_check_backup(pgBackup *backup)
@@ -187,7 +192,7 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
     }
 
     /* setup threads */
-    for (i = 0; (size_t)i < g_totalFiles; i++)
+    for (i = 0; i < g_totalFiles; i++)
     {
         pgFile       *file = (pgFile *) parray_get(files, i);
         pg_atomic_clear_flag(&file->lock);

@@ -134,7 +134,8 @@ Partition By RANGE(c1)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 
 create table gpi_table2_inherits (c4 int) INHERITS (gpi_table2);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ERROR:  inherited relation "gpi_table2" is a partitioned table
+DETAIL:  can not inherit from partitioned table
 -- error
 alter table gpi_table2 set (wait_clean_gpi=y);
 ERROR:  Un-support feature

@@ -394,6 +394,7 @@ typedef struct A_Indices {
     NodeTag type;
     Node *lidx; /* NULL if it's a single subscript */
     Node *uidx;
+    bool is_slice; /* for age */
 } A_Indices;
 
 /*
@@ -814,6 +815,7 @@ typedef struct AlterTableStmt {
     ObjectType relkind;    /* type of object */
     bool missing_ok;       /* skip error if table missing */
     bool fromCreate;       /* from create stmt */
+    bool fromReplace;      /* from create or replace stmt */
     bool need_rewrite_sql; /* after rewrite rule, need to rewrite query string */
 } AlterTableStmt;
 
@@ -2113,6 +2115,7 @@ typedef struct Query {
     void* intoPolicy;
     ParentStmtType parentStmtType;
 #endif
+    bool has_uservar;
 } Query;
 
 /* ----------------------

@@ -139,6 +139,12 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_ddes_dms_adapter>
 )
 
+if("${ENABLE_BBOX}" STREQUAL "OFF")
+list(REMOVE_ITEM gaussdb_objects 
+    $<TARGET_OBJECTS:gausskernel_cbb_bbox>
+)
+endif()
+
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
 list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_replication_dcf>
@@ -294,9 +300,13 @@ if(${USE_LIBXML})
 endif()
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
-    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo)
+    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo -latomic)
 else()
     list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lncurses -ltinfo -lboost_thread -lboost_chrono -lboost_system -lboost_atomic)
+endif()
+
+if(NOT "${ENABLE_JEMALLOC}" STREQUAL "ON")
+    list(REMOVE_ITEM gaussdb_LINK_LIBS -l${JEMALLOC_LIB_NAME})
 endif()
 
 include_directories(

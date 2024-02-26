@@ -235,6 +235,9 @@ void SSSyncOldestXminWhenReform(uint8 reformer_id)
         LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
         CalculateLocalLatestSnapshot(true);
         LWLockRelease(ProcArrayLock);
+        SpinLockAcquire(&xmin_info->snapshot_available_lock);
+        xmin_info->snapshot_available = true;
+        SpinLockRelease(&xmin_info->snapshot_available_lock);
     } else {
         int ret = DMS_SUCCESS;
         do {

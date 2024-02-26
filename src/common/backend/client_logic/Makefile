@@ -19,11 +19,13 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-.PHONY: copy_cstrings
-copy_cstrings: 
-	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq/client_logic_common cstrings_map.o
-	cp $(top_builddir)/src/common/interfaces/libpq/client_logic_common/cstrings_map.o . 
-cstrings_map.o: copy_cstrings
+DEPENDENCY_PATH = $(top_builddir)/src/common/interfaces/libpq/client_logic_common/
+DEPENDENCY_FILE = cstrings_map.cpp
+DEPENDENCY_FILE_O = $(patsubst %.cpp,%.o, $(DEPENDENCY_FILE))
+cstrings_map.o: $(DEPENDENCY_PATH)/$(DEPENDENCY_FILE)
+	@echo $(DEPENDENCY_PATH)$(DEPENDENCY_FILE)
+	$(MAKE) -C $(DEPENDENCY_PATH) $(DEPENDENCY_FILE_O)
+	@cp $(DEPENDENCY_PATH)$(DEPENDENCY_FILE_O) . 
 OBJS= client_logic.o cache.o cstrings_map.o client_logic_proc.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

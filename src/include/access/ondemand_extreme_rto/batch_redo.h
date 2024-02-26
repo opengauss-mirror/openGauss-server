@@ -69,9 +69,13 @@ typedef struct redoitemhashentry {
 } RedoItemHashEntry;
 
 extern void PRPrintRedoItemHashTab(HTAB *redoItemHash);
-extern HTAB **PRRedoItemHashInitialize(MemoryContext context);
-extern  void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
-extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
+extern ondemand_htab_ctrl_t *PRRedoItemHashInitialize(MemoryContext context);
+extern ondemand_htab_ctrl_t **PRInitRedoItemHashForAllPipeline(MemoryContext context);
+extern void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
+extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash, bool isHead = false);
+extern void PRTrackAddBatchBlock(XLogRecParseState *headBlockState, XLogRecParseState *tailBlockState, int count,
+    HTAB *redoItemHash, bool isHead);
+extern void PRTrackAllClear(HTAB *redoItemHash);
 extern uint32 XlogTrackTableHashCode(RedoItemTag *tagPtr);
 
 }  // namespace ondemand_extreme_rto

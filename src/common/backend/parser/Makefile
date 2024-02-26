@@ -91,13 +91,12 @@ else
 	@$(missing) flex $< $@
 endif
 
-hint_gram.o keywords.o parser.o: hint_gram.hpp  submake-kwlist
+hint_gram.o keywords.o parser.o: hint_gram.hpp $(top_srcdir)/src/include/parser/kwlist_d.h
 
 # gram.cpp, gram.hpp, and scan.inc are in the distribution tarball, so they
 # are not cleaned here.
-clean distclean maintainer-clean:
+clean distclean maintainer-clean: submake-kwlist-clean
 	rm -f lex.backup hint_gram.cpp
-	rm -f kwlist_d.h
 
 
 maintainer-check:

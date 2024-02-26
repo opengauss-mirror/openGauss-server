@@ -34,6 +34,110 @@ SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
 NOTICE: UPDATE Multiple-Relation Syntax is only avaliable in CENTRALIZED mode and B-format database!
 NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
 
+-- issue
+CREATE TEMPORARY TABLE t0 ( c54 INT , c9 INT ) ;
+INSERT INTO t0 VALUES ( 25 , -8 ) , ( -88 , -77 ) ;
+UPDATE t0 , ( SELECT t2 . c54 AS c17 FROM t0 , t0 AS t1 LEFT OUTER JOIN t0 AS t2 USING ( c9 , c54 ) ) AS t3 JOIN t0 AS t4 ON t4 . c9 = t4 . c54 NATURAL INNER JOIN t0 AS t5 SET t4 . c54 = -32 WHERE t4 . c54 = ( SELECT c54 AS c4 FROM t0 LIMIT 1 ) ;
+WITH t6 AS ( SELECT c54 AS c12 FROM t0 ) SELECT t0 . c9 AS c9 FROM t0 CROSS JOIN t0 AS t7 WHERE t0 . c54 = -33 ;
+ c9 
+----
+(0 rows)
+
+drop table t0;
+create table t0(c1 int, c2 int, c3 int, c4 int);
+insert into t0 values(25, -8, -88, -8),(-88, -77, 25, -8);
+update t0 a, t0 b set b.c1=10, a.c2=200, b.c3=20, a.c4=100;
+select * from t0;
+ c1 | c2  | c3 | c4  
+----+-----+----+-----
+ 10 | 200 | 20 | 100
+ 10 | 200 | 20 | 100
+(2 rows)
+
+drop table t0;
+drop table if exists tt0;
+NOTICE:  table "tt0" does not exist, skipping
+create table tt0(a int, b int);
+insert into tt0 values(1,2),(2,3);
+begin;
+update tt0 a0, tt0 a1 set a0.a=5;
+select * from tt0;
+ a | b 
+---+---
+ 5 | 2
+ 5 | 3
+(2 rows)
+
+rollback;
+begin;
+update tt0 a, tt0 b set a.a=10;
+select * from tt0;
+ a  | b 
+----+---
+ 10 | 2
+ 10 | 3
+(2 rows)
+
+rollback;
+drop table tt0;
+create type newtype as(a int, b int);
+create table test(a newtype,b int);
+insert into test values(ROW(1,2),3);
+update test set test.a=ROW(10,20);
+select * from test;
+    a    | b 
+---------+---
+ (10,20) | 3
+(1 row)
+
+update test t set t.a=ROW(11,21);
+select * from test;
+    a    | b 
+---------+---
+ (11,21) | 3
+(1 row)
+
+--Ambiguous scene
+--update field a of column a rather than column a of table a
+update test a set a.a=12;
+NOTICE:  update field 'a' of column 'a', though it's ambiguous.
+--update field b of column a rather than column b of table a
+update test a set a.b=22;
+NOTICE:  update field 'b' of column 'a', though it's ambiguous.
+select * from test;
+    a    | b 
+---------+---
+ (12,22) | 3
+(1 row)
+
+--fail
+update test a set a.a=ROW(13,23);
+NOTICE:  update field 'a' of column 'a', though it's ambiguous.
+ERROR:  subfield "a" is of type integer but expression is of type record
+LINE 1: update test a set a.a=ROW(13,23);
+                          ^
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: a
+update test a set a.c=10;
+NOTICE:  update field 'c' of column 'a', though it's ambiguous.
+ERROR:  cannot assign to field "c" of column "a" because there is no such column in data type newtype
+LINE 1: update test a set a.c=10;
+                          ^
+CONTEXT:  referenced column: a
+update test b set b.c=10;
+ERROR:  column "c" of relation "test" does not exist
+LINE 1: update test b set b.c=10;
+                          ^
+--must compatible with previous features, though not perfect
+update test a set a.a.a=12;
+select * from test;
+    a    | b 
+---------+---
+ (12,22) | 3
+(1 row)
+
+drop table test;
+drop type newtype;
 -- three relation
 drop table if exists t_t_mutil_t1;
 NOTICE:  table "t_t_mutil_t1" does not exist, skipping

@@ -36,7 +36,9 @@
 #include "utils/palloc.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "postmaster/bgwriter.h"
 #include "knl/knl_thread.h"
 #include "tde_key_management/tde_key_storage.h"
@@ -1539,9 +1541,12 @@ static void dw_file_cxt_init_batch(int id, dw_batch_file_context *batch_file_cxt
     (void)dw_recover_batch_file_head(batch_file_cxt);
 
     batch_file_cxt->buf = buf;
+    
+#ifdef ENABLE_BBOX
     if (BBOX_BLACKLIST_DW_BUFFER) {
         bbox_blacklist_add(DW_BUFFER, buf, buf_size - BLCKSZ - BLCKSZ);
     }
+#endif
 
     batch_file_cxt->write_pos = 0;
     batch_file_cxt->flush_page = 0;

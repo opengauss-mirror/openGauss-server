@@ -36,7 +36,9 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
@@ -367,6 +369,17 @@ static void InitNetworkConfigureNamesBool()
             NULL},
             &g_instance.attr.attr_network.enable_dolphin_proto,
             false,
+            NULL,
+            NULL,
+            NULL},
+        {{"dolphin_hot_standby",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SECURITY,
+            gettext_noop("Enables connectivity of the standby dolphin protocol"),
+            NULL},
+            &g_instance.attr.attr_network.dolphin_hot_standby,
+            true,
             NULL,
             NULL,
             NULL},

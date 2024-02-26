@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/time.h>
+#include <sys/prctl.h>
 
 #ifdef HAVE_LIBZ
 #include "zlib.h"
@@ -568,7 +569,11 @@ bool StartLogStreamer(
     fflush(stderr);
     bgchild = fork();
     if (bgchild == 0) {
-        /* in child process */
+        /*
+         * In child process.
+         * Receive SIGKILL when main process exits.
+         */
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
         exit(LogStreamerMain(param));
     } else if (bgchild < 0) {
         pg_log(PG_WARNING, _(" could not create background process: %s.\n"), strerror(errno));
@@ -671,7 +676,6 @@ static void progress_report(int tablespacenum, const char* filename, bool force)
     pg_time_t now = 0;
     int elapsed_secs = 0;
     int caculate_secs = 0;
-    static bool print = true;
 
     /*
      * report and cacluate speed for every report_timeout or the sync percent changed.
@@ -1022,12 +1026,22 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 continue;
             }
             
-            /* pg_control will be written into pages of each interconnect nodes in stanby cluster corresponding to */
+            /* pg_control will be written into pages of each interconnect nodes in dorado stanby cluster corresponding to */
             if (ss_instance_config.dss.enable_dss && strcmp(filename, pg_control_file) == 0) {
                 pg_log(PG_WARNING, _("file size %d. \n"), r);
-                int node;
-                for (node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
-                    off_t seekpos = (off_t)BLCKSZ * node;
+                if (ss_instance_config.dss.enable_dorado) {
+                    for (int node = 0; node < ss_instance_config.dss.interNodeNum; node++) {
+                        off_t seekpos = (off_t)BLCKSZ * node;
+                        fseek(file, seekpos, SEEK_SET);
+                        if (fwrite(copybuf, r, 1, file) != 1) {
+                            pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
+                            DisconnectConnection();
+                            FREE_AND_RESET(copybuf);
+                            return false;
+                        }
+                    }
+                } else {
+                    off_t seekpos = (off_t)BLCKSZ * ss_instance_config.dss.instance_id;
                     fseek(file, seekpos, SEEK_SET);
                     if (fwrite(copybuf, r, 1, file) != 1) {
                         pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
@@ -1557,8 +1571,8 @@ static bool BaseBackup(const char* dirname, uint32 term)
 
     /* Print the progress of the tool execution through a new thread. */
     g_totalTableSpace = PQntuples(res);
-    fprintf(stderr, "Begin Receiving files \n");
-    pthread_t progressThread = NULL;
+    fprintf(stdout, "Begin Receiving files \n");
+    pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReportFullBuild, NULL);
 
     /*
@@ -1579,7 +1593,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThread, NULL);
     
-    fprintf(stderr, "Finish Receiving files \n");
+    fprintf(stdout, "Finish Receiving files \n");
 
     if (showprogress) {
         progress_report(PQntuples(res), NULL, true);
@@ -1685,7 +1699,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     }
 #endif
 
-    if (ss_instance_config.dss.enable_dss) {
+    if (ss_instance_config.dss.enable_dss && !ss_instance_config.dss.enable_dorado) {
         BeginGetXlogbyStream(xlogstart, timeline, sysidentifier, xlog_location, term, res);
     }
 
@@ -2802,19 +2816,23 @@ bool RenameTblspcDir(char *dataDir)
  * Execute this function in another thread and print the progress periodically.
  */
 static void *ProgressReportFullBuild(void *arg) {
-    char progressBar[52];
+    if (totalsize == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)((totaldone / 1024) * 100 / totalsize);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%dKB). (%d/%d)tablespaces. Receive files \r",
+        fprintf(stdout, "Progress: %s %d%% (%lu/%luKB). (%d/%d)tablespaces. Receive files \r",
             progressBar, percent, (totaldone / 1024), totalsize, g_curTableSpace, g_totalTableSpace);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -2825,8 +2843,9 @@ static void *ProgressReportFullBuild(void *arg) {
     } while (((totaldone / 1024) < totalsize) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%dKB). (%d/%d)tablespaces. Receive files \n",
+    fprintf(stdout, "Progress: %s %d%% (%lu/%luKB). (%d/%d)tablespaces. Receive files \n",
             progressBar, percent, totalsize, totalsize, g_curTableSpace, g_totalTableSpace);
+    return nullptr;
 }
 
 static void BeginGetXlogbyStream(char* xlogstart, uint32 timeline, char* sysidentifier, char* xlog_location, uint term, PGresult* res)

@@ -151,7 +151,7 @@ Node* MultiExecHash(HashState* node)
             hashtable->totalTuples += 1;
         }
 #ifdef USE_SPQ
-        if (hashkeys_null) {
+        if (IS_SPQ_RUNNING && hashkeys_null) {
             node->hs_hashkeys_null = true;
             if (node->hs_quit_if_hashkeys_null) {
                 ExecEndNode(outerNode);
@@ -1208,11 +1208,6 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
             idx += MAXALIGN(HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(hashTuple)->t_len);
         }
     }
-
-#ifdef HJDEBUG
-    printf("Nbuckets increased to %d, average items per bucket %.1f\n", hashtable->nbuckets,
-           batchTuples / hashtable->nbuckets);
-#endif
 }
 
 /*

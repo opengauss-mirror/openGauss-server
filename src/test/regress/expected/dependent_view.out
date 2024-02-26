@@ -1,0 +1,633 @@
+drop schema if exists dependent_view cascade;
+NOTICE:  schema "dependent_view" does not exist, skipping
+create schema dependent_view;
+set current_schema = dependent_view;
+-- test 1：视图
+-- 创建基表
+DROP TABLE IF EXISTS base_table;
+NOTICE:  table "base_table" does not exist, skipping
+CREATE TABLE base_table
+(
+  base_table_id INTEGER,
+  base_table_field NUMERIC(10,4)
+);
+-- 插入数据
+insert into base_table values (1,1);
+insert into base_table values (2,2);
+-- 创建第一层直接引用表字段的视图对象master_viewx
+DROP VIEW IF EXISTS master_view1;
+NOTICE:  view "master_view1" does not exist, skipping
+CREATE OR REPLACE VIEW master_view1 AS
+  SELECT
+    base_table_id AS id,
+    base_table_field AS field
+  FROM base_table;
+DROP VIEW IF EXISTS master_view2;
+NOTICE:  view "master_view2" does not exist, skipping
+CREATE OR REPLACE VIEW master_view2 AS
+  SELECT
+    base_table_field AS field
+  FROM base_table;
+DROP VIEW IF EXISTS master_view3;
+NOTICE:  view "master_view3" does not exist, skipping
+CREATE OR REPLACE VIEW master_view3 AS
+  SELECT
+    base_table_id AS id
+  FROM base_table;
+-- 创建第二层间接引用表字段的视图对象dependent_viewx
+DROP VIEW IF EXISTS dependent_view1;
+NOTICE:  view "dependent_view1" does not exist, skipping
+CREATE OR REPLACE VIEW dependent_view1 AS
+  SELECT
+    id AS dependent_id,
+    field AS dependent_field
+  FROM master_view1;
+DROP VIEW IF EXISTS dependent_view2;
+NOTICE:  view "dependent_view2" does not exist, skipping
+CREATE OR REPLACE VIEW dependent_view2 AS
+  SELECT
+    id AS dependent_id
+  FROM master_view1;
+DROP VIEW IF EXISTS dependent_view3;
+NOTICE:  view "dependent_view3" does not exist, skipping
+CREATE OR REPLACE VIEW dependent_view3 AS
+  SELECT
+    field AS dependent_field
+  FROM master_view1;
+DROP VIEW IF EXISTS dependent_view4;
+NOTICE:  view "dependent_view4" does not exist, skipping
+CREATE OR REPLACE VIEW dependent_view4 AS
+  SELECT
+    field AS dependent_field1
+  FROM master_view2;
+DROP VIEW IF EXISTS dependent_view5;
+NOTICE:  view "dependent_view5" does not exist, skipping
+CREATE OR REPLACE VIEW dependent_view5 AS
+  SELECT
+    id AS dependent_id
+  FROM master_view3;
+-- 创建第三层间接引用表字段的视图对象second_dependent_viewx
+DROP VIEW IF EXISTS second_dependent_view1;
+NOTICE:  view "second_dependent_view1" does not exist, skipping
+CREATE OR REPLACE VIEW second_dependent_view1 AS
+  SELECT
+    dependent_id AS sec_dependent_id,
+    dependent_field AS sec_dependent_field
+  FROM dependent_view1;
+DROP VIEW IF EXISTS second_dependent_view2;
+NOTICE:  view "second_dependent_view2" does not exist, skipping
+CREATE OR REPLACE VIEW second_dependent_view2 AS
+  SELECT
+    dependent_id AS sec_dependent_id
+  FROM dependent_view2;
+DROP VIEW IF EXISTS second_dependent_view3;
+NOTICE:  view "second_dependent_view3" does not exist, skipping
+CREATE OR REPLACE VIEW second_dependent_view3 AS
+  SELECT
+    dependent_field AS sec_dependent_field
+  FROM dependent_view3;
+-- 初始valid字段为true
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | t
+ master_view2           | v           | t
+ master_view3           | v           | t
+ dependent_view1        | v           | t
+ dependent_view2        | v           | t
+ dependent_view3        | v           | t
+ dependent_view4        | v           | t
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | t
+ second_dependent_view2 | v           | t
+ second_dependent_view3 | v           | t
+(12 rows)
+
+-- 修改表字段类型，预期视图失效，查询无效视图成功
+ALTER TABLE base_table ALTER COLUMN base_table_field TYPE VARCHAR(32);
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | f
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | f
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | f
+(12 rows)
+
+select * from second_dependent_view3;
+ sec_dependent_field 
+---------------------
+ 1.0000
+ 2.0000
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | t
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | t
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | t
+(12 rows)
+
+\d base_table
+          Table "dependent_view.base_table"
+      Column      |         Type          | Modifiers 
+------------------+-----------------------+-----------
+ base_table_id    | integer               | 
+ base_table_field | character varying(32) | 
+
+-- 修改表字段长度，预期视图失效，查询无效视图成功
+ALTER TABLE base_table ALTER COLUMN base_table_field TYPE VARCHAR(64);
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | f
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | f
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | f
+(12 rows)
+
+select * from second_dependent_view3;
+ sec_dependent_field 
+---------------------
+ 1.0000
+ 2.0000
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | t
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | t
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | t
+(12 rows)
+
+\d base_table
+          Table "dependent_view.base_table"
+      Column      |         Type          | Modifiers 
+------------------+-----------------------+-----------
+ base_table_id    | integer               | 
+ base_table_field | character varying(64) | 
+
+-- 删除表字段，预期视图失效，查询无效视图报错
+ALTER TABLE base_table DROP COLUMN base_table_field;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | f
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | f
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | f
+(12 rows)
+
+select * from second_dependent_view3;
+ERROR:  The view second_dependent_view3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | f
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | f
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | f
+(12 rows)
+
+\d base_table
+  Table "dependent_view.base_table"
+    Column     |  Type   | Modifiers 
+---------------+---------+-----------
+ base_table_id | integer | 
+
+-- 重新插入表字段，预期失效的视图被查询时恢复有效，引用链上的父视图也恢复有效状态
+ALTER TABLE base_table ADD base_table_field INTEGER;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | f
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | f
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | f
+(12 rows)
+
+select * from second_dependent_view3;
+ sec_dependent_field 
+---------------------
+                    
+                    
+(2 rows)
+
+select * from dependent_view3;
+ dependent_field 
+-----------------
+                
+                
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+        relname         | object_type | valid 
+------------------------+-------------+-------
+ base_table             | r           | t
+ master_view1           | v           | t
+ master_view2           | v           | f
+ master_view3           | v           | t
+ dependent_view1        | v           | f
+ dependent_view2        | v           | f
+ dependent_view3        | v           | t
+ dependent_view4        | v           | f
+ dependent_view5        | v           | t
+ second_dependent_view1 | v           | f
+ second_dependent_view2 | v           | f
+ second_dependent_view3 | v           | t
+(12 rows)
+
+\d base_table
+   Table "dependent_view.base_table"
+      Column      |  Type   | Modifiers 
+------------------+---------+-----------
+ base_table_id    | integer | 
+ base_table_field | integer | 
+
+-- 删除整个表，预期报错
+DROP TABLE base_table;
+ERROR:  cannot drop table base_table because other objects depend on it
+DETAIL:  view master_view2 depends on table base_table
+view dependent_view4 depends on view master_view2
+view master_view3 depends on table base_table
+view dependent_view5 depends on view master_view3
+view master_view1 depends on table base_table
+view dependent_view3 depends on view master_view1
+view second_dependent_view3 depends on view dependent_view3
+view dependent_view1 depends on view master_view1
+view second_dependent_view1 depends on view dependent_view1
+view dependent_view2 depends on view master_view1
+view second_dependent_view2 depends on view dependent_view2
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- 删除整个表，预期成功
+DROP TABLE base_table CASCADE;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to view master_view2
+drop cascades to view dependent_view4
+drop cascades to view master_view3
+drop cascades to view dependent_view5
+drop cascades to view master_view1
+drop cascades to view dependent_view3
+drop cascades to view second_dependent_view3
+drop cascades to view dependent_view1
+drop cascades to view second_dependent_view1
+drop cascades to view dependent_view2
+drop cascades to view second_dependent_view2
+-- test2：物化视图
+DROP TABLE IF EXISTS base_table;
+NOTICE:  table "base_table" does not exist, skipping
+CREATE TABLE base_table
+(
+  base_table_id INTEGER,
+  base_table_field NUMERIC(10,4)
+);
+-- 插入数据
+insert into base_table values (1,1);
+insert into base_table values (2,2);
+DROP MATERIALIZED VIEW IF EXISTS master_view1;
+NOTICE:  materialized view "master_view1" does not exist, skipping
+CREATE MATERIALIZED VIEW master_view1 AS
+  SELECT
+    base_table_id AS id,
+    base_table_field AS field
+  FROM base_table;
+  
+-- 插入新数据
+insert into base_table values (3,3);
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | t
+(2 rows)
+
+-- 重命名表字段，预期修改后查询到原数据
+ALTER TABLE base_table rename COLUMN base_table_id to id;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | t
+(2 rows)
+
+select * from master_view1;
+ id | field  
+----+--------
+  1 | 1.0000
+  2 | 2.0000
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | t
+(2 rows)
+
+\d base_table
+      Table "dependent_view.base_table"
+      Column      |     Type      | Modifiers 
+------------------+---------------+-----------
+ id               | integer       | 
+ base_table_field | numeric(10,4) | 
+
+-- 修改表字段类型，预期修改后查询到原数据
+ALTER TABLE base_table ALTER COLUMN id TYPE VARCHAR(32);
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | f
+(2 rows)
+
+select * from master_view1;
+ id | field  
+----+--------
+  1 | 1.0000
+  2 | 2.0000
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | f
+(2 rows)
+
+\d base_table
+          Table "dependent_view.base_table"
+      Column      |         Type          | Modifiers 
+------------------+-----------------------+-----------
+ id               | character varying(32) | 
+ base_table_field | numeric(10,4)         | 
+
+-- 删除表字段，预期修改后查询到原数据
+ALTER TABLE base_table DROP COLUMN base_table_field;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | f
+(2 rows)
+
+select * from master_view1;
+ id | field  
+----+--------
+  1 | 1.0000
+  2 | 2.0000
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | f
+(2 rows)
+
+\d base_table
+     Table "dependent_view.base_table"
+ Column |         Type          | Modifiers 
+--------+-----------------------+-----------
+ id     | character varying(32) | 
+
+-- 刷新物化视图，预期报错
+REFRESH MATERIALIZED VIEW master_view1;
+ERROR:  The materialized view master_view1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+-- 重新添加表字段，刷新物化视图，预期查询到同步后数据
+ALTER TABLE base_table ADD base_table_field INTEGER;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | f
+(2 rows)
+
+REFRESH MATERIALIZED VIEW master_view1;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | t
+(2 rows)
+
+select * from master_view1;
+ id | field 
+----+-------
+ 1  |      
+ 2  |      
+ 3  |      
+(3 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+   relname    | object_type | valid 
+--------------+-------------+-------
+ base_table   | r           | t
+ master_view1 | m           | t
+(2 rows)
+
+\d base_table
+          Table "dependent_view.base_table"
+      Column      |         Type          | Modifiers 
+------------------+-----------------------+-----------
+ id               | character varying(32) | 
+ base_table_field | integer               | 
+
+-- test 3: join方式创建视图
+drop view if exists v_view_independent_1;
+NOTICE:  view "v_view_independent_1" does not exist, skipping
+drop table if exists t_view_independent_1;
+NOTICE:  table "t_view_independent_1" does not exist, skipping
+drop table if exists t_view_independent_2;
+NOTICE:  table "t_view_independent_2" does not exist, skipping
+create table t_view_independent_1(c1 int primary key,c2 text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_view_independent_1_pkey" for table "t_view_independent_1"
+insert into t_view_independent_1 select a,a || 'x' from generate_series(1,3) as a;
+create table t_view_independent_2(c1 int primary key,c2 text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_view_independent_2_pkey" for table "t_view_independent_2"
+insert into t_view_independent_2 select a,a || 'y' from generate_series(2,4) as a;
+create view v_view_independent_1(vc1,vc2,vc3,vc4) as select * from t_view_independent_1 a inner join t_view_independent_2 b on a.c1 = b.c1 ;
+select * from v_view_independent_1;
+ vc1 | vc2 | vc3 | vc4 
+-----+-----+-----+-----
+   2 | 2x  |   2 | 2y
+   3 | 3x  |   3 | 3y
+(2 rows)
+
+--- 删除字段
+ALTER TABLE t_view_independent_1 DROP COLUMN c2;
+--- 查看视图为失效状态
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+          relname          | object_type | valid 
+---------------------------+-------------+-------
+ base_table                | r           | t
+ master_view1              | m           | t
+ t_view_independent_1      | r           | t
+ t_view_independent_1_pkey | i           | t
+ t_view_independent_2      | r           | t
+ t_view_independent_2_pkey | i           | t
+ v_view_independent_1      | v           | f
+(7 rows)
+
+select * from v_view_independent_1;
+ERROR:  The view v_view_independent_1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+ALTER TABLE t_view_independent_1 ADD COLUMN c2 text;
+--- 查询视图
+select * from v_view_independent_1;
+ vc1 | vc2 | vc3 | vc4 
+-----+-----+-----+-----
+   2 |     |   2 | 2y
+   3 |     |   3 | 3y
+(2 rows)
+
+-- 查看视图为有效状态
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+          relname          | object_type | valid 
+---------------------------+-------------+-------
+ base_table                | r           | t
+ master_view1              | m           | t
+ t_view_independent_1      | r           | t
+ t_view_independent_1_pkey | i           | t
+ t_view_independent_2      | r           | t
+ t_view_independent_2_pkey | i           | t
+ v_view_independent_1      | v           | t
+(7 rows)
+
+--- 修改字段类型
+ALTER TABLE t_view_independent_1 ALTER COLUMN c1 TYPE text;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+          relname          | object_type | valid 
+---------------------------+-------------+-------
+ base_table                | r           | t
+ master_view1              | m           | t
+ t_view_independent_1      | r           | t
+ t_view_independent_2      | r           | t
+ t_view_independent_2_pkey | i           | t
+ v_view_independent_1      | v           | f
+ t_view_independent_1_pkey | i           | t
+(7 rows)
+
+select * from v_view_independent_1;
+ vc1 | vc2 | vc3 | vc4 
+-----+-----+-----+-----
+ 2   |     |   2 | 2y
+ 3   |     |   3 | 3y
+(2 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+          relname          | object_type | valid 
+---------------------------+-------------+-------
+ base_table                | r           | t
+ master_view1              | m           | t
+ t_view_independent_1      | r           | t
+ t_view_independent_2      | r           | t
+ t_view_independent_2_pkey | i           | t
+ v_view_independent_1      | v           | t
+ t_view_independent_1_pkey | i           | t
+(7 rows)
+
+--- 删除字段类型
+ALTER TABLE t_view_independent_2 DROP COLUMN c1;
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+          relname          | object_type | valid 
+---------------------------+-------------+-------
+ base_table                | r           | t
+ master_view1              | m           | t
+ t_view_independent_1      | r           | t
+ t_view_independent_2      | r           | t
+ v_view_independent_1      | v           | f
+ t_view_independent_1_pkey | i           | t
+(6 rows)
+
+select * from v_view_independent_1;
+ERROR:  The view v_view_independent_1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
+ALTER TABLE t_view_independent_2 ADD COLUMN c1 text;
+select * from v_view_independent_1;
+ vc1 | vc2 | vc3 | vc4 
+-----+-----+-----+-----
+(0 rows)
+
+select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
+          relname          | object_type | valid 
+---------------------------+-------------+-------
+ base_table                | r           | t
+ master_view1              | m           | t
+ t_view_independent_1      | r           | t
+ t_view_independent_2      | r           | t
+ v_view_independent_1      | v           | t
+ t_view_independent_1_pkey | i           | t
+(6 rows)
+
+--- 清理环境
+drop view v_view_independent_1;
+drop table t_view_independent_1;
+drop table t_view_independent_2;
+--- clean
+drop schema dependent_view cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table base_table
+drop cascades to materialized view master_view1

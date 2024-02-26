@@ -29,7 +29,7 @@ include $(top_builddir)/src/Makefile.global
 include $(top_builddir)/src/Makefile.shlib
 parser.o gram.o: scan.cpp
 gram.hpp: gram.cpp
-gram.o  kwlookup.o parser.o: gram.hpp submake-kwlist
+gram.o  kwlookup.o parser.o: gram.hpp $(top_srcdir)/src/include/parser/kwlist_d.h
 scan.o: gram.hpp scan.cpp
 #gram.cpp: build-parser
 
@@ -57,7 +57,7 @@ removefiles:
 	rm -f fe-*.cpp
 all:softlinks scan.o gram.o ${OBJS} all-static-lib
 
-clean: clean-lib
+clean: clean-lib submake-kwlist-clean
 	rm -f gram.cpp gram.hpp scan.cpp
 	rm -f *.o *.a
 	rm -f test

@@ -8,6 +8,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/gistdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/gistdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/hashdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/hashdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/heapdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/heapdesc.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/logicalddlmsgdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logicalddlmsgdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/motdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/motdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/mxactdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/mxactdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/nbtdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/nbtdesc.cpp

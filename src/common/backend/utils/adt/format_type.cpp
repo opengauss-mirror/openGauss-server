@@ -30,7 +30,7 @@
 
 static char* format_type_internal(
     Oid type_oid, int32 typemod, bool typemod_given, bool allow_invalid, bool include_nspname = false);
-static char* printTypmod(const char* typname, int32 typmod, Oid typmodout);
+char* printTypmod(const char* typname, int32 typmod, Oid typmodout);
 static char* psnprintf(size_t len, const char* fmt, ...)
     /* This lets gcc check the format string for consistency. */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
@@ -360,7 +360,7 @@ static char* format_type_internal(
 /*
  * Add typmod decoration to the basic type name
  */
-static char* printTypmod(const char* typname, int32 typmod, Oid typmodout)
+char* printTypmod(const char* typname, int32 typmod, Oid typmodout)
 {
     char* res = NULL;
 

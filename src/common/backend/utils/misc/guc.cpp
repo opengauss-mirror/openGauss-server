@@ -42,7 +42,9 @@
 #ifdef ENABLE_WHITEBOX
 #include "access/ustore/knl_whitebox_test.h"
 #endif
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
@@ -442,7 +444,8 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "track_stmt_details_size",
     "sql_note",
     "max_error_count",
-    "enable_expr_fusion"
+    "enable_expr_fusion",
+    "heap_bulk_read_size"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
@@ -1679,7 +1682,11 @@ static void InitConfigureNamesBool()
             &u_sess->attr.attr_common.enable_bbox_dump,
             true,
             NULL,
+#ifdef ENABLE_BBOX
             assign_bbox_coredump,
+#else
+            NULL,
+#endif /* ENABLE_BBOX */
             NULL},
         {{"enable_default_index_deduplication",
             PGC_POSTMASTER,
@@ -2033,6 +2040,31 @@ static void InitConfigureNamesBool()
             NULL,
             },
             &g_instance.attr.attr_common.light_comm,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_nls",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("enable native language support"),
+            NULL},
+            &u_sess->attr.attr_common.enable_nls,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_proc_coverage",
+            PGC_SUSET,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enable procedure coverage"),
+            NULL,
+            },
+            &u_sess->attr.attr_common.enable_proc_coverage,
             false,
             NULL,
             NULL,
@@ -3408,7 +3440,7 @@ static void InitConfigureNamesString()
             NULL,
             NULL},
             
-         {{"thread_pool_stream_attr",
+        {{"thread_pool_stream_attr",
             PGC_POSTMASTER,
             NODE_ALL,
             CLIENT_CONN,
@@ -3750,9 +3782,15 @@ static void InitConfigureNamesString()
             NULL},
             &u_sess->attr.attr_common.bbox_dump_path,
             "",
+#ifdef ENABLE_BBOX
             check_bbox_corepath,
             assign_bbox_corepath,
             show_bbox_dump_path},
+#else
+            NULL,
+            NULL,
+            NULL},
+#endif /* ENABLE_BBOX */
 
         {{"alarm_component",
             PGC_POSTMASTER,
@@ -4016,9 +4054,15 @@ static void InitConfigureNamesString()
             GUC_LIST_INPUT},
             &g_instance.attr.attr_common.bbox_blacklist_items,
             "",
+#ifdef ENABLE_BBOX
             check_bbox_blacklist,
             assign_bbox_blacklist,
             show_bbox_blacklist},
+#else
+            NULL,
+            NULL,
+            NULL},        
+#endif /* ENABLE_BBOX */
 
         {{"track_stmt_stat_level",
             PGC_USERSET,

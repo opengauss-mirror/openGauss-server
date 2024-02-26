@@ -168,6 +168,24 @@ endif
 	$(INSTALL_DATA) parser/scanner.h '$(DESTDIR)$(includedir_server)/parser/scanner.h'
 	$(INSTALL_DATA) parser/keywords.h '$(DESTDIR)$(includedir_server)/parser/keywords.h'
 	$(INSTALL_DATA) ddes/dms/dms_api.h '$(DESTDIR)$(includedir_server)/ddes/dms/dms_api.h'
+# These headers are needed by AGE(A Graph Extension)
+	$(INSTALL_DATA) db4ai/predict_by.h '$(DESTDIR)$(includedir_server)/db4ai/predict_by.h'
+	$(INSTALL_DATA) db4ai/model_warehouse.h '$(DESTDIR)$(includedir_server)/db4ai/model_warehouse.h'
+	$(INSTALL_DATA) executor/node/nodeCtescan.h '$(DESTDIR)$(includedir_server)/executor/node/nodeCtescan.h'
+	$(INSTALL_DATA) executor/exec/execStream.h '$(DESTDIR)$(includedir_server)/executor/exec/execStream.h'
+	$(INSTALL_DATA) instruments/unique_sql_basic.h '$(DESTDIR)$(includedir_server)/instruments/unique_sql_basic.h'
+	$(INSTALL_DATA) storage/file/fio_device_com.h '$(DESTDIR)$(includedir_server)/storage/file/fio_device_com.h'
+	$(INSTALL_DATA) storage/gs_uwal/uwal.h '$(DESTDIR)$(includedir_server)/storage/gs_uwal/uwal.h'
+	$(INSTALL_DATA) ddes/dms/ss_aio.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_aio.h'
+	$(INSTALL_DATA) ddes/dms/ss_dms_recovery.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_dms_recovery.h'
+	$(INSTALL_DATA) ddes/dms/ss_common_attr.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_common_attr.h'
+	$(INSTALL_DATA) ddes/dms/ss_dms_callback.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_dms_callback.h'
+	$(INSTALL_DATA) ddes/dms/ss_init.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_init.h'
+	$(INSTALL_DATA) ddes/dms/ss_xmin.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_xmin.h'
+	$(INSTALL_DATA) ddes/dms/ss_txnstatus.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_txnstatus.h'
+	$(INSTALL_DATA) storage/dss/dss_api_def.h '$(DESTDIR)$(includedir_server)/storage/dss/dss_api_def.h'
+	$(INSTALL_DATA) executor/node/nodeExtensible.h '$(DESTDIR)$(includedir_server)/executor/node/nodeExtensible.h'
+	$(INSTALL_DATA) executor/node/nodeAgg.h '$(DESTDIR)$(includedir_server)/executor/node/nodeAgg.h'
 # We don't use INSTALL_DATA for performance reasons --- there are a lot of files
 	cp $(srcdir)/*.h '$(DESTDIR)$(includedir_server)'/ || exit; \
 	chmod $(INSTALL_DATA_MODE) '$(DESTDIR)$(includedir_server)'/*.h  || exit; \

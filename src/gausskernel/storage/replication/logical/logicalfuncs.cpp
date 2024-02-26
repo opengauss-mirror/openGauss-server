@@ -43,6 +43,7 @@
 #include "replication/logicalfuncs.h"
 #include "replication/walsender_private.h"
 #include "access/xlog_internal.h"
+#include "replication/ddlmessage.h"
 
 #include "storage/smgr/fd.h"
 #include "storage/file/fio_device.h"

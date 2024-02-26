@@ -175,7 +175,7 @@ static int findprefix(struct cnfa* cnfa, struct colormap* cm, chr* string, size_
         if (thiscolor == COLORLESS)
             break;
         /* The color must be a singleton */
-        if (cm->cd[thiscolor].nchrs != 1)
+        if (cm->cd[thiscolor].nschrs != 1 && cm->cd[thiscolor].nuchrs != 1)
             break;
 
         /*
@@ -190,7 +190,11 @@ static int findprefix(struct cnfa* cnfa, struct colormap* cm, chr* string, size_
          * is a member of a common prefix.  If we do hit such a corner case,
          * we just fall out without adding anything to the prefix string.
          */
-        c = cm->cd[thiscolor].firstchr;
+        if (cm->cd[thiscolor].nschrs == 1) {
+            c = cm->cd[thiscolor].firstchr;
+        } else {
+            c = cm->cmranges[thiscolor - 1].cmin;
+        }
         if (GETCOLOR(cm, c) != thiscolor)
             break;
 

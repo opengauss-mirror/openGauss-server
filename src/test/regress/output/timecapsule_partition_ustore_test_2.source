@@ -1,3 +1,5 @@
+CREATE DATABASE timecapsule_partition_ustore_test_2;
+\c timecapsule_partition_ustore_test_2
 set enable_default_ustore_table = on;
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
 --parition table
@@ -381,3 +383,6 @@ select count(*) from gs_recyclebin;
 
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
 set enable_default_ustore_table = off;
+-- end
+\c regression
+DROP DATABASE IF EXISTS timecapsule_partition_ustore_test_2;

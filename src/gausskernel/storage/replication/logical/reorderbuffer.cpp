@@ -71,6 +71,7 @@
 #include "replication/slot.h"
 #include "replication/snapbuild.h" /* just for SnapBuildSnapDecRefcount */
 #include "access/xlog_internal.h"
+#include "replication/ddlmessage.h"
 
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/fd.h"
@@ -243,6 +244,8 @@ static ReorderBufferTXN *ReorderBufferGetTXN(ReorderBuffer *rb)
     dlist_init(&txn->tuplecids);
     dlist_init(&txn->subtxns);
 
+    txn->output_plugin_private = NULL;
+
     return txn;
 }
 
@@ -343,6 +346,13 @@ static Size ReorderBufferChangeSize(ReorderBufferChange *change)
             }
             break;
         }
+        case REORDER_BUFFER_CHANGE_DDL: {
+            Size prefix_size = strlen(change->data.ddl.prefix) + 1;
+
+            sz += prefix_size + change->data.ddl.message_size + sizeof(Size) + sizeof(Size) + sizeof(Oid) + sizeof(DeparsedCommandType);
+
+            break;
+        }
     }
     return sz;
 }
@@ -392,6 +402,14 @@ void ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
                 ReorderBufferReturnTupleBuf(rb, change->data.tp.oldtuple);
                 change->data.tp.oldtuple = NULL;
             }
+            break;
+        case REORDER_BUFFER_CHANGE_DDL:
+            if (change->data.ddl.prefix != NULL)
+                pfree(change->data.ddl.prefix);
+            change->data.ddl.prefix = NULL;
+            if (change->data.ddl.message != NULL)
+                pfree(change->data.ddl.message);
+            change->data.ddl.message = NULL;
             break;
         case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT:
             if (change->data.snapshot) {
@@ -623,6 +641,35 @@ void ReorderBufferQueueChange(LogicalDecodingContext *ctx, TransactionId xid, XL
     ReorderBufferCheckSerializeTXN(ctx, txn);
 }
 
+/*
+ * A transactional DDL message is queued to be processed upon commit.
+ */
+void
+ReorderBufferQueueDDLMessage(LogicalDecodingContext *ctx, TransactionId xid, XLogRecPtr lsn,
+    const char*prefix, Size message_size, const char *message, Oid relid, DeparsedCommandType cmdtype)
+{
+    int rc = 0;
+    ReorderBuffer *rb = ctx->reorder;
+    MemoryContext oldcontext;
+    ReorderBufferChange *change;
+
+    Assert(TransactionIdIsValid(xid));
+
+    oldcontext = MemoryContextSwitchTo(rb->context);
+
+    change = ReorderBufferGetChange(rb);
+    change->action = REORDER_BUFFER_CHANGE_DDL;
+    change->data.ddl.prefix = pstrdup(prefix);
+    change->data.ddl.relid = relid;
+    change->data.ddl.cmdtype = cmdtype;
+    change->data.ddl.message_size = message_size;
+    change->data.ddl.message = (char*)palloc(message_size);
+    rc = memcpy_s(change->data.ddl.message, message_size, message, message_size);
+    securec_check(rc, "", "");
+
+    ReorderBufferQueueChange(ctx, xid, lsn, change);
+    MemoryContextSwitchTo(oldcontext);
+}
 /*
  * AssertTXNLsnOrder
  *     Verify LSN ordering of transaction lists in the reorderbuffer
@@ -1304,6 +1351,21 @@ static void ReorderBufferFreeSnap(ReorderBuffer *rb, Snapshot snap)
 }
 
 /*
+ * Helper function for ReorderBufferProcessTXN for applying the DDL message.
+ */
+static inline void
+ReorderBufferApplyDDLMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
+                                ReorderBufferChange *change)
+{
+    rb->ddl(rb, txn, change->lsn,
+        change->data.ddl.prefix,
+        change->data.ddl.relid,
+        change->data.ddl.cmdtype,
+        change->data.ddl.message_size,
+        change->data.ddl.message);
+}
+
+/*
  * Perform the replay of a transaction and its non-aborted subtransactions.
  *
  * Subtransactions previously have to be processed by
@@ -1390,7 +1452,6 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
             Relation relation = NULL;
             Oid reloid;
             Oid partitionReltoastrelid = InvalidOid;
-            bool stopDecoding = false;
             bool isSegment = false;
 
             switch (change->action) {
@@ -1500,11 +1561,6 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
 
                 case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
                     Assert(change->data.command_id != InvalidCommandId);
-                    if (change->data.command_id != FirstCommandId) {
-                        LogicalDecodeReportLostChanges<ReorderBufferIterTXNState>(iterstate);
-                        stopDecoding = true;
-                        break;
-                    }
                     if (command_id < change->data.command_id) {
                         command_id = change->data.command_id;
 
@@ -1531,6 +1587,9 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
                     ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
                         errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tuplecid value in changequeue")));
+                    break;
+                case REORDER_BUFFER_CHANGE_DDL:
+                    ReorderBufferApplyDDLMessage(rb, txn, change);
                     break;
                 case REORDER_BUFFER_CHANGE_UINSERT:
                 case REORDER_BUFFER_CHANGE_UDELETE:
@@ -1605,9 +1664,6 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                     }
                     RelationClose(relation);
                     break;
-            }
-            if (stopDecoding) {
-                break;
             }
         }
 
@@ -2220,6 +2276,44 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
             }
             break;
         }
+        case REORDER_BUFFER_CHANGE_DDL: {
+            char       *data;
+            Size        prefix_size = strlen(change->data.ddl.prefix) + 1;
+
+            sz += prefix_size + change->data.ddl.message_size +
+                sizeof(Size) + sizeof(Oid) + sizeof(DeparsedCommandType) + sizeof(Size);
+            ReorderBufferSerializeReserve(rb, sz);
+
+            data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
+
+            /* might have been reallocated above */
+            ondisk = (ReorderBufferDiskChange *) rb->outbuf;
+
+            /* write the prefix, relid and cmdtype including the size */
+            rc = memcpy_s(data, sizeof(Size), &prefix_size, sizeof(Size));
+            securec_check(rc, "", "");
+            data += sizeof(Size);
+            rc = memcpy_s(data, sizeof(Oid), &change->data.ddl.relid, sizeof(Oid));
+            securec_check(rc, "", "");
+            data += sizeof(Oid);
+            rc = memcpy_s(data, sizeof(DeparsedCommandType), &change->data.ddl.cmdtype, sizeof(DeparsedCommandType));
+            securec_check(rc, "", "");
+            data += sizeof(DeparsedCommandType);
+            rc = memcpy_s(data, prefix_size, change->data.ddl.prefix, prefix_size);
+            securec_check(rc, "", "");
+            data += prefix_size;
+
+            /* write the message including the size */
+            rc = memcpy_s(data, sizeof(Size), &change->data.ddl.message_size, sizeof(Size));
+            securec_check(rc, "", "");
+            data += sizeof(Size);
+            rc = memcpy_s(data, change->data.ddl.message_size, change->data.ddl.message,
+                    change->data.ddl.message_size);
+            securec_check(rc, "", "");
+            data += change->data.ddl.message_size;
+
+            break;
+        }
         case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
             /* ReorderBufferChange contains everything important */
             break;
@@ -2440,6 +2534,39 @@ static void ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
         case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
         case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
             break;
+        case REORDER_BUFFER_CHANGE_DDL: {
+            Size prefix_size;
+
+            /* read prefix */
+            rc = memcpy_s(&prefix_size, sizeof(Size), data, sizeof(Size));
+            securec_check(rc, "", "");
+            data += sizeof(Size);
+            rc = memcpy_s(&change->data.ddl.relid, sizeof(Oid), data, sizeof(Oid));
+            securec_check(rc, "", "");
+            data += sizeof(Oid);
+            rc = memcpy_s(&change->data.ddl.cmdtype, sizeof(DeparsedCommandType), data, sizeof(DeparsedCommandType));
+            securec_check(rc, "", "");
+            data += sizeof(DeparsedCommandType);
+
+            change->data.ddl.prefix = (char*)MemoryContextAlloc(rb->context, prefix_size);
+            rc = memcpy_s(change->data.ddl.prefix, prefix_size, data, prefix_size);
+            securec_check(rc, "", "");
+            Assert(change->data.ddl.prefix[prefix_size - 1] == '\0');
+            data += prefix_size;
+
+            /* read the message */
+            rc = memcpy_s(&change->data.ddl.message_size, sizeof(Size), data, sizeof(Size));
+            securec_check(rc, "", "");
+            data += sizeof(Size);
+            change->data.ddl.message = (char*)MemoryContextAlloc(rb->context,
+                                                            change->data.ddl.message_size);
+            rc = memcpy_s(change->data.ddl.message, change->data.ddl.message_size, data,
+                    change->data.ddl.message_size);
+            securec_check(rc, "", "");
+            data += change->data.ddl.message_size;
+
+            break;
+        }
         case REORDER_BUFFER_CHANGE_UINSERT:
         case REORDER_BUFFER_CHANGE_UDELETE:
         case REORDER_BUFFER_CHANGE_UUPDATE:

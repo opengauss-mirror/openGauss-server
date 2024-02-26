@@ -2032,6 +2032,34 @@ void SS_process_ctes(PlannerInfo* root)
     }
 }
 
+static void remove_redundant_distinct_group_by(Query* subselect)
+{
+    if (!ENABLE_REMOVE_REDUNDANT_DISTINCT_GROUP_BY()) {
+        return;
+    }
+
+    /*
+     * Remove distinct if distinct-on is not used and there is no limitClause.
+     */
+    if (subselect->distinctClause && !subselect->hasDistinctOn &&
+        subselect->limitCount == NULL && subselect->limitOffset == NULL) {
+        list_free_deep(subselect->distinctClause);
+        subselect->distinctClause = NULL;
+    }
+
+    /*
+     * Remove GROUP BY if there are no aggregate functions, HAVING clause, grouping
+     * sets and limitClause.
+     */
+
+    if (subselect->groupClause && !subselect->hasAggs && !subselect->hasWindowFuncs &&
+        subselect->havingQual == NULL && subselect->groupingSets == NULL &&
+        subselect->limitCount == NULL && subselect->limitOffset == NULL) {
+        list_free_deep(subselect->groupClause);
+        subselect->groupClause = NULL;
+    }
+}
+
 /*
  * convert_ANY_sublink_to_join: try to convert an ANY SubLink to a join
  *
@@ -2110,6 +2138,8 @@ JoinExpr* convert_ANY_sublink_to_join(PlannerInfo* root, SubLink* sublink, bool 
      */
     if (contain_volatile_functions(sublink->testexpr))
         return NULL;
+
+    remove_redundant_distinct_group_by(subselect);
 
     /*
      * Okay, pull up the sub-select into upper range table.

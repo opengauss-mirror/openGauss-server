@@ -1,3 +1,5 @@
+create database hw_partition_llt_db;
+\c hw_partition_llt_db;
 ------ The file is for llt
 -- indexGetPartitionOidList
 create table test_reindex_llt (a int)
@@ -396,6 +398,8 @@ partition by range (a)
 	partition test_pwj_1_p1 values less than (10),
 	partition test_pwj_1_p2 values less than (20)
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create table test_pwj_2 (b int)
 distribute by replication
 partition by range (b)
@@ -403,98 +407,45 @@ partition by range (b)
 	partition test_pwj_2_p1 values less than (10),
 	partition test_pwj_2_p2 values less than (20)
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 insert into test_pwj_1 values (generate_series(0, 19));
+ERROR:  relation "test_pwj_1" does not exist on datanode1
+LINE 1: insert into test_pwj_1 values (generate_series(0, 19));
+                    ^
 insert into test_pwj_2 values (generate_series(0, 19));
+ERROR:  relation "test_pwj_2" does not exist on datanode1
+LINE 1: insert into test_pwj_2 values (generate_series(0, 19));
+                    ^
 set enable_partitionwise = on;
 -- try_nestloop_path
 set enable_nestloop = on;
 set enable_mergejoin = off;
 set enable_hashjoin = off;
 select * from test_pwj_1 inner join test_pwj_2 on a=b;
- a  | b  
-----+----
-  0 |  0
-  1 |  1
-  2 |  2
-  3 |  3
-  4 |  4
-  5 |  5
-  6 |  6
-  7 |  7
-  8 |  8
-  9 |  9
- 10 | 10
- 11 | 11
- 12 | 12
- 13 | 13
- 14 | 14
- 15 | 15
- 16 | 16
- 17 | 17
- 18 | 18
- 19 | 19
-(20 rows)
-
+ERROR:  relation "test_pwj_1" does not exist on datanode1
+LINE 1: select * from test_pwj_1 inner join test_pwj_2 on a=b;
+                      ^
 -- try_mergejoin_path
 set enable_nestloop = off;
 set enable_mergejoin = on;
 set enable_hashjoin = off;
 select * from test_pwj_1 inner join test_pwj_2 on a=b;
- a  | b  
-----+----
-  0 |  0
-  1 |  1
-  2 |  2
-  3 |  3
-  4 |  4
-  5 |  5
-  6 |  6
-  7 |  7
-  8 |  8
-  9 |  9
- 10 | 10
- 11 | 11
- 12 | 12
- 13 | 13
- 14 | 14
- 15 | 15
- 16 | 16
- 17 | 17
- 18 | 18
- 19 | 19
-(20 rows)
-
+ERROR:  relation "test_pwj_1" does not exist on datanode1
+LINE 1: select * from test_pwj_1 inner join test_pwj_2 on a=b;
+                      ^
 -- try_hasjoin_path
 set enable_nestloop = off;
 set enable_mergejoin = on;
 set enable_hashjoin = off;
 select * from test_pwj_1 inner join test_pwj_2 on a=b;
- a  | b  
-----+----
-  0 |  0
-  1 |  1
-  2 |  2
-  3 |  3
-  4 |  4
-  5 |  5
-  6 |  6
-  7 |  7
-  8 |  8
-  9 |  9
- 10 | 10
- 11 | 11
- 12 | 12
- 13 | 13
- 14 | 14
- 15 | 15
- 16 | 16
- 17 | 17
- 18 | 18
- 19 | 19
-(20 rows)
-
+ERROR:  relation "test_pwj_1" does not exist on datanode1
+LINE 1: select * from test_pwj_1 inner join test_pwj_2 on a=b;
+                      ^
 drop table test_pwj_1;
+ERROR:  table "test_pwj_1" does not exist
 drop table test_pwj_2;
+ERROR:  table "test_pwj_2" does not exist
 -- pwj with index
 create table test_pwj_idx_1 (c1 int, c2 int)
 distribute by replication
@@ -503,7 +454,10 @@ partition by range (c1)
 	partition test_pwj_idx_1_p1 values less than (10),
 	partition test_pwj_idx_1_p2 values less than (20)
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create index idx_test_pwj_idx_1 on test_pwj_idx_1(c1) local;
+ERROR:  relation "test_pwj_idx_1" does not exist
 create table test_pwj_idx_2 (c3 int, c4 int)
 distribute by replication
 partition by range (c3)
@@ -511,104 +465,56 @@ partition by range (c3)
 	partition test_pwj_idx_2_p1 values less than (10),
 	partition test_pwj_idx_2_p2 values less than (20)
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create index idx_test_pwj_idx_2 on test_pwj_idx_2(c3) local;
+ERROR:  relation "test_pwj_idx_2" does not exist
 insert into test_pwj_idx_1 values (generate_series(0, 19), generate_series(0, 19));
+ERROR:  relation "test_pwj_idx_1" does not exist on datanode1
+LINE 1: insert into test_pwj_idx_1 values (generate_series(0, 19), g...
+                    ^
 insert into test_pwj_idx_2 values (generate_series(0, 19), generate_series(0, 19));
+ERROR:  relation "test_pwj_idx_2" does not exist on datanode1
+LINE 1: insert into test_pwj_idx_2 values (generate_series(0, 19), g...
+                    ^
 set enable_partitionwise = on;
 set enable_seqscan = off;
 -- try_nestloop_path
 alter index idx_test_pwj_idx_1 modify partition test_pwj_idx_1_p1_c1_idx unusable;
+ERROR:  relation "idx_test_pwj_idx_1" does not exist
 set enable_nestloop = on;
 set enable_mergejoin = off;
 set enable_hashjoin = off;
 select c1, c3 from test_pwj_idx_1 inner join test_pwj_idx_2 on c1=c3;
- c1 | c3 
-----+----
- 10 | 10
- 11 | 11
- 12 | 12
- 13 | 13
- 14 | 14
- 15 | 15
- 16 | 16
- 17 | 17
- 18 | 18
- 19 | 19
-  0 |  0
-  1 |  1
-  2 |  2
-  3 |  3
-  4 |  4
-  5 |  5
-  6 |  6
-  7 |  7
-  8 |  8
-  9 |  9
-(20 rows)
-
+ERROR:  relation "test_pwj_idx_1" does not exist on datanode1
+LINE 1: select c1, c3 from test_pwj_idx_1 inner join test_pwj_idx_2 ...
+                           ^
 -- try_mergejoin_path
 alter index idx_test_pwj_idx_2 modify partition test_pwj_idx_2_p1_c3_idx unusable;
+ERROR:  relation "idx_test_pwj_idx_2" does not exist
 set enable_nestloop = off;
 set enable_mergejoin = on;
 set enable_hashjoin = off;
 select c1, c3 from test_pwj_idx_1 inner join test_pwj_idx_2 on c1=c3;
- c1 | c3 
-----+----
-  0 |  0
-  1 |  1
-  2 |  2
-  3 |  3
-  4 |  4
-  5 |  5
-  6 |  6
-  7 |  7
-  8 |  8
-  9 |  9
- 10 | 10
- 11 | 11
- 12 | 12
- 13 | 13
- 14 | 14
- 15 | 15
- 16 | 16
- 17 | 17
- 18 | 18
- 19 | 19
-(20 rows)
-
+ERROR:  relation "test_pwj_idx_1" does not exist on datanode1
+LINE 1: select c1, c3 from test_pwj_idx_1 inner join test_pwj_idx_2 ...
+                           ^
 -- try_hasjoin_path
 alter index idx_test_pwj_idx_1 unusable;
+ERROR:  relation "idx_test_pwj_idx_1" does not exist
 alter index idx_test_pwj_idx_2 unusable;
+ERROR:  relation "idx_test_pwj_idx_2" does not exist
 set enable_nestloop = off;
 set enable_mergejoin = on;
 set enable_hashjoin = off;
 select c1, c3 from test_pwj_idx_1 inner join test_pwj_idx_2 on c1=c3;
- c1 | c3 
-----+----
-  0 |  0
-  1 |  1
-  2 |  2
-  3 |  3
-  4 |  4
-  5 |  5
-  6 |  6
-  7 |  7
-  8 |  8
-  9 |  9
- 10 | 10
- 11 | 11
- 12 | 12
- 13 | 13
- 14 | 14
- 15 | 15
- 16 | 16
- 17 | 17
- 18 | 18
- 19 | 19
-(20 rows)
-
+ERROR:  relation "test_pwj_idx_1" does not exist on datanode1
+LINE 1: select c1, c3 from test_pwj_idx_1 inner join test_pwj_idx_2 ...
+                           ^
 drop table test_pwj_idx_1;
+ERROR:  table "test_pwj_idx_1" does not exist
 drop table test_pwj_idx_2;
+ERROR:  table "test_pwj_idx_2" does not exist
 -- reindexPartIndex
 create table test_reindexPartIndex (a int)
 partition by range (a)
@@ -670,6 +576,8 @@ create table setop_002 (
     w_country                 Boolean                   ,
     w_gmt_offset              decimal(5,2)  
 )distribute by hash(w_gmt_offset,w_state,w_county,w_street_number,w_warehouse_sq_ft); 
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create table call_center
 (
     cc_call_center_sk         integer               not null,
@@ -704,6 +612,8 @@ create table call_center
     cc_gmt_offset             decimal(5,2)                  ,
     cc_tax_percentage         decimal(5,2)                  
  ) distribute by hash (cc_call_center_id);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create table web_page
 (
     wp_web_page_sk            integer               not null,
@@ -731,15 +641,19 @@ partition by range(wp_rec_start_date)
         partition p6 values less than('2015-01-01'),
         partition p7 values less than(maxvalue)
 );
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 select w_warehouse_date from setop_002
 where w_warehouse_date in (select cc_rec_start_date from call_center union all select wp_rec_start_date from web_page);
- w_warehouse_date 
-------------------
-(0 rows)
-
+ERROR:  relation "setop_002" does not exist on datanode1
+LINE 1: select w_warehouse_date from setop_002
+                                     ^
 drop table setop_002;
+ERROR:  table "setop_002" does not exist
 drop table call_center;
+ERROR:  table "call_center" does not exist
 drop table web_page;
+ERROR:  table "web_page" does not exist
 create table t10 (c1 int, c2 date)
 partition by range(c2)
 (
@@ -767,12 +681,12 @@ select pg_get_indexdef('t10_idx'::regclass::oid);
  c1     | integer                        |           | plain   |              | 
  c2     | timestamp(0) without time zone |           | plain   |              | 
 Indexes:
-    "t10_idx" btree (c2) LOCAL(PARTITION "01", PARTITION "02", PARTITION p01, PARTITION p02)  TABLESPACE pg_default
-Range partition by(c2)
-Number of partition: 4 (View pg_partition to check each partition range.)
+    "t10_idx" btree (c2) LOCAL TABLESPACE pg_default
+Partition By RANGE(c2)
+Number of partitions: 4 (View pg_partition to check each partition range.)
 Has OIDs: no
-Distribute By: HASH(c1)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 drop table t10;
+\c regression;
+drop database hw_partition_llt_db;

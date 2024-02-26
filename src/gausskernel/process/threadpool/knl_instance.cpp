@@ -202,9 +202,11 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.in_flushcopy = false;
     dms_cxt->SSRecoveryInfo.no_backend_left = false;
     dms_cxt->SSRecoveryInfo.in_ondemand_recovery = false;
+    dms_cxt->SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
     dms_cxt->SSRecoveryInfo.startup_need_exit_normally = false;
     dms_cxt->SSRecoveryInfo.recovery_trapped_in_page_request = false;
     dms_cxt->SSRecoveryInfo.dorado_sharestorage_inited = false;
+    dms_cxt->SSRecoveryInfo.ondemand_recovery_pause_status = NOT_PAUSE;
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
@@ -229,11 +231,21 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
         xmin_info->global_oldest_xmin_active = false;
         SpinLockInit(&xmin_info->bitmap_active_nodes_lock);
         xmin_info->bitmap_active_nodes = 0;
+        SpinLockInit(&xmin_info->snapshot_available_lock);
+        xmin_info->snapshot_available = false;
     }
     dms_cxt->latest_snapshot_xmin = 0;
     dms_cxt->latest_snapshot_xmax = 0;
     dms_cxt->latest_snapshot_csn = 0;
     SpinLockInit(&dms_cxt->set_snapshot_mutex);
+    {
+        ss_fake_seesion_context_t *fs_cxt = &g_instance.dms_cxt.SSFakeSessionCxt;
+        SpinLockInit(&fs_cxt->lock);
+        fs_cxt->fake_sessions = NULL;
+        fs_cxt->fake_session_cnt = 0;
+        fs_cxt->quickFetchIndex = 0;
+        fs_cxt->session_start = 0;
+    }
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
@@ -339,7 +351,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->exrto_recyle_xmin = 0;
     predo_cxt->exrto_snapshot = (ExrtoSnapshot)MemoryContextAllocZero(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ExrtoSnapshotData));
-    predo_cxt->redoItemHash = NULL;
+    predo_cxt->redoItemHashCtrl = NULL;
 
     predo_cxt->standby_read_delay_ddl_stat.delete_stat = 0;
     predo_cxt->standby_read_delay_ddl_stat.next_index_can_insert = 0;
@@ -1062,6 +1074,7 @@ void knl_instance_init()
     g_instance.needCheckConflictSubIds = NIL;
     pthread_mutex_init(&g_instance.subIdsLock, NULL);
 #endif
+    g_instance.noNeedWaitForCatchup = 0;
 
     knl_g_datadir_init(&g_instance.datadir_cxt);
     knl_g_listen_sock_init(&g_instance.listen_cxt);

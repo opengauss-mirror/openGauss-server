@@ -45,3 +45,4 @@ select int2mod(3, 0);
 select int4mod(3, 0);
 select int8mod(3, 0);
 select numeric_mod(1234.5678,0.0);
+select '10'::interval;

@@ -103,6 +103,14 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
         sub->binary = DatumGetBool(datum);
     }
 
+    datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_submatchddlowner, &isnull);
+    if (unlikely(isnull)) {
+        /* default matchddlowner is true */
+        sub->matchddlowner = true;
+    } else {
+        sub->matchddlowner = DatumGetBool(datum);
+    }
+
     /* Get skiplsn */
     datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subskiplsn, &isnull);
     if (unlikely(isnull)) {

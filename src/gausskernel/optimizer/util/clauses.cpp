@@ -3409,6 +3409,13 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             break;
     }
 
+    if (IS_SPQ_COORDINATOR) {
+        /* recurse into query structure if requested */
+        if (IsA(node, Query) && context->recurse_queries) {
+            return (Node *)query_tree_mutator((Query *)node, (Node * (*)(Node *, void *)) eval_const_expressions_mutator, (void *)context, 0);
+        }
+    }
+
     ELOG_FIELD_NAME_START(IsA(node, TargetEntry) ? ((TargetEntry*)node)->resname : NULL);
 
     /*

@@ -439,6 +439,12 @@ void gs_thread_exit(int code)
 
     /* check if proc lock need to be release */
     ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B]) {
+        pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+        t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
+    }
+#endif
 
     /* 
      * policy plugin is released when PM thread exit(existing as last one) 
@@ -500,7 +506,7 @@ void gs_thread_exit(int code)
 
     /* release the signal slot in signal_base */
     (void)gs_signal_slot_release(gs_thread_self());
-    if (IsPostmasterEnvironment && !t_thrd.postmaster_cxt.IsRPCWorkerThread) {
+    if (IsPostmasterEnvironment && !t_thrd.postmaster_cxt.IsRPCWorkerThread && !AmDmsProcess()) {
         if (u_sess->attr.attr_resource.enable_reaper_backend &&
             (StreamThreadAmI() || ParallelLogicalWorkerThreadAmI()) &&
             g_instance.pid_cxt.ReaperBackendPID && g_instance.status == NoShutdown) {

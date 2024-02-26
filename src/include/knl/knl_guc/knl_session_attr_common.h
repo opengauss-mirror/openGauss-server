@@ -74,6 +74,7 @@ typedef struct knl_session_attr_common {
     bool enable_redistribute;
     bool check_implicit_conversions_for_indexcol;
     bool support_batch_bind;
+    bool enable_nls;
     int XLogArchiveTimeout;
     int Log_file_mode;
     int bbox_dump_count;
@@ -224,6 +225,7 @@ typedef struct knl_session_attr_common {
     int wdr_snapshot_query_timeout;
     int dn_heartbeat_interval;
     bool enable_full_encryption;
+    bool enable_proc_coverage;
 
     char* router_att;
     bool enable_router;

@@ -96,6 +96,7 @@ void df_ctrl_init(SegLogicFile *sf, RelFileNode relNode, ForkNumber forknum);
 void df_open_files(SegLogicFile *sf);
 void df_extend(SegLogicFile *sf, BlockNumber target_blocks);
 void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum);
+void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums);
 void df_pwrite_block(SegLogicFile *sf, const char *buffer, BlockNumber blocknum);
 void df_fsync(SegLogicFile *sf);
 void df_unlink(SegLogicFile *sf);

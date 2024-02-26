@@ -41,20 +41,13 @@
 #include "replication/reorderbuffer.h"
 #include "replication/origin.h"
 #include "replication/snapbuild.h"
-
+#include "replication/ddlmessage.h"
 #include "storage/standby.h"
 
 #include "utils/memutils.h"
 #include "utils/relfilenodemap.h"
 #include "utils/lsyscache.h"
 
-
-typedef struct XLogRecordBuffer {
-    XLogRecPtr origptr;
-    XLogRecPtr endptr;
-    XLogReaderState *record;
-    char *record_data;
-} XLogRecordBuffer;
 
 /* RMGR Handlers */
 static void DecodeXLogOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
@@ -254,6 +247,9 @@ void LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogReaderState *
             break;
         case RM_UHEAP_ID:
             DecodeUheapOp(ctx, &buf);
+            break;
+        case RM_LOGICALDDLMSG_ID:
+            logicalddl_decode(ctx, &buf);
             break;
         default:
             break;
@@ -993,10 +989,11 @@ static void AreaDecodingChange(ReorderBufferChange *change, LogicalDecodingConte
 
     Relation relation = NULL;
     Oid reloid;
-    Oid partitionReltoastrelid = InvalidOid;;
+    Oid partitionReltoastrelid = InvalidOid;
+    bool isSegment = IsSegmentFileNode(change->data.tp.relnode);
 
     reloid = HeapGetRelid(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, partitionReltoastrelid,
-        NULL, false);
+        NULL, isSegment);
     /*
      * Catalog tuple without data, emitted while catalog was
      * in the process of being rewritten.
@@ -1038,6 +1035,47 @@ static void AreaDecodingChange(ReorderBufferChange *change, LogicalDecodingConte
         }
     }
     RelationClose(relation);
+}
+
+/*
+ * Handle rmgr LOGICALDDLMSG_ID records for DecodeRecordIntoReorderBuffer()
+ */
+void
+logicalddl_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
+{
+    SnapBuild *builder = ctx->snapshot_builder;
+    XLogReaderState *r = buf->record;
+    TransactionId xid = XLogRecGetXid(r);
+    uint8 info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
+    RepOriginId origin_id = XLogRecGetOrigin(r);
+    xl_logical_ddl_message *message;
+
+    if (info != XLOG_LOGICAL_DDL_MESSAGE)
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errmsg("unexpected RM_LOGICALDDLMSG_ID record type: %u", info)));
+
+    ReorderBufferProcessXid(ctx->reorder, XLogRecGetXid(r), buf->origptr);
+
+    /*
+     * If we don't have snapshot or we are just fast-forwarding, there is no
+     * point in decoding ddl messages.
+     */
+    if (SnapBuildCurrentState(builder) < SNAPBUILD_FULL_SNAPSHOT ||
+        ctx->fast_forward)
+        return;
+
+    message = (xl_logical_ddl_message *)XLogRecGetData(r);
+
+    if (message->dbId != ctx->slot->data.database ||
+        FilterByOrigin(ctx, origin_id))
+        return;
+
+    if (SnapBuildProcessChange(builder, xid, buf->origptr))
+        ReorderBufferQueueDDLMessage(ctx, xid, buf->endptr,
+                                    message->message,
+                                    message->message_size,
+                                    message->message + message->prefix_size,
+                                    message->relid, message->cmdtype);
+
 }
 
 /*

@@ -646,6 +646,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_INT_FIELD(current_id);
     WRITE_BOOL_FIELD(enable_adaptive_scan);
     WRITE_BOOL_FIELD(is_spq_optmized);
+    WRITE_INT_FIELD(write_node_index);
 #endif
 }
 
@@ -944,6 +945,11 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
         WRITE_NODE_FIELD(withCheckOptionLists);
     }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        WRITE_NODE_FIELD(isSplitUpdates);
+    }
+#endif
 }
 
 static void _outUpsertClause(StringInfo str, const UpsertClause* node)
@@ -1439,6 +1445,7 @@ static void _outSpqSeqScan(StringInfo str, SpqSeqScan* node)
     WRITE_BOOL_FIELD(isFullTableScan);
     WRITE_BOOL_FIELD(isAdaptiveScan);
     WRITE_BOOL_FIELD(isDirectRead);
+    WRITE_UINT_FIELD(DirectReadBlkNum);
 }
 
 static void _outAssertOp(StringInfo str, const AssertOp *node)
@@ -1485,6 +1492,23 @@ static void _outSpqBitmapHeapScan(StringInfo str, SpqBitmapHeapScan* node)
 {
     WRITE_NODE_TYPE("SPQBITMAPHEAPSCAN");
     _outBitmapHeapScanInfo(str, &node->scan);
+}
+
+static void _outDMLActionExpr(StringInfo str, const DMLActionExpr *node)
+{
+    WRITE_NODE_TYPE("DMLACTIONEXPR");
+}
+
+static void _outSplitUpdate(StringInfo str, const SplitUpdate *node)
+{
+    WRITE_NODE_TYPE("SPLITUPDATE");
+
+    WRITE_INT_FIELD(actionColIdx);
+    WRITE_INT_FIELD(tupleoidColIdx);
+    WRITE_NODE_FIELD(insertColIdx);
+    WRITE_NODE_FIELD(deleteColIdx);
+
+    _outPlanInfo(str, (Plan *) node);
 }
 #endif
 
@@ -1765,7 +1789,7 @@ static void _outHashJoin(StringInfo str, HashJoin* node)
     WRITE_BOOL_FIELD(isSonicHash);
     out_mem_info(str, &node->mem_info);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_NODE_FIELD(hash_collations);
     }
 #endif
@@ -1922,7 +1946,7 @@ static void _outGroup(StringInfo str, Group* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
@@ -2097,7 +2121,7 @@ static void _outUnique(StringInfo str, Unique* node)
 
     WRITE_GRPOP_FIELD(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(uniq_collations, numCols);
     }
 #endif
@@ -2156,7 +2180,7 @@ static void _outSetOp(StringInfo str, SetOp* node)
 
     WRITE_GRPOP_FIELD(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         WRITE_GRPOP_FIELD(dup_collations, numCols);
     }
 #endif
@@ -3579,9 +3603,7 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_BITMAPSET_FIELD(lateral_relids);
     WRITE_NODE_FIELD(indexlist);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING) {
-        WRITE_NODE_FIELD(statlist);
-    }
+    WRITE_NODE_FIELD(statlist);
 #endif
     WRITE_FLOAT_FIELD(pages, "%.0f");
     WRITE_FLOAT_FIELD(tuples, "%.0f");
@@ -4061,6 +4083,7 @@ static void _outAlterTableStmt(StringInfo str, AlterTableStmt* node)
 {
     WRITE_NODE_TYPE("ALTERTABLE");
     WRITE_NODE_FIELD(relation);
+    WRITE_BOOL_FIELD(fromReplace);
 }
 
 static void _outCopyStmt(StringInfo str, CopyStmt* node)
@@ -4910,6 +4933,9 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= INDEX_HINT_VERSION_NUM) {
         WRITE_NODE_FIELD(indexhintList);
     }
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
+        WRITE_BOOL_FIELD(has_uservar);
+    }
 }
 
 static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)
@@ -5418,6 +5444,7 @@ static void _outA_Indices(StringInfo str, A_Indices* node)
 {
     WRITE_NODE_TYPE("A_INDICES");
 
+    WRITE_BOOL_FIELD(is_slice);
     WRITE_NODE_FIELD(lidx);
     WRITE_NODE_FIELD(uidx);
 }
@@ -6308,6 +6335,12 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_SpqBitmapHeapScan:
                 _outSpqBitmapHeapScan(str, (SpqBitmapHeapScan*)obj);
+                break;
+            case T_DMLActionExpr:
+                _outDMLActionExpr(str, (DMLActionExpr*)obj);
+                break;
+            case T_SplitUpdate:
+                _outSplitUpdate(str, (SplitUpdate*)obj);
                 break;
 #endif
 #ifdef PGXC

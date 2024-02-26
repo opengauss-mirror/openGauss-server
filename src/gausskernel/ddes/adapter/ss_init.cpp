@@ -38,11 +38,13 @@
 #include "ddes/dms/ss_dms.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "postmaster/postmaster.h"
+#include "ddes/dms/ss_dms_auxiliary.h"
+
+#define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')
 
 #define FIXED_NUM_OF_INST_IP_PORT 3
 #define BYTES_PER_KB 1024
 #define NON_PROC_NUM 4
-
 
 const int MAX_CPU_STR_LEN = 5;
 const int DEFAULT_DIGIT_RADIX = 10;
@@ -358,6 +360,21 @@ static void SetOckLogPath(knl_instance_attr_dms* dms_attr, char *ock_log_path)
     }
 }
 
+static void SetWorkThreadpoolConfig(dms_profile_t *profile) 
+{    
+    char* attr = TrimStr(g_instance.attr.attr_storage.dms_attr.work_thread_pool_attr);
+    if (IS_NULL_STR(attr)) {
+        profile->enable_mes_task_threadpool = false;
+        profile->mes_task_worker_max_cnt = 0;
+        return;
+    }
+
+    char* replStr = NULL;
+    replStr = pstrdup(attr);
+    profile->mes_task_worker_max_cnt = (unsigned int)pg_strtoint32(replStr);
+    profile->enable_mes_task_threadpool = true;
+}
+
 static void setDMSProfile(dms_profile_t* profile)
 {
     knl_instance_attr_dms* dms_attr = &g_instance.attr.attr_storage.dms_attr;
@@ -384,6 +401,7 @@ static void setDMSProfile(dms_profile_t* profile)
         InitDmsSSL();
     }
     parseInternalURL(profile);
+    SetWorkThreadpoolConfig(profile);
 
     /* some callback initialize */
     DmsInitCallback(&profile->callback);
@@ -406,6 +424,9 @@ void DMSInit()
     }
     if (dms_register_thread_init(DmsCallbackThreadShmemInit)) {
         ereport(FATAL, (errmsg("failed to register dms memcxt callback!")));
+    }
+    if (dms_register_thread_deinit(DmsThreadDeinit)) {
+        ereport(FATAL, (errmsg("failed to register DmsThreadDeinit!")));
     }
 
     uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
@@ -504,8 +525,11 @@ void DMSUninit()
         return;
     }
 
-    ereport(LOG, (errmsg("dms xmin maintainer thread exit")));
-    signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
+    if (g_instance.pid_cxt.DmsAuxiliaryPID != 0) {
+        ereport(LOG, (errmsg("[SS] notify dms auxiliary thread exit")));
+        signal_child(g_instance.pid_cxt.DmsAuxiliaryPID, SIGTERM, -1);
+        SSWaitDmsAuxiliaryExit();
+    }
 
     g_instance.dms_cxt.dmsInited = false;
     ereport(LOG, (errmsg("DMS uninit worker threads, DRC, errdesc and DL")));

@@ -48,6 +48,7 @@
 ./bin/pg_xlogdump
 ./bin/pagehack
 ./bin/gs_assessment
+./bin/gs_retrieve
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  
 ./etc/kerberos/krb5.conf  
@@ -83,8 +84,6 @@
 ./share/postgresql/extension/dolphin--3.0--2.0.sql
 ./share/postgresql/extension/dolphin--2.0--2.0.1.sql
 ./share/postgresql/extension/dolphin--2.0.1--2.0.sql
-./share/postgresql/extension/whale.control
-./share/postgresql/extension/whale--1.0.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/assessment--1.0.sql
 ./share/postgresql/extension/assessment.control
@@ -737,6 +736,19 @@
 ./share/sslcert/gsql/openssl.cnf
 ./share/sslcert/grpc/openssl.cnf
 ./share/sslcert/om/openssl.cnf
+./share/locale/zh_CN/LC_MESSAGES/ecpg-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/ecpglib6-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/gaussdb-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/initdb-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/libpq5-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/pg_basebackup-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/pg_config-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/pg_controldata-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/pg_ctl-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/pg_dump-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/pg_resetxlog-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/plpgsql-9.2.mo
+./share/locale/zh_CN/LC_MESSAGES/psql-9.2.mo
 ./lib/libsimsearch/
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
@@ -779,7 +791,6 @@
 ./lib/postgresql/proc_srclib
 ./lib/postgresql/security_plugin.so
 ./lib/postgresql/dolphin.so
-./lib/postgresql/whale.so
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/postgres_fdw.so

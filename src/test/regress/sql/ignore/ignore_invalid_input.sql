@@ -317,6 +317,11 @@ reset sql_ignore_strategy;
 
 drop table net, ran, hashvec, varbit;
 
+-- insert + subquery
+create table t1(a int);
+insert /*+ ignore_error */ into t1 select 'abc'::time;
+drop table t1;
+
 -- restore context
 reset timezone;
 show timezone;

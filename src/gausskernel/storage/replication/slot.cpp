@@ -330,7 +330,8 @@ static bool HasArchiveSlot()
  *     be used for that pass true, otherwise false.
  */
 void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persistency, bool isDummyStandby,
-                           Oid databaseId, XLogRecPtr restart_lsn, char* extra_content, bool encrypted)
+                           Oid databaseId, XLogRecPtr restart_lsn, XLogRecPtr confirmed_lsn, char* extra_content,
+                           bool encrypted)
 {
     ReplicationSlot *slot = NULL;
     int i;
@@ -424,7 +425,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
     NameStr(slot->data.name)[NAMEDATALEN - 1] = '\0';
     slot->data.database = databaseId;
     slot->data.restart_lsn = restart_lsn;
-    slot->data.confirmed_flush = InvalidXLogRecPtr;
+    slot->data.confirmed_flush = confirmed_lsn;
     slot->data.isDummyStandby = isDummyStandby;
     if (extra_content != NULL && strlen(extra_content) != 0) {
         MemoryContext curr;

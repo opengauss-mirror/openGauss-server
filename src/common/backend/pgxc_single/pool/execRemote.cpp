@@ -436,6 +436,17 @@ bool SpqFetchTuple(RemoteQueryState* combiner, TupleTableSlot* slot, ParallelFun
  
     return have_tuple;
 }
+static void update_spq_port(PGXCNodeHandle **conn, PlannedStmt *planstmt, int regular_conn_count)
+{
+    for (int i = 0; i < regular_conn_count; i++) {
+        if (strcmp(planstmt->nodesDefinition[i].nodename.data, conn[i]->remoteNodeName) != 0) {
+            elog(WARNING, "update_spq_port index[%d] not same[%s][%s]", i, planstmt->nodesDefinition[i].nodename.data,
+                  conn[i]->remoteNodeName);
+        }
+        planstmt->nodesDefinition[i].nodectlport = conn[i]->tcpCtlPort;
+        planstmt->nodesDefinition[i].nodesctpport = conn[i]->listenPort;
+    }
+}
 static void
 HandleDatanodeGxid(PGXCNodeHandle* conn, const char* msg_body, size_t len)
 {
@@ -456,7 +467,64 @@ HandleDatanodeGxid(PGXCNodeHandle* conn, const char* msg_body, size_t len)
     gxid += ntohl(n32);
     conn->remote_top_txid = gxid;
 }
- 
+static void HandleLibcommPort(PGXCNodeHandle *conn, const char *msg_body, size_t len)
+{
+    Assert(msg_body != NULL);
+    errno_t rc = 0;
+    uint16 n16;
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
+    securec_check(rc, "\0", "\0");
+    conn->tcpCtlPort = ntohs(n16);
+    msg_body += sizeof(uint16);
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
+    securec_check(rc, "\0", "\0");
+    conn->listenPort = ntohs(n16);
+    msg_body += sizeof(uint16);
+    elog(DEBUG1, "spq HandleLibcommPort get [%d:%d]", conn->tcpCtlPort, conn->listenPort);
+    rc = memcpy_s(&n16, sizeof(uint16), msg_body, sizeof(uint16));
+    securec_check(rc, "\0", "\0");
+    uint16 nodenamelen = ntohs(n16);
+    msg_body += sizeof(uint16);
+    char nodename[NAMEDATALEN];
+    rc = memcpy_s(nodename, NAMEDATALEN * sizeof(char), msg_body, nodenamelen * sizeof(char));
+    securec_check(rc, "\0", "\0");
+    if (strcmp(conn->remoteNodeName, nodename) != 0) {
+        elog(ERROR, "remote name [%s] not match cluster map: [%s].", nodename, conn->remoteNodeName);
+    }
+}
+static void HandleDirectRead(PGXCNodeHandle *conn, const char *msg_body, size_t len)
+{
+    Assert(msg_body != NULL);
+    Assert(len >= 4);
+    errno_t rc = 0;
+    uint32 n32;
+    int readlen = 0;
+    rc = memcpy_s(&n32, sizeof(uint32), msg_body, sizeof(uint32));
+    securec_check(rc, "", "");
+    int oidcount = ntohl(n32);
+    readlen += sizeof(uint32);
+    int checkLen = sizeof(uint32) + (sizeof(uint32) + sizeof(uint32)) * oidcount;
+    if (len != checkLen) {
+        elog(LOG, "HandleDirectRead len not match [%d:%d]", len, checkLen);
+        return;
+    }
+    ListCell *cell;
+    foreach (cell, u_sess->spq_cxt.direct_read_map) {
+        rc = memcpy_s(&n32, sizeof(uint32), msg_body + readlen, sizeof(uint32));
+        securec_check(rc, "", "");
+        Oid oid = ntohl(n32);
+        readlen += sizeof(uint32);
+
+        rc = memcpy_s(&n32, sizeof(uint32), msg_body + readlen, sizeof(uint32));
+        securec_check(rc, "", "");
+        uint32 ReadBlkNum = ntohl(n32);
+        readlen += sizeof(uint32);
+        SpqDirectReadEntry *entry = (SpqDirectReadEntry *)lfirst(cell);
+        if (entry->rel_id == oid) {
+            entry->nums = ReadBlkNum;
+        }
+    }
+}
 static void HandleLocalCsnMin(PGXCNodeHandle* conn, const char* msg_body, size_t len)
 {
     Assert(msg_body != NULL);
@@ -982,6 +1050,12 @@ int spq_handle_response(PGXCNodeHandle* conn, RemoteQueryState* combiner, bool i
             case 'O': /* PlanIdComplete */
                 conn->state = DN_CONNECTION_STATE_IDLE;
                 return RESPONSE_PLANID_OK;
+            case 'l': /* libcomm port infomation */
+                HandleLibcommPort(conn, msg, msg_len);
+                break;
+            case 'i': /* Direct Read */
+                HandleDirectRead(conn, msg, msg_len);
+                break;
             case 'g': /* DN top xid */
                 HandleDatanodeGxid(conn, msg, msg_len);
                 break;
@@ -1018,7 +1092,7 @@ static void ExecInitPlanState(PlanState* plan_state, EState* estate, RemoteQuery
     ExecAssignResultTypeFromTL(&remotestate->ss.ps);
 }
 
-bool adp_disconnect_walker(Node* plan, void* cxt)
+bool backward_connection_walker(Node *plan, void *cxt)
 {
     if (plan == nullptr) return false;
     if (IsA(plan, SpqSeqScan)) {
@@ -1032,24 +1106,71 @@ bool adp_disconnect_walker(Node* plan, void* cxt)
         QCConnEntry *entry;
         pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
         entry = (QCConnEntry *)hash_search(g_instance.spq_cxt.adp_connects, (void *)&key, HASH_FIND, &found);
-        if (found) {
-            ereport(LOG, (errmsg("disconnect from queryid: %lu, nodeid: %d", key.query_id, key.plan_node_id)));
-            gs_close_gsocket(&entry->backward);
+        if (!found) {
+            pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+            ereport(ERROR, ((errmsg("spq forward direction not found"))));
         }
-        hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_REMOVE, &found);
+        // connection from qc already here, try build backward connection
+        if (entry->forward.idx == 0) {
+            BackConnInfo fcmsg;
+            fcmsg.node_idx = entry->backward.idx;
+            fcmsg.version = entry->backward.ver;
+            fcmsg.streamcap = entry->streamcap;
+            fcmsg.query_id = u_sess->debug_query_id;
+            fcmsg.stream_key = {
+                .queryId = entry->key.query_id,
+                .planNodeId = entry->key.plan_node_id,
+                .producerSmpId = 0,
+                .consumerSmpId = 0,
+            };
+            fcmsg.backward = &entry->backward;
+            int error = gs_r_build_reply_connection(&fcmsg, entry->backward.ver, &entry->forward.sid);
+            if (error != 0) {
+                gs_close_gsocket(&entry->forward);
+                pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+                ereport(ERROR, ((errmsg("spq try build dual channel backward direction failed"))));
+            }
+            entry->forward.idx = entry->backward.idx;
+            entry->forward.ver = entry->backward.ver;
+            entry->forward.type = GSOCK_PRODUCER;
+        }
         pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+        if (entry->backward.idx == 0) {
+            gs_close_gsocket(&entry->backward);
+            ereport(ERROR, ((errmsg("spq try build dual channel forward direction failed"))));
+        }
+        u_sess->spq_cxt.adp_connections = lappend(u_sess->spq_cxt.adp_connections, entry);
     }
-    return plan_tree_walker(plan, (MethodWalker)adp_disconnect_walker, cxt);
+    return plan_tree_walker(plan, (MethodWalker)backward_connection_walker, cxt);
 }
 
-void disconnect_qc_conn(PlannedStmt* planstmt)
+void build_backward_connection(PlannedStmt *planstmt)
 {
-    if (!planstmt) return;
+    if (!planstmt || !planstmt->enable_adaptive_scan) return;
+    if (!u_sess->stream_cxt.stream_runtime_mem_cxt) return;
+    AutoContextSwitch switcher(u_sess->stream_cxt.stream_runtime_mem_cxt);
     MethodPlanWalkerContext cxt;
     cxt.base.init_plans = NIL;
     cxt.base.traverse_flag = NULL;
     exec_init_plan_tree_base(&cxt.base, planstmt);
-    adp_disconnect_walker((Node*)planstmt->planTree, &cxt);
+    backward_connection_walker((Node *)planstmt->planTree, &cxt);
+}
+
+void disconnect_qc_conn()
+{
+    if (u_sess->spq_cxt.adp_connections == NIL) return;
+    if (!StreamTopConsumerAmI()) return;
+    ListCell *cell;
+    foreach (cell, u_sess->spq_cxt.adp_connections) {
+        QCConnEntry *entry = (QCConnEntry *)lfirst(cell);
+        bool found;
+        pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
+        gs_close_gsocket(&entry->backward);
+        hash_search(g_instance.spq_cxt.adp_connects, (void *)entry, HASH_REMOVE, &found);
+        pthread_rwlock_unlock(&g_instance.spq_cxt.adp_connects_lock);
+    }
+    list_free(u_sess->spq_cxt.adp_connections);
+    u_sess->spq_cxt.adp_connections = NIL;
 }
 
 bool build_connections(Node* plan, void* cxt)
@@ -1509,6 +1630,27 @@ void spq_cancel_query(void)
     }
 }
 
+static void spq_do_direct_read()
+{
+    if (u_sess->spq_cxt.direct_read_map != NIL) {
+        ListCell *cell;
+        foreach (cell, u_sess->spq_cxt.direct_read_map) {
+            SpqDirectReadEntry *entry = (SpqDirectReadEntry *)lfirst(cell);
+            if (entry->nums != InvalidBlockNumber) {
+                ListCell *nodecell;
+                foreach (nodecell, entry->spq_seq_scan_node_list) {
+                    SpqSeqScan *node = (SpqSeqScan *)lfirst(nodecell);
+                    node->isDirectRead = true;
+                    node->DirectReadBlkNum = entry->nums;
+                }
+                list_free(entry->spq_seq_scan_node_list);
+            }
+        }
+        list_free(u_sess->spq_cxt.direct_read_map);
+        u_sess->spq_cxt.direct_read_map = NIL;
+    }
+}
+
 void spq_do_query(RemoteQueryState* node)
 {
     RemoteQuery* step = (RemoteQuery*)node->ss.ps.plan;
@@ -1534,16 +1676,24 @@ void spq_do_query(RemoteQueryState* node)
     node->queryId = generate_unique_id64(&gt_queryId);
     node->node_count = step->nodeCount;
 
-    spq_startQcThread(node);
-
     connections = spq_get_exec_connections(node, step->exec_nodes, step->exec_type);
     u_sess->spq_cxt.remoteQuerys = lappend(u_sess->spq_cxt.remoteQuerys, node);
  
     Assert(node->spq_connections_info != NULL);
     Assert(connections != NULL);
     Assert(step->exec_type == EXEC_ON_DATANODES);
- 
+
     regular_conn_count = node->node_count;
+    /*
+     *	Send begin statement to all datanodes for RW transaction parallel.
+     *  Current it should be RO transaction
+     */
+    pgxc_node_send_queryid_with_sync(connections, regular_conn_count, node->queryId);
+    if (u_sess->attr.attr_spq.spq_enable_direct_read) {
+        spq_do_direct_read();
+    }
+    update_spq_port(connections, planstmt, regular_conn_count);
+    spq_startQcThread(node);
 
     pfree_ext(node->switch_connection);
     pfree_ext(node->nodeidxinfo);
@@ -1602,13 +1752,6 @@ void spq_do_query(RemoteQueryState* node)
 #endif
     if (node->rqs_num_params) {
         step->sql_statement = node->serializedPlan;
-    }
-    /*
-     *	Send begin statement to all datanodes for RW transaction parallel.
-     *  Current it should be RO transaction
-     */
-    if (need_stream_sync) {
-        pgxc_node_send_queryid_with_sync(connections, regular_conn_count, node->queryId);
     }
     for (i = 0; i < regular_conn_count; i++) {
         if (!pgxc_start_command_on_connection(connections[i], node, snapshot, compressedPlan, cLen)) {
@@ -3055,7 +3198,11 @@ void CopyDataRowTupleToSlot(RemoteQueryState* combiner, TupleTableSlot* slot)
     errno_t rc = 0;
     rc = memcpy_s(msg, combiner->currentRow.msglen, combiner->currentRow.msg, combiner->currentRow.msglen);
     securec_check(rc, "\0", "\0");
-    ExecStoreDataRowTuple(msg, combiner->currentRow.msglen, combiner->currentRow.msgnode, slot, true);
+    if (IS_SPQ_RUNNING) {
+        ExecStoreMinimalTuple((MinimalTuple)msg, slot, true);
+    } else {
+        ExecStoreDataRowTuple(msg, combiner->currentRow.msglen, combiner->currentRow.msgnode, slot, true);
+    }
     pfree_ext(combiner->currentRow.msg);
     combiner->currentRow.msg = NULL;
     combiner->currentRow.msglen = 0;
@@ -5758,8 +5905,9 @@ static void pgxc_node_send_queryid_with_sync(PGXCNodeHandle** connections, int c
 
     Assert(queryId != 0);
 
+    int countOID = list_length(u_sess->spq_cxt.direct_read_map);
     for (i = 0; i < conn_count; i++) {
-        int msglen = 12;
+        int msglen = sizeof(int) + sizeof(uint64) + sizeof(int) + sizeof(Oid) * countOID;
 
         if (temp_connections[i]->state == DN_CONNECTION_STATE_QUERY)
             BufferConnection(temp_connections[i]);
@@ -5788,6 +5936,22 @@ static void pgxc_node_send_queryid_with_sync(PGXCNodeHandle** connections, int c
             sizeof(uint64));
         securec_check(ss_rc, "\0", "\0");
         temp_connections[i]->outEnd += sizeof(uint64);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd,
+                         &countOID,
+                         sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(int);
+        ListCell *cell;
+        foreach (cell, u_sess->spq_cxt.direct_read_map) {
+            SpqDirectReadEntry *entry = (SpqDirectReadEntry *)lfirst(cell);
+            ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                             temp_connections[i]->outSize - temp_connections[i]->outEnd,
+                             &(entry->rel_id), sizeof(Oid));
+            securec_check(ss_rc, "\0", "\0");
+            temp_connections[i]->outEnd += sizeof(Oid);
+        }
 
         if (pgxc_node_flush(temp_connections[i]) != 0) {
             temp_connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;

@@ -37,13 +37,15 @@
 #include "replication/syncrep.h"
 #include "replication/walsender.h"
 #include "replication/walreceiver.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "storage/buf/bufmgr.h"
 #include "pgxc/pgxc.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 
 #define BCMElementArrayLen 8192
 #define BCMElementArrayLenHalf (BCMElementArrayLen / 2)
@@ -132,10 +134,11 @@ void DataWriterQueueShmemInit(void)
         if (foundDataQueue) {
             return;
         }
-
+#ifdef ENABLE_BBOX
         if (BBOX_BLACKLIST_DATA_WRITER_QUEUE) {
             bbox_blacklist_add(DATA_WRITER_QUEUE, t_thrd.dataqueue_cxt.DataWriterQueue, DataQueueShmemSize());
         }
+#endif
 
         rc = memset_s(t_thrd.dataqueue_cxt.DataWriterQueue, sizeof(DataQueueData), 0, sizeof(DataQueueData));
         securec_check_c(rc, "", "");
@@ -301,7 +304,7 @@ DataQueuePtr PushToSenderQueue(const RelFileNode &rnode, BlockNumber blockNum, S
         LWLockRelease(DataSyncRepLock);
 
         if (g_instance.attr.attr_storage.max_wal_senders > 0) {
-            if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !(IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER)) {
+            if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !(IS_SHARED_STORAGE_MODE || SS_DORADO_CLUSTER)) {
                 ereport(
                     LOG,
                     (errmsg("failed to push rnode %u/%u/%u blockno %u into data-queue becuase sync_master_standalone "

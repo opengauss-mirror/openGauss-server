@@ -1,0 +1,93 @@
+create schema ddl_publication;
+create table ddl_publication.t1 (a int);
+create table ddl_publication.t2 (a int);
+create table ddl_publication.t3 (a int);
+create publication regress_pub1 for all tables with (publish='insert,update', ddl='all');
+create publication regress_pub2 for table ddl_publication.t1, ddl_publication.t2 with (publish='insert,update', ddl='table');
+create publication regress_pub3 for table ddl_publication.t1, ddl_publication.t2, ddl_publication.t3;
+select pubname, puballtables, pubinsert, pubupdate, pubdelete, pubddl_decode(pubddl) from pg_publication order by pubname;
+   pubname    | puballtables | pubinsert | pubupdate | pubdelete | pubddl_decode 
+--------------+--------------+-----------+-----------+-----------+---------------
+ regress_pub1 | t            | t         | t         | f         | all
+ regress_pub2 | f            | t         | t         | f         | table
+ regress_pub3 | f            | t         | t         | t         | none
+(3 rows)
+
+select p.pubname, pubddl_decode(p.pubddl), t.evtfoid from pg_event_trigger t, pg_publication p where t.evtname='pg_deparse_trig_ddl_command_end_'|| p.oid and p.pubname ~ 'regress_pub' order by p.pubname;
+   pubname    | pubddl_decode | evtfoid 
+--------------+---------------+---------
+ regress_pub1 | all           |    4642
+ regress_pub2 | table         |    4642
+(2 rows)
+
+drop publication regress_pub1, regress_pub2, regress_pub3;
+create publication regress_pub for all tables with (ddl='all');
+SELECT * FROM pg_create_logical_replication_slot('test_decoding_slot', 'test_decoding');
+      slotname      | xlog_position 
+--------------------+---------------
+--? test_decoding_slot | .*
+(1 row)
+
+begin;
+create table ddl_publication.t4 (a int, b text);
+create index ddl_publication.idx_t4_1 on ddl_publication.t4 (a);
+insert into ddl_publication.t4 values (1, 'asd'), (2, 'asdd');
+commit;
+begin;
+create table ddl_publication.t5 (a int, b text);
+drop table ddl_publication.t4;
+rollback;
+select data from  pg_logical_slot_get_changes('test_decoding_slot', NULL, NULL);
+--?.*data.*
+--?.*
+--? BEGIN .*
+--? message: prefix deparse, relid .*, cmdtype: Simple, sz: .* content: \{"fmt": "CREATE %\{persistence}s TABLE %\{if_not_exists}s %\{identity}D (%\{table_elements:, }s) WITH (%\{with:, }s)", "with": [{"fmt": "%{label}s = %{value}L", "label": {"fmt": "%{label}I", "label": "orientation"}, "value": "row"}, {"fmt": "%{label}s = %{value}L", "label": {"fmt": "%{label}I", "label": "compression"}, "value": "no"}], "myowner": ".*", "identity": \{"objname": "t4", "schemaname": "ddl_publication"}, "persistence": "", "if_not_exists": "", "table_elements": [{"fmt": "%{name}I %{coltype}T", "name": "a", "type": "column", "coltype": {"typmod": "", "typarray": false, "typename": "int4", "schemaname": "pg_catalog"}}, {"fmt": "%{name}I %{coltype}T COLLATE %{collate}D", "name": "b", "type": "column", "collate": {"objname": "default", "schemaname": "pg_catalog"}, "coltype": {"typmod": "", "typarray": false, "typename": "text", "schemaname": "pg_catalog"}}]}.*+
+--? decode to : CREATE  TABLE  ddl_publication.t4 (a pg_catalog.int4, b pg_catalog.text COLLATE pg_catalog."default") WITH (orientation = 'row', compression = 'no'), [owner .*]
+--? message: prefix deparse, relid .*, cmdtype: Simple, sz: .* content: \{"fmt": "CREATE %\{unique}s INDEX %\{concurrently}s %\{name}I ON %\{table}D USING %\{index_am}s %\{definition}s", "name": "idx_t4_1", "table": \{"objname": "t4", "schemaname": "ddl_publication"}, "unique": "", "myowner": ".*", "index_am": "btree", "definition": "(a pg_catalog.int4_ops)", "concurrently": ""}.*+
+--? decode to : CREATE  INDEX  idx_t4_1 ON ddl_publication.t4 USING btree (a pg_catalog.int4_ops), [owner .*]
+ table ddl_publication.t4: INSERT: a[integer]:1 b[text]:'asd'
+ table ddl_publication.t4: INSERT: a[integer]:2 b[text]:'asdd'
+--? COMMIT .*
+(6 rows)
+
+begin;
+insert into ddl_publication.t4 values (3, 'ddasd'), (4, 'asdd');
+drop table ddl_publication.t4;
+commit;
+select data from  pg_logical_slot_get_changes('test_decoding_slot', NULL, NULL);
+--?.*data.*
+--?.*
+--? BEGIN .*
+ table ddl_publication.t4: INSERT: a[integer]:3 b[text]:'ddasd'
+ table ddl_publication.t4: INSERT: a[integer]:4 b[text]:'asdd'
+--? message: prefix deparse, relid .*, cmdtype: Drop table, sz: .* content: Drop table command start
+--? message: prefix deparse, relid .*, cmdtype: Drop Table End, sz: .* content: \{"fmt": "DROP %\{objtype}s %\{concurrently}s %\{if_exists}s %\{objidentity}s %\{cascade}s", "cascade": "", "objtype": "table", "if_exists": "", "objidentity": "ddl_publication.t4", "concurrently": ""}.*+
+ decode to : DROP table   ddl_publication.t4 , [owner none]
+--? COMMIT .*
+(6 rows)
+
+select pg_drop_replication_slot('test_decoding_slot');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+select pubname, puballtables, pubinsert, pubupdate, pubdelete, pubddl_decode(pubddl) from pg_publication order by pubname;
+   pubname   | puballtables | pubinsert | pubupdate | pubdelete | pubddl_decode 
+-------------+--------------+-----------+-----------+-----------+---------------
+ regress_pub | t            | t         | t         | t         | all
+(1 row)
+
+alter publication regress_pub set (ddl='table');
+select pubname, puballtables, pubinsert, pubupdate, pubdelete, pubddl_decode(pubddl) from pg_publication order by pubname;
+   pubname   | puballtables | pubinsert | pubupdate | pubdelete | pubddl_decode 
+-------------+--------------+-----------+-----------+-----------+---------------
+ regress_pub | t            | t         | t         | t         | table
+(1 row)
+
+drop publication regress_pub;
+drop schema ddl_publication cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table ddl_publication.t1
+drop cascades to table ddl_publication.t2
+drop cascades to table ddl_publication.t3

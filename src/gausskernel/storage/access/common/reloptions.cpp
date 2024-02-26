@@ -3145,12 +3145,12 @@ void CheckSpqBTBuildOption(const char *val)
 {
     if (!u_sess->attr.attr_spq.spq_enable_btbuild) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("spq_build is not supported, please set gauss_enable_spq_btbuild=on")));
+                        errmsg("spq_build is not supported, please set spqplugin.spq_enable_btbuild=on")));
     }
 
     if (val == NULL || (strcmp(val, "on") != 0 && strcmp(val, "off") != 0 && strcmp(val, "finish") != 0)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid value for \"spq_build\" option"),
-                        errdetail("Valid values are \"on\", and \"off\".")));
+                        errdetail("Valid values are \"on\", \"off\" and \"finish\".")));
     }
 }
 #endif

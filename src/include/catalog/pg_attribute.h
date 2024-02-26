@@ -176,6 +176,8 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
 #endif
 	/* the attribute type for kv storage: tag(1), field(2), time(3), hide(4) or default(0) */
 	int1		attkvtype;
+	/* name of dropped attribute */
+	NameData        attdroppedname;
 } FormData_pg_attribute;
 
 /*
@@ -185,7 +187,7 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
  * can access fields beyond attcollation except in a real tuple!
  */
 #define ATTRIBUTE_FIXED_PART_SIZE \
-	(offsetof(FormData_pg_attribute, attkvtype) + sizeof(Oid))
+	(offsetof(FormData_pg_attribute, attdroppedname) + sizeof(Oid))
 
 /* ----------------
  *		Form_pg_attribute corresponds to a pointer to a tuple with
@@ -198,7 +200,7 @@ typedef FormData_pg_attribute *Form_pg_attribute;
  *		compiler constants for pg_attribute
  * ----------------
  */
-#define Natts_pg_attribute				24
+#define Natts_pg_attribute				25
 #define Anum_pg_attribute_attrelid		1
 #define Anum_pg_attribute_attname		2
 #define Anum_pg_attribute_atttypid		3
@@ -223,6 +225,7 @@ typedef FormData_pg_attribute *Form_pg_attribute;
 #define Anum_pg_attribute_attfdwoptions 22
 #define Anum_pg_attribute_attinitdefval 23
 #define Anum_pg_attribute_attkvtype		24
+#define Anum_pg_attribute_attdroppedname 25
 
 /* ----------------
  *		initial contents of pg_attribute

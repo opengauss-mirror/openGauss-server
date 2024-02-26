@@ -260,9 +260,9 @@ CALL func_insert_tbl_hashjoin_04();
 
 \parallel on  2
 --insert into ROW_HASHJOIN_TABLE_05 select generate_series(1,2000), generate_series(1,2000), 'row'|| generate_series(1,2000);
-copy ROW_HASHJOIN_TABLE_05 from '/usr3/data1/jiangyan/openGauss-server/src/test/regress/data/vec_hashjoin1_data1.txt' delimiter as ' ';
+copy ROW_HASHJOIN_TABLE_05 from '@abs_srcdir@/data/vec_hashjoin1_data1.txt' delimiter as ' ';
 --insert into ROW_HASHJOIN_TABLE_06 select generate_series(5000,6000,1), generate_series(5000,6000,1), 'row'|| generate_series(1,1001);
-copy ROW_HASHJOIN_TABLE_06 from '/usr3/data1/jiangyan/openGauss-server/src/test/regress/data/vec_hashjoin1_data2.txt' delimiter as ' ';
+copy ROW_HASHJOIN_TABLE_06 from '@abs_srcdir@/data/vec_hashjoin1_data2.txt' delimiter as ' ';
 \parallel off
 \parallel on 8
 INSERT INTO vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_01 SELECT * FROM vector_hashjoin_engine.ROW_HASHJOIN_TABLE_01;

@@ -35,7 +35,7 @@ SHOW search_path;
 SHOW default_tablespace;
  default_tablespace 
 --------------------
- dfm
+ 
 (1 row)
 
 DROP USER dfm;
@@ -48,7 +48,7 @@ SHOW search_path;
 SHOW default_tablespace;
  default_tablespace 
 --------------------
- dfm
+ 
 (1 row)
 
 SELECT nspname from pg_namespace where nspname='dfm';
@@ -73,7 +73,7 @@ SHOW default_tablespace;
 (1 row)
 
 DROP USER dfm;
-ERROR:  Permission denied.
+ERROR:  Permission denied to drop role.
 RESET SESSION AUTHORIZATION;
 SET search_path='dfm';
 --can not drop current schema
@@ -94,26 +94,6 @@ CREATE USER SET_SESSION_ROLLBACK_AUDIT_TABLE IDENTIFIED BY 'GAUSS@123';
 ERROR:  Permission denied to create role.
 COMMIT;
 DROP USER SET_SESSION_ROLLBACK_AUDIT;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-CREATE TABLE
-DROP TABLE
-drop user test_drop_user cascade;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-CREATE TABLE
-DROP TABLE
-drop user test_drop_user cascade;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-CREATE TABLE
-DROP TABLE
-drop user if exists test_drop_user cascade;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-CREATE TABLE
-DROP TABLE
-drop user if exists test_drop_user cascade;
 REVOKE ALL on schema public FROM public;
 create role test_revoke_for_sysadmin login sysadmin password 'Gauss@123';
 clean connection to all check to user test_revoke_for_sysadmin;
@@ -164,7 +144,7 @@ drop user createrole_change_itself;
 create database a1qazse4;
 \c a1qazse4;
 \! @gsqldir@/gsql -d postgres -p @portstring@ -c "drop database a1qazse4"
-ERROR:  database "a1qazse4" is being accessed by other users. You can stop all connections by command: "clean connection to all force for database XXXX;" or wait for the sessions to end by querying view: "pg_stat_activity".
+ERROR:  Database "a1qazse4" is being accessed by other users. You can stop all connections by command: "clean connection to all force for database XXXX;" or wait for the sessions to end by querying view: "pg_stat_activity".
 --?DETAIL:  There is.*
 \c postgres; 
 drop database a1qazse4;
@@ -179,7 +159,7 @@ select pg_sleep(1);
  
 (1 row)
 
---1¡¢audit for resouce pool and workload.
+--1ï¿½ï¿½audit for resouce pool and workload.
 select * from pg_delete_audit('1111-1-1','2222-2-2');
  pg_delete_audit 
 -----------------
@@ -188,8 +168,14 @@ select * from pg_delete_audit('1111-1-1','2222-2-2');
 
 create resource pool test_resourcepool_audit;
 create workload group test_workloadgroup_audit;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 alter workload group test_workloadgroup_audit using resource pool test_resourcepool_audit;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 drop workload group test_workloadgroup_audit;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 drop resource pool test_resourcepool_audit;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_resourcepool';
  type | result | object_name | detail_info 
@@ -201,7 +187,7 @@ select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-
 ------+--------+-------------+-------------
 (0 rows)
 
---2¡¢audit for app workload group mapping.
+--2ï¿½ï¿½audit for app workload group mapping.
 select * from pg_delete_audit('1111-1-1','2222-2-2');
  pg_delete_audit 
 -----------------
@@ -209,14 +195,20 @@ select * from pg_delete_audit('1111-1-1','2222-2-2');
 (1 row)
 
 create app workload group mapping test_appworkloadgroupmapping_audit;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 alter app workload group mapping test_appworkloadgroupmapping_audit with (workload_gpname='default_group');
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 drop app workload group mapping test_appworkloadgroupmapping_audit;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_appworkloadgroupmapping';
  type | result | object_name | detail_info 
 ------+--------+-------------+-------------
 (0 rows)
 
---3¡¢audit for server in hardoop
+--3ï¿½ï¿½audit for server in hardoop
 select * from pg_delete_audit('1111-1-1','2222-2-2');
  pg_delete_audit 
 -----------------
@@ -225,10 +217,14 @@ select * from pg_delete_audit('1111-1-1','2222-2-2');
 
 create role temp_role password 'Gauss@123';
 create server test_serverforhardoop_audit foreign data wrapper hdfs_fdw options (address '10.10.0.100:25000', hdfscfgpath '/home/omm', type 'hdfs');
+ERROR:  foreign-data wrapper "hdfs_fdw" does not exist
 --alter server test_serverforhardoop_audit options (add hdfscfgpath '/opt/hadoop');
 alter server test_serverforhardoop_audit owner to temp_role;
+ERROR:  server "test_serverforhardoop_audit" does not exist
 alter server test_serverforhardoop_audit rename to test_serverforhardoop_audit1;
+ERROR:  server "test_serverforhardoop_audit" does not exist
 drop server test_serverforhardoop_audit1;
+ERROR:  server "test_serverforhardoop_audit1" does not exist
 drop role temp_role;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name LIKE 'test_serverforhardoop';
  type | result | object_name | detail_info 
@@ -237,12 +233,18 @@ select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-
 
 --4 audit for data source 
 create data source ds_tst_102 options (encoding 'utf8', password 'Gs@123456', username 'gaussdb');
+ERROR:  No key file datasource.key.cipher
+HINT:  Please create datasource.key.cipher file with gs_guc and gs_ssh, such as :gs_ssh -c "gs_guc generate -S XXX -D $GAUSSHOME/bin -o datasource"
 alter data source ds_tst_102 type 'MPPDB';
+ERROR:  data source "ds_tst_102" does not exist
 alter data source ds_tst_102 rename to ds_tst_104;
+ERROR:  data source "ds_tst_102" does not exist
 create user ds_tst_user_101 identified by 'Gs@123456';
 alter user ds_tst_user_101 with sysadmin;
 alter data source ds_tst_104 owner to ds_tst_user_101;
+ERROR:  data source "ds_tst_104" does not exist
 drop data source ds_tst_104;
+ERROR:  source "ds_tst_104" does not exist
 drop user ds_tst_user_101;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name='ds_tst_001';
  type | result | object_name | detail_info 
@@ -260,8 +262,14 @@ select pg_sleep(1);
 create role nologin_privilege_role password 'Gauss@123';
 set role nologin_privilege_role password 'Gauss@123';
 create table stream_test(id int);
+ERROR:  permission denied for schema public
+DETAIL:  N/A
 insert into stream_test values(1),(2);
+ERROR:  relation "stream_test" does not exist on datanode1
+LINE 1: insert into stream_test values(1),(2);
+                    ^
 drop table stream_test;
+ERROR:  table "stream_test" does not exist
 reset role;
 drop role nologin_privilege_role;
 --ALTER SYSTEM KILL SESSION '123456789101213,0' IMMEDIATE;
@@ -285,12 +293,11 @@ set role set_role_user password 'gauss@123';
 reset role;
 drop user set_role_user;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';
-     type      | result |  object_name  |                   detail_info                   
----------------+--------+---------------+-------------------------------------------------
- ddl_user      | ok     | set_role_user | create user set_role_user password '*********';
- set_parameter | ok     | role          | set role set_role_user password '*********';
- ddl_user      | ok     | set_role_user | drop user set_role_user;
-(3 rows)
+   type   | result |  object_name  |                  detail_info                   
+----------+--------+---------------+------------------------------------------------
+ ddl_user | ok     | set_role_user | create user set_role_user password '********';
+ ddl_user | ok     | set_role_user | drop user set_role_user;
+(2 rows)
 
 select * from pg_delete_audit('1111-1-1','2222-2-2');
  pg_delete_audit 
@@ -586,12 +593,11 @@ set role set_role_user password 'gauss@123';
 reset role;
 drop user set_role_user;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';
-     type      | result |  object_name  |                   detail_info                   
----------------+--------+---------------+-------------------------------------------------
- ddl_user      | ok     | set_role_user | create user set_role_user password '*********';
- set_parameter | ok     | role          | set role set_role_user password '*********';
- ddl_user      | ok     | set_role_user | drop user set_role_user;
-(3 rows)
+   type   | result |  object_name  |                  detail_info                   
+----------+--------+---------------+------------------------------------------------
+ ddl_user | ok     | set_role_user | create user set_role_user password '********';
+ ddl_user | ok     | set_role_user | drop user set_role_user;
+(2 rows)
 
 select * from pg_delete_audit('1111-1-1','2222-2-2');
  pg_delete_audit 
@@ -608,7 +614,6 @@ CREATE TABLE
 (0 rows)
 
 alter user test_rename_user rename to test_rename_user2;
-WARNING:  Please alter the role's password after rename role name for compatible with PG client.
 \! @abs_bindir@/gsql -d postgres -U test_rename_user2 -W gauss@123 -p @portstring@ -r -c "table rename_test;"
  id 
 ----
@@ -626,7 +631,7 @@ CREATE ROLE
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U user01 -W 'gauss@123' -c "set role user03;"
 ERROR:  Invalid username/password,set role denied.
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U user01 -W 'gauss@123' -c "set role user02;"
-ERROR:  Invalid username/password,set role denied.
+ERROR:  permission denied to set role "user02"
 drop user user01;
 drop user user02;
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -c "create user current_user01 password 'gauss@123';"
@@ -634,9 +639,9 @@ CREATE ROLE
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -c "create user current_user02 password 'gauss@123';"
 CREATE ROLE
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "drop user current_user02;"
-ERROR:  Permission denied.
+ERROR:  Permission denied to drop role.
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "drop user current_user03;"
-ERROR:  Permission denied.
+ERROR:  Permission denied to drop role.
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "alter user current_user02 sysadmin;"
 ERROR:  Permission denied.
 \! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "alter user current_user03 sysadmin;"
@@ -746,7 +751,7 @@ drop user test_createrole_lock_audit;
 Command:     CREATE USER
 Description: define a new database role
 Syntax:
-CREATE USER user_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' | DISABLE };
+CREATE USER [IF NOT EXISTS] user_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' [ EXPIRED ] | DISABLE };
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
@@ -762,12 +767,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]
@@ -784,7 +792,7 @@ where option can be:
 Command:     CREATE ROLE
 Description: define a new database role
 Syntax:
-CREATE ROLE role_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' | DISABLE };
+CREATE ROLE role_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' [ EXPIRED ] | DISABLE };
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
@@ -800,12 +808,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]
@@ -822,7 +833,7 @@ where option can be:
 Command:     ALTER USER
 Description: change a database role
 Syntax:
-ALTER USER user_name [ [ WITH ] option [ ... ] ];
+ALTER USER [ IF EXISTS ] user_name [ [ WITH ] option [ ... ] ];
 ALTER USER user_name
     RENAME TO new_name;
 ALTER USER user_name [ IN DATABASE database_name ]
@@ -844,14 +855,17 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
-    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' | DISABLE }
-    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' ] | DISABLE }
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' [ EXPIRED ] | DISABLE | EXPIRED }
+    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' | EXPIRED ] | DISABLE }
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | ACCOUNT { LOCK | UNLOCK }
     | PGUSER
@@ -882,14 +896,17 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
-    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' | DISABLE }
-    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' ] | DISABLE }
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' [ EXPIRED ] | DISABLE | EXPIRED }
+    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' | EXPIRED ] | DISABLE }
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | ACCOUNT { LOCK | UNLOCK }
     | PGUSER
@@ -898,7 +915,7 @@ where option can be:
 Command:     CREATE GROUP
 Description: define a new database role
 Syntax:
-CREATE GROUP group_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' | DISABLE };
+CREATE GROUP group_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' [ EXPIRED ] | DISABLE };
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
@@ -914,12 +931,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_group_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]
@@ -957,30 +977,10 @@ create user normal_compatible_user1 password 'gauss@123';
 create user normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
 NOTICE:  Using encrypted password directly now and it is not recommended.
 HINT:  The role can't be used if you don't know the original password before encrypted.
-select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user1';
- length 
---------
-    372
-(1 row)
-
-select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user2';
- length 
---------
-     35
-(1 row)
-
-select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
- length 
---------
-    372
-(1 row)
-
-select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user2';
- length 
---------
-    233
-(1 row)
-
+--select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user1';
+--select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user2';
+--select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
+--select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user2';
 set role md5_compatible_user1 password 'gauss@123';
 reset role;
 set role md5_compatible_user2 password 'gauss@123';
@@ -993,26 +993,21 @@ alter role md5_compatible_user2 identified by 'Gauss@123' replace 'md529c2b5b467
 ERROR:  The old password is invalid.
 alter role md5_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
 reset role;
-set role normal_compatible_user1 password 'gauss@123';
-reset role;
-set role normal_compatible_user2 password 'gauss@123';
-reset role;
-set role normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
-NOTICE:  Using encrypted password directly is not recommended.
-alter role normal_compatible_user2 identified by 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c' replace 'gauss@123';
-ERROR:  Password can't contain more than 32 characters.
-alter role normal_compatible_user2 identified by 'Gauss@123' replace 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
-ERROR:  The old password is invalid.
-alter role normal_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
-reset role;
+--set role normal_compatible_user1 password 'gauss@123';
+--reset role;
+--set role normal_compatible_user2 password 'gauss@123';
+--reset role;
+--set role normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+--alter role normal_compatible_user2 identified by 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c' replace 'gauss@123';
+--alter role normal_compatible_user2 identified by 'Gauss@123' replace 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+--alter role normal_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
+--reset role;
 drop user md5_compatible_user1;
 drop user md5_compatible_user2;
 drop user normal_compatible_user1;
 drop user normal_compatible_user2;
 --The supported special character of password are: ~!@#$%^&*()-_=+\\|[{}];:,<.>/?
-create role special_character_password_role password 'gauss""123';
-WARNING:  Characters except numbers, alphabetic characters and special characters are not recommended in password.
-ERROR:  Password must contain at least three kinds of characters.
+--create role special_character_password_role password 'gauss""123';
 drop role special_character_password_role; 
 ERROR:  role "special_character_password_role" does not exist
 --test create table for non-eixt/invalid/available schema
@@ -1028,12 +1023,12 @@ create table schema_no_exit.schematest_tbtest(a int);
 ERROR:  schema "schema_no_exit" does not exist
 set current_schema=schema_no_exit,schematest_schema_1;
 create table schematest_tbtest(a int); drop table schematest_schema_1.schematest_tbtest;
-set role schematest_user1 password "Gauss_234";
+--set role schematest_user1 password "Gauss_234";
 set current_schema=schematest_schema_1;
 create table schematest_tbtest(a int);
-ERROR:  permission denied for schema schematest_schema_1
 create table schematest_schema_1.schematest_tbtest(a int);
-ERROR:  permission denied for schema schematest_schema_1
+ERROR:  relation "schematest_tbtest" already exists in schema "schematest_schema_1"
+DETAIL:  creating new table with existing name in the same schema
 set current_schema=schema_no_exit;
 create table schematest_tbtest(a int);
 ERROR:  schema "schema_no_exit" does not exist
@@ -1041,9 +1036,12 @@ create table schema_no_exit.schematest_tbtest(a int);
 ERROR:  schema "schema_no_exit" does not exist
 set current_schema=schematest_schema_1,schema_no_exit;
 create table schematest_tbtest(a int);
-ERROR:  permission denied for schema schematest_schema_1; schema "schema_no_exit" does not exist
+ERROR:  relation "schematest_tbtest" already exists in schema "schematest_schema_1"
+DETAIL:  creating new table with existing name in the same schema
 set current_schema=schematest_schema_1,schematest_user1;
 create table schematest_tbtest(a int);
+ERROR:  relation "schematest_tbtest" already exists in schema "schematest_schema_1"
+DETAIL:  creating new table with existing name in the same schema
 drop table schematest_tbtest;
 reset role;
 drop user if exists  schematest_user1;

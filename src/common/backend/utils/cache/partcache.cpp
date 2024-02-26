@@ -2418,3 +2418,29 @@ bool PartitionMetadataDisabledClean(Relation pgPartition)
     }
     return result;
 }
+
+bool PartCheckPartitionedIndexAllUsable(Relation index_relation)
+{
+    Assert(index_relation->rd_index != NULL);
+    Oid indrelid = index_relation->rd_index->indrelid;
+    Relation relation = relation_open(indrelid, NoLock);
+    if (relation->storage_type == SEGMENT_PAGE) {
+        relation_close(relation, NoLock);
+        return false;
+    }
+    relation_close(relation, NoLock);
+    Assert(RelationIsPartitioned(index_relation) && RelationIsIndex(index_relation));
+    bool result = true;
+    List* partitions = indexGetPartitionList(index_relation, AccessShareLock);
+    ListCell* lc = NULL;
+    foreach(lc, partitions) {
+        Partition index_partition = (Partition)lfirst(lc);
+        if (!index_partition->pd_part->indisusable) {
+            result = false;
+            break;
+        }
+    }
+    releasePartitionList(index_relation, &partitions, AccessShareLock);
+    list_free_ext(partitions);
+    return result;
+}

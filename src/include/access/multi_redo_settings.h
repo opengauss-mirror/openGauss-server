@@ -56,6 +56,7 @@ static const int MAX_REDO_WORKERS_PER_PARSE = 8;
 static const int TRXN_REDO_MANAGER_NUM = 1;
 static const int TRXN_REDO_WORKER_NUM = 1;
 static const int XLOG_READER_NUM = 3;
+static const int ONDEMAND_AUXILIARY_WORKER_NUM = 2;   // segredoworker and ctrlworker, only for ondemand recovery
 
 static const int MAX_EXTREME_THREAD_NUM = MAX_PARSE_WORKERS * MAX_REDO_WORKERS_PER_PARSE + MAX_PARSE_WORKERS + 
     MAX_PARSE_WORKERS + TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM;

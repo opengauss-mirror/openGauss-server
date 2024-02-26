@@ -24,6 +24,7 @@
 #ifndef __DMS_API_H__
 #define __DMS_API_H__
 
+#include <stdlib.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,7 +33,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           119
+#define DMS_LOCAL_VERSION           130
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -48,6 +49,7 @@ extern "C" {
 #define DMS_INDEX_PROFILE_SIZE  96
 #define DMS_MAX_IP_LEN          64
 #define DMS_MAX_INSTANCES       64
+#define DMS_MAX_NAME_LEN        64
 
 #define DMS_VERSION_MAX_LEN     256
 #define DMS_OCK_LOG_PATH_LEN    256
@@ -420,7 +422,7 @@ typedef struct st_dms_buf_ctrl {
     volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
     volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
     volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
-    volatile unsigned char break_wal;
+    volatile unsigned char unused;
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
@@ -581,7 +583,9 @@ typedef enum en_dms_wait_event {
     DMS_EVT_DCS_REQ_XA_OWNER_ID,
     DMS_EVT_DCS_REQ_XA_IN_USE,
     DMS_EVT_DCS_REQ_END_XA,
+    DMS_EVT_REQ_CKPT,
 
+// add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
 } dms_wait_event_t;
 
@@ -671,12 +675,20 @@ typedef struct st_stat_buf_info {
     char                aio_in_progress;        /* indicate aio is in progress */
     char                data[DMS_RESID_SIZE];   /* user defined resource(page) identifier */
 } stat_buf_info_t;
+
+typedef enum en_broadcast_scope {
+    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
+    DMS_BROADCAST_ONLINE_LIST = 1,
+    DMS_BROADCAST_TYPE_COUNT,
+} dms_broadcast_scope_e;
+
 /*
 * used by openGauss server to get DRC information
 */
-typedef struct st_stat_drc_info {
+typedef struct st_dv_drc_buf_info {
     stat_buf_info_t         buf_info[DMS_MAX_INSTANCES];           /* save buffer related information */
     dms_context_t           dms_ctx;
+    char                    data[DMS_MAX_NAME_LEN];            /* user defined resource(page) identifier */
     unsigned char           master_id;
     unsigned long long      copy_insts;         /* bitmap for owners, for S mode, more than one owner may exist */
     unsigned char           claimed_owner;      /* owner */
@@ -691,14 +703,18 @@ typedef struct st_stat_drc_info {
     unsigned short          len;                /* the length of data below */
     unsigned char           recovery_skip;      /* DRC is accessed in recovery and skip because drc has owner */
     unsigned char           recycling;
-    char                    data[DMS_RESID_SIZE];            /* user defined resource(page) identifier */
-} stat_drc_info_t;
+    unsigned char           converting_req_info_inst_id;
+    unsigned char           converting_req_info_curr_mode;
+    unsigned char           converting_req_info_req_mode;
+    unsigned char           is_valid;
+} dv_drc_buf_info;
 
-typedef enum en_broadcast_scope {
-    DMS_BROADCAST_OLDIN_LIST = 0,    // default value
-    DMS_BROADCAST_ONLINE_LIST = 1,
-    DMS_BROADCAST_TYPE_COUNT,
-} dms_broadcast_scope_e;
+typedef struct st_dms_reform_start_context {
+    dms_role_t role;
+    dms_reform_type_t reform_type;
+    unsigned long long bitmap_participated;
+    unsigned long long bitmap_reconnect;
+} dms_reform_start_context_t;
 
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
@@ -716,13 +732,13 @@ typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
 typedef int(*dms_recovery_analyse)(void *db_handle, void *recovery_list, int is_reformer);
-typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, int is_reformer);
+typedef int(*dms_dw_recovery)(void *db_handle, void *recovery_list, unsigned long long list_in, int is_reformer);
 typedef int(*dms_df_recovery)(void *db_handle, unsigned long long list_in, void *recovery_list);
+typedef int(*dms_space_reload)(void *db_handle, unsigned long long list_in);
 typedef int(*dms_opengauss_startup)(void *db_handle);
 typedef int(*dms_opengauss_recovery_standby)(void *db_handle, int inst_id);
 typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
-typedef void(*dms_reform_start_notify)(void *db_handle, dms_role_t role, unsigned char reform_type,
-    unsigned long long bitmap_nodes);
+typedef void(*dms_reform_start_notify)(void *db_handle, dms_reform_start_context_t *rs_ctx);
 typedef int(*dms_undo_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_load)(void *db_handle, unsigned char inst_id);
@@ -808,13 +824,15 @@ typedef int(*dms_get_open_status)(void *db_handle);
 typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
 typedef void (*dms_reset_user)(void *db_handle, unsigned long long list_in);
 typedef int (*dms_drc_xa_res_rebuild)(void *db_handle, unsigned char thread_index, unsigned char parall_num);
-typedef void (*dms_reform_shrink_xa_rms)(unsigned char undo_seg_id);
+typedef void (*dms_reform_shrink_xa_rms)(void *db_handle, unsigned char undo_seg_id);
 typedef void (*dms_ckpt_unblock_rcy_local)(void *db_handle, unsigned long long list_in);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
+typedef void (*dms_thread_deinit_t)(void);
 typedef int (*dms_get_db_primary_id)(void *db_handle, unsigned int *primary_id);
 typedef int (*dms_opengauss_ondemand_redo_buffer)(void *block_key, int *redo_status);
+typedef int (*dms_opengauss_do_ckpt_immediate)(unsigned long long *ckpt_loc);
 
 // for ssl
 typedef int(*dms_decrypt_pwd_t)(const char *cipher, unsigned int len, char *plain, unsigned int size);
@@ -856,7 +874,10 @@ typedef int (*dms_end_xa)(void *db_handle, void *knl_xa_xid, unsigned long long 
     unsigned char is_commit);
 typedef unsigned char (*dms_xa_inuse)(void *db_handle, void *knl_xa_xid);
 typedef int (*dms_get_part_changed)(void *db_handle, char* resid);
-typedef void (*dms_edpp_func_t)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
+typedef void (*dms_buf_ctrl_recycle)(void *db_handle);
+typedef void *(*dms_malloc_prot_proc)(size_t size);
+typedef void (*dms_free_prot_proc)(void *ptr);
+typedef int (*dms_get_kernel_error_code)();
 typedef struct st_dms_callback {
     // used in reform
     dms_get_list_stable get_list_stable;
@@ -874,6 +895,7 @@ typedef struct st_dms_callback {
     dms_recovery_analyse recovery_analyse;
     dms_dw_recovery dw_recovery;
     dms_df_recovery df_recovery;
+    dms_space_reload space_reload;
     dms_get_open_status get_open_status;
     dms_undo_init undo_init;
     dms_tx_area_init tx_area_init;
@@ -893,6 +915,7 @@ typedef struct st_dms_callback {
 
     // used in reform for opengauss
     dms_thread_init_t dms_thread_init;
+    dms_thread_deinit_t dms_thread_deinit;
     dms_get_db_primary_id get_db_primary_id;
     dms_opengauss_startup opengauss_startup;
     dms_opengauss_recovery_standby opengauss_recovery_standby;
@@ -947,6 +970,7 @@ typedef struct st_dms_callback {
     dms_get_opengauss_update_xid get_opengauss_update_xid;
     dms_get_opengauss_txn_status get_opengauss_txn_status;
     dms_opengauss_lock_buffer opengauss_lock_buffer;
+    dms_opengauss_do_ckpt_immediate opengauss_do_ckpt_immediate;
     dms_get_txn_snapshot get_txn_snapshot;
     dms_get_opengauss_txn_snapshot get_opengauss_txn_snapshot;
     dms_get_opengauss_txn_of_master get_opengauss_txn_of_master;
@@ -1004,7 +1028,10 @@ typedef struct st_dms_callback {
     dms_xa_inuse xa_inuse;
     dms_get_part_changed get_part_changed;
 
-    dms_edpp_func_t cache_page;
+    dms_buf_ctrl_recycle buf_ctrl_recycle;
+    dms_malloc_prot_proc dms_malloc_prot;
+    dms_free_prot_proc dms_free_prot;
+    dms_get_kernel_error_code db_get_kernel_error_code;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1060,6 +1087,9 @@ typedef struct st_dms_profile {
     unsigned char scrlock_server_bind_core_end;
     unsigned char parallel_thread_num;
     unsigned int max_wait_time;
+    char gsdb_home[DMS_LOG_PATH_LEN];
+    unsigned char enable_mes_task_threadpool;
+    unsigned int mes_task_worker_max_cnt;
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -1077,6 +1107,51 @@ typedef enum en_dms_info_id {
     DMS_INFO_REFORM_CURRENT = 0,
     DMS_INFO_REFORM_LAST = 1,
 } dms_info_id_e;
+
+typedef struct st_wait_cmd_stat_result {
+    char name[DMS_MAX_NAME_LEN];
+    char p1[DMS_MAX_NAME_LEN];
+    char wait_class[DMS_MAX_NAME_LEN];
+    unsigned long long wait_count;
+    unsigned long long wait_time;
+    unsigned char is_valid;
+} wait_cmd_stat_result_t;
+
+typedef struct st_drc_local_lock_res_result {
+    char               lock_id[DMS_MAX_NAME_LEN];
+    unsigned char      is_owner;
+    unsigned char      is_locked;
+    unsigned short     count;
+    unsigned char      releasing;
+    unsigned short     shared_count;
+    unsigned short     stat;
+    unsigned short     sid;
+    unsigned short     rmid;
+    unsigned short     rmid_sum;
+    unsigned char      lock_mode;
+    unsigned char      is_valid;
+} drc_local_lock_res_result_t;
+
+typedef enum en_reform_callback_stat {
+    REFORM_CALLBACK_STAT_CKPT_LATCH = 0,
+    REFORM_CALLBACK_STAT_BUCKET_LOCK,
+    REFORM_CALLBACK_STAT_SS_READ_LOCK,
+    REFORM_CALLBACK_STAT_GET_DISK_LSN,
+    REFORM_CALLBACK_STAT_DRC_EXIST,
+    REFORM_CALLBACK_STAT_CLEAN_EDP,
+    REFORM_CALLBACK_STAT_NEED_NOT_REBUILD,
+    REFORM_CALLBACK_STAT_EXPIRE,
+    REFORM_MES_TASK_STAT_CONFIRM_OWNER_BUCKET_LOCK,
+    REFORM_MES_TASK_STAT_CONFIRM_OWNER_GET_DISK_LSN,
+    REFORM_MES_TASK_STAT_CONFIRM_CVT_BUCKET_LOCK,
+    REFORM_MES_TASK_STAT_CONFIRM_CVT_SS_READ_LOCK,
+    REFORM_MES_TASK_STAT_NEED_FLUSH_ALLOC_CTRL,
+    REFORM_MES_TASK_STAT_NEED_FLUSH_SS_READ_LOCK,
+    REFORM_MES_TASK_STAT_EDP_TO_OWNER_GET_DISK_LSN,
+    REFORM_MES_TASK_STAT_EDP_TO_OWNER_ALLOC_CTRL,
+
+    REFORM_CALLBACK_STAT_COUNT
+} reform_callback_stat_e;
 
 #ifdef __cplusplus
 }

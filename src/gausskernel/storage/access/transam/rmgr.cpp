@@ -41,6 +41,7 @@
 #include "access/xlog_internal.h"
 #include "catalog/storage_xlog.h"
 #include "commands/dbcommands.h"
+#include "replication/ddlmessage.h"
 #include "commands/sequence.h"
 #include "commands/tablespace.h"
 #include "replication/slot.h"

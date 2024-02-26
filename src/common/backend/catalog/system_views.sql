@@ -3614,6 +3614,92 @@ CREATE VIEW pg_stat_subscription AS
             LEFT JOIN pg_catalog.pg_stat_get_subscription(NULL) st
                       ON (st.subid = su.oid);
 
+CREATE SEQUENCE coverage.proc_coverage_coverage_id_seq START 1;
+CREATE unlogged table coverage.proc_coverage(
+	coverage_id bigint NOT NULL DEFAULT nextval('coverage.proc_coverage_coverage_id_seq'::regclass),
+	pro_oid oid NOT NULL,
+	pro_name text NOT NULL,
+	db_name text NOT NULL,
+	pro_querys text NOT NULL,
+	pro_canbreak bool[] NOT NULL,
+	coverage int[] NOT NULL
+);
+REVOKE ALL on table coverage.proc_coverage FROM public;
+
+CREATE OR REPLACE FUNCTION pg_catalog.array_integer_agg_add(int[], int[])
+RETURNS int[]
+AS $$
+DECLARE
+    result int[];
+    len int;
+    i int;
+    BEGIN
+        IF $1 IS NULL THEN
+            RETURN $2;
+        END IF;
+
+        IF $2 IS NULL THEN
+            RETURN $1;
+        END IF;
+
+        len := GREATEST(array_length($1, 1), array_length($2, 1));
+        result := $1;
+
+        FOR i IN 1..len LOOP
+            result[i] := COALESCE($1[i], 0) + COALESCE($2[i], 0);
+        END LOOP;
+
+        RETURN result;
+    END;$$
+LANGUAGE 'plpgsql' IMMUTABLE;
+
+CREATE AGGREGATE pg_catalog.array_integer_sum(int[]) (
+    SFUNC = array_integer_agg_add,
+    STYPE = int[]
+);
+
+CREATE OR REPLACE FUNCTION pg_catalog.coverage_arrays(booleans bool[], integers int[])
+RETURNS int[] AS $$
+DECLARE
+    result int[] := ARRAY[]::int[];
+    i int;
+BEGIN
+    FOR i IN 1..array_length(booleans, 1) LOOP
+        IF booleans[i] THEN
+            result := array_append(result, integers[i]);
+        ELSE
+            result := array_append(result, -1);
+        END IF;
+    END LOOP;
+
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION pg_catalog.calculate_coverage(numbers int[])
+RETURNS float8 AS $$
+DECLARE
+    count_ge_1 int := 0;
+    count_ge_0 int := 0;
+    ratio float8;
+BEGIN
+	FOR i IN 1..array_length(numbers, 1) LOOP
+		IF numbers[i] >= 1 THEN
+			count_ge_1 := count_ge_1 + 1;
+		END IF;
+		IF numbers[i] >= 0 THEN
+			count_ge_0 := count_ge_0 + 1;
+		END IF;
+	END LOOP;
+
+	IF count_ge_0 > 0 THEN
+		ratio := count_ge_1::float8 / count_ge_0::float8;
+	END IF;
+
+    RETURN ratio;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 CREATE VIEW pg_replication_origin_status AS
     SELECT *
     FROM pg_catalog.pg_show_replication_origin_status();

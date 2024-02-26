@@ -397,22 +397,57 @@ static void set_io_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, i
     values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.io_info[eventId].last_updated);
 }
 
-static void set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
+static bool set_dms_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
 {
+    if (!ENABLE_DMS) {
+        return false;
+    }
     values[++i] = CStringGetTextDatum("DMS_EVENT");
     values[++i] = CStringGetTextDatum(pgstat_get_wait_dms(WaitEventDMS(eventId + PG_WAIT_DMS)));
+
+    if (!g_instance.dms_cxt.dmsInited) {
+        ereport(WARNING, (errmsg("[SS] dms not init!")));
+        return false;
+    }
     unsigned long long cnt = 0;
     unsigned long long time = 0;
-    if (g_instance.dms_cxt.dmsInited) {
-        dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
-    }
+    dms_get_event(dms_wait_event_t(eventId), &cnt, &time);
+
     values[++i] = Int64GetDatum(cnt);
-    values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].failed_counter);
+    values[++i] = Int64GetDatum(INT64_MIN);
     values[++i] = Int64GetDatum(time);
     values[++i] = Int64GetDatum(cnt == 0 ? 0 : time / cnt);
-    values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].max_duration);
-    values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].min_duration);
+    values[++i] = Int64GetDatum(INT64_MIN);
+    values[++i] = Int64GetDatum(INT64_MIN);
     values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].last_updated);
+    return true;
+}
+
+static bool set_dms_cmd_tuple_value(WaitInfo *gsInstrWaitInfo, Datum *values, int i, uint32 eventId)
+{
+    if (!ENABLE_DMS) {
+        return false;
+    }
+    values[++i] = CStringGetTextDatum("DMS_CMD");
+    if (!g_instance.dms_cxt.dmsInited) {
+        ereport(WARNING, (errmsg("[SS] dms not init!")));
+        return false;
+    }
+    wait_cmd_stat_result_t cmd_stat_result;
+    dms_get_cmd_stat(eventId, &cmd_stat_result);
+    if (!cmd_stat_result.is_valid) {
+        return false;
+    }
+    values[++i] = CStringGetTextDatum(cmd_stat_result.name);
+    values[++i] = Int64GetDatum(cmd_stat_result.wait_count);
+    values[++i] = Int64GetDatum(INT64_MIN);
+    values[++i] = Int64GetDatum(cmd_stat_result.wait_time);
+    values[++i] =
+        Int64GetDatum(cmd_stat_result.wait_count == 0 ? 0 : cmd_stat_result.wait_time / cmd_stat_result.wait_count);
+    values[++i] = Int64GetDatum(INT64_MIN);
+    values[++i] = Int64GetDatum(INT64_MIN);
+    values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.dms_info[eventId].last_updated);
+    return true;
 }
 
 static void set_lock_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
@@ -447,7 +482,7 @@ static void set_lwlock_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* value
     values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.lwlock_info[eventId].last_updated);
 }
 
-static void set_tuple_value(
+static bool set_tuple_value(
     WaitInfo* gsInstrWaitInfo, Datum* values, bool* nulls, int i, uint32 eventId, uint32 call_cn)
 {
     values[++i] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
@@ -465,8 +500,12 @@ static void set_tuple_value(
         set_lwlock_event_tuple_value(gsInstrWaitInfo, values, i, eventId, nulls);
     } else if (call_cn < LOCK_EVENT_NUM + IO_EVENT_NUM + STATE_WAIT_NUM + LWLOCK_EVENT_NUM + DMS_EVENT_NUM) {
         eventId = call_cn - LOCK_EVENT_NUM - IO_EVENT_NUM - STATE_WAIT_NUM - LWLOCK_EVENT_NUM;
-        set_dms_event_tuple_value(gsInstrWaitInfo, values, i, eventId);
+        return set_dms_event_tuple_value(gsInstrWaitInfo, values, i, eventId);
+    } else {
+        eventId = call_cn - LOCK_EVENT_NUM - IO_EVENT_NUM - STATE_WAIT_NUM - LWLOCK_EVENT_NUM - DMS_EVENT_NUM;
+        return set_dms_cmd_tuple_value(gsInstrWaitInfo, values, i, eventId);
     }
+    return true;
 }
 
 Datum get_instr_wait_event(PG_FUNCTION_ARGS)
@@ -495,7 +534,6 @@ Datum get_instr_wait_event(PG_FUNCTION_ARGS)
         }
 
         funcctx->user_fctx = read_current_instr_wait_info();
-        funcctx->max_calls = STATE_WAIT_NUM + IO_EVENT_NUM + LOCK_EVENT_NUM + LWLOCK_EVENT_NUM + DMS_EVENT_NUM;
 
         MemoryContextSwitchTo(oldcontext);
 
@@ -504,7 +542,7 @@ Datum get_instr_wait_event(PG_FUNCTION_ARGS)
     }
 
     funcctx = SRF_PERCALL_SETUP();
-    if (funcctx->user_fctx != NULL && funcctx->call_cntr < funcctx->max_calls) {
+    if (funcctx->user_fctx != NULL) {
         Datum values[INSTR_WAITEVENT_ATTRUM];
         bool nulls[INSTR_WAITEVENT_ATTRUM] = {false};
         HeapTuple tuple = NULL;
@@ -518,11 +556,11 @@ Datum get_instr_wait_event(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        set_tuple_value(gsInstrWaitInfo, values, nulls, i, eventId, funcctx->call_cntr);
-
-        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
-        result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(funcctx, result);
+        if (set_tuple_value(gsInstrWaitInfo, values, nulls, i, eventId, funcctx->call_cntr)) {
+            tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+            result = HeapTupleGetDatum(tuple);
+            SRF_RETURN_NEXT(funcctx, result);
+        }
     }
 
     pfree_ext(funcctx->user_fctx);

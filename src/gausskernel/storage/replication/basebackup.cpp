@@ -31,7 +31,7 @@
 #include "replication/dcf_data.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "replication/slot.h"
 #include "access/xlog.h"
 #include "storage/cfs/cfs_converter.h"
@@ -664,8 +664,6 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     SetPaxosIndex(&consensusPaxosIdx);
 #endif
     SendXlogRecPtrResult(endptr, consensusPaxosIdx);
-    elog(WARNING, "Sleep 10s");
-    sleep(10);
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
     XlogCopyStartPtr = InvalidXLogRecPtr;
     LWLockRelease(FullBuildXlogCopyStartPtrLock);
@@ -2245,7 +2243,7 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", readfilename)));
             }
         }
-        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck && !SS_REPLICATION_DORADO_CLUSTER) {
+        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck && !SS_DISASTER_CLUSTER) {
             uint32 segSize;
             GET_SEG_SIZE(undoFileType, segSize);
             /* len and cnt must be integer multiple of BLCKSZ. */

@@ -118,6 +118,7 @@
 #include "utils/snapmgr.h"
 #include "datasource/datasource.h"
 #include "postmaster/rbcleaner.h"
+#include "catalog/pg_object.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/gs_dependencies_obj.h"
 /*
@@ -205,7 +206,7 @@ static void deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel
     /*
      * Keep track of objects for event triggers, if necessary.
      */
-    if (trackDroppedObjectsNeeded()) {
+    if (trackDroppedObjectsNeeded() && !(flags & PERFORM_DELETION_INTERNAL)) {
         for (i = 0; i < targetObjects->numrefs; i++) {
             const ObjectAddress *thisobj = &targetObjects->refs[i];
             const ObjectAddressExtra *extra = &targetObjects->extras[i];
@@ -909,7 +910,7 @@ void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressS
  *		(the latter case occurs in DROP OWNED)
  */
 void reportDependentObjects(
-    const ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject)
+    ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject)
 {
     bool ok = true;
     StringInfoData clientdetail;
@@ -917,6 +918,7 @@ void reportDependentObjects(
     int numReportedClient = 0;
     int numNotReportedClient = 0;
     int i;
+    int j;
 
     /*
      * If no error is to be thrown, and the msglevel is too low to be shown to
@@ -940,6 +942,45 @@ void reportDependentObjects(
 
     initStringInfo(&clientdetail);
     initStringInfo(&logdetail);
+
+    /*
+     * In restrict mode, we check targetObjects, remove object entries related to views from targetObjects,
+     * and ensure that no errors are reported due to deleting table fields that have view references.
+     */
+    if (behavior == DROP_RESTRICT && origObject != NULL && origObject->objectSubId != 0) {
+        ObjectAddresses* newTargetObjects = new_object_addresses();
+        const ObjectAddress* originalObj = NULL;
+        const int typeOidOffset = 2;
+        for (i = targetObjects->numrefs - 1; i >= 0; i--) {
+            const ObjectAddress* obj = &targetObjects->refs[i];
+            const ObjectAddressExtra* extra = &targetObjects->extras[i];
+            ObjectClass objClass = getObjectClass(obj);
+            char relkind = get_rel_relkind(obj->objectId);
+            /* record the original deletion target(s) */
+            if (extra->flags & DEPFLAG_ORIGINAL) {
+                originalObj = obj;
+            }
+            if (objClass == OCLASS_CLASS && obj == originalObj) {
+                add_exact_object_address_extra(obj, extra, newTargetObjects);
+            } else if (objClass == OCLASS_CLASS && (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW)) {
+                SetPgObjectValid(obj->objectId,
+                                 relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW, false);
+            } else if (objClass == OCLASS_TYPE && originalObj != NULL &&
+                       ((originalObj->objectId + 1) == obj->objectId ||
+                       (originalObj->objectId + typeOidOffset) == obj->objectId)) {
+                // delete pg_type entry
+                add_exact_object_address_extra(obj, extra, newTargetObjects);
+            } else if (objClass != OCLASS_REWRITE) { // delete constraint and so on
+                add_exact_object_address_extra(obj, extra, newTargetObjects);
+            }
+        }
+        for (j = 0; j < newTargetObjects->numrefs; j++) {
+            targetObjects->refs[newTargetObjects->numrefs - j - 1] = newTargetObjects->refs[j];
+            targetObjects->extras[newTargetObjects->numrefs - j - 1] = newTargetObjects->extras[j];
+        }
+        targetObjects->numrefs = newTargetObjects->numrefs;
+        free_object_addresses(newTargetObjects);
+    }
 
     /*
      * We process the list back to front (ie, in dependency order not deletion
@@ -3488,6 +3529,47 @@ Datum pg_describe_object(PG_FUNCTION_ARGS)
 
     description = getObjectDescription(&address);
     PG_RETURN_TEXT_P(cstring_to_text(description));
+}
+
+void ReplaceTypeCheckRef(const ObjectAddress* object)
+{
+    ObjectAddresses* targetObjects = NULL;
+    Relation depRel;
+    targetObjects = new_object_addresses();
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+
+    findDependentObjects(object,
+        DEPFLAG_ORIGINAL,
+        NULL, /* empty stack */
+        targetObjects,
+        NULL, /* no pendingObjects */
+        &depRel);
+    
+    heap_close(depRel, RowExclusiveLock);
+
+    for (int i = targetObjects->numrefs - 1; i >= 0; i--) {
+        const ObjectAddress* refobj = &targetObjects->refs[i];
+        switch (getObjectClass(refobj)) {
+            case OCLASS_CLASS:
+                if (refobj->objectSubId != 0) {
+                    ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                        errmsg("cannot replace type because table %u depends on it", refobj->objectId)));
+                }
+                break;
+
+            case OCLASS_PROC:
+            case OCLASS_PACKAGE:
+                ereport(NOTICE, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("%s depends on this type", format_procedure(refobj->objectId))));
+                break;
+            
+            default:
+                break;
+        }
+    }
+
+    /* clean up */
+    free_object_addresses(targetObjects);
 }
 
 #ifdef ENABLE_MULTIPLE_NODES

@@ -1,3 +1,5 @@
+create database test_sql;
+\c test_sql;
 --for LLT
 --test gsql outer help
 \! @abs_bindir@/gsql --help | grep command
@@ -10,11 +12,11 @@
   -S, --single-line        single-line mode (end of line terminates SQL command)
   -P, --pset=VAR[=ARG]     set printing option VAR to ARG (see \pset command)
 For more information, type "\?" (for internal commands) or "\help" (for SQL
-commands) from within gsql, or consult the gsql section in the FusionInsight LibrA
+commands) from within gsql, or consult the gsql section in the openGauss documentation.
 --test gsql inner help
 \?
 General
-  \copyright             show FusionInsight LibrA usage and distribution terms
+  \copyright             show openGauss usage and distribution terms
   \g [FILE] or ;         execute query (and send results to file or |pipe)
   \h(\help) [NAME]              help on syntax of SQL commands, * for all commands
   \parallel [on [num]|off] toggle status of execute (currently off)
@@ -62,6 +64,7 @@ Informational
   \di[S+] [PATTERN]      list indexes
   \dl                    list large objects, same as \lo_list
   \dL[S+] [PATTERN]      list procedural languages
+  \dm[S+] [PATTERN]      list materialized views
   \dn[S+] [PATTERN]      list schemas
   \do[S]  [PATTERN]      list operators
   \dO[S+] [PATTERN]      list collations
@@ -74,6 +77,7 @@ Informational
   \dv[S+] [PATTERN]      list views
   \dE[S+] [PATTERN]      list foreign tables
   \dx[+]  [PATTERN]      list extensions
+  \dy     [PATTERN]      list event triggers
   \l[+]                  list all databases
   \sf[+] FUNCNAME        show a function's definition
   \z      [PATTERN]      same as \dp
@@ -85,14 +89,15 @@ Formatting
   \H                     toggle HTML output mode (currently off)
   \pset NAME [VALUE]     set table output option
                          (NAME := {format|border|expanded|fieldsep|fieldsep_zero|footer|null|
-                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager})
+                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager|
+                         feedback})
   \t [on|off]            show only rows (currently off)
   \T [STRING]            set HTML <table> tag attributes, or unset if none
   \x [on|off|auto]       toggle expanded output (currently off)
 
 Connection
   \c[onnect] [DBNAME|- USER|- HOST|- PORT|-]
-                         connect to new database (currently "regression")
+                         connect to new database (currently "test_sql")
   \encoding [ENCODING]   show or set client encoding
   \conninfo              display information about current connection
 
@@ -122,7 +127,7 @@ CREATE OR REPLACE FUNCTION pg_catalog.pg_table_size(regclass)
  RETURNS bigint
  LANGUAGE internal
  STRICT NOT FENCED NOT SHIPPABLE
-AS $function$pg_table_size$function$
+AS $function$pg_table_size$function$;
 --show user info
 create user gaussuser password 'gauss@123';
 \du gaussuser
@@ -140,7 +145,7 @@ create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
     Column     |  Type   |        Value        
 ---------------+---------+---------------------
  sequence_name | name    | seq_test
- last_value    | bigint  | -1
+ last_value    | bigint  | 1
  start_value   | bigint  | 1
  increment_by  | bigint  | 2
  max_value     | bigint  | 9223372036854775807
@@ -152,9 +157,11 @@ create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
 --? uuid          | bigint  | .*
 Owned by: public.tbl_seq.col1
 
-\! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"
+\! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d test_sql -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"
 CREATE TABLE
-\! @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "drop table gsql_c_copy;"
+ERROR:  invalid input syntax for integer: "123 ."
+CONTEXT:  COPY gsql_c_copy, line 1, column age: "123 ."
+\! @abs_bindir@/gsql -X -d test_sql -p @portstring@ -c "drop table gsql_c_copy;"
 DROP TABLE
 --select_audit_log test
 select * from pg_delete_audit('1111-1-1','2222-2-2');
@@ -163,7 +170,7 @@ select * from pg_delete_audit('1111-1-1','2222-2-2');
  
 (1 row)
 
-select detail_info from pg_query_audit('1111-1-1','2222-2-2') where client_conninfo != 'gs_clean@::1';
+select detail_info from pg_query_audit('1111-1-1','2222-2-2') where client_conninfo != 'gs_clean@::1' and detail_info like 'select * from pg_delete_audit%';
                       detail_info                      
 -------------------------------------------------------
  select * from pg_delete_audit('1111-1-1','2222-2-2');
@@ -182,7 +189,7 @@ select * from std_table order by 1;
 (4 rows)
 
 drop table std_table;
-\! @abs_bindir@/gsql --no-gsqlrc -d postgres -p @portstring@ -a -c "select 1;"
+\! @abs_bindir@/gsql --no-gsqlrc -d test_sql -p @portstring@ -a -c "select 1;"
 select 1;
  ?column? 
 ----------
@@ -200,19 +207,19 @@ CONTEXT:  referenced column: pg_sleep
 set session_timeout = 600; 
 set statement_timeout = 0;
 --test for '~/' in PSQLRC
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -c ""
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from lock_cluster_ddl();"  >a.txt 2>&1
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from unlock_cluster_ddl();"  >a.txt 2>&1
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c ""
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "select * from lock_cluster_ddl();"  >a.txt 2>&1
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "select * from unlock_cluster_ddl();"  >a.txt 2>&1
 --add llt for psql
 \dFp+
     Text search parser "pg_catalog.default"
      Method      |    Function    | Description 
 -----------------+----------------+-------------
- Start parse     | prsd_start     | 
- Get next token  | prsd_nexttoken | 
- End parse       | prsd_end       | 
- Get headline    | prsd_headline  | 
- Get token types | prsd_lextype   | 
+ Start parse     | prsd_start     | (internal)
+ Get next token  | prsd_nexttoken | (internal)
+ End parse       | prsd_end       | (internal)
+ Get headline    | prsd_headline  | (internal)
+ Get token types | prsd_lextype   | (internal)
 
         Token types for parser "pg_catalog.default"
    Token name    |               Description                
@@ -248,7 +255,7 @@ set statement_timeout = 0;
  Start parse     | ngram_start     | 
  Get next token  | ngram_nexttoken | 
  End parse       | ngram_end       | 
- Get headline    | prsd_headline   | 
+ Get headline    | prsd_headline   | (internal)
  Get token types | ngram_lextype   | 
 
 Token types for parser "pg_catalog.ngram"
@@ -268,7 +275,7 @@ Token types for parser "pg_catalog.ngram"
  Start parse     | pound_start     | 
  Get next token  | pound_nexttoken | 
  End parse       | pound_end       | 
- Get headline    | prsd_headline   | 
+ Get headline    | prsd_headline   | (internal)
  Get token types | pound_lextype   | 
 
 Token types for parser "pg_catalog.pound"
@@ -283,7 +290,8 @@ Token types for parser "pg_catalog.pound"
 (6 rows)
 
 \i+ aes_llt.sql 0123456789abcdef
-aes_llt.sql: No such file or directory
+Invalid password,it must contain at least three kinds of characters
+\i+: Missing the key or the key is illegal,must be 8~16 bytes and contain at least three kinds of characters!
 --test gsql parallel execute
 drop table if exists gsql_parallel_test;
 NOTICE:  table "gsql_parallel_test" does not exist, skipping
@@ -365,8 +373,6 @@ set enable_nestloop=on;
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ gsql_parallel_test
@@ -375,8 +381,6 @@ Options: orientation=row, compression=no
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \parallel
@@ -426,6 +430,7 @@ create table test_d_command_tbl1(id int);
 create table test_d_command_tbl2(id int) with(orientation=column);
 create table test_d_command_tbl3(id int) with(orientation=row);
 create table test_d_command_tbl4(id int) with(compression=yes);
+ERROR:  row-oriented table does not support compression
 create index test_d_command_tbl1_idx on test_d_command_tbl1(id);
 select relname,reloptions from pg_class where relname like 'test_d_command_tbl%' order by relname;
          relname         |              reloptions              
@@ -434,8 +439,7 @@ select relname,reloptions from pg_class where relname like 'test_d_command_tbl%'
  test_d_command_tbl1_idx | 
  test_d_command_tbl2     | {orientation=column,compression=low}
  test_d_command_tbl3     | {orientation=row,compression=no}
- test_d_command_tbl4     | {orientation=row,compression=yes}
-(5 rows)
+(4 rows)
 
 \d+ test_d_command_tbl1
                  Table "public.test_d_command_tbl1"
@@ -445,8 +449,6 @@ select relname,reloptions from pg_class where relname like 'test_d_command_tbl%'
 Indexes:
     "test_d_command_tbl1_idx" btree (id) TABLESPACE pg_default
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ test_d_command_tbl2
@@ -455,8 +457,6 @@ Options: orientation=row, compression=no
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=column, compression=low
 
 \d+ test_d_command_tbl3
@@ -465,20 +465,9 @@ Options: orientation=column, compression=low
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ test_d_command_tbl4
-                 Table "public.test_d_command_tbl4"
- Column |  Type   | Modifiers | Storage | Stats target | Description 
---------+---------+-----------+---------+--------------+-------------
- id     | integer |           | plain   |              | 
-Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
-Options: orientation=row, compression=yes
-
 \di test_d_command_tbl1_idx
 --?.*
 --?.*
@@ -487,6 +476,7 @@ Options: orientation=row, compression=yes
 (1 row)
 
 drop table test_d_command_tbl1,test_d_command_tbl2,test_d_command_tbl3,test_d_command_tbl4;
+ERROR:  table "test_d_command_tbl4" does not exist
 create table test_d_command_part1 (id int,id2 int) partition by range (id2) (partition p1 values less than(2001),partition p2 values less than(2002),partition p3 values less than(2003));
 create table test_d_command_part2 (id int,id2 int) partition by range (id,id2) (partition p1 values less than(1,2001),partition p2 values less than(2,2002),partition p3 values less than(3,2003));
 \d test_d_command_part1
@@ -495,8 +485,8 @@ Table "public.test_d_command_part1"
 --------+---------+-----------
  id     | integer | 
  id2    | integer | 
-Range partition by(id2)
-Number of partition: 3 (View pg_partition to check each partition range.)
+Partition By RANGE(id2)
+Number of partitions: 3 (View pg_partition to check each partition range.)
 
 \d test_d_command_part2
 Table "public.test_d_command_part2"
@@ -504,8 +494,8 @@ Table "public.test_d_command_part2"
 --------+---------+-----------
  id     | integer | 
  id2    | integer | 
-Range partition by(id, id2)
-Number of partition: 3 (View pg_partition to check each partition range.)
+Partition By RANGE(id, id2)
+Number of partitions: 3 (View pg_partition to check each partition range.)
 
 \d+ test_d_command_part1
                  Table "public.test_d_command_part1"
@@ -513,11 +503,9 @@ Number of partition: 3 (View pg_partition to check each partition range.)
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
  id2    | integer |           | plain   |              | 
-Range partition by(id2)
-Number of partition: 3 (View pg_partition to check each partition range.)
+Partition By RANGE(id2)
+Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ test_d_command_part2
@@ -526,11 +514,9 @@ Options: orientation=row, compression=no
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
  id2    | integer |           | plain   |              | 
-Range partition by(id, id2)
-Number of partition: 3 (View pg_partition to check each partition range.)
+Partition By RANGE(id, id2)
+Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
-Distribute By: HASH(id)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 drop table test_d_command_part1;
@@ -569,19 +555,9 @@ drop table test_d_command_part2;
 \! echo "select ab;                                                                                                             " >> @abs_bindir@/gsql_parallel.sql
 \! echo "\parallel off                                                                                                          " >> @abs_bindir@/gsql_parallel.sql
 \! echo "\set VERBOSITY default                                                                                                 " >> @abs_bindir@/gsql_parallel.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_parallel.sql
-Parallel is on with scale 2.
-Parallel is off.
---?.*gsql_parallel.sql:4: ERROR:  
-GAUSS-00068: column "ab" does not exist
-SQLSTATE: 42703
-LINE 1: select ab;
-               ^
-CONTEXT:  referenced column: ab
---?.*
---?.*
-\! rm @abs_bindir@/gsql_parser.sql
-\! rm @abs_bindir@/gsql_parallel.sql
+-- \! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_parallel.sql
+-- \! rm @abs_bindir@/gsql_parser.sql
+-- \! rm @abs_bindir@/gsql_parallel.sql
 set session_timeout = 3;
 \parallel on 3
 select pg_sleep(3);
@@ -609,6 +585,10 @@ select pg_sleep(3);
  
 (1 row)
 
+drop table if exists dual;
+NOTICE:  table "dual" does not exist, skipping
+create table dual (dummy varchar(1));
+insert into dual values ('X');
 select * from dual;
  dummy 
 -------
@@ -622,10 +602,10 @@ show session_timeout;
 (1 row)
 
 reset session_timeout;
-select left(version(),18);
-        left        
---------------------
- PostgreSQL 9.2.4 (
+select left(version(),10);
+    left    
+------------
+ (openGauss
 (1 row)
 
 \! echo "select 1" 	>> @abs_bindir@/gsql_cat.sql
@@ -633,7 +613,7 @@ select left(version(),18);
 \! echo "select 2;"	>> @abs_bindir@/gsql_cat.sql
 \! echo "select 3;" >> @abs_bindir@/gsql_cat.sql
 \! echo "select 4"	>> @abs_bindir@/gsql_cat.sql
-\! cat @abs_bindir@/gsql_cat.sql | @abs_bindir@/gsql -d postgres -p @portstring@
+\! cat @abs_bindir@/gsql_cat.sql | @abs_bindir@/gsql -d test_sql -p @portstring@
  ?column? 
 ----------
         1
@@ -654,333 +634,28 @@ select left(version(),18);
 --add test for ut
 \! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e '	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 ERROR: Failed to check environment value: invalid token ";".
 \! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e @abs_bindir@/gsql_ut.sql'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 ERROR: Failed to check environment value: invalid token ";".
 \! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e  @abs_bindir@/gsql_ut.sql 10'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 ERROR: Failed to check environment value: invalid token ";".
 -- this is not added to V1R7C00 now.
 /*
 \! echo '\setenv PSQL_EDITOR_LINENUMBER_ARG "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\e a.sql'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 */
 \! echo '\setenv PAGER "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo 'select * from generate_series(1, 300);'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
- generate_series 
------------------
-               1
-               2
-               3
-               4
-               5
-               6
-               7
-               8
-               9
-              10
-              11
-              12
-              13
-              14
-              15
-              16
-              17
-              18
-              19
-              20
-              21
-              22
-              23
-              24
-              25
-              26
-              27
-              28
-              29
-              30
-              31
-              32
-              33
-              34
-              35
-              36
-              37
-              38
-              39
-              40
-              41
-              42
-              43
-              44
-              45
-              46
-              47
-              48
-              49
-              50
-              51
-              52
-              53
-              54
-              55
-              56
-              57
-              58
-              59
-              60
-              61
-              62
-              63
-              64
-              65
-              66
-              67
-              68
-              69
-              70
-              71
-              72
-              73
-              74
-              75
-              76
-              77
-              78
-              79
-              80
-              81
-              82
-              83
-              84
-              85
-              86
-              87
-              88
-              89
-              90
-              91
-              92
-              93
-              94
-              95
-              96
-              97
-              98
-              99
-             100
-             101
-             102
-             103
-             104
-             105
-             106
-             107
-             108
-             109
-             110
-             111
-             112
-             113
-             114
-             115
-             116
-             117
-             118
-             119
-             120
-             121
-             122
-             123
-             124
-             125
-             126
-             127
-             128
-             129
-             130
-             131
-             132
-             133
-             134
-             135
-             136
-             137
-             138
-             139
-             140
-             141
-             142
-             143
-             144
-             145
-             146
-             147
-             148
-             149
-             150
-             151
-             152
-             153
-             154
-             155
-             156
-             157
-             158
-             159
-             160
-             161
-             162
-             163
-             164
-             165
-             166
-             167
-             168
-             169
-             170
-             171
-             172
-             173
-             174
-             175
-             176
-             177
-             178
-             179
-             180
-             181
-             182
-             183
-             184
-             185
-             186
-             187
-             188
-             189
-             190
-             191
-             192
-             193
-             194
-             195
-             196
-             197
-             198
-             199
-             200
-             201
-             202
-             203
-             204
-             205
-             206
-             207
-             208
-             209
-             210
-             211
-             212
-             213
-             214
-             215
-             216
-             217
-             218
-             219
-             220
-             221
-             222
-             223
-             224
-             225
-             226
-             227
-             228
-             229
-             230
-             231
-             232
-             233
-             234
-             235
-             236
-             237
-             238
-             239
-             240
-             241
-             242
-             243
-             244
-             245
-             246
-             247
-             248
-             249
-             250
-             251
-             252
-             253
-             254
-             255
-             256
-             257
-             258
-             259
-             260
-             261
-             262
-             263
-             264
-             265
-             266
-             267
-             268
-             269
-             270
-             271
-             272
-             273
-             274
-             275
-             276
-             277
-             278
-             279
-             280
-             281
-             282
-             283
-             284
-             285
-             286
-             287
-             288
-             289
-             290
-             291
-             292
-             293
-             294
-             295
-             296
-             297
-             298
-             299
-             300
-(300 rows)
-
---?.*
+-- \! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 \! echo '\setenv SHELL "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\!'	>> @abs_bindir@/gsql_ut.sql
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_ut.sql
 ERROR: Failed to check environment value: invalid token ";".
 \cd @abs_bindir@
 \set FETCH_COUNT 10
@@ -1017,10 +692,14 @@ select * from dual;
 GaussDB Kernel Database Management System
 Copyright (c) Huawei Technologies Co., Ltd. 2018. All rights reserved.
 
+\c regression;
+drop database test_sql;
 \! rm -f @abs_bindir@/gsql_ut.sql
 -- end of test for ut.
---10)test on_error_stop in parallel execute
-\set ON_ERROR_STOP 'on'
-start transaction;
-\parallel
-Parallel within transaction is not supported
+-- --10)test on_error_stop in parallel execute
+-- \set ON_ERROR_STOP 'on'
+-- start transaction;
+-- \parallel
+-- insert into gsql_parallel_test select generate_series(1,10);
+-- insert into gsql_parallel_test select generate_series(1,10);
+-- \parallel

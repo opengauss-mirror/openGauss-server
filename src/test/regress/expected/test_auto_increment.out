@@ -3371,34 +3371,34 @@ SELECT col1 FROM test_part_autoinc_pk ORDER BY 1;
 (23 rows)
 
 SELECT pg_catalog.pg_get_tabledef('test_part_autoinc_pk');
-                                  pg_get_tabledef                                  
------------------------------------------------------------------------------------
- SET search_path = public;                                                        +
- CREATE TABLE test_part_autoinc_pk (                                              +
-     col1 integer AUTO_INCREMENT NOT NULL,                                        +
-     col2 integer NOT NULL,                                                       +
-     col3 integer NOT NULL,                                                       +
-     CONSTRAINT test_part_autoinc_pk_pkey PRIMARY KEY (col1, col2)                +
- ) AUTO_INCREMENT = 3005                                                          +
- WITH (orientation=row, compression=no)                                           +
- PARTITION BY RANGE (col1) SUBPARTITION BY HASH (col2)                            +
- (                                                                                +
-     PARTITION col1_less_1000 VALUES LESS THAN (1000) TABLESPACE pg_default       +
-     (                                                                            +
-         SUBPARTITION p1_col2_hash1 TABLESPACE pg_default,                        +
-         SUBPARTITION p1_col2_hash2 TABLESPACE pg_default                         +
-     ),                                                                           +
-     PARTITION col1_mid_1000 VALUES LESS THAN (2000) TABLESPACE pg_default        +
-     (                                                                            +
-         SUBPARTITION p2_col2_hash1 TABLESPACE pg_default,                        +
-         SUBPARTITION p2_col2_hash2 TABLESPACE pg_default                         +
-     ),                                                                           +
-     PARTITION col1_greater_2000 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
-     (                                                                            +
-         SUBPARTITION p3_col2_hash1 TABLESPACE pg_default,                        +
-         SUBPARTITION p3_col2_hash2 TABLESPACE pg_default                         +
-     )                                                                            +
- )                                                                                +
+                          pg_get_tabledef                          
+-------------------------------------------------------------------
+ SET search_path = public;                                        +
+ CREATE TABLE test_part_autoinc_pk (                              +
+     col1 integer AUTO_INCREMENT NOT NULL,                        +
+     col2 integer NOT NULL,                                       +
+     col3 integer NOT NULL,                                       +
+     CONSTRAINT test_part_autoinc_pk_pkey PRIMARY KEY (col1, col2)+
+ ) AUTO_INCREMENT = 3005                                          +
+ WITH (orientation=row, compression=no)                           +
+ PARTITION BY RANGE (col1) SUBPARTITION BY HASH (col2)            +
+ (                                                                +
+     PARTITION col1_less_1000 VALUES LESS THAN (1000)             +
+     (                                                            +
+         SUBPARTITION p1_col2_hash1,                              +
+         SUBPARTITION p1_col2_hash2                               +
+     ),                                                           +
+     PARTITION col1_mid_1000 VALUES LESS THAN (2000)              +
+     (                                                            +
+         SUBPARTITION p2_col2_hash1,                              +
+         SUBPARTITION p2_col2_hash2                               +
+     ),                                                           +
+     PARTITION col1_greater_2000 VALUES LESS THAN (MAXVALUE)      +
+     (                                                            +
+         SUBPARTITION p3_col2_hash1,                              +
+         SUBPARTITION p3_col2_hash2                               +
+     )                                                            +
+ )                                                                +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -3703,20 +3703,20 @@ SELECT pg_catalog.pg_get_tabledef('test_part_autoinc_unique');
  WITH (orientation=row, compression=no)                                              +
  PARTITION BY RANGE (col2) SUBPARTITION BY HASH (col3)                               +
  (                                                                                   +
-     PARTITION col1_less_1000 VALUES LESS THAN (1000) TABLESPACE pg_default          +
+     PARTITION col1_less_1000 VALUES LESS THAN (1000)                                +
      (                                                                               +
-         SUBPARTITION p1_col2_hash1 TABLESPACE pg_default,                           +
-         SUBPARTITION p1_col2_hash2 TABLESPACE pg_default                            +
+         SUBPARTITION p1_col2_hash1,                                                 +
+         SUBPARTITION p1_col2_hash2                                                  +
      ),                                                                              +
-     PARTITION col1_mid_1000 VALUES LESS THAN (2000) TABLESPACE pg_default           +
+     PARTITION col1_mid_1000 VALUES LESS THAN (2000)                                 +
      (                                                                               +
-         SUBPARTITION p2_col2_hash1 TABLESPACE pg_default,                           +
-         SUBPARTITION p2_col2_hash2 TABLESPACE pg_default                            +
+         SUBPARTITION p2_col2_hash1,                                                 +
+         SUBPARTITION p2_col2_hash2                                                  +
      ),                                                                              +
-     PARTITION col1_greater_2000 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default   +
+     PARTITION col1_greater_2000 VALUES LESS THAN (MAXVALUE)                         +
      (                                                                               +
-         SUBPARTITION p3_col2_hash1 TABLESPACE pg_default,                           +
-         SUBPARTITION p3_col2_hash2 TABLESPACE pg_default                            +
+         SUBPARTITION p3_col2_hash1,                                                 +
+         SUBPARTITION p3_col2_hash2                                                  +
      )                                                                               +
  )                                                                                   +
  ENABLE ROW MOVEMENT;

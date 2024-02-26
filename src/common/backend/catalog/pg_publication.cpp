@@ -56,9 +56,11 @@ static inline bool IsInternalSchema(Oid relnamespace)
     Assert(PG_DB4AI_NAMESPACE < PG_PLDEBUG_NAMESPACE);
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(PG_PLDEBUG_NAMESPACE < DBE_PLDEVELOPER_NAMESPACE);
-    Assert(DBE_PLDEVELOPER_NAMESPACE < PG_SQLADVISOR_NAMESPACE);
+    Assert(DBE_PLDEVELOPER_NAMESPACE < PROC_COVERAGE_NAMESPACE);
+    Assert(PROC_COVERAGE_NAMESPACE < PG_SQLADVISOR_NAMESPACE);
 #else
-    Assert(PG_PLDEBUG_NAMESPACE < PG_SQLADVISOR_NAMESPACE);
+    Assert(PG_PLDEBUG_NAMESPACE < PROC_COVERAGE_NAMESPACE);
+    Assert(PROC_COVERAGE_NAMESPACE < PG_SQLADVISOR_NAMESPACE);
 #endif
 
     /* please make sure the list is ordered */
@@ -73,6 +75,7 @@ static inline bool IsInternalSchema(Oid relnamespace)
 #ifndef ENABLE_MULTIPLE_NODES
         DBE_PLDEVELOPER_NAMESPACE,
 #endif
+        PROC_COVERAGE_NAMESPACE,
         PG_SQLADVISOR_NAMESPACE
     };
     static size_t count = lengthof(internalSchemaList);
@@ -141,7 +144,7 @@ static Publication *GetPublication(Oid pubid)
     pub->pubactions.pubinsert = pubform->pubinsert;
     pub->pubactions.pubupdate = pubform->pubupdate;
     pub->pubactions.pubdelete = pubform->pubdelete;
-
+    pub->pubactions.pubddl = pubform->pubddl;
     ReleaseSysCache(tup);
 
     return pub;

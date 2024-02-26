@@ -75,7 +75,10 @@ typedef enum {
     RBM_ZERO_ON_ERROR,         /* Read, but return an all-zeros page on error */
     RBM_NORMAL_NO_LOG,         /* Don't log page as invalid during WAL
                                 * replay; otherwise same as RBM_NORMAL */
-    RBM_FOR_REMOTE             /* Like RBM_NORMAL, but not remote read again when PageIsVerified failed. */
+    RBM_FOR_REMOTE,            /* Like RBM_NORMAL, but not remote read again when PageIsVerified failed. */
+    RBM_FOR_ONDEMAND_REALTIME_BUILD  /* Like RBM_NORMAL, only used in ondemand realtime time
+                                      * build (shared storage mode), need newest page by DMS,
+                                      * but do not load from disk */
 } ReadBufferMode;
 
 typedef enum
@@ -262,6 +265,9 @@ static inline Buffer BlockGetBuffer(const char *block)
 
 void shared_buffer_write_error_callback(void *arg);
 
+/* DMS max try eliminate buffer ctrl times in once*/
+#define TRY_ELIMINATE_BUF_TIMES 5
+
 /*
  * prototypes for functions in bufmgr.c
  */
@@ -273,6 +279,8 @@ extern void PageListPrefetch(
 extern Buffer ReadBuffer(Relation reln, BlockNumber blockNum);
 extern Buffer ReadBufferExtended(
     Relation reln, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode, BufferAccessStrategy strategy);
+extern Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                                     BufferAccessStrategy strategy, int maxBulkCount, bool isVacuum);
 extern Buffer ReadBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, const XLogPhyBlock *pblk);
 extern Buffer ReadUndoBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
@@ -433,6 +441,9 @@ BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, F
                         BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
 Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber firstBlockNum,
+    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, int maxBulkCount, const XLogPhyBlock *pblk, int paramNum, char* bufRead);
 void buffer_in_progress_pop();
 void buffer_in_progress_push();
+void SSTryEliminateBuf(uint64 times);
 #endif

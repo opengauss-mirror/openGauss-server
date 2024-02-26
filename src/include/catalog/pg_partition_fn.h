@@ -268,7 +268,7 @@ extern void  releasePartitionList(Relation relation, List** partList, LOCKMODE l
 extern void  releaseSubPartitionList(Relation relation, List** partList, LOCKMODE lockmode);
 extern void releasePartitionOidList(List** partList);
 extern void ReleaseSubPartitionOidList(List** partList);
-extern bool PartExprKeyIsNull(Relation rel, Relation partitionRel, char** partExprKeyStr = NULL);
+extern bool PartExprKeyIsNull(Relation rel, char** partExprKeyStr = NULL);
 
 #endif
 

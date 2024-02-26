@@ -382,7 +382,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         return BUILD_FATAL;
     }
 
-    fprintf(stderr, "Begin fetching files \n");
+    fprintf(stdout, "Begin fetching files \n");
     pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReportIncrementalBuild, NULL);
 
@@ -508,7 +508,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThread, NULL);
 
-    fprintf(stderr, "Finish fetching files \n");
+    fprintf(stdout, "Finish fetching files \n");
 
     return BUILD_SUCCESS;
 }
@@ -1331,19 +1331,23 @@ bool checkDummyStandbyConnection(void)
  */
 static void *ProgressReportIncrementalBuild(void *arg)
 {
-    char progressBar[52];
+    if (fetch_size == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(fetch_done * 100 / fetch_size);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%dKB). fetch files \r",
-            progressBar, percent, fetch_done, fetch_size);
+        fprintf(stdout, "Progress: %s %d%% (%lu/%luKB). fetch files \r",
+            progressBar, percent, fetch_done / 1024, fetch_size /1024);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -1354,6 +1358,7 @@ static void *ProgressReportIncrementalBuild(void *arg)
     } while ((fetch_done < fetch_size) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%dKB). fetch files \n",
-            progressBar, percent, fetch_done, fetch_size);
+    fprintf(stdout, "Progress: %s %d%% (%lu/%luKB). fetch files \n",
+            progressBar, percent, fetch_done /1024, fetch_size / 1024);
+    return nullptr;
 }

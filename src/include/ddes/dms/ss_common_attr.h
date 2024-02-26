@@ -37,6 +37,7 @@
 #define ENABLE_VERIFY_PAGE_VERSION false
 #define ENABLE_SS_TXNSTATUS_CACHE false
 #define ENABLE_SS_BCAST_SNAPSHOT false
+#define SS_SINGLE_CLUSTER false
 #else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_REFORM (g_instance.attr.attr_storage.dms_attr.enable_reform)
@@ -74,14 +75,14 @@
 
 #define SS_IN_FLUSHCOPY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == true)
 
-#define SS_STANDBY_FAILOVER (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
+#define SS_STANDBY_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
 
 #define SS_PRIMARY_NORMAL_REFORM \
     (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
 
 #define SS_PERFORMING_SWITCHOVER \
-    (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState > NODESTATE_NORMAL && \
-    g_instance.dms_cxt.SSClusterState != NODESTATE_STANDBY_FAILOVER_PROMOTING))
+    (ENABLE_DMS && SS_IN_REFORM && \
+    (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS))
 
 #define SS_STANDBY_PROMOTING \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING))
@@ -129,6 +130,10 @@
 #define BUF_READ_MODE_ZERO_LOCK    0x80
 #define BUF_DIRTY_NEED_FLUSH    0x100
 #define BUF_ERTO_NEED_MARK_DIRTY    0x200
+
+#define BUF_READ_MODE_ONDEMAND_REALTIME_BUILD    0x400
+/* mark buffer is pinned in ondemand realtime build, which do not allow eliminated */
+#define BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED    0x800
 
 #define SS_BROADCAST_FAILED_RETRYCOUNTS 4
 #define SS_BROADCAST_WAIT_INFINITE (0xFFFFFFFF)

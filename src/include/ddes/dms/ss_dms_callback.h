@@ -24,14 +24,25 @@
 #define SS_DMS_CALLBACK_H
 
 #include "ss_common_attr.h"
+#include "storage/lock/s_lock.h"
 
 /* 5 seconds */
 #define REFORM_CONFIRM_TIMEOUT  5000000
 #define REFORM_CONFIRM_INTERVAL 5000
 #define GET_US(tv) ((int64)tv.tv_sec * 1000000U + tv.tv_usec)
 #define DMS_LOGGER_BUFFER_SIZE 2048
+#define REFORM_START_CLEAN_TICKS 100
+
+typedef struct st_ss_fake_seesion_context {
+    slock_t lock;
+    bool *fake_sessions;
+    uint32 fake_session_cnt;
+    uint32 quickFetchIndex;
+    uint32 session_start;
+} ss_fake_seesion_context_t;
 
 extern void DmsInitCallback(dms_callback_t *callback);
 extern void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data);
+void DmsThreadDeinit();
 
 #endif

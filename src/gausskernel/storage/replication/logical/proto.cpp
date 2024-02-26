@@ -629,3 +629,44 @@ void logicalrep_read_conninfo(StringInfo in, char** conninfo)
     int rc = strcpy_s(*conninfo, conninfoLen, conninfoTemp);
     securec_check(rc, "", "");
 }
+
+/*
+ * Read DDL MESSAGE from stream
+ */
+char *
+logicalrep_read_ddl(StringInfo in, XLogRecPtr *lsn,
+                    const char **prefix,
+                    Size *sz)
+{
+    uint8 flags;
+    char *msg;
+
+    flags = pq_getmsgint(in, 1);
+    if (flags != 0)
+        elog(ERROR, "unrecognized flags %u in ddl message", flags);
+
+    *lsn = pq_getmsgint64(in);
+    *prefix = pq_getmsgstring(in);
+    *sz = pq_getmsgint64(in);
+    msg = (char *)pq_getmsgbytes(in, *sz);
+
+    return msg;
+}
+
+/*
+ * Write DDL MESSAGE to stream
+ */
+void
+logicalrep_write_ddl(StringInfo out, XLogRecPtr lsn,
+                        const char *prefix, Size sz, const char *message)
+{
+    uint8 flags = 0;
+
+    pq_sendbyte(out, LOGICAL_REP_MSG_DDL);
+
+    pq_sendint8(out, flags);
+    pq_sendint64(out, lsn);
+    pq_sendstring(out, prefix);
+    pq_sendint64(out, sz);
+    pq_sendbytes(out, message, sz);
+}

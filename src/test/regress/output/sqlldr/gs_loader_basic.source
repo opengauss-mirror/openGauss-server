@@ -54,13 +54,13 @@ select * from SQLLDR_TBL order by 1,2,3,4;
 \! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=3
 ERROR: after transform: BEGIN;
 \COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '3' WHEN (2-2) = ',' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
-select 'copy_txid:'||txid_current();
+select 'copy_txid:'||pg_catalog.txid_current();
 COMMIT;
 ERROR: BEGIN
-gsql:.gs_loader_file.tmp:17: ERROR:  date/time field value out of range: "2007-37-8"
+gsql:.gs_loader_file.tmp:2: ERROR:  date/time field value out of range: "2007-37-8"
 HINT:  Perhaps you need a different "datestyle" setting.
 CONTEXT:  COPY sqlldr_tbl, line 12, column dt: "2007-37-8"
-gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+gsql:.gs_loader_file.tmp:3: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 ROLLBACK
 select * from SQLLDR_TBL order by 1,2,3,4;
  id | name | con | dt 
@@ -165,42 +165,42 @@ select * from SQLLDR_TBL order by 1,2,3,4;
 \! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_greater.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
 ERROR: after transform: BEGIN;
 \COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name > 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
-select 'copy_txid:'||txid_current();
+select 'copy_txid:'||pg_catalog.txid_current();
 COMMIT;
 ERROR: BEGIN
-gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+gsql:.gs_loader_file.tmp:2: ERROR:  WHEN field oper error
 CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
-gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+gsql:.gs_loader_file.tmp:3: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 ROLLBACK
 \! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_ge.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
 ERROR: after transform: BEGIN;
 \COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name >= 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
-select 'copy_txid:'||txid_current();
+select 'copy_txid:'||pg_catalog.txid_current();
 COMMIT;
 ERROR: BEGIN
-gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+gsql:.gs_loader_file.tmp:2: ERROR:  WHEN field oper error
 CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
-gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+gsql:.gs_loader_file.tmp:3: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 ROLLBACK
 \! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_less.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
 ERROR: after transform: BEGIN;
 \COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name < 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
-select 'copy_txid:'||txid_current();
+select 'copy_txid:'||pg_catalog.txid_current();
 COMMIT;
 ERROR: BEGIN
-gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+gsql:.gs_loader_file.tmp:2: ERROR:  WHEN field oper error
 CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
-gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+gsql:.gs_loader_file.tmp:3: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 ROLLBACK
 \! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_le.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
 ERROR: after transform: BEGIN;
 \COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name <= 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
-select 'copy_txid:'||txid_current();
+select 'copy_txid:'||pg_catalog.txid_current();
 COMMIT;
 ERROR: BEGIN
-gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+gsql:.gs_loader_file.tmp:2: ERROR:  WHEN field oper error
 CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
-gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+gsql:.gs_loader_file.tmp:3: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 ROLLBACK
 -- table mode(truncate/insert/replace/append)
 truncate table SQLLDR_TBL;

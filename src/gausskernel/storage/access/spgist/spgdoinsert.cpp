@@ -139,7 +139,7 @@ void spgPageIndexMultiDelete(SpGistState *state, Page page, OffsetNumber *itemno
      * replacement tuples.)  However, we must not scribble on the caller's
      * array, so we have to make a copy.
      */
-    errorno = memcpy_s(sortednos, MaxIndexTuplesPerPage, itemnos, sizeof(OffsetNumber) * nitems);
+    errorno = memcpy_s(sortednos, sizeof(OffsetNumber) * MaxIndexTuplesPerPage, itemnos, sizeof(OffsetNumber) * nitems);
     securec_check(errorno, "\0", "\0");
     if (nitems > 1) {
         qsort(sortednos, nitems, sizeof(OffsetNumber), cmpOffsetNumbers);

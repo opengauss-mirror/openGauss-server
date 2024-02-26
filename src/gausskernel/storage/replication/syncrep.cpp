@@ -56,7 +56,7 @@
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
 #include "replication/shared_storage_walreceiver.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -174,7 +174,8 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
      * return true.
      */
     if (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync ||
-        u_sess->attr.attr_storage.catchup2normal_wait_time < 0) {
+        u_sess->attr.attr_storage.catchup2normal_wait_time < 0 ||
+        pg_atomic_read_u32(&g_instance.noNeedWaitForCatchup) == 1) {
         return true;
     }
 
@@ -207,13 +208,6 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  */
 SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
-    /* Check sync replication through XLogWaitFlush if uwal enabled.
-     * Fast exit.
-     */
-    if (g_instance.attr.attr_storage.enable_uwal) {
-        return REPSYNCED;
-    }
-
     char *new_status = NULL;
     const char *old_status = NULL;
     int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;
@@ -224,7 +218,7 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      * sync replication standby names defined. Note that those standbys don't
      * need to be connected.
      */
-    if (ENABLE_DMS || !u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() ||
+    if ((ENABLE_DMS && !SS_STREAM_CLUSTER) || !u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() ||
         !SyncStandbysDefined() || (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
         return NOT_REQUEST;
 
@@ -256,7 +250,7 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         return REPSYNCED;
     }
     if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !DelayIntoMostAvaSync(false) &&
-        !IS_SHARED_STORAGE_MODE && !SS_REPLICATION_DORADO_CLUSTER) {
+        !IS_SHARED_STORAGE_MODE && !SS_DORADO_CLUSTER) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return STAND_ALONE;
@@ -956,6 +950,7 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
     num_standbys = SyncRepGetSyncStandbys(&sync_standbys, &catchup_standbys);
     /* Skip here if there is at lease one sync standby, or no standby in catchup. */
     if (check_sync_standbys_num(sync_standbys, num_standbys) != STANDBIES_EMPTY || list_length(catchup_standbys) == 0) {
+        pg_atomic_exchange_u32(&g_instance.noNeedWaitForCatchup, 1);
         pfree(sync_standbys);
         list_free(catchup_standbys);
         return false;
@@ -1130,6 +1125,9 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     }
 
     group_len = list_length(stby_list);
+    if (group_len == 0) {
+        return;
+    }
 
     receive_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * group_len);
     write_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * group_len);

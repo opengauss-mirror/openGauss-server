@@ -47,7 +47,7 @@
 #include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "replication/syncrep.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
@@ -397,7 +397,7 @@ void CheckpointerMain(void)
             u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                               ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                               : u_sess->attr.attr_storage.fullCheckPointTimeout;
-
+            most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
             /*
              * Checkpointer is the last process to shut down, so we ask it to
              * hold the keys for a range of other tasks required most of which
@@ -543,7 +543,7 @@ void CheckpointerMain(void)
                 } else {
                     CheckPointBuffers(flags, true);
                 }
-            } else if (!do_restartpoint && !SS_REPLICATION_STANDBY_CLUSTER) {
+            } else if (!do_restartpoint && !SS_DISASTER_STANDBY_CLUSTER) {
                 CreateCheckPoint(flags);
                 ckpt_performed = true;
                 if (!bgwriter_first_startup && CheckFpwBeforeFirstCkpt()) {
@@ -740,6 +740,7 @@ void CheckpointWriteDelay(int flags, double progress)
         if (t_thrd.checkpoint_cxt.got_SIGHUP) {
             t_thrd.checkpoint_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
+            most_available_sync = (volatile bool)u_sess->attr.attr_storage.guc_most_available_sync;
             /* update shmem copies of config variables */
             UpdateSharedMemoryConfig();
         }
@@ -816,7 +817,7 @@ static bool IsCheckpointOnSchedule(double progress)
     if (!RecoveryInProgress()) {
         recptr = GetInsertRecPtr();
         elapsed_xlogs = (((double)(recptr - t_thrd.checkpoint_cxt.ckpt_start_recptr)) / XLogSegSize) /
-                        XLogSegmentsNum(u_sess->attr.attr_storage.CheckPointSegments);
+                        (u_sess->attr.attr_storage.CheckPointSegments);
 
         if (progress < elapsed_xlogs) {
             t_thrd.checkpoint_cxt.ckpt_cached_elapsed = elapsed_xlogs;
@@ -1459,6 +1460,20 @@ bool FirstCallSinceLastCheckpoint(void)
     t_thrd.checkpoint_cxt.ckpt_done = new_done;
 
     return FirstCall;
+}
+
+bool CheckpointInProgress(void)
+{
+    bool inProgress = false;
+    volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
+    SpinLockAcquire(&cps->ckpt_lck);
+    if (cps->ckpt_done != cps->ckpt_started) {
+        inProgress = true;
+    }
+    SpinLockRelease(&cps->ckpt_lck);
+    ereport(LOG, (errmsg("CheckpointInProgress: ckpt_done=%d, ckpt_started=%d",
+        cps->ckpt_done, cps->ckpt_started)));
+    return inProgress;
 }
 
 #ifdef ENABLE_MOT

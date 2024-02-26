@@ -154,6 +154,8 @@
 typedef short color; /* colors of characters */
 typedef int pcolor;  /* what color promotes to */
 
+
+#define MAX_COLOR 32767 /* max color (must fit in 'color' datatype) */
 #define COLORLESS (-1) /* impossible color */
 #define WHITE 0        /* default color, parent of all others */
 
@@ -195,11 +197,12 @@ union tree {
  * less than colormap.max.	Any array entries beyond "max" are just garbage.
  */
 struct colordesc {
-    uchr nchrs;         /* number of chars of this color */
+    int nschrs;         /* number of simple chars of this color */
+    int nuchrs;         /* number of upper map entries of this color */
     color sub;          /* open subcolor, if any; or free-chain ptr */
 #define NOSUB COLORLESS /* value of "sub" when no open subcolor */
     struct arc* arcs;   /* chain of all arcs of this color */
-    chr firstchr;       /* char first assigned to this color */
+    chr firstchr;       /* simple char first assigned to this color */
     int flags;          /* bit values defined next */
 #define FREECOL 01      /* currently free */
 #define PSEUDO 02       /* pseudocolor, no real chars */
@@ -210,41 +213,70 @@ struct colordesc {
 /*
  * The color map itself
  *
- * Much of the data in the colormap struct is only used at compile time.
- * However, the bulk of the space usage is in the "tree" structure, so it's
- * not clear that there's much point in converting the rest to a more compact
- * form when compilation is finished.
+ * This struct holds both data used only at compile time, and the chr to
+ * color mapping information, used at both compile and run time.  The latter
+ * is the bulk of the space, so it's not really worth separating out the
+ * compile-only portion.
+ *
+ * Ideally, the mapping data would just be an array of colors indexed by
+ * chr codes; but for large character sets that's impractical.  Fortunately,
+ * common characters have smaller codes, so we can use a simple array for chr
+ * codes up to MAX_SIMPLE_CHR, and do something more complex for codes above
+ * that, without much loss of performance.  The "something more complex" is a
+ * 2-D array of color entries, where row indexes correspond to individual chrs
+ * or chr ranges that have been mentioned in the regex (with row zero
+ * representing all other chrs), and column indexes correspond to different
+ * sets of locale-dependent character classes such as "isalpha".  The
+ * classbits[k] entry is zero if we do not care about the k'th character class
+ * in this regex, and otherwise it is the bit to be OR'd into the column index
+ * if the character in question is a member of that class.  We find the color
+ * of a high-valued chr by identifying which colormaprange it is in to get
+ * the row index (use row zero if it's in none of them), identifying which of
+ * the interesting cclasses it's in to get the column index, and then indexing
+ * into the 2-D hicolormap array.
+ *
+ * The colormapranges are required to be nonempty, nonoverlapping, and to
+ * appear in increasing chr-value order.
  */
+
+#define NUM_CCLASSES 13 /* must match data in regc_locale.c */
+
+typedef struct colormaprange {
+    chr cmin; /* range represents cmin..cmax inclusive */
+    chr cmax;
+    int rownum; /* row index in hicolormap array (>= 1) */
+} colormaprange;
+
 struct colormap {
     int magic;
 #define CMMAGIC 0x876
-    struct vars* v;       /* for compile error reporting */
+    struct vars *v;       /* for compile error reporting */
     size_t ncds;          /* allocated length of colordescs array */
     size_t max;           /* highest color number currently in use */
     color free;           /* beginning of free chain (if non-0) */
-    struct colordesc* cd; /* pointer to array of colordescs */
+    struct colordesc *cd; /* pointer to array of colordescs */
 #define CDEND(cm) (&(cm)->cd[(cm)->max + 1])
+
+    /* mapping data for chrs <= MAX_SIMPLE_CHR: */
+    color *locolormap; /* simple array indexed by chr code */
+
+    /* mapping data for chrs > MAX_SIMPLE_CHR: */
+    int classbits[NUM_CCLASSES]; /* see comment above */
+    int numcmranges;             /* number of colormapranges */
+    colormaprange* cmranges;     /* ranges of high chrs */
+    color *hicolormap;           /* 2-D array of color entries */
+    int maxarrayrows;            /* number of array rows allocated */
+    int hiarrayrows;             /* number of array rows in use */
+    int hiarraycols;             /* number of array columns (2^N) */
+
     /* If we need up to NINLINECDS, we store them here to save a malloc */
 #define NINLINECDS ((size_t)10)
     struct colordesc cdspace[NINLINECDS];
     union tree tree[NBYTS]; /* tree top, plus lower-level fill blocks */
 };
 
-/* optimization magic to do fast chr->color mapping */
-#define B0(c) ((c)&BYTMASK)
-#define B1(c) (((c) >> BYTBITS) & BYTMASK)
-#define B2(c) (((c) >> (2 * BYTBITS)) & BYTMASK)
-#define B3(c) (((c) >> (3 * BYTBITS)) & BYTMASK)
-#if NBYTS == 1
-#define GETCOLOR(cm, c) ((cm)->tree->tcolor[B0(c)])
-#endif
-/* beware, for NBYTS>1, GETCOLOR() is unsafe -- 2nd arg used repeatedly */
-#if NBYTS == 2
-#define GETCOLOR(cm, c) ((cm)->tree->tptr[B1(c)]->tcolor[B0(c)])
-#endif
-#if NBYTS == 4
-#define GETCOLOR(cm, c) ((cm)->tree->tptr[B3(c)]->tptr[B2(c)]->tptr[B1(c)]->tcolor[B0(c)])
-#endif
+/* fetch color for chr; beware of multiple evaluation of c argument */
+#define GETCOLOR(cm, c) ((c) <= MAX_SIMPLE_CHR ? (cm)->locolormap[(c)-CHR_MIN] : pg_reg_getcolor(cm, c))
 
 /*
  * Interface definitions for locale-interface functions in regc_locale.c.
@@ -253,6 +285,11 @@ struct colormap {
 /*
  * Representation of a set of characters.  chrs[] represents individual
  * code points, ranges[] represents ranges in the form min..max inclusive.
+ *
+ * If the cvec represents a locale-specific character class, eg [[:alpha:]],
+ * then the chrs[] and ranges[] arrays contain only members of that class
+ * up to MAX_SIMPLE_CHR (inclusive).  cclasscode is set to regc_locale.c's
+ * code for the class, rather than being -1 as it is in an ordinary cvec.
  *
  * Note that in cvecs gotten from newcvec() and intended to be freed by
  * freecvec(), both arrays of chrs are after the end of the struct, not
@@ -265,6 +302,7 @@ struct cvec {
     int nranges;    /* number of ranges (chr pairs) */
     int rangespace; /* number of ranges allocated in ranges[] */
     chr* ranges;    /* pointer to vector of chr pairs */
+	int cclasscode; /* value of "enum classes", or -1 */
 };
 
 /*
@@ -457,3 +495,7 @@ struct guts {
     int nlacons;          /* size of lacons[]; note that only slots
                            * numbered 1 .. nlacons-1 are used */
 };
+
+/* prototypes for functions that are exported from regcomp.c to regexec.c */
+extern void pg_set_regex_collation(Oid collation);
+extern color pg_reg_getcolor(struct colormap * cm, chr c);

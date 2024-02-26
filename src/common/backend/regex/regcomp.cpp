@@ -55,7 +55,6 @@ static void cbracket(struct vars*, struct state*, struct state*);
 static void brackpart(struct vars*, struct state*, struct state*);
 static const chr* scanplain(struct vars*);
 static void onechr(struct vars*, chr, struct state*, struct state*);
-static void dovec(struct vars*, struct cvec*, struct state*, struct state*);
 static void wordchrs(struct vars*);
 static void processlacon(struct vars*, struct state*, struct state*, int, struct state*, struct state*);
 static struct subre* subre(struct vars*, int, int, struct state*, struct state*);
@@ -94,15 +93,19 @@ static chr chrnamed(struct vars*, const chr*, const chr*, chr);
 static void initcm(struct vars*, struct colormap*);
 static void freecm(struct colormap*);
 static void cmtreefree(struct colormap*, union tree*, int);
-static color setcolor(struct colormap*, chr, pcolor);
 static color maxcolor(struct colormap*);
 static color newcolor(struct colormap*);
 static void freecolor(struct colormap*, pcolor);
 static color pseudocolor(struct colormap*);
 static color subcolor(struct colormap*, chr c);
+static color subcolorhi(struct colormap*, color*);
 static color newsub(struct colormap*, pcolor);
-static void subrange(struct vars*, chr, chr, struct state*, struct state*);
-static void subblock(struct vars*, chr, struct state*, struct state*);
+static int newhicolorrow(struct colormap*, int);
+static void newhicolorcols(struct colormap*);
+static void subcolorcvec(struct vars*, struct cvec*, struct state*, struct state*);
+static void subcoloronechr(struct vars*, chr, struct state*, struct state*, color*);
+static void subcoloronerange(struct vars*, chr, chr, struct state*, struct state*, color*);
+static void subcoloronerow(struct vars*, int, struct state*, struct state*, color*);
 static void okcolors(struct nfa*, struct colormap*);
 static void colorchain(struct colormap*, struct arc*);
 static void uncolorchain(struct colormap*, struct arc*);
@@ -213,6 +216,7 @@ static struct cvec* cclass(struct vars*, const chr*, const chr*, int);
 static struct cvec* allcases(struct vars*, chr);
 static int cmp(const chr*, const chr*, size_t);
 static int casecmp(const chr*, const chr*, size_t);
+static int cclass_column_index(struct colormap *, chr);
 
 /* internal variables, bundled for easy passing around */
 struct vars {
@@ -1379,7 +1383,7 @@ static void brackpart(struct vars* v, struct state* lp, struct state* rp)
             NOERR();
             cv = eclass(v, startc, (v->cflags & REG_ICASE));
             NOERR();
-            dovec(v, cv, lp, rp);
+            subcolorcvec(v, cv, lp, rp);
             return;
             break;
         case CCLASS:
@@ -1389,7 +1393,7 @@ static void brackpart(struct vars* v, struct state* lp, struct state* rp)
             NOERR();
             cv = cclass(v, startp, endp, (v->cflags & REG_ICASE));
             NOERR();
-            dovec(v, cv, lp, rp);
+            subcolorcvec(v, cv, lp, rp);
             return;
             break;
         default:
@@ -1432,7 +1436,7 @@ static void brackpart(struct vars* v, struct state* lp, struct state* rp)
         NOTE(REG_UUNPORT);
     cv = range(v, startc, endc, (v->cflags & REG_ICASE));
     NOERR();
-    dovec(v, cv, lp, rp);
+    subcolorcvec(v, cv, lp, rp);
 }
 
 /*
@@ -1468,38 +1472,14 @@ static const chr* scanplain(struct vars* v)
 static void onechr(struct vars* v, chr c, struct state* lp, struct state* rp)
 {
     if (!(v->cflags & REG_ICASE)) {
-        newarc(v->nfa, PLAIN, subcolor(v->cm, c), lp, rp);
+        color lastsubcolor = COLORLESS;
+
+        subcoloronechr(v, c, lp, rp, &lastsubcolor);
         return;
     }
 
     /* rats, need general case anyway... */
-    dovec(v, allcases(v, c), lp, rp);
-}
-
-/*
- * dovec - fill in arcs for each element of a cvec
- */
-static void dovec(struct vars* v, struct cvec* cv, struct state* lp, struct state* rp)
-{
-    chr ch, from, to;
-    const chr* p = NULL;
-    int i;
-
-    /* ordinary characters */
-    for (p = cv->chrs, i = cv->nchrs; i > 0; p++, i--) {
-        ch = *p;
-        newarc(v->nfa, PLAIN, subcolor(v->cm, ch), lp, rp);
-        NOERR();
-    }
-
-    /* and the ranges */
-    for (p = cv->ranges, i = cv->nranges; i > 0; p += 2, i--) {
-        from = *p;
-        to = *(p + 1);
-        if (from <= to)
-            subrange(v, from, to, lp, rp);
-        NOERR();
-    }
+    subcolorcvec(v, allcases(v, c), lp, rp);
 }
 
 /*

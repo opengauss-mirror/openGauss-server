@@ -339,7 +339,20 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
     CHECK_FOR_INTERRUPTS();
 
     /* read page using selected strategy */
-    scan->rs_base.rs_cbuf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, scan->rs_base.rs_strategy);
+    if (u_sess->attr.attr_storage.heap_bulk_read_size > 0 
+        && ScanDirectionIsForward(scan->bulk_scan_direction) 
+        && page != scan->rs_base.rs_startblock
+        && !(IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker())) {
+        int maxBulkBlockCount = scan->rs_base.rs_nblocks - page;
+        if (scan->rs_base.rs_strategy != NULL) {
+            maxBulkBlockCount = Min(scan->rs_base.rs_strategy->ring_size, maxBulkBlockCount);
+        }
+        /* The entry of pre-read */
+        scan->rs_base.rs_cbuf = MultiReadBufferExtend(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, 
+            scan->rs_base.rs_strategy, maxBulkBlockCount, false);
+    } else {
+        scan->rs_base.rs_cbuf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, scan->rs_base.rs_strategy);
+    }
     scan->rs_base.rs_cblock = page;
 
     if (!scan->rs_base.rs_pageatatime) {
@@ -782,6 +795,9 @@ static void heapgettup(HeapScanDesc scan, ScanDirection dir, int nkeys, ScanKey 
     int lines_left;
     ItemId lpp;
 
+    /* record the bulk read direction */
+    scan->bulk_scan_direction = dir;
+
     if (tuple != NULL) {
         Assert(TUPLE_IS_HEAP_TUPLE(tuple));
     }
@@ -1023,6 +1039,9 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
     OffsetNumber line_off;
     int lines_left;
     ItemId lpp;
+
+    /* record the bulk read direction */
+    scan->bulk_scan_direction = dir;
 
     Assert(tuple != NULL && TUPLE_IS_HEAP_TUPLE(tuple));
 
@@ -7832,7 +7851,7 @@ TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uin
 {
     if (ENABLE_DMS) {
         /* fetch TXN info locally if either reformer, original primary, or normal primary */
-        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        bool local_fetch = SSCanFetchLocalSnapshotTxnRelatedInfo();
         if (!local_fetch) {
             return SSMultiXactIdGetUpdateXid(xmax, t_infomask, t_infomask2);
         }
@@ -9148,8 +9167,10 @@ static void heap_xlog_insert(XLogReaderState* record)
      * the page from scratch.
      */
     if (isinit) {
-        XLogInitBufferForRedo(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
-        action = BLK_NEEDS_REDO;
+        action = SSCheckInitPageXLog(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
+        }
     } else {
         action = XLogReadBufferForRedo(record, HEAP_INSERT_ORIG_BLOCK_NUM, &buffer);
     }
@@ -9219,8 +9240,10 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
     }
 
     if (isinit) {
-        XLogInitBufferForRedo(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
-        action = BLK_NEEDS_REDO;
+        action = SSCheckInitPageXLog(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
+        }
     } else {
         action = XLogReadBufferForRedo(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM, &buffer);
     }
@@ -9326,8 +9349,10 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         nbuffer = obuffer;
         newaction = oldaction;
     } else if (isinit) {
-        XLogInitBufferForRedo(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
-        newaction = BLK_NEEDS_REDO;
+        newaction = SSCheckInitPageXLog(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
+        if (newaction == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
+        }
     } else {
         newaction = XLogReadBufferForRedo(record, HEAP_UPDATE_NEW_BLOCK_NUM, &nbuffer);
     }

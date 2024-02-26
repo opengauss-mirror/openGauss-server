@@ -36,10 +36,10 @@ bool isPartKeyValuesInListPartition(
     ListPartitionMap *partMap, Const **partKeyValues, const int partkeyColumnNum, const int partSeq)
 {
     Assert(partMap && partKeyValues);
-    Assert(partkeyColumnNum == partMap->partitionKey->dim1);
+    Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int sourcePartSeq = -1;
-    Oid sourceOid = getListPartitionOid(&partMap->type, partKeyValues, partkeyColumnNum, &sourcePartSeq, true);
+    Oid sourceOid = getListPartitionOid(&partMap->base, partKeyValues, partkeyColumnNum, &sourcePartSeq);
     if (sourcePartSeq < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -58,10 +58,10 @@ bool isPartKeyValuesInHashPartition(Relation partTableRel, const HashPartitionMa
     const int partkeyColumnNum, const int partSeq)
 {
     Assert(partMap && partKeyValues);
-    Assert(partkeyColumnNum == partMap->partitionKey->dim1);
+    Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int sourcePartSeq = -1;
-    Oid sourceOid = getHashPartitionOid(partTableRel->partMap, partKeyValues, &sourcePartSeq, true);
+    Oid sourceOid = getHashPartitionOid(partTableRel->partMap, partKeyValues, &sourcePartSeq);
     if (sourcePartSeq < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -81,8 +81,8 @@ static bool checkTupleIsInListPartition(Relation partTableRel, int partSeq, Tupl
     int2vector* partkeyColumns = NULL;
     int partkeyColumnNum = 0;
     int i = 0;
-    Const* tuplePartKeyValues[LIST_PARTKEYMAXNUM];
-    Const consts[LIST_PARTKEYMAXNUM];
+    Const* tuplePartKeyValues[MAX_LIST_PARTKEY_NUMS];
+    Const consts[MAX_LIST_PARTKEY_NUMS];
     Datum tuplePartKeyValue;
     bool isNull = false;
     bool isInPartition = false;
@@ -95,7 +95,7 @@ static bool checkTupleIsInListPartition(Relation partTableRel, int partSeq, Tupl
     incre_partmap_refcount(partTableRel->partMap);
     partMap = (ListPartitionMap *)(partTableRel->partMap);
 
-    partkeyColumns = partMap->partitionKey;
+    partkeyColumns = partMap->base.partitionKey;
     partkeyColumnNum = partkeyColumns->dim1;
 
     for (i = 0; i < partkeyColumnNum; i++) {
@@ -117,8 +117,8 @@ static bool checkTupleIsInHashPartition(Relation partTableRel, int partSeq, Tupl
     int2vector* partkeyColumns = NULL;
     int partkeyColumnNum = 0;
     int i = 0;
-    Const* tuplePartKeyValues[HASH_PARTKEYMAXNUM];
-    Const consts[HASH_PARTKEYMAXNUM];
+    Const* tuplePartKeyValues[MAX_HASH_PARTKEY_NUMS];
+    Const consts[MAX_HASH_PARTKEY_NUMS];
     Datum tuplePartKeyValue;
     bool isNull = false;
     bool isInPartition = false;
@@ -129,7 +129,7 @@ static bool checkTupleIsInHashPartition(Relation partTableRel, int partSeq, Tupl
     incre_partmap_refcount(partTableRel->partMap);
     partMap = (HashPartitionMap *)(partTableRel->partMap);
 
-    partkeyColumns = partMap->partitionKey;
+    partkeyColumns = partMap->base.partitionKey;
     partkeyColumnNum = partkeyColumns->dim1;
 
     for (i = 0; i < partkeyColumnNum; i++) {
@@ -152,8 +152,8 @@ static bool checkTupleIsInRangePartition(Relation partTableRel, int partSeq, Tup
     int2vector* partkeyColumns = NULL;
     int partkeyColumnNum = 0;
     int i = 0;
-    Const* tuplePartKeyValues[RANGE_PARTKEYMAXNUM];
-    Const consts[RANGE_PARTKEYMAXNUM];
+    Const* tuplePartKeyValues[MAX_RANGE_PARTKEY_NUMS];
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
     Datum tuplePartKeyValue;
     bool isNull = false;
     bool isInPartition = false;
@@ -164,7 +164,7 @@ static bool checkTupleIsInRangePartition(Relation partTableRel, int partSeq, Tup
     incre_partmap_refcount(partTableRel->partMap);
     partMap = (RangePartitionMap *)(partTableRel->partMap);
 
-    partkeyColumns = partMap->partitionKey;
+    partkeyColumns = partMap->base.partitionKey;
     partkeyColumnNum = partkeyColumns->dim1;
 
     for (i = 0; i < partkeyColumnNum; i++) {

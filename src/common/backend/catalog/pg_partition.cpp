@@ -2061,31 +2061,30 @@ int GetPartitionnoFromSequence(PartitionMap *partmap, int partseq)
     return partitionno;
 }
 
-bool PartExprKeyIsNull(Relation rel, Relation partitionRel, char** partExprKeyStr)
+bool PartExprKeyIsNull(Relation rel, char** partExprKeyStr)
 {
-    if (!rel)
-        ereport(ERROR,(errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("The relation can't be null here.")));
-    Relation pgPartitionRel = partitionRel;
+    if (!rel) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("The relation can't be null here.")));
+    }
     HeapTuple partTuple = NULL;
-    Datum val = 0;
-    if (!partitionRel)
-        pgPartitionRel = heap_open(PartitionRelationId, RowExclusiveLock);
-    if (OidIsValid(rel->parentId))
+    if (OidIsValid(rel->parentId)) {
+        /* partition re_id is oid of pg_partition */
+        
         partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(rel->rd_id));
-    else
-        partTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
-    if (!partTuple)
-        ereport(ERROR,(errcode(ERRCODE_PARTITION_ERROR),errmsg("The partition can't be found")));
+    } else {
+        /* oid of pg_class */
+        partTuple = SearchSysCache3(PARTPARTOID, NameGetDatum(RelationGetRelationName(rel)),
+                                    CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE), ObjectIdGetDatum(rel->rd_id));
+    }
+    if (!HeapTupleIsValid(partTuple)) {
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("The partition can't be found")));
+    }
+
     bool isnull = false;
-    val = fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    Datum val = SysCacheGetAttr(PARTPARTOID, partTuple, Anum_pg_partition_partkeyexpr, &isnull);
     if (!isnull && partExprKeyStr) {
         *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
     }
-    if (OidIsValid(rel->parentId))
-        ReleaseSysCache(partTuple);
-    else
-        heap_freetuple(partTuple);
-    if (!partitionRel)
-        heap_close(pgPartitionRel, RowExclusiveLock);
+    ReleaseSysCache(partTuple);
     return isnull;
 }

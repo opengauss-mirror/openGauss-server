@@ -27,5 +27,7 @@
 #define __SS_DMS_AUXILIARY_H__
 
 void DmsAuxiliaryMain(void);
+void SSWaitDmsAuxiliaryExit();
+void SSInitXminInfo();
 
 #endif

@@ -1,0 +1,51 @@
+DROP SCHEMA IF EXISTS test_alter_seq_max_in_txn_01 CASCADE;
+NOTICE:  schema "test_alter_seq_max_in_txn_01" does not exist, skipping
+CREATE SCHEMA test_alter_seq_max_in_txn_01;
+SET CURRENT_SCHEMA TO test_alter_seq_max_in_txn_01;
+create sequence seqa maxvalue 50;
+--test what sequence would be like before/after ALTER SEQUENCE MAXVALUE txns' rollback
+begin;
+select * from seqa;
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+ seqa          |          1 |           1 |            1 |        50 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+alter sequence seqa maxvalue 40;
+select * from seqa;
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+ seqa          |          1 |           1 |            1 |        40 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+rollback;
+select * from seqa;
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+ seqa          |          1 |           1 |            1 |        50 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+--test what sequence would be like before/after ALTER SEQUENCE MAXVALUE txns' rollback
+begin;
+select * from seqa;
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+ seqa          |          1 |           1 |            1 |        50 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+alter sequence seqa maxvalue 40;
+select * from seqa;
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+ seqa          |          1 |           1 |            1 |        40 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+commit;
+select * from seqa;
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+ seqa          |          1 |           1 |            1 |        40 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+DROP SCHEMA test_alter_seq_max_in_txn_01 CASCADE;
+NOTICE:  drop cascades to sequence seqa

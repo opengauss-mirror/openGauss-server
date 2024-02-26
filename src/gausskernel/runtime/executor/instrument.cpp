@@ -87,12 +87,14 @@ static inline uint64 rdtsc(void)
     asm volatile("isb; mrs %0, cntvct_el0" : "=r"(cval) : : "memory");
 
     return cval;
-#else
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
     uint32 hi = 0;
     uint32 lo = 0;
     asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
 
     return ((uint64)lo) | (((uint64)hi) << 32);
+#else
+    return clock();
 #endif
 }
 #else
@@ -3153,12 +3155,6 @@ void InitOperStatProfile(void)
         512,
         &hash_ctl1,
         HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE | HASH_PARTITION);
-
-    const int max_work_mem = 10 * MBYTES;  // 10MB
-    const int detail_mem = 20 * MBYTES;
-
-    g_operator_table.max_realtime_num = max_work_mem / sizeof(ExplainDNodeInfo);
-    g_operator_table.max_collectinfo_num = detail_mem / sizeof(ExplainDNodeInfo);
 
     MemoryContextSwitchTo(old_context);
 }

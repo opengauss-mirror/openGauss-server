@@ -4,35 +4,29 @@
 -- test inheritance
 create table dropColumn (a int, b int, e int);
 create table dropColumnChild (c int) inherits (dropColumn);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 create table dropColumnAnother (d int) inherits (dropColumnChild);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 -- these two should fail
 alter table dropColumnchild drop column a;
-ERROR:  relation "dropcolumnchild" does not exist
+ERROR:  cannot drop inherited column "a"
 alter table only dropColumnChild drop column b;
-ERROR:  relation "dropcolumnchild" does not exist
+ERROR:  cannot drop inherited column "b"
 -- these three should work
 alter table only dropColumn drop column e;
 alter table dropColumnChild drop column c;
-ERROR:  relation "dropcolumnchild" does not exist
 alter table dropColumn drop column a;
 create table renameColumn (a int);
 create table renameColumnChild (b int) inherits (renameColumn);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 create table renameColumnAnother (c int) inherits (renameColumnChild);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 -- these three should fail
 alter table renameColumnChild rename column a to d;
-ERROR:  relation "renamecolumnchild" does not exist
+ERROR:  cannot rename inherited column "a"
 alter table only renameColumnChild rename column a to d;
-ERROR:  relation "renamecolumnchild" does not exist
+ERROR:  inherited column "a" must be renamed in child tables too
 alter table only renameColumn rename column a to d;
+ERROR:  inherited column "a" must be renamed in child tables too
 -- these should work
 alter table renameColumn rename column a to d;
-ERROR:  column "a" does not exist
 alter table renameColumnChild rename column b to a;
-ERROR:  relation "renamecolumnchild" does not exist
 -- these should work
 alter table if exists doesnt_exist_tab rename column a to d;
 NOTICE:  relation "doesnt_exist_tab" does not exist, skipping
@@ -42,80 +36,92 @@ NOTICE:  relation "doesnt_exist_tab" does not exist, skipping
 alter table renameColumn add column w int;
 -- this should fail
 alter table only renameColumn add column x int;
+ERROR:  column must be added to child tables too
 -- Test corner cases in dropping of inherited columns
 create table p1 (f1 int, f2 int);
 create table c1 (f1 int not null) inherits(p1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+NOTICE:  merging column "f1" with inherited definition
 -- should be rejected since c1.f1 is inherited
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
+ERROR:  cannot drop inherited column "f1"
 -- should work
 alter table p1 drop column f1;
 -- c1.f1 is still there, but no longer inherited
 select f1 from c1;
-ERROR:  relation "c1" does not exist on datanode1
-LINE 1: select f1 from c1;
-                       ^
+ f1 
+----
+(0 rows)
+
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
 select f1 from c1;
-ERROR:  relation "c1" does not exist on datanode1
+ERROR:  column "f1" does not exist
 LINE 1: select f1 from c1;
-                       ^
+               ^
+CONTEXT:  referenced column: f1
 drop table p1 cascade;
+NOTICE:  drop cascades to table c1
 create table p1 (f1 int, f2 int);
 create table c1 () inherits(p1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 -- should be rejected since c1.f1 is inherited
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
+ERROR:  cannot drop inherited column "f1"
 alter table p1 drop column f1;
 -- c1.f1 is dropped now, since there is no local definition for it
 select f1 from c1;
-ERROR:  relation "c1" does not exist on datanode1
+ERROR:  column "f1" does not exist
 LINE 1: select f1 from c1;
-                       ^
+               ^
+CONTEXT:  referenced column: f1
 drop table p1 cascade;
+NOTICE:  drop cascades to table c1
 create table p1 (f1 int, f2 int);
 create table c1 () inherits(p1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 -- should be rejected since c1.f1 is inherited
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
+ERROR:  cannot drop inherited column "f1"
 alter table only p1 drop column f1;
 -- c1.f1 is NOT dropped, but must now be considered non-inherited
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
 drop table p1 cascade;
+NOTICE:  drop cascades to table c1
 create table p1 (f1 int, f2 int);
 create table c1 (f1 int not null) inherits(p1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+NOTICE:  merging column "f1" with inherited definition
 -- should be rejected since c1.f1 is inherited
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
+ERROR:  cannot drop inherited column "f1"
 alter table only p1 drop column f1;
 -- c1.f1 is still there, but no longer inherited
 alter table c1 drop column f1;
-ERROR:  relation "c1" does not exist
 drop table p1 cascade;
+NOTICE:  drop cascades to table c1
 create table p1(id int, name text);
 create table p2(id2 int, name text, height int);
 create table c1(age int) inherits(p1,p2);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+NOTICE:  merging multiple inherited definitions of column "name"
 create table gc1() inherits (c1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 select relname, attname, attinhcount, attislocal
 from pg_class join pg_attribute on (pg_class.oid = pg_attribute.attrelid)
 where relname in ('p1','p2','c1','gc1') and attnum > 0 and not attisdropped
 order by relname, attnum;
  relname | attname | attinhcount | attislocal 
 ---------+---------+-------------+------------
+ c1      | id      |           1 | f
+ c1      | name    |           2 | f
+ c1      | id2     |           1 | f
+ c1      | height  |           1 | f
+ c1      | age     |           0 | t
+ gc1     | id      |           1 | f
+ gc1     | name    |           1 | f
+ gc1     | id2     |           1 | f
+ gc1     | height  |           1 | f
+ gc1     | age     |           1 | f
  p1      | id      |           0 | t
  p1      | name    |           0 | t
  p2      | id2     |           0 | t
  p2      | name    |           0 | t
  p2      | height  |           0 | t
-(5 rows)
+(15 rows)
 
 -- should work
 alter table only p1 drop column name;
@@ -123,13 +129,12 @@ alter table only p1 drop column name;
 alter table p2 drop column name;
 -- should be rejected since its inherited
 alter table gc1 drop column name;
-ERROR:  relation "gc1" does not exist
+ERROR:  cannot drop inherited column "name"
 -- should work, and drop gc1.name along
 alter table c1 drop column name;
-ERROR:  relation "c1" does not exist
 -- should fail: column does not exist
 alter table gc1 drop column name;
-ERROR:  relation "gc1" does not exist
+ERROR:  column "name" of relation "gc1" does not exist
 -- should work and drop the attribute in all tables
 alter table p2 drop column height;
 select relname, attname, attinhcount, attislocal
@@ -138,11 +143,20 @@ where relname in ('p1','p2','c1','gc1') and attnum > 0 and not attisdropped
 order by relname, attnum;
  relname | attname | attinhcount | attislocal 
 ---------+---------+-------------+------------
+ c1      | id      |           1 | f
+ c1      | id2     |           1 | f
+ c1      | age     |           0 | t
+ gc1     | id      |           1 | f
+ gc1     | id2     |           1 | f
+ gc1     | age     |           1 | f
  p1      | id      |           0 | t
  p2      | id2     |           0 | t
-(2 rows)
+(8 rows)
 
 drop table p1, p2 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table c1
+drop cascades to table gc1
 --
 -- Test the ALTER TABLE SET WITH/WITHOUT OIDS command
 --
@@ -179,7 +193,7 @@ create table altwithoid (col integer) with oids;
 ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
 -- Inherits parents oid column anyway
 create table altinhoid () inherits (altwithoid) without oids;
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ERROR:  relation "altwithoid" does not exist
 insert into altinhoid values (1);
 ERROR:  relation "altinhoid" does not exist on datanode1
 LINE 1: insert into altinhoid values (1);
@@ -225,7 +239,7 @@ ERROR:  table "altwithoid" does not exist
 create table altwithoid (col integer) without oids;
 -- child can have local oid column
 create table altinhoid () inherits (altwithoid) with oids;
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
 insert into altinhoid values (1);
 ERROR:  relation "altinhoid" does not exist on datanode1
 LINE 1: insert into altinhoid values (1);
@@ -265,32 +279,31 @@ drop table altwithoid cascade;
 -- test renumbering of child-table columns in inherited operations
 create table p1 (f1 int);
 create table c1 (f2 text, f3 int) inherits (p1);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 alter table p1 add column a1 int check (a1 > 0);
 alter table p1 add column f2 text;
+NOTICE:  merging definition of column "f2" for child "c1"
 insert into p1 values (1,2,'abc');
 insert into c1 values(11,'xyz',33,0); -- should fail
-ERROR:  relation "c1" does not exist on datanode1
-LINE 1: insert into c1 values(11,'xyz',33,0);
-                    ^
+ERROR:  new row for relation "c1" violates check constraint "p1_a1_check"
+DETAIL:  N/A
 insert into c1 values(11,'xyz',33,22);
-ERROR:  relation "c1" does not exist on datanode1
-LINE 1: insert into c1 values(11,'xyz',33,22);
-                    ^
 select * from p1 order by f1;
  f1 | a1 | f2  
 ----+----+-----
   1 |  2 | abc
-(1 row)
+ 11 | 22 | xyz
+(2 rows)
 
 update p1 set a1 = a1 + 1, f2 = upper(f2);
 select * from p1 order by f1;
  f1 | a1 | f2  
 ----+----+-----
   1 |  3 | ABC
-(1 row)
+ 11 | 23 | XYZ
+(2 rows)
 
 drop table p1 cascade;
+NOTICE:  drop cascades to table c1
 -- test that operations with a dropped column do not try to reference
 -- its datatype
 --create domain mytype as text;
@@ -440,7 +453,6 @@ where oid = 'test_storage'::regclass;
 -- ALTER TYPE with a check constraint and a child table (bug before Nov 2012)
 CREATE TABLE test_inh_check (a float check (a > 10.2));
 CREATE TABLE test_inh_check_child() INHERITS(test_inh_check);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 ALTER TABLE test_inh_check ALTER COLUMN a TYPE numeric;
 \d test_inh_check
 Table "public.test_inh_check"
@@ -449,8 +461,17 @@ Table "public.test_inh_check"
  a      | numeric | 
 Check constraints:
     "test_inh_check_a_check" CHECK (a::double precision > 10.2::double precision)
+Number of child tables: 1 (Use \d+ to list them.)
 
 \d test_inh_check_child
+Table "public.test_inh_check_child"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | numeric | 
+Check constraints:
+    "test_inh_check_a_check" CHECK (a::double precision > 10.2::double precision)
+Inherits: test_inh_check
+
 --
 -- lock levels
 --
@@ -770,7 +791,6 @@ ERROR:  cannot alter type "test_type1" because column "test_tbl1.y" uses it
 CREATE TYPE test_type2 AS (a int, b text);
 CREATE TABLE test_tbl2 OF test_type2;
 CREATE TABLE test_tbl2_subclass () INHERITS (test_tbl2);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 \d test_type2
 Composite type "public.test_type2"
  Column |  Type   | Modifiers 
@@ -784,6 +804,7 @@ Composite type "public.test_type2"
 --------+---------+-----------
  a      | integer | 
  b      | text    | 
+Number of child tables: 1 (Use \d+ to list them.)
 Typed table of type: test_type2
 
 ALTER TYPE test_type2 ADD ATTRIBUTE c text; -- fails
@@ -805,6 +826,7 @@ Composite type "public.test_type2"
  a      | integer | 
  b      | text    | 
  c      | text    | 
+Number of child tables: 1 (Use \d+ to list them.)
 Typed table of type: test_type2
 
 ALTER TYPE test_type2 ALTER ATTRIBUTE b TYPE varchar; -- fails
@@ -826,6 +848,7 @@ ALTER TYPE test_type2 ALTER ATTRIBUTE b TYPE varchar CASCADE;
  a      | integer           | 
  b      | character varying | 
  c      | text              | 
+Number of child tables: 1 (Use \d+ to list them.)
 Typed table of type: test_type2
 
 ALTER TYPE test_type2 DROP ATTRIBUTE b; -- fails
@@ -845,6 +868,7 @@ Composite type "public.test_type2"
 --------+---------+-----------
  a      | integer | 
  c      | text    | 
+Number of child tables: 1 (Use \d+ to list them.)
 Typed table of type: test_type2
 
 ALTER TYPE test_type2 RENAME ATTRIBUTE a TO aa; -- fails
@@ -864,11 +888,18 @@ Composite type "public.test_type2"
 --------+---------+-----------
  aa     | integer | 
  c      | text    | 
+Number of child tables: 1 (Use \d+ to list them.)
 Typed table of type: test_type2
 
 \d test_tbl2_subclass
+Table "public.test_tbl2_subclass"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ aa     | integer | 
+ c      | text    | 
+Inherits: test_tbl2
+
 DROP TABLE test_tbl2_subclass;
-ERROR:  table "test_tbl2_subclass" does not exist
 -- This test isn't that interesting on its own, but the purpose is to leave
 -- behind a table to test pg_upgrade with. The table has a composite type
 -- column in it, and the composite type has a dropped attribute.
@@ -889,7 +920,6 @@ CREATE TABLE tt3 (y numeric(8,2), x int);			-- wrong column order
 CREATE TABLE tt4 (x int);							-- too few columns
 CREATE TABLE tt5 (x int, y numeric(8,2), z int);	-- too few columns
 CREATE TABLE tt6 () INHERITS (tt0);					-- can't have a parent
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 CREATE TABLE tt7 (x int, q text, y numeric(8,2)) WITH OIDS;
 ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
 ALTER TABLE tt7 DROP q;								-- OK
@@ -906,7 +936,7 @@ ERROR:  table is missing column "y"
 ALTER TABLE tt5 OF tt_t0;
 ERROR:  table has extra column "z"
 ALTER TABLE tt6 OF tt_t0;
-ERROR:  relation "tt6" does not exist
+ERROR:  typed tables cannot inherit
 ALTER TABLE tt7 OF tt_t0;
 ERROR:  relation "tt7" does not exist
 CREATE TYPE tt_t1 AS (x int, y numeric(8,2));
@@ -918,14 +948,13 @@ ERROR:  relation "tt7" does not exist
 -- make sure we can drop a constraint on the parent but it remains on the child
 CREATE TABLE test_drop_constr_parent (c text CHECK (c IS NOT NULL));
 CREATE TABLE test_drop_constr_child () INHERITS (test_drop_constr_parent);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 ALTER TABLE ONLY test_drop_constr_parent DROP CONSTRAINT "test_drop_constr_parent_c_check";
 -- should fail
 INSERT INTO test_drop_constr_child (c) VALUES (NULL);
-ERROR:  relation "test_drop_constr_child" does not exist on datanode1
-LINE 1: INSERT INTO test_drop_constr_child (c) VALUES (NULL);
-                    ^
+ERROR:  new row for relation "test_drop_constr_child" violates check constraint "test_drop_constr_parent_c_check"
+DETAIL:  N/A
 DROP TABLE test_drop_constr_parent CASCADE;
+NOTICE:  drop cascades to table test_drop_constr_child
 --
 -- IF EXISTS test
 --
@@ -8815,12 +8844,12 @@ Indexes:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt') order by c.relname;
  nspname |  relname   
 ---------+------------
  test1   | test
- test1   | test_pkey
  test1   | test_b_idx
+ test1   | test_pkey
 (3 rows)
 
 SELECT * FROM test1.test;
@@ -8850,12 +8879,12 @@ Indexes:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt') order by c.relname;
  nspname |  relname   
 ---------+------------
- test2   | tttt
- test2   | test_pkey
  test2   | test_b_idx
+ test2   | test_pkey
+ test2   | tttt
 (3 rows)
 
 INSERT INTO test2.tttt VALUES (2, 2);
@@ -9094,5 +9123,278 @@ select * from t_after_first;
      |  3 |  4 |     | 
 (2 rows)
 
+drop table if exists test_dts;
+NOTICE:  table "test_dts" does not exist, skipping
+create table test_dts(
+        f1 int primary key,
+        f2 varchar(8),
+        f3 timestamp
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dts_pkey" for table "test_dts"
+insert into test_dts(f1, f2, f3) values(1, 'data1', '2023-07-31 12:34:56'), (2, 'date2', '2023-07-31 13:45:30'),
+(3, 'data3', '2023-07-31 14:56:15'), (4, 'data1', '2023-07-31 12:34:56'), (5, 'date2', '2023-07-31 13:45:30'),
+(6, 'data3', '2023-07-31 14:56:15');
+analyze test_dts;
+analyze test_dts((f1, f3));
+INFO:  Please set default_statistics_target to a negative value to collect extended statistics.
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         1 | {1,2,3,4,5,6}
+         2 | {data1,data3,date2}
+         3 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts add column f4 int default 0 after f1;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         1 | {1,2,3,4,5,6}
+         3 | {data1,data3,date2}
+         4 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts add column f5 varchar(20) default 'f5' first;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         2 | {1,2,3,4,5,6}
+         4 | {data1,data3,date2}
+         5 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts modify f5 varchar(20) after f4;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         1 | {1,2,3,4,5,6}
+         4 | {data1,data3,date2}
+         5 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts modify f1 int first;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         4 | {data1,data3,date2}
+         5 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(2 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+drop table if exists test_dts;
+drop table if exists t_after_first;
+create table t_after_first(c4 int, c5 int);
+insert into t_after_first values(1, 2), (3, 4);
+alter table t_after_first add column c11 varchar(2), add column c22 varchar(2) after c11, add column c57 int first;
+select * from t_after_first;
+ c57 | c4 | c5 | c11 | c22 
+-----+----+----+-----+-----
+     |  1 |  2 |     | 
+     |  3 |  4 |     | 
+(2 rows)
+
+drop table if exists t_after_first;
+-- test for modify type
+drop table if exists fat0;
+NOTICE:  table "fat0" does not exist, skipping
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify column c17 int first, modify column c41 text, add column c4 int after c17, add column c61 int after c41, add constraint cc0 unique fai0(c17);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "fai0" for table "fat0"
+insert into fat0 values(-51, 2, -20, default), (-34, 81, -24, default);
+select * from fat0;
+ c17 | c4 | c41 | c61 
+-----+----+-----+-----
+ -49 |    | 1   |    
+ -28 |    | 64  |    
+ -51 |  2 | -20 |    
+ -34 | 81 | -24 |    
+(4 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 text);
+insert into fat0 values(-104 not in(58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify column c41 int, add column c4 int after c17;
+select * from fat0;
+ c17 | c4 | c41 
+-----+----+-----
+ -49 |    |   1
+ -28 |    |  64
+(2 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 int, c21 int);
+insert into fat0 values(-104 not in(58, -123, -109), -49, -12),(64, -28, 20);
+alter table fat0 modify column c17 text, modify column c41 text, add column c21 int after c41;
+ERROR:  column "c21" of relation "fat0" already exists
+insert into fat0 values(-51, 2, -20), (-34, 81, -24);
+select * from fat0;
+ c41 | c17 | c21 
+-----+-----+-----
+   1 | -49 | -12
+  64 | -28 |  20
+ -51 |   2 | -20
+ -34 |  81 | -24
+(4 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 int, c21 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49, -12), (64, -28, 20);
+alter table fat0 modify column c17 text first, modify column c41 text, add column c21 int after c41;
+ERROR:  column "c21" of relation "fat0" already exists
+insert into fat0 values(-51, 2, -20), (-34, 81, -24);
+select * from fat0;
+ c41 | c17 | c21 
+-----+-----+-----
+   1 | -49 | -12
+  64 | -28 |  20
+ -51 |   2 | -20
+ -34 |  81 | -24
+(4 rows)
+
+drop table if exists fat0;
+-- test for modify type not has column
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in(58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify c41 text, add c4 int after c17, add c61 int after c41, add constraint cc0 unique fai0(c17);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "fai0" for table "fat0"
+select * from fat0;
+ c17 | c4 | c41 | c61 
+-----+----+-----+-----
+ -49 |    | 1   |    
+ -28 |    | 64  |    
+(2 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify column c17 int first, modify column c41 text;
+drop table if exists fat0;
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify c41 text;
+drop table if exists fat0;
+drop table if exists t0;
+NOTICE:  table "t0" does not exist, skipping
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values (55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify column c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify column c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+alter table t0 change column c6 c int first, add x int default 11 first, modify column c text;
+select * from t0;
+ x  |  c  | c59  
+----+-----+------
+ 11 | -34 |   55
+ 11 | -49 | -123
+(2 rows)
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+alter table t0 add x int default 11 first, change column c6 c int first, modify c text;
+select * from t0;
+ x  |  c  | c59  
+----+-----+------
+ 11 | -34 |   55
+ 11 | -49 | -123
+(2 rows)
+
+drop table if exists t0;
+drop table if exists t0;
+NOTICE:  table "t0" does not exist, skipping
+create table t0(c32 int, c6 text default (substring(-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+alter table t0 change column c6 c int first, add x int default 11 first, modify c text;
+select * from t0;
+ x  |  c  | c59  
+----+-----+------
+ 11 | -34 |   55
+ 11 | -49 | -123
+(2 rows)
+
+drop table if exists t0;
+drop table if exists t0;
+NOTICE:  table "t0" does not exist, skipping
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 change column c32 c59 int after c6, modify c59 bigint;
+ERROR:  syntax error at or near "change"
+LINE 1: insert into t0 change column c32 c59 int after c6, modify c5...
+                       ^
+select * from t0;
+ c32 | c6 
+-----+----
+(0 rows)
+
+alter table t0 add x int default 11 first;
+select * from t0;
+ x | c32 | c6 
+---+-----+----
+(0 rows)
+
+alter table t0 change column c6 c int first, modify c text after x, change column c59 c32 bigint first, modify column c32 text after c;
+ERROR:  column "c59" does not exist
+select * from t0;
+ x | c32 | c6 
+---+-----+----
+(0 rows)
+
+drop table if exists t0;
 \c postgres
 drop database test_first_after_B;

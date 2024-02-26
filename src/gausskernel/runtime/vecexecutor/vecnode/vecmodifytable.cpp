@@ -139,11 +139,11 @@ static List* getPartitionkeyDataType(Relation relation)
     incre_partmap_refcount(relation->partMap);
     part_map = (RangePartitionMap*)(relation->partMap);
 
-    Assert(PointerIsValid(part_map->partitionKeyDataType));
-    Assert(PointerIsValid(part_map->partitionKey));
+    Assert(PointerIsValid(part_map->base.partitionKeyDataType));
+    Assert(PointerIsValid(part_map->base.partitionKey));
 
-    for (counter = 0; counter < part_map->partitionKey->dim1; counter++) {
-        result = lappend_oid(result, part_map->partitionKeyDataType[counter]);
+    for (counter = 0; counter < part_map->base.partitionKey->dim1; counter++) {
+        result = lappend_oid(result, part_map->base.partitionKeyDataType[counter]);
     }
     decre_partmap_refcount(relation->partMap);
 

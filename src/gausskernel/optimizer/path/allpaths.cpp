@@ -913,7 +913,7 @@ static bool IsPbeSinglePartition(Relation rel, RelOptInfo* relInfo)
     }
     if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         RangePartitionMap *partMap = (RangePartitionMap *)rel->partMap;
-        int partKeyNum = partMap->partitionKey->dim1;
+        int partKeyNum = partMap->base.partitionKey->dim1;
         if (partKeyNum > 1) {
             relInfo->pruning_result->isPbeSinlePartition = false;
             return false;
@@ -1536,8 +1536,8 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
 
         parent_rows += RELOPTINFO_LOCAL_FIELD(root, childrel, rows);
         parent_global_rows += childrel->rows;
-        parent_tuples += RELOPTINFO_LOCAL_FIELD(root, childrel, tuples);
-        parent_global_tuples += childrel->tuples;
+        parent_tuples += RELOPTINFO_LOCAL_FIELD(root, childrel, rows);
+        parent_global_tuples += childrel->rows;
         parent_size += childrel->reltarget->width * RELOPTINFO_LOCAL_FIELD(root, childrel, rows);
 
         /*
@@ -3831,7 +3831,7 @@ static void make_partiterator_pathkey(
         return;
     }
 
-    partitionKey = ((RangePartitionMap*)relation->partMap)->partitionKey;
+    partitionKey = ((RangePartitionMap*)relation->partMap)->base.partitionKey;
     pk_cell = (ListCell*)list_head(pathkeys);
 
     bool pk_state_init = false;  /* if all pathkey have same sort direction (ASC or DESC) */

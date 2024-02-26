@@ -1,3 +1,5 @@
+create database predefined_roles;
+\c predefined_roles;
 -- default roles
 SELECT oid, * FROM pg_authid WHERE rolname like 'gs_role_%' ORDER BY oid;
 \du gs_role_signal_backend
@@ -272,3 +274,5 @@ RESET ROLE;
 DROP TABLE public.copy_role_tbl;
 DROP USER test_user1,test_user2,test_sysadmin,test_createrole;
 DROP USER test_root,test_persis,test_opr,test_oprpersis,test_monadmin;
+\c regression;
+drop database predefined_roles;

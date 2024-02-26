@@ -22,7 +22,38 @@ NOTICE:  database "restore_sequence_db" does not exist, skipping
 create database restore_sequence_db;
 \! @abs_bindir@/gs_restore -d restore_sequence_db -p @portstring@ @abs_bindir@/dump_sequence.tar >/dev/null 2>&1; echo $?
 0
+drop database if exists gs_dump_c_t_new;
+NOTICE:  database "gs_dump_c_t_new" does not exist, skipping
+drop database if exists gs_dump_c_t;
+NOTICE:  database "gs_dump_c_t" does not exist, skipping
+create database gs_dump_c_t;
+create database gs_dump_c_t_new;
+\c gs_dump_c_t_new
+create table table_test(id1 int);
+insert into table_test values(generate_series(1,10));
+\! @abs_bindir@/gs_dump gs_dump_c_t_new -p @portstring@ -f @abs_bindir@/back.dmp -F c >/dev/null 2>&1; echo $?
+0
+\c regression
+drop database if exists gs_dump_c_t_new;
+\! @abs_bindir@/gs_restore @abs_bindir@/back.dmp -p @portstring@ -d gs_dump_c_t -C -t table_test >/dev/null 2>&1; echo $?
+0
+-- not exist
+\c gs_dump_c_t
+select count(*) from table_test;
+ERROR:  relation "table_test" does not exist on datanode1
+LINE 1: select count(*) from table_test;
+                             ^
+-- success
+\c gs_dump_c_t_new
+select count(*) from table_test;
+ count 
+-------
+    10
+(1 row)
+
 \c regression
 drop database if exists restore_sequence_db;
 drop database if exists dump_sequence_db;
+drop database if exists gs_dump_c_t_new;
+drop database if exists gs_dump_c_t;
 drop role seq_user1;

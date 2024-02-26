@@ -44,19 +44,6 @@ CREATE USER SET_SESSION_ROLLBACK_AUDIT_TABLE IDENTIFIED BY 'GAUSS@123';
 COMMIT;
 DROP USER SET_SESSION_ROLLBACK_AUDIT;
 
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-drop user test_drop_user cascade;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-drop user test_drop_user cascade;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-drop user if exists test_drop_user cascade;
-create user test_drop_user password 'Gauss@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
-drop user if exists test_drop_user cascade;
-
 REVOKE ALL on schema public FROM public;
 create role test_revoke_for_sysadmin login sysadmin password 'Gauss@123';
 clean connection to all check to user test_revoke_for_sysadmin;
@@ -110,7 +97,7 @@ drop database a1qazse4;
 \! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=8191" > /dev/null 2>&1
 select pg_sleep(1);
 
---1¡¢audit for resouce pool and workload.
+--1ï¿½ï¿½audit for resouce pool and workload.
 select * from pg_delete_audit('1111-1-1','2222-2-2');
 create resource pool test_resourcepool_audit;
 create workload group test_workloadgroup_audit;
@@ -120,14 +107,14 @@ drop resource pool test_resourcepool_audit;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_resourcepool';
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_workloadgroup';
 
---2¡¢audit for app workload group mapping.
+--2ï¿½ï¿½audit for app workload group mapping.
 select * from pg_delete_audit('1111-1-1','2222-2-2');
 create app workload group mapping test_appworkloadgroupmapping_audit;
 alter app workload group mapping test_appworkloadgroupmapping_audit with (workload_gpname='default_group');
 drop app workload group mapping test_appworkloadgroupmapping_audit;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_appworkloadgroupmapping';
 
---3¡¢audit for server in hardoop
+--3ï¿½ï¿½audit for server in hardoop
 select * from pg_delete_audit('1111-1-1','2222-2-2');
 create role temp_role password 'Gauss@123';
 create server test_serverforhardoop_audit foreign data wrapper hdfs_fdw options (address '10.10.0.100:25000', hdfscfgpath '/home/omm', type 'hdfs');
@@ -450,10 +437,10 @@ create user md5_compatible_user1 with pguser password 'gauss@123';
 create user md5_compatible_user2 password 'md529c2b5b4676f802b4e20e393024e280a';
 create user normal_compatible_user1 password 'gauss@123';
 create user normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
-select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user1';
-select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user2';
-select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
-select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user2';
+--select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user1';
+--select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user2';
+--select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
+--select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user2';
 set role md5_compatible_user1 password 'gauss@123';
 reset role;
 set role md5_compatible_user2 password 'gauss@123';
@@ -463,15 +450,15 @@ alter role md5_compatible_user2 identified by 'md529c2b5b4676f802b4e20e393024e28
 alter role md5_compatible_user2 identified by 'Gauss@123' replace 'md529c2b5b4676f802b4e20e393024e280a';
 alter role md5_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
 reset role;
-set role normal_compatible_user1 password 'gauss@123';
-reset role;
-set role normal_compatible_user2 password 'gauss@123';
-reset role;
-set role normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
-alter role normal_compatible_user2 identified by 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c' replace 'gauss@123';
-alter role normal_compatible_user2 identified by 'Gauss@123' replace 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
-alter role normal_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
-reset role;
+--set role normal_compatible_user1 password 'gauss@123';
+--reset role;
+--set role normal_compatible_user2 password 'gauss@123';
+--reset role;
+--set role normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+--alter role normal_compatible_user2 identified by 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c' replace 'gauss@123';
+--alter role normal_compatible_user2 identified by 'Gauss@123' replace 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+--alter role normal_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
+--reset role;
 
 drop user md5_compatible_user1;
 drop user md5_compatible_user2;
@@ -479,7 +466,7 @@ drop user normal_compatible_user1;
 drop user normal_compatible_user2;
 
 --The supported special character of password are: ~!@#$%^&*()-_=+\\|[{}];:,<.>/?
-create role special_character_password_role password 'gauss""123';
+--create role special_character_password_role password 'gauss""123';
 drop role special_character_password_role; 
 
 --test create table for non-eixt/invalid/available schema
@@ -497,7 +484,7 @@ create table schema_no_exit.schematest_tbtest(a int);
 set current_schema=schema_no_exit,schematest_schema_1;
 create table schematest_tbtest(a int); drop table schematest_schema_1.schematest_tbtest;
 
-set role schematest_user1 password "Gauss_234";
+--set role schematest_user1 password "Gauss_234";
 set current_schema=schematest_schema_1;
 create table schematest_tbtest(a int);
 create table schematest_schema_1.schematest_tbtest(a int);

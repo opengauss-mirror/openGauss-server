@@ -625,7 +625,6 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "events_pkey" for
 create table other_events (event_id int primary key);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "other_events_pkey" for table "other_events"
 create table events_child () inherits (events);
-ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 explain (costs off)
 select event_id
  from (select event_id from events
@@ -636,13 +635,17 @@ select event_id
 ----------------------------------------------------------------
  Result
    ->  Merge Append
-         Sort Key: events.event_id
-         ->  Index Scan using events_pkey on events
+         Sort Key: public.events.event_id
+         ->  Merge Append
+               Sort Key: public.events.event_id
+               ->  Index Scan using events_pkey on events
+               ->  Sort
+                     Sort Key: public.events.event_id
+                     ->  Seq Scan on events_child events
          ->  Index Scan using other_events_pkey on other_events
-(5 rows)
+(10 rows)
 
 drop table events_child, events, other_events;
-ERROR:  table "events_child" does not exist
 reset enable_indexonlyscan;
 -- Test constraint exclusion of UNION ALL subqueries
 explain (costs off)

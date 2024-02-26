@@ -69,6 +69,18 @@ typedef struct knl_session_attr_spq {
     bool spq_optimizer_print_optimization_stats;
 
     bool spq_optimizer_print_optimization_cost;
+
+    /* Optimizer Parallel DML */
+    bool spq_enable_insert_select;
+    int spq_insert_dop_num;
+    bool spq_enable_insert_from_tableless;
+    bool spq_enable_insert_order_sensitive;
+    bool spq_enable_delete;
+    bool spq_enable_remove_delete_redundant_motion;
+    bool spq_enable_remove_update_redundant_motion;
+    int spq_delete_dop_num;
+    bool spq_enable_update;
+    int spq_update_dop_num;
  
     /* array of xforms disable flags */
 #define OPTIMIZER_XFORMS_COUNT 400 /* number of transformation rules */
@@ -192,6 +204,8 @@ typedef struct knl_session_attr_spq {
     int spq_scan_unit_size;
     int spq_scan_unit_bit;
     char *gauss_cluster_map;
+    double spq_small_table_threshold;
+    bool spq_enable_direct_read;
  
     /* enable spq btbuild */
     bool spq_enable_btbuild;
@@ -253,6 +267,7 @@ typedef struct spq_qc_ctx {
  
 typedef struct knl_t_spq_context {
     SpqRole spq_role;
+    bool spq_in_processing;
     uint64 spq_session_id;
     int current_id;
     bool skip_direct_distribute_result;

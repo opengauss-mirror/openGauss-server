@@ -1188,6 +1188,16 @@ select * from varbit;
 
 reset sql_ignore_strategy;
 drop table net, ran, hashvec, varbit;
+-- insert + subquery
+create table t1(a int);
+insert /*+ ignore_error */ into t1 select 'abc'::time;
+WARNING:  invalid input syntax for type time: "abc"
+LINE 1: insert /*+ ignore_error */ into t1 select 'abc'::time;
+                                                  ^
+CONTEXT:  referenced column: time
+WARNING:  column "a" is of type integer but expression is of type time without time zone. Data truncated automatically.
+CONTEXT:  referenced column: a
+drop table t1;
 -- restore context
 reset timezone;
 show timezone;

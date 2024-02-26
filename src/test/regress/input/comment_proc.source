@@ -883,14 +883,14 @@ END;/* body end*/
 \sf+ first_day_month_func_020
 
 
-\! @abs_bindir@/gs_dump -f @abs_bindir@/test_comment.tar -c -n test_comment -p @portstring@ test_comment -F t >>/dev/null
+\! @abs_bindir@/gs_dump -f @abs_bindir@/test_comment.tar -c -n test_comment -p @portstring@ test_comment -F t --disable-progress >>/dev/null
 
 drop database if exists test_comment1;
 create database test_comment1;
 \c test_comment1
 CREATE SCHEMA test_comment;
 
-\! @abs_bindir@/gs_restore @abs_bindir@/test_comment.tar -p @portstring@ -d test_comment1 -s -e -c  >>/dev/null
+\! @abs_bindir@/gs_restore @abs_bindir@/test_comment.tar -p @portstring@ -d test_comment1 -s -e -c --disable-progress >>/dev/null
 
 SET search_path to test_comment;
 \sf fi_random_str

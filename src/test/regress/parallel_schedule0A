@@ -10,6 +10,18 @@
 # If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
 #test: recovery_2pc_tools recovery_2pc_tools02
 #test: recovery_2pc_tools
+# --------------------------
+# usecases for improving coverage 
+# these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+# --------------------------
+test: timecapsule_partition_ustore_test_1
+test: timecapsule_partition_ustore_test_2
+test: ddl
+test: ustore_subpartition_vacuum_partition
+test: test_ustore_undo_tool
+test: privileges
+test: AMHeap_logical_scan
+test: copy
 
 test: sqlbypass_partition
 test: sqlpatch_base
@@ -25,7 +37,7 @@ test: smp
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
-test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
+test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views dependent_view
 
 # test multiple statistics
 test: functional_dependency record_slow_sql_in_proc
@@ -168,6 +180,9 @@ test: single_node_create_function_1
 # is concurrent safe.
 # ----------
 #test: single_node_copy single_node_copyselect
+
+# pre-Read test
+test: preread_test
 
 # ----------
 # More groups of parallel tests

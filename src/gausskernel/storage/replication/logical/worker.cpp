@@ -36,11 +36,16 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 
+#include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_subscription_rel.h"
-
+#include "parser/analyze.h"
+#include "tcop/ddldeparse.h"
+#include "tcop/pquery.h"
+#include "tcop/utility.h"
+#include "commands/tablecmds.h"
 #include "commands/trigger.h"
 #include "commands/subscriptioncmds.h"
 
@@ -89,6 +94,8 @@
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
+#include "utils/acl.h"
 #include "utils/syscache.h"
 #include "utils/postinit.h"
 #include "utils/ps_status.h"
@@ -1161,6 +1168,241 @@ static void apply_handle_delete(StringInfo s)
 
 
 /*
+ * Handle CREATE TABLE command
+ *
+ * Call AddSubscriptionRelState for CREATE TABLE command to set the relstate to
+ * SUBREL_STATE_READY so DML changes on this new table can be replicated without
+ * having to manually run "ALTER SUBSCRIPTION ... REFRESH PUBLICATION"
+ */
+static void
+handle_create_table(Node *command)
+{
+    const char *commandTag;
+    RangeVar *rv = NULL;
+    Oid relid;
+    Oid relnamespace = InvalidOid;
+    CreateStmt *cstmt;
+    char *schemaname = NULL;
+    char *relname = NULL;
+
+    commandTag = CreateCommandTag((Node *) command);
+    cstmt = (CreateStmt *) command;
+    rv = cstmt->relation;
+    
+    if (nodeTag(command) == T_CreateStmt) {
+        cstmt = (CreateStmt*)command;
+        rv = cstmt->relation;
+    } else {
+        return;
+    }
+
+    if (!rv)
+        return;
+
+    schemaname = rv->schemaname;
+    relname = rv->relname;
+
+    if (schemaname != NULL)
+        relnamespace = get_namespace_oid(schemaname, false);
+
+    if (relnamespace != InvalidOid)
+        relid = get_relname_relid(relname, relnamespace);
+    else
+        relid = RelnameGetRelid(relname);
+
+    if (OidIsValid(relid))
+    {
+        AddSubscriptionRelState(t_thrd.applyworker_cxt.mySubscription->oid, relid,
+                                SUBREL_STATE_READY);
+        ereport(DEBUG1,
+                (errmsg_internal("table \"%s\" added to subscription \"%s\"",
+                                 relname, t_thrd.applyworker_cxt.mySubscription->name)));
+    }
+}
+
+
+/*
+ * Begin one step (one INSERT, UPDATE, etc) of a replication transaction.
+ *
+ * Start a transaction, if this is the first step (else we keep using the
+ * existing transaction).
+ * Also provide a global snapshot and ensure we run in ApplyMessageContext.
+ */
+static void
+begin_replication_step(void)
+{
+    SetCurrentStatementStartTimestamp();
+
+    if (!IsTransactionState())
+    {
+        StartTransactionCommand();
+        reread_subscription();
+    }
+
+    PushActiveSnapshot(GetTransactionSnapshot());
+}
+
+/*
+ * Finish up one step of a replication transaction.
+ * Callers of begin_replication_step() must also call this.
+ *
+ * We don't close out the transaction here, but we should increment
+ * the command counter to make the effects of this step visible.
+ */
+static void
+end_replication_step(void)
+{
+    PopActiveSnapshot();
+
+    CommandCounterIncrement();
+}
+
+/*
+ * Handle DDL commands
+ *
+ * Handle DDL replication messages. Convert the json string into a query
+ * string and run it through the query portal.
+ */
+static void
+apply_handle_ddl(StringInfo s)
+{
+    XLogRecPtr lsn;
+    const char *prefix = NULL;
+    char *message = NULL;
+    char *ddl_command;
+    char *owner;
+    Size sz;
+    List *parsetree_list;
+    ListCell *parsetree_item;
+    DestReceiver *receiver;
+    MemoryContext oldcontext;
+    Oid owner_oid = InvalidOid;
+    Oid saved_current_user = InvalidOid;
+    int save_sec_context = 0;
+
+    const char *save_debug_query_string = t_thrd.postgres_cxt.debug_query_string;
+
+    MemoryContext per_parsetree_context = NULL;
+
+    ensure_transaction();
+
+    message = logicalrep_read_ddl(s, &lsn, &prefix, &sz);
+
+    begin_replication_step();
+
+    ddl_command = deparse_ddl_json_to_string(message, &owner);
+    t_thrd.postgres_cxt.debug_query_string = ddl_command;
+
+    ereport(LOG, (errmsg("apply [ddl] for %s [owner] %s", ddl_command, owner ? owner : "none")));
+
+    /*
+     * If requested, set the current role to the owner that executed the
+     * command on the publication server.
+     */
+    GetUserIdAndSecContext(&saved_current_user, &save_sec_context);
+    if (t_thrd.applyworker_cxt.mySubscription->matchddlowner && owner) {
+        owner_oid = get_role_oid(owner, false);
+        SetUserIdAndSecContext(owner_oid, save_sec_context);
+    }
+
+    /* DestNone for logical replication */
+    receiver = CreateDestReceiver(DestNone);
+    parsetree_list = pg_parse_query(ddl_command);
+
+    foreach(parsetree_item, parsetree_list) {
+        List *plantree_list;
+        List *querytree_list;
+        Node *command = (Node *) lfirst(parsetree_item);
+        const char *commandTag;
+
+        Portal portal;
+        bool snapshot_set = false;
+
+        commandTag = CreateCommandTag((Node *) command);
+
+        /* If we got a cancel signal in parsing or prior command, quit */
+        CHECK_FOR_INTERRUPTS();
+
+        /*
+         * Set up a snapshot if parse analysis/planning will need one.
+         */
+        if (analyze_requires_snapshot(command)) {
+            PushActiveSnapshot(GetTransactionSnapshot());
+            snapshot_set = true;
+        }
+
+        /*
+         * We do the work for each parsetree in a short-lived context, to
+         * limit the memory used when there are many commands in the string.
+         */
+        per_parsetree_context =
+            AllocSetContextCreate(CurrentMemoryContext,
+                                  "execute_sql_string per-statement context",
+                                  ALLOCSET_DEFAULT_SIZES);
+        oldcontext = MemoryContextSwitchTo(per_parsetree_context);
+
+        querytree_list = pg_analyze_and_rewrite(command, ddl_command, NULL, 0);
+
+        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+
+        /* Done with the snapshot used for parsing/planning */
+        if (snapshot_set)
+            PopActiveSnapshot();
+
+        portal = CreatePortal("logical replication", true, true);
+
+        /*
+         * We don't have to copy anything into the portal, because everything
+         * we are passing here is in ApplyMessageContext or the
+         * per_parsetree_context, and so will outlive the portal anyway.
+         */
+        PortalDefineQuery(portal,
+                          NULL,
+                          ddl_command,
+                          commandTag,
+                          plantree_list,
+                          NULL);
+
+        /*
+         * Start the portal.  No parameters here.
+         */
+        PortalStart(portal, NULL, 0, InvalidSnapshot);
+
+        /*
+         * Switch back to transaction context for execution.
+         */
+        MemoryContextSwitchTo(oldcontext);
+
+        (void) PortalRun(portal,
+                         FETCH_ALL,
+                         true,
+                         receiver,
+                         receiver,
+                         NULL);
+
+        PortalDrop(portal, false);
+
+        CommandCounterIncrement();
+
+        /*
+         * Table created by DDL replication (database level) is automatically
+         * added to the subscription here.
+         */
+        handle_create_table(command);
+
+        /* Now we may drop the per-parsetree context, if one was created. */
+        MemoryContextDelete(per_parsetree_context);
+    }
+
+    if (t_thrd.applyworker_cxt.mySubscription->matchddlowner && owner) {
+        SetUserIdAndSecContext(saved_current_user, save_sec_context);
+    }
+
+    t_thrd.postgres_cxt.debug_query_string = save_debug_query_string;
+    end_replication_step();
+}
+
+/*
  * Logical replication protocol message dispatcher.
  */
 static void apply_dispatch(StringInfo s)
@@ -1202,6 +1444,9 @@ static void apply_dispatch(StringInfo s)
             break;
         case 'S':
             apply_handle_conninfo(s);
+            break;
+        case LOGICAL_REP_MSG_DDL:
+            apply_handle_ddl(s);
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
@@ -1729,6 +1974,14 @@ void ApplyWorkerMain()
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
+
+    if (!t_thrd.mem_cxt.mask_password_mem_cxt)
+        t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        "MaskPasswordCtx",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
 
     /*
      * If an exception is encountered, processing resumes here.

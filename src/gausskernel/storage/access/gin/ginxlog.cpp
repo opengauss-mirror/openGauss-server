@@ -39,15 +39,21 @@ static void GinRedoCreateIndex(XLogReaderState *record)
 {
     RedoBufferInfo rootBuffer, metaBuffer;
 
-    XLogInitBufferForRedo(record, 0, &metaBuffer);
-    GinRedoCreateIndexOperatorMetaPage(&metaBuffer);
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &metaBuffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &metaBuffer);
+        GinRedoCreateIndexOperatorMetaPage(&metaBuffer);
 
-    MarkBufferDirty(metaBuffer.buf);
+        MarkBufferDirty(metaBuffer.buf);
+    }
 
-    XLogInitBufferForRedo(record, 1, &rootBuffer);
-    GinRedoCreateIndexOperatorRootPage(&rootBuffer);
+    action = SSCheckInitPageXLog(record, 1, &rootBuffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 1, &rootBuffer);
+        GinRedoCreateIndexOperatorRootPage(&rootBuffer);
 
-    MarkBufferDirty(rootBuffer.buf);
+        MarkBufferDirty(rootBuffer.buf);
+    }
 
     UnlockReleaseBuffer(rootBuffer.buf);
     UnlockReleaseBuffer(metaBuffer.buf);
@@ -56,6 +62,9 @@ static void GinRedoCreateIndex(XLogReaderState *record)
 static void GinRedoCreatePTree(XLogReaderState *record)
 {
     RedoBufferInfo buffer;
+    if (SSCheckInitPageXLogSimple(record, 0, &buffer) == BLK_DONE) {
+        return;
+    }
 
     XLogInitBufferForRedo(record, 0, &buffer);
 
@@ -467,11 +476,13 @@ static void ginRedoUpdateMetapage(XLogReaderState *record)
      * image, so restore the metapage unconditionally without looking at the
      * LSN, to avoid torn page hazards.
      */
-    XLogInitBufferForRedo(record, 0, &metabuffer);
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &metabuffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &metabuffer);
+        GinRedoUpdateOperatorMetapage(&metabuffer, (void *)data);
 
-    GinRedoUpdateOperatorMetapage(&metabuffer, (void *)data);
-
-    MarkBufferDirty(metabuffer.buf);
+        MarkBufferDirty(metabuffer.buf);
+    }
 
     if (data->ntuples > 0) {
         /*
@@ -510,6 +521,9 @@ static void GinRedoInsertListPage(XLogReaderState *record)
     char *payload = NULL;
     Size totaltupsize;
 
+    if (SSCheckInitPageXLogSimple(record, 0, &buffer) == BLK_DONE) {
+        return;
+    }
     /* We always re-initialize the page. */
     XLogInitBufferForRedo(record, 0, &buffer);
 
@@ -543,12 +557,14 @@ static void GinRedoDeleteListPages(XLogReaderState *record)
     ginxlogDeleteListPages *data = (ginxlogDeleteListPages *)XLogRecGetData(record);
     RedoBufferInfo metabuffer;
     int i;
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &metabuffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &metabuffer);
 
-    XLogInitBufferForRedo(record, 0, &metabuffer);
+        GinRedoDeleteListPagesOperatorPage(&metabuffer, (void *)&(data->metadata));
 
-    GinRedoDeleteListPagesOperatorPage(&metabuffer, (void *)&(data->metadata));
-
-    MarkBufferDirty(metabuffer.buf);
+        MarkBufferDirty(metabuffer.buf);
+    }
 
     /*
      * In normal operation, shiftList() takes exclusive lock on all the
@@ -567,10 +583,12 @@ static void GinRedoDeleteListPages(XLogReaderState *record)
      */
     for (i = 0; i < data->ndeleted; i++) {
         RedoBufferInfo buffer;
-
-        XLogInitBufferForRedo(record, i + 1, &buffer);
-        GinRedoDeleteListPagesMarkDelete(&buffer);
-        MarkBufferDirty(buffer.buf);
+        XLogRedoAction action = SSCheckInitPageXLog(record, i + 1, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, i + 1, &buffer);
+            GinRedoDeleteListPagesMarkDelete(&buffer);
+            MarkBufferDirty(buffer.buf);
+        }
 
         UnlockReleaseBuffer(buffer.buf);
     }

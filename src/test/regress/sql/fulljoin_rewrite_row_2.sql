@@ -57,9 +57,9 @@ select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer
 explain (verbose, costs off) select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer join t2 on t1.acct_id=t2.acct_id ) A full join (select atan2(t3.acct_id,t2.acct_id)as acct_id from  t2 full outer join t3 on t3.acct_id=t2.acct_id )  t3 on a.acct_id=t3.acct_id full join t1 on atan2(a.acct_id,t3.acct_id)=t1.acct_id order by 1,2,3,4;
 select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer join t2 on t1.acct_id=t2.acct_id ) A full join (select atan2(t3.acct_id,t2.acct_id)as acct_id from  t2 full outer join t3 on t3.acct_id=t2.acct_id )  t3 on a.acct_id=t3.acct_id full join t1 on atan2(a.acct_id,t3.acct_id)=t1.acct_id order by 1,2,3,4;
 
-explain select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
+explain (costs off) select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
-explain select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
+explain (costs off) select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 
 set enable_nestloop=off;
@@ -72,9 +72,9 @@ select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer
 explain (verbose, costs off) select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer join t2 on t1.acct_id=t2.acct_id ) A full join (select atan2(t3.acct_id,t2.acct_id)as acct_id from  t2 full outer join t3 on t3.acct_id=t2.acct_id )  t3 on a.acct_id=t3.acct_id full join t1 on atan2(a.acct_id,t3.acct_id)=t1.acct_id order by 1,2,3,4;
 select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer join t2 on t1.acct_id=t2.acct_id ) A full join (select atan2(t3.acct_id,t2.acct_id)as acct_id from  t2 full outer join t3 on t3.acct_id=t2.acct_id )  t3 on a.acct_id=t3.acct_id full join t1 on atan2(a.acct_id,t3.acct_id)=t1.acct_id order by 1,2,3,4;
 
-explain select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
+explain (costs off) select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
-explain select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
+explain (costs off) select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 
 
@@ -90,9 +90,9 @@ explain (verbose, costs off) select * from (select atan2(t1.acct_id,t2.acct_id)a
 select * from (select atan2(t1.acct_id,t2.acct_id)as acct_id from  t1 full outer join t2 on t1.acct_id=t2.acct_id ) A full join (select atan2(t3.acct_id,t2.acct_id)as acct_id from  t2 full outer join t3 on t3.acct_id=t2.acct_id )  t3 on a.acct_id=t3.acct_id full join t1 on atan2(a.acct_id,t3.acct_id)=t1.acct_id order by 1,2,3,4;
 
 
-explain select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
+explain (costs off) select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 select /*+  leading((t1 t2)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
-explain select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
+explain (costs off) select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 select /*+  leading((t2 t1)) */ *from t1 full join t2 on t1.acct_id=t2.acct_id order by 1,2,3,4;
 
 

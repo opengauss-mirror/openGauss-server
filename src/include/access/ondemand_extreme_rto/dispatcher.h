@@ -43,6 +43,7 @@ namespace ondemand_extreme_rto {
 typedef struct {
     PageRedoWorker *batchThd;   /* BatchRedoThread */
     PageRedoWorker *managerThd; /* PageRedoManager */
+    PageRedoWorker *htabThd;    /* HashMapManager */
     PageRedoWorker **redoThd;   /* RedoThreadPool */
     uint32 redoThdNum;
     uint32 *chosedRTIds; /* chosedRedoThdIds */
@@ -59,6 +60,11 @@ typedef struct ReadPipeline {
     PageRedoWorker *readPageThd; /* readthrd */
     PageRedoWorker *readThd;     /* readthrd */
 } ReadPipeline;
+
+typedef struct AuxiliaryPipeLine {
+    PageRedoWorker *segRedoThd;
+    PageRedoWorker *ctrlThd;
+} AuxiliaryPipeLine;
 
 #define MAX_XLOG_READ_BUFFER (0xFFFFF) /* 8k uint */
 
@@ -130,6 +136,7 @@ typedef struct {
     uint32 chosedPLCnt;        /* chosedPageLineCount */
     TrxnRedoPipeline trxnLine;
     ReadPipeline readLine;
+    AuxiliaryPipeLine auxiliaryLine;
     RecordBufferState rtoXlogBufState;
     PageRedoWorker **allWorkers; /* Array of page redo workers. */
     uint32 allWorkersCnt;
@@ -166,6 +173,17 @@ typedef struct {
     volatile XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoTimeCost *startupTimeCost;
     RedoParseManager parseManager;
+    /* used in realtime ondemand extreme rto */
+    volatile XLogRecPtr ckptRedoPtr;
+    volatile XLogRecPtr syncRecordPtr;
+    SPSCBlockingQueue *trxnQueue;
+    SPSCBlockingQueue *segQueue;
+
+    /**
+     * used in ondemand real-time build, to avoid write primary node's
+     * control file into standby node's, when standby node shutdown.
+     */
+    ControlFileData* restoreControlFile;
 } LogDispatcher;
 
 typedef struct {
@@ -180,6 +198,7 @@ extern LogDispatcher *g_dispatcher;
 extern RedoItem g_GlobalLsnForwarder;
 extern RedoItem g_cleanupMark;
 extern RedoItem g_forceDistributeMark;
+extern RedoItem g_hashmapPruneMark;
 extern THR_LOCAL RecordBufferState *g_recordbuffer;
 
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
@@ -213,13 +232,15 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen);
 
 /* RedoItem lifecycle. */
 void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+void UpdateCheckpointRedoPtrForPrune(XLogRecPtr prunePtr);
 void ProcessPendingRecords(bool fullSync = false);
 void FreeRedoItem(RedoItem *item);
 
 /* Dispatcher phases. */
-void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code);
 void SendRecoveryEndMarkToWorkersAndWaitForReach(int code);
 void WaitRedoFinish();
+void WaitRealtimeBuildShutdown();
+void BackupControlFileForRealtimeBuild(ControlFileData* controlFile);
 
 /* Dispatcher states. */
 int GetDispatcherExitCode();

@@ -132,50 +132,6 @@ XLogRecPtr readOneRecord(const char* datadir, XLogRecPtr ptr, TimeLineID tli)
     return endptr;
 }
 
-int SSInitXlogDir(char*** xlogDirs)
-{
-    int xlogDirNum = 0;
-    *xlogDirs = (char**)malloc(SS_MAX_INST * sizeof(char*));
-    if (*xlogDirs == NULL) {
-        return -1;
-    }
-
-    for (int i = 0; i < SS_MAX_INST; i++) {
-        (*xlogDirs)[i] = (char*)malloc(MAXPGPATH * sizeof(char));
-        if ((*xlogDirs)[i] == NULL) {
-            for (int j = 0; j < i; j++) {
-                free((*xlogDirs)[j]);
-            }
-            free(*xlogDirs);
-            return -1;
-        }
-    }
-
-    DIR* dir = opendir(ss_instance_config.dss.vgname);
-    struct dirent* entry = NULL;
-    while (dir != NULL && (entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "pg_xlog", strlen("pg_xlog")) == 0) {
-            snprintf((*xlogDirs)[xlogDirNum], MAXPGPATH, "%s/%s", ss_instance_config.dss.vgname, entry->d_name);
-            xlogDirNum++;
-            if (xlogDirNum >= SS_MAX_INST) {
-                break;
-            }
-        }
-    }
-    closedir(dir);
-    return xlogDirNum;
-}
-
-void FreeXlogDir(char** xlogDirs)
-{
-    if (ss_instance_config.dss.enable_dss && xlogDirs != NULL) {
-        for (int i = 0; i < SS_MAX_INST; i++) {
-            free(xlogDirs[i]);
-        }
-        free(xlogDirs);
-    }
-}
-
 BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRecPtr startrec, XLogRecPtr* lastchkptrec,
     TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term)
 {
@@ -211,7 +167,12 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
             pg_log(PG_FATAL, "init xlog dirs failed\n");
             return BUILD_FATAL;
         }
-        max_lsn = SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, xlogDirs, xlogDirNum);
+        if (ss_instance_config.dss.enable_dorado) {
+            max_lsn = startrec;
+        } else {
+            max_lsn =
+                SSFindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, xlogDirs, xlogDirNum);
+        }
     } else {
         max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
     }

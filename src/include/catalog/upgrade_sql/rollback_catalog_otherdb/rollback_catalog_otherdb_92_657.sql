@@ -5,7 +5,7 @@ DROP TABLE IF EXISTS pg_catalog.pg_subscription_rel;
 
 DROP FUNCTION IF EXISTS pg_catalog.pg_get_replica_identity_index(regclass);
 
-DROP FUNCTION IF EXISTS pg_catalog.pg_stat_get_subscription(IN subid oid, OUT subid oid, OUT pid integer, OUT relid oid, OUT received_lsn text, OUT last_msg_send_time timestamp with time zone, OUT last_msg_receipt_time timestamp with time zone, OUT latest_end_lsn text, OUT latest_end_time timestamp with time zone) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.pg_stat_get_subscription(IN subid oid, OUT subid oid, OUT relid oid, OUT pid integer, OUT received_lsn text, OUT last_msg_send_time timestamp with time zone, OUT last_msg_receipt_time timestamp with time zone, OUT latest_end_lsn text, OUT latest_end_time timestamp with time zone) CASCADE;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2802;
 

@@ -2147,19 +2147,23 @@ void check_interrupt()
  */
 static void *ProgressReportProbackup(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_doneFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \r",
             progressBar, percent, g_doneFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -2170,25 +2174,30 @@ static void *ProgressReportProbackup(void *arg)
     } while ((g_doneFiles < g_totalFiles) && !g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). backup file \n",
             progressBar, percent, g_doneFiles, g_totalFiles);
+    return nullptr;
 }
 
 static void *ProgressReportSyncBackupFile(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_syncFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync backup file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync backup file \r",
             progressBar, percent, g_syncFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -2199,8 +2208,9 @@ static void *ProgressReportSyncBackupFile(void *arg)
     } while ((g_syncFiles < g_totalFiles) && !g_progressFlagSync);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync backup file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync backup file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
+    return nullptr;
 }
 
 /*

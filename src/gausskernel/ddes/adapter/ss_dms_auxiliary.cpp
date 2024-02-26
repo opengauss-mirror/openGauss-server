@@ -43,6 +43,13 @@ static void dms_auxiliary_request_shutdown_handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+static void dms_auxiliary_siguser1_handler(SIGNAL_ARGS)
+{
+    int save_errno = errno;
+    latch_sigusr1_handler();
+    errno = save_errno;
+}
+
 static void SetupDmsAuxiliarySignalHook(void)
 {
     /*
@@ -54,7 +61,7 @@ static void SetupDmsAuxiliarySignalHook(void)
     (void)gspqsignal(SIGQUIT, dms_auxiliary_request_shutdown_handler); /* hard crash time */
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
-    (void)gspqsignal(SIGUSR1, SIG_IGN);
+    (void)gspqsignal(SIGUSR1, dms_auxiliary_siguser1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
     (void)gspqsignal(SIGURG, print_stack);
     /*
@@ -97,6 +104,31 @@ void dms_auxiliary_handle_exception()
     return;
 }
 
+void SSInitXminInfo()
+{
+    if (!ENABLE_DMS) {
+        return;
+    }
+
+    ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
+    if (xmin_info->snap_cache != NULL) {
+        return;
+    }
+
+    HASHCTL ctl;
+    errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = sizeof(ss_snap_xmin_key_t);
+    ctl.entrysize = sizeof(ss_snap_xmin_item_t);
+    ctl.hash = tag_hash;
+    ctl.num_partitions = NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS;
+    xmin_info->snap_cache = HeapMemInitHash("DMS snapshot xmin cache", 60, 30000, &ctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+    if (xmin_info->snap_cache == NULL) {
+        ereport(FATAL, (errmodule(MOD_DMS), errmsg("could not initialize shared xmin_info hash table")));
+    }
+}
+
 void DmsAuxiliaryMain(void)
 {
     sigjmp_buf localSigjmpBuf;
@@ -114,17 +146,6 @@ void DmsAuxiliaryMain(void)
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
-
-    HASHCTL ctl;
-    errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
-    securec_check(rc, "\0", "\0");
-    ctl.keysize = sizeof(ss_snap_xmin_key_t);
-    ctl.entrysize = sizeof(ss_snap_xmin_item_t);
-    ctl.hash = tag_hash;
-    ctl.num_partitions = NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS;
-    ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
-    xmin_info->snap_cache = HeapMemInitHash("DMS snapshot xmin cache", 60, 30000, &ctl,
-        HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
 
     for (;;) {
         if (t_thrd.dms_aux_cxt.shutdown_requested) {
@@ -151,4 +172,12 @@ void DmsAuxiliaryMain(void)
             }
         }
     }
+}
+
+void SSWaitDmsAuxiliaryExit()
+{
+    while (g_instance.pid_cxt.DmsAuxiliaryPID != 0) {
+        pg_usleep(1);
+    }
+    ereport(LOG, (errmsg("[SS] dms auxiliary thread exit")));
 }

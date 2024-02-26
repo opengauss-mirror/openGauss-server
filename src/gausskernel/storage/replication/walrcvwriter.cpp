@@ -39,6 +39,7 @@
 #include "utils/resowner.h"
 #include "gssignal/gs_signal.h"
 #include "gs_bbox.h"
+#include "storage/gs_uwal/gs_uwal.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "postmaster/barrier_preparse.h"
@@ -55,6 +56,7 @@ static volatile XLogSegNo recvSegNo = 0;
 static volatile uint32 recvOff = 0;
 
 #define MAX_DUMMY_DATA_FILE (RELSEG_SIZE * BLCKSZ)
+#define UWAL_XLOGDIR (g_instance.attr.attr_storage.uwal_devices_path)
 
 /* max dummy data write file (default: 1GB) */
 static int ws_dummy_data_writer_file_fd = -1;
@@ -67,6 +69,18 @@ static void WSDataRcvWriteOnDummyStandby(const char *buf, uint32 nbytes);
 static void walrcvWriterSigHupHandler(SIGNAL_ARGS);
 static void walrcvWriterQuickDie(SIGNAL_ARGS);
 static void reqShutdownHandler(SIGNAL_ARGS);
+
+int walRcvWriteUwal(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInfo *info);
+int defWalRcvWriteUwal(WalRcvCtlBlock *walrcb);
+int uwalRcvStateInit(UwalrcvWriterState *uwalrcv, UwalInfo info);
+static void uwalRcvStateAlloc();
+static void uwalRcvStateFree();
+static void XLogWalRcvWriteFromUwal(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli);
+static int RenameUwalFile(XLogRecPtr recptr, TimeLineID tli);
+static int RemoveUwalFile(XLogRecPtr recptr, TimeLineID tli);
+static int walRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInfo *info);
+static void RemoveFromUwal(UwalrcvWriterState *uwalrcv);
+extern void XlogArchUwal(XLogRecPtr archRqstPtr);
 
 void SetWalRcvWriterPID(ThreadId tid)
 {
@@ -488,9 +502,13 @@ int WalDataRcvWrite(void)
     XLogRecPtr recptr = InvalidXLogRecPtr;
     char data_flag;
 
-    if (!g_instance.attr.attr_storage.enable_mix_replication)
-        return walRcvWrite(walrcb);
-    else if (!t_thrd.xlog_cxt.InRecovery)
+    if (!g_instance.attr.attr_storage.enable_mix_replication) {
+        if (g_instance.attr.attr_storage.enable_uwal) {
+            return defWalRcvWriteUwal(walrcb);
+        } else {
+            return walRcvWrite(walrcb);
+        }
+    } else if (!t_thrd.xlog_cxt.InRecovery)
         t_thrd.xlog_cxt.InRecovery = true;
 
     /* avoid concurrent WalDataRcvWrite by WalRcvWriteLock */
@@ -837,8 +855,16 @@ void walrcvWriterMain(void)
     /*
      * Use the recovery target timeline ID during recovery
      */
-    if (!RecoveryInProgress())
-        ereport(FATAL, (errmsg("cannot continue WAL streaming, recovery has already ended")));
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE &&
+            t_thrd.postmaster_cxt.HaShmData->current_mode != PRIMARY_MODE) {
+            if (!RecoveryInProgress())
+                ereport(FATAL, (errmsg("cannot continue WAL streaming, recovery has already ended")));
+        }
+    } else {
+        if (!RecoveryInProgress())
+            ereport(FATAL, (errmsg("cannot continue WAL streaming, recovery has already ended")));
+    }
 
     t_thrd.xlog_cxt.ThisTimeLineID = GetRecoveryTargetTLI();
 
@@ -850,6 +876,9 @@ void walrcvWriterMain(void)
     t_thrd.walrcvwriter_cxt.walStreamWrite = GetXLogReplayRecPtr(NULL);
     pgstat_report_appname("Wal Receive Writer");
     pgstat_report_activity(STATE_IDLE, NULL);
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        uwalRcvStateAlloc();        
+    }
 
     /*
      * Loop forever
@@ -865,10 +894,8 @@ void walrcvWriterMain(void)
             ProcessConfigFile(PGC_SIGHUP);
         }
 
-        if (!g_instance.attr.attr_storage.enable_uwal) {
-            while (!t_thrd.walrcvwriter_cxt.shutdownRequested && WalDataRcvWrite() > 0)
-                ;
-        }    
+        while (!t_thrd.walrcvwriter_cxt.shutdownRequested && WalDataRcvWrite() > 0)
+            ;
 
         if (t_thrd.walrcvwriter_cxt.shutdownRequested) {
             ereport(LOG, (errmsg("walrcvwriter thread shut down")));
@@ -877,6 +904,12 @@ void walrcvWriterMain(void)
              * control back to the sigsetjmp block above
              */
             u_sess->attr.attr_common.ExitOnAnyError = true;
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                GsUwalRcvFlush();
+                while (WalDataRcvWrite() > 0) {
+                };
+                uwalRcvStateFree();
+            }
             /* Normal exit from the pagewriter is here */
             proc_exit(0); /* done */
         }
@@ -936,4 +969,494 @@ static void reqShutdownHandler(SIGNAL_ARGS)
     }
 
     errno = saveErrno;
+}
+
+int walRcvWriteUwal(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInfo *info)
+{
+    char *walrecvbuf = NULL;
+    XLogRecPtr startPtr = InvalidXLogRecPtr;
+    XLogRecPtr readPtr = InvalidXLogRecPtr;
+    XLogRecPtr writePtr = InvalidXLogRecPtr;
+    int64 recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+    int nbytes = 0;
+    int64 readLen = 0;
+    int64 uwalReadOffset;
+    int64 uwalFreeOffset;
+    TimeLineID tli;
+    bool writeNoWait = false;
+
+    START_CRIT_SECTION();
+    SpinLockAcquire(&uwalrcv->writeMutex);
+    writePtr = uwalrcv->writePtr;
+    SpinLockRelease(&uwalrcv->writeMutex);
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    if (uwalrcv->readPtr == writePtr) {
+        SpinLockRelease(&uwalrcv->mutex);
+        END_CRIT_SECTION();
+        return 0;
+    }
+    walrecvbuf = uwalrcv->uwalReceiverBuffer;
+    startPtr = uwalrcv->startPtr;
+    readPtr = uwalrcv->readPtr;
+    tli = uwalrcv->startTimeLine;
+    SpinLockRelease(&uwalrcv->mutex);
+    readLen = writePtr - readPtr;
+    if (readLen <= 0) {
+        ereport(LOG, (errmsg("walRcvWriteUwal no need to write")));
+        END_CRIT_SECTION();
+        return 0;
+    }
+
+    uwalReadOffset = readPtr - startPtr;
+    uwalFreeOffset = recBufferSize - uwalReadOffset;
+    nbytes = Min(MaxReadUwalBytes, Min(uwalFreeOffset, readLen));
+    if (startPtr / XLogSegSize != t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset / XLogSegSize) {
+        if (startPtr / XLogSegSize != writePtr / XLogSegSize) {
+            startPtr = (startPtr / XLogSegSize + 1) * XLogSegSize;
+            SpinLockAcquire(&uwalrcv->mutex);
+            uwalrcv->startPtr = startPtr;
+            uwalrcv->flushPtr = startPtr;
+            uwalrcv->writeNoWait = false;
+            SpinLockRelease(&uwalrcv->mutex);
+            END_CRIT_SECTION();
+            return XLogSegSize;
+        }
+        END_CRIT_SECTION();
+        return 0;
+    }
+    if (startPtr % XLogSegSize + uwalReadOffset + nbytes > XLogSegSize) {
+        nbytes = (int)(XLogSegSize - uwalReadOffset - startPtr % XLogSegSize);
+        writeNoWait = true;
+    }
+    int ret = 0;
+    if (nbytes > 0) {
+        ret = GsUwalRead(&info->id, readPtr, walrecvbuf + uwalReadOffset, nbytes);
+        if (0 != ret) {
+            ereport(
+                LOG,
+                (errmsg("walRcvWriteUwal uwal_read failed ret: %d,readPtr: %lu,startPtr: %lu,startWriteOffset: %lu",
+                        ret, readPtr, startPtr, t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset)));
+            END_CRIT_SECTION();
+            return -1;
+        }
+        XLByteAdvance(readPtr, nbytes);
+        uwalReadOffset += nbytes;
+    }
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    uwalrcv->readPtr = readPtr;
+    writeNoWait = writeNoWait || uwalrcv->writeNoWait;
+    SpinLockRelease(&uwalrcv->mutex);
+
+    if (uwalReadOffset < recBufferSize && writeNoWait == false) {
+        END_CRIT_SECTION();
+        return 0;
+    }
+
+    XLogWalRcvWriteFromUwal(walrcb, walrecvbuf, uwalReadOffset, startPtr, tli);
+    XLByteAdvance(startPtr, uwalReadOffset);
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    uwalrcv->startPtr = startPtr;
+    uwalrcv->flushPtr = startPtr;
+    uwalrcv->writeNoWait = false;
+    SpinLockRelease(&uwalrcv->mutex);
+
+    ereport(DEBUG5,
+            (errmsg("walRcvWrite: nbytes(%d),startptr(%u:%u)", nbytes, (uint32)(startPtr >> 32), (uint32)startPtr)));
+
+    END_CRIT_SECTION();
+
+    /* the max lsn to be replayed */
+    g_instance.comm_cxt.predo_cxt.redoPf.local_max_lsn = startPtr;
+    return nbytes;
+}
+
+int defWalRcvWriteUwal(WalRcvCtlBlock *walrcb)
+{
+    if (t_thrd.walrcvwriter_cxt.shutdownRequested) {
+        return 0;
+    }
+    int ret = 0;
+    bool needXlogCatchup = false;
+    bool fullSync = true;
+    UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
+    XLogRecPtr startPtr = InvalidXLogRecPtr;
+
+    if (t_thrd.xlog_cxt.uwalInfo.info.dataSize == 0) {
+        int ret = GsUwalQueryByUser(t_thrd.xlog_cxt.ThisTimeLineID, true);
+        if (0 != ret) {
+            ereport(LOG, (errmsg("walrcvwriter thread shut down with UwalQueryByUser failed retCode: %d", ret)));
+            gs_thread_exit(1);
+        }
+        if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+            ereport(LOG, (errmsg("walrcvwriter find uwal datasize : %lu", t_thrd.xlog_cxt.uwalInfo.info.dataSize)));
+            uwalRcvStateInit(uwalrcv, t_thrd.xlog_cxt.uwalInfo);
+        } else {
+            ereport(LOG, (errmsg("walrcvwriter no uwal detected")));
+            return 0;
+        }
+    }
+
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        SpinLockAcquire(&uwalrcv->mutex);
+        needXlogCatchup = uwalrcv->needXlogCatchup;
+        SpinLockRelease(&uwalrcv->mutex);
+        if (needXlogCatchup) {
+            if (walrcb == NULL)
+                return 0;
+            int ret = walRcvWrite(walrcb);
+            if (ret != 0) {
+                return ret;
+            }
+
+            ret = GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info);
+            if (ret != 0) {
+                ereport(WARNING, (errmsg("GsUwalQuery return failed")));
+                return ret;
+            }
+            SpinLockAcquire(&walrcb->mutex);
+            startPtr = walrcb->walStart;
+            SpinLockRelease(&walrcb->mutex);
+            if (startPtr < t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
+                return ret;
+            }
+            SpinLockAcquire(&uwalrcv->mutex);
+            uwalrcv->needXlogCatchup = false;
+            SpinLockRelease(&uwalrcv->mutex);
+        }
+    }
+
+    ret = walRcvWriteUwal(walrcb, uwalrcv, &t_thrd.xlog_cxt.uwalInfo);
+
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE) {
+        walRcvUwalTruncate(walrcb, uwalrcv, &t_thrd.xlog_cxt.uwalInfo);
+        RemoveFromUwal(uwalrcv);
+    } else {
+        SpinLockAcquire(&uwalrcv->mutex);
+        fullSync = uwalrcv->fullSync;
+        SpinLockRelease(&uwalrcv->mutex);
+        if (fullSync) {
+            walRcvUwalTruncate(walrcb, uwalrcv, &t_thrd.xlog_cxt.uwalInfo);
+            RemoveFromUwal(uwalrcv);
+        }
+    }
+    return ret;
+}
+
+int uwalRcvStateInit(UwalrcvWriterState *uwalrcv, UwalInfo info)
+{
+    SpinLockAcquire(&uwalrcv->mutex);
+    uwalrcv->startTimeLine = info.info.startTimeLine;
+    uwalrcv->startPtr = info.info.truncateOffset;
+    uwalrcv->flushPtr = info.info.truncateOffset;
+    uwalrcv->truncatePtr = info.info.truncateOffset;
+    uwalrcv->readPtr = info.info.truncateOffset;
+    uwalrcv->renamePtr = info.info.truncateOffset;
+    uwalrcv->needQuery = false;
+    uwalrcv->fullSync = false;
+    uwalrcv->needXlogCatchup = true;
+    SpinLockRelease(&uwalrcv->mutex);
+
+    SpinLockAcquire(&uwalrcv->writeMutex);
+    uwalrcv->writePtr = info.info.writeOffset;
+    SpinLockRelease(&uwalrcv->writeMutex);
+    return 0;
+}
+
+static void uwalRcvStateAlloc()
+{
+    char *buf = NULL;
+    int64 recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+    size_t len = offsetof(UwalrcvWriterState, uwalReceiverBuffer) + recBufferSize;
+    errno_t rc = 0;
+
+    buf = (char *)palloc(len);
+
+    if (buf == NULL) {
+        ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+    }
+
+    rc = memset_s(buf, sizeof(UwalrcvWriterState), 0, sizeof(UwalrcvWriterState));
+    securec_check_c(rc, "\0", "\0");
+
+    t_thrd.walreceiverfuncs_cxt.WalRcv->uwalRcvState = (UwalrcvWriterState *)buf;
+    SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->uwalRcvState->mutex);
+    SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->uwalRcvState->writeMutex);
+}
+
+static void uwalRcvStateFree()
+{
+    if (t_thrd.walreceiverfuncs_cxt.WalRcv->uwalRcvState != NULL) {
+        pfree(t_thrd.walreceiverfuncs_cxt.WalRcv->uwalRcvState);
+        t_thrd.walreceiverfuncs_cxt.WalRcv->uwalRcvState = NULL;
+    }
+}
+
+static void XLogWalRcvWriteFromUwal(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLogRecPtr recptr, TimeLineID tli)
+{
+    int startoff;
+    int byteswritten;
+    int nRetCode = 0;
+    Size write_bytes = nbytes;
+
+    while (nbytes > 0) {
+        int segbytes;
+
+        if (recvFile < 0 || !XLByteInSeg(recptr, recvSegNo)) {
+            bool use_existent = false;
+
+            /*
+             * fsync() and close current file before we switch to next one. We
+             * would otherwise have to reopen this file to fsync it later
+             */
+            if (recvFile >= 0) {
+                char xlogfname[MAXFNAMELEN];
+
+                /*
+                 * XLOG segment files will be re-read by recovery in startup
+                 * process soon, so we don't advise the OS to release cache
+                 * pages associated with the file like XLogFileClose() does.
+                 */
+                if (close(recvFile) != 0)
+                    ereport(PANIC, (errcode_for_file_access(),
+                                    errmsg("could not close log file %s: %m", XLogFileNameP(tli, recvSegNo))));
+
+                /*
+                 * Create .done file forcibly to prevent the restored segment from
+                 * being archived again later.
+                 */
+                XLogFileName(xlogfname, MAXFNAMELEN, recvFileTLI, recvSegNo);
+                XLogArchiveForceDone(xlogfname);
+            }
+            recvFile = -1;
+
+            /* Create/use new log file */
+            XLByteToSeg(recptr, recvSegNo);
+            use_existent = true;
+            recvFile = XLogFileInit(recvSegNo, &use_existent, true);
+            recvFileTLI = tli;
+            recvOff = 0;
+        }
+
+        /* Calculate the start offset of the received logs */
+        startoff = (int)(recptr % XLogSegSize);
+
+        if (startoff + nbytes > XLogSegSize)
+            segbytes = (int)(XLogSegSize - startoff);
+        else
+            segbytes = nbytes;
+
+        /* Need to seek in the file? */
+        if (recvOff != (uint32)startoff) {
+            if (lseek(recvFile, (off_t)startoff, SEEK_SET) < 0)
+                ereport(PANIC, (errcode_for_file_access(), errmsg("could not seek in log file %s to offset %d: %m",
+                                                                  XLogFileNameP(tli, recvSegNo), startoff)));
+            recvOff = startoff;
+        }
+
+        /* OK to write the logs */
+        errno = 0;
+
+        byteswritten = write(recvFile, buf, segbytes);
+        if (byteswritten <= 0) {
+            /* if write didn't set errno, assume no disk space */
+            if (errno == 0)
+                errno = ENOSPC;
+            ereport(PANIC,
+                    (errcode_for_file_access(), errmsg("could not write to log file %s at offset %u, length %lu: %m",
+                                                       XLogFileNameP(tli, recvSegNo), recvOff, INT2ULONG(segbytes))));
+        }
+        if (recvOff == (uint32)0 && segbytes >= (int)sizeof(XLogPageHeaderData)) {
+            if (((XLogPageHeader)buf)->xlp_magic == XLOG_PAGE_MAGIC &&
+                (recvSegNo * XLogSegSize) != ((XLogPageHeader)buf)->xlp_pageaddr) {
+                ereport(PANIC, (errcode_for_file_access(),
+                                errmsg("unexpected page addr %lu of log file %s", ((XLogPageHeader)buf)->xlp_pageaddr,
+                                       XLogFileNameP(tli, recvSegNo))));
+            }
+        }
+        /* Update state for write */
+        XLByteAdvance(recptr, byteswritten);
+
+        recvOff += byteswritten;
+        nbytes -= byteswritten;
+        buf += byteswritten;
+
+        issue_xlog_fsync(recvFile, recvSegNo);
+
+        /* Report XLOG streaming progress in PS display */
+        if (u_sess->attr.attr_common.update_process_title) {
+            char activitymsg[50];
+            nRetCode = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1,
+                                  "walrcvwriter streaming %X/%X", (uint32)(recptr >> 32), (uint32)recptr);
+            securec_check_ss(nRetCode, "\0", "\0");
+            set_ps_display(activitymsg, false);
+        }
+
+        ereport(DEBUG2, (errmsg("write xlog done: start %X/%X %lu bytes", (uint32)(recptr >> 32), (uint32)recptr,
+                                write_bytes)));
+    }
+
+}
+
+static int RenameUwalFile(XLogRecPtr recptr, TimeLineID tli)
+{
+    char path[MAXPGPATH];
+    char newpath[MAXPGPATH];
+    char filename[MAXFNAMELEN];
+    XLByteToSeg(recptr, recvSegNo);
+    recvFileTLI = tli;
+    XLogFileName(filename, MAXFNAMELEN, recvFileTLI, recvSegNo);
+
+    errno_t errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", UWAL_XLOGDIR, filename);
+    securec_check_ss(errorno, "", "");
+
+    errorno = snprintf_s(newpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SS_XLOGDIR, filename);
+    securec_check_ss(errorno, "", "");
+
+    if (rename(path, newpath) != 0) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not rename old transaction log file \"%s\": %m", path)));
+        return -1;
+    }
+    return 0;
+}
+
+static int RemoveUwalFile(XLogRecPtr recptr, TimeLineID tli)
+{
+    char path[MAXPGPATH];
+    char filename[MAXFNAMELEN];
+    XLByteToSeg(recptr, recvSegNo);
+    recvFileTLI = tli;
+    XLogFileName(filename, MAXFNAMELEN, recvFileTLI, recvSegNo);
+
+    errno_t errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", UWAL_XLOGDIR, filename);
+    securec_check_ss(errorno, "", "");
+
+    if (remove(path) != 0) {
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not rename old transaction log file \"%s\": %m", path)));
+        return -1;
+    }
+    return 0;
+}
+
+static int walRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInfo *info)
+{
+    XLogRecPtr flushPtr = InvalidXLogRecPtr;
+    XLogRecPtr truncatePtr = InvalidXLogRecPtr;
+    XLogRecPtr startPtr = InvalidXLogRecPtr;
+    XLogRecPtr expectTruncate = InvalidXLogRecPtr;
+    bool needQuery = false;
+    bool fullSync = false;
+    int ret;
+    if (uwalrcv == NULL)
+        return -1;
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    flushPtr = uwalrcv->flushPtr;
+    truncatePtr = uwalrcv->truncatePtr;
+    needQuery = uwalrcv->needQuery;
+    expectTruncate = uwalrcv->expectTruncate;
+    SpinLockRelease(&uwalrcv->mutex);
+
+    startPtr = flushPtr;
+    if (startPtr / XLogSegSize == info->info.startWriteOffset / XLogSegSize) {
+        return 0;
+    }
+
+    int loop = 0;
+    while (needQuery && loop++ < 20) {
+        ret = GsUwalQuery(&info->id, &(info->info));
+        if (ret != 0) {
+            ereport(WARNING, (errmsg("GsUwalQuery return failed")));
+            return ret;
+        }
+
+        if (info->info.truncateOffset == expectTruncate) {
+            SpinLockAcquire(&uwalrcv->mutex);
+            uwalrcv->needQuery = false;
+            uwalrcv->truncatePtr = info->info.truncateOffset;
+            SpinLockRelease(&uwalrcv->mutex);
+            truncatePtr = info->info.truncateOffset;
+            needQuery = false;
+            break;
+        }
+        pg_usleep(100000);
+    }
+
+    if (needQuery || (startPtr / XLogSegSize == truncatePtr / XLogSegSize)) {
+        return 0;
+    }
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    fullSync = uwalrcv->fullSync;
+    SpinLockRelease(&uwalrcv->mutex);
+    if(!fullSync) {
+        ereport(LOG, (errmsg("walRcvUwalTruncate truncate not in fullSync")));
+        return 0;
+    }
+    START_CRIT_SECTION();
+    ret = GsUwalTruncate(&(info->id), startPtr);
+    if (0 != ret) {
+        ereport(LOG, (errmsg("walRcvUwalTruncate failed retCode: %d", ret)));
+        END_CRIT_SECTION();
+        return -1;
+    }
+    pg_usleep(10000);
+
+    ret = GsUwalQuery(&info->id, &(info->info));
+    if (ret != 0) {
+        ereport(WARNING, (errmsg("GsUwalQuery return failed")));
+        END_CRIT_SECTION();
+        return ret;
+    }
+    END_CRIT_SECTION();
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    uwalrcv->truncatePtr = info->info.truncateOffset;
+    uwalrcv->expectTruncate = startPtr;
+    if (info->info.truncateOffset == startPtr) {
+        uwalrcv->needQuery = false;
+    } else {
+        uwalrcv->needQuery = true;
+    }
+    SpinLockRelease(&uwalrcv->mutex);
+
+    return 0;
+}
+
+static void RemoveFromUwal(UwalrcvWriterState *uwalrcv)
+{
+    XLogRecPtr truncatePtr = InvalidXLogRecPtr;
+    XLogRecPtr renamePtr = InvalidXLogRecPtr;
+    TimeLineID tli;
+    SpinLockAcquire(&uwalrcv->mutex);
+    truncatePtr = uwalrcv->truncatePtr;
+    tli = uwalrcv->startTimeLine;
+    renamePtr = uwalrcv->renamePtr;
+    SpinLockRelease(&uwalrcv->mutex);
+
+    while (truncatePtr / XLogSegSize != renamePtr / XLogSegSize) {
+        if (renamePtr / XLogSegSize != t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset / XLogSegSize) {
+            if (RenameUwalFile(renamePtr, tli) < 0) {
+                ereport(LOG, (errmsg("RenameUwalFile failed")));
+                return;
+            }
+        } else {
+            if (RemoveUwalFile(renamePtr, tli) < 0) {
+                ereport(LOG, (errmsg("RemoveUwalFile failed")));
+                return;
+            }
+        }
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+            t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+            XlogArchUwal(renamePtr);
+        }
+        renamePtr = (renamePtr / XLogSegSize + 1) * XLogSegSize;
+    }
+
+    SpinLockAcquire(&uwalrcv->mutex);
+    uwalrcv->renamePtr = renamePtr;
+    SpinLockRelease(&uwalrcv->mutex);
+    return;
 }

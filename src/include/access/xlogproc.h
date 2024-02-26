@@ -59,6 +59,16 @@ typedef void (*relasexlogreadstate)(void* record);
 #define XLogBlockHeadGetCompressOpt(blockhead) ((blockhead)->opt)
 #define XLogBlockHeadGetValidInfo(blockhead) ((blockhead)->block_valid)
 #define XLogBlockHeadGetPhysicalBlock(blockhead) ((blockhead)->pblk)
+#define XLogBlockHeadGetBufferTag(blockhead, buffertag)             \
+    do {                                                            \
+        (buffertag)->rnode.spcNode = (blockhead)->spcNode;          \
+        (buffertag)->rnode.dbNode = (blockhead)->dbNode;            \
+        (buffertag)->rnode.relNode = (blockhead)->relNode;          \
+        (buffertag)->rnode.bucketNode = (blockhead)->bucketNode;    \
+        (buffertag)->rnode.opt = (blockhead)->opt;                  \
+        (buffertag)->forkNum = (blockhead)->forknum;                \
+        (buffertag)->blockNum = (blockhead)->blkno;                 \
+    } while (0)
 /* for common blockhead end  */
 
 /* for block data beging  */
@@ -101,7 +111,7 @@ extern void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint64 *bu
 #define RedoBufferDirtyClear(bufferinfo) ((bufferinfo)->dirtyflag = false)
 #define IsRedoBufferDirty(bufferinfo) ((bufferinfo)->dirtyflag == true)
 
-#define RedoMemIsValid(memctl, bufferid) (((bufferid) > InvalidBuffer) && ((bufferid) <= (memctl->totalblknum)))
+#define RedoMemIsValid(memctl, bufferid) (((bufferid) > InvalidBuffer) && ((uint32)(bufferid) <= (memctl->totalblknum)))
 
 typedef struct {
     RedoBufferTag blockinfo;
@@ -655,15 +665,15 @@ typedef void (*InterruptFunc)();
 
 typedef struct
 {
-	int    totalblknum;    /* total slot */
-	int    usedblknum;     /* used slot */
+	uint32 totalblknum;    /* total slot */
+	uint32 usedblknum;     /* used slot */
 	Size   itemsize;
 	Buffer firstfreeslot;  /* first free slot */
 	Buffer firstreleaseslot;  /* first release slot */
 	RedoMemSlot *memslot;  /* slot itme */
 	bool  isInit;
 	InterruptFunc doInterrupt;
-}RedoMemManager;
+} RedoMemManager;
 
 typedef void (*RefOperateFunc)(void *record);
 #ifdef USE_ASSERT_CHECKING
@@ -1158,6 +1168,7 @@ XLogRecParseState* xlog_redo_parse_to_block(XLogReaderState* record, uint32* blo
 XLogRecParseState* smgr_redo_parse_to_block(XLogReaderState* record, uint32* blocknum);
 XLogRecParseState* segpage_redo_parse_to_block(XLogReaderState* record, uint32* blocknum);
 void ProcSegPageCommonRedo(XLogRecParseState *parseState);
+void SegPageRedoChildState(XLogRecParseState *childStateList);
 void ProcSegPageJustFreeChildState(XLogRecParseState *parseState);
 XLogRecParseState* XactXlogClogParseToBlock(XLogReaderState* record, XLogRecParseState* recordstatehead,
     uint32* blocknum, TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status);
@@ -1289,5 +1300,11 @@ bool is_backup_end(const XLogRecParseState *parse_state);
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
 void redo_target_page(const BufferTag& buf_tag, StandbyReadLsnInfoArray* lsn_info, Buffer base_page_buf);
+void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo);
+
+// shared-storage
+XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);
+XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);
+bool SSPageReplayNeedSkip(RedoBufferInfo *blockinfo, XLogRecPtr xlogLsn);
 
 #endif

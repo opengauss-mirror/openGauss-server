@@ -225,6 +225,11 @@ int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSourc
                         (errcode(ERRCODE_DUPLICATE_ALIAS), errmsg("table name \"%s\" specified more than once",
                             relRv->alias->aliasname)));
                 } else if (relRv->alias == NULL && strcmp(rte1->eref->aliasname, relRv->relname) == 0) {
+                    if (rte1->rtekind != RTE_RELATION) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                                errmsg("The target table \"%s\" of the DELETE is not updatable", relRv->relname)));
+                    }
                     if (list_member_ptr(pstate->p_target_rangetblentry, rte1)) {
                         ereport(ERROR,
                             (errcode(ERRCODE_DUPLICATE_ALIAS), errmsg("table name \"%s\" specified more than once",
@@ -662,6 +667,11 @@ static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* 
     pstate->p_lateral_active = r->lateral;
 
     /*
+     * For age.
+     */
+    pstate->p_lateral_active = true;
+
+    /*
      * Transform the raw expression.
      */
     last_srf = pstate->p_last_srf;
@@ -699,10 +709,13 @@ static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* 
                 parser_errposition(pstate, locate_windowfunc(funcexpr))));
     }
 
+    /* mark the RTE as LATERAL */
+    bool isLateral = r->lateral || contain_vars_of_level((Node *) funcexpr, 0);
+
     /*
      * OK, build an RTE for the function.
      */
-    rte = addRangeTableEntryForFunction(pstate, funcname, funcexpr, r, r->lateral, true);
+    rte = addRangeTableEntryForFunction(pstate, funcname, funcexpr, r, isLateral, true);
 
     /*
      * If a coldeflist was supplied, ensure it defines a legal set of names

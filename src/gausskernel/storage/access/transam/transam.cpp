@@ -396,7 +396,7 @@ bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transa
 {
     if (ENABLE_DMS) {
         /* fetch TXN info locally if either reformer, original primary, or normal primary */
-        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        bool local_fetch = SSCanFetchLocalSnapshotTxnRelatedInfo();
         if (!local_fetch) {
             bool didCommit;
             SSTransactionIdDidCommit(transactionId, &didCommit);

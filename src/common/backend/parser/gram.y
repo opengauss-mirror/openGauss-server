@@ -476,7 +476,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_collation
 
 %type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
-				qualified_trigger_name
+				qualified_trigger_name qualified_name_for_delete
 
 %type <str>		all_Op MathOp
 
@@ -635,8 +635,8 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <ielem>	index_elem constraint_elem
 %type <node>	table_ref
 %type <jexpr>	joined_table
-%type <range>	relation_expr
-%type <range>	relation_expr_opt_alias delete_relation_expr_opt_alias
+%type <range>	relation_expr relation_expr_for_delete relation_expr_common
+%type <range>	relation_expr_opt_alias delete_relation_expr_opt_alias relation_expr_opt_alias_for_delete
 %type <target>	target_el single_set_clause set_target insert_column_item connect_by_root_expr
 %type <node>	tablesample_clause timecapsule_clause opt_timecapsule_clause opt_repeatable_clause end_expr start_expr
 
@@ -8783,11 +8783,12 @@ key_action:
 
 OptInherit: INHERITS '(' qualified_name_list ')'
 			{
-        		const char* message = "CREATE TABLE ... INHERITS is not yet supported.";
-    			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-				ereport(errstate,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("CREATE TABLE ... INHERITS is not yet supported.")));
+				if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+					const char* message = "inherits is not support in B-format database, it conflicts with multi-relation update";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("inherits is not support in B-format database, it conflicts with multi-relation update")));
+				}
 				$$ = $3;
 			}
 			| /*EMPTY*/								{ $$ = NIL; }
@@ -12455,14 +12456,34 @@ DefineStmt:
 
 					/* can't use qualified_name, sigh */
 					n->typevar = makeRangeVarFromAnyName($3, @3, yyscanner);
+					n->replace = false;
 					n->coldeflist = $6;
+					$$ = (Node *)n;
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is '(' OptTableFuncElementList ')'
+				{
+					CompositeTypeStmt *n = makeNode(CompositeTypeStmt);
+
+					/* can't use qualified_name, sigh */
+					n->typevar = makeRangeVarFromAnyName($5, @5, yyscanner);
+					n->replace = true;
+					n->coldeflist = $8;
 					$$ = (Node *)n;
 				}
 			| CREATE TYPE_P any_name as_is TABLE OF func_type
 				{
 					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
+					n->replace = false;
 					n->typname = $3;
 					n->reftypname = $7;
+					$$ = (Node *)n;
+				}
+			| CREATE OR REPLACE TYPE_P any_name as_is TABLE OF func_type
+				{
+					TableOfTypeStmt *n = makeNode(TableOfTypeStmt);
+					n->replace = true;
+					n->typname = $5;
+					n->reftypname = $9;
 					$$ = (Node *)n;
 				}
 			| CREATE TYPE_P any_name as_is ENUM_P '(' opt_enum_val_list ')'
@@ -16290,7 +16311,8 @@ pkg_body_subprogram: {
 						} else if (block_level == 0 && tok != ';') {
 							in_procedure = false;
 						}
-                        if (tok == ';')
+                        if (tok == ';' || 
+							(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && pre_tok == ';' && tok == IDENT && in_procedure))
                         {
                             block_level = block_level - 1;
                             if (block_level == 0)
@@ -16922,6 +16944,11 @@ subprogram_body: 	{
 							&& tok != WHILE_P
 							&& tok != REPEAT)
 						{
+							if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';')
+							{
+								proc_e = yylloc;
+								break;
+							}
 							tok = END_P;
 							continue;
 						}
@@ -21819,7 +21846,6 @@ policy_label_name:
 
 opt_add_resources_to_label:
         ADD_P resources_to_label_list { $$ = $2; }
-        | /* EMPTY */ { $$ = NULL; }
         ;
 
 resources_to_label_list:
@@ -24762,7 +24788,14 @@ relation_expr:
 					$$->inhOpt = INH_DEFAULT;
 					$$->alias = NULL;
 				}
-			| qualified_name '*'
+			| relation_expr_common
+				{
+					$$ = $1;
+				}
+		;
+
+relation_expr_common:
+			 qualified_name '*'
 				{
 					/* inheritance query */
 					$$ = $1;
@@ -24785,6 +24818,26 @@ relation_expr:
 				}
 		;
 
+/* used for multi delete stmt, to support writing table's name forms like t.* or schema.t.* */
+relation_expr_for_delete:
+			qualified_name_for_delete OptSnapshotVersion
+				{
+					/* default inheritance */
+					$$ = $1;
+					if ($2 != NULL)
+					{
+						char *snapshot_name = (char *)palloc0(strlen($1->relname) + 1 + strlen($2) + 1);
+						sprintf(snapshot_name, "%s%c%s", $1->relname, DB4AI_SNAPSHOT_VERSION_DELIMITER, $2);
+						$$->relname = snapshot_name;
+					}
+					$$->inhOpt = INH_DEFAULT;
+					$$->alias = NULL;
+				}
+			| relation_expr_common
+				{
+					$$ = $1;
+				}
+		;
 
 relation_expr_list:
 			relation_expr							{ $$ = list_make1($1); }
@@ -24792,7 +24845,7 @@ relation_expr_list:
 		;
 
 delete_relation_expr_opt_alias:
-    relation_expr_opt_alias                 %prec UMINUS
+    relation_expr_opt_alias_for_delete                 %prec UMINUS
         {
             /*
              * When sql_compatibility is B, name in PARTITION(name) can be
@@ -24807,7 +24860,7 @@ delete_relation_expr_opt_alias:
             }
             $$ = $1;
         }
-    | relation_expr PARTITION '(' name ',' name_list ')'
+    | relation_expr_for_delete PARTITION '(' name ',' name_list ')'
         {
 #ifdef ENABLE_MULTIPLE_NODES
         const char* message = "partition syntax is not yet supported";
@@ -24823,7 +24876,7 @@ delete_relation_expr_opt_alias:
             $1->partitionNameList = lcons(makeString($4), $6);
             $$ = $1;
         }
-    | relation_expr ColId PARTITION '(' name_list ')'
+    | relation_expr_for_delete ColId PARTITION '(' name_list ')'
         {
 #ifdef ENABLE_MULTIPLE_NODES
         const char* message = "partition syntax is not yet supported";
@@ -24842,7 +24895,7 @@ delete_relation_expr_opt_alias:
             $1->partitionNameList = $5;
             $$ = $1;
         }
-    | relation_expr AS ColId PARTITION '(' name_list ')'
+    | relation_expr_for_delete AS ColId PARTITION '(' name_list ')'
         {
 #ifdef ENABLE_MULTIPLE_NODES
         const char* message = "partition syntax is not yet supported";
@@ -24916,6 +24969,66 @@ relation_expr_opt_alias: relation_expr					%prec UMINUS
 					$$ = $1;
 				}
 			| relation_expr update_delete_partition_clause AS ColId
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $4;
+					$1->alias = alias;
+					$$ = $1;
+				}
+		;
+
+/* used for multi delete stmt */
+relation_expr_opt_alias_for_delete: relation_expr_for_delete					%prec UMINUS
+				{
+					$$ = $1;
+				}
+			| relation_expr_for_delete ColId
+				{
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $2;
+					$1->alias = alias;
+					$$ = $1;
+				}
+			| relation_expr_for_delete AS ColId
+				{
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $3;
+					$1->alias = alias;
+					$$ = $1;
+				}
+			| relation_expr_for_delete  update_delete_partition_clause 			%prec UMINUS
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					$$ = $1;
+				}
+			| relation_expr_for_delete update_delete_partition_clause ColId
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $3;
+					$1->alias = alias;
+					$$ = $1;
+				}
+			| relation_expr_for_delete update_delete_partition_clause AS ColId
 				{
 					if ($2 != NULL) {
 						$1->partitionname = $2->partitionname;
@@ -28655,6 +28768,60 @@ qualified_name:
 				}
 		;
 
+/*
+ * used for multi delete stmt, to support writing table's name forms like t.* or schema.t.*
+ * when modify qualified_name, please check whether need to sync modifications here.
+ */
+qualified_name_for_delete:
+			ColId
+				{
+					$$ = makeRangeVar(NULL, $1, @1);
+				}
+			| ColId indirection
+				{
+					$$ = makeRangeVar(NULL, NULL, @1);
+					const char* message = "improper qualified name (too many dotted names)";
+					switch (list_length($2))
+					{
+						case 1:
+							if (IsA(linitial($2), A_Star)) {
+								$$->catalogname = NULL;
+								$$->schemaname = NULL;
+								$$->relname = $1;
+							} else {
+								check_qualified_name($2, yyscanner);
+								$$->catalogname = NULL;
+								$$->schemaname = $1;
+								$$->relname = strVal(linitial($2));
+							}
+							break;
+						case 2:
+							if (IsA(lsecond($2), A_Star)) {
+								$$->catalogname = NULL;
+								$$->schemaname = $1;
+								if (!(IsA(linitial($2), String))) {
+									parser_yyerror("syntax error");
+								}
+								$$->relname = strVal(linitial($2));
+							} else {
+								check_qualified_name($2, yyscanner);
+								$$->catalogname = $1;
+								$$->schemaname = strVal(linitial($2));
+								$$->relname = strVal(lsecond($2));
+							}
+							break;
+						default:
+    						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("improper qualified name (too many dotted names): %s",
+											NameListToString(lcons(makeString($1), $2))),
+									 parser_errposition(@1)));
+							break;
+					}
+				}
+		;
+
 name_list:	name
 					{ $$ = list_make1(makeString($1)); }
 			| name_list ',' name
@@ -28883,14 +29050,36 @@ SignedIconst: Iconst								{ $$ = $1; }
 
 /* Column identifier --- names that can be column, table, etc names.
  */
-ColId:		IDENT									{ $$ = $1; }
+ColId:		IDENT
+				{ 
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes 
+					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					{
+						$$ = pg_strtolower(pstrdup($1));
+					}
+					else
+					{
+						$$ = $1;
+					}
+				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 		;
 
 /* Type/function identifier --- names that can be type or function names.
  */
-type_function_name:	IDENT							{ $$ = $1; }
+type_function_name:	IDENT
+				{
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
+					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					{
+						$$ = pg_strtolower(pstrdup($1));
+					}
+					else
+					{
+						$$ = $1;
+					}
+				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
 		;
@@ -28898,7 +29087,18 @@ type_function_name:	IDENT							{ $$ = $1; }
 /* Column label --- allowed labels in "AS" clauses.
  * This presently includes *all* Postgres keywords.
  */
-ColLabel:	IDENT									{ $$ = $1; }
+ColLabel:	IDENT
+				{
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
+					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					{
+						$$ = pg_strtolower(pstrdup($1));
+					}
+					else
+					{
+						$$ = $1;
+					}
+				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }

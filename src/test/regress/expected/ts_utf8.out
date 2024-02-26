@@ -767,7 +767,7 @@ CREATE TEXT SEARCH CONFIGURATION ntestf(parser=B.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 NOTICE:  identifier "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" will be truncated to "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ERROR:  schema "b" does not exist
 CREATE TEXT SEARCH CONFIGURATION ntestf(parser=A.B.C);
-ERROR:  cross-database references are not implemented: a.b.c
+ERROR:  schema "b" does not exist
 CREATE TEXT SEARCH CONFIGURATION ntestf(parser='A.B.C');
 ERROR:  syntax error at or near "'A.B.C'"
 LINE 1: CREATE TEXT SEARCH CONFIGURATION ntestf(parser='A.B.C');

@@ -2326,7 +2326,8 @@ void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListIn
                 true,
 #endif /* PGXC */
                 NULL,
-                is_top_level ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
+                //is_top_level ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
+                PROCESS_UTILITY_SUBCOMMAND,
                 isCTAS);
         }
 
@@ -3609,11 +3610,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                 }
                 TransformLoadDataToCopy(stmt);
                 break;
-            }        
+            }
+            char str[] = "age";
+            int result = strcmp(stmt->filename, str);
+            if (result != 0) {
 #ifdef PGXC
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("LOAD statement is not yet supported.")));
 #endif /* PGXC */
-
+            }
                 closeAllVfds(); /* probably not necessary... */
                 /* Allowed names are restricted if you're not superuser */
                 load_file(stmt->filename, !superuser());
@@ -5141,9 +5145,15 @@ ProcessUtilitySlow(Node *parse_tree,
     ObjectAddress address;
     ObjectAddress secondaryObject = InvalidObjectAddress;
 
+    if (T_CreateStmt == nodeTag(parse_tree) && isCTAS) {
+        isCompleteQuery = true;
+    } else if (T_AlterTableStmt == nodeTag(parse_tree) && ((AlterTableStmt*)parse_tree)->fromCreate) {
+        isCompleteQuery = false;
+    }
+
     /* All event trigger calls are done only when isCompleteQuery is true */
     needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
- 
+
     /* PG_TRY block is to ensure we call EventTriggerEndCompleteQuery */
     PG_TRY();
     {
@@ -6135,9 +6145,6 @@ ProcessUtilitySlow(Node *parse_tree,
 
             case T_AlterSeqStmt:
 #ifdef PGXC
-                if (IS_MAIN_COORDINATOR || IS_SINGLE_NODE) {
-                    PreventAlterSeqInTransaction(is_top_level, (AlterSeqStmt*)parse_tree);
-                }
                 if (IS_PGXC_COORDINATOR) {
                     AlterSeqStmt* stmt = (AlterSeqStmt*)parse_tree;
 
@@ -6217,7 +6224,6 @@ ProcessUtilitySlow(Node *parse_tree,
                     address = AlterSequenceWrapper((AlterSeqStmt*)parse_tree);
                 }
 #else
-                PreventAlterSeqInTransaction(is_top_level, (AlterSeqStmt*)parse_tree);
                 address = AlterSequenceWrapper((AlterSeqStmt*)parse_tree);
 #endif
                 break;

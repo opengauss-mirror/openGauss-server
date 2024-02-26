@@ -21,6 +21,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 #include "pgstat.h"
 #include "catalog/pg_proc.h"

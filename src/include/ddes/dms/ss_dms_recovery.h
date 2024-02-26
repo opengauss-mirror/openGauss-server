@@ -40,15 +40,25 @@
 #define SS_REPLAYED_BY_ONDEMAND (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY && \
                                  t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandBuildDone == true && \
                                  t_thrd.shemem_ptr_cxt.XLogCtl->IsOnDemandRedoDone == true)
+#define SS_ONDEMAND_REALTIME_BUILD_DISABLED (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status == DISABLED)
+#define SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status == READY_TO_BUILD)
+#define SS_ONDEMAND_REALTIME_BUILD_NORMAL (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status == BUILD_NORMAL)
+#define SS_ONDEMAND_REALTIME_BUILD_SHUTDOWN (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status == BUILD_TO_DISABLED)
+#define SS_ONDEMAND_REALTIME_BUILD_FAILOVER (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status == BUILD_TO_REDO)
+
+#define SS_ONDEMAND_RECOVERY_PAUSE (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status != NOT_PAUSE)
+#define SS_ONDEMAND_RECOVERY_HASHMAP_FULL (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status == PAUSE_FOR_PRUNE_HASHMAP)
+#define SS_ONDEMAND_RECOVERY_TRXN_QUEUE_FULL (ENABLE_DMS && \
+    g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status == PAUSE_FOR_PRUNE_TRXN_QUEUE)
 
 #define REFORM_CTRL_VERSION 1
-
-typedef struct st_old_reformer_ctrl {
-    uint64 list_stable; // stable instances list
-    int primaryInstId;
-    pg_crc32c crc;
-} ss_old_reformer_ctrl_t;
-
 typedef struct st_reformer_ctrl {
     uint32 version;
     uint64 list_stable; // stable instances list
@@ -64,14 +74,15 @@ typedef struct st_reform_info {
     dms_role_t dms_role;
     dms_reform_type_t reform_type;
     unsigned long long bitmap_nodes;
-    timeval reform_start_time;
-    timeval reform_end_time;
+    unsigned long long bitmap_reconnect;
+    TimestampTz reform_start_time;
+    TimestampTz reform_end_time;
     uint64 old_bitmap;      // Save the cluster nodes bitmap before REFORM
     uint64 new_bitmap;      // Save the cluster nodes bitmap after REFORM
     
-    timeval redo_start_time;
-    timeval redo_end_time;
-    timeval construct_hashmap;
+    TimestampTz redo_start_time;
+    TimestampTz redo_end_time;
+    TimestampTz construct_hashmap;
     uint64 redo_total_bytes;
     bool reform_success;
     bool is_hashmap_constructed;
@@ -82,6 +93,35 @@ typedef enum st_failover_ckpt_status {
     NOT_ALLOW_CKPT,
     ALLOW_CKPT
 } failover_ckpt_status_t;
+
+typedef enum st_ondemand_realtime_build_status {
+    DISABLED = 0,
+    BUILD_NORMAL,
+    READY_TO_BUILD,
+    BUILD_TO_DISABLED,
+    BUILD_TO_REDO
+} ondemand_realtime_build_status_t;
+
+typedef enum st_ondemand_recovery_pause_status {
+    NOT_PAUSE = 0,
+    PAUSE_FOR_SYNC_REDO,
+    PAUSE_FOR_PRUNE_HASHMAP,
+    PAUSE_FOR_PRUNE_SEG_QUEUE,
+    PAUSE_FOR_PRUNE_TRXN_QUEUE
+} ondemand_recovery_pause_status_t;
+
+typedef struct ondemand_recovery_stat {
+    XLogRecPtr checkpointPtr;
+    XLogRecPtr replayedPtr;
+    uint32 hmpUsedBlkNum;
+    uint32 hmpTotalBlkNum;
+    uint32 trxnQueueNum;
+    uint32 segQueueNum;
+    bool inOndemandRecovery;
+    SSGlobalClusterState ondemandRecoveryStatus;
+    ondemand_realtime_build_status_t realtimeBuildStatus;
+    ondemand_recovery_pause_status_t recoveryPauseStatus;
+} ondemand_recovery_stat;
 
 typedef struct ss_recovery_info {
     bool recovery_pause_flag;
@@ -102,8 +142,16 @@ typedef struct ss_recovery_info {
     bool startup_need_exit_normally;        //used in alive failover
     bool recovery_trapped_in_page_request;   //used in alive failover
     bool in_ondemand_recovery;
+    volatile ondemand_realtime_build_status_t ondemand_realtime_build_status;
     bool dorado_sharestorage_inited;        // used in dorado mode
+    volatile ondemand_recovery_pause_status_t ondemand_recovery_pause_status;
 } ss_recovery_info_t;
+
+typedef struct ondemand_htab_ctrl {
+    HTAB *hTab;
+    void *nextHTabCtrl;
+    XLogRecPtr maxRedoItemPtr;
+} ondemand_htab_ctrl_t;
 
 extern bool SSRecoveryNodes();
 extern void SSWaitStartupExit();
@@ -114,6 +162,9 @@ extern bool SSRecoveryApplyDelay();
 extern void SShandle_promote_signal();
 extern void ss_failover_dw_init();
 extern void ss_switchover_promoting_dw_init();
+extern XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn();
+void StartupOndemandRecovery();
+void OndemandRealtimeBuildHandleFailover();
 
 
 #endif

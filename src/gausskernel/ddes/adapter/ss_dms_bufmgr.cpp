@@ -26,13 +26,14 @@
 #include "storage/proc.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
+#include "access/ondemand_extreme_rto/dispatcher.h"
 #include "access/multi_redo_api.h"
 
 void InitDmsBufCtrl(void)
@@ -216,6 +217,11 @@ RETRY:
 
 void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
 {
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
+        return;
+    }
+
     /*
      * prerequisite is that the page that initialized to zero in memory should be flush to disk
      */
@@ -262,6 +268,17 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
 }
 #endif
 
+static Buffer ReadBufferInRealtimeBuildFailoverForDMS(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
+{
+    Page page = (Page)BufHdrGetBlock(buf_desc);
+    XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
+    if (XLByteLT(ckptRedoPtr, PageGetLSN(page))) {
+        return BufferDescriptorGetBuffer(buf_desc);
+    } else {
+        return ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
+    }
+}
+
 Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -270,7 +287,21 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
         if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && AmDmsReformProcProcess()) {
             ereport(PANIC, (errmsg("SS In flush copy, can't read from disk!")));
         }
-        buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
+        /*
+         * do not allow pageredo workers read buffer from disk if standby node in ondemand
+         * realtime build status, because some buffer need init directly in recovery mode
+         */
+        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
+            buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+            buffer = InvalidBuffer;
+        } else {
+            if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (read_mode == RBM_NORMAL) &&
+                (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
+                buffer = ReadBufferInRealtimeBuildFailoverForDMS(buf_desc, read_mode, pblk);
+            } else {
+                buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
+            }
+        }
     } else {
 #ifdef USE_ASSERT_CHECKING
         if (buf_ctrl->state & BUF_IS_EXTEND) {
@@ -295,6 +326,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             buf_desc->extra->seg_fileno == EXTENT_INVALID) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer, !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy);
         }
+        buf_desc->extra->lsn_on_disk = InvalidXLogRecPtr;
     }
     if (BufferIsValid(buffer)) {
         buf_ctrl->been_loaded = true;
@@ -374,6 +406,11 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
 #ifdef USE_ASSERT_CHECKING
 void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
 {
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
+        return;
+    }
+
     /*
      * prequisite is that the page that initialized to zero in memory should be flushed to disk,
      * references to seg_extend
@@ -397,12 +434,39 @@ void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
 }
 #endif
 
+static Buffer ReadSegBufferInRealtimeBuildFailoverForDMS(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc)
+{
+    Page page = (Page)BufHdrGetBlock(buf_desc);
+    XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
+    if (XLByteLT(ckptRedoPtr, PageGetLSN(page))) {
+        SegTerminateBufferIO(buf_desc, false, BM_VALID);
+        return BufferDescriptorGetBuffer(buf_desc);
+    } else {
+        return ReadSegBufferForDMS(buf_desc, read_mode, spc);
+    }
+}
+
 Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     Buffer buffer;
     if (buf_ctrl->state & BUF_NEED_LOAD) {
-        buffer = ReadSegBufferForDMS(buf_desc, read_mode, spc);
+        /*
+         * do not allow pageredo workers read buffer from disk if standby node in ondemand
+         * realtime build status, because some buffer need init directly in recovery mode
+         */
+        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
+            buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+            SegTerminateBufferIO(buf_desc, false, BM_VALID);
+            buffer = InvalidBuffer;
+        } else {
+            if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (read_mode == RBM_NORMAL) &&
+                (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
+                buffer = ReadSegBufferInRealtimeBuildFailoverForDMS(buf_desc, read_mode, spc);
+            } else {
+                buffer = ReadSegBufferForDMS(buf_desc, read_mode, spc);
+            }
+        }
     } else {
         Page page = (Page)BufHdrGetBlock(buf_desc);
         PageSetChecksumInplace(page, buf_desc->tag.blockNum);
@@ -436,6 +500,12 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
         return buffer;
     }
 
+    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
+        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        *with_io = false;
+        return InvalidBuffer;
+    }
+
     if (!DmsCheckBufAccessible()) {
         *with_io = false;
         return 0;
@@ -452,6 +522,8 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
     if (!StartReadPage(buf_desc, mode)) {
         return 0;
     }
+
+    *with_io = false;
     return TerminateReadSegPage(buf_desc, read_mode);
 }
 
@@ -462,6 +534,12 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
 
     if (buf_ctrl->state & BUF_IS_RELPERSISTENT_TEMP) {
         return buffer;
+    }
+
+    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
+        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        *with_io = false;
+        return InvalidBuffer;
     }
 
     XLogPhyBlock pblk = {0, 0, 0};
@@ -494,6 +572,8 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
     if (!StartReadPage(buf_desc, mode)) {
         return 0;
     }
+
+    *with_io = false;
     return TerminateReadPage(buf_desc, read_mode, OidIsValid(buf_ctrl->pblk_relno) ? &pblk : NULL);
 }
 
@@ -678,6 +758,19 @@ void SSCheckBufferIfNeedMarkDirty(Buffer buf)
     }
 }
 
+static void SSOndemandCheckBufferState()
+{
+    for (int buffer = 0; buffer < TOTAL_BUFFER_NUM; buffer++) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer);
+        Assert(!(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD));
+
+        // realtime build pinned buffer are already mark dirty in CBFlushCopy, do not need label
+        if (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED) {
+            buf_ctrl->state &= ~BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED;
+        }
+    }
+}
+
 void SSRecheckBufferPool()
 {
     uint64 buf_state;
@@ -708,6 +801,7 @@ void SSRecheckBufferPool()
                 buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (unsigned long long)pagelsn)));
         }
     }
+    SSOndemandCheckBufferState();
 }
 
 bool CheckPageNeedSkipInRecovery(Buffer buf)
@@ -735,12 +829,12 @@ dms_session_e DMSGetProcType4RequestPage()
     // proc type used in DMS request page
     if (AmDmsReformProcProcess() || (AmPageRedoProcess() && !SS_ONDEMAND_BUILD_DONE) ||
         (AmStartupProcess() && !SS_ONDEMAND_BUILD_DONE)) {
-        /* When xlog_file_path is not null and enable_dms is set on, main standby always is in recovery.
+        /* When SS double cluster, main standby always is in recovery.
          * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
          * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access
          * page in recovery state.
          */
-        if (SS_REPLICATION_MAIN_STANBY_NODE && pmState == PM_HOT_STANDBY) {
+        if (SS_DISASTER_MAIN_STANDBY_NODE && pmState == PM_HOT_STANDBY) {
             return DMS_SESSION_RECOVER_HOT_STANDBY;
         } else {
             return DMS_SESSION_RECOVER;
@@ -955,7 +1049,7 @@ long SSGetBufSleepTime(int retry_times)
 bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
 {
     bool get_lock = false;
-    int wait_tickets = 2000;
+    int wait_tickets = 1000;
     int cur_tickets = 0;
 
     do {
@@ -972,7 +1066,7 @@ bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
     } while (true);
 
     if (!get_lock) {
-        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:2s",
+        ereport(WARNING, (errcode(MOD_DMS), (errmsg("[SS lwlock] request LWLock:%p timeout, LWLockMode:%d, timeout:1s",
             lock, mode))));
     }
     return get_lock;
@@ -1006,4 +1100,101 @@ bool SSWaitIOTimeout(BufferDesc *buf)
             tag->forkNum, tag->blockNum, buf->buf_id, buf->io_in_progress_lock))));
     }
     return ret;
+}
+
+bool SSOndemandRealtimeBuildAllowFlush(BufferDesc *buf_desc)
+{
+    if (!ENABLE_DMS || IsInitdb) {
+        return true;
+    }
+
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    if (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED) {
+        if (!SS_ONDEMAND_REALTIME_BUILD_DISABLED && IsExtremeRtoRunning()) {
+            XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
+            XLogRecPtr bufferLsn = PageGetLSN(BufHdrGetBlock(buf_desc));
+            if (XLByteLT(ckptRedoPtr, bufferLsn)) {
+                return false;
+            }
+        }
+        buf_ctrl->state &= ~BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED;
+    }
+    return true;
+}
+
+Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode)
+{
+    Buffer buffer;
+    if (IsSegmentPhysicalRelNode(tag->rnode)) {
+        SegSpace *spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false, false);
+        buffer = ReadBufferFast(spc, tag->rnode, tag->forkNum, tag->blockNum, mode);
+    } else {
+        buffer = ReadBufferWithoutRelcache(tag->rnode, tag->forkNum, tag->blockNum, mode, NULL, NULL);
+    }
+    return buffer;
+}
+
+void DmsReleaseBuffer(int buffer, bool is_seg)
+{
+    if (is_seg) {
+        SegReleaseBuffer(buffer);
+    } else {
+        ReleaseBuffer(buffer);
+    }
+}
+
+bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recordLsn, XLogRecPtr *pageLsn)
+{
+    Buffer buffer = SSReadBuffer(bufferTag, RBM_FOR_ONDEMAND_REALTIME_BUILD);
+    if (BufferIsInvalid(buffer)) {
+        WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
+        ereport(DEBUG1, (errmodule(MOD_DMS),
+            errmsg("[On-demand] standby node request page failed in ondemand realtime build, step readbuffer, "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, ondemand realtime build status %d",
+            bufferTag->rnode.spcNode, bufferTag->rnode.dbNode, bufferTag->rnode.relNode, bufferTag->rnode.bucketNode,
+            bufferTag->forkNum, bufferTag->blockNum, g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status)));
+        return false;
+    }
+
+    LockBuffer(buffer, BUFFER_LOCK_SHARE);
+
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
+    if (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD) {
+        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        buf_ctrl->state |= BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED;
+
+        if (pageLsn != NULL) {
+            *pageLsn = PageGetLSN(BufferGetPage(buffer));
+        }
+    } else {
+        DmsReleaseBuffer(buffer, IsSegmentPhysicalRelNode(bufferTag->rnode));
+        WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
+        ereport(DEBUG1, (errmodule(MOD_DMS),
+            errmsg("[On-demand] standby node request page failed in ondemand realtime build, step lockbuffer, "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, ondemand realtime build status %d",
+            bufferTag->rnode.spcNode, bufferTag->rnode.dbNode, bufferTag->rnode.relNode, bufferTag->rnode.bucketNode,
+            bufferTag->forkNum, bufferTag->blockNum, g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status)));
+        return false;
+    }
+
+    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+    DmsReleaseBuffer(buffer, IsSegmentPhysicalRelNode(bufferTag->rnode));
+    return true;
+}
+
+bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
+{
+    if (AmDmsReformProcProcess() && dms_reform_failed()) {
+        return true;
+    }
+
+    if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
+        return true;
+    }
+
+    if (AmPageRedoProcess() && SS_IN_REFORM && (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
+        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        return true;
+    }
+    return false;
 }

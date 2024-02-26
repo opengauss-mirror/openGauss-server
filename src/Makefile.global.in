@@ -18,7 +18,7 @@
 #
 # Meta configuration
 
-standard_targets = all install installdirs uninstall distprep clean distclean maintainer-clean coverage check installcheck maintainer-check 2pccheck
+standard_targets = all install installdirs uninstall distprep clean distclean maintainer-clean coverage check installcheck maintainer-check 2pccheck init-po update-po
 # these targets should recurse even into subdirectories not being built:
 standard_always_targets = distprep clean distclean maintainer-clean
 
@@ -176,6 +176,8 @@ enable_multiple_nodes		= @enable_multiple_nodes@
 enable_lite_mode		= @enable_lite_mode@
 enable_finance_mode		= @enable_finance_mode@
 enable_mot			= @enable_mot@
+enable_bbox			= @enable_bbox@
+enable_llvm			= @enable_llvm@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
 enable_memory_check		= @enable_memory_check@
@@ -497,12 +499,19 @@ LIBHOTPATCH_TOOL_PATH = $(LIBHOTPATCH_HOME)/tool
 #############################################################################
 # llvm component
 #############################################################################
-LIBLLVM_BIN = $(LIBLLVM_HOME)/bin
-LIBLLVM_INCLUDE_PATH = $(LIBLLVM_HOME)/include
-LIBLLVM_LIB_PATH = $(LIBLLVM_HOME)/lib
-LLVM_CONFIG = $(LIBLLVM_BIN)/llvm-config
-ifneq ($(enable_lite_mode), yes)
-  LLVM_LIBS = $(shell $(LLVM_CONFIG)    --libs)
+
+ifeq ($(enable_llvm), yes)
+  LIBLLVM_BIN = $(LIBLLVM_HOME)/bin
+  LIBLLVM_INCLUDE_PATH = $(LIBLLVM_HOME)/include
+  LIBLLVM_LIB_PATH = $(LIBLLVM_HOME)/lib
+  LLVM_CONFIG = $(LIBLLVM_BIN)/llvm-config
+  ifneq ($(enable_lite_mode), yes)
+    LLVM_LIBS = $(shell $(LLVM_CONFIG)    --libs)
+  endif
+else
+  LIBLLVM_INCLUDE_PATH = /usr/include
+  LIBLLVM_LIB_PATH = /usr/lib
+  LLVM_LIBS = 
 endif
 
 #############################################################################
@@ -870,7 +879,9 @@ ifeq ($(SUPPORT_HOTPATCH), yes)
 LDFLAGS += -L$(LIBHOTPATCH_LIB_PATH)
 endif
 
+ifeq ($(enable_bbox), yes)
 LDFLAGS += -L$(BBOX_LIB_PATH)
+endif
 LDFLAGS += -L$(LIBODBC_LIB_PATH)
 LDFLAGS += -L$(LIBOBS_LIB_PATH)
 LDFLAGS += -L$(KERBEROS_LIB_PATH)
@@ -1125,10 +1136,13 @@ submake-pagecompression:
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
-submake-kwlist:
+submake-kwlist-clean:
+	rm $(top_srcdir)/src/include/parser/kwlist_d.h -f
+
+$(top_srcdir)/src/include/parser/kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
 
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression submake-kwlist
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression
 
 
 ##########################################################################

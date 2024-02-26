@@ -33,10 +33,12 @@
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
 #include "catalog/dependency.h"
+#include "parser/parser.h"
 
 #include "commands/dbcommands.h"
 #include "commands/defrem.h"
 #include "commands/publicationcmds.h"
+#include "nodes/makefuncs.h"
 
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -57,17 +59,24 @@ static void CloseTableList(List *rels);
 static void PublicationAddTables(Oid pubid, List *rels, bool if_not_exists, AlterPublicationStmt *stmt);
 static void PublicationDropTables(Oid pubid, List *rels, bool missing_ok);
 
-static void parse_publication_options(List *options, bool *publish_given, bool *publish_insert, bool *publish_update,
-    bool *publish_delete)
+static void parse_publication_options(List *options, 
+                                    bool *publish_given, 
+                                    bool *publish_insert, 
+                                    bool *publish_update,
+                                    bool *publish_delete, 
+                                    bool *publish_ddl_given,
+                                    int64 *pubddl)
 {
     ListCell *lc;
 
     *publish_given = false;
+    *publish_ddl_given = false;
 
     /* Defaults are true */
     *publish_insert = true;
     *publish_update = true;
     *publish_delete = true;
+    *pubddl = 0;
 
     /* Parse options */
     foreach (lc, options) {
@@ -108,10 +117,154 @@ static void parse_publication_options(List *options, bool *publish_given, bool *
                     ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized \"publish\" value: \"%s\"", publish_opt)));
             }
+        } else if (pubddl && strcmp(defel->defname, "ddl") == 0) {
+            char *ddl_types;
+            List *ddl_type_list;
+            ListCell *lc2;
+
+            if (*publish_ddl_given)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            
+            *publish_ddl_given = true;
+            *pubddl = 0;
+
+            /*
+             * If ddl option was given only the explicitly listed ddl types
+             * should be published.
+             */
+            ddl_types = defGetString(defel);
+
+            if (!SplitIdentifierString(ddl_types, ',', &ddl_type_list))
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid list syntax for \"ddl\" option")));
+
+            /* Process the option list */
+            foreach (lc2, ddl_type_list) {
+                char *ddl_opt = (char *)lfirst(lc2);
+
+                if (strcmp(ddl_opt, "table") == 0)
+                    *pubddl |= PUBDDL_TABLE;
+                else if (strcmp(ddl_opt, "none") == 0)
+                    *pubddl = 0;
+                else if (strcmp(ddl_opt, "all") == 0)
+                    *pubddl = PUBDDL_ALL;
+                else
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized \"ddl\" value: \"%s\"", ddl_opt)));
+            }
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized publication parameter: %s", defel->defname)));
     }
+}
+
+/*
+ * Create event trigger which is used for DDL replication
+ */
+static void
+CreateDDLReplicaEventTrigger(char *eventname, List *commands, ObjectAddress pubaddress, Oid puboid)
+{
+    List *tags = NIL;
+    ListCell *lc;
+    Oid trigger_id;
+    ObjectAddress referenced;
+    CreateEventTrigStmt *ddl_trigger;
+    char trigger_name[NAMEDATALEN];
+    char trigger_func_name[NAMEDATALEN];
+    errno_t rc;
+    static const char *trigger_func_prefix = "publication_deparse_%s";
+
+    ddl_trigger = makeNode(CreateEventTrigStmt);
+
+    rc = snprintf_s(trigger_name, sizeof(trigger_name), sizeof(trigger_name) - 1, PUB_EVENT_TRIG_FORMAT, eventname, puboid);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(trigger_func_name, sizeof(trigger_func_name), sizeof(trigger_func_name) - 1, trigger_func_prefix, eventname);
+    securec_check_ss(rc, "\0", "\0");
+
+    ddl_trigger->trigname = pstrdup(trigger_name);
+    ddl_trigger->eventname = eventname;
+    ddl_trigger->funcname = SystemFuncName(trigger_func_name);
+
+    foreach(lc, commands) {
+        Value *tag = (Value*)lfirst(lc);
+        tags = lappend(tags, tag);
+    }
+
+    ddl_trigger->whenclause = list_make1(makeDefElem("tag", (Node*)tags));
+
+    trigger_id = CreateEventTrigger(ddl_trigger);
+
+    /*
+     * Register the event triggers as internally dependent on the publication.
+     */
+    ObjectAddressSet(referenced, EventTriggerRelationId, trigger_id);
+    recordDependencyOn(&referenced, &pubaddress, DEPENDENCY_INTERNAL);
+}
+
+static void
+AddAllDDLReplicaEventTriggers(List *end_commands)
+{
+    end_commands = lappend(end_commands, makeString("CREATE INDEX"));
+    end_commands = lappend(end_commands, makeString("DROP INDEX"));
+}
+
+/*
+ * If DDL replication is enabled, create event triggers to capture and log any
+ * relevant events.
+ */
+static void
+CreateDDLReplicaEventTriggers(ObjectAddress pubaddress, Oid puboid)
+{
+    List *start_commands = list_make1(makeString("DROP TABLE"));
+    List *end_commands = NIL;
+    end_commands = lappend(end_commands, makeString("CREATE TABLE"));
+    end_commands = lappend(end_commands, makeString("DROP TABLE"));
+    AddAllDDLReplicaEventTriggers(end_commands);
+
+    /* Create the ddl_command_end event trigger */
+    CreateDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_END, end_commands, pubaddress, puboid);
+
+    /* Create the ddl_command_start event trigger */
+    CreateDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_START, start_commands, pubaddress, puboid);
+}
+
+/*
+ * Helper function to drop an event trigger for DDL replication.
+ */
+static void
+DropDDLReplicaEventTrigger(char *eventname, Oid puboid)
+{
+    char trigger_name[NAMEDATALEN];
+    Oid evtoid;
+    ObjectAddress obj;
+    errno_t rc;
+
+    rc = snprintf_s(trigger_name, sizeof(trigger_name), sizeof(trigger_name) - 1, PUB_EVENT_TRIG_FORMAT, eventname, puboid);
+    securec_check_ss(rc, "\0", "\0");
+
+    evtoid = get_event_trigger_oid(trigger_name, true);
+    if (!OidIsValid(evtoid))
+        return;
+
+    deleteDependencyRecordsForClass(EventTriggerRelationId, evtoid, PublicationRelationId, DEPENDENCY_INTERNAL);
+
+    /*
+     * Ensure that the dependency removal is visible, so that we can drop the
+     * event trigger.
+     */
+    CommandCounterIncrement();
+
+    ObjectAddressSet(obj, EventTriggerRelationId, evtoid);
+    performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+}
+
+/*
+ * Drop all the event triggers which are used for DDL replication.
+ */
+static void
+DropDDLReplicaEventTriggers(Oid puboid)
+{
+    DropDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_START, puboid);
+    DropDDLReplicaEventTrigger(PUB_TRIG_DDL_CMD_END, puboid);
 }
 
 /*
@@ -134,6 +287,8 @@ ObjectAddress CreatePublication(CreatePublicationStmt *stmt)
     bool publish_insert;
     bool publish_update;
     bool publish_delete;
+    bool publish_ddl_given;
+    int64 pubddl;
     AclResult aclresult;
     int rc;
 
@@ -164,14 +319,23 @@ ObjectAddress CreatePublication(CreatePublicationStmt *stmt)
     values[Anum_pg_publication_pubname - 1] = DirectFunctionCall1(namein, CStringGetDatum(stmt->pubname));
     values[Anum_pg_publication_pubowner - 1] = ObjectIdGetDatum(GetUserId());
 
-    parse_publication_options(stmt->options, &publish_given, &publish_insert, &publish_update, &publish_delete);
+    parse_publication_options(stmt->options, &publish_given, 
+                            &publish_insert, &publish_update, &publish_delete,
+                            &publish_ddl_given, &pubddl);
 
     values[Anum_pg_publication_puballtables - 1] = BoolGetDatum(stmt->for_all_tables);
     values[Anum_pg_publication_pubinsert - 1] = BoolGetDatum(publish_insert);
     values[Anum_pg_publication_pubupdate - 1] = BoolGetDatum(publish_update);
     values[Anum_pg_publication_pubdelete - 1] = BoolGetDatum(publish_delete);
+    values[Anum_pg_publication_pubddl - 1] = Int64GetDatum(pubddl);
 
     tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
+
+    if (pubddl == PUBDDL_ALL && !stmt->for_all_tables) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("DDL=all replication is only supported in FOR ALL TABLES publications")));
+    }
 
     /* Insert tuple into catalog. */
     puboid = simple_heap_insert(rel, tup);
@@ -200,6 +364,13 @@ ObjectAddress CreatePublication(CreatePublicationStmt *stmt)
         CacheInvalidateRelcacheAll();
     }
 
+    /*
+     * Create an event trigger to allow logging of DDL statements.
+     */
+    if (pubddl != PUBDDL_NONE) {
+        CreateDDLReplicaEventTriggers(myself, puboid);
+    }
+
     heap_close(rel, RowExclusiveLock);
 
     InvokeObjectAccessHook(OAT_POST_CREATE, PublicationRelationId, puboid, 0, NULL);
@@ -225,10 +396,17 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
     bool publish_insert;
     bool publish_update;
     bool publish_delete;
+    bool publish_ddl_given;
+    int64 pubddl;
+    bool pubddl_change = false;
     int rc;
     ObjectAddress obj;
+    Form_pg_publication pubform;
+    pubform = (Form_pg_publication)GETSTRUCT(tup);
 
-    parse_publication_options(stmt->options, &publish_given, &publish_insert, &publish_update, &publish_delete);
+    parse_publication_options(stmt->options, &publish_given, 
+                        &publish_insert, &publish_update, &publish_delete,
+                        &publish_ddl_given, &pubddl);
 
     /* Everything ok, form a new tuple. */
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -249,6 +427,23 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
         replaces[Anum_pg_publication_pubdelete - 1] = true;
     }
 
+    if (publish_ddl_given) {
+        if (pubform->pubddl != pubddl) {
+            if (pubddl == PUBDDL_NONE || pubform->pubddl == PUBDDL_NONE) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("can not enable or disable DDL replication for an existing publication, cause there maybe some subscriptor with different compatibility.")));
+            }
+            
+            pubddl_change = true;
+        }
+
+        values[Anum_pg_publication_pubddl - 1] = Int64GetDatum(pubddl);
+        replaces[Anum_pg_publication_pubddl - 1] = true;
+    } else {
+        pubddl = pubform->pubddl;
+    }
+
     tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
 
     /* Update the catalog. */
@@ -261,6 +456,12 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
     if (((Form_pg_publication)GETSTRUCT(tup))->puballtables) {
         CacheInvalidateRelcacheAll();
     } else {
+        if (pubddl == PUBDDL_ALL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("DDL=all replication is only supported in FOR ALL TABLES publications")));
+        }
+
         List *relids = GetPublicationRelations(HeapTupleGetOid(tup));
 
         /*
@@ -280,6 +481,12 @@ static void AlterPublicationOptions(AlterPublicationStmt *stmt, Relation rel, He
         }
     }
     ObjectAddressSet(obj, PublicationRelationId,  HeapTupleGetOid(tup));
+    if (pubddl_change) {
+        DropDDLReplicaEventTriggers(HeapTupleGetOid(tup));
+        if (pubddl != PUBDDL_NONE) {
+            CreateDDLReplicaEventTriggers(obj, HeapTupleGetOid(tup));
+        }
+    }
     EventTriggerCollectSimpleCommand(obj, InvalidObjectAddress, (Node *) stmt);
 }
 

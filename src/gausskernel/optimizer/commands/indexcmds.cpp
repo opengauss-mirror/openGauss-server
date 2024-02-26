@@ -425,6 +425,9 @@ static List *ExtractSubPartitionIdf(IndexStmt* stmt, List *subPartitionOidList, 
                 errmsg("Cannot match subpartitions when create subpartition indexes.")));
     }
 
+    /* the element stmt->partClause point has been freed */
+    stmt->partClause = (Node*)partitionIndexdef;
+
     /* Count sum of subpartitions */
     foreach(lc1, backupIdxdef) {
         RangePartitionindexDefState *def = (RangePartitionindexDefState*)lfirst(lc1);
@@ -2084,7 +2087,8 @@ static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const Li
                 HeapTuple tuple;
                 Value* colValue = (Value*)linitial(ielem->collation);
                 char* colName = colValue->val.str;
-                Oid colId = CollationGetCollid(colName);
+                /* ielem->collation is a Value list with schema */
+                Oid colId = get_collation_oid(ielem->collation, true);
                 Oid attColId = InvalidOid;
 
                 if (0 == colId) {
@@ -5411,11 +5415,12 @@ static void CheckIndexParamsNumber(IndexStmt* stmt) {
 
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
 {
-    if (!PartExprKeyIsNull(rel, NULL)) {
+    if (!PartExprKeyIsNull(rel)) {
         return false;
     }
-    int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
-    for (int i = 0; i < partKey->dim1; i++) {
+    int2vector* partKey = PartitionMapGetPartKeyArray(rel->partMap);
+    int partKeyNum = PartitionMapGetPartKeyNum(rel->partMap);
+    for (int i = 0; i < partKeyNum; i++) {
         int2 attNum = partKey->values[i];
         Form_pg_attribute attTup = &rel->rd_att->attrs[attNum - 1];
         if (!columnIsExist(rel, attTup, indexParams)) {

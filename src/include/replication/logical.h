@@ -342,7 +342,6 @@ extern void ParallelDecodeWorkerMain(void* point);
 extern void LogicalReadWorkerMain(void* point);
 extern void ParseProcessRecord(ParallelLogicalDecodingContext *ctx, XLogReaderState *record, ParallelDecodeReaderWorker
     *worker);
-extern void XLogSendParallelLogical();
 extern void StartLogicalLogWorkers(char* dbUser, char* dbName, char* slotname, List *options, int parallelDecodeNum);
 extern void CheckBooleanOption(DefElem *elem, bool *booleanOption, bool defaultValue);
 extern void CheckIntOption(DefElem *elem, int *intOption, int defaultValue, int minVal, int maxVal);

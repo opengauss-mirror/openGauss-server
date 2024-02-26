@@ -139,6 +139,7 @@ extern const uint32 GB18030_2022_VERSION_NUM;
 extern const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION;
 extern const uint32 SPQ_VERSION_NUM;
 extern const uint32 UPSERT_ALIAS_VERSION_NUM;
+extern const uint32 SELECT_STMT_HAS_USERVAR;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
@@ -202,7 +203,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_SELECT_INTO_RETURN_NULL 67108864
 #define OPT_ACCEPT_EMPTY_STR 134217728
 #define OPT_PLPGSQL_DEPENDENCY 268435456
-#define OPT_MAX 29
+#define OPT_PROC_UNCHECK_DEFAULT_PARAM 536870912
+#define OPT_MAX 30
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -245,6 +247,7 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define SELECT_INTO_RETURN_NULL (u_sess->utils_cxt.behavior_compat_flags & OPT_SELECT_INTO_RETURN_NULL)
 #define PLPGSQL_DEPENDENCY (u_sess->utils_cxt.behavior_compat_flags & OPT_PLPGSQL_DEPENDENCY)
+#define PROC_UNCHECK_DEFAULT_PARAM (u_sess->utils_cxt.behavior_compat_flags & OPT_PROC_UNCHECK_DEFAULT_PARAM)
 
 /* define database compatibility Attribute */
 typedef struct {
@@ -615,7 +618,9 @@ typedef enum {
 #define AmTsCompactionAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionAuxiliaryProcess)
 #define AmPageRedoWorker() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
 #define AmDmsReformProcProcess() (t_thrd.role == DMS_WORKER && t_thrd.dms_cxt.is_reform_proc)
+#define AmDmsProcess() (t_thrd.role == DMS_WORKER)
 #define AmErosRecyclerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == ExrtoRecyclerProcess)
+#define AmDmsAuxiliaryProcess() (t_thrd.role == DMS_AUXILIARY_THREAD)
 
 
 

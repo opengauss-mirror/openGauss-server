@@ -1430,6 +1430,8 @@ static void ProcessPseudoReturnColumns(StartWithOpState *state)
     int rowCount = 0;
     /* step2. start processing */
     for (;;) {
+        CHECK_FOR_INTERRUPTS();
+        
         /* fetch one tuple from workingTable */
         (void)tuplestore_gettupleslot(state->sw_workingTable, true, false, dstSlot);
         if (TupIsNull(dstSlot)) {

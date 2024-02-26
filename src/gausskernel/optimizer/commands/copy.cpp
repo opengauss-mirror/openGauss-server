@@ -4866,7 +4866,7 @@ uint64 CopyFrom(CopyState cstate)
                     /* step 1: query and get the caching buffer */
                     if (isPartitionRel) {
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
-                            targetOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
+                            targetOid = heapTupleGetSubPartitionOid(resultRelationDesc, tuple);
                         } else {
                             targetOid = getPartitionIdFromTuple(resultRelationDesc, tuple, estate, slot, NULL);
                         }
@@ -4919,7 +4919,7 @@ uint64 CopyFrom(CopyState cstate)
                     if (isPartitionRel && needflush) {
                         Oid targetPartOid = InvalidOid;
                         if (RelationIsSubPartitioned(resultRelationDesc)) {
-                            targetPartOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
+                            targetPartOid = heapTupleGetSubPartitionOid(resultRelationDesc, tuple);
                         } else {
                             targetPartOid = getPartitionIdFromTuple(resultRelationDesc, tuple, estate, slot, NULL);
                         }

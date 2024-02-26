@@ -123,7 +123,8 @@
 #include "gstrace/storage_gstrace.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_transaction.h"
-#include "replication/ss_cluster_replication.h"
+#include "ddes/dms/ss_reform_common.h"
+#include "replication/ss_disaster_cluster.h"
 
 #ifdef ENABLE_UT
     #define static
@@ -1378,7 +1379,7 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
 
     if (ENABLE_DMS) {
         /* fetch TXN info locally if either reformer, original primary, or normal primary */
-        bool local_fetch = SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY;
+        bool local_fetch = SSCanFetchLocalSnapshotTxnRelatedInfo();
         if (!local_fetch) {
             bool in_progress = true;
             SSTransactionIdIsInProgress(xid, &in_progress);
@@ -2062,12 +2063,8 @@ RETRY:
 
         Snapshot result;
         if (ENABLE_DMS) {
-            if (SS_IN_REFORM) {
-                ereport(ERROR, (errmsg("failed to request snapshot as current node is in reform!")));
-                return NULL;
-            }
             /* fetch TXN info locally if either reformer, original primary, or normal primary */
-            if (SS_PRIMARY_MODE || SS_OFFICIAL_PRIMARY) {
+            if (SSCanFetchLocalSnapshotTxnRelatedInfo()) {
                 result = GetLocalSnapshotData(snapshot);
                 snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
             } else {
@@ -2381,7 +2378,7 @@ GROUP_GET_SNAPSHOT:
     }
 
     /* Check whether there's a standby requiring an older xmin when dms is enabled. */
-    if (SS_NORMAL_PRIMARY && SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (SS_NORMAL_PRIMARY && SS_DISASTER_MAIN_STANDBY_NODE) {
         uint64 global_xmin = SSGetGlobalOldestXmin(u_sess->utils_cxt.RecentGlobalXmin);
         u_sess->utils_cxt.RecentGlobalXmin = global_xmin;
     }
@@ -3154,8 +3151,9 @@ VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
         volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
         volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
 
-        /* Exclude prepared transactions */
-        if (proc->pid == 0 || (OidIsValid(dbOid) && proc->databaseId != dbOid)) {
+        /* Exclude prepared transactions and Statement flush thread */
+        if (proc->pid == 0 || (OidIsValid(dbOid) && proc->databaseId != dbOid) ||
+            strcmp((const char*)(proc->myProgName), "Statement flush thread") == 0) {
             continue;
         }
 

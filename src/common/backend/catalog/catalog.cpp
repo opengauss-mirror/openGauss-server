@@ -150,7 +150,11 @@ ForkNumber forkname_to_number(char* forkName, BlockNumber* segno)
         /* it is a column data bcm file. C1_bcm */
         /* skip 'C' */
         token = token + 1;
-        forkNum = ColumnId2ColForkNum(atooid(token));
+        Oid colOid = atooid(token);
+        if (!AttrNumberIsForUserDefinedAttr(colOid))
+            return InvalidForkNumber;
+
+        forkNum = ColumnId2ColForkNum(colOid);
 
         /* bcm.1 */
         token = strtok_r(NULL, ".", &tmptoken);
@@ -921,9 +925,15 @@ bool IsSnapshotNamespace(Oid namespaceId)
     return namespaceId == PG_SNAPSHOT_NAMESPACE;
 }
 
+bool IsProcCoverageNamespace(Oid namespaceId)
+{
+    return namespaceId == PROC_COVERAGE_NAMESPACE;
+}
+
 bool IsMonitorSpace(Oid namespaceId)
 {
-    return IsPerformanceNamespace(namespaceId) || IsSnapshotNamespace(namespaceId);
+    return IsPerformanceNamespace(namespaceId) || IsSnapshotNamespace(namespaceId) ||
+           IsProcCoverageNamespace(namespaceId);
 }
 /*
  * IsReservedName

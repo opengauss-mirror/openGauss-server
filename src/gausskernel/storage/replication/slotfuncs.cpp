@@ -123,8 +123,9 @@ void log_slot_drop(const char *name)
     XLogRecPtr Ptr;
     ReplicationSlotPersistentData xlrec;
 
-    errno_t rc = memset_s(xlrec.name.data, NAMEDATALEN, 0, NAMEDATALEN);
+    errno_t rc = memset_s(&xlrec, sizeof(ReplicationSlotPersistentData), 0, sizeof(ReplicationSlotPersistentData));
     securec_check(rc, "\0", "\0");
+
     rc = memcpy_s(xlrec.name.data, NAMEDATALEN, name, strlen(name));
     securec_check(rc, "\0", "\0");
     START_CRIT_SECTION();
@@ -245,7 +246,8 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
     }
 
     /* acquire replication slot, this will check for conflicting names */
-    ReplicationSlotCreate(NameStr(*name), RS_PERSISTENT, isDummyStandby, InvalidOid, InvalidXLogRecPtr);
+    ReplicationSlotCreate(NameStr(*name), RS_PERSISTENT, isDummyStandby, InvalidOid, InvalidXLogRecPtr,
+        InvalidXLogRecPtr);
 
     values[0] = CStringGetTextDatum(NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
 
@@ -358,7 +360,8 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 }
 
 void create_logical_replication_slot(const Name name, Name plugin, bool isDummyStandby, Oid databaseId,
-                                     NameData *databaseName, char *str_tmp_lsn, int str_length)
+                                     NameData *databaseName, char *str_tmp_lsn, int str_length,
+                                     XLogRecPtr restart_lsn, XLogRecPtr confirmed_lsn)
 {
     LogicalDecodingContext *ctx = NULL;
     CheckLogicalDecodingRequirements(databaseId);
@@ -379,7 +382,21 @@ void create_logical_replication_slot(const Name name, Name plugin, bool isDummyS
      * Acquire a logical decoding slot, this will check for conflicting
      * names.
      */
-    ReplicationSlotCreate(NameStr(*name), RS_EPHEMERAL, isDummyStandby, databaseId, InvalidXLogRecPtr);
+    ReplicationSlotCreate(NameStr(*name), RS_EPHEMERAL, isDummyStandby, databaseId, restart_lsn, confirmed_lsn);
+
+    /* if restart_lsn and confirmed_lsh are specified, no need to create logical decoding context */
+    if (XLogRecPtrIsValid(restart_lsn) && XLogRecPtrIsValid(confirmed_lsn)) {
+        ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
+
+        /* register output plugin name with slot */
+        SpinLockAcquire(&slot->mutex);
+        rc = strncpy_s(NameStr(slot->data.plugin), NAMEDATALEN, NameStr(*plugin), NAMEDATALEN - 1);
+        securec_check(rc, "\0", "\0");
+        NameStr(slot->data.plugin)[NAMEDATALEN - 1] = '\0';
+        SpinLockRelease(&slot->mutex);
+
+        goto create_done;
+    }
 
     /*
      * Create logical decoding context, to build the initial snapshot.
@@ -390,6 +407,8 @@ void create_logical_replication_slot(const Name name, Name plugin, bool isDummyS
     if (ctx != NULL) {
         DecodingContextFindStartpoint(ctx);
     }
+
+create_done:
     if (databaseName != NULL) {
         rc = snprintf_s(databaseName->data, NAMEDATALEN, NAMEDATALEN - 1, "%s",
                         t_thrd.slot_cxt.MyReplicationSlot->data.name.data);
@@ -425,7 +444,7 @@ void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra
      * names.
      */
     ReplicationSlotCreate(NameStr(slotInfo->name), RS_EPHEMERAL, slotInfo->isDummyStandby, slotInfo->database,
-                          InvalidXLogRecPtr, extra_content, true);
+                          InvalidXLogRecPtr, InvalidXLogRecPtr, extra_content, true);
     int rc = memcpy_s(&t_thrd.slot_cxt.MyReplicationSlot->data, sizeof(ReplicationSlotPersistentData), slotInfo,
                       sizeof(ReplicationSlotPersistentData));
     securec_check(rc, "\0", "\0");
@@ -441,6 +460,84 @@ void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra
         add_archive_slot_to_instance(t_thrd.slot_cxt.MyReplicationSlot);
     }
     ReplicationSlotRelease();
+}
+
+static void check_and_assign_lsn(PG_FUNCTION_ARGS, XLogRecPtr *restart_lsn, XLogRecPtr *confirmed_lsn)
+{
+#define RESTART_IDX 2
+#define CONFIRM_IDX 3
+    if (PG_ARGISNULL(RESTART_IDX) || PG_ARGISNULL(CONFIRM_IDX)) {
+        ereport(ERROR, (errmsg("restart_lsn or confirmed_flush should not be NULL")));
+    }
+    const char *str_restart_lsn = TextDatumGetCString(PG_GETARG_DATUM(RESTART_IDX));
+    ValidateInputString(str_restart_lsn);
+    if (!AssignLsn(restart_lsn, str_restart_lsn)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
+                                                                      "of start_lsn", str_restart_lsn)));
+    }
+    const char *str_confirmed_lsn = TextDatumGetCString(PG_GETARG_DATUM(CONFIRM_IDX));
+    ValidateInputString(str_confirmed_lsn);
+    if (!AssignLsn(confirmed_lsn, str_confirmed_lsn)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
+                                                                      "of confirmed_flush",
+                                                                      str_confirmed_lsn)));
+    }
+}
+
+/*
+ * SQL function for creating a new logical replication slot.
+ */
+Datum pg_create_logical_replication_slot_with_lsn(PG_FUNCTION_ARGS)
+{
+    if (SS_IN_REFORM || SS_NORMAL_STANDBY) {
+        ereport(ERROR, (errmsg("Operation can't be excuted during reform or on DMS standby node!")));
+    }
+
+    Name name = PG_GETARG_NAME(0);
+    Name plugin = PG_GETARG_NAME(1);
+    errno_t rc = EOK;
+    XLogRecPtr restart_lsn = InvalidXLogRecPtr;
+    XLogRecPtr confirmed_lsn = InvalidXLogRecPtr;
+    TupleDesc tupdesc;
+    HeapTuple tuple;
+    Datum result;
+    const int TUPLE_FIELDS = 2;
+    Datum values[TUPLE_FIELDS];
+    bool nulls[TUPLE_FIELDS];
+    char str_tmp_lsn[128] = {0};
+    NameData databaseName;
+
+    ValidateInputString(NameStr(*name));
+    ValidateInputString(NameStr(*plugin));
+
+    check_and_assign_lsn(fcinfo, &restart_lsn, &confirmed_lsn);
+
+    Oid userId = GetUserId();
+    CheckLogicalPremissions(userId);
+    if (RecoveryInProgress())
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Standby mode doesn't support create logical slot")));
+    /* we are about to start streaming switch over, stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot create logical slot during streaming disaster recovery")));
+    }
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
+
+    create_logical_replication_slot(name, plugin, false, u_sess->proc_cxt.MyDatabaseId, &databaseName, str_tmp_lsn,
+                                    128, restart_lsn, confirmed_lsn);
+
+    values[0] = CStringGetTextDatum(NameStr(databaseName));
+    values[1] = CStringGetTextDatum(str_tmp_lsn);
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(tuple);
+    PG_RETURN_DATUM(result);
 }
 
 /*
@@ -462,12 +559,11 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
     const int TUPLE_FIELDS = 2;
     Datum values[TUPLE_FIELDS];
     bool nulls[TUPLE_FIELDS];
-    char *str_tmp_lsn = NULL;
+    char str_tmp_lsn[128] = {0};
     NameData databaseName;
 
     ValidateInputString(NameStr(*name));
     ValidateInputString(NameStr(*plugin));
-    str_tmp_lsn = (char *)palloc0(128);
 
     Oid userId = GetUserId();
     CheckLogicalPremissions(userId);
@@ -487,8 +583,6 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 
     values[0] = CStringGetTextDatum(NameStr(databaseName));
     values[1] = CStringGetTextDatum(str_tmp_lsn);
-    pfree(str_tmp_lsn);
-    str_tmp_lsn = NULL;
     rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
     securec_check(rc, "\0", "\0");
 
@@ -1186,7 +1280,8 @@ XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, b
     check_permissions();
 
     /* create persistent replication slot with extra archive configuration */
-    ReplicationSlotCreate(slot_name, RS_PERSISTENT, is_dummy, InvalidOid, currFlushPtr, extra_content);
+    ReplicationSlotCreate(slot_name, RS_PERSISTENT, is_dummy, InvalidOid, currFlushPtr, InvalidXLogRecPtr,
+                          extra_content);
     /* log slot creation */
     log_slot_create(&t_thrd.slot_cxt.MyReplicationSlot->data, t_thrd.slot_cxt.MyReplicationSlot->extra_content);
     MarkArchiveSlotOperate();
@@ -1230,7 +1325,8 @@ XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bo
     * returned as backup start lsn. After this call, lsn larger than current or subsequent redo point will
     * nolonger be recycled.
     */
-    ReplicationSlotCreate(slot_name, RS_BACKUP, is_dummy, InvalidOid, InvalidXLogRecPtr, extra_content);
+    ReplicationSlotCreate(slot_name, RS_BACKUP, is_dummy, InvalidOid, InvalidXLogRecPtr, InvalidXLogRecPtr,
+                          extra_content);
     /* log slot creation, in which quorum replication will be confirmed. */
     log_slot_create(&t_thrd.slot_cxt.MyReplicationSlot->data, NULL);
     ReplicationSlotRelease();

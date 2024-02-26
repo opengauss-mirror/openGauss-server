@@ -1899,6 +1899,7 @@ void add_child_rel_equivalences(
     PlannerInfo* root, AppendRelInfo* appinfo, RelOptInfo* parent_rel, RelOptInfo* child_rel)
 {
     ListCell* lc1 = NULL;
+    Relids	top_parent_relids = child_rel->top_parent_relids ? child_rel->top_parent_relids: parent_rel->relids;
 
     foreach (lc1, root->eq_classes) {
         EquivalenceClass* cur_ec = (EquivalenceClass*)lfirst(lc1);
@@ -1913,7 +1914,7 @@ void add_child_rel_equivalences(
             continue;
 
         /* No point in searching if parent rel not mentioned in eclass */
-        if (!bms_is_subset(parent_rel->relids, cur_ec->ec_relids))
+        if (!bms_is_subset(top_parent_relids, cur_ec->ec_relids))
             continue;
 
         foreach (lc2, cur_ec->ec_members) {
@@ -1923,13 +1924,18 @@ void add_child_rel_equivalences(
                 continue; /* ignore consts and children here */
 
             /* Does it reference parent_rel? */
-            if (bms_overlap(cur_em->em_relids, parent_rel->relids)) {
+            if (bms_overlap(cur_em->em_relids, top_parent_relids)) {
                 /* Yes, generate transformed child version */
                 Expr* child_expr = NULL;
                 Relids new_relids;
                 Relids new_nullable_relids;
 
-                child_expr = (Expr*)adjust_appendrel_attrs(root, (Node*)cur_em->em_expr, appinfo);
+                if (parent_rel->reloptkind != RELOPT_OTHER_MEMBER_REL) {
+                    child_expr = (Expr*)adjust_appendrel_attrs(root, (Node*)cur_em->em_expr, appinfo);
+                } else {
+                    child_expr = (Expr *)adjust_appendrel_attrs_multilevel(root, (Node *)cur_em->em_expr,
+                                                                           child_rel->relids, top_parent_relids);
+                }
 
                 /*
                  * Transform em_relids to match.  Note we do *not* do
@@ -1937,7 +1943,7 @@ void add_child_rel_equivalences(
                  * transformation might have substituted a constant, but we
                  * don't want the child member to be marked as constant.
                  */
-                new_relids = bms_difference(cur_em->em_relids, parent_rel->relids);
+                new_relids = bms_difference(cur_em->em_relids, top_parent_relids);
                 new_relids = bms_add_members(new_relids, child_rel->relids);
 
                 /*
@@ -1945,8 +1951,8 @@ void add_child_rel_equivalences(
                  * parent and child relids are singletons.
                  */
                 new_nullable_relids = cur_em->em_nullable_relids;
-                if (bms_overlap(new_nullable_relids, parent_rel->relids)) {
-                    new_nullable_relids = bms_difference(new_nullable_relids, parent_rel->relids);
+                if (bms_overlap(new_nullable_relids, top_parent_relids)) {
+                    new_nullable_relids = bms_difference(new_nullable_relids, top_parent_relids);
                     new_nullable_relids = bms_add_members(new_nullable_relids, child_rel->relids);
                 }
 

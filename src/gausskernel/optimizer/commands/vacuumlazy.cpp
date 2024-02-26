@@ -1166,7 +1166,17 @@ static IndexBulkDeleteResult** lazy_scan_heap(
          */
         visibilitymap_pin(onerel, blkno, &vmbuffer);
 
-        buf = ReadBufferExtended(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy);
+        /*
+         * We do pre-read for lazy-vacuum when we cant skip the visible blocks.
+         * If we do it directly, we will read many blocks what we dont neet to
+         * check, it is useless and meaningless.
+         */
+        if (u_sess->attr.attr_storage.vacuum_bulk_read_size > 0 && !skipping_all_visible_blocks) {
+            int maxBLockCount = nblocks - blkno;
+            buf = MultiReadBufferExtend(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy, maxBLockCount, true);
+        } else {
+            buf = ReadBufferExtended(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy);
+        }
         /* We need buffer cleanup lock so that we can prune HOT chains. */
         if (!ConditionalLockBufferForCleanup(buf)) {
             /*

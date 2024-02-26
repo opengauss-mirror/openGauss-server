@@ -6,6 +6,23 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
+# --------------------------
+# usecases for improving coverage 
+# --------------------------
+# these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+test: timecapsule_partition_ustore_test_1
+test: timecapsule_partition_ustore_test_2
+test: ddl
+test: ustore_subpartition_vacuum_partition
+test: test_ustore_undo_tool
+test: privileges
+test: AMHeap_logical_scan
+test: copy
+
+test: vec_hashjoin1 single_node_rangetypes db4ai_explain_model test_ustore_toast ustore_ddl ts_utf8 test_ustore_update test_ustore_index
+test: sqlldr/gs_loader_basic psql parse_xlog cgin_test create_index_gist hw_user rowlevelsecurity query_self_tuning hw_partition_llt
+test: heap_copytuple partition_cost_model fulljoin_rewrite_row_2 auto_analyze_test vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill 
+
 # test for index deduplication
 test: btree_deduplication
 
@@ -14,6 +31,7 @@ test: btree_deduplication
 #test: recovery_2pc_tools recovery_2pc_tools02
 #test: recovery_2pc_tools
 
+test: vacuum_full_cstore_table
 test: sqlbypass_partition
 test: sqlpatch_base
 test: sqlpatch_func
@@ -55,7 +73,7 @@ test: transaction_with_snapshot
 test: select_into_user_defined_variables
 test: select_into_file
 
-test: gs_dump_package trigger_dump
+test: gs_dump_package trigger_dump gs_dumpall
 test: out_param_func
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint
@@ -110,6 +128,8 @@ test: segment_subpartition_vacuum_partition segment_subpartition_select_1
 
 test: get_instr_unique_sql
 
+test: test_case_subselect
+
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
 # interferes with crash-recovery testing.
@@ -142,7 +162,7 @@ test: single_node_numerology
 # ----------
 # The second group of parallel tests
 # ----------
-test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz 
+test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz ignore_double_quotes
 #test: single_node_interval 
 test: single_node_abstime single_node_reltime 
 #test: single_node_tinterval 
@@ -354,7 +374,7 @@ test: gpi_index
 test: gpi_index_only
 
 # gpi bitmap
-test: gpi_bitmapscan
+test: gpi_bitmapscan gpi_bitmapscan_prefetch
 
 # gpi pwj
 test: gpi_pwj
@@ -484,7 +504,7 @@ test: hw_procedure_define
 #test: hw_anonymous_block
 #test: hw_procedure#
 test: hw_grant_all hw_dynamic_sql hw_func_return_out
-test: hw_package_function
+test: hw_package_function type_replace
 
 #show plan
 #test: plan_hint
@@ -759,7 +779,7 @@ test: plpgsql_assign_value_to_array_attribute
 test: plpgsql_array_of_record 
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
-test: plpgsql_inout_param record_slow_sql_in_proc
+test: function_default_test plpgsql_inout_param record_slow_sql_in_proc
 test: plpgsql_cursor_rowtype
 test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param
@@ -1031,6 +1051,7 @@ test: reindex_concurrently_partition_parallel
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication
 test: subscription
+test: replication_ddl_publication
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
@@ -1060,7 +1081,7 @@ test: sytcomp_del_upt4orderby
 test: aioptimizer
 test: aioptimizer_small
 test: pgfincore 
-test: rename_table test_plsql_core
+test: rename_table test_plsql_core alter_sequence_001 alter_seq_max_in_txn
 
 # debug instrument
 test: test_debug5
@@ -1081,6 +1102,9 @@ test: optimizing_index_scan_ustore
 # row_count()
 test: row_count_function
 
+# test for inherit table
+test: inherits01
+
 # show_warnings
 test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
 
@@ -1089,7 +1113,7 @@ test: test_object_alter
 test: event_trigger object_address
 test: event_trigger_dump_restore
 # partition expression key
-test: partition_expr_key
+test: partition_expr_key instr_query_plan_threshold
 test: alter_foreign_schema
 
 # test for slow_sql

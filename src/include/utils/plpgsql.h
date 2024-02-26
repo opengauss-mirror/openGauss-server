@@ -32,14 +32,8 @@
  * Definitions
  **********************************************************************/
 
-/* define our text domain for translations */
-#undef TEXTDOMAIN
-#define TEXTDOMAIN PG_TEXTDOMAIN("plpgsql")
-
-#undef _
-#define _(x) dgettext(TEXTDOMAIN, x)
-
 #define TABLEOFINDEXBUCKETNUM 128
+#define MAX_INT32_LEN 11
 
 /*
  * Compile status mark
@@ -1229,6 +1223,7 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     struct DebugInfo* debug;
     struct PLpgSQL_nsitem* ns_top;
 
+    uint64 guc_stat;
     bool is_autonomous;
     bool is_plpgsql_func_with_outparam;
     bool is_insert_gs_source;
@@ -1850,7 +1845,8 @@ extern THR_LOCAL PLpgSQL_execstate* plpgsql_estate;
  */
 #define BULK_COLLECT_MAX ((Size)0x3FFFFFF)    /* maximum number of rows can be bulk collected (by 3FFFFFFF/16) */
 
-extern Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, bool dynexec_anonymous_block);
+extern Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo,
+                                   bool dynexec_anonymous_block, int* coverage = NULL);
 extern Datum plpgsql_exec_autonm_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, char* source_text);
 extern HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata);
 extern void plpgsql_xact_cb(XactEvent event, void* arg);
@@ -2056,6 +2052,14 @@ typedef struct CursorRecordType {
     Oid type_oid;
 } CursorRecordType;
 
+typedef enum {
+    PRO_NAME_COL,
+    DB_NAME_COL,
+    COVERAGE_ARR_COL,
+    PRO_QUERYS_COL,
+    COVERAGE_COL
+} CoverageColumn;
+
 /* Quick access array state */
 #define IS_ARRAY_STATE(state_list, state) ((state_list && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) ? \
                                           (linitial_int(state_list) == state) : false)
@@ -2107,6 +2111,7 @@ extern void examine_parameter_list(List* parameters, Oid languageOid, const char
 extern void compute_return_type(
     TypeName* returnType, Oid languageOid, Oid* prorettype_p, bool* returnsSet_p, bool fenced, int startLineNumber,
     TypeDependExtend* type_depend_extend, bool is_refresh_head);
+extern CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerlines);
 void plpgsql_free_override_stack(int depth);
 
 #endif /* PLPGSQL_H */

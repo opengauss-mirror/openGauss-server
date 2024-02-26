@@ -177,3 +177,32 @@ drop cascades to table uschema2_ix.associate
 drop cascades to table uschema2_ix.associate_benefit_expense
 drop cascades to table uschema2_ix.associate_position
 drop cascades to table uschema2_ix.position_type
+create schema create_resource;
+set current_schema='create_resource';
+create table tab(a text);
+create resource label name;
+ERROR:  syntax error at or near ";"
+LINE 1: create resource label name;
+                                  ^
+alter resource label name add column(tab.a);
+ERROR:  name no such label found
+drop table tab;
+reset current_schema;
+drop schema create_resource CASCADE;
+-- roach function
+select gs_roach_stop_backup('test');
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_stop_backup
+CONTEXT:  referenced column: gs_roach_stop_backup
+select gs_roach_switch_xlog(false);
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_switch_xlog
+CONTEXT:  referenced column: gs_roach_switch_xlog
+select gs_roach_enable_delay_ddl_recycle('test');
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_enable_delay_ddl_recycle
+CONTEXT:  referenced column: gs_roach_enable_delay_ddl_recycle
+select gs_roach_disable_delay_ddl_recycle('test');
+ERROR:  Un-supported feature
+DETAIL:  unsupported function: gs_roach_disable_delay_ddl_recycle
+CONTEXT:  referenced column: gs_roach_disable_delay_ddl_recycle

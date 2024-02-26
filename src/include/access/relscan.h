@@ -85,6 +85,8 @@ typedef struct HeapScanDescData {
 #ifdef USE_SPQ
     SPQScanDesc spq_scan;
 #endif
+    /* scan direction value for bulk read */
+    ScanDirection bulk_scan_direction;
 
     /* this must be the end of this sturcture */
     HeapTupleHeaderData rs_ctbuf_hdr;

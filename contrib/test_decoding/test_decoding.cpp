@@ -29,6 +29,7 @@
 #include "utils/typcache.h"
 #include "replication/output_plugin.h"
 #include "replication/logical.h"
+#include "tcop/ddldeparse.h"
 
 PG_MODULE_MAGIC;
 
@@ -48,6 +49,8 @@ static void pg_decode_prepare_txn(LogicalDecodingContext* ctx, ReorderBufferTXN*
 static void pg_decode_change(
     LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation rel, ReorderBufferChange* change);
 static bool pg_decode_filter(LogicalDecodingContext* ctx, RepOriginId origin_id);
+static void pg_decode_ddl(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr message_lsn,
+    const char *prefix, Oid relid, DeparsedCommandType cmdtype, Size sz, const char *message);
 
 void _PG_init(void)
 {
@@ -67,6 +70,7 @@ void _PG_output_plugin_init(OutputPluginCallbacks* cb)
     cb->prepare_cb = pg_decode_prepare_txn;
     cb->filter_by_origin_cb = pg_decode_filter;
     cb->shutdown_cb = pg_decode_shutdown;
+    cb->ddl_cb = pg_decode_ddl;
 }
 
 /* initialize this plugin */
@@ -300,6 +304,62 @@ static void pg_decode_change(
             break;
         default:
             Assert(false);
+    }
+
+    MemoryContextSwitchTo(old);
+    MemoryContextReset(data->context);
+
+    OutputPluginWrite(ctx, true);
+}
+
+static char *deparse_command_type(DeparsedCommandType cmdtype)
+{
+    switch (cmdtype) {
+        case DCT_SimpleCmd:
+            return "Simple";
+        case DCT_TableDropStart:
+            return "Drop table";
+        case DCT_TableDropEnd:
+            return "Drop Table End";
+        default:
+            Assert(false);
+    }
+    return NULL;
+}
+
+static void pg_decode_ddl(LogicalDecodingContext* ctx, 
+                        ReorderBufferTXN* txn, XLogRecPtr message_lsn,
+                        const char *prefix, Oid relid, 
+                        DeparsedCommandType cmdtype, 
+                        Size sz, const char *message)
+{
+    PluginTestDecodingData* data = NULL;
+    MemoryContext old;
+
+    data = (PluginTestDecodingData*)ctx->output_plugin_private;
+
+    /* output BEGIN if we haven't yet */
+    if (data->skip_empty_xacts && !data->xact_wrote_changes) {
+        pg_output_begin(ctx, data, txn, false);
+    }
+    data->xact_wrote_changes = true;
+
+    /* Avoid leaking memory by using and resetting our own context */
+    old = MemoryContextSwitchTo(data->context);
+    OutputPluginPrepareWrite(ctx, true);
+
+    appendStringInfo(ctx->out, "message: prefix %s, relid %u, cmdtype: %s, sz: %lu content: %s",
+        prefix,
+        relid,
+        deparse_command_type(cmdtype),
+        sz,
+        message);
+    if (cmdtype != DCT_TableDropStart) {
+        char *tmp = pstrdup(message);
+        char *owner = NULL;
+        char *decodestring = deparse_ddl_json_to_string(tmp, &owner);
+        appendStringInfo(ctx->out, "\ndecode to : %s, [owner %s]", decodestring, owner ? owner : "none");
+        pfree(tmp);
     }
 
     MemoryContextSwitchTo(old);

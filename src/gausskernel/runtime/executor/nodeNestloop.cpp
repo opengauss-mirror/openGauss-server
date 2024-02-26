@@ -469,7 +469,9 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
     nlstate->js.ps.state = estate;
     nlstate->nl_MaterialAll = node->materialAll;
 #ifdef USE_SPQ
-    nlstate->prefetch_inner = node->join.prefetch_inner;
+    if (IS_SPQ_RUNNING) {
+        nlstate->prefetch_inner = node->join.prefetch_inner;
+    }
 #endif
     nlstate->js.ps.ExecProcNode = ExecNestLoop;
 

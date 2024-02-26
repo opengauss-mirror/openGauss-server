@@ -30,6 +30,7 @@
 
 #define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
 #define SS_BUF_MAX_WAIT_TIME (1000L * 1000 * 20) // 20s
+#define SS_BUF_WAIT_TIME_IN_ONDEMAND_REALTIME_BUILD (100000L)  // 100ms
 
 #define DmsInitLatch(drid, _type, _oid, _idx, _parent_part, _part, _uid) \
     do {                                                      \
@@ -88,4 +89,9 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag);
 bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode);
 bool SSWaitIOTimeout(BufferDesc *buf);
 void buftag_get_buf_info(BufferTag tag, stat_buf_info_t *buf_info);
+Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode);
+void DmsReleaseBuffer(int buffer, bool is_seg);
+bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recordLsn, XLogRecPtr *pageLsn);
+bool SSOndemandRealtimeBuildAllowFlush(BufferDesc *buf);
+bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl);
 #endif

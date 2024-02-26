@@ -1,5 +1,119 @@
 \c postgres
+/* prepare data */
+create schema sql_self_tuning;
 set current_schema='sql_self_tuning';
+create node group sql_self_tuning_01 with (datanode1, datanode3, datanode5,datanode7);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create node group sql_self_tuning_02 with (datanode2, datanode4, datanode6);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table t1 ( c1 integer[], c2 int) with(autovacuum_enabled = off) distribute by replication;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table t2 (c1 int, c2 hstore) with(autovacuum_enabled = off);
+create table t3(c1 text, c2 text, c3 int) with(autovacuum_enabled = off);
+create table t5(c1 int, c2 int, c3 int, c4 int) with(autovacuum_enabled = off) distribute by hash(c4);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+insert into t5 select v % 5,v,v, 0 from generate_series(1,1024) as v;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select v % 5,v,v, 0 from generate_series(1,10...
+                    ^
+create table t4 with(autovacuum_enabled = off) as select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: ...table t4 with(autovacuum_enabled = off) as select * from t5;
+                                                                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+insert into t5 select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: insert into t5 select * from t5;
+                    ^
+create table t13 with(autovacuum_enabled = off) as select * from t5;
+ERROR:  relation "t5" does not exist on datanode1
+LINE 1: ...able t13 with(autovacuum_enabled = off) as select * from t5;
+                                                                    ^
+insert into t13 select * from t13;
+ERROR:  relation "t13" does not exist on datanode1
+LINE 1: insert into t13 select * from t13;
+                    ^
+insert into t13 select * from t13;
+ERROR:  relation "t13" does not exist on datanode1
+LINE 1: insert into t13 select * from t13;
+                    ^
+create table t14(c1 int, c2 int, c3 int, c4 int) with(autovacuum_enabled = off) distribute by hash(c2) to group sql_self_tuning_01;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table t15(c1 int, c2 int, c3 int, c4 int) with(autovacuum_enabled = off) distribute by hash(c4) to group sql_self_tuning_02;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+insert into t14 select * from t5;
+ERROR:  relation "t14" does not exist on datanode1
+LINE 1: insert into t14 select * from t5;
+                    ^
+insert into t15 select * from t5;
+ERROR:  relation "t15" does not exist on datanode1
+LINE 1: insert into t15 select * from t5;
+                    ^
+analyze t5;
+ERROR:  relation "t5" does not exist
+analyze t13;
+ERROR:  relation "t13" does not exist
+analyze t14;
+ERROR:  relation "t14" does not exist
+analyze t15;
+ERROR:  relation "t15" does not exist
+create table t6(c1 bytea, c2 bytea,c3 int) with(autovacuum_enabled = off);
+create table t16(c1 int, c2 int, c3 int, c4 int) with(autovacuum_enabled = off) distribute by hash(c1) to group sql_self_tuning_02;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+insert into t16 select * from t5;
+ERROR:  relation "t16" does not exist on datanode1
+LINE 1: insert into t16 select * from t5;
+                    ^
+create index idx_t16 on t16(c4);
+ERROR:  relation "t16" does not exist
+create table ct16(c1 int, c2 int, c3 int, c4 int) with(autovacuum_enabled = off, ORIENTATION = column) distribute by hash(c2) to group sql_self_tuning_02;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+insert into ct16 select * from t5;
+ERROR:  relation "ct16" does not exist on datanode1
+LINE 1: insert into ct16 select * from t5;
+                    ^
+create index idx_ct16 on ct16(c1);
+ERROR:  relation "ct16" does not exist
+/* prepare data end */
 set resource_track_duration=0;
 set resource_track_cost=30;
 set resource_track_level=operator;
@@ -9,138 +123,105 @@ set resource_track_log=summary;
  */
 /* distinct on */
 select distinct on (not_plan_shipping_01)t4.c1 not_plan_shipping_01  from t4, t5 where t4.c1=t5.c2 and t5.c3 < 20;
- not_plan_shipping_01 
-----------------------
-                    1
-                    2
-                    3
-                    4
-(4 rows)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 5: ...plan_shipping_01)t4.c1 not_plan_shipping_01  from t4, t5 whe...
+                                                             ^
 /* for update */
 select t5.c1 not_plan_shipping_02 from t5, t4 where t5.c1=t4.c2  for update;
-ERROR:  Unsupported FOR UPDATE/SHARE multiple table in stream plan.
+ERROR:  relation "t5" does not exist on datanode1
+LINE 2: select t5.c1 not_plan_shipping_02 from t5, t4 where t5.c1=t4...
+                                               ^
 /* with recursive */
 with recursive t5_recursive(c1, c2) as (select 1, c2 from t5 where c1 = 1)
 select c1 not_plan_shipping_03 from t5_recursive order by 1 limit 3;
- not_plan_shipping_03 
-----------------------
-                    1
-                    1
-                    1
-(3 rows)
-
+ERROR:  relation "t5" does not exist on datanode1
+LINE 2: ...ursive t5_recursive(c1, c2) as (select 1, c2 from t5 where c...
+                                                             ^
 /* returing list */
 update t4 set c2 = 1024 where (c2 - 1024) > (select max(c2) from t5 where c3 > 1000 and t4.c2 = t5.c3 order by 1) returning c2 not_plan_shipping_04;
- not_plan_shipping_04 
-----------------------
-(0 rows)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: update t4 set c2 = 1024 where (c2 - 1024) > (select max(c2) ...
+               ^
 /* row() */
 select row(t4.*, 12) not_plan_shipping_05 from t4, t5 where t4.c1 = t5.c2 and t5.c3 < 15  order by 1 limit 3;
- not_plan_shipping_05 
-----------------------
- (1,1,1,0,12)
- (1,1,1,0,12)
- (1,1,1,0,12)
-(3 rows)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: select row(t4.*, 12) not_plan_shipping_05 from t4, t5 where ...
+                                                       ^
 /* row() compare */
 select (t4.c1, t5.c2) < (1,2)  not_plan_shipping_06 from t4, t5 where t4.c1 = t5.c1 and t5.c3 < 6 order by 1 limit 1;
- not_plan_shipping_06 
-----------------------
- f
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: ...(t4.c1, t5.c2) < (1,2)  not_plan_shipping_06 from t4, t5 whe...
+                                                             ^
 /* array cast*/
 select a.c1::float[]  not_plan_shipping_07 from t1 a , t1 b where a.c1 = b.c1 and b.c2 in (select c2 from t5 order by 1);
- not_plan_shipping_07 
-----------------------
-(0 rows)
-
+ERROR:  relation "t1" does not exist on datanode1
+LINE 2: select a.c1::float[]  not_plan_shipping_07 from t1 a , t1 b ...
+                                                        ^
 /* array expression*/
 select array[c1,1]  not_plan_shipping_08 from t5 where c2 in (select c1 from t4 where t4.c1 < 15 ) order by 1 limit 1;
- not_plan_shipping_08 
-----------------------
- {1,1}
-(1 row)
-
+ERROR:  relation "t5" does not exist on datanode1
+LINE 2: select array[c1,1]  not_plan_shipping_08 from t5 where c2 in...
+                                                      ^
 /* table in targetlist */
 select t4 not_plan_shipping_09,t4.c1 from t4, t5 where t4.c1=t5.c2 and t5.c3 < 30 order by 2,1 limit 1;
- not_plan_shipping_09 | c1 
-----------------------+----
- (1,1,1,0)            |  1
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: select t4 not_plan_shipping_09,t4.c1 from t4, t5 where t4.c1...
+                                                  ^
 /* no from, no setop */
 select distinct(t5.c1) not_plan_shipping_10, t4.c1  from t4, t5, (select 1 col)  tmp where t4.c1=t5.c2 and t5.c3=tmp.col and t5.c3 < 30;
- not_plan_shipping_10 | c1 
-----------------------+----
-                    1 |  1
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: ...distinct(t5.c1) not_plan_shipping_10, t4.c1  from t4, t5, (s...
+                                                             ^
 /* Record in targetlist */
 select each(t2.c2) not_plan_shipping_11 from t2, t4 where t4.c1=t2.c1;
- not_plan_shipping_11 
-----------------------
-(0 rows)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: select each(t2.c2) not_plan_shipping_11 from t2, t4 where t4...
+                                                         ^
 /* IMMUTABLE function (every) */
 select every(t4.c1) not_plan_shipping_12 from t4,t5 where  t4.c1 = t5.c2 and t5.c3 < 30;
- not_plan_shipping_12 
-----------------------
- t
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: select every(t4.c1) not_plan_shipping_12 from t4,t5 where  t...
+                                                      ^
 /* volatile function */
 select count(*) from (select count(*) not_plan_shipping_13 from t4,t5 where t4.c1>clock_timestamp() and t4.c1 = t5.c2 and t5.c3<30) tmp;
- count 
--------
-     1
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: ...) from (select count(*) not_plan_shipping_13 from t4,t5 wher...
+                                                             ^
 /* stable function */
 select count(*) from (select count(*) not_plan_shipping_14 from t4,t5 where t4.c1>now() and t4.c1 = t5.c2 and t5.c3< 100) tmp ;
- count 
--------
-     1
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: ...) from (select count(*) not_plan_shipping_14 from t4,t5 wher...
+                                                             ^
 /* OID in Target table when insert */
 insert into pg_class (relnamespace,reltype)  select count(t4.c1) not_plan_shipping_15, t5.c2 
 from t4,t5 where t4.c1>t5.c2 and t5.c3< 300 and t4.c1 > 5 group by t5.c2 order by t5.c2;
+ERROR:  relation "t4" does not exist on datanode1
+LINE 3: from t4,t5 where t4.c1>t5.c2 and t5.c3< 300 and t4.c1 > 5 gr...
+             ^
 /* agg function：string_agg(text, text) */
 select string_agg(t3.c1,t3.c2) not_plan_shipping_16 from t3 ,t5 where t3.c3=t5.c3;
- not_plan_shipping_16 
-----------------------
- 
-(1 row)
-
+ERROR:  relation "t5" does not exist on datanode1
+LINE 2: ...ng_agg(t3.c1,t3.c2) not_plan_shipping_16 from t3 ,t5 where t...
+                                                             ^
 /* agg function：string_agg(bytea, bytea) */
 select string_agg(t6.c1,t6.c2) not_plan_shipping_17 from t6 ,t5 where t6.c3=t5.c3;
- not_plan_shipping_17 
-----------------------
- 
-(1 row)
-
+ERROR:  relation "t5" does not exist on datanode1
+LINE 2: ...ng_agg(t6.c1,t6.c2) not_plan_shipping_17 from t6 ,t5 where t...
+                                                             ^
 /* order by in agg function */
 select count(t5.c1 order by t5.c1) not_plan_shipping_20 from t5, t4 where t5.c2 = t4.c3 and t5.c3<100;
- not_plan_shipping_20 
-----------------------
-                50688
-(1 row)
-
+ERROR:  relation "t5" does not exist on datanode1
+LINE 2: ...t(t5.c1 order by t5.c1) not_plan_shipping_20 from t5, t4 whe...
+                                                             ^
 /* more than one count(distinct) */
 with tmp as (select c3, c4 from t4 where c3>100) 
 select count(distinct(c1)) not_plan_shipping_23, count(distinct(c2)) from t5, tmp where t5.c1 = tmp.c3 and t5.c2 = tmp.c4 and t5.c3<100;
- not_plan_shipping_23 | count 
-----------------------+-------
-                    0 |     0
-(1 row)
-
+ERROR:  relation "t4" does not exist on datanode1
+LINE 2: with tmp as (select c3, c4 from t4 where c3>100) 
+                                        ^
 /* string_agg/array_agg use in grouping sets */
 select string_agg(t11.c2,',') not_plan_shipping_25 from t11, t5 where t5.c2=t11.c2 group by cube(t11.c2);
-ERROR:  relation "t11" does not exist
+ERROR:  relation "t11" does not exist on datanode1
 LINE 2: ... string_agg(t11.c2,',') not_plan_shipping_25 from t11, t5 wh...
                                                              ^
 /* finalize_node_id */
@@ -171,17 +252,25 @@ SELECT trunc(random() * 2999 + 1) not_plan_shipping_27, 1, 3, 0.124, 3.234, 1.23
 '101111', 123, 'pi', 'sqrt(numeric)', '-(bigint, bigint)', 'pg_am', 'float', 'aaaaa', '1 12:59:10', '2013-04-16', '13:50:00', '13:50:00 +8',
 1.2,'FG','2013-04-16',99 FROM generate_series(1,100);
 create table t_subplan1(a1 int, b1 int, c1 int, d1 int) distribute by hash(a1, b1);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create table t_subplan2(a2 int, b2 int, c2 int, d2 int) distribute by hash(a2, b2);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6;
+ERROR:  relation "t_subplan1" does not exist on datanode1
+LINE 1: insert into t_subplan1 select generate_series(1, 100)%98, ge...
+                    ^
 insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9;
+ERROR:  relation "t_subplan2" does not exist on datanode1
+LINE 1: insert into t_subplan2 select generate_series(1, 50)%48, gen...
+                    ^
 select (with cte(foo) as 
 (select not_plan_shipping_28.b1 from t_subplan2, t_subplan1 where t_subplan2.c2 = t_subplan1.c1 order by 1 limit 1) 
 values((select foo from cte order by 1))) from t_subplan1  not_plan_shipping_28 order by 1 limit 1;
- column1 
----------
-       0
-(1 row)
-
+ERROR:  relation "t_subplan1" does not exist on datanode1
+LINE 3: values((select foo from cte order by 1))) from t_subplan1  n...
+                                                       ^
 SELECT
   (SELECT n
      FROM (VALUES (1)) AS x,
@@ -204,99 +293,7 @@ SELECT
 
 /* check the not plan-shipping results   */
 select query, warning from pgxc_wlm_session_history where query like '%not_plan_shipping%' order by start_time,1,2;
-                                                                        query                                                                         |                                              warning                                              
-------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------
- /*                                                                                                                                                  +| SQL is not plan-shipping, reason : ""Distinct On" can not be shipped"                            +
-  * SQL-Self Tuning scenario[1] query not plan shipping                                                                                              +| Statistic Not Collect:                                                                           +
-  */                                                                                                                                                 +|     sql_self_tuning.t4(c1)                                                                       +
- /* distinct on */                                                                                                                                   +| 
- select distinct on (not_plan_shipping_01)t4.c1 not_plan_shipping_01  from t4, t5 where t4.c1=t5.c2 and t5.c3 < 20;                                   | 
- /* returing list */                                                                                                                                 +| SQL is not plan-shipping, reason : ""Returning" can not be shipped"                              +
- update t4 set c2 = 1024 where (c2 - 1024) > (select max(c2) from t5 where c3 > 1000 and t4.c2 = t5.c3 order by 1) returning c2 not_plan_shipping_04; | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1,c2)                                                                    +
-                                                                                                                                                      | 
- /* row() */                                                                                                                                         +| SQL is not plan-shipping, reason : ""Row () Expression" can not be shipped"                      +
- select row(t4.*, 12) not_plan_shipping_05 from t4, t5 where t4.c1 = t5.c2 and t5.c3 < 15  order by 1 limit 3;                                        | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* row() compare */                                                                                                                                 +| SQL is not plan-shipping, reason : "Row Compare Expression  can not be shipped"                  +
- select (t4.c1, t5.c2) < (1,2)  not_plan_shipping_06 from t4, t5 where t4.c1 = t5.c1 and t5.c3 < 6 order by 1 limit 1;                                | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* array cast*/                                                                                                                                     +| SQL is not plan-shipping, reason : "Cast Array Expression  can not be shipped"                   +
- select a.c1::float[]  not_plan_shipping_07 from t1 a , t1 b where a.c1 = b.c1 and b.c2 in (select c2 from t5 order by 1);                            | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t1(c1,c2)                                                                    +
-                                                                                                                                                      | 
- /* array expression*/                                                                                                                               +| SQL is not plan-shipping, reason : "Array Expression  can not be shipped"                        +
- select array[c1,1]  not_plan_shipping_08 from t5 where c2 in (select c1 from t4 where t4.c1 < 15 ) order by 1 limit 1;                               | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* table in targetlist */                                                                                                                           +| SQL is not plan-shipping, reason : "Table in TargetList can not be shipped"                      +
- select t4 not_plan_shipping_09,t4.c1 from t4, t5 where t4.c1=t5.c2 and t5.c3 < 30 order by 2,1 limit 1;                                              | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* no from, no setop */                                                                                                                             +| Statistic Not Collect:                                                                           +
- select distinct(t5.c1) not_plan_shipping_10, t4.c1  from t4, t5, (select 1 col)  tmp where t4.c1=t5.c2 and t5.c3=tmp.col and t5.c3 < 30;             |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      |                                                                                                  +
-                                                                                                                                                      |                                                                                                  +
-                                                                                                                                                      | PlanNode[7] DataSkew:"Materialize", min_dn_tuples:0, max_dn_tuples:104961
- /* Record in targetlist */                                                                                                                          +| SQL is not plan-shipping, reason : "Type of Record in TargetList can not be shipped"             +
- select each(t2.c2) not_plan_shipping_11 from t2, t4 where t4.c1=t2.c1;                                                                               | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t2(c1)                                                                       +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* IMMUTABLE function (every) */                                                                                                                    +| SQL is not plan-shipping, reason : "Function every() can not be shipped"                         +
- select every(t4.c1) not_plan_shipping_12 from t4,t5 where  t4.c1 = t5.c2 and t5.c3 < 30;                                                             | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* volatile function */                                                                                                                             +| SQL is not plan-shipping, reason : "Function clock_timestamp() can not be shipped"               +
- select count(*) from (select count(*) not_plan_shipping_13 from t4,t5 where t4.c1>clock_timestamp() and t4.c1 = t5.c2 and t5.c3<30) tmp;             | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* stable function */                                                                                                                               +| Statistic Not Collect:                                                                           +
- select count(*) from (select count(*) not_plan_shipping_14 from t4,t5 where t4.c1>now() and t4.c1 = t5.c2 and t5.c3< 100) tmp ;                      |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* OID in Target table when insert */                                                                                                               +| SQL is not plan-shipping, reason : "TargetList with OID type can not be shipped"                 +
- insert into pg_class (relnamespace,reltype)  select count(t4.c1) not_plan_shipping_15, t5.c2                                                        +| Statistic Not Collect:                                                                           +
- from t4,t5 where t4.c1>t5.c2 and t5.c3< 300 and t4.c1 > 5 group by t5.c2 order by t5.c2;                                                             |     sql_self_tuning.t4(c1)                                                                       +
-                                                                                                                                                      | 
- /* agg function：string_agg(text, text) */                                                                                                          +| SQL is not plan-shipping, reason : ""String_agg" or "Array_agg" or "Listagg""                    +
- select string_agg(t3.c1,t3.c2) not_plan_shipping_16 from t3 ,t5 where t3.c3=t5.c3;                                                                   | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t3(c1,c3)                                                                    +
-                                                                                                                                                      | 
- /* agg function：string_agg(bytea, bytea) */                                                                                                        +| SQL is not plan-shipping, reason : "Function string_agg() can not be shipped"                    +
- select string_agg(t6.c1,t6.c2) not_plan_shipping_17 from t6 ,t5 where t6.c3=t5.c3;                                                                   | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t6(c1,c3)                                                                    +
-                                                                                                                                                      | 
- /* order by in agg function */                                                                                                                      +| SQL is not plan-shipping, reason : ""Order by" in agg function"                                  +
- select count(t5.c1 order by t5.c1) not_plan_shipping_20 from t5, t4 where t5.c2 = t4.c3 and t5.c3<100;                                               | Statistic Not Collect:                                                                           +
-                                                                                                                                                      |     sql_self_tuning.t4(c1,c3)                                                                    +
-                                                                                                                                                      | 
- /* more than one count(distinct) */                                                                                                                 +| Statistic Not Collect:                                                                           +
- with tmp as (select c3, c4 from t4 where c3>100)                                                                                                    +|     sql_self_tuning.t4(c1,c3,c4)                                                                 +
- select count(distinct(c1)) not_plan_shipping_23, count(distinct(c2)) from t5, tmp where t5.c1 = tmp.c3 and t5.c2 = tmp.c4 and t5.c3<100;             |                                                                                                  +
-                                                                                                                                                      |                                                                                                  +
-                                                                                                                                                      | PlanNode[10] Indexscan is ought to be used:"Seq Scan", output:0, filtered:524288, rate:0.00000   +
-                                                                                                                                                      | PlanNode[22] Indexscan is ought to be used:"Seq Scan", output:0, filtered:524288, rate:0.00000
- insert into t12(C_INTEGER , C_SMALLINT , C_BIGINT , C_DECIMAL , C_NUMERIC, C_REAL , C_DOUBLE , C_BIGSERIAL  , C_MONEY , C_CHARACTER  ,              +| SQL is not plan-shipping, reason : "Function random() can not be shipped"
- C_VARCHAR , C_CHAR , C_TEXT, C_BYTEA , C_TIMESTAMP_1  ,C_TIMESTAMP_2  , C_BOOLEAN  , C_POINT, C_LSEG, C_BOX , C_PATH , C_POLYGON,                   +| 
- C_CIRCLE, C_CIDR , C_INET, C_MACADDR, C_BIT_1, C_BIT_2, C_OID, C_REGPROC  , C_REGPROCEDURE , C_REGOPERATOR , C_REGCLASS ,                           +| 
- C_REGTYPE , C_CHARACTER_1 , C_INTERVAL , C_DATE , C_TIMESTAMP_3 , C_TIMESTAMP_4 ,C_NUMBER ,C_NVARCHAR2 ,C_SMALLDATETIME ,C_TINYINT)                 +| 
- SELECT trunc(random() * 2999 + 1) not_plan_shipping_27, 1, 3, 0.124, 3.234, 1.2345, 0.1712,  21474836478, 1000.00, 'aaaaa',                         +| 
- 'BBBBBBBB', 'ccccccccc', 'hello', '1101', '2004-10-19 10:23:01', '2004-10-19 10:23:01 +2', true, '(1,3)', '((-1,-7), (-4,2))',                      +| 
- '((10, 3), (3,19))', '((4,2),(5,1))', '((1,2),(3,4),(5,6))', '<(1,2),3>', '10.1.2.3', '192.168.61.68', '08-00-2b-01-02-03', '101000',               +| 
- '101111', 123, 'pi', 'sqrt(numeric)', '-(bigint, bigint)', 'pg_am', 'float', 'aaaaa', '1 12:59:10', '2013-04-16', '13:50:00', '13:50:00 +8',        +| 
- 1.2,'FG','2013-04-16',99 FROM generate_series(1,100);                                                                                                | 
- select (with cte(foo) as                                                                                                                            +| Statistic Not Collect:                                                                           +
- (select not_plan_shipping_28.b1 from t_subplan2, t_subplan1 where t_subplan2.c2 = t_subplan1.c1 order by 1 limit 1)                                 +|     sql_self_tuning.t_subplan2(a2,b2,c2)                                                         +
- values((select foo from cte order by 1))) from t_subplan1  not_plan_shipping_28 order by 1 limit 1;                                                  |     sql_self_tuning.t_subplan1(a1,b1,c1)                                                         +
-                                                                                                                                                      | 
- SELECT                                                                                                                                              +| SQL is not plan-shipping, reason : "main plan exec on CN and SubPlan exec on DN can't be shipped"
-   (SELECT n                                                                                                                                         +| 
-      FROM (VALUES (1)) AS x,                                                                                                                        +| 
-           (SELECT n FROM generate_series(1,10) AS n                                                                                                 +| 
-              ORDER BY n LIMIT 1 OFFSET not_plan_shipping_29-1) AS y) AS z                                                                           +| 
-   FROM generate_series(1,10) AS not_plan_shipping_29;                                                                                                | 
-(20 rows)
-
+ERROR:  relation "pgxc_wlm_session_history" does not exist on datanode1
+LINE 2: select query, warning from pgxc_wlm_session_history where qu...
+                                   ^
 \c regression

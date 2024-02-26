@@ -424,7 +424,7 @@ typedef struct XLogCtlInsert {
     uint32 PrevByteSize;
     int32 CurrLRC;
 
-#if (!defined __x86_64__) && (!defined __aarch64__)
+#if ((!defined __x86_64__) && (!defined __aarch64__)) || defined(__USE_SPINLOCK)
     slock_t insertpos_lck; /* protects CurrBytePos and PrevBytePos */
 #endif
     /*
@@ -554,6 +554,13 @@ typedef struct XLogCtlData {
      * to appear.
      */
     Latch recoveryWakeupLatch;
+
+    /**
+     * used to wake up startup process in extroRtoMode and recovery_min_apply_delay > 0,
+     * to wake up startup process,  which is waiting in RecoveryApplyDelay(), to avoid 
+     * startup process contend for recoveryWakeupLatch with XLogPageRead process.
+     */
+    Latch recoveryWakeupDelayLatch;
 
     Latch dataRecoveryLatch;
 

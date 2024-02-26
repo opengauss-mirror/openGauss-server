@@ -55,7 +55,8 @@ SUBDIRS = \
 	gsqlerr \
 	pg_basebackup \
 	pg_probackup \
-	gs_plan_simulator
+	gs_plan_simulator \
+	gs_retrieve
 
 ifeq ($(enable_ut), yes)
 	SUBDIRS += gs_persist

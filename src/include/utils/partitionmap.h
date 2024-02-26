@@ -35,6 +35,38 @@
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 
+/*
+ * ---------------------------------------------------------------------------------------
+ *
+ * Table partitioning related defines
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+
+/* ALL types partition allows 4 columns at most */
+#define MAX_PARTKEY_NUMS           16
+
+/* range-partition allows 4 columns at most */
+#define MAX_RANGE_PARTKEY_NUMS     16
+
+/* interval-partition allows 1 columns at most */
+#define MAX_INTERVAL_PARTKEY_NUMS  1
+
+/* list-partition allows 1 columns at most */
+#define MAX_LIST_PARTKEY_NUMS      16
+
+/* hash-partition allows 1 columns at most */
+#define MAX_HASH_PARTKEY_NUMS      1
+
+/* value-partition allows 4 columns at most */
+#define MAX_VALUE_PARTKEY_NUMS     4
+
+typedef struct {
+    Datum value;
+    bool isNull;
+} PartKeyExprResult;
+
+/* describe table partition type */
 typedef enum PartitionType {
     PART_TYPE_NONE = 0,
     PART_TYPE_RANGE,
@@ -44,27 +76,21 @@ typedef enum PartitionType {
     PART_TYPE_VALUE
 } PartitionType;
 
-// describe abstract partition map
+/* describe abstract PartitionMap class */
 typedef struct PartitionMap {
     PartitionType type;
     int refcount;
     bool isDirty;
+
+    Oid relOid;                /* oid of partitioned table a.w.k the pg_class.oid */
+    int2vector *partitionKey;  /* partition key */
+    Oid *partitionKeyDataType; /* the data type of partition key */
 } PartitionMap;
 
 typedef struct PartitionKey {
     int count;      /* partition key values count */
     Const **values;
 } PartitionKey;
-
-// describe range partition
-#define RANGE_PARTKEYMAXNUM 16
-#define PARTITION_PARTKEYMAXNUM 16
-#define VALUE_PARTKEYMAXNUM 4
-#define INTERVAL_PARTKEYMAXNUM 1
-
-#define LIST_PARTKEYMAXNUM 16
-
-#define HASH_PARTKEYMAXNUM 1
 
 #define PartitionLogicalExist(partitionIdentifier) ((partitionIdentifier)->partSeq >= 0)
 
@@ -74,17 +100,32 @@ typedef struct PartitionKey {
 void incre_partmap_refcount(PartitionMap* map);
 void decre_partmap_refcount(PartitionMap* map);
 
-#define PartitionMapGetKey(partmap) (((RangePartitionMap*)(partmap))->partitionKey)
+/* macro to check type of partition type */
+#define PartitionMapIsRange(partMap)    (((PartitionMap *)partMap)->type == PART_TYPE_RANGE)
+#define PartitionMapIsList(partMap)     (((PartitionMap *)partMap)->type == PART_TYPE_LIST)
+#define PartitionMapIsHash(partMap)     (((PartitionMap *)partMap)->type == PART_TYPE_HASH)
+#define PartitionMapIsInterval(partMap) (((PartitionMap *)partMap)->type == PART_TYPE_INTERVAL)
 
-#define PartitionMapGetType(partmap) (((RangePartitionMap*)(partmap))->partitionKeyDataType)
+#define PartitionMapTypeIsValid(partMap) (  \
+    PartitionMapIsRange(partMap) ||         \
+    PartitionMapIsList(partMap)  ||         \
+    PartitionMapIsHash(partMap)  ||         \
+    PartitionMapIsInterval(partMap)         \
+)
 
-#define PartitionMapIsRange(partmap) (PART_TYPE_RANGE == ((RangePartitionMap*)(partmap))->type.type)
+inline int2vector* PartitionMapGetPartKeyArray(PartitionMap *partMap)
+{
+    Assert (partMap != NULL && PartitionMapTypeIsValid(partMap));
+    return partMap->partitionKey;
+}
 
-#define PartitionMapIsList(partmap) (PART_TYPE_LIST == ((ListPartitionMap*)(partmap))->type.type)
+inline int PartitionMapGetPartKeyNum(PartitionMap *partMap)
+{
+    Assert (partMap != NULL && PartitionMapTypeIsValid(partMap));
+    return partMap->partitionKey->dim1;
+}
 
-#define PartitionMapIsHash(partmap) (PART_TYPE_HASH == ((HashPartitionMap*)(partmap))->type.type)
-
-#define PartitionMapIsInterval(partmap) (PART_TYPE_INTERVAL == ((RangePartitionMap*)(partmap))->type.type)
+#define constIsMaxValue(value) ((value)->ismaxvalue)
 
 #define FAKERELATIONCACHESIZE 100
 
@@ -103,11 +144,11 @@ void decre_partmap_refcount(PartitionMap* map);
 #define PruningResultIsSubset(pruningRes) (PointerIsValid(pruningRes) && (pruningRes)->state == PRUNING_RESULT_SUBSET)
 
 extern void RelationInitPartitionMap(Relation relation, bool isSubPartition = false);
-
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
-extern Oid getListPartitionOid(
-    PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex, bool topClosed);
-extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
+extern void partitionKeyCompareForRouting(Const **partkey_value, Const **partkey_bound, uint32 partKeyColumnNum,
+                                          int &compare);
+extern Oid getListPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int partKeyCount, int* partIndex);
+extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex);
 extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm);
 extern List* getRangePartitionBoundaryList(Relation rel, int sequence);
@@ -119,7 +160,7 @@ extern int getNumberOfListPartitions(Relation rel);
 extern int getNumberOfHashPartitions(Relation rel);
 extern int getNumberOfPartitions(Relation rel);
 extern Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue, bool isnull, Const* cnst);
-Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, Datum datumValue, bool isnull, Const* cnst);
+Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, PartKeyExprResult* result, Const* cnst);
 
 extern int2vector* getPartitionKeyAttrNo(
     Oid** typeOids, HeapTuple pg_part_tup, TupleDesc tupledsc, TupleDesc rel_tupledsc);

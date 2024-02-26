@@ -1,3 +1,6 @@
+CREATE DATABASE test_heap_copytuple;
+\c test_heap_copytuple
+
 CREATE TABLE heap_copytuple_s (rf_a SERIAL PRIMARY KEY,
 	b INT);
 
@@ -117,22 +120,22 @@ drop table tgin122 cascade;
 
 
 
-CREATE SCHEMA regress_rls_schema;
-GRANT CREATE ON SCHEMA regress_rls_schema to public;
-GRANT USAGE ON SCHEMA regress_rls_schema to public;
+CREATE SCHEMA regress_rls_schema_heap_copytuple;
+GRANT CREATE ON SCHEMA regress_rls_schema_heap_copytuple to public;
+GRANT USAGE ON SCHEMA regress_rls_schema_heap_copytuple to public;
 -- reconnect
 \c
-SET search_path = regress_rls_schema;
+SET search_path = regress_rls_schema_heap_copytuple;
 	
-CREATE TABLE regress_rls_schema.document_row(
+CREATE TABLE regress_rls_schema_heap_copytuple.document_row(
     did     int primary key,
     cid     int,
     dlevel  int not null,
     dauthor name,
     dtitle  text
 );
-GRANT ALL ON regress_rls_schema.document_row TO public;
-INSERT INTO regress_rls_schema.document_row VALUES
+GRANT ALL ON regress_rls_schema_heap_copytuple.document_row TO public;
+INSERT INTO regress_rls_schema_heap_copytuple.document_row VALUES
     ( 1, 11, 1, 'regress_rls_bob', 'my first novel'),
     ( 2, 11, 5, 'regress_rls_bob', 'my second novel'),
     ( 3, 22, 7, 'regress_rls_bob', 'my science fiction'),
@@ -146,14 +149,14 @@ INSERT INTO regress_rls_schema.document_row VALUES
     (11, 55, 8, 'regress_rls_alice', 'great biography'),
     (12, 33, 10, 'regress_rls_admin', 'physical technology'),
     (13, 55, 5, 'regress_rls_single_user', 'Beethoven biography');
-ANALYZE regress_rls_schema.document_row;
+ANALYZE regress_rls_schema_heap_copytuple.document_row;
 UPDATE document_row SET dlevel = dlevel + 1 - 1 WHERE did > 1;
 INSERT INTO document_row VALUES (100, 49, 1, 'regress_rls_david', 'testing sorting of policies');
 DELETE FROM document_row WHERE did = 100;
 INSERT INTO document_row VALUES (100, 49, 1, 'regress_rls_david', 'testing sorting of policies');
 DELETE FROM document_row WHERE did = 100 RETURNING dauthor, did;
 
-CREATE TABLE regress_rls_schema.account_row(
+CREATE TABLE regress_rls_schema_heap_copytuple.account_row(
     aid   int,
     aname varchar(100)
 ) WITH (ORIENTATION=row);
@@ -164,8 +167,8 @@ ALTER POLICY p01 ON document_row USING (dauthor = current_user);
 ALTER POLICY p01 ON document_row RENAME TO p12;
 ALTER POLICY p12 ON document_row RENAME TO p13;
 ALTER POLICY p13 ON document_row RENAME TO p01;
-SELECT * FROM pg_rlspolicies ORDER BY tablename, policyname;
-drop schema regress_rls_schema cascade;
+SELECT * FROM pg_rlspolicies WHERE schemaname = 'regress_rls_schema_heap_copytuple' ORDER BY tablename, policyname;
+drop schema regress_rls_schema_heap_copytuple cascade;
 reset search_path;
 
 
@@ -213,4 +216,5 @@ SELECT * FROM t;
 
 drop table y cascade;
 drop function y_trigger;
-
+\c regression
+DROP DATABASE test_heap_copytuple;

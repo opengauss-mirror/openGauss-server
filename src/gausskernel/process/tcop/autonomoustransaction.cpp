@@ -232,7 +232,7 @@ bool AutonomousSession::ReConnSession(void)
 void CreateAutonomousSession(void)
 {
     if (u_sess->SPI_cxt.autonomous_session == NULL) {
-        MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->SPI_cxt._stack[0].procCxt);
+        MemoryContext oldCxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
         u_sess->SPI_cxt.autonomous_session = (AutonomousSession*)palloc(sizeof(AutonomousSession));
         (void)MemoryContextSwitchTo(oldCxt);
         u_sess->SPI_cxt.autonomous_session->Init();

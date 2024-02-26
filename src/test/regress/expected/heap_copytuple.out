@@ -1,3 +1,5 @@
+CREATE DATABASE test_heap_copytuple;
+\c test_heap_copytuple
 CREATE TABLE heap_copytuple_s (rf_a SERIAL PRIMARY KEY,
 	b INT);
 NOTICE:  CREATE TABLE will create implicit sequence "heap_copytuple_s_rf_a_seq" for serial column "heap_copytuple_s.rf_a"
@@ -89,6 +91,8 @@ create index tgin122_idx1 on tgin122 (substr(email,2,5));
 create index tgin122_idx2 on tgin122 (upper(info));
 set default_statistics_target=-2;
 analyze tGin122 ((tv, ts));
+WARNING:  [AI Stats] Unsupported attribute types 3614.
+ (Support only FLOAT8,Double Precision, FlOAT4, REAL, INT16, BIGINT, INTEGER, VARCHAR, CHARACTER VARYING, CHAR, CHARACTER, NUMERIC)
 select * from pg_ext_stats where schemaname='distribute_stat_2' and tablename='tgin122' order by attname;
  schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
 ------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
@@ -98,6 +102,8 @@ alter table tGin122 delete statistics ((tv, ts));
 update tGin122 set tv=to_tsvector(config::regconfig, coalesce(name,'') || ' ' || coalesce(ID,'') || ' ' || coalesce(carNum,'') || ' ' || coalesce(phone,'') || ' ' || coalesce(email,'') || ' ' || coalesce(info,''));
 update tGin122 set ts=to_tsquery('ngram', coalesce(phone,'')); 
 analyze tGin122 ((tv, ts));
+WARNING:  [AI Stats] Unsupported attribute types 3614.
+ (Support only FLOAT8,Double Precision, FlOAT4, REAL, INT16, BIGINT, INTEGER, VARCHAR, CHARACTER VARYING, CHAR, CHARACTER, NUMERIC)
 select * from pg_ext_stats where schemaname='distribute_stat_2' and tablename='tgin122' order by attname;
  schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
 ------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
@@ -111,6 +117,8 @@ select * from pg_ext_stats where schemaname='distribute_stat_2' and tablename='t
 
 alter table tGin122 add statistics ((tv, ts));
 analyze tGin122;
+WARNING:  [AI Stats] Unsupported attribute types 3614.
+ (Support only FLOAT8,Double Precision, FlOAT4, REAL, INT16, BIGINT, INTEGER, VARCHAR, CHARACTER VARYING, CHAR, CHARACTER, NUMERIC)
 select * from pg_ext_stats where schemaname='distribute_stat_2' and tablename='tgin122' order by attname;
  schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
 ------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
@@ -129,14 +137,14 @@ select attname,avg_width,n_distinct,histogram_bounds from pg_stats where tablena
 (1 row)
 
 drop table tgin122 cascade;
-CREATE SCHEMA regress_rls_schema;
-GRANT CREATE ON SCHEMA regress_rls_schema to public;
-GRANT USAGE ON SCHEMA regress_rls_schema to public;
+CREATE SCHEMA regress_rls_schema_heap_copytuple;
+GRANT CREATE ON SCHEMA regress_rls_schema_heap_copytuple to public;
+GRANT USAGE ON SCHEMA regress_rls_schema_heap_copytuple to public;
 -- reconnect
 \c
-SET search_path = regress_rls_schema;
+SET search_path = regress_rls_schema_heap_copytuple;
 	
-CREATE TABLE regress_rls_schema.document_row(
+CREATE TABLE regress_rls_schema_heap_copytuple.document_row(
     did     int primary key,
     cid     int,
     dlevel  int not null,
@@ -144,8 +152,8 @@ CREATE TABLE regress_rls_schema.document_row(
     dtitle  text
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "document_row_pkey" for table "document_row"
-GRANT ALL ON regress_rls_schema.document_row TO public;
-INSERT INTO regress_rls_schema.document_row VALUES
+GRANT ALL ON regress_rls_schema_heap_copytuple.document_row TO public;
+INSERT INTO regress_rls_schema_heap_copytuple.document_row VALUES
     ( 1, 11, 1, 'regress_rls_bob', 'my first novel'),
     ( 2, 11, 5, 'regress_rls_bob', 'my second novel'),
     ( 3, 22, 7, 'regress_rls_bob', 'my science fiction'),
@@ -159,7 +167,7 @@ INSERT INTO regress_rls_schema.document_row VALUES
     (11, 55, 8, 'regress_rls_alice', 'great biography'),
     (12, 33, 10, 'regress_rls_admin', 'physical technology'),
     (13, 55, 5, 'regress_rls_single_user', 'Beethoven biography');
-ANALYZE regress_rls_schema.document_row;
+ANALYZE regress_rls_schema_heap_copytuple.document_row;
 UPDATE document_row SET dlevel = dlevel + 1 - 1 WHERE did > 1;
 INSERT INTO document_row VALUES (100, 49, 1, 'regress_rls_david', 'testing sorting of policies');
 DELETE FROM document_row WHERE did = 100;
@@ -170,7 +178,7 @@ DELETE FROM document_row WHERE did = 100 RETURNING dauthor, did;
  regress_rls_david | 100
 (1 row)
 
-CREATE TABLE regress_rls_schema.account_row(
+CREATE TABLE regress_rls_schema_heap_copytuple.account_row(
     aid   int,
     aname varchar(100)
 ) WITH (ORIENTATION=row);
@@ -180,13 +188,13 @@ ALTER POLICY p01 ON document_row USING (dauthor = current_user);
 ALTER POLICY p01 ON document_row RENAME TO p12;
 ALTER POLICY p12 ON document_row RENAME TO p13;
 ALTER POLICY p13 ON document_row RENAME TO p01;
-SELECT * FROM pg_rlspolicies ORDER BY tablename, policyname;
-     schemaname     |  tablename   | policyname | policypermissive | policyroles | policycmd |          policyqual          
---------------------+--------------+------------+------------------+-------------+-----------+------------------------------
- regress_rls_schema | document_row | p01        | PERMISSIVE       | {public}    | ALL       | (dauthor = "current_user"())
+SELECT * FROM pg_rlspolicies WHERE schemaname = 'regress_rls_schema_heap_copytuple' ORDER BY tablename, policyname;
+            schemaname             |  tablename   | policyname | policypermissive | policyroles | policycmd |          policyqual          
+-----------------------------------+--------------+------------+------------------+-------------+-----------+------------------------------
+ regress_rls_schema_heap_copytuple | document_row | p01        | PERMISSIVE       | {public}    | ALL       | (dauthor = "current_user"())
 (1 row)
 
-drop schema regress_rls_schema cascade;
+drop schema regress_rls_schema_heap_copytuple cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table document_row
 drop cascades to table account_row
@@ -225,3 +233,5 @@ NOTICE:  y_trigger: a = 23
 
 drop table y cascade;
 drop function y_trigger;
+\c regression
+DROP DATABASE test_heap_copytuple;

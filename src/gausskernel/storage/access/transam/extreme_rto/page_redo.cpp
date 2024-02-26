@@ -73,6 +73,7 @@
 #include "access/multi_redo_api.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
+#include "replication/ss_disaster_cluster.h"
 #include "pgxc/barrier.h"
 #include "storage/file/fio_device.h"
 #include "utils/timestamp.h"
@@ -263,7 +264,7 @@ void DestroyPageRedoWorker(PageRedoWorker *worker)
 void SetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr)
 {
     volatile PageRedoWorker *tmpWk = worker;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u exchange;
     uint128_u current;
     uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr);
@@ -292,7 +293,7 @@ loop:
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
 {
     volatile PageRedoWorker *tmpWk = worker;
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr);
     Assert(sizeof(tmpWk->lastReplayedReadRecPtr) == 8);
     Assert(sizeof(tmpWk->lastReplayedEndRecPtr) == 8);
@@ -971,7 +972,9 @@ void PageManagerProcSegFullSyncState(XLogRecParseState *parseState)
 
 void PageManagerProcSegPipeLineSyncState(XLogRecParseState *parseState)
 {
-    WaitCurrentPipeLineRedoWorkersQueueEmpty();
+    if (!SS_DISASTER_STANDBY_CLUSTER) {
+        WaitCurrentPipeLineRedoWorkersQueueEmpty();   
+    }
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
 
     RedoPageManagerDdlAction(parseState);

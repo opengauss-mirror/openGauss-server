@@ -37,7 +37,7 @@ explain performance insert into test_num_zero values(0.3000,3);
 ------------------------------------------------------------------------------------------------------------
  [Bypass]
 --?.*
-   (Buffers: shared hit=1)
+--?.*
 --?.*
 --?.*
          Output: .3, 3

@@ -1,3 +1,6 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92608 then
 DROP FUNCTION IF EXISTS pg_catalog.get_client_info;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 7732;
 CREATE OR REPLACE FUNCTION pg_catalog.get_client_info()
@@ -7,7 +10,6 @@ CREATE OR REPLACE FUNCTION pg_catalog.get_client_info()
 AS $function$get_client_info$function$;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-DO $$
 DECLARE
 ans boolean;
 BEGIN
@@ -16,10 +18,9 @@ BEGIN
         drop extension if exists security_plugin cascade;
         create extension security_plugin;
     end if;
-END$$;
+END;
 
 ------------------------------------------------------------------------------------------------------------------------------------
-DO $DO$
 DECLARE
   ans boolean;
   user_name text;
@@ -105,7 +106,7 @@ END IF;
 GRANT SELECT ON pg_catalog.pg_replication_slots TO PUBLIC;
 
 -----------------------------------------------------------------------------
-END$DO$;
+END;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_zone(int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_spaces(int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta_dump_slot(int4, boolean) CASCADE;
@@ -114,8 +115,7 @@ DROP FUNCTION IF EXISTS pg_catalog.gs_undo_translot_dump_slot(int4, boolean) CAS
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_translot_dump_xid(xid, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_record(bigint) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_xid(xid) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_parsepage_mv(text, bigint, text, boolean) CASCADE;DO
-$do$
+DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_parsepage_mv(text, bigint, text, boolean) CASCADE;
 DECLARE
 query_str text;
 ans boolean;
@@ -135,5 +135,6 @@ BEGIN
       END IF;
     END IF;
   END LOOP;
-END
-$do$;
+END;
+END IF;
+END $upgrade$;

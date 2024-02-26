@@ -30,7 +30,9 @@ static void hash_xlog_init_meta_page(XLogReaderState *record)
 {
     RedoBufferInfo metabuf;
     ForkNumber forknum;
-
+    if (SSCheckInitPageXLogSimple(record, 0, &metabuf) == BLK_DONE) {
+        return;
+    }
     /* create the index' metapage */
     XLogInitBufferForRedo(record, 0, &metabuf);
     Assert(BufferIsValid(metabuf.buf));
@@ -63,19 +65,23 @@ static void hash_xlog_init_bitmap_page(XLogReaderState *record)
     /*
      * Initialize bitmap page
      */
-    XLogInitBufferForRedo(record, 0, &bitmapbuf);
-    HashRedoInitBitmapPageOperatorBitmapPage(&bitmapbuf, XLogRecGetData(record));
-    MarkBufferDirty(bitmapbuf.buf);
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &bitmapbuf);
+    
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &bitmapbuf);
+        HashRedoInitBitmapPageOperatorBitmapPage(&bitmapbuf, XLogRecGetData(record));
+        MarkBufferDirty(bitmapbuf.buf);
 
-    /*
-     * Force the on-disk state of init forks to always be in sync with the
-     * state in shared buffers.  See XLogReadBufferForRedoExtended.  We need
-     * special handling for init forks as create index operations don't log a
-     * full page image of the metapage.
-     */
-    XLogRecGetBlockTag(record, 0, NULL, &forknum, NULL);
-    if (forknum == INIT_FORKNUM)
-        FlushOneBuffer(bitmapbuf.buf);
+        /*
+        * Force the on-disk state of init forks to always be in sync with the
+        * state in shared buffers.  See XLogReadBufferForRedoExtended.  We need
+        * special handling for init forks as create index operations don't log a
+        * full page image of the metapage.
+        */
+        XLogRecGetBlockTag(record, 0, NULL, &forknum, NULL);
+        if (forknum == INIT_FORKNUM)
+            FlushOneBuffer(bitmapbuf.buf);
+    }
     UnlockReleaseBuffer(bitmapbuf.buf);
 
     /* add the new bitmap page to the metapage's list of bitmaps */
@@ -145,12 +151,15 @@ static void hash_xlog_add_ovfl_page(XLogReaderState* record)
     XLogRecGetBlockTag(record, 0, NULL, NULL, &rightblk);
     XLogRecGetBlockTag(record, 1, NULL, NULL, &leftblk);
 
-    XLogInitBufferForRedo(record, 0, &ovflbuf);
-    Assert(BufferIsValid(ovflbuf.buf));
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &ovflbuf);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &ovflbuf);
+        Assert(BufferIsValid(ovflbuf.buf));
 
-    data = XLogRecGetBlockData(record, 0, &datalen);
-    HashRedoAddOvflPageOperatorOvflPage(&ovflbuf, leftblk, data, datalen);
-    MarkBufferDirty(ovflbuf.buf);
+        data = XLogRecGetBlockData(record, 0, &datalen);
+        HashRedoAddOvflPageOperatorOvflPage(&ovflbuf, leftblk, data, datalen);
+        MarkBufferDirty(ovflbuf.buf);
+    }
 
     if (XLogReadBufferForRedo(record, 1, &leftbuf) == BLK_NEEDS_REDO) {
         HashRedoAddOvflPageOperatorLeftPage(&leftbuf, rightblk);
@@ -182,12 +191,13 @@ static void hash_xlog_add_ovfl_page(XLogReaderState* record)
 
     if (XLogRecHasBlockRef(record, 3)) {
         RedoBufferInfo newmapbuf;
+        XLogRedoAction action = SSCheckInitPageXLog(record, 3, &newmapbuf);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, 3, &newmapbuf);
 
-        XLogInitBufferForRedo(record, 3, &newmapbuf);
-
-        HashRedoAddOvflPageOperatorNewmapPage(&newmapbuf, XLogRecGetData(record));
-        MarkBufferDirty(newmapbuf.buf);
-
+            HashRedoAddOvflPageOperatorNewmapPage(&newmapbuf, XLogRecGetData(record));
+            MarkBufferDirty(newmapbuf.buf);
+        }
         UnlockReleaseBuffer(newmapbuf.buf);
     }
 
@@ -232,11 +242,14 @@ static void hash_xlog_split_allocate_page(XLogReaderState *record)
     }
 
     /* replay the record for new bucket */
-    XLogInitBufferForRedo(record, 1, &newbuf);
-    HashRedoSplitAllocatePageOperatorNbukPage(&newbuf, XLogRecGetData(record));
-    if (!IsBufferCleanupOK(newbuf.buf))
-        elog(PANIC, "hash_xlog_split_allocate_page: failed to acquire cleanup lock");
-    MarkBufferDirty(newbuf.buf);
+    action = SSCheckInitPageXLog(record, 1, &newbuf);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 1, &newbuf);
+        HashRedoSplitAllocatePageOperatorNbukPage(&newbuf, XLogRecGetData(record));
+        if (!IsBufferCleanupOK(newbuf.buf))
+            elog(PANIC, "hash_xlog_split_allocate_page: failed to acquire cleanup lock");
+        MarkBufferDirty(newbuf.buf);
+    }
 
     /*
      * We can release the lock on old bucket early as well but doing here to

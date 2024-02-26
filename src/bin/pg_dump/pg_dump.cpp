@@ -62,6 +62,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_rlspolicy.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_publication.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_attrdef.h"
 #include "catalog/pg_partition.h"
@@ -205,6 +206,7 @@ int g_totalSteps = sizeof(g_progressDetails) / sizeof(g_progressDetails[0]);
 static volatile bool g_progressFlagScan = false;
 static volatile bool g_progressFlagDump = false;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_condDump = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Database Security: Data importing/dumping support AES128. */
@@ -298,6 +300,7 @@ const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
 const uint32 RB_OBJECT_VERSION_NUM = 92831;
+const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -370,6 +373,9 @@ static int exclude_function = 0;
 static bool is_pipeline = false;
 static int no_subscriptions = 0;
 static int no_publications = 0;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+static bool disable_progress = false;
+#endif
 
 /* Used to count the number of -t input */
 int gTableCount = 0;
@@ -678,6 +684,9 @@ int main(int argc, char** argv)
         {"include-table-file", required_argument, NULL, 15},
         {"exclude-table-file", required_argument, NULL, 16},
         {"pipeline", no_argument, NULL, 17},
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+        {"disable-progress", no_argument, NULL, 18},
+#endif
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -758,7 +767,15 @@ int main(int argc, char** argv)
     } else if (archiveFormat == archNull) {
         exit_horribly(NULL, "Compress mode is not supported for plain text.\n");
     }
-
+    
+    /*
+	 * If emitting an archive format, we always want to emit a DATABASE item,
+	 * in case --create is specified at pg_restore time.
+     */
+    if (!plainText) {
+        outputCreateDB = 1;
+    }
+    
     // Overwrite  the file if file already exists and overwrite option is specified
     if ((NULL != filename) && (archDirectory != archiveFormat) && (true == dont_overwritefile) &&
         (true == fileExists(filename))) {
@@ -1028,7 +1045,7 @@ int main(int argc, char** argv)
      * Now scan the database and create DumpableObject structs for all the
      * objects we intend to dump.
      */
-    fprintf(stderr, "Begin scanning database. \n");
+    write_msg(NULL, "Begin scanning database. \n");
     pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReportScanDatabase, NULL);
 
@@ -1040,7 +1057,7 @@ int main(int argc, char** argv)
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThread, NULL);
 
-    fprintf(stderr, "Finish scanning database. \n");
+    write_msg(NULL, "Finish scanning database. \n");
 
     if (fout->remoteVersion < 80400)
         guessConstraintInheritance(tblinfo, numTables);
@@ -1105,38 +1122,22 @@ int main(int argc, char** argv)
     if (isExistsSQLResult(archiveHandle->connection, sqlCmd)) {
         dumpAnyPrivilege(fout);
     }
-    /* gets the total number of dump objects */
-    if (!dataOnly) {
-        for (i = 0; i < numObjs; i++) {
-            if (dobjs[i]->dump && dobjs[i]->objType != DO_DUMMY_TYPE && dobjs[i]->objType != DO_PRE_DATA_BOUNDARY &&
-                dobjs[i]->objType != DO_POST_DATA_BOUNDARY)
-                g_totalObjNums++;
-        }
-        write_msg(NULL, "The total objects number is %d.\n", g_totalObjNums);
-    }
-    fprintf(stderr, "Start dumping objects \n");
-    pthread_t progressThreadDumpProgress = NULL;
+    g_totalObjNums = numObjs;
+    write_msg(NULL, "Start dumping objects \n");
+    pthread_t progressThreadDumpProgress;
     pthread_create(&progressThreadDumpProgress, NULL, ProgressReportDump, NULL);
 
     /* Now the rearrangeable objects. */
     for (i = 0; i < numObjs; i++) {
-        if (!dataOnly && dobjs[i]->dump && dobjs[i]->objType != DO_DUMMY_TYPE &&
-            dobjs[i]->objType != DO_PRE_DATA_BOUNDARY && dobjs[i]->objType != DO_POST_DATA_BOUNDARY) {
-            g_dumpObjNums++;
-            if (g_dumpObjNums % OUTPUT_OBJECT_NUM == 0)
-                write_msg(NULL,
-                    "[%6.2lf%%] %d objects have been dumped.\n",
-                    float((float(g_dumpObjNums * 100.0)) / g_totalObjNums),
-                    g_dumpObjNums);
-        }
+        g_dumpObjNums++;
         dumpDumpableObject(fout, dobjs[i]);
     }
     g_progressFlagDump = true;
     pthread_mutex_lock(&g_mutex);
-    pthread_cond_signal(&g_cond);
+    pthread_cond_signal(&g_condDump);
     pthread_mutex_unlock(&g_mutex);
-    pthread_join(progressThread, NULL);
-    fprintf(stderr, "Finish dumping objects \n");
+    pthread_join(progressThreadDumpProgress, NULL);
+    write_msg(NULL, "Finish dumping objects \n");
 
     /*
      * Synonym now only support for table/view/function/procedure. When dump all object, it will be dumped.
@@ -1144,8 +1145,6 @@ int main(int argc, char** argv)
     if (include_everything && !dataOnly) {
         dumpSynonym(fout);
     }
-    if (!dataOnly)
-        write_msg(NULL, "[100.00%%] %d objects have been dumped.\n", g_totalObjNums);
 
     /*
      * Set up options info to ensure we dump what we want.
@@ -1724,6 +1723,11 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
             case 17:
                 is_pipeline = true;
                 break;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+            case 18:
+                disable_progress = true;
+                break;
+#endif
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -2317,7 +2321,8 @@ static void selectDumpableNamespace(NamespaceInfo* nsinfo)
              strcmp(nsinfo->dobj.name, "pkg_util") == 0 || strcmp(nsinfo->dobj.name, "sys") == 0 ||
              strcmp(nsinfo->dobj.name, "cstore") == 0 || strcmp(nsinfo->dobj.name, "snapshot") == 0 ||
              strcmp(nsinfo->dobj.name, "information_schema") == 0 || strcmp(nsinfo->dobj.name, "pkg_service") == 0 ||
-             strcmp(nsinfo->dobj.name, "blockchain") == 0 || strcmp(nsinfo->dobj.name, "sqladvisor") == 0
+             strcmp(nsinfo->dobj.name, "blockchain") == 0 || strcmp(nsinfo->dobj.name, "sqladvisor") == 0 ||
+             strcmp(nsinfo->dobj.name, "coverage") == 0
 #ifdef ENABLE_MULTIPLE_NODES
              || strcmp(nsinfo->dobj.name, "db4ai") == 0
 #endif
@@ -2785,7 +2790,7 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
         /*syntax changed from CURSOR declaration */
         appendPQExpBuffer(q,
             "CURSOR _pg_dump_cursor FOR "
-            "SELECT * FROM ONLY %s",
+            "SELECT * FROM ONLY (%s)",
             fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, classname));
     } else {
         appendPQExpBuffer(q,
@@ -2920,7 +2925,7 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
         /* Dump/restore using COPY */
         dumpFn = dumpTableData_copy;
         /* must use 2 steps here 'cause fmtId is nonreentrant */
-        appendPQExpBuffer(copyBuf, "COPY %s ", fmtId(tbinfo->dobj.name));
+        appendPQExpBuffer(copyBuf, "COPY %s.%s ", tbinfo->dobj.nmspace->dobj.name, fmtId(tbinfo->dobj.name));
         appendPQExpBuffer(copyBuf,
             "%s %sFROM stdin;\n",
             fmtCopyColumnList(tbinfo),
@@ -4386,6 +4391,7 @@ void getPublications(Archive *fout)
     int i_pubinsert;
     int i_pubupdate;
     int i_pubdelete;
+    int i_pubddl = 0;
     int i, ntups;
 
     if (no_publications || GetVersionNum(fout) < SUBSCRIPTION_VERSION) {
@@ -4397,12 +4403,21 @@ void getPublications(Archive *fout)
     resetPQExpBuffer(query);
 
     /* Get the publications. */
-    appendPQExpBuffer(query,
-        "SELECT p.tableoid, p.oid, p.pubname, "
-        "(%s p.pubowner) AS rolname, "
-        "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete "
-        "FROM pg_catalog.pg_publication p",
-        username_subquery);
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        appendPQExpBuffer(query,
+            "SELECT p.tableoid, p.oid, p.pubname, "
+            "(%s p.pubowner) AS rolname, "
+            "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete, p.pubddl "
+            "FROM pg_catalog.pg_publication p",
+            username_subquery);
+    } else {
+        appendPQExpBuffer(query,
+            "SELECT p.tableoid, p.oid, p.pubname, "
+            "(%s p.pubowner) AS rolname, "
+            "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete "
+            "FROM pg_catalog.pg_publication p",
+            username_subquery);
+    }
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
@@ -4421,6 +4436,9 @@ void getPublications(Archive *fout)
     i_pubinsert = PQfnumber(res, "pubinsert");
     i_pubupdate = PQfnumber(res, "pubupdate");
     i_pubdelete = PQfnumber(res, "pubdelete");
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        i_pubddl = PQfnumber(res, "pubddl");
+    }
 
     pubinfo = (PublicationInfo *)pg_malloc(ntups * sizeof(PublicationInfo));
 
@@ -4435,6 +4453,9 @@ void getPublications(Archive *fout)
         pubinfo[i].pubinsert = (strcmp(PQgetvalue(res, i, i_pubinsert), "t") == 0);
         pubinfo[i].pubupdate = (strcmp(PQgetvalue(res, i, i_pubupdate), "t") == 0);
         pubinfo[i].pubdelete = (strcmp(PQgetvalue(res, i, i_pubdelete), "t") == 0);
+        if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+            pubinfo[i].pubddl = atol(PQgetvalue(res, i, i_pubddl));
+        }
 
         if (strlen(pubinfo[i].rolname) == 0) {
             write_msg(NULL, "WARNING: owner of publication \"%s\" appears to be invalid\n", pubinfo[i].dobj.name);
@@ -4495,6 +4516,23 @@ static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo)
             appendPQExpBufferStr(query, ", ");
         }
         appendPQExpBufferStr(query, "delete");
+        first = false;
+    }
+
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM && pubinfo->pubddl != 0) {
+        if (!first) {
+            appendPQExpBufferStr(query, "',");
+        }
+
+        if (pubinfo->pubddl == PUBDDL_ALL) {
+            appendPQExpBufferStr(query, "ddl = 'all");
+        } else {
+            appendPQExpBufferStr(query, "ddl = ");
+
+            if (ENABLE_PUBDDL_TYPE(pubinfo->pubddl, PUBDDL_TABLE)) {
+                appendPQExpBuffer(query, "'table");
+            }
+        }
         first = false;
     }
 
@@ -4638,6 +4676,7 @@ void getSubscriptions(Archive *fout)
     int i_subsynccommit;
     int i_subpublications;
     int i_subbinary;
+    int i_submatchddlowner;
     int i;
     int ntups;
 
@@ -4657,12 +4696,18 @@ void getSubscriptions(Archive *fout)
     /* Get the subscriptions in current database. */
     appendPQExpBuffer(query, "SELECT s.tableoid, s.oid, s.subname,"
         "(%s s.subowner) AS rolname, s.subconninfo, s.subslotname, "
-        "s.subsynccommit, s.subpublications, \n", username_subquery);
+        "s.subsynccommit, s.subpublications \n", username_subquery);
 
     if (GetVersionNum(fout) >= SUBSCRIPTION_BINARY_VERSION_NUM) {
-        appendPQExpBuffer(query, " s.subbinary\n");
+        appendPQExpBuffer(query, ", s.subbinary\n");
     } else {
-        appendPQExpBuffer(query, " false AS subbinary\n");
+        appendPQExpBuffer(query, ", false AS subbinary\n");
+    }
+
+    if (GetVersionNum(fout) >= PUBLICATION_DDL_VERSION_NUM) {
+        appendPQExpBuffer(query, ", s.submatchddlowner\n");
+    } else {
+        appendPQExpBuffer(query, ", true AS submatchddlowner\n");
     }
 
     appendPQExpBuffer(query, "FROM pg_catalog.pg_subscription s "
@@ -4687,6 +4732,7 @@ void getSubscriptions(Archive *fout)
     i_subsynccommit = PQfnumber(res, "subsynccommit");
     i_subpublications = PQfnumber(res, "subpublications");
     i_subbinary = PQfnumber(res, "subbinary");
+    i_submatchddlowner = PQfnumber(res, "submatchddlowner");
 
     subinfo = (SubscriptionInfo *)pg_malloc(ntups * sizeof(SubscriptionInfo));
 
@@ -4706,6 +4752,7 @@ void getSubscriptions(Archive *fout)
         subinfo[i].subsynccommit = gs_strdup(PQgetvalue(res, i, i_subsynccommit));
         subinfo[i].subpublications = gs_strdup(PQgetvalue(res, i, i_subpublications));
         subinfo[i].subbinary = gs_strdup(PQgetvalue(res, i, i_subbinary));
+        subinfo[i].submatchddlowner = gs_strdup(PQgetvalue(res, i, i_submatchddlowner));
 
         if (strlen(subinfo[i].rolname) == 0) {
             write_msg(NULL, "WARNING: owner of subscription \"%s\" appears to be invalid\n", subinfo[i].dobj.name);
@@ -4774,6 +4821,10 @@ static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
 
     if (strcmp(subinfo->subbinary, "t") == 0) {
         appendPQExpBuffer(query, ", binary = true");
+    }
+
+    if (strcmp(subinfo->submatchddlowner, "f") == 0) {
+        appendPQExpBuffer(query, ", matchddlowner = false");
     }
 
     if (strcmp(subinfo->subsynccommit, "off") != 0) {
@@ -5337,7 +5388,22 @@ TypeInfo* getTypes(Archive* fout, int* numTypes)
 
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, "pg_catalog");
-    if (fout->remoteVersion >= 90200) {
+    if (GetVersionNum(fout) >= 92838 && findDBCompatibility(fout, PQdb(GetConnection(fout))) &&
+        hasSpecificExtension(fout, "dolphin")) {
+        appendPQExpBuffer(query,
+            "SELECT tableoid, oid, typname, "
+            "typnamespace, typacl, "
+            "(%s typowner) AS rolname, "
+            "typinput::oid AS typinput, "
+            "typoutput::oid AS typoutput, typelem, typrelid, "
+            "CASE WHEN typrelid = 0 THEN ' '::`char` "
+            "ELSE (SELECT relkind FROM pg_class WHERE oid = typrelid) END AS typrelkind, "
+            "typtype, typisdefined, "
+            "typname[0] = '_' AND typelem != 0 AND "
+            "(SELECT typarray FROM pg_type te WHERE oid = pg_type.typelem) = oid AS isarray "
+            "FROM pg_type",
+            username_subquery);
+    } else if (fout->remoteVersion >= 90200) {
         appendPQExpBuffer(query,
             "SELECT tableoid, oid, typname, "
             "typnamespace, typacl, "
@@ -18275,9 +18341,9 @@ static void GenerateSubPartitionDetail(PQExpBuffer result, Archive *fout, TableI
             }
             free(parttblspc);
             parttblspc = NULL;
-        } else {
-            appendPQExpBuffer(result, " TABLESPACE pg_default");
         }
+        /* If the tablespace is null, the table uses the default tablespace of the database or schema. */
+
         free(pname);
         pname = NULL;
     }
@@ -18599,9 +18665,9 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                     appendPQExpBuffer(result, " TABLESPACE %s", fmtId(parttblspc));
                 free(parttblspc);
                 parttblspc = NULL;
-            } else {
-                appendPQExpBuffer(result, " TABLESPACE pg_default");
             }
+            /* If the tablespace is null, the table uses the default tablespace of the database or schema. */
+            
             free(pname);
             pname = NULL;
 
@@ -19582,8 +19648,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * Attach to type, if reloftype; except in case of a binary upgrade,
          * we dump the table normally and attach it to the type afterward.
          */
-        if ((tbinfo->reloftype != NULL) && !binary_upgrade)
-            appendPQExpBuffer(q, " OF %s", tbinfo->reloftype);
+        if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
+            Oid typeOid = atooid(tbinfo->reloftype);
+            appendPQExpBuffer(q, " OF %s", getFormattedTypeName(fout, typeOid, zeroAsNone));
+        }
         /*
          * No matter row table or colunm table, We can make suere that attrNums >= 1.
          */
@@ -20595,9 +20663,9 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
         if (tbinfo->relreplident == REPLICA_IDENTITY_INDEX) {
             /* nothing to do, will be set when the index is dumped */
         } else if (tbinfo->relreplident == REPLICA_IDENTITY_NOTHING) {
-            appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY NOTHING;\n", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY NOTHING;\n", fmtId(tbinfo->dobj.name));
         } else if (tbinfo->relreplident == REPLICA_IDENTITY_FULL) {
-            appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY FULL;\n", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY FULL;\n", fmtId(tbinfo->dobj.name));
         }
     }
 
@@ -20866,7 +20934,7 @@ static void dumpIndex(Archive* fout, IndxInfo* indxinfo)
         }
         /* If the index is clustered, we need to record that. */
         if (indxinfo->indisreplident) {
-            appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY USING", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(q, "\nALTER TABLE ONLY (%s) REPLICA IDENTITY USING", fmtId(tbinfo->dobj.name));
             appendPQExpBuffer(q, " INDEX %s;\n", fmtId(indxinfo->dobj.name));
         }
 
@@ -23463,7 +23531,21 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
     destroyPQExpBuffer(query);
     return evtinfo;
 }
- 
+
+static bool eventtrigger_filter(EventTriggerInfo *evtinfo)
+{
+    static char *reserved_trigger_prefix[] = {PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_END,
+                                              PUB_EVENT_TRIG_PREFIX PUB_TRIG_DDL_CMD_START};
+    static const size_t triggerPrefixLength = sizeof(reserved_trigger_prefix) / sizeof(reserved_trigger_prefix[0]);
+
+    for (size_t i = 0; i < triggerPrefixLength; ++i) {
+        if (!strncmp(evtinfo->dobj.name, reserved_trigger_prefix[i], strlen(reserved_trigger_prefix[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 {
     PQExpBuffer query;
@@ -23472,7 +23554,10 @@ static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
     /* Skip if not to be dumped */
     if (!evtinfo->dobj.dump || dataOnly)
         return;
-      
+
+    if (!eventtrigger_filter(evtinfo))
+        return;
+
     query = createPQExpBuffer();
     labelq = createPQExpBuffer();
  
@@ -23575,13 +23660,13 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, tbinfo->dobj.nmspace->dobj.name);
     /* Obtain the sequence name of the auto_increment column from the pg_attrdef. */
-    appendPQExpBuffer(query,
-        "SELECT pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqNameSpace ', 2), ' ', 1) as seqnamespace, "
-        "pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace"
-        "(pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqName ', 2), ' :seqNameSpace', 1), '\\ ', ' '), "
-        "'\\{', '{'), '\\}', '}'), '\\(', '('), '\\)', ')'), '\\\\', '\\') as seqname "
-        "from pg_catalog.pg_attrdef where adrelid = %u and adnum = %d",
-        tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum);
+    appendPQExpBuffer(query, "select nspname, relname from "
+                             "pg_class c left join pg_namespace n on c.relnamespace = n.oid "
+                             "left join  pg_depend d on c.oid = d.objid "
+                             "where classid = %u and deptype = '%c' and refobjid = %u and refobjsubid = %u "
+                             "and c.relkind in ('%c', '%c')"
+                      ,RelationRelationId, DEPENDENCY_AUTO, tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum
+                      ,RELKIND_SEQUENCE, RELKIND_LARGE_SEQUENCE);
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     if (PQntuples(res) != 1) {
@@ -23653,22 +23738,28 @@ static bool needIgnoreSequence(TableInfo* tbinfo)
 static void *ProgressReportDump(void *arg)
 {
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    return nullptr;
+    if (disable_progress) {
+        return nullptr;
+    }
 #endif
-    char progressBar[52];
+    if (g_totalObjNums == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(100 * g_dumpObjNums / g_totalObjNums);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \r",
             progressBar, percent, g_dumpObjNums, g_totalObjNums);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
-        int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
+        timeout.tv_nsec = 0;
+        int ret = pthread_cond_timedwait(&g_condDump, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
             continue;
@@ -23678,28 +23769,32 @@ static void *ProgressReportDump(void *arg)
     } while ((g_dumpObjNums < g_totalObjNums) && !g_progressFlagDump);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, dumpObjNums/totalObjNums). dump objects \n",
             progressBar, percent, g_dumpObjNums, g_totalObjNums);
+    return nullptr;
 }
 
 static void *ProgressReportScanDatabase(void *arg)
 {
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    return nullptr;
+    if (disable_progress) {
+        return nullptr;
+    }
 #endif
-    char progressBar[52];
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_curStep * 100 / g_totalSteps);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). %s \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, cur_step/total_step). %s \r",
             progressBar, percent, g_curStep, g_totalSteps, g_progressDetails[g_curStep]);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -23710,8 +23805,9 @@ static void *ProgressReportScanDatabase(void *arg)
     } while ((g_curStep < g_totalSteps) && !g_progressFlagScan);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, cur_step/total_step). finish scanning database                       \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, cur_step/total_step). finish scanning database                       \n",
             progressBar, percent, g_curStep, g_totalSteps);
+    return nullptr;
 }
 
 bool FuncExists(Archive* fout, const char* funcNamespace, const char* funcName)

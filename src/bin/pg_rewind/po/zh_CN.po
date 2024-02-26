@@ -1,0 +1,1203 @@
+# LANGUAGE message translation file for pg_rewind
+# Copyright (C) 2023 PostgreSQL Global Development Group
+# This file is distributed under the same license as the pg_rewind (PostgreSQL) package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2023.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: pg_rewind (PostgreSQL) 9.2\n"
+"Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
+"PO-Revision-Date: 2023-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: datapagemap.cpp:115
+#, c-format
+msgid "  block %u\n"
+msgstr "  块 %u\n"
+
+#: fetch.cpp:68
+#, c-format
+msgid "could not connect to server %s: %s"
+msgstr "无法连接到服务器%s: %s"
+
+#: fetch.cpp:72
+#, c-format
+msgid "connected to server: %s\n"
+msgstr "连接到服务器: %s\n"
+
+#: fetch.cpp:108
+#, c-format
+msgid "source server must not be in recovery mode\n"
+msgstr "源服务器不得处于恢复模式\n"
+
+#: fetch.cpp:133
+#, c-format
+msgid "full_page_writes must be enabled in the source server when the incremental checkpoint is not used.\n"
+msgstr "当不使用增量检查点时，必须在源服务器中启用full_page_writes.\n"
+
+#: fetch.cpp:155
+#, c-format
+msgid "pgxc_node_name is %s.\n"
+msgstr "pgxc_node_name是%s.\n"
+
+#: fetch.cpp:169
+#, c-format
+msgid "replication_type is %d.\n"
+msgstr "replication_type是%d.\n"
+
+#: fetch.cpp:184
+#, c-format
+msgid "error running query (%s) in source server: %s"
+msgstr "在源服务器中运行查询(%s)时出错: %s"
+
+#: fetch.cpp:189
+#, c-format
+msgid "unexpected result set from query\n"
+msgstr "查询中出现意外结果集\n"
+
+#: fetch.cpp:227
+#, c-format
+msgid "Could not get source flush lsn.\n"
+msgstr "无法获取源刷新lsn.\n"
+
+#: fetch.cpp:231
+#, c-format
+msgid "unrecognized result \"%s\" for current XLOG insert location\n"
+msgstr "无法识别当前XLOG插入位置的结果\"%s\"\n"
+
+#: fetch.cpp:282
+#, c-format
+msgid "could not fetch file list: %s"
+msgstr "无法获取文件列表: %s"
+
+#: fetch.cpp:290
+#, c-format
+msgid "unexpected result set while fetching file list\n"
+msgstr "获取文件列表时出现意外结果集\n"
+
+#: fetch.cpp:330
+#, c-format
+msgid "source filesize mod BLOCKSIZE not equal 0 %s %s \n"
+msgstr "源文件大小mod BLOCKSIZE不等于0%s %s \n"
+
+# fe-connect.c:1322
+#: fetch.cpp:368
+#, c-format
+msgid "could not send query: %s"
+msgstr "无法发送查询:%s"
+
+#: fetch.cpp:372
+#, c-format
+msgid "getting file chunks\n"
+msgstr "获取文件块\n"
+
+#: fetch.cpp:375
+#, c-format
+msgid "could not set libpq connection to single row mode\n"
+msgstr "无法将libpq连接设置为单行模式\n"
+
+#: fetch.cpp:396
+#, c-format
+msgid "unexpected result while fetching remote files: %s\n"
+msgstr "获取远程文件时出现意外结果: %s\n"
+
+#: fetch.cpp:402
+#, c-format
+msgid "unexpected result set size while fetching remote files\n"
+msgstr "获取远程文件时出现意外的结果集大小\n"
+
+#: fetch.cpp:408
+#, c-format
+msgid "unexpected data types in result set while fetching remote files: %u %u %u %u\n"
+msgstr "获取远程文件时，结果集中出现意外的数据类型: %u %u %u %u\n"
+
+#: fetch.cpp:417 fetch.cpp:512
+#, c-format
+msgid "unexpected result format while fetching remote files\n"
+msgstr "获取远程文件时出现意外的结果格式\n"
+
+#: fetch.cpp:422 fetch.cpp:517
+#, c-format
+msgid "unexpected null values in result while fetching remote files\n"
+msgstr "获取远程文件时结果中出现意外的null值\n"
+
+#: fetch.cpp:427
+#, c-format
+msgid "unexpected result length while fetching remote files\n"
+msgstr "获取远程文件时出现意外的结果长度\n"
+
+#: fetch.cpp:459
+#, c-format
+msgid "received null value for chunk for file \"%s\", file has been deleted"
+msgstr "收到文件\"%s\"的区块的空值，文件已被删除"
+
+#: fetch.cpp:471
+#, c-format
+msgid "received chunk for file \"%s\", offset %d, size %d\n"
+msgstr "已收到文件\"%s\"的区块, offset %d, size %d\n"
+
+#: fetch.cpp:507
+#, c-format
+msgid "FetchCompressedFile:unexpected data types: %u %u %u\n"
+msgstr "FetchCompressedFile: 意外的数据类型: %u %u %u\n"
+
+#: fetch.cpp:539
+#, c-format
+msgid "could not fetch remote file \"%s\": %s"
+msgstr "无法获取远程文件 \"%s\": %s"
+
+#: fetch.cpp:545
+#, c-format
+msgid "unexpected result set while fetching remote file \"%s\"\n"
+msgstr "获取远程文件时出现意外结果集 \"%s\"\n"
+
+#: fetch.cpp:552
+#, c-format
+msgid "unexpected file size of remote file \"%s\"\n"
+msgstr "远程文件的意外文件大小 \"%s\"\n"
+
+#: fetch.cpp:560
+#, c-format
+msgid "fetched file \"%s\", length %d\n"
+msgstr "提取的文件\"%s\", 长度 %d\n"
+
+#: fetch.cpp:594 fetch.cpp:641
+#, c-format
+msgid "could not send COPY data: %s"
+msgstr "无法传送COPY数据: %s"
+
+#: fetch.cpp:596
+#, c-format
+msgid "CompressedFileCopy: %s"
+msgstr "CompressedFileCopy: %s"
+
+#: fetch.cpp:602 fetch.cpp:605
+#, c-format
+msgid "CompressedFileRemove: %s\n"
+msgstr "CompressedFileRemove: %s\n"
+
+#: fetch.cpp:610
+#, c-format
+msgid "could not remove compress file \"%s\": %s\n"
+msgstr "无法删除压缩文件 \"%s\": %s\n"
+
+#: fetch.cpp:663
+#, c-format
+msgid "could not create temporary table: %s"
+msgstr "无法创建临时表: %s"
+
+#: fetch.cpp:675
+#, c-format
+msgid "could not send file list: %s"
+msgstr "无法发送文件列表: %s"
+
+#: fetch.cpp:690 fetch.cpp:694 fetch.cpp:836
+#, c-format
+msgid "path: %s, type: %d, action: %d\n"
+msgstr "path: %s, type: %d, action: %d\n"
+
+#: fetch.cpp:759
+#, c-format
+msgid "could not send end-of-COPY: %s"
+msgstr "无法发送end-of-COPY: %s"
+
+#: fetch.cpp:768
+#, c-format
+msgid "unexpected result while sending file list: %s"
+msgstr "发送文件列表时出现意外结果: %s"
+
+#: fetch.cpp:820 file_ops.cpp:293 file_ops.cpp:638
+#, c-format
+msgid "could not create directory \"%s\": %s\n"
+msgstr "无法创建目录 \"%s\": %s\n"
+
+#: fetch.cpp:826
+#, c-format
+msgid "could not create file \"%s\\%s\": %s\n"
+msgstr "无法创建文件\"%s\\%s\": %s\n"
+
+#: fetch.cpp:877 pg_rewind.cpp:487
+#, c-format
+msgid "failed to rename \"%s\" to \"%s\": %s\n"
+msgstr "重命名\"%s\"为\"%s\"失败: %s\n"
+
+#: fetch.cpp:977
+#, c-format
+msgid "could not open directory \"%s\": %s\n"
+msgstr "无法打开目录 \"%s\": %s\n"
+
+#: fetch.cpp:995
+#, c-format
+msgid "skip log directory %s during fetch target file list\n"
+msgstr "提取目标文件列表期间跳过日志目录%s\n"
+
+#: fetch.cpp:1012
+#, c-format
+msgid "could not stat file \"%s\" in recurse_dir: %s\n"
+msgstr "无法统计文件\"%s\"它位于: %s\n"
+
+#: fetch.cpp:1043
+#, c-format
+msgid "file size of \"%s\" is over %ld\n"
+msgstr "\"%s\"的文件大小超过%ld\n"
+
+#: fetch.cpp:1060
+#, c-format
+msgid "could not read symbolic link \"%s\": %s\n"
+msgstr "无法读取符号链接\"%s\": %s\n"
+
+#: fetch.cpp:1065
+#, c-format
+msgid "symbolic link \"%s\" target is too long\n"
+msgstr "符号链接\"%s\"目标太长\n"
+
+#: fetch.cpp:1089
+#, c-format
+msgid "could not read directory \"%s\": %s\n"
+msgstr "无法读取目录 \"%s\": %s\n"
+
+#: fetch.cpp:1095
+#, c-format
+msgid "could not close directory \"%s\": %s\n"
+msgstr "无法关闭目录\"%s\": %s\n"
+
+#: fetch.cpp:1193 fetch.cpp:1248 parsexlog.cpp:763
+#, c-format
+msgid "%s cannot be opened.\n"
+msgstr "无法打开%s.\n"
+
+#: fetch.cpp:1260
+#, c-format
+msgid "Get log directory guc is %s\n"
+msgstr "获取日志目录guc%s\n"
+
+#: fetch.cpp:1283
+#, c-format
+msgid "could not get dummystandby connection status on source: %s"
+msgstr "无法获取源上的dummystandby连接状态: %s"
+
+#: fetch.cpp:1301
+#, c-format
+msgid " the results are peer_role: %s, state: %s\n"
+msgstr " 结果是peer_role: %s, state: %s\n"
+
+#: file_ops.cpp:73
+#, c-format
+msgid "could not fsync target file \"%s\": %s\n"
+msgstr "无法同步目标文件\"%s\": %s\n"
+
+#: file_ops.cpp:87
+#, c-format
+msgid "could not open target file \"%s\": %s\n"
+msgstr "无法打开目标文件\"%s\": %s\n"
+
+#: file_ops.cpp:101
+#, c-format
+msgid "could not close target file \"%s\": %s\n"
+msgstr "无法关闭目标文件\"%s\": %s\n"
+
+#: file_ops.cpp:123
+#, c-format
+msgid "seek position %ld in target file \"%s\" is not in BLOCKSIZEs\n"
+msgstr "在目标文件\"%2$s\"查找位置%1$ld不在BLOCKSIZEs中\n "
+
+#: file_ops.cpp:129
+#, c-format
+msgid "could not seek in target file \"%s\": %s\n"
+msgstr "无法在目标文件中查找 \"%s\": %s\n"
+
+#: file_ops.cpp:139
+#, c-format
+msgid "out of memory during function call of write_target_range\n"
+msgstr "函数调用write_target_range时内存溢出\n"
+
+#: file_ops.cpp:160
+#, c-format
+msgid "could not write file \"%s\": %s\n"
+msgstr "无法写入文件\"%s\"：%s\n"
+
+#: file_ops.cpp:163
+#, c-format
+msgid "write length %d is not in BLOCKSIZEs which may be risky, file %s, size %ld, write left %d\n"
+msgstr "写入长度%d不在BLOCKSIZEs中, 这可能有风险, 文件%s，大小%ld，写入剩余%d\n"
+
+#: file_ops.cpp:186
+#, c-format
+msgid "remove file %s, type% d\n"
+msgstr "删除文件%s, 类型%d\n"
+
+#: file_ops.cpp:220
+#, c-format
+msgid "invalid action (CREATE) for regular file\n"
+msgstr "常规文件无效操作(CREATE)\n"
+
+#: file_ops.cpp:242 file_ops.cpp:550
+#, c-format
+msgid "could not remove file \"%s\": %s\n"
+msgstr "无法删除文件 \"%s\": %s\n"
+
+#: file_ops.cpp:263
+#, c-format
+msgid "could not open file \"%s\" for truncation: %s\n"
+msgstr "无法打开文件\"%s\"进行截断: %s\n"
+
+#: file_ops.cpp:268
+#, c-format
+msgid "could not truncate file \"%s\" to %u bytes: %s\n"
+msgstr "无法将文件\"%s\"截断为%u字节: %s\n"
+
+#: file_ops.cpp:310
+#, c-format
+msgid "could not remove directory \"%s\": %s\n"
+msgstr "无法删除目录\"%s\": %s\n"
+
+#: file_ops.cpp:344 file_ops.cpp:765
+#, c-format
+msgid "out pf memory\n"
+msgstr "内存溢出\n"
+
+#: file_ops.cpp:350 file_ops.cpp:769
+#, c-format
+msgid "could not create tablespace directory \"%s\": %s\n"
+msgstr "无法创建表空间目录 \"%s\": %s\n"
+
+#: file_ops.cpp:361 file_ops.cpp:779
+#, c-format
+msgid "could not access tablespace directory \"%s\": %s\n"
+msgstr "无法访问表空间目录\"%s\": %s\n"
+
+#: file_ops.cpp:367 file_ops.cpp:784
+#, c-format
+msgid "could not create symbolic link at \"%s\": %s\n"
+msgstr "无法在\"%s\"创建符号连接: %s\n"
+
+#: file_ops.cpp:383
+#, c-format
+msgid "could not remove symbolic link \"%s\": %s\n"
+msgstr "无法删除符号连接\"%s\": %s\n"
+
+#: file_ops.cpp:414 file_ops.cpp:420
+#, c-format
+msgid "could not open file \"%s\" for reading: %s\n"
+msgstr "无法打开文件\"%s\"进行读: %s\n"
+
+#: file_ops.cpp:428
+#, c-format
+msgid "could not read file \"%s\": unexpected file size\n"
+msgstr "无法读文件\"%s\": 意外的文件大小\n"
+
+#: file_ops.cpp:438
+#, c-format
+msgid "could not read file \"%s\": %s\n"
+msgstr "无法读取文件\"%s\"：%s\n"
+
+#: file_ops.cpp:461 file_ops.cpp:674
+#, c-format
+msgid "could not stat file \"%s\": %s\n"
+msgstr "无法统计文件\"%s\":%s\n"
+
+#: file_ops.cpp:532
+#, c-format
+msgid "could not stat file \"%s\" in delete_all_file : %s\n"
+msgstr "无法在delete_all_file统计文件\"%s\" : %s\n"
+
+#: file_ops.cpp:579
+#, c-format
+msgid "could not stat file \"%s\" in create_backup_filepath : %s\n"
+msgstr "无法在create_backup_filepath统计文件\"%s\" : %s\n"
+
+#: file_ops.cpp:590 file_ops.cpp:598 file_ops.cpp:820
+#, c-format
+msgid "could not create file directory for backup\"%s\": %s\n"
+msgstr "无法为备份创建文件目录\"%s\": %s\n"
+
+#: file_ops.cpp:695
+#, c-format
+msgid "could not open file \"%s\" for reading: %s in backup\n"
+msgstr "在备份中无法打开文件\"%s\"进行读取: %s\n"
+
+#: file_ops.cpp:702
+#, c-format
+msgid ""
+"could not read file \"%s\": %s in backup\n"
+" "
+msgstr ""
+"在备份中无法读取文件 \"%s\": %s\n"
+" "
+
+#: file_ops.cpp:712
+#, c-format
+msgid "could not open file \"%s\" for backup: %s\n"
+msgstr "在备份中无法打开文件\"%s\": %s\n"
+
+#: file_ops.cpp:716 pg_rewind.cpp:760 pg_rewind.cpp:768
+#, c-format
+msgid "could not write data to file \"%s\": %s in backup\n"
+msgstr "在备份中无法把数据写入文件\"%s\": %s\n"
+
+#: file_ops.cpp:719
+#, c-format
+msgid "could not close backup file \"%s\": %s in backup\n"
+msgstr "在备份中无法关闭备份文件\"%s\": %s\n"
+
+#: file_ops.cpp:741
+#, c-format
+msgid "could not read symbolic link \"%s\":for backuping\n"
+msgstr "无法为备份读取符号连接\"%s\"\n"
+
+#: file_ops.cpp:744
+#, c-format
+msgid "symbolic link \"%s\" target is too long for backuping\n"
+msgstr "符号链接\"%s\"对于备份来说太长\n"
+
+#: file_ops.cpp:825
+#, c-format
+msgid "could not create fake file \"%s\": %s\n"
+msgstr "无法创建假文件\"%s\": %s\n"
+
+#: file_ops.cpp:839
+#, c-format
+msgid "unrecognized result \"%s\" for current XLOG name\n"
+msgstr "无法识别当前XLOG名称的结果\"%s\"\n"
+
+#: file_ops.cpp:949
+#, c-format
+msgid "restore %s success\n"
+msgstr "还原%s成功\n"
+
+#: file_ops.cpp:953 file_ops.cpp:1041 file_ops.cpp:1137 logging.cpp:118
+#, c-format
+msgid "%s"
+msgstr "%s"
+
+#: file_ops.cpp:1063
+#, c-format
+msgid "malloc for buffer failed!"
+msgstr "缓冲区的malloc失败！"
+
+#: file_ops.cpp:1254
+#, c-format
+msgid "CompressedFileTruncate: %s\n"
+msgstr "CompressedFileTruncate: %s\n"
+
+#: file_ops.cpp:1261
+#, c-format
+msgid "FetchCompressedFile failed: \n"
+msgstr "FetchCompressedFile失败: \n"
+
+#: file_ops.cpp:1304
+#, c-format
+msgid "process compressed file \"%s\": %s\n"
+msgstr "处理压缩文件\"%s\": %s\n"
+
+#: filemap.cpp:183
+#, c-format
+msgid "traverse_datadir start.\n"
+msgstr "traverse_datadir开始.\n"
+
+#: filemap.cpp:188
+#, c-format
+msgid "filemap_list_to_array start.\n"
+msgstr "filemap_list_to_array开始.\n"
+
+#: filemap.cpp:190
+#, c-format
+msgid "filemap_list_to_array end sort start. length is %d \n"
+msgstr "filemap_list_to_array结束排序开始.长度为%d \n"
+
+#: filemap.cpp:192
+#, c-format
+msgid "sort end.\n"
+msgstr "结束排序.\n"
+
+#: filemap.cpp:199
+#, c-format
+msgid "targetFileStatThread success pid %lu.\n"
+msgstr "targetFileStatThread成功pid %lu.\n"
+
+#: filemap.cpp:210
+#, c-format
+msgid "waitEndTargetFileStatThread not return success.\n"
+msgstr "waitEndTargetFileStatThread未返回成功.\n"
+
+#: filemap.cpp:213
+#, c-format
+msgid "targetFileStatThread return success.\n"
+msgstr "targetFileStatThread返回成功.\n"
+
+#: filemap.cpp:253 filemap.cpp:1574
+#, c-format
+msgid "invalid input path=%s.\n"
+msgstr "无效输入, path=%s.\n"
+
+#: filemap.cpp:260 filemap.cpp:1581
+#, c-format
+msgid "path %s is not bsearch in current map\n"
+msgstr "路径%s未在当前映射中搜索\n"
+
+#: filemap.cpp:264 filemap.cpp:1585
+#, c-format
+msgid "path %s is not valid in current map\n"
+msgstr "路径%s在当前映射中无效\n"
+
+#: filemap.cpp:274 filemap.cpp:1589
+#, c-format
+msgid "path %s,type %d,size %lu,link %s\n"
+msgstr "path %s,type %d,size %lu,link %s\n"
+
+#: filemap.cpp:327
+#, c-format
+msgid "invalid tablespace in primary:path=%s.\n"
+msgstr "primary中的表空间无效:path=%s.\n"
+
+#: filemap.cpp:337
+#, c-format
+msgid "data file \"%s\" in source is not a regular file\n"
+msgstr "源中的数据文件\"%s\"不是常规文件\n "
+
+#: filemap.cpp:370
+#, c-format
+msgid "entry \"%s\" excluded from source file list\n"
+msgstr "条目\"%s\"从源文件列表中排除\n"
+
+#: filemap.cpp:392
+#, c-format
+msgid "process_source_file:path=%s.\n"
+msgstr "process_source_file:path=%s.\n"
+
+#: filemap.cpp:426
+#, c-format
+msgid "\"%s\" is not a directory\n"
+msgstr "\"%s\"不是一个目录\n"
+
+#: filemap.cpp:449
+#, c-format
+msgid "\"%s\" is not a symbolic link\n"
+msgstr "\"%s\"不是一个符号链接\n"
+
+#: filemap.cpp:462
+#, c-format
+msgid "\"%s\" is not a regular file\n"
+msgstr "\"%s\"不是一个常规文件\n"
+
+#: filemap.cpp:530
+#, c-format
+msgid "target file size mod BLOCKSIZE not equal 0 %s %ld \n"
+msgstr "目标文件大小mod BLOCKSIZE不等于0%s %ld \n"
+
+#: filemap.cpp:590
+#, c-format
+msgid "source file list is empty\n"
+msgstr "源文件列表为空\n"
+
+#: filemap.cpp:606
+#, c-format
+msgid "entry \"%s\" excluded from target file list\n"
+msgstr "条目\"%s\"已从目标文件列表中排除\n"
+
+#: filemap.cpp:611
+#, c-format
+msgid "process_target_file:path=%s.\n"
+msgstr "process_target_file:path=%s.\n"
+
+#: filemap.cpp:744
+#, c-format
+msgid "unexpected page modification for directory or symbolic link \"%s\"\n"
+msgstr "目录或符号链接\"%s\"的页面意外修改\n"
+
+#: filemap.cpp:749
+#, c-format
+msgid "add data page map(%s): rel %u/%u/%u, bucketNode:%d forknum %u blkno %u\n"
+msgstr "添加数据页面地图(%s): rel %u/%u/%u, bucketNode:%d forknum %u blkno %u\n"
+
+#: filemap.cpp:759
+#, c-format
+msgid "no entry to be processed: rel %u/%u/%u, bucketNode:%d forknum %u blkno %u\n"
+msgstr "没有要处理的条目: rel %u/%u/%u, bucketNode:%d forknum %u blkno %u\n"
+
+#. translator: first %s is a file path, second is a keyword such as COPY
+#: filemap.cpp:884
+#, c-format
+msgid "%s (%s) old(%ld) new(%ld)\n"
+msgstr "%s (%s) old(%ld) new(%ld)\n"
+
+#: filemap.cpp:1178 parsexlog.cpp:72 parsexlog.cpp:119 parsexlog.cpp:229
+#: parsexlog.cpp:587 parsexlog.cpp:707
+#, c-format
+msgid "out of memory\n"
+msgstr "内存溢出\n"
+
+#: filemap.cpp:1219
+#, c-format
+msgid "could not alloc MAXPGPATH memory for path.\n"
+msgstr "无法为路径分配MAXPGPATH内存.\n"
+
+#: logging.cpp:83 logging.cpp:89 logging.cpp:93 logging.cpp:97 logging.cpp:108
+#, c-format
+msgid "[%s][%d][%s][%s]: %s"
+msgstr "[%s][%d][%s][%s]: %s"
+
+#: logging.cpp:98
+#, c-format
+msgid ""
+" \n"
+"%s receive ERROR, it will exit\n"
+msgstr ""
+" \n"
+"%s收到ERROR, 它将退出\n"
+
+#: logging.cpp:109
+#, c-format
+msgid ""
+" \n"
+"%s receive FATAL, it will exit\n"
+msgstr ""
+" \n"
+"%s收到FATAL, 它将退出\n"
+
+#
+#: logging.cpp:218
+#, c-format
+msgid "receiving and unpacking files...\n"
+msgstr "接收和解压文件…\n"
+
+#: parsexlog.cpp:86 parsexlog.cpp:124
+#, c-format
+msgid "could not read WAL record at %X/%X: %s\n"
+msgstr "无法在%X/%X读取WAL记录: %s\n"
+
+#: parsexlog.cpp:92 parsexlog.cpp:126
+#, c-format
+msgid "could not read WAL record at %X/%X\n"
+msgstr "无法在%X/%X读取WAL记录"
+
+#: parsexlog.cpp:211
+#, c-format
+msgid "init xlog dirs failed\n"
+msgstr "初始化xlog目录失败\n"
+
+#: parsexlog.cpp:219
+#, c-format
+msgid "find max lsn fail, errmsg:%s\n"
+msgstr "查找max lsn失败, 错误信息:%s\n"
+
+#: parsexlog.cpp:223
+#, c-format
+msgid "find max lsn success, %s"
+msgstr "查找max lsn成功, %s"
+
+#: parsexlog.cpp:245
+#, c-format
+msgid "try 300s, could not find any common checkpoint, need to do full build\n"
+msgstr "尝试300s，找不到任何通用检查点，需要进行完整构建\n"
+
+#: parsexlog.cpp:260 parsexlog.cpp:546 parsexlog.cpp:720
+#, c-format
+msgid "could not find previous WAL record at %X/%X: %s\n"
+msgstr "在%X/%X中找不到以前的WAL记录: %s\n"
+
+#: parsexlog.cpp:265 parsexlog.cpp:723
+#, c-format
+msgid "could not find previous WAL record at %X/%X\n"
+msgstr "在%X/%X中找不到以前的WAL记录\n"
+
+#: parsexlog.cpp:291
+#, c-format
+msgid "find common checkpoint %X/%X\n"
+msgstr "查找公共检查点%X/%X\n"
+
+#: parsexlog.cpp:315
+#, c-format
+msgid "could not find any common checkpoint, must to do full build\n"
+msgstr "找不到任何通用检查点，必须执行完整生成\n"
+
+#: parsexlog.cpp:333
+#, c-format
+msgid "extract WAL: cur: %X/%X; prev %X/%X; xid %lu; len/total_len %u/%u; info %u; rmid %u"
+msgstr "提取WAL: cur:%X/%X; 上一页%X/%X; xid%lu; len/total_len%u/%u;  信息%u;  rmid %u"
+
+#: parsexlog.cpp:360
+#, c-format
+msgid "; block%d: rel %u/%u/%u forknum %u blkno %u physical address[%u, %u]\n"
+msgstr "; block%d: rel %u/%u/%u forknum %u blkno %u physical address[%u, %u]\n"
+
+#: parsexlog.cpp:380
+#, c-format
+msgid "\n"
+msgstr "\n"
+
+#: parsexlog.cpp:418
+#, c-format
+msgid "could not connect to server, failed to identify consistency, change to full build."
+msgstr "无法连接到服务器，无法识别一致性，更改为完整版本."
+
+#: parsexlog.cpp:424
+#, c-format
+msgid "connection lost, failed to identify consistency, change to full build."
+msgstr "连接丢失，无法识别一致性，更改为完整版本."
+
+#: parsexlog.cpp:433
+#, c-format
+msgid " could not IDENTIFY_CONSISTENCE system: %s\n"
+msgstr " 无法IDENTIFY_CONSISTENCE系统: %s\n"
+
+#: parsexlog.cpp:441
+#, c-format
+msgid " could not IDENTIFY_CONSISTENCE, got %d rows and %d fields\n"
+msgstr " 无法IDENTIFY_CONSISTENCE, 获取%d行和%d字段\n"
+
+#: parsexlog.cpp:458
+#, c-format
+msgid "request lsn is %X/%X and its crc(source, target):[%u, %u]\n"
+msgstr "请求lsn是%X/%X及其crc(source, target):[%u, %u]\n"
+
+#: parsexlog.cpp:506
+#, c-format
+msgid "getValidCommonLSN out of memory\n"
+msgstr "getValidCommonLSN内存溢出\n"
+
+#: parsexlog.cpp:580 parsexlog.cpp:592
+#, c-format
+msgid "It's not a valid WAL record start at %X/%X\n"
+msgstr "它不是有效的WAL记录，起始于%X/%X\n"
+
+#: parsexlog.cpp:604
+#, c-format
+msgid "   Input LSN %X/%X check success, %s\n"
+msgstr "  输入LSN%X/%X检查成功, %s\n"
+
+#: parsexlog.cpp:628
+#, c-format
+msgid "Failed to check CRC/Magic/Lenth of replication slot %s.\n"
+msgstr "无法检查复制插槽%s的CRC/Magic/Lenth.\n"
+
+#: parsexlog.cpp:638
+#, c-format
+msgid "Get confirmed lsn %X/%X from replication slot %s."
+msgstr "从复制插槽%3$s获取已确认的lsn%1$X/%2$X."
+
+#: parsexlog.cpp:647
+#, c-format
+msgid "Start to get the confirmed LSN of the replication slots.\n"
+msgstr "开始获取复制插槽的已确认LSN.\n"
+
+#: parsexlog.cpp:654
+#, c-format
+msgid "The DIR pg_replslot does'nt exist. Can't get confirmed LSN.\n"
+msgstr "目录pg_replslot不存在.无法获得确认的LSN.\n"
+
+#: parsexlog.cpp:673
+#, c-format
+msgid "unexpected slot file size %d, expected %d\n"
+msgstr "意外的插槽文件大小%d, 期望%d\n"
+
+#: parsexlog.cpp:732
+#, c-format
+msgid "could not find confirmed record %X/%X on source\n"
+msgstr "在源上找不到已确认的记录%X/%X\n"
+
+#: parsexlog.cpp:741
+#, c-format
+msgid "Check confirmed lsn %X/%X at source success."
+msgstr "在源检查已确认lsn%X/%X成功."
+
+#: parsexlog.cpp:773
+#, c-format
+msgid "Enable saving confirmed_lsn in target %s\n"
+msgstr "启用在目标%s中保存confirmed_lsn\n"
+
+#: pg_rewind.cpp:102
+#, c-format
+msgid "%s: no source specified (--source-server)\n"
+msgstr "%s: 未指定源(--source-server)\n"
+
+#: pg_rewind.cpp:103 pg_rewind.cpp:109 pg_rewind.cpp:115 pg_rewind.cpp:955
+#: pg_rewind.cpp:961
+#, c-format
+msgid "Try \"%s --help\" for more information.\n"
+msgstr "用 \"%s --help\" 获取更多的信息.\n"
+
+#: pg_rewind.cpp:108 pg_rewind.cpp:954
+#, c-format
+msgid "%s: no target data directory specified (--target-pgdata)\n"
+msgstr "%s: 未指定目标数据目录 (--target-pgdata)\n"
+
+#: pg_rewind.cpp:114 pg_rewind.cpp:960
+#, c-format
+msgid "%s: unexpected term specified\n"
+msgstr "%s: 指定了意外的术语\n"
+
+#: pg_rewind.cpp:126 pg_rewind.cpp:972
+#, c-format
+msgid "cannot be executed by \"root\"\n"
+msgstr "无法被\"root\"执行\n"
+
+#: pg_rewind.cpp:127 pg_rewind.cpp:973
+#, c-format
+msgid "You must run %s as the PostgreSQL superuser.\n"
+msgstr "您必须以PostgreSQL超级用户的身份运行%s.\n"
+
+#: pg_rewind.cpp:140
+#, c-format
+msgid "last build uncompleted, change to full build. \n"
+msgstr "最后一个构建未完成, 更改为完整构建. \n"
+
+#: pg_rewind.cpp:147 pg_rewind.cpp:980
+#, c-format
+msgid "%s: last restore process hasn't completed, can't start new building.\n"
+msgstr "%s: 上次恢复过程尚未完成，无法启动新的构建.\n"
+
+#: pg_rewind.cpp:178
+#, c-format
+msgid "set gaussdb state file when %s build:db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(INC_BUILD).\n"
+msgstr "在%s生成时设置gaussdb状态文件：数据库状态（BUILDING_state）、服务器模式（STANDBY_mode）、生成模式（INC_build）.\n"
+
+#: pg_rewind.cpp:187 pg_rewind.cpp:991
+#, c-format
+msgid "connect to primary success\n"
+msgstr "成功连接到primary\n"
+
+#: pg_rewind.cpp:191
+#, c-format
+msgid "The source DN primary can't connect to dummy standby. Please repairing the dummy standby first.\n"
+msgstr "源DN主服务器无法连接到虚拟备用服务器.请先修复虚拟备用.\n"
+
+#: pg_rewind.cpp:215
+#, c-format
+msgid "get pg_control success\n"
+msgstr "获取pg_control成功\n"
+
+#: pg_rewind.cpp:220 pg_rewind.cpp:1033
+#, c-format
+msgid "sanityChecks success\n"
+msgstr "sanityChecks成功\n"
+
+#: pg_rewind.cpp:225 pg_rewind.cpp:1038
+#, c-format
+msgid "find last checkpoint at %X/%X and checkpoint redo at %X/%X from source control file\n"
+msgstr "从源代码管理文件中查找位于%X/%X的最后一个检查点和位于%X/%X的检查点重做\n"
+
+#: pg_rewind.cpp:232 pg_rewind.cpp:1010
+#, c-format
+msgid "find last checkpoint at %X/%X and checkpoint redo at %X/%X from target control file\n"
+msgstr "从目标控制文件中查找位于%X/%X的最后一个检查点和位于%X/%X的检查点重做\n"
+
+#: pg_rewind.cpp:243 pg_rewind.cpp:1049
+#, c-format
+msgid "find diverge point success\n"
+msgstr "找到分歧点成功\n"
+
+#: pg_rewind.cpp:250
+#, c-format
+msgid "Can't find quorum confirmed LSN at source, build will exit!\n"
+msgstr "在源位置找不到仲裁确认的LSN，生成将退出!\n"
+
+#: pg_rewind.cpp:258
+#, c-format
+msgid "read checkpoint redo (%X/%X) success before rewinding.\n"
+msgstr "在倒带之前读取检查点重做（%X/%X）成功.\n"
+
+#: pg_rewind.cpp:263
+#, c-format
+msgid "rewinding from checkpoint redo point at %X/%X on timeline %u\n"
+msgstr "从时间线%3$u上%1$X/%2$X的检查点重做点倒带\n"
+
+#: pg_rewind.cpp:270
+#, c-format
+msgid "diverge xlogfile is %s, older ones will not be copied or removed.\n"
+msgstr "divert xlogfile是%s, 旧的将不会被复制或删除.\n"
+
+#: pg_rewind.cpp:273
+#, c-format
+msgid "error when libpqRotateCbmFile, inc build failed"
+msgstr "inc构建失败, 在libpqRotateCbmFile时发生错误"
+
+#: pg_rewind.cpp:283
+#, c-format
+msgid "reading source file list\n"
+msgstr "读取源文件列表\n"
+
+#: pg_rewind.cpp:286
+#, c-format
+msgid "reading target file list\n"
+msgstr "读取目标文件列表\n"
+
+#: pg_rewind.cpp:290
+#, c-format
+msgid "traverse target datadir success\n"
+msgstr "遍历目标datadir成功\n"
+
+#: pg_rewind.cpp:299
+#, c-format
+msgid "reading WAL in target\n"
+msgstr "读取目标的WAL\n"
+
+#: pg_rewind.cpp:304
+#, c-format
+msgid "calculate totals rewind success\n"
+msgstr "计算总倒带成功率\n"
+
+#: pg_rewind.cpp:317
+#, c-format
+msgid "need to copy %luMB (total source directory size is %luMB)\n"
+msgstr "需要复制%luMB（源目录总大小为%luMB）\n"
+
+#: pg_rewind.cpp:330
+#, c-format
+msgid "backup target files success\n"
+msgstr "备份目标文件成功\n"
+
+#
+#: pg_rewind.cpp:335
+#, c-format
+msgid "starting background WAL receiver\n"
+msgstr "启动背景WAL接收机\n"
+
+#: pg_rewind.cpp:339
+#, c-format
+msgid "Starting copy xlog, start point: %s\n"
+msgstr "正在启动复制xlog, 起点: %s\n"
+
+#: pg_rewind.cpp:342
+#, c-format
+msgid "start log streamer failed: %s\n"
+msgstr "启动日志streamer失败: %s\n"
+
+#: pg_rewind.cpp:349 pg_rewind.cpp:358 pg_rewind.cpp:754
+#, c-format
+msgid "could not create file \"%s\": %s\n"
+msgstr "无法创建文件\"%s\":%s\n"
+
+#: pg_rewind.cpp:371
+#, c-format
+msgid "execute file map success\n"
+msgstr "执行文件映射成功"
+
+#: pg_rewind.cpp:393
+#, c-format
+msgid "find minRecoveryPoint success from xlog insert location %X/%X\n"
+msgstr "从xlog插入位置 %X/%X 查找minRecoveryPoint成功\n"
+
+#: pg_rewind.cpp:397
+#, c-format
+msgid "find minRecoveryPoint success from checkpoint location %X/%X\n"
+msgstr "从检查点位置 %X/%X 查找minRecoveryPoint成功\n"
+
+#: pg_rewind.cpp:405
+#, c-format
+msgid "update pg_control file success, minRecoveryPoint: %X/%X, ckpLoc:%X/%X, ckpRedo:%X/%X, preCkp:%X/%X\n"
+msgstr "更新pg_control文件成功，minRecoveryPoint: %X/%X, ckpLoc:%X/%X, ckpRedo:%X/%X, preCkp:%X/%X\n"
+
+#: pg_rewind.cpp:413
+#, c-format
+msgid "update pg_dw file success\n"
+msgstr "更新pg_dw文件成功\n"
+
+#: pg_rewind.cpp:427
+#, c-format
+msgid "xlog end point: %s\n"
+msgstr "xlog结束点: %s\n"
+
+#
+#: pg_rewind.cpp:432
+#, c-format
+msgid "waiting for background process to finish streaming...\n"
+msgstr "等待后台进程完成流…\n"
+
+#: pg_rewind.cpp:434
+#, c-format
+msgid "could not send command to background pipe: %s\n"
+msgstr "无法将命令发送到后台管道:%s\n"
+
+#: pg_rewind.cpp:442
+#, c-format
+msgid "could not wait for child process: %s\n"
+msgstr "无法等待子进程:%s\n"
+
+#: pg_rewind.cpp:447
+#, c-format
+msgid "child %d died, expected %d\n"
+msgstr "子进程%d已终止,预计%d\n"
+
+#
+#: pg_rewind.cpp:452
+#, c-format
+msgid "child process did not exit normally\n"
+msgstr "子进程未正常退出\n"
+
+#: pg_rewind.cpp:457
+#, c-format
+msgid "child process exited with error %d\n"
+msgstr "子进程退出出错%d\n"
+
+#: pg_rewind.cpp:465
+#, c-format
+msgid "truncating and removing old xlog files\n"
+msgstr "截断和删除旧的xlog文件\n"
+
+#: pg_rewind.cpp:468
+#, c-format
+msgid "truncate and remove old xlog files success\n"
+msgstr "截断和删除旧xlog文件成功\n"
+
+#: pg_rewind.cpp:471
+#, c-format
+msgid "creating backup label and updating control file\n"
+msgstr "创建备份标签并更新控制文件\n"
+
+#: pg_rewind.cpp:474
+#, c-format
+msgid "create backup label success\n"
+msgstr "创建备份标签成功\n"
+
+#: pg_rewind.cpp:479
+#, c-format
+msgid "read checkpoint redo (%X/%X) success.\n"
+msgstr "读取检查点重做(%X/%X)成功.\n"
+
+#: pg_rewind.cpp:483
+#, c-format
+msgid "read checkpoint rec (%X/%X) success.\n"
+msgstr "读取检查点重rec (%X/%X)成功.\n"
+
+#: pg_rewind.cpp:498
+#, c-format
+msgid "failed to rename tablespace dir for cross cluster build.\n"
+msgstr "无法重命名跨集群生成的表空间目录.\n"
+
+#: pg_rewind.cpp:507
+#, c-format
+msgid "dn %s build completed.\n"
+msgstr "dn %s构建完成.\n"
+
+#: pg_rewind.cpp:521
+#, c-format
+msgid "source and target clusters are from different systems\n"
+msgstr "源集群和目标集群来自不同的系统\n"
+
+#: pg_rewind.cpp:530
+#, c-format
+msgid "clusters are not compatible with this version of gs_rewind\n"
+msgstr "群集与此版本的不兼容gs_rewind\n"
+
+#: pg_rewind.cpp:539
+#, c-format
+msgid "source and target cluster should be on the same timeline.\n"
+msgstr "源集群和目标集群应该在同一时间线上.\n"
+
+#: pg_rewind.cpp:551
+#, c-format
+msgid "target server was interrupted in mode %d.\n"
+msgstr "目标服务器在模式%d下中断.\n"
+
+#: pg_rewind.cpp:569
+#, c-format
+msgid "failed to remove \"%s\"\n"
+msgstr "删除\"%s\"失败\n"
+
+#: pg_rewind.cpp:571
+#, c-format
+msgid "the cluster needs to recover from the latest backup first.\n"
+msgstr "群集需要首先从最新的备份中恢复.\n"
+
+#: pg_rewind.cpp:608
+#, c-format
+msgid "localtime return NULL\n"
+msgstr "localtime返回空\n"
+
+#: pg_rewind.cpp:631
+#, c-format
+msgid "backup label buffer too small\n"
+msgstr "备份标签缓冲区太小\n"
+
+#: pg_rewind.cpp:658
+#, c-format
+msgid "unexpected control file CRC\n"
+msgstr "意外控制文件CRC\n"
+
+#: pg_rewind.cpp:728 pg_rewind.cpp:744 pg_rewind.cpp:795 pg_rewind.cpp:826
+#, c-format
+msgid "could not get canonical path for file \"%s\": %s in backup\n"
+msgstr "在备份中无法获取文件的规范路径\"%s\": %s\n"
+
+#: pg_rewind.cpp:802
+#, c-format
+msgid "open xlog dir %s failed when move old xlog files.\n"
+msgstr "移动旧xlog文件时打开xlog目录%s失败.\n"
+
+#: pg_rewind.cpp:808
+#, c-format
+msgid "failed to translate name to xlog: %s\n"
+msgstr "翻译名称到xlog失败:%s\n"
+
+#: pg_rewind.cpp:820
+#, c-format
+msgid "could not create directory \"%s\"\n"
+msgstr "无法创建目录\"%s\"\n"
+
+#: pg_rewind.cpp:833
+#, c-format
+msgid "failed to rename xlog file: %s\n"
+msgstr "重命名xlog文件失败: %s\n"
+
+#: pg_rewind.cpp:870
+#, c-format
+msgid "open xlog file %s failed when truncate old xlog file.\n"
+msgstr "截断旧的xlog文件时, 打开xlog文件%s失败.\n"
+
+#: pg_rewind.cpp:876
+#, c-format
+msgid "lseek xlog file %s failed when truncate old xlog file.\n"
+msgstr "lseek xlog文件%s在截断旧xlog文件时失败.\n"
+
+#: pg_rewind.cpp:885
+#, c-format
+msgid "write file %s failed when truncate old xlog file.\n"
+msgstr "截断旧xlog文件时写入文件%s失败.\n"
+
+#: pg_rewind.cpp:891
+#, c-format
+msgid "fsync file %s failed when truncate old xlog file.\n"
+msgstr "fsync文件%s在截断旧xlog文件时失败.\n"
+
+#: pg_rewind.cpp:896
+#, c-format
+msgid "close file %s failed when truncate old xlog file.\n"
+msgstr "截断旧xlog文件时关闭文件%s失败.\n"
+
+#: pg_rewind.cpp:906
+#, c-format
+msgid "could not get canonical path for file \"%s\": %s in truncate\n"
+msgstr "截断时无法获取文件的规范路径\"%s\": %s\n"
+
+#: pg_rewind.cpp:913
+#, c-format
+msgid "open xlog dir %s failed when remove old xlog files.\n"
+msgstr "删除旧的xlog文件时, 打开xlog目录%s失败.\n"
+
+#: pg_rewind.cpp:925
+#, c-format
+msgid "remove %s failed when truncate old xlog file.\n"
+msgstr "截断旧xlog文件时删除%s失败.\n"
+
+#: pg_rewind.cpp:1028
+#, c-format
+msgid "get primary pg_control success\n"
+msgstr "获取主pg_control成功\n"
+
+#: pg_rewind.cpp:1052
+#, c-format
+msgid "Build check result : needless build\n"
+msgstr "构建检查结果: 不需要构建\n"
+
+#: pg_rewind.cpp:1054
+#, c-format
+msgid "Build check result : incremental build\n"
+msgstr "构建检查结果: 增量构建\n"

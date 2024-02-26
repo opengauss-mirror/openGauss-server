@@ -38,7 +38,9 @@
 #include "access/xlog.h"
 #include "access/ustore/knl_whitebox_test.h"
 #include "access/ubtree.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
@@ -182,6 +184,7 @@ static void assign_plsql_compile_behavior_compat_options(const char* newval, voi
 static void assign_connection_info(const char* newval, void* extra);
 static bool check_application_type(int* newval, void** extra, GucSource source);
 static void assign_convert_string_to_digit(bool newval, void* extra);
+static bool check_enable_ignore_case_in_dquotes(bool* newval, void** extra, GucSource source);
 static bool CheckUStoreAttr(char** newval, void** extra, GucSource source);
 static void AssignUStoreAttr(const char* newval, void* extra);
 static bool check_snapshot_delimiter(char** newval, void** extra, GucSource source);
@@ -245,6 +248,7 @@ static const struct config_enum_entry rewrite_options[] = {
     {"predpushforce", PRED_PUSH_FORCE, false},
     {"disable_pullup_expr_sublink", SUBLINK_PULLUP_DISABLE_EXPR, false},
     {"enable_sublink_pullup_enhanced", SUBLINK_PULLUP_ENHANCED, false},
+    {"remove_redundant_distinct_group_by", REMOVE_REDUNDANT_DISTINCT_GROUP_BY, false},
     {NULL, 0, false}
 };
 
@@ -385,7 +389,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN},
     {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL},
     {"accept_empty_str", OPT_ACCEPT_EMPTY_STR},
-    {"plpgsql_dependency", OPT_PLPGSQL_DEPENDENCY}
+    {"plpgsql_dependency", OPT_PLPGSQL_DEPENDENCY},
+    {"proc_uncheck_default_param", OPT_PROC_UNCHECK_DEFAULT_PARAM}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -1724,6 +1729,17 @@ static void InitSqlConfigureNamesBool()
             &u_sess->attr.attr_sql.partition_iterator_elimination,
             false,
             NULL,
+            NULL,
+            NULL},
+        {{"enable_ignore_case_in_dquotes",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enable ignore case in double quotes for some driver."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_ignore_case_in_dquotes,
+            false,
+            check_enable_ignore_case_in_dquotes,
             NULL,
             NULL},
         {{"enable_streaming",
@@ -3760,6 +3776,16 @@ static void assign_convert_string_to_digit(bool newval, void* extra)
         InvalidateOprCacheCallBack(0, 0, 0);
     }
     return;
+}
+
+static bool check_enable_ignore_case_in_dquotes(bool* newval, void** extra, GucSource source)
+{
+    if (*newval && (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
+        ereport(WARNING, (errmsg("if tables with the same name but different case already\n"
+        "exists in the database, this will result in only being able to\n"
+        "manipulate tables with table names that are entirely lowercase.")));
+    }
+    return true;
 }
 
 #define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')

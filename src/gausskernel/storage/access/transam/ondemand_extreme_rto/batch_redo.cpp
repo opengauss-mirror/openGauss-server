@@ -101,11 +101,11 @@ int RedoItemTagMatch(const void *left, const void *right, Size keysize)
     return 1;
 }
 
-HTAB **PRRedoItemHashInitialize(MemoryContext context)
+ondemand_htab_ctrl_t *PRRedoItemHashInitialize(MemoryContext context)
 {
     HASHCTL ctl;
-    int batchNum = get_batch_redo_num();
-    HTAB **hTab = (HTAB **)MemoryContextAllocZero(context, batchNum * sizeof(HTAB *));
+    ondemand_htab_ctrl_t *htab_ctrl =
+        (ondemand_htab_ctrl_t *)MemoryContextAllocZero(context, sizeof(ondemand_htab_ctrl_t));
 
     /*
      * create hashtable that indexes the redo items
@@ -117,30 +117,107 @@ HTAB **PRRedoItemHashInitialize(MemoryContext context)
     ctl.entrysize = sizeof(RedoItemHashEntry);
     ctl.hash = RedoItemTagHash;
     ctl.match = RedoItemTagMatch;
-    for (int i = 0; i < batchNum; i++) {
-        hTab[i] = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
-            HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_SHRCTX | HASH_COMPARE);
-    }
+    htab_ctrl->hTab = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
+                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
+    htab_ctrl->nextHTabCtrl = NULL;
+    htab_ctrl->maxRedoItemPtr = InvalidXLogRecPtr;
 
-    return hTab;
+    return htab_ctrl;
 }
 
-void PRRegisterBlockInsertToList(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *record)
+ondemand_htab_ctrl_t **PRInitRedoItemHashForAllPipeline(MemoryContext context)
+{
+    int batchNum = get_batch_redo_num();
+    ondemand_htab_ctrl_t **htab_ctrl =
+        (ondemand_htab_ctrl_t **)MemoryContextAllocZero(context, batchNum * sizeof(ondemand_htab_ctrl_t *));
+
+    for (int i = 0; i < batchNum; i++) {
+        htab_ctrl[i] = PRRedoItemHashInitialize(context);
+    }
+
+    return htab_ctrl;
+}
+
+void PRRegisterBlockInsertToListHead(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *record)
+{
+    ReferenceRecParseState(record);
+    if (redoItemHashEntry->head != NULL) {
+        Assert(XLByteLE(record->blockparse.blockhead.end_ptr, redoItemHashEntry->head->blockparse.blockhead.end_ptr));
+        record->nextrecord = redoItemHashEntry->head;
+        redoItemHashEntry->head = record;
+    } else {
+        redoItemHashEntry->tail = record;
+        redoItemHashEntry->head = record;
+    }
+    redoItemHashEntry->redoItemNum++;
+}
+
+void PRRegisterBlockInsertToListTail(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *record)
 {
     ReferenceRecParseState(record);
     if (redoItemHashEntry->tail != NULL) {
         redoItemHashEntry->tail->nextrecord = record;
         redoItemHashEntry->tail = record;
     } else {
-        redoItemHashEntry->tail = record;
         redoItemHashEntry->head = record;
+        redoItemHashEntry->tail = record;
     }
     record->nextrecord = NULL;
     redoItemHashEntry->redoItemNum++;
 }
 
-void PRRegisterBlockChangeExtended(XLogRecParseState *recordBlockState, const RelFileNode rNode, ForkNumber forkNum,
-                                   BlockNumber blkNo, HTAB *redoItemHash)
+#ifdef USE_ASSERT_CHECKING
+static void OndemandCheckPRRegister(XLogRecParseState *headRecord, XLogRecParseState *tailRecord, int count)
+{
+    Assert(headRecord != NULL);
+    Assert(tailRecord != NULL);
+
+    int checkCount = 1;
+    XLogRecParseState *nextRecord = headRecord;
+    while (nextRecord != tailRecord) {
+        XLogRecParseState *checkRecord = nextRecord;
+        nextRecord = (XLogRecParseState *)checkRecord->nextrecord;
+        Assert(XLByteLE(checkRecord->blockparse.blockhead.end_ptr, nextRecord->blockparse.blockhead.end_ptr));
+        checkCount++;
+    }
+    Assert(nextRecord == tailRecord);
+    Assert(checkCount == count);
+}
+#endif
+
+void PRRegisterBatchBlockInsertToListHead(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *headRecord,
+                                          XLogRecParseState *tailRecord, int count)
+{
+    if (redoItemHashEntry->head != NULL) {
+        Assert(XLByteLE(tailRecord->blockparse.blockhead.end_ptr,
+                        redoItemHashEntry->head->blockparse.blockhead.end_ptr));
+        tailRecord->nextrecord = redoItemHashEntry->head;
+        redoItemHashEntry->head = headRecord;
+    } else {
+        redoItemHashEntry->head = headRecord;
+        redoItemHashEntry->tail = tailRecord;
+    }
+    redoItemHashEntry->redoItemNum += count;
+}
+
+void PRRegisterBatchBlockInsertToListTail(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *headRecord,
+                                          XLogRecParseState *tailRecord, int count)
+{
+    if (redoItemHashEntry->tail != NULL) {
+        Assert(XLByteLE(redoItemHashEntry->tail->blockparse.blockhead.end_ptr,
+                        headRecord->blockparse.blockhead.end_ptr));
+        redoItemHashEntry->tail->nextrecord = headRecord;
+        redoItemHashEntry->tail = tailRecord;
+    } else {
+        redoItemHashEntry->head = headRecord;
+        redoItemHashEntry->tail = tailRecord;
+    }
+    tailRecord->nextrecord = NULL;
+    redoItemHashEntry->redoItemNum += count;
+}
+
+static RedoItemHashEntry *PRRegisterGetHashEntry(const RelFileNode rNode, ForkNumber forkNum, BlockNumber blkNo,
+                                               HTAB *redoItemHash)
 {
     RedoItemTag redoItemTag;
     RedoItemHashEntry *redoItemHashEntry = NULL;
@@ -157,12 +234,35 @@ void PRRegisterBlockChangeExtended(XLogRecParseState *recordBlockState, const Re
     }
     if (!g_instance.dms_cxt.SSReformInfo.is_hashmap_constructed) {
         g_instance.dms_cxt.SSReformInfo.is_hashmap_constructed = true;
-        INSTR_TIME_SET_CURRENT(g_instance.dms_cxt.SSReformInfo.construct_hashmap);
+        g_instance.dms_cxt.SSReformInfo.construct_hashmap = GetCurrentTimestamp();
     }
     if (!found) {
         PRInitRedoItemEntry(redoItemHashEntry);
     }
-    PRRegisterBlockInsertToList(redoItemHashEntry, recordBlockState);
+    return redoItemHashEntry;
+}
+
+void PRRegisterBlockChangeExtended(XLogRecParseState *recordBlockState, const RelFileNode rNode, ForkNumber forkNum,
+                                   BlockNumber blkNo, HTAB *redoItemHash, bool isHead)
+{
+    RedoItemHashEntry *redoItemHashEntry = PRRegisterGetHashEntry(rNode, forkNum, blkNo, redoItemHash);
+    if (unlikely(isHead)) {
+        PRRegisterBlockInsertToListHead(redoItemHashEntry, recordBlockState);
+    } else {
+        PRRegisterBlockInsertToListTail(redoItemHashEntry, recordBlockState);
+    }
+}
+
+void PRRegisterBatchBlockChangeExtended(XLogRecParseState *headBlockState, XLogRecParseState *tailBlockState, int count,
+                                        const RelFileNode rNode, ForkNumber forkNum, BlockNumber blkNo,
+                                        HTAB *redoItemHash, bool isHead)
+{
+    RedoItemHashEntry *redoItemHashEntry = PRRegisterGetHashEntry(rNode, forkNum, blkNo, redoItemHash);
+    if (unlikely(isHead)) {
+        PRRegisterBatchBlockInsertToListHead(redoItemHashEntry, headBlockState, tailBlockState, count);
+    } else {
+        PRRegisterBatchBlockInsertToListTail(redoItemHashEntry, headBlockState, tailBlockState, count);
+    }
 }
 
 void PRTrackRemoveEntry(HTAB *hashMap, RedoItemHashEntry *entry)
@@ -252,6 +352,17 @@ void PRTrackDatabaseDrop(XLogRecParseState *recordBlockState, HTAB *hashMap)
     XLogBlockParseStateRelease(recordBlockState);
 }
 
+void PRTrackAllClear(HTAB *redoItemHash)
+{
+    HASH_SEQ_STATUS status;
+    RedoItemHashEntry *redoItemEntry = NULL;
+    hash_seq_init(&status, redoItemHash);
+
+    while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
+        PRTrackRemoveEntry(redoItemHash, redoItemEntry);
+    }
+}
+
 void PRTrackDropFiles(HTAB *redoItemHash, XLogBlockDdlParse *ddlParse, XLogRecPtr lsn)
 {
     ColFileNodeRel *xnodes = (ColFileNodeRel *)ddlParse->mainData;
@@ -307,7 +418,7 @@ void PRTrackRelStorageDrop(XLogRecParseState *recordBlockState, HTAB *redoItemHa
 }
 
 // Get relfile node fork num blockNum
-void PRTrackRelPageModification(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
+void PRTrackRelPageModification(XLogRecParseState *recordBlockState, HTAB *redoItemHash, bool isHead)
 {
     RelFileNode relnode;
     ForkNumber forkNum;
@@ -315,16 +426,31 @@ void PRTrackRelPageModification(XLogRecParseState *recordBlockState, HTAB *redoI
 
     PRXLogRecGetBlockTag(recordBlockState, &relnode, &blkNo, &forkNum);
 
-    PRRegisterBlockChangeExtended(recordBlockState, relnode, forkNum, blkNo, redoItemHash);
+    PRRegisterBlockChangeExtended(recordBlockState, relnode, forkNum, blkNo, redoItemHash, isHead);
 }
 
 /**
     for block state, put it in to hash
 */
-void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
+void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash, bool isHead)
 {
     Assert(recordBlockState->blockparse.blockhead.block_valid < BLOCK_DATA_DDL_TYPE);
-    PRTrackRelPageModification(recordBlockState, redoItemHash);
+    PRTrackRelPageModification(recordBlockState, redoItemHash, isHead);
+}
+
+void PRTrackAddBatchBlock(XLogRecParseState *headBlockState, XLogRecParseState *tailBlockState, int count,
+                          HTAB *redoItemHash, bool isHead)
+{
+#ifdef USE_ASSERT_CHECKING
+    OndemandCheckPRRegister(headBlockState, tailBlockState, count);
+#endif
+    RelFileNode relnode;
+    ForkNumber forkNum;
+    BlockNumber blkNo;
+
+    PRXLogRecGetBlockTag(headBlockState, &relnode, &blkNo, &forkNum);
+    PRRegisterBatchBlockChangeExtended(headBlockState, tailBlockState, count, relnode, forkNum, blkNo, redoItemHash,
+                                       isHead);
 }
 
 /**

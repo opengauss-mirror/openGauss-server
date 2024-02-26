@@ -789,3 +789,28 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
     return NULL;
 }
 
+BufferDesc *SSTryGetBuffer(uint64 times, uint64 *buf_state)
+{
+    int max_buffer_can_use = NORMAL_SHARED_BUFFER_NUM;
+    int try_times = times;
+    uint64 local_buf_state;
+    BufferDesc *buf = NULL;
+    for (int i = 0; i < try_times; i++) {
+        buf = GetBufferDescriptor(ClockSweepTick(max_buffer_can_use));
+
+        if (!retryLockBufHdr(buf, &local_buf_state)) {
+            return NULL;
+        }
+
+        if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_IS_META) &&
+            (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
+            *buf_state = local_buf_state;
+            (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->get_buf_num_clock_sweep, 1);
+            return buf;
+        }
+
+        UnlockBufHdr(buf, local_buf_state);
+    }
+
+    return NULL;
+}

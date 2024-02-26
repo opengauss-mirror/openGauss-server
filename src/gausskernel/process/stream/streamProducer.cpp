@@ -1166,16 +1166,16 @@ void StreamProducer::redistributeBatchChannelForSlice(VectorBatch* batch)
     }
 
     int keyNum;
-    Datum keyValues[RANGE_PARTKEYMAXNUM];
-    bool keyNulls[RANGE_PARTKEYMAXNUM];
-    Oid KeyAttrs[RANGE_PARTKEYMAXNUM];
-    int colMap[RANGE_PARTKEYMAXNUM];
+    Datum keyValues[MAX_RANGE_PARTKEY_NUMS];
+    bool keyNulls[MAX_RANGE_PARTKEY_NUMS];
+    Oid KeyAttrs[MAX_RANGE_PARTKEY_NUMS];
+    int colMap[MAX_RANGE_PARTKEY_NUMS];
     Datum data;
     uint64 hashValue;
     bool allIsNull;
     ScalarVector* pDistributeVec = NULL;
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* constPointers[RANGE_PARTKEYMAXNUM] = {NULL};
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* constPointers[MAX_RANGE_PARTKEY_NUMS] = {NULL};
 
     keyNum = list_length(m_distributeKey);
 
@@ -1322,16 +1322,16 @@ template<int distrType>
 void StreamProducer::redistributeTupleChannelForSlice(TupleTableSlot* tuple)
 {
     int keyNum;
-    Datum keyValues[RANGE_PARTKEYMAXNUM] = {0};
-    bool keyNulls[RANGE_PARTKEYMAXNUM] = {false};
-    Oid keyAttrs[RANGE_PARTKEYMAXNUM] = {0};
-    int colMap[RANGE_PARTKEYMAXNUM] = {0};
+    Datum keyValues[MAX_RANGE_PARTKEY_NUMS] = {0};
+    bool keyNulls[MAX_RANGE_PARTKEY_NUMS] = {false};
+    Oid keyAttrs[MAX_RANGE_PARTKEY_NUMS] = {0};
+    int colMap[MAX_RANGE_PARTKEY_NUMS] = {0};
     Datum data;
     uint64 hashValue = 0;
     bool isNull = false;
     bool allIsNULL = true;
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Const* constPointers[RANGE_PARTKEYMAXNUM] = {NULL};
+    Const consts[MAX_RANGE_PARTKEY_NUMS];
+    Const* constPointers[MAX_RANGE_PARTKEY_NUMS] = {NULL};
 
     if (distrType == REMOTE_DIRECT_DISTRIBUTE) {
         return;
@@ -1376,30 +1376,16 @@ void StreamProducer::DispatchBatchRedistrFunctionByRedisType()
         case PARALLEL_NONE:
 #ifdef ENABLE_MULTIPLE_NODES
         case REMOTE_DISTRIBUTE:
-            if (m_hasExprKey) {
-                m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
-                                  &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_DIRECT_DISTRIBUTE> :
-                                  &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_DISTRIBUTE>);
-            } else {
-                m_channelCalFun = ((list_length(m_consumerNodes->nodeList) == 1) ?
-                                  &StreamProducer::redistributeTupleChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
-                                  &StreamProducer::redistributeTupleChannel<len, REMOTE_DISTRIBUTE>);
-            }
+            m_channelCalVecFun = (list_length(m_consumerNodes->nodeList) == 1) ?
+                                 &StreamProducer::redistributeBatchChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
+                                 &StreamProducer::redistributeBatchChannel<len, REMOTE_DISTRIBUTE>;
             break;
         case REMOTE_SPLIT_DISTRIBUTE:
-            if (m_hasExprKey) {
-                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<REMOTE_SPLIT_DISTRIBUTE>;
-            } else {
-                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
-            }
+            m_channelCalVecFun = &StreamProducer::redistributeBatchChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
             break;
 #endif
         case LOCAL_DISTRIBUTE:
-            if (m_hasExprKey) {
-                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<LOCAL_DISTRIBUTE>;
-            } else {
-                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, LOCAL_DISTRIBUTE>;
-            }
+            m_channelCalVecFun = &StreamProducer::redistributeBatchChannel<len, LOCAL_DISTRIBUTE>;
             break;
 
         default:
@@ -2143,6 +2129,12 @@ void StreamProducer::SetDest(bool is_vec_plan)
                     else
                         m_dest = DestTupleRoundRobin;
                     break;
+#ifdef USE_SPQ
+                case REMOTE_DML_WRITE_NODE:
+                    if (!is_vec_plan)
+                        m_dest = DestTupleDML;
+                    break;
+#endif
                 case PARALLEL_NONE:
                 case REMOTE_DISTRIBUTE:
                 case REMOTE_SPLIT_DISTRIBUTE:
@@ -2339,6 +2331,22 @@ void StreamProducer::roundRobinStream(VectorBatch* batch)
 {
     roundRobinBatch<BCT_LZ4>(batch);
 }
+
+#ifdef USE_SPQ
+void StreamProducer::dmlStream(TupleTableSlot* tuple, DestReceiver* self)
+{
+    assembleStreamMessage(tuple, self, &m_tupleBuffer);
+    sendByteStream(m_plan->write_node_index + m_roundRobinIdx * m_plan->num_nodes);
+
+    m_roundRobinIdx++;
+    /* only send to write node. */
+    int write_dop = m_connNum / m_plan->num_nodes;
+    m_roundRobinIdx = m_roundRobinIdx % write_dop;
+
+    /* reset tuple buffer. */
+    resetStringInfo(&m_tupleBuffer);
+}
+#endif
  
 template<BatchCompressType ctype>
 void StreamProducer::roundRobinBatch(VectorBatch* batch)

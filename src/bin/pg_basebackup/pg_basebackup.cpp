@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 
 #include "tool_common.h"
 #include "getopt_long.h"
@@ -503,7 +504,11 @@ static void StartLogStreamer(const char *startpos, uint32 timeline, char *syside
 #ifndef WIN32
     bgchild = fork();
     if (bgchild == 0) {
-        /* in child process */
+        /*
+         * In child process.
+         * Receive SIGKILL when main process exits.
+         */
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
         exit(LogStreamerMain(g_childParam));
     } else if (bgchild < 0) {
         fprintf(stderr, _("%s: could not create background process: %s\n"), progname, strerror(errno));
@@ -576,7 +581,10 @@ static void verify_dir_is_empty_or_create(char *dirname)
  */
 static void *ProgressReport(void *arg)
 {
-    char progressBar[52];
+    if (totalsize == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     char totaldone_str[32];
     char totalsize_str[32];
     errno_t errorno = EOK;
@@ -611,17 +619,16 @@ static void *ProgressReport(void *arg)
             snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
         securec_check_ss_c(errorno, "", "");
 
-        fprintf(stderr,
+        fprintf(stdout,
             ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\r",
             "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\r", tblspaceCount),
             progressBar, totaldone_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
-
-        /* print it per second */
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -635,10 +642,11 @@ static void *ProgressReport(void *arg)
     errorno =
         snprintf_s(totalsize_str, sizeof(totalsize_str), sizeof(totalsize_str) - 1, INT64_FORMAT, (int64)totalsize);
         securec_check_ss_c(errorno, "", "");
-    fprintf(stderr,
+    fprintf(stdout,
         ngettext("Progress: %s %s/%s kB (%d%%), %d/%d tablespace\n",
         "Progress: %s %s/%s kB (%d%%), %d/%d tablespaces\n", tblspaceCount),
         progressBar, totalsize_str, totalsize_str, percent, g_tablespacenum, tblspaceCount);
+    return nullptr;
 }
 
 /*
@@ -1402,7 +1410,7 @@ static void BaseBackup(void)
     PQfreemem(sysidentifier);
     sysidentifier = NULL;
 
-    fprintf(stderr, "Start receiving chunks\n");
+    fprintf(stdout, "Start receiving chunks\n");
     /* Print the progress of the tool execution through a new thread. */
     pthread_t progressThread;
     pthread_create(&progressThread, NULL, ProgressReport, NULL);
@@ -1425,7 +1433,7 @@ static void BaseBackup(void)
     pthread_cond_signal(&g_cond);
     pthread_mutex_unlock(&g_mutex);
     pthread_join(progressThread, NULL);
-    fprintf(stderr, "Finish receiving chunks\n");
+    fprintf(stdout, "Finish receiving chunks\n");
 
     /*
      * Get the stop position

@@ -19,6 +19,15 @@
 
 #include "catalog/genbki.h"
 #include "catalog/objectaddress.h"
+#include "nodes/pg_list.h"
+
+/* Publication trigger events */
+#define PUB_TRIG_DDL_CMD_END "ddl_command_end"
+#define PUB_TRIG_DDL_CMD_START "ddl_command_start"
+
+/* Publication event trigger prefix */
+#define PUB_EVENT_TRIG_FORMAT "pg_deparse_trig_%s_%u"
+#define PUB_EVENT_TRIG_PREFIX "pg_deparse_trig_"
 
 /* ----------------
  *		pg_publication definition.  cpp turns this into
@@ -26,6 +35,9 @@
  *
  * ----------------
  */
+
+#define int8 int64
+
 #define PublicationRelationId 6130
 #define PublicationRelation_Rowtype_Id 6141
 CATALOG(pg_publication,6130) BKI_ROWTYPE_OID(6141) BKI_SCHEMA_MACRO
@@ -48,8 +60,11 @@ CATALOG(pg_publication,6130) BKI_ROWTYPE_OID(6141) BKI_SCHEMA_MACRO
 
     /* true if deletes are published */
     bool pubdelete;
+
+    int8 pubddl;
 }
 FormData_pg_publication;
+#undef int8
 
 /* ----------------
  * 		Form_pg_publication corresponds to a pointer to a tuple with
@@ -63,18 +78,20 @@ typedef FormData_pg_publication *Form_pg_publication;
  * ----------------
  */
 
-#define Natts_pg_publication 6
+#define Natts_pg_publication 7
 #define Anum_pg_publication_pubname 1
 #define Anum_pg_publication_pubowner 2
 #define Anum_pg_publication_puballtables 3
 #define Anum_pg_publication_pubinsert 4
 #define Anum_pg_publication_pubupdate 5
 #define Anum_pg_publication_pubdelete 6
+#define Anum_pg_publication_pubddl 7
 
 typedef struct PublicationActions {
     bool pubinsert;
     bool pubupdate;
     bool pubdelete;
+    int64 pubddl;
 } PublicationActions;
 
 typedef struct Publication {
@@ -83,6 +100,13 @@ typedef struct Publication {
     bool alltables;
     PublicationActions pubactions;
 } Publication;
+
+#define PUBDDL_NONE 0
+#define PUBDDL_TABLE ((int64)1 << 0)
+#define PUBDDL_ALL ((int64)0xFFFFFFFFFFFFFFFF)
+
+#define ENABLE_PUBDDL_TYPE(pub, obj) \
+    ((bool)((int64)(pub) & (obj)))
 
 extern Publication *GetPublicationByName(const char *pubname, bool missing_ok);
 extern List *GetRelationPublications(Oid relid);

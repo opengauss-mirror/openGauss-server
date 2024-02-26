@@ -1,3 +1,5 @@
+create database parse_xlog_db;
+\c parse_xlog_db;
 -- gs_xlogdump_lsn
 START TRANSACTION;
 
@@ -76,3 +78,6 @@ $$
 SELECT gs_xlogdump_parsepage_tablepath();
 DROP TABLE heap_t1;
 COMMIT;
+
+\c regression;
+drop database parse_xlog_db;

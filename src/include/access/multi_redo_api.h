@@ -38,9 +38,12 @@
 
 #ifdef ENABLE_LITE_MODE
 #define ENABLE_ONDEMAND_RECOVERY false
+#define ENABLE_ONDEMAND_REALTIME_BUILD false
 #else
 #define ENABLE_ONDEMAND_RECOVERY (ENABLE_DMS && IsExtremeRedo() \
     && g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery)
+#define ENABLE_ONDEMAND_REALTIME_BUILD (ENABLE_ONDEMAND_RECOVERY \
+    && g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build)
 #endif
 
 typedef enum {
@@ -90,14 +93,21 @@ static inline int get_recovery_undozidworkers_num()
 
 inline bool IsExtremeRedo()
 {
+    if (ENABLE_DMS && SS_STANDBY_PROMOTING) {
+        /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
+        return false;
+    }
     return g_instance.comm_cxt.predo_cxt.redoType == EXTREME_REDO && (get_real_recovery_parallelism() > 1);
 }
 
 inline bool IsParallelRedo()
 {
+    if (ENABLE_DMS && SS_STANDBY_PROMOTING) {
+        /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
+        return false;
+    }
     return g_instance.comm_cxt.predo_cxt.redoType == PARALLEL_REDO && (get_real_recovery_parallelism() > 1);
 }
-
 
 static inline bool IsMultiThreadRedo()
 {
@@ -105,7 +115,6 @@ static inline bool IsMultiThreadRedo()
 }
 
 uint32 GetRedoWorkerCount();
-
 bool IsMultiThreadRedoRunning();
 void DispatchRedoRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
 void GetThreadNameIfMultiRedo(int argc, char* argv[], char** threadNamePtr);

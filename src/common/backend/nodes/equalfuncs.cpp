@@ -983,6 +983,10 @@ static bool _equalQuery(const Query* a, const Query* b)
     }
     
     COMPARE_NODE_FIELD(indexhintList);
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
+        COMPARE_SCALAR_FIELD(has_uservar);
+    }
+    
     return true;
 }
 
@@ -1102,6 +1106,7 @@ static bool _equalAlterTableStmt(const AlterTableStmt* a, const AlterTableStmt* 
     COMPARE_NODE_FIELD(cmds);
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(fromCreate);
 
     return true;
 }
@@ -1666,6 +1671,7 @@ static bool _equalTransactionStmt(const TransactionStmt* a, const TransactionStm
 
 static bool _equalCompositeTypeStmt(const CompositeTypeStmt* a, const CompositeTypeStmt* b)
 {
+    COMPARE_SCALAR_FIELD(replace);
     COMPARE_NODE_FIELD(typevar);
     COMPARE_NODE_FIELD(coldeflist);
 
@@ -1674,6 +1680,7 @@ static bool _equalCompositeTypeStmt(const CompositeTypeStmt* a, const CompositeT
 
 static bool _equalTableOfTypeStmt(const TableOfTypeStmt* a, const TableOfTypeStmt* b)
 {
+    COMPARE_SCALAR_FIELD(replace);
     COMPARE_NODE_FIELD(typname);
     COMPARE_NODE_FIELD(reftypname);
 
@@ -1898,6 +1905,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
     COMPARE_SCALAR_FIELD(canCreateTempSeq);
     COMPARE_SCALAR_FIELD(is_large);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(is_autoinc);
 
     return true;
 }
@@ -1908,6 +1916,7 @@ static bool _equalAlterSeqStmt(const AlterSeqStmt* a, const AlterSeqStmt* b)
     COMPARE_NODE_FIELD(options);
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_SCALAR_FIELD(is_large);
+    COMPARE_SCALAR_FIELD(is_autoinc);
 
     return true;
 }
@@ -2557,6 +2566,7 @@ static bool _equalAStar(const A_Star* a, const A_Star* b)
 
 static bool _equalAIndices(const A_Indices* a, const A_Indices* b)
 {
+    COMPARE_SCALAR_FIELD(is_slice);
     COMPARE_NODE_FIELD(lidx);
     COMPARE_NODE_FIELD(uidx);
 
@@ -3124,6 +3134,7 @@ static bool _equalCreateDirectoryStmt(const CreateDirectoryStmt* a, const Create
 static bool _equalDropDirectoryStmt(const DropDirectoryStmt* a, const DropDirectoryStmt* b)
 {
     COMPARE_STRING_FIELD(directoryname);
+    COMPARE_SCALAR_FIELD(missing_ok);
 
     return true;
 }

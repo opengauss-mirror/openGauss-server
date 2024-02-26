@@ -1067,19 +1067,23 @@ static char check_in_dss_instance(pgFile *file, int include_id)
  */
 static void *ProgressReportRestore(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_doneFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \r",
             progressBar, percent, g_doneFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -1090,25 +1094,30 @@ static void *ProgressReportRestore(void *arg)
     } while (((g_doneFiles + g_directoryFiles) < g_totalFiles) && g_progressFlag);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Restore file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
+    return nullptr;
 }
 
 static void *ProgressReportSyncRestoreFile(void *arg)
 {
-    char progressBar[52];
+    if (g_totalFiles == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_syncFiles * 100 / g_totalFiles);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync restore file \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, sync_files/total_files). Sync restore file \r",
             progressBar, percent, g_syncFiles, g_totalFiles);
         pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -1119,8 +1128,9 @@ static void *ProgressReportSyncRestoreFile(void *arg)
     } while ((g_syncFiles < g_totalFiles) && !g_progressFlagSync);
     percent = 100;
     GenerateProgressBar(percent, progressBar);
-    fprintf(stderr, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync restore file \n",
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, done_files/total_files). Sync restore file \n",
         progressBar, percent, g_totalFiles, g_totalFiles);
+    return nullptr;
 }
 
 static void remove_redundant_files(const char *pgdata_path,
@@ -1660,17 +1670,7 @@ create_recovery_conf(time_t backup_id,
     /* construct restore_command */
     if (pitr_requested)
     {
-        char *timestamp = NULL;
-        const char *oldtime = NULL;
-        timestamp = (char *)pg_malloc(RESTORE_ARRAY_LEN);
-        time2iso(timestamp, RESTORE_ARRAY_LEN, backup->end_time);
-        oldtime = rt->time_string;
-        if (rt->time_string) {
-            rt->time_string = timestamp;
-        }
         construct_restore_cmd(fp, rt, restore_command_provided, target_immediate);
-        rt->time_string = oldtime;
-        free(timestamp);
     }
 
     if (fio_fflush(fp) != 0 ||
@@ -1752,10 +1752,17 @@ static void construct_restore_cmd(FILE *fp, pgRecoveryTarget *rt,
         fio_fprintf(fp, "recovery_target_timeline = 'current'\n");
 #endif
     }
-    if (instance_config.archive.host) {
-        elog(LOG, "archive host specified, input restore command manually.");
+    
+    if (restore_command_provided)
+    {
+        char restore_command_guc[16384];
+        errno_t rc = sprintf_s(restore_command_guc, sizeof(restore_command_guc), "%s", instance_config.restore_command);
+        securec_check_ss_c(rc, "\0", "\0");
+        fio_fprintf(fp, "restore_command = '%s\n", restore_command_guc);
+        elog(LOG, "Setting restore command to '%s'", restore_command_guc);
     } else {
-        fprintf(fp, "restore_command = 'cp %s/%%f %%p'\n", arclog_path);
+        elog(WARNING, "you need to input restore command manually.");
+        
     }
 }
 

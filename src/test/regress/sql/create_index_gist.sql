@@ -1,3 +1,53 @@
+-- Prepare Data
+CREATE SCHEMA create_index_gist;
+SET CURRENT_SCHEMA = create_index_gist;
+
+CREATE TABLE slow_emp4000 (
+	home_base	 box
+) with(autovacuum_enabled = off);
+COPY slow_emp4000 FROM '@abs_srcdir@/data/rect.data';
+
+CREATE TABLE fast_emp4000 (
+	home_base	 box
+) with(autovacuum_enabled = off);
+INSERT INTO fast_emp4000 SELECT * FROM slow_emp4000;
+
+CREATE TABLE POLYGON_TBL(f1 polygon);
+INSERT INTO POLYGON_TBL(f1) VALUES ('(2.0,0.0),(2.0,4.0),(0.0,0.0)');
+INSERT INTO POLYGON_TBL(f1) VALUES ('(3.0,1.0),(3.0,3.0),(1.0,0.0)');
+-- degenerate polygons
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0.0,0.0)');
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0.0,1.0),(0.0,1.0)');
+-- bad polygon input strings
+INSERT INTO POLYGON_TBL(f1) VALUES ('0.0');
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0.0 0.0');
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0,1,2)');
+INSERT INTO POLYGON_TBL(f1) VALUES ('(0,1,2,3');
+INSERT INTO POLYGON_TBL(f1) VALUES ('asdf');
+
+CREATE TABLE CIRCLE_TBL (f1 circle);
+INSERT INTO CIRCLE_TBL VALUES ('<(5,1),3>');
+INSERT INTO CIRCLE_TBL VALUES ('<(1,2),100>');
+INSERT INTO CIRCLE_TBL VALUES ('1,3,5');
+INSERT INTO CIRCLE_TBL VALUES ('((1,2),3)');
+INSERT INTO CIRCLE_TBL VALUES ('<(100,200),10>');
+INSERT INTO CIRCLE_TBL VALUES ('<(100,1),115>');
+-- bad values
+INSERT INTO CIRCLE_TBL VALUES ('<(-100,0),-100>');
+INSERT INTO CIRCLE_TBL VALUES ('1abc,3,5');
+INSERT INTO CIRCLE_TBL VALUES ('(3,(1,2),3)');
+
+CREATE TABLE POINT_TBL(f1 point);
+INSERT INTO POINT_TBL(f1) VALUES ('(0.0,0.0)');
+INSERT INTO POINT_TBL(f1) VALUES ('(-10.0,0.0)');
+INSERT INTO POINT_TBL(f1) VALUES ('(-3.0,4.0)');
+INSERT INTO POINT_TBL(f1) VALUES ('(5.1, 34.5)');
+INSERT INTO POINT_TBL(f1) VALUES ('(-5.0,-12.0)');
+-- bad format points
+INSERT INTO POINT_TBL(f1) VALUES ('asdfasdf');
+INSERT INTO POINT_TBL(f1) VALUES ('10.0,10.0');
+INSERT INTO POINT_TBL(f1) VALUES ('(10.0 10.0)');
+INSERT INTO POINT_TBL(f1) VALUES ('(10.0,10.0');
 --
 -- GiST (rtree-equivalent opclasses only)
 --
@@ -189,3 +239,10 @@ create index i on t using gist(c_point) with (buffering=on);
 RESET enable_seqscan;
 RESET enable_indexscan;
 RESET enable_bitmapscan;
+DROP TABLE slow_emp4000;
+DROP TABLE fast_emp4000;
+DROP TABLE polygon_tbl;
+DROP TABLE circle_tbl;
+DROP TABLE point_tbl;
+DROP TABLE t;
+DROP SCHEMA create_index_gist CASCADE;

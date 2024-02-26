@@ -1008,6 +1008,17 @@ select @num;
     0
 (1 row)
 
+-- test insert right ref
+drop table if exists ins_sel_t0;
+NOTICE:  table "ins_sel_t0" does not exist, skipping
+CREATE TABLE ins_sel_t0 ( c3 INT , c10 INT ) ;
+INSERT INTO ins_sel_t0 VALUES ( -66 , 54 ) ,
+    ( EXISTS ( SELECT 76 AS c42 WHERE c3 = 12 IS NOT FALSE ) NOT IN ( 75 >= -80 ) , -99 ) ; -- should error
+ERROR:  column "c3" does not exist
+LINE 2:     ( EXISTS ( SELECT 76 AS c42 WHERE c3 = 12 IS NOT FALSE )...
+                                              ^
+HINT:  There is a column named "c3" in table "ins_sel_t0", but it cannot be referenced from this part of the query.
+drop table ins_sel_t0;
 --test as function parameter
 set @num := 1;
 select sin(@num := @num + 1) from t1;
@@ -1646,6 +1657,33 @@ select @a_1131028:=cast(2 as number);
  ?column? 
 ----------
         2
+(1 row)
+
+DROP PROCEDURE IF EXISTS load_tbtest_WITH_REPLACE;
+NOTICE:  function load_tbtest_with_replace() does not exist, skipping
+CREATE PROCEDURE load_tbtest_WITH_REPLACE(id_count IN INT) AS
+BEGIN
+    SET @id = 1;
+    WHILE @id <= id_count LOOP
+        raise info 'id is %',@id;
+        IF @id % 10 = 0 THEN
+            SET @lsql = '';
+        END IF;
+        SET @id = @id + 1;
+        raise info 'id+ is %',@id;
+    END LOOP;
+END;
+/
+call load_tbtest_WITH_REPLACE(3);
+INFO:  id is 1
+INFO:  id+ is 2
+INFO:  id is 2
+INFO:  id+ is 3
+INFO:  id is 3
+INFO:  id+ is 4
+ load_tbtest_with_replace 
+--------------------------
+ 
 (1 row)
 
 set enable_set_variable_b_format = 0;

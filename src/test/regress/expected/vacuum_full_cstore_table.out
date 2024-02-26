@@ -1,0 +1,20 @@
+create schema vacuum_full_cstore_table;
+set search_path to vacuum_full_cstore_table;
+CREATE TABLE range_sales
+(
+    time_id        DATE PRIMARY KEY
+) with (orientation=column)
+    PARTITION BY RANGE (time_id)
+(
+    PARTITION time_2008 VALUES LESS THAN ('2009-01-01'),
+    PARTITION time_2009 VALUES LESS THAN ('2010-01-01'),
+    PARTITION time_2010 VALUES LESS THAN ('2011-01-01'),
+    PARTITION time_2011 VALUES LESS THAN ('2012-01-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_sales_pkey" for table "range_sales"
+/* ignore vacuum full log */
+set client_min_messages to ERROR;
+vacuum full;
+reset client_min_messages;
+drop schema vacuum_full_cstore_table cascade;
+NOTICE:  drop cascades to table range_sales

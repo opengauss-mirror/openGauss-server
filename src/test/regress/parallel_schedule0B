@@ -1,6 +1,12 @@
 # ----------
 # data partition
 # ----------
+# --------------------------
+# usecases for improving coverage 
+# --------------------------
+test: vec_hashjoin1 single_node_rangetypes db4ai_explain_model test_ustore_toast ustore_ddl ts_utf8 test_ustore_update test_ustore_index
+test: sqlldr/gs_loader_basic psql parse_xlog cgin_test create_index_gist hw_user rowlevelsecurity query_self_tuning hw_partition_llt
+
 test: physical_slot
 
 test: hw_smp
@@ -44,7 +50,7 @@ test: hw_procedure_define
 #test: hw_anonymous_block
 #test: hw_procedure#
 test: hw_grant_all hw_dynamic_sql hw_func_return_out
-test: hw_package_function
+test: hw_package_function type_replace
 
 #show plan
 #test: plan_hint
@@ -172,7 +178,7 @@ test: boolean name oid bit txid uuid numeric_hide_tailing_zero rawlike
 # The second group of parallel tests
 # ----------
 #test: lseg box path polygon circle date time timetz timestamptz abstime reltime inet
-test: interval tinterval macaddr tstypes comments
+test: interval tinterval macaddr tstypes comments ignore_double_quotes
 #test: point timestamp
 
 # ----------
@@ -217,7 +223,7 @@ test: vec_delete_part1 vec_delete_part2
 test: vec_set_func
 test: hw_cursor_rollback hw_cursor_rollback_ustore
 
-test: alter_schema_db_rename_seq
+test: alter_schema_db_rename_seq alter_sequence_001 alter_seq_max_in_txn
 
 test: a_outerjoin_conversion
 
@@ -277,7 +283,7 @@ test: plpgsql_assign_value_to_array_attribute
 test: plpgsql_array_of_record 
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
-test: plpgsql_inout_param
+test: function_default_test plpgsql_inout_param
 test: plpgsql_cursor_rowtype
 test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param
@@ -303,7 +309,7 @@ test: hw_to_timestamp hw_view_privilege
 test: hw_identifier
 #test: hw_hashint1 hw_smalldatetime_hash hw_rawtype_hash
 #test: hw_nvarchar2_hash cmpr_smallint cmpr_prefix_150left cmpr_uint32_oid
-test: oidjoins opr_sanity_2 regex regex2
+test: oidjoins opr_sanity_2 regex regex2 regex.linux.utf8
 #test: opr_sanity_1
 
 test: pmk
@@ -314,6 +320,9 @@ test: pmk
 test: hw_datatype_2 hw_datatype_3
 test: hw_datatype hw_datatype_set
 test: test_regex llt_atc
+
+# test for inherit table
+test: inherits01
 
 # ----------
 # test for set operations

@@ -199,6 +199,7 @@ typedef struct PlannedStmt {
     int current_id;
     bool enable_adaptive_scan;
     bool is_spq_optmized;
+    int write_node_index;
     int	numSlices;
     struct PlanSlice *slices;
     int *subplan_sliceIds;
@@ -293,6 +294,8 @@ typedef struct Plan {
 
     /* flag to indicate if it is controller plan node */
     bool recursive_union_controller;
+	
+    bool isinherit;
 
     /* plan node id of Controller plan node, 0 for not in control */
     int control_plan_nodeid;
@@ -472,6 +475,9 @@ typedef struct ModifyTable {
     OpMemInfo mem_info;    /*  Memory info for modify node */
     List* targetlists;     /* For multi-relation modifying */
     List* withCheckOptionLists; /* per-target-table WCO lists */
+#ifdef USE_SPQ
+    List *isSplitUpdates;
+#endif
 } ModifyTable;
 
 /* ----------------
@@ -657,6 +663,7 @@ typedef struct SpqSeqScan {
     bool isFullTableScan;
     bool isAdaptiveScan;
     bool isDirectRead;
+    uint32 DirectReadBlkNum;
 } SpqSeqScan;
 #endif
 /*
@@ -1830,6 +1837,11 @@ typedef struct AssertOp {
     int errcode; /* SQL error code */
     List *errmessage; /* error message */
 } AssertOp;
+
+typedef enum DMLAction {
+    DML_DELETE,
+    DML_INSERT
+} DMLAction;
 #endif /* USE_SPQ */
 #endif /* PLANNODES_H */
 

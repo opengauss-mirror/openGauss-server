@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+﻿/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -66,7 +66,9 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -151,7 +153,7 @@
 #include "replication/dcf_replication.h"
 #include "replication/logicallauncher.h"
 #include "replication/logicalworker.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/cbmwriter.h"
 #include "postmaster/startup.h"
@@ -213,6 +215,7 @@
 #include "utils/guc_storage.h"
 #include "utils/guc_tables.h"
 #include "utils/mmpool.h"
+#include "utils/pg_locale.h"
 #include "libcomm/libcomm.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
@@ -299,6 +302,7 @@ static bool isNeedGetLCName = true;
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
 #define CHECK_TIMES 10
+#define InvalidPid ((ThreadId)(-1))
 
 static char gaussdb_state_file[MAXPGPATH] = {0};
 static char AddMemberFile[MAXPGPATH] = {0};
@@ -344,7 +348,9 @@ pthread_rwlock_t hba_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 extern bool data_catchup;
 extern bool wal_catchup;
 
+#ifdef ENABLE_BBOX
 char g_bbox_dump_path[1024] = {0};
+#endif
 
 #define CHECK_FOR_PROCDIEPENDING()                                                                          \
     do {                                                                                                    \
@@ -405,6 +411,7 @@ static int initPollfd(struct pollfd* ufds);
 static void report_fork_failure_to_client(Port* port, int errnum, const char* specialErrorInfo = NULL);
 void signal_child(ThreadId pid, int signal, int be_mode = -1);
 static bool SignalSomeChildren(int signal, int targets);
+static bool SignalSpecialChildren(int signal, int target, ThreadId pid);
 
 static bool IsChannelAdapt(Port* port, ReplConnInfo* repl);
 static bool IsLocalPort(Port* port);
@@ -457,8 +464,7 @@ bool PMstateIsRun(void);
 #define BACKEND_TYPE_TEMPBACKEND                                        \
     0x0010                      /* temp thread processing cancel signal \
                                    or stream connection */
-#define BACKEND_TYPE_CMAGENT 0x0020 /* cmagent process*/
-#define BACKEND_TYPE_ALL 0x002F /* OR of all the above */
+#define BACKEND_TYPE_ALL 0x001F /* OR of all the above */
 
 #define GTM_LITE_CN (GTM_LITE_MODE && IS_PGXC_COORDINATOR)
 
@@ -949,9 +955,10 @@ bool SetDBStateFileState(DbState state, bool optional)
         len = read(fd, &s, sizeof(GaussState));
         /* sizeof(int) is for current_connect_idx of GaussState */
         if ((len != sizeof(GaussState)) && (len != sizeof(GaussState) - sizeof(int))) {
-            write_stderr("Failed to read gaussdb.state: %d", errno);
+            write_stderr("Failed to read gaussdb.state: %d, len: %d", errno, len);
             (void)close(fd);
-            return false;
+            (void)unlink(gaussdb_state_file);
+            return true;
         }
 
         if (close(fd) != 0) {
@@ -1288,13 +1295,7 @@ void check_short_optOfVoid(char *optstring, int argc, char *const *argv)
     int i;
     for (i = 0; i < argc; i++) {
         char *optstr = argv[i];
-        int is_only_shortbar;
-        if (strlen(optstr) == 1) {
-            is_only_shortbar = optstr[0] == '-' ? 1 : 0;
-        } else {
-            is_only_shortbar = 0;
-        }
-        if (is_only_shortbar) {
+        if (strlen(optstr) == 1 && *optstr == '-') {
             fprintf(stderr, _("[%s] FATAL: The option '-' is not a valid option.\n"), progname);
             exit(1);
         }
@@ -2222,13 +2223,17 @@ int PostmasterMain(int argc, char* argv[])
     if (strlen(GetConfigOption(const_cast<char*>("unix_socket_directory"), true, false)) != 0) {
         PythonFencedMasterModel = true;
 
+#ifdef ENABLE_BBOX
         /* disable bbox for fenced UDF process */
         SetConfigOption("enable_bbox_dump", "false", PGC_POSTMASTER, PGC_S_ARGV);
+#endif
     }
 #else
     if (FencedUDFMasterMode) {
+#ifdef ENABLE_BBOX
         /* disable bbox for fenced UDF process */
         SetConfigOption("enable_bbox_dump", "false", PGC_POSTMASTER, PGC_S_ARGV);
+#endif
     } else if (!SelectConfigFiles(userDoption, progname)) {
         ExitPostmaster(1);
     }
@@ -2854,8 +2859,10 @@ int PostmasterMain(int argc, char* argv[])
     (void)gspqsignal(SIGXFSZ, SIG_IGN); /* ignored */
 #endif
 
+#ifdef ENABLE_BBOX
     /* core dump injection */
     bbox_initialize();
+#endif
 
     /*
      * Initialize stats collection subsystem (this does NOT start the
@@ -3041,10 +3048,10 @@ int PostmasterMain(int argc, char* argv[])
     if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
         /* load primary id and reform stable list from control file */
         SSReadControlFile(REFORM_CTRL_PAGE);
-        if (SS_REPLICATION_DORADO_CLUSTER) {
+        if (SS_DISASTER_CLUSTER) {
             /* fresh ss dorado cluster run mode */
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
-            SSDoradoRefreshMode();
+            SSDisasterRefreshMode();
         }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
         ereport(LOG, (errmsg("[SS reform] node%d starts, found cluster PRIMARY:%d",
@@ -3061,25 +3068,11 @@ int PostmasterMain(int argc, char* argv[])
             }
             ereport(LOG, (errmsg("[SS reform] Success: node:%d wait for PRIMARY:%d to finish 1st reform",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
-
-            if (SS_OFFICIAL_RECOVERY_NODE && SS_CLUSTER_ONDEMAND_NOT_NORAML) {
-                ereport(FATAL, (errmsg(
-                    "[On-demand] node%d is last primary node, do not allow join cluster until on-demand recovery done",
-                    g_instance.attr.attr_storage.dms_attr.instance_id)));
-            }
         }
     }
 
     if (SS_PRIMARY_MODE) {
-        while (dss_set_server_status_wrapper() != GS_SUCCESS) {
-            pg_usleep(REFORM_WAIT_LONG);
-            ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                    g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                    errhint("Check vgname and socketpath and restart later.")));
-        }
-        ereport(LOG, (errmsg("set dss server status as primary")));
+        SSGrantDSSWritePermission();
     }
 
     /*
@@ -3117,7 +3110,8 @@ int PostmasterMain(int argc, char* argv[])
             if (ret != 0) {
                 ereport(PANIC, (errmsg("uwal primary init notify failed, ret: %d", ret)));
             }
-        } else if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        } else if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
+                   t_thrd.postmaster_cxt.HaShmData->current_mode == PENDING_MODE) {
             ret = GsUwalStandbyInitNotify();
             if (ret != 0) {
                 ereport(PANIC, (errmsg("uwal standby init notify failed, ret: %d", ret)));
@@ -3434,6 +3428,15 @@ static void CheckExtremeRtoGUCConflicts(void)
                 (errcode(ERRCODE_SYSTEM_ERROR),
                     errmsg("extreme rto param should be set in ondemand extreme rto mode."),
                     errhint("Either turn off ss_enable_ondemand_recovery, or set extreme rto param.")));
+        }
+    }
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build) {
+        if (!g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("ondemand realtime build only support in ondemand recovery mode."),
+                    errhint("Either turn on ss_enable_ondemand_recovery, or turn off ss_enable_ondemand_realtime_build.")));
         }
     }
 }
@@ -3832,7 +3835,7 @@ static int ServerLoop(void)
         fd_set rmask;
         int selres;
 
-        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE || IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
+        if (t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE || IS_SHARED_STORAGE_MODE || SS_DISASTER_CLUSTER) {
             check_and_reset_ha_listen_port();
 
 #ifdef HAVE_POLL
@@ -3893,6 +3896,20 @@ static int ServerLoop(void)
             } else {
                 ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform success.", SS_MY_INST_ID)));
                 startup_reform_finish = true;
+            }
+        }
+
+        /**
+         *  Standby node start StartUp thread to start ondemand realtime build, 
+         *  after reform.
+         */
+        if (startup_reform_finish && ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_DISABLED &&
+            SS_NORMAL_STANDBY && SS_CLUSTER_ONDEMAND_NORMAL && pmState == PM_RUN) {
+            if (g_instance.pid_cxt.StartupPID == 0) {
+                g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
+                Assert(g_instance.pid_cxt.StartupPID != 0);
+                g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = READY_TO_BUILD;
+                ereport(LOG, (errmsg("[On-demand] Node:%d ondemand realtime build start, set status to READY_TO_BUILD.", SS_MY_INST_ID)));
             }
         }
 
@@ -4153,8 +4170,24 @@ static int ServerLoop(void)
          * one.  But this is needed only in normal operation (else we cannot
          * be writing any new WAL).
          */
-        if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN && !SS_REPLICATION_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN && !SS_DORADO_STANDBY_CLUSTER) {
             g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                if (t_thrd.postmaster_cxt.audit_standby_switchover || t_thrd.postmaster_cxt.audit_primary_failover) {
+                    int ret = GsUwalPrimaryInitNotify();
+                    if (ret != 0) {
+                        ereport(PANIC, (errmsg("uwal primary init notify failed. uwal ret: %d", ret)));
+                    }
+                }
+            }
+        }
+
+        if (g_instance.attr.attr_storage.enable_uwal) {
+            if (g_instance.pid_cxt.WalRcvWriterPID == 0 && pmState == PM_RUN &&
+                (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
+                 t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE)) {
+                g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
+            }
         }
 
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && (pmState == PM_RUN ||
@@ -6396,6 +6429,14 @@ static void PrepareDemoteResponse(void)
         return;
 
     if (ENABLE_DMS) {
+        ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+        if (g_instance.dms_cxt.SSClusterState != NODESTATE_PRIMARY_DEMOTING &&
+            (dms_reform_failed() || dms_reform_last_failed() || reform_info->in_reform == false)) {
+            ereport(LOG,
+                (errmsg("[SS switchover] primary demoting: current switchover round failed caused by"
+                " remote instance; new round of reform has been running concurrently, exit now")));
+            _exit(0);
+        }
         ereport(LOG,
             (errmsg("[SS switchover] primary demoting: shutdown ckpt done, demote success. restart now")));
         Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_PRIMARY_DEMOTING);
@@ -6712,7 +6753,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
                     }
 
-                    if (g_instance.pid_cxt.StartupPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+                    if (g_instance.pid_cxt.StartupPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
                         signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
                     }
                     
@@ -6721,7 +6762,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                     StopAliveBuildSender();
 
-                    if (g_instance.pid_cxt.WalReceiverPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
+                    if (g_instance.pid_cxt.WalReceiverPID != 0 && SS_DISASTER_STANDBY_CLUSTER) {
                         signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
                     }
 
@@ -6765,6 +6806,10 @@ dms_demote:
                     if (g_instance.pid_cxt.SnapshotPID != 0) {
                         Assert(!dummyStandbyMode);
                         signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
+                    }
+
+                    if (g_instance.pid_cxt.CBMWriterPID != 0) {
+                        signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
                     }
 
                     ereport(LOG, (errmsg("[SS switchover] primary demoting: "
@@ -6948,8 +6993,16 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus)) {
                 if (!g_instance.fatal_error)
                     g_instance.recover_error = true;
-
                 HandleChildCrash(pid, exitstatus, _("startup process"));
+                continue;
+            }
+
+            /**
+             * No need to set pmState to PM_RUN and initialize util threads when first-round reform failed,
+             * postmaster will send SIGTERM signal to itself and exit in this case.
+             */
+            if (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.startup_reform && (dms_reform_failed() || dms_reform_last_failed()))) {
+                write_stderr("first-round reform failed, no need to initialize util threads.\n");
                 continue;
             }
 
@@ -7024,8 +7077,26 @@ static void reaper(SIGNAL_ARGS)
                 }
             }
 
-            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_REPLICATION_STANDBY_CLUSTER)
+            if (g_instance.pid_cxt.WalWriterPID == 0 && !SS_DORADO_STANDBY_CLUSTER) {
                 g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+                if (g_instance.attr.attr_storage.enable_uwal) {
+                    if (t_thrd.postmaster_cxt.audit_standby_switchover ||
+                        t_thrd.postmaster_cxt.audit_primary_failover) {
+                        int ret = GsUwalPrimaryInitNotify();
+                        if (ret != 0) {
+                            ereport(PANIC, (errmsg("uwal primary init notify failed at reaper. uwal ret: %d", ret)));
+                        }
+                    }
+                }
+            }
+
+            if (g_instance.attr.attr_storage.enable_uwal) {
+                if (g_instance.pid_cxt.WalRcvWriterPID == 0 && pmState == PM_RUN &&
+                    (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
+                     t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE)) {
+                    g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
+                }
+            }
 
             if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0)
                 g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
@@ -8831,17 +8902,22 @@ void signal_child(ThreadId pid, int signal, int be_mode)
 }
 
 /*
- * Send a signal to the targeted children (but NOT special children;
- * dead_end children are never signaled, either).
+ * Send a signal to the special children;
+ * And we should not care about dead_end children.
+ * This function is also a sub entry for 'SignalSomeChildren'.
  */
-static bool SignalSomeChildren(int signal, int target)
-{
+static bool SignalSpecialChildren(int signal, int target, ThreadId pid) {
     Dlelem* curr = NULL;
     bool signaled = false;
 
     for (curr = DLGetHead(g_instance.backend_list); curr; curr = DLGetSucc(curr)) {
         Backend* bp = (Backend*)DLE_VAL(curr);
         int child = BACKEND_TYPE_ALL;
+
+        /* if we want to shut special pid */
+        if (pid != InvalidPid && bp->pid != pid) {
+            continue;
+        }
 
         /*
          * we want to know the type of this backend thread, so
@@ -8878,6 +8954,15 @@ static bool SignalSomeChildren(int signal, int target)
     }
 
     return signaled;
+}
+
+/*
+ * Send a signal to the targeted children (but NOT special children;
+ * dead_end children are never signaled, either).
+ */
+static bool SignalSomeChildren(int signal, int target)
+{
+    return SignalSpecialChildren(signal, target, InvalidPid);
 }
 
 bool SignalCancelAllBackEnd()
@@ -10070,23 +10155,15 @@ static void sigusr1_handler(SIGNAL_ARGS)
          * update cluster_run_mode from pg_control file,
          * in case failover has been performed between two dorado cluster.
          */
-        if (SS_REPLICATION_DORADO_CLUSTER) {
+        if (SS_DISASTER_CLUSTER) {
             SSReadControlFile(REFORM_CTRL_PAGE);
         }
-        if (SS_REPLICATION_MAIN_STANBY_NODE) {
+        if (SS_DISASTER_MAIN_STANDBY_NODE) {
             ereport(LOG,
                 (errmsg("Failover between two dorado cluster start, change current run mode and dssserver mode to primary_cluster")));
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
-            SSDoradoRefreshMode();
-            while (dss_set_server_status_wrapper() != GS_SUCCESS) {
-                pg_usleep(REFORM_WAIT_LONG);
-                ereport(WARNING, (errmodule(MOD_DMS),
-                    errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
-                        g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
-                        g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
-                        errhint("Check vgname and socketpath and restart later.")));
-            }
-            ereport(LOG, (errmsg("set dss server status as primary")));
+            SSDisasterRefreshMode();
+            SSGrantDSSWritePermission();
         }
 
         /* promote cascade standby */
@@ -10208,13 +10285,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
      */
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown &&
-        (!ENABLE_DMS || SS_REPLICATION_DORADO_CLUSTER)) {
-        /* when SS_REPLICATION_DORADO_CLUSTER enabled, don't start walrecwrite */
-        if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_REPLICATION_DORADO_CLUSTER) {
-            g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
-            SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
-        }
+        g_instance.status == NoShutdown && (!ENABLE_DMS || SS_DISASTER_CLUSTER)) {
+            /* when SS_DORADO_CLUSTER enabled, don't start walrecwrite */
+            if (g_instance.pid_cxt.WalRcvWriterPID == 0 && !SS_DORADO_CLUSTER) {
+                g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
+                SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
+            }
 
         /* Startup Process wants us to start the walreceiver process. */
         g_instance.pid_cxt.WalReceiverPID = initialize_util_thread(WALRECEIVER);
@@ -10305,7 +10381,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && SS_DISASTER_STANDBY_CLUSTER) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -10341,24 +10417,28 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.UndoLauncherPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.UndoLauncherPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
         }
 #ifndef ENABLE_MULTIPLE_NODES
-        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.ApplyLauncerPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
         }
 #endif
-        if (g_instance.pid_cxt.GlobalStatsPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.GlobalStatsPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.UndoRecyclerPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
         }
 
-        if (g_instance.pid_cxt.FaultMonitorPID != 0 && (SS_REPLICATION_STANDBY_CLUSTER)) {
+        if (g_instance.pid_cxt.FaultMonitorPID != 0 && (SS_DISASTER_STANDBY_CLUSTER)) {
             signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.CBMWriterPID != 0) {
+            signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
         }
 
         pmState = PM_WAIT_BACKENDS;
@@ -10373,6 +10453,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         PMUpdateDBState(STARTING_STATE, get_cur_mode(), get_cur_repl_num());
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+        /* avoid panics caused by concurreny between startup processes and recovery */
+        if (g_instance.pid_cxt.StartupPID != 0) {
+            ereport(LOG, (errmsg("[SS Reform] request startup proc exit")));
+            signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+        }
 
         /* and the autovac launcher too */
         if (g_instance.pid_cxt.AutoVacPID != 0)
@@ -10433,6 +10519,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
         }
 
+        if (g_instance.pid_cxt.CBMWriterPID != 0) {
+            signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
+        }
+
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] terminate backends success")));
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
@@ -10467,7 +10557,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.AutoVacPID != 0)
             signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
 
-        if (g_instance.pid_cxt.PgStatPID != 0 && SS_REPLICATION_STANDBY_CLUSTER) {
+        if (g_instance.pid_cxt.PgStatPID != 0 && SS_DISASTER_STANDBY_CLUSTER) {
             signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
         }
 
@@ -10480,9 +10570,16 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.WalWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
 
+        if (g_instance.pid_cxt.CBMWriterPID != 0)
+            signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
+
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
-        pmState = PM_WAIT_BACKENDS;
+
+        if (SS_STANDBY_FAILOVER) {
+            pmState = PM_WAIT_BACKENDS;
+        }
+
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
         }
@@ -10709,8 +10806,6 @@ static int CountChildren(int target)
                 child = BACKEND_TYPE_WALSND;
             else if (IsPostmasterChildDataSender(bp->child_slot))
                 child = BACKEND_TYPE_DATASND;
-            else if (ENABLE_DMS && (bp->backend_type & BACKEND_TYPE_CMAGENT))
-                child = BACKEND_TYPE_CMAGENT;
             else
                 child = BACKEND_TYPE_NORMAL;
 
@@ -11806,7 +11901,6 @@ Backend* AssignFreeBackEnd(int slot)
     bn->role = t_thrd.role;
     bn->cancel_key = 0;
     bn->dead_end = false;
-    bn->backend_type = 0;
     return bn;
 }
 
@@ -12795,7 +12889,7 @@ const char* wal_get_db_state_string(DbState db_state)
 
 static ServerMode get_cur_mode(void)
 {
-    if (SS_REPLICATION_MAIN_STANBY_NODE) {
+    if (SS_DISASTER_MAIN_STANDBY_NODE) {
         return STANDBY_MODE;
     } else if (ENABLE_DMS) {
         return SS_OFFICIAL_PRIMARY ? PRIMARY_MODE : STANDBY_MODE;
@@ -13212,7 +13306,13 @@ static void check_and_reset_ha_listen_port(void)
     bool refreshReplList = false;
     bool needToRestart = false;
     bool refreshListenSocket = false;
+    bool walRcvNeedRestart = false;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    int walreplindex = -1;
 
+    SpinLockAcquire(&hashmdata->mutex);
+    walreplindex = hashmdata->current_repl;
+    SpinLockRelease(&hashmdata->mutex);
     /*
      * when Ha replconninfo have changed and current_mode is not NORMAL,
      * dynamically modify the ha socket.
@@ -13227,6 +13327,22 @@ static void check_and_reset_ha_listen_port(void)
 
         if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == OLD_REPL_CHANGE_IP_OR_PORT ||
             t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j]) {
+            /* Now we should shut the WalSender which connection changed */
+            for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+                volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+
+                if (walsnd->pid == 0 || walsnd->channel_get_replc != j) {
+                    continue;
+                }
+                SignalSpecialChildren(SIGTERM, BACKEND_TYPE_WALSND, walsnd->pid);
+            }
+            /* 
+             * And the standby should shut the WalReciver when replication changed.
+             * We will not shut WalReciver when replication changed with other standby.
+             */
+            if (g_instance.pid_cxt.WalReceiverPID != 0 && walreplindex == j) {
+                walRcvNeedRestart = true;
+            }
             needToRestart = true;
             refreshListenSocket = true;
         }
@@ -13255,11 +13371,10 @@ static void check_and_reset_ha_listen_port(void)
 
     if (needToRestart) {
         /* send SIGTERM to end process senders and receiver */
-        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_WALSND);
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_DATASND);
-        if (g_instance.pid_cxt.WalRcvWriterPID != 0)
+        if (g_instance.pid_cxt.WalRcvWriterPID != 0 && walRcvNeedRestart)
             signal_child(g_instance.pid_cxt.WalRcvWriterPID, SIGTERM);
-        if (g_instance.pid_cxt.WalReceiverPID != 0)
+        if (g_instance.pid_cxt.WalReceiverPID != 0 && walRcvNeedRestart)
             signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
         if (g_instance.pid_cxt.DataRcvWriterPID != 0)
             signal_child(g_instance.pid_cxt.DataRcvWriterPID, SIGTERM);
@@ -13789,6 +13904,25 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     gs_memprot_thread_init();
     MemoryContextInit();
     knl_thread_init(thread_role);
+
+    /*
+     * Set LC_CTYPE for auxiliary threads same as main
+     * 1.When thread called knl_t_port_init and the pg_perm_setlocale(LC_MESSAGES, "") 
+     *   in InitializeGUCOptions, LC_CTYPE will be changed to "C".
+     *   if now LC_MESSAGES is zh_CN.UTF-8, function gettext will return "????".
+     * 2.Worker thread will call SetEncordingInfo, 
+     *   and LC_CTYPE will be overwritten to the encoding of database.
+     */
+#ifdef ENABLE_NLS
+    (void) pg_perm_setlocale(LC_CTYPE, "");
+    if (thread_role == THREADPOOL_WORKER) {
+        errno_t rc;
+        const char* curctype = pg_perm_setlocale(LC_CTYPE, NULL);
+        /* if cur_datctype is diff from database encoding, LC_CTYPE will be overwritten */
+        rc = strncpy_s(NameStr(t_thrd.port_cxt.cur_datctype), NAMEDATALEN, curctype, strlen(curctype));
+        securec_check(rc, "\0", "\0");
+    }
+#endif
 
 #ifdef USE_SPQ
     if (arg->spq_role == ROLE_QUERY_EXECUTOR) {
@@ -15117,8 +15251,8 @@ void InitShmemForDmsCallBack()
 
 const char *GetSSServerMode(ServerMode mode)
 {
-    if (IS_SHARED_STORAGE_MODE || SS_REPLICATION_DORADO_CLUSTER) {
-        if (SS_OFFICIAL_PRIMARY && (mode == PRIMARY_MODE || mode == NORMAL_MODE)) { 
+    if (SS_DISASTER_CLUSTER) {
+        if (SS_OFFICIAL_PRIMARY && mode == PRIMARY_MODE) { 
             return "Primary";
         }
         

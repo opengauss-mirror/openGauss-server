@@ -164,9 +164,9 @@ bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block)
         char *filename = slice_filename(sf->filename, 0);
         int fd = dv_open_file(filename, flags, (int)SEGMENT_FILE_MODE);
         if (fd < 0) {
-            pfree(filename);
             ereport(LOG,
                 (errmodule(MOD_SEGMENT_PAGE), errmsg("File \"%s\" does not exist, stop read here.", filename)));
+            pfree(filename);
             return false;
         }
         
@@ -506,7 +506,7 @@ void df_extend_internal(SegLogicFile *sf)
             ereport(ERROR, (errcode_for_file_access(), errmsg("[segpage] could not create file \"%s\": %m", filename)));
         }
 
-        if (ftruncate(new_fd, DF_FILE_EXTEND_STEP_SIZE) != 0) {
+        if (fallocate(new_fd, 0, 0, DF_FILE_EXTEND_STEP_SIZE) != 0) {
             dv_close_file(new_fd);
             ereport(ERROR,
                 (errmodule(MOD_SEGMENT_PAGE),
@@ -528,8 +528,14 @@ void df_extend_internal(SegLogicFile *sf)
         }
 
         SegmentCheck(new_size <= DF_FILE_SLICE_SIZE);
+        if (fd < 0) {
+            char *filename = slice_filename(sf->filename, sf->file_num - 1);
+            int fd = dv_open_file(filename, O_RDONLY | PG_BINARY, SEGMENT_FILE_MODE);
+            sf->segfiles[sf->file_num - 1].fd = fd;
+            pfree(filename);
+        }
 
-        if (ftruncate(fd, new_size) != 0) {
+        if (fallocate(fd, 0, last_file_size, new_size - last_file_size) != 0) {
             char *filename = slice_filename(sf->filename, sf->file_num - 1);
             ereport(ERROR, (errmsg("ftuncate file %s failed during df_extend due to %s", filename, strerror(errno))));
         }
@@ -654,6 +660,29 @@ void df_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum)
                 errcode_for_file_access(),
                 errmsg("could not read segment block %d in file %s", blocknum, sf->filename),
                 errdetail("errno: %d", errno)));
+    }
+}
+
+void df_direct_pread_block(SegLogicFile *sf, char *buffer, BlockNumber blocknum, BlockNumber *blocknums)
+{
+    off_t offset = ((off_t)blocknum) * BLCKSZ;
+    int sliceno = DF_OFFSET_TO_SLICENO(offset);
+    off_t roffset = DF_OFFSET_TO_SLICE_OFFSET(offset);
+
+    pgstat_report_waitevent(WAIT_EVENT_DATA_FILE_READ);
+    SegPhysicalFile spf = df_get_physical_file(sf, sliceno, blocknum);
+    int nbytes = pread(spf.fd, buffer, (*blocknums) * BLCKSZ, roffset);
+    pgstat_report_waitevent(WAIT_EVENT_END);
+    if (nbytes > ((uint64)(*blocknums) * BLCKSZ) || nbytes < 0) {
+        ereport(ERROR,
+                (errcode(MOD_SEGMENT_PAGE),
+                 errcode_for_file_access(),
+                 errmsg("could not direct read segment block %d to block %d in file %s and read size = %d",
+                        blocknum, blocknum + (*blocknums), sf->filename, nbytes),
+                 errdetail("errno: %d", errno)));
+    } else if (nbytes < ((uint64)(*blocknums) * BLCKSZ)) {
+        ereport(DEBUG1, (errmsg("Direct read has been cut off from %d to %d", *blocknums, nbytes / BLCKSZ)));
+        *blocknums = nbytes / BLCKSZ;
     }
 }
 

@@ -49,6 +49,7 @@
 #include "postmaster/pagerepair.h"
 #include "storage/cfs/cfs_converter.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_reform_common.h"
 
 /*
  * During XLOG replay, we may see XLOG records for incremental updates of
@@ -1222,7 +1223,15 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
 
     if (BufferIsValid(buffer)) {
         Page page = BufferGetPage(buffer);
-        if (mode == RBM_NORMAL) {
+        /*
+         * We check not SS_IN_ONDEMAND_RECOVERY for these reasons:
+         * 1. DMS mode (shared storage) do not support page repair.
+         * 2. In standby failover, some pages meet replay request which
+         *    are in standby shared memorys, but there DRC are lost in
+         *    last primary node. So use LockBuffer in XLogReadBufferExtendedForSegpage
+         *    will read from DISK and cover these newest pages.
+         */
+        if (mode == RBM_NORMAL && !SS_IN_ONDEMAND_RECOVERY) {
             bool buffer_is_locked = false;
             if (ENABLE_DMS && (GetDmsBufCtrl(buffer - 1)->lock_mode == DMS_LOCK_NULL)) {
                 buffer_is_locked = true;

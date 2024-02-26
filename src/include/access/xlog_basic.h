@@ -61,7 +61,7 @@
 #define XLogSegmentsNum(val) (((val) * XLogBaseSize + XLogSegSize - 1) / XLogSegSize)
 
 
-#define XLogPreReadSize 67108864 // 64MB
+#define XLogPreReadSize 4194304 // 4MB
 
 /* Compute XLogRecPtr with segment number and offset. */
 #define XLogSegNoOffsetToRecPtr(segno, offset, dest) \

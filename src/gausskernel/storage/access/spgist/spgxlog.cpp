@@ -73,20 +73,28 @@ void addOrReplaceTuple(Page page, Item tuple, int size, OffsetNumber offset)
 static void spgRedoCreateIndex(XLogReaderState *record)
 {
     RedoBufferInfo buffer;
-
-    XLogInitBufferForRedo(record, 0, &buffer);
-    spgRedoCreateIndexOperatorMetaPage(&buffer);
-    MarkBufferDirty(buffer.buf);
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &buffer);
+        spgRedoCreateIndexOperatorMetaPage(&buffer);
+        MarkBufferDirty(buffer.buf);
+    }
     UnlockReleaseBuffer(buffer.buf);
 
-    XLogInitBufferForRedo(record, 1, &buffer);
-    spgRedoCreateIndexOperatorRootPage(&buffer);
-    MarkBufferDirty(buffer.buf);
+    action = SSCheckInitPageXLog(record, 1, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 1, &buffer);
+        spgRedoCreateIndexOperatorRootPage(&buffer);
+        MarkBufferDirty(buffer.buf);
+    }
     UnlockReleaseBuffer(buffer.buf);
 
-    XLogInitBufferForRedo(record, 2, &buffer);
-    spgRedoCreateIndexOperatorLeafPage(&buffer);
-    MarkBufferDirty(buffer.buf);
+    action = SSCheckInitPageXLog(record, 2, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 2, &buffer);
+        spgRedoCreateIndexOperatorLeafPage(&buffer);
+        MarkBufferDirty(buffer.buf);
+    }
     UnlockReleaseBuffer(buffer.buf);
 }
 
@@ -103,8 +111,10 @@ static void spgRedoAddLeaf(XLogReaderState *record)
      * page before updating the parent.
      */
     if (xldata->newPage) {
-        XLogInitBufferForRedo(record, 0, &buffer);
-        action = BLK_NEEDS_REDO;
+        action = SSCheckInitPageXLog(record, 0, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, 0, &buffer);
+        }
     } else
         action = XLogReadBufferForRedo(record, 0, &buffer);
     if (action == BLK_NEEDS_REDO) {
@@ -161,8 +171,10 @@ static void spgRedoMoveLeafs(XLogReaderState *record)
      * Insert tuples on the dest page (do first, so redirect is valid)
      */
     if (xldata->newPage) {
-        XLogInitBufferForRedo(record, 1, &buffer);
-        action = BLK_NEEDS_REDO;
+        XLogRedoAction action = SSCheckInitPageXLog(record, 1, &buffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, 1, &buffer);
+        }
     } else
         action = XLogReadBufferForRedo(record, 1, &buffer);
 
@@ -233,8 +245,10 @@ static void spgRedoAddNode(XLogReaderState *record)
          * Install new tuple first so redirect is valid
          */
         if (xldata->newPage) {
-            XLogInitBufferForRedo(record, 1, &buffer);
-            action = BLK_NEEDS_REDO;
+            action = SSCheckInitPageXLog(record, 1, &buffer);
+            if (action == BLK_NEEDS_REDO) {
+                XLogInitBufferForRedo(record, 1, &buffer);
+            }
         } else
             action = XLogReadBufferForRedo(record, 1, &buffer);
 
@@ -296,8 +310,10 @@ static void spgRedoSplitTuple(XLogReaderState *record)
      */
     if (!xldata->postfixBlkSame) {
         if (xldata->newPage) {
-            XLogInitBufferForRedo(record, 1, &buffer);
-            action = BLK_NEEDS_REDO;
+            action = SSCheckInitPageXLog(record, 1, &buffer);
+            if (action == BLK_NEEDS_REDO) {
+                XLogInitBufferForRedo(record, 1, &buffer);
+            }
         } else
             action = XLogReadBufferForRedo(record, 1, &buffer);
 
@@ -360,8 +376,10 @@ static void spgRedoPickSplit(XLogReaderState *record)
     } else {
         if (xldata->initSrc) {
             /* just re-init the source page */
-            XLogInitBufferForRedo(record, 0, &srcBuffer);
-            redoaction = BLK_NEEDS_REDO;
+            redoaction = SSCheckInitPageXLog(record, 0, &srcBuffer);
+            if (redoaction == BLK_NEEDS_REDO) {
+                XLogInitBufferForRedo(record, 0, &srcBuffer);
+            }
         } else {
             /*
              * Delete the specified tuples from source page.  (In case we're in
@@ -384,8 +402,10 @@ static void spgRedoPickSplit(XLogReaderState *record)
     } else {
         if (xldata->initDest) {
             /* just re-init the dest page */
-            XLogInitBufferForRedo(record, 1, &destBuffer);
-            redoaction = BLK_NEEDS_REDO;
+            redoaction = SSCheckInitPageXLog(record, 1, &destBuffer);
+            if (redoaction == BLK_NEEDS_REDO) {
+                XLogInitBufferForRedo(record, 1, &destBuffer);
+            }
         } else {
             redoaction = XLogReadBufferForRedo(record, 1, &destBuffer);
         }
@@ -407,8 +427,10 @@ static void spgRedoPickSplit(XLogReaderState *record)
 
     /* restore new inner tuple */
     if (xldata->initInner) {
-        XLogInitBufferForRedo(record, 2, &innerBuffer);
-        action = BLK_NEEDS_REDO;
+        action = SSCheckInitPageXLog(record, 2, &innerBuffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, 2, &innerBuffer);
+        }
     } else
         action = XLogReadBufferForRedo(record, 2, &innerBuffer);
 

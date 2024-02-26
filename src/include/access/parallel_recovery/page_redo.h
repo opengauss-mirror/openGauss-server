@@ -73,8 +73,8 @@ struct PageRedoWorker {
     XLogRecPtr lastReplayedReadRecPtr;
     XLogRecPtr lastReplayedEndRecPtr;
     XLogRecPtr curReplayingReadRecPtr;
-#if (!defined __x86_64__) && (!defined __aarch64__)
-            /* protects lastReplayedReadRecPtr and lastReplayedEndRecPtr */
+#if (!defined(__x86_64__) && !defined(__aarch64__)) || defined(__USE_SPINLOCK)
+    /* protects lastReplayedReadRecPtr and lastReplayedEndRecPtr */
     slock_t ptrLck;  
 #endif
     PageRedoWorker* selfOrinAddr;

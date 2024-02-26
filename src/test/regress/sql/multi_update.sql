@@ -1,6 +1,51 @@
 create database multiupdate DBCOMPATIBILITY = 'B';
 \c multiupdate;
 \h update
+-- issue
+CREATE TEMPORARY TABLE t0 ( c54 INT , c9 INT ) ;
+INSERT INTO t0 VALUES ( 25 , -8 ) , ( -88 , -77 ) ;
+UPDATE t0 , ( SELECT t2 . c54 AS c17 FROM t0 , t0 AS t1 LEFT OUTER JOIN t0 AS t2 USING ( c9 , c54 ) ) AS t3 JOIN t0 AS t4 ON t4 . c9 = t4 . c54 NATURAL INNER JOIN t0 AS t5 SET t4 . c54 = -32 WHERE t4 . c54 = ( SELECT c54 AS c4 FROM t0 LIMIT 1 ) ;
+WITH t6 AS ( SELECT c54 AS c12 FROM t0 ) SELECT t0 . c9 AS c9 FROM t0 CROSS JOIN t0 AS t7 WHERE t0 . c54 = -33 ;
+drop table t0;
+create table t0(c1 int, c2 int, c3 int, c4 int);
+insert into t0 values(25, -8, -88, -8),(-88, -77, 25, -8);
+update t0 a, t0 b set b.c1=10, a.c2=200, b.c3=20, a.c4=100;
+select * from t0;
+drop table t0;
+drop table if exists tt0;
+create table tt0(a int, b int);
+insert into tt0 values(1,2),(2,3);
+begin;
+update tt0 a0, tt0 a1 set a0.a=5;
+select * from tt0;
+rollback;
+begin;
+update tt0 a, tt0 b set a.a=10;
+select * from tt0;
+rollback;
+drop table tt0;
+create type newtype as(a int, b int);
+create table test(a newtype,b int);
+insert into test values(ROW(1,2),3);
+update test set test.a=ROW(10,20);
+select * from test;
+update test t set t.a=ROW(11,21);
+select * from test;
+--Ambiguous scene
+--update field a of column a rather than column a of table a
+update test a set a.a=12;
+--update field b of column a rather than column b of table a
+update test a set a.b=22;
+select * from test;
+--fail
+update test a set a.a=ROW(13,23);
+update test a set a.c=10;
+update test b set b.c=10;
+--must compatible with previous features, though not perfect
+update test a set a.a.a=12;
+select * from test;
+drop table test;
+drop type newtype;
 -- three relation
 drop table if exists t_t_mutil_t1;
 drop table if exists t_t_mutil_t2;

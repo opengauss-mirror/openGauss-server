@@ -138,6 +138,33 @@ UNAME_RELEASE=`(uname -r) 2>/dev/null` || UNAME_RELEASE=unknown
 UNAME_SYSTEM=`(uname -s) 2>/dev/null`  || UNAME_SYSTEM=unknown
 UNAME_VERSION=`(uname -v) 2>/dev/null` || UNAME_VERSION=unknown
 
+case "$UNAME_SYSTEM" in
+Linux|GNU|GNU/*)
+	# If the system lacks a compiler, then just pick glibc.
+	# We could probably try harder.
+	LIBC=gnu
+
+	eval "$set_cc_for_build"
+	cat <<-EOF > "$dummy.c"
+	#include <features.h>
+	#if defined(__UCLIBC__)
+	LIBC=uclibc
+	#elif defined(__dietlibc__)
+	LIBC=dietlibc
+	#else
+	LIBC=gnu
+	#endif
+	EOF
+	eval "`$CC_FOR_BUILD -E "$dummy.c" 2>/dev/null | grep '^LIBC' | sed 's, ,,g'`"
+
+	# If ldd exists, use it to detect musl libc.
+	if command -v ldd >/dev/null && \
+		ldd --version 2>&1 | grep -q ^musl
+	then
+	    LIBC=musl
+	fi
+	;;
+esac
 # Note: order is significant - the case branches are not exclusive.
 
 case "${UNAME_MACHINE}:${UNAME_SYSTEM}:${UNAME_RELEASE}:${UNAME_VERSION}" in
@@ -932,6 +959,9 @@ EOF
 	exit ;;
     m68*:Linux:*:*)
 	echo ${UNAME_MACHINE}-unknown-linux-gnu
+	exit ;;
+	loongarch*:Linux:*:*)
+	echo "$UNAME_MACHINE"-linux-"$LIBC"
 	exit ;;
     mips:Linux:*:* | mips64:Linux:*:*)
 	eval $set_cc_for_build

@@ -63,6 +63,7 @@
 #define SUBOPT_COPY_DATA            0x00000040
 #define SUBOPT_CONNECT              0x00000080
 #define SUBOPT_SKIPLSN              0x00000100
+#define SUBOPT_MATCHDDLOWNER        0x00000200
 
 /* check if the 'val' has 'bits' set */
 #define IsSet(val, bits)  (((val) & (bits)) == (bits))
@@ -82,6 +83,7 @@ typedef struct SubOpts
     bool binary;
     bool copy_data;
     bool connect;
+    bool matchddlowner;
     XLogRecPtr skiplsn;
 } SubOpts;
 
@@ -117,6 +119,9 @@ static void parse_subscription_options(const List *stmt_options, bits32 supporte
     }
     if (IsSet(supported_opts, SUBOPT_CONNECT)) {
         opts->connect = true;
+    }
+    if (IsSet(supported_opts, SUBOPT_MATCHDDLOWNER)) {
+        opts->matchddlowner = true;
     }
 
     /* Parse options */
@@ -218,6 +223,16 @@ static void parse_subscription_options(const List *stmt_options, bits32 supporte
                             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("invalid WAL location (LSN): %s", lsn_str)));
             }
+        } else if (IsSet(supported_opts, SUBOPT_MATCHDDLOWNER) && strcmp(defel->defname, "matchddlowner") == 0) {
+             if (IsSet(opts->specified_opts, SUBOPT_MATCHDDLOWNER)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                         errmsg("conflicting or redundant options")));
+            }
+            
+            opts->specified_opts |= SUBOPT_MATCHDDLOWNER;
+            opts->matchddlowner = defGetBoolean(defel);
+               
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized subscription parameter: %s", defel->defname)));
@@ -507,7 +522,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      * Connection and publication should not be specified here.
      */
     supported_opts = (SUBOPT_ENABLED | SUBOPT_SLOT_NAME | SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY |
-                      SUBOPT_COPY_DATA | SUBOPT_CONNECT);
+                      SUBOPT_COPY_DATA | SUBOPT_CONNECT | SUBOPT_MATCHDDLOWNER);
     parse_subscription_options(stmt->options, supported_opts, &opts);
 
     /*
@@ -552,6 +567,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     values[Anum_pg_subscription_subowner - 1] = ObjectIdGetDatum(owner);
     values[Anum_pg_subscription_subenabled - 1] = BoolGetDatum(opts.enabled);
     values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(opts.binary);
+    values[Anum_pg_subscription_submatchddlowner - 1] = BoolGetDatum(opts.matchddlowner);
 
     /* encrypt conninfo */
     char *encryptConninfo = EncryptOrDecryptConninfo(stmt->conninfo, 'E');
@@ -867,7 +883,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     /* Parse options. */
     if (!stmt->refresh) {
         supported_opts = (SUBOPT_CONNINFO | SUBOPT_PUBLICATION | SUBOPT_ENABLED | SUBOPT_SLOT_NAME |
-                          SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY | SUBOPT_SKIPLSN);
+                          SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY | SUBOPT_SKIPLSN | SUBOPT_MATCHDDLOWNER);
         parse_subscription_options(stmt->options, supported_opts, &opts);
     } else {
         supported_opts = SUBOPT_COPY_DATA;
@@ -955,6 +971,10 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     if (IsSet(opts.specified_opts, SUBOPT_SKIPLSN)) {
         values[Anum_pg_subscription_subskiplsn - 1] = LsnGetTextDatum(opts.skiplsn);
         replaces[Anum_pg_subscription_subskiplsn - 1] = true;
+    }
+    if (IsSet(opts.specified_opts, SUBOPT_MATCHDDLOWNER)) {
+        values[Anum_pg_subscription_submatchddlowner - 1] = BoolGetDatum(opts.matchddlowner);
+        replaces[Anum_pg_subscription_submatchddlowner - 1] = true;
     }
 
     tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);

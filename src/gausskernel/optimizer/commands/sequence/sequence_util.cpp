@@ -379,6 +379,9 @@ void seq_redo(XLogReaderState* record)
         elog(PANIC, "seq_redo: unknown op code %u", (uint)info);
     }
 
+    if (SSCheckInitPageXLogSimple(record, 0, &buffer) == BLK_DONE) {
+        return;
+    }
     XLogInitBufferForRedo(record, 0, &buffer);
 
     /*

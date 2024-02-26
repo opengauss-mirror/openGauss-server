@@ -214,8 +214,6 @@ typedef enum RTEKind {
                       * RTEs are added by the planner, they're not
                       * present during parsing or rewriting */
 #ifdef USE_SPQ
-    RTE_NAMEDTUPLESTORE,
-    RTE_TABLEFUNC, /* TableFunc(.., column list) */
     RTE_VOID, /* CDB: deleted RTE */
     RTE_TABLEFUNCTION /* CDB: Functions over multiset input */
 #endif
@@ -383,9 +381,6 @@ typedef struct RangeTblEntry {
                                  * Select * from table_name subpartition (subpartition_name);
                                  * or delete from table_name partition (partition_name, ...)
                                  */
-#ifdef USE_SPQ
-    bool forceDistRandom;
-#endif
 } RangeTblEntry;
 
 /*
@@ -1148,6 +1143,7 @@ typedef struct CreateSeqStmt {
     bool canCreateTempSeq; /* create sequence when "create table (like )" */
     bool is_large;
     bool missing_ok; /* skip error if a Sequence is exists */
+    bool is_autoinc;
 } CreateSeqStmt;
 
 typedef struct AlterSeqStmt {
@@ -1159,6 +1155,7 @@ typedef struct AlterSeqStmt {
     bool is_serial; /* Indicates if this sequence is part of SERIAL process */
 #endif
     bool is_large; /* Indicates if this is a large or normal sequence */
+    bool is_autoinc;
 } AlterSeqStmt;
 
 /* ----------------------
@@ -1499,6 +1496,7 @@ typedef struct UnlistenStmt {
  */
 typedef struct CompositeTypeStmt {
     NodeTag type;
+    bool replace;
     RangeVar* typevar; /* the composite type to be created */
     List* coldeflist;  /* list of ColumnDef nodes */
 } CompositeTypeStmt;
@@ -1509,6 +1507,7 @@ typedef struct CompositeTypeStmt {
  */
 typedef struct TableOfTypeStmt {
     NodeTag type;
+    bool replace;
     List* typname;         /* the table of type to be quoted */
     TypeName* reftypname;  /* the name of the type being referenced */
 } TableOfTypeStmt;

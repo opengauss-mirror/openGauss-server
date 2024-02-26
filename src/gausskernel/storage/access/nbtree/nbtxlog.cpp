@@ -198,6 +198,9 @@ static void _bt_restore_meta(XLogReaderState *record, uint8 block_id)
     char *ptr = NULL;
     Size len;
 
+    if (SSCheckInitPageXLogSimple(record, block_id, &metabuf) == BLK_DONE) {
+        return;
+    }
     XLogInitBufferForRedo(record, block_id, &metabuf);
     ptr = XLogRecGetBlockData(record, block_id, &len);
 
@@ -319,11 +322,14 @@ static void btree_xlog_split_update(bool onleft, bool isroot, bool is_dedup, XLo
 
     /* Reconstruct right (new) sibling page from scratch */
     RedoBufferInfo rbuf;
-    XLogInitBufferForRedo(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &rbuf);
+    XLogRedoAction action = SSCheckInitPageXLog(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &rbuf);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &rbuf);
 
-    datapos = XLogRecGetBlockData(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &datalen);
-    BtreeXlogSplitOperatorRightpage(&rbuf, (void *)xlrec, leftsib, rnext, (void *)datapos, datalen);
-    MarkBufferDirty(rbuf.buf);
+        datapos = XLogRecGetBlockData(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &datalen);
+        BtreeXlogSplitOperatorRightpage(&rbuf, (void *)xlrec, leftsib, rnext, (void *)datapos, datalen);
+        MarkBufferDirty(rbuf.buf);
+    }
 
     RedoBufferInfo lbuf;
     if (XLogReadBufferForRedo(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &lbuf) == BLK_NEEDS_REDO) {
@@ -391,34 +397,37 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
     }
 
     /* Reconstruct right (new) sibling page from scratch */
-    XLogInitBufferForRedo(record, 1, &rbuf);
-    datapos = XLogRecGetBlockData(record, 1, &datalen);
-    rpage = rbuf.pageinfo.page;
+    XLogRedoAction action = SSCheckInitPageXLog(record, 1, &rbuf);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 1, &rbuf);
+        datapos = XLogRecGetBlockData(record, 1, &datalen);
+        rpage = rbuf.pageinfo.page;
 
-    _bt_pageinit(rpage, rbuf.pageinfo.pagesize);
-    ropaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rpage);
+        _bt_pageinit(rpage, rbuf.pageinfo.pagesize);
+        ropaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rpage);
 
-    ropaque->btpo_prev = leftsib;
-    ropaque->btpo_next = rnext;
-    ropaque->btpo.level = xlrec->level;
-    ropaque->btpo_flags = isleaf ? BTP_LEAF : 0;
-    ropaque->btpo_cycleid = 0;
+        ropaque->btpo_prev = leftsib;
+        ropaque->btpo_next = rnext;
+        ropaque->btpo.level = xlrec->level;
+        ropaque->btpo_flags = isleaf ? BTP_LEAF : 0;
+        ropaque->btpo_cycleid = 0;
 
-    _bt_restore_page(rpage, datapos, (int)datalen);
+        _bt_restore_page(rpage, datapos, (int)datalen);
 
-    /*
-     * On leaf level, the high key of the left page is equal to the first key
-     * on the right page.
-     */
-    if (isleaf) {
-        ItemId hiItemId = PageGetItemId(rpage, P_FIRSTDATAKEY(ropaque));
+        /*
+        * On leaf level, the high key of the left page is equal to the first key
+        * on the right page.
+        */
+        if (isleaf) {
+            ItemId hiItemId = PageGetItemId(rpage, P_FIRSTDATAKEY(ropaque));
 
-        left_hikey = PageGetItem(rpage, hiItemId);
-        left_hikeysz = ItemIdGetLength(hiItemId);
+            left_hikey = PageGetItem(rpage, hiItemId);
+            left_hikeysz = ItemIdGetLength(hiItemId);
+        }
+
+        PageSetLSN(rpage, lsn);
+        MarkBufferDirty(rbuf.buf);
     }
-
-    PageSetLSN(rpage, lsn);
-    MarkBufferDirty(rbuf.buf);
     /* don't release the buffer yet; we touch right page's first item below
      * Now reconstruct left (original) sibling page
      */
@@ -827,20 +836,23 @@ static void btree_xlog_delete_page(uint8 info, XLogReaderState *record)
     }
 
     /* Rewrite target page as empty deleted page */
-    XLogInitBufferForRedo(record, 0, &buffer);
-    page = buffer.pageinfo.page;
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &buffer);
+        page = buffer.pageinfo.page;
 
-    _bt_pageinit(page, buffer.pageinfo.pagesize);
-    pageop = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+        _bt_pageinit(page, buffer.pageinfo.pagesize);
+        pageop = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
-    pageop->btpo_prev = leftsib;
-    pageop->btpo_next = rightsib;
-    pageop->btpo_flags = BTP_DELETED;
-    pageop->btpo_cycleid = 0;
-    ((BTPageOpaque)pageop)->xact = xlrec->btpo_xact;
+        pageop->btpo_prev = leftsib;
+        pageop->btpo_next = rightsib;
+        pageop->btpo_flags = BTP_DELETED;
+        pageop->btpo_cycleid = 0;
+        ((BTPageOpaque)pageop)->xact = xlrec->btpo_xact;
 
-    PageSetLSN(page, lsn);
-    MarkBufferDirty(buffer.buf);
+        PageSetLSN(page, lsn);
+        MarkBufferDirty(buffer.buf);
+    }
     UnlockReleaseBuffer(buffer.buf);
 
     /* Update metapage if needed */
@@ -879,6 +891,9 @@ static void btree_xlog_mark_page_halfdead(uint8 info, XLogReaderState *record)
     }
 
     RedoBufferInfo lbuffer;
+    if (SSCheckInitPageXLogSimple(record, BTREE_HALF_DEAD_LEAF_PAGE_NUM, &lbuffer) == BLK_DONE) {
+        return;
+    }
     XLogInitBufferForRedo(record, BTREE_HALF_DEAD_LEAF_PAGE_NUM, &lbuffer);
     BtreeXlogHalfdeadPageOperatorLeafpage(&lbuffer, xlrec);
 
@@ -927,10 +942,13 @@ static void btree_xlog_unlink_page(uint8 info, XLogReaderState *record)
 
     /* Rewrite target page as empty deleted page */
     RedoBufferInfo buffer;
-    XLogInitBufferForRedo(record, BTREE_UNLINK_PAGE_CUR_PAGE_NUM, &buffer);
-    BtreeXlogUnlinkPageOperatorCurpage(&buffer, xlrec);
+    XLogRedoAction action = SSCheckInitPageXLog(record, BTREE_UNLINK_PAGE_CUR_PAGE_NUM, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, BTREE_UNLINK_PAGE_CUR_PAGE_NUM, &buffer);
+        BtreeXlogUnlinkPageOperatorCurpage(&buffer, xlrec);
 
-    MarkBufferDirty(buffer.buf);
+        MarkBufferDirty(buffer.buf);
+    }
     UnlockReleaseBuffer(buffer.buf);
 
     /*
@@ -944,10 +962,13 @@ static void btree_xlog_unlink_page(uint8 info, XLogReaderState *record)
          * scratch using the information from the WAL record.
          */
         RedoBufferInfo cbuffer;
-        XLogInitBufferForRedo(record, BTREE_UNLINK_PAGE_CHILD_NUM, &cbuffer);
-        BtreeXlogUnlinkPageOperatorChildpage(&cbuffer, xlrec);
+        XLogRedoAction action = SSCheckInitPageXLog(record, BTREE_UNLINK_PAGE_CHILD_NUM, &cbuffer);
+        if (action == BLK_NEEDS_REDO) {
+            XLogInitBufferForRedo(record, BTREE_UNLINK_PAGE_CHILD_NUM, &cbuffer);
+            BtreeXlogUnlinkPageOperatorChildpage(&cbuffer, xlrec);
 
-        MarkBufferDirty(cbuffer.buf);
+            MarkBufferDirty(cbuffer.buf);
+        }
         UnlockReleaseBuffer(cbuffer.buf);
     }
 
@@ -966,11 +987,14 @@ static void btree_xlog_newroot_update(XLogReaderState *record)
     char *ptr = NULL;
     Size len;
 
-    XLogInitBufferForRedo(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, &buffer);
-    ptr = XLogRecGetBlockData(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, &len);
-    BtreeXlogNewrootOperatorPage(&buffer, (void *)xlrec, (void *)ptr, len, &downlink);
+    XLogRedoAction action = SSCheckInitPageXLog(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, &buffer); 
+        ptr = XLogRecGetBlockData(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, &len);
+        BtreeXlogNewrootOperatorPage(&buffer, (void *)xlrec, (void *)ptr, len, &downlink);
 
-    MarkBufferDirty(buffer.buf);
+        MarkBufferDirty(buffer.buf);
+    }
     UnlockReleaseBuffer(buffer.buf);
 
     lbuffer.buf = InvalidBuffer;
@@ -1004,33 +1028,36 @@ static void btree_xlog_newroot(XLogReaderState *record, bool issplitupgrade)
 
     XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL);
 
-    XLogInitBufferForRedo(record, 0, &buffer);
-    page = buffer.pageinfo.page;
+    XLogRedoAction action = SSCheckInitPageXLog(record, 0, &buffer);
+    if (action == BLK_NEEDS_REDO) {
+        XLogInitBufferForRedo(record, 0, &buffer);
+        page = buffer.pageinfo.page;
 
-    _bt_pageinit(page, buffer.pageinfo.pagesize);
-    pageop = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
-    pageop->btpo_flags = BTP_ROOT;
-    pageop->btpo_prev = pageop->btpo_next = P_NONE;
-    pageop->btpo.level = xlrec->level;
-    if (xlrec->level == 0) {
-        pageop->btpo_flags |= BTP_LEAF;
+        _bt_pageinit(page, buffer.pageinfo.pagesize);
+        pageop = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+        pageop->btpo_flags = BTP_ROOT;
+        pageop->btpo_prev = pageop->btpo_next = P_NONE;
+        pageop->btpo.level = xlrec->level;
+        if (xlrec->level == 0) {
+            pageop->btpo_flags |= BTP_LEAF;
+        }
+        pageop->btpo_cycleid = 0;
+
+        if (xlrec->level > 0) {
+            IndexTuple itup;
+
+            ptr = XLogRecGetBlockData(record, 0, &len);
+            _bt_restore_page(page, ptr, len);
+
+            /* extract downlink to the right-hand split page */
+            itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, P_FIRSTKEY));
+            downlink = ItemPointerGetBlockNumber(&(itup->t_tid));
+            Assert(ItemPointerGetOffsetNumber(&(itup->t_tid)) == P_HIKEY);
+        }
+
+        PageSetLSN(page, lsn);
+        MarkBufferDirty(buffer.buf);
     }
-    pageop->btpo_cycleid = 0;
-
-    if (xlrec->level > 0) {
-        IndexTuple itup;
-
-        ptr = XLogRecGetBlockData(record, 0, &len);
-        _bt_restore_page(page, ptr, len);
-
-        /* extract downlink to the right-hand split page */
-        itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, P_FIRSTKEY));
-        downlink = ItemPointerGetBlockNumber(&(itup->t_tid));
-        Assert(ItemPointerGetOffsetNumber(&(itup->t_tid)) == P_HIKEY);
-    }
-
-    PageSetLSN(page, lsn);
-    MarkBufferDirty(buffer.buf);
     UnlockReleaseBuffer(buffer.buf);
 
     /* Check to see if this satisfies any incomplete insertions */

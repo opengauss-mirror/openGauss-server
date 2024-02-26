@@ -14,6 +14,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 #include "utils/fmgroids.h"
 #include "utils/pl_package.h"
@@ -58,8 +59,21 @@
 PG_MODULE_MAGIC;
 #endif
 #define MAXSTRLEN ((1 << 11) - 1)
+#define HTML_LT_LEN 4
+#define HTML_AMP_LEN 5
+#define HTML_QUOT_LEN 6
 static void init_do_stmt(PLpgSQL_package *pkg, bool isCreate, ListCell *cell, int oldCompileStatus,
                   PLpgSQL_compile_context *curr_compile, List *temp_tableof_index, MemoryContext oldcxt);
+static void get_func_actual_rows(Oid funcid, uint32* rows);
+static void get_proc_coverage(Oid func_oid, int* coverage);
+static void generate_procoverage_html(int beginId, int endId, StringInfoData* result, bool isDefault);
+static void generate_procoverage_table(char* value, StringInfoData* result, int index,
+                  List** coverage_array, List** pro_querys);
+static void generate_procoverage_rows(StringInfoData* result, List* coverage_array, List* pro_querys);
+static void deconstruct_coverage_array(List** coverage_array, char* array_string);
+static void deconstruct_querys_array(List** pro_querys, const char* querys_string);
+static char* replace_html_entity(const char* input);
+
 static void auditExecPLpgSQLFunction(PLpgSQL_function* func, AuditResult result)
 {
     char details[PGAUDIT_MAXLENGTH];
@@ -689,6 +703,75 @@ extern bool CheckElementParsetreeTag(Node* parsetree)
     return result;
 }
 
+static PGconn* LoginDatabase(char* host, int port, char* user, char* password,
+    char* dbname, const char* progname, char* encoding)
+{
+    PGconn* conn = NULL;
+    char portValue[32];
+#define PARAMS_ARRAY_SIZE 10
+    const char* keywords[PARAMS_ARRAY_SIZE];
+    const char* values[PARAMS_ARRAY_SIZE];
+    int count = 0;
+    int retryNum = 10;
+    int rc;
+
+    rc = sprintf_s(portValue, sizeof(portValue), "%d", port);
+    securec_check_ss(rc, "\0", "\0");
+
+    keywords[0] = "host";
+    values[0] = host;
+    keywords[1] = "port";
+    values[1] = portValue;
+    keywords[2] = "user";
+    values[2] = user;
+    keywords[3] = "password";
+    values[3] = password;
+    keywords[4] = "dbname";
+    values[4] = dbname;
+    keywords[5] = "fallback_application_name";
+    values[5] = progname;
+    keywords[6] = "client_encoding";
+    values[6] = encoding;
+    keywords[7] = "connect_timeout";
+    values[7] = "5";
+    keywords[8] = "options";
+    /* this mode: remove timeout */
+    values[8] = "-c xc_maintenance_mode=on";
+    keywords[9] = NULL;
+    values[9] = NULL;
+
+retry:
+    /* try to connect to database */
+    conn = PQconnectdbParams(keywords, values, true);
+    if (PQstatus(conn) != CONNECTION_OK) {
+        if (++count < retryNum) {
+            ereport(LOG, (errmsg("Could not connect to the %s, the connection info : %s",
+                                 dbname, PQerrorMessage(conn))));
+            PQfinish(conn);
+            conn = NULL;
+
+            /* sleep 0.1 s */
+            pg_usleep(100000L);
+            goto retry;
+        }
+
+        char connErrorMsg[1024] = {0};
+        errno_t rc;
+        rc = snprintf_s(connErrorMsg, 1024, 1023,
+                        "%s", PQerrorMessage(conn));
+        securec_check_ss(rc, "\0", "\0");
+
+        PQfinish(conn);
+        conn = NULL;
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                       (errmsg("Could not connect to the %s, "
+                               "we have tried %d times, the connection info: %s",
+                               dbname, count, connErrorMsg))));
+    }
+
+    return (conn);
+}
+
 Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 {
     bool nonatomic;
@@ -709,6 +792,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     MemoryContext oldContext = CurrentMemoryContext;
     int pkgDatumsNumber = 0;
     bool savedisAllowCommitRollback = true;
+    bool enableProcCoverage = u_sess->attr.attr_common.enable_proc_coverage;
     /*
      * if the atomic stored in fcinfo is false means allow
      * commit/rollback within stored procedure.
@@ -784,6 +868,15 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
          */
         firstLevelPkgOid = saveCallFromPkgOid(package_oid);
         bool saved_current_stp_with_exception = plpgsql_get_current_value_stp_with_exception();
+        int *coverage = NULL;
+        if (enableProcCoverage) {
+            uint32 rows;
+            int ret;
+            get_func_actual_rows(func_oid, &rows);
+            coverage = (int*)palloc(sizeof(int) * rows);
+            ret = memset_s(coverage, sizeof(int) * rows, 0, sizeof(int) * rows);
+            securec_check(ret, "\0", "\0");
+        }
         /* Find or compile the function */
         if (func == NULL) {
             u_sess->plsql_cxt.compile_has_warning_info = false;
@@ -881,7 +974,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
                 if (IsAutonomousTransaction(func->action->isAutonomous)) {
                     retval = plpgsql_exec_autonm_function(func, fcinfo, NULL);
                 } else {
-                    retval = plpgsql_exec_function(func, fcinfo, false);
+                    retval = plpgsql_exec_function(func, fcinfo, false, coverage);
                 }
                 /* Disconnecting and releasing resources */
                 DestoryAutonomousSession(false);
@@ -953,6 +1046,11 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
             clean_up_debug_server(func->debug, false, true);
         }
 #endif
+        if (enableProcCoverage && func->namespaceOid != PG_CATALOG_NAMESPACE) {
+            get_proc_coverage(func_oid, coverage);
+            pfree(coverage);
+        }
+
         cursor_step = 0;
         /* cursor as an in parameter, its option shoule be return to the caller */
         if (pkg != NULL) {
@@ -1947,4 +2045,331 @@ static void init_do_stmt(PLpgSQL_package *pkg, bool isCreate, ListCell *cell, in
             (void*)MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
         }
     }
+}
+
+static void get_func_actual_rows(Oid funcid, uint32* rows)
+{
+    int headerlines = 0;
+    char* funcdef = pg_get_functiondef_worker(funcid, &headerlines);
+    if (funcdef == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_TARGET_SERVER_NOT_ATTACHED),
+                errmsg("Unexpected NULL value for function definition"),
+                errdetail("N/A"),
+                errcause("Function definition is NULL"),
+                erraction("Re-create the function and retry")));
+    }
+    int nLine = 0;
+    for (unsigned int i = 0; i < strlen(funcdef); i++) {
+        if (funcdef[i] == '\n') {
+            nLine++;
+        }
+    }
+    *rows = nLine;
+    pfree(funcdef);
+}
+
+static void get_proc_coverage(Oid func_oid, int* coverage)
+{
+    PGconn* conn = NULL;
+    char* dbName = u_sess->proc_cxt.MyProcPort->database_name;
+    conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+    NULL, NULL, "postgres", "gs_clean", "auto");
+
+    if (PQstatus(conn) == CONNECTION_OK) {
+        char proId[MAX_INT32_LEN];
+        char* proNname = get_func_name(func_oid);
+        StringInfoData pro_querys;
+        StringInfoData pro_canbreak;
+        StringInfoData pro_coverage;
+        int rc = sprintf_s(proId, MAX_INT32_LEN, "%u", func_oid);
+        securec_check_ss(rc, "\0", "\0");
+        const char* infoCodeValues[1];
+        infoCodeValues[0] = proId;
+        uint32 rows;
+        int headerLines;
+        CodeLine* infoCode = debug_show_code_worker(func_oid, &rows, &headerLines);
+        
+        initStringInfo(&pro_querys);
+        initStringInfo(&pro_canbreak);
+        initStringInfo(&pro_coverage);
+        appendStringInfo(&pro_querys, "%s", infoCode[0].code);
+        appendStringInfo(&pro_canbreak, "{%s", infoCode[0].canBreak ? "true" : "false");
+        appendStringInfo(&pro_coverage, "{%d", coverage[0]);
+
+        for (int i = 1; i < rows; ++i) {
+            appendStringInfo(&pro_querys, "\n %s", infoCode[i].code);
+            appendStringInfo(&pro_canbreak, ",%s", infoCode[i].canBreak ? "true" : "false");
+            appendStringInfo(&pro_coverage, ",%d", coverage[i]);
+        }
+        appendStringInfoString(&pro_canbreak, "}");
+        appendStringInfoString(&pro_coverage, "}");
+
+        const char *insertQuery = "INSERT INTO coverage.proc_coverage"
+                                  "(pro_oid, pro_name, db_name, pro_querys, pro_canbreak, coverage) "
+                                  "VALUES ($1, $2, $3, $4, $5, $6)";
+        const Oid paramTypes[6] = {OIDOID, TEXTOID, TEXTOID, TEXTOID, BOOLARRAYOID, INT4ARRAYOID};
+        const int paramFormats[6] = {0};
+        const char *paramValues[6];
+        paramValues[0] = proId;
+        paramValues[1] = proNname;
+        paramValues[2] = dbName;
+        paramValues[3] = pro_querys.data;
+        paramValues[4] = pro_canbreak.data;
+        paramValues[5] = pro_coverage.data;
+
+        PGresult *res = PQexecParams(conn, insertQuery, 6, paramTypes, paramValues, NULL, paramFormats, 0);
+        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+            ereport(WARNING,
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("Insert failed: %s", PQerrorMessage(conn))));
+        }
+        FreeStringInfo(&pro_querys);
+        FreeStringInfo(&pro_canbreak);
+        FreeStringInfo(&pro_coverage);
+        pfree(infoCode);
+        PQclear(res);
+        PQfinish(conn);
+    } else {
+        ereport(WARNING,
+            (errcode(ERRCODE_INVALID_STATUS), errmsg("Database connect failed: %s", PQerrorMessage(conn))));
+    }
+}
+
+Datum generate_procoverage_report(PG_FUNCTION_ARGS)
+{
+    int64 beginId = PG_GETARG_INT64(0);
+    int64 endId = PG_GETARG_INT64(1);
+    bool isDefault = false;
+
+    if (!u_sess->attr.attr_common.enable_proc_coverage) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("GUC enable_proc_coverage not turned on")));
+    }
+    if (beginId == -1 && endId == -1) {
+        isDefault = true;
+    }
+    if (!isDefault && (beginId < 1 || endId < 1 || beginId > endId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Incorrect begin/end value")));
+    }
+
+    StringInfoData result;
+    const char* css =
+        "<html lang=\"en\"><head><title>openGauss Procedure Coverage Report</title>\n"
+        "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n"
+        "<style>.unexecuted{background-color: #ff6230;}\n"
+        ".executed{background-color: #cad7fe;}.lineno{background-color: yellow;width: 120px;}</style>\n"
+        "</head><body class=\"pcr\">\n";
+    initStringInfo(&result);
+    appendStringInfo(&result, "%s<h1 class=\"wdr\">Procedure Coverage Report</h1>\n", css);
+    generate_procoverage_html(beginId, endId, &result, isDefault);
+    appendStringInfoString(&result, "</body></html>");
+    PG_RETURN_TEXT_P(cstring_to_text(result.data));
+}
+
+static void generate_procoverage_html(int beginId, int endId, StringInfoData* result, bool isDefault)
+{
+    int rc = 0;
+    /* connect SPI to execute query */
+    SPI_STACK_LOG("connect", NULL, NULL);
+    if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("proc coverage SPI_connect failed: %s", SPI_result_code_string(rc))));
+    }
+
+    StringInfoData sql;
+    initStringInfo(&sql);
+    isDefault ?
+        appendStringInfoString(
+        &sql, "SELECT pro_name,db_name,coverage_arrays(pro_canbreak,pg_catalog.array_integer_sum(coverage)) "
+        "as coverage_array, "
+        "pro_querys, calculate_coverage(coverage_array) FROM coverage.proc_coverage "
+        "GROUP BY pro_oid, db_name, pro_name, pro_querys, pro_canbreak order by db_name") :
+        appendStringInfo(
+        &sql, "SELECT pro_name,db_name,coverage_arrays(pro_canbreak,pg_catalog.array_integer_sum(coverage)) "
+        "as coverage_array, "
+        "pro_querys, calculate_coverage(coverage_array) FROM coverage.proc_coverage "
+        "WHERE coverage_id BETWEEN %d AND %d GROUP BY pro_oid, db_name, pro_name, pro_querys, "
+        "pro_canbreak order by db_name",
+        beginId, endId);
+
+    if (SPI_execute(sql.data, false, 0) != SPI_OK_SELECT) {
+        FreeStringInfo(&sql);
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid query")));
+    }
+    FreeStringInfo(&sql);
+    List* cstring_values = NIL;
+    if (SPI_tuptable != NULL) {
+        for (uint32 i = 0; i < SPI_processed; i++) {
+            List* row_string = NIL;
+            uint32 colNum = (uint32)SPI_tuptable->tupdesc->natts;
+            for (uint32 j = 1; j <= colNum; j++) {
+                char* value = SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, j);
+                row_string = lappend(row_string, value);
+            }
+            cstring_values = lappend(cstring_values, row_string);
+        }
+    }
+
+    foreach_cell(outer_cell, cstring_values) {
+        List* row_list = (List*)lfirst(outer_cell);
+        List* coverage_array = NIL;
+        List* pro_querys = NIL;
+        int index = 0;
+        foreach_cell(inner_cell, row_list) {
+            char* value = (char*)lfirst(inner_cell);
+            generate_procoverage_table(value, result, index, &coverage_array, &pro_querys);
+            index++;
+        }
+        list_free_ext(coverage_array);
+        list_free_deep(pro_querys);
+    }
+    list_free_deep(cstring_values);
+    SPI_STACK_LOG("finish", NULL, NULL);
+    SPI_finish();
+}
+
+static void generate_procoverage_table(char* value, StringInfoData* result,
+                                       int index, List** coverage_array, List** pro_querys)
+{
+    switch (index) {
+        case PRO_NAME_COL:
+            appendStringInfo(result, "<h2 class=\"pro_name\">%s()</h2>\n", value);
+            break;
+        case DB_NAME_COL:
+            appendStringInfo(result, "<h4 class=\"db_name\">Database: %s</h4>\n", value);
+            appendStringInfoString(result, "<table border=\"0\" class=\"proc_table\">\n");
+            break;
+        case COVERAGE_ARR_COL:
+            deconstruct_coverage_array(coverage_array, value);
+            break;
+        case PRO_QUERYS_COL:
+            deconstruct_querys_array(pro_querys, value);
+            break;
+        case COVERAGE_COL: {
+            char* endptr;
+            double coverageRate = strtod(value, &endptr);
+            generate_procoverage_rows(result, *coverage_array, *pro_querys);
+            appendStringInfo(result, "<h4 class=\"db_name\">Coverage rate: %.2f%%</h4>\n", coverageRate * 100);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static void generate_procoverage_rows(StringInfoData* result, List* coverage_array, List* pro_querys)
+{
+    ListCell* cover_cell = list_head(coverage_array);
+    ListCell* query_cell = list_head(pro_querys);
+    int lineno = -3;
+    while (cover_cell != NULL && query_cell != NULL) {
+        int cover = lfirst_int(cover_cell);
+        char* query = (char*)lfirst(query_cell);
+        const char* trClass = (cover == -1 ? "unbreakable" : (cover == 0 ? "unexecuted" : "executed"));
+        appendStringInfo(result, "<tr class=\"%s\">\n", trClass);
+        lineno < 1 ? appendStringInfoString(result, "<th class=\"lineno\"></th>\n") :
+                     appendStringInfo(result, "<th class=\"lineno\">%d</th>\n", lineno);
+        cover == -1 ? appendStringInfoString(result, "<th></th>\n") : appendStringInfo(result, "<th>%d</th>\n", cover);
+        appendStringInfo(result, "<th>%s</th>\n</tr>\n", query);
+        cover_cell = lnext(cover_cell);
+        query_cell = lnext(query_cell);
+        lineno++;
+    }
+    appendStringInfoString(result, "</table>");
+}
+
+static void deconstruct_coverage_array(List** coverage_array, char* array_string)
+{
+    char *p = array_string;
+    int num;
+    if (*p++ != '{') {
+        return;
+    }
+    while (*p && *p != '}') {
+        while (*p == ',') {
+            p++;
+        }
+        if (sscanf_s(p, "%d", &num) == 1) {
+            *coverage_array = lappend_int(*coverage_array, num);
+        }
+        while (*p && *p != ',' && *p != '}') {
+            p++;
+        }
+    }
+}
+
+static void deconstruct_querys_array(List** pro_querys, const char* querys_string)
+{
+    char* buffer = NULL;
+    char* token = NULL;
+    char* saveStr = NULL;
+    const char delim[2] = "\n";
+    buffer = pstrdup(querys_string);
+    token = strtok_r(buffer, delim, &saveStr);
+
+    while (token != NULL) {
+        char* copy = replace_html_entity(token);
+        *pro_querys = lappend(*pro_querys, copy);
+        token = strtok_r(NULL, delim, &saveStr);
+    }
+    pfree(buffer);
+}
+
+static char* replace_html_entity(const char* input)
+{
+    size_t input_length = strlen(input);
+    size_t new_length = 0;
+
+    for (size_t i = 0; i < input_length; i++) {
+        switch (input[i]) {
+            case '<':
+            case '>':
+                new_length += HTML_LT_LEN;
+                break;
+            case '&':
+                new_length += HTML_AMP_LEN;
+                break;
+            case '\"':
+                new_length += HTML_QUOT_LEN;
+                break;
+            default:
+                new_length += 1;
+                break;
+        }
+    }
+    char* result = (char*)palloc(new_length + 1);
+
+    size_t j = 0;
+    for (size_t i = 0; i < input_length; i++) {
+        errno_t rc;
+        switch (input[i]) {
+            case '<':
+                rc = strcpy_s(&result[j], HTML_LT_LEN + 1, "&lt;");
+                securec_check_c(rc, "\0", "\0");
+                j += HTML_LT_LEN;
+                break;
+            case '>':
+                rc = strcpy_s(&result[j], HTML_LT_LEN + 1, "&gt;");
+                securec_check_c(rc, "\0", "\0");
+                j += HTML_LT_LEN;
+                break;
+            case '&':
+                rc = strcpy_s(&result[j], HTML_AMP_LEN + 1, "&amp;");
+                securec_check_c(rc, "\0", "\0");
+                j += HTML_AMP_LEN;
+                break;
+            case '\"':
+                rc = strcpy_s(&result[j], HTML_QUOT_LEN + 1, "&quot;");
+                securec_check_c(rc, "\0", "\0");
+                j += HTML_QUOT_LEN;
+                break;
+            default:
+                result[j] = input[i];
+                j += 1;
+                break;
+        }
+    }
+    result[j] = '\0';
+    return result;
 }

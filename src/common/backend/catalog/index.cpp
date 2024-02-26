@@ -5497,6 +5497,8 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
         {
             if (OidIsValid(indexPartId)) {
                 reindex_indexpart_internal(heapRelation, iRel, indexInfo, indexPartId, baseDesc);
+                /* Register invalidation of the relation's relcache entry. */
+                CacheInvalidateRelcacheByRelid(indexId);
             } else if (RelationIsGlobalIndex(iRel)) {
                 ReindexGlobalIndexInternal(heapRelation, iRel, indexInfo, baseDesc);
             } else {
@@ -6113,6 +6115,9 @@ bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType)
     PG_END_TRY();
     ResetReindexPending();
 
+    /* Register invalidation of the relation's relcache entry. */
+    CacheInvalidateRelcache(rel);
+    
     /*
      * Close rel, but continue to hold the lock.
      */
@@ -6278,6 +6283,8 @@ static void reindexPartIndex(Oid indexId, Oid partOid, bool skip_constraint_chec
 
         // step 2: reset indisusable state of index partition
         ATExecSetIndexUsableState(PartitionRelationId, indexPartOid, true);
+        /* Register invalidation of the relation's relcache entry. */
+        CacheInvalidateRelcacheByRelid(indexId);
     }
     PG_CATCH();
     {

@@ -39,8 +39,10 @@
 
 static Oid FuncNameAsType(List* funcname);
 static Node* ParseComplexProjection(ParseState* pstate, char* funcname, Node* first_arg, int location);
-static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs);
+static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs, bool* defaultValid);
 static Oid cl_get_input_param_original_type(Oid func_oid, int argno);
+static bool CheckDefaultArgsPosition(int2vector* defaultargpos, int pronargdefaults, int ndargs,
+    int pronallargs, int pronargs, HeapTuple procTup);
 
 /*
  *	Parse a function call
@@ -478,6 +480,11 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
         newa->location = exprLocation((Node*)vargs);
 
         fargs = lappend(fargs, newa);
+
+	/* We could not have had VARIADIC marking before ... For age */
+        Assert(!func_variadic);
+        /* ... but now, it's a VARIADIC call */
+        func_variadic = true;
     }
 
     /* if it returns a set, check that's OK */
@@ -1631,6 +1638,10 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
         if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0) {
             break;
         }
+
+        if (CheckTableOfType(best_candidate, argtypes)) {
+            break;
+        }
     }
 
     if (best_candidate == NULL) {
@@ -1820,7 +1831,14 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_FUNCTION), errmodule(MOD_OPT), errmsg("not enough default arguments")));
 
-            *argdefaults = GetDefaultVale(*funcid, best_candidate->argnumbers, best_candidate->ndargs);
+            bool defaultValid = true;
+            *argdefaults = GetDefaultVale(*funcid, best_candidate->argnumbers, best_candidate->ndargs, &defaultValid);
+            if (!defaultValid) {
+                ereport(DEBUG3,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmodule(MOD_OPT), errmsg("default arguments pos is not right.")));
+                return FUNCDETAIL_NOTFOUND;
+            }
         }
         if (pform->proisagg)
             result = FUNCDETAIL_AGGREGATE;
@@ -2260,7 +2278,7 @@ Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError)
 }
 
 // fetch default args if caller wants 'em
-static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs)
+static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs, bool* defaultValid)
 {
     HeapTuple tuple;
     Form_pg_proc formproc;
@@ -2357,6 +2375,9 @@ static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs)
         while (ndelete-- > 0) {
             defaults = list_delete_first(defaults);
         }
+        
+        *defaultValid = CheckDefaultArgsPosition(defaultargpos, pronargdefaults, ndargs,
+                                                 pronallargs, pronargs, tuple);
     }
 
     if (argtypes != NULL)
@@ -2374,6 +2395,49 @@ static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs)
 
     ReleaseSysCache(tuple);
     return defaults;
+}
+
+static bool CheckDefaultArgs(int2vector* defaultargpos, int pronargdefaults, int pronallargs,
+    int pronargs, HeapTuple proctup)
+{
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT || PROC_UNCHECK_DEFAULT_PARAM) {
+        return true;
+    }
+    // if the func has out param, but did not enable_out_param_override, we don't check the defaultpos
+    if (pronallargs > pronargs && !enable_out_param_override()) {
+        return true;
+    }
+    // the pg_catalog's func can omit out param, so we don't check the defaultpos
+    bool isnull = false;
+    Datum namespaceDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_pronamespace, &isnull);
+    if (!isnull && IsAformatStyleFunctionOid(DatumGetObjectId(namespaceDatum))) {
+        return true;
+    }
+    // if the func has the default args without position, we consider the position is at the end, no error
+    if (defaultargpos->dim1 == 0 && pronargdefaults > 0) {
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Check whether the parameter is in the appropriate position with default values
+ */
+static bool CheckDefaultArgsPosition(int2vector* defaultargpos, int pronargdefaults, int ndargs,
+    int pronallargs, int pronargs, HeapTuple proctup)
+{
+    if (CheckDefaultArgs(defaultargpos, pronargdefaults, pronallargs, pronargs, proctup)) {
+        return true;
+    }
+    // Check whether the defaultpos are at the end of the parameter list from back to front
+    int argIndex = pronallargs - 1;
+    int defaultposIndex = pronargdefaults - 1;
+    for (; argIndex >= pronallargs - ndargs; argIndex--, defaultposIndex--) {
+        if (defaultargpos->values[defaultposIndex] != argIndex) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /*

@@ -1,0 +1,25 @@
+6109,6132d6108
+< -- Name: tab_foreign_child_col_a_fkey; Type: FK CONSTRAINT; Schema: public; Owner: ddl_test_user
+< --
+< 
+< ALTER TABLE tab_foreign_child
+<     ADD CONSTRAINT tab_foreign_child_col_a_fkey FOREIGN KEY (col_a, col_b) REFERENCES tab_foreign_parent(col_1, col_2);
+< 
+< 
+< --
+< -- Name: tab_product2_currency_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: ddl_test_user
+< --
+< 
+< ALTER TABLE tab_product2
+<     ADD CONSTRAINT tab_product2_currency_id_fkey FOREIGN KEY (currency_id) REFERENCES tab_currency(col_id);
+< 
+< 
+< --
+< -- Name: tab_product_currency_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: ddl_test_user
+< --
+< 
+< ALTER TABLE tab_product
+<     ADD CONSTRAINT tab_product_currency_id_fkey FOREIGN KEY (currency_id) REFERENCES tab_currency(col_id);
+< 
+< 
+< --

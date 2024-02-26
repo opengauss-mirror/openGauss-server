@@ -14,6 +14,7 @@
 #define EVENT_TRIGGER_H
 
 #include "catalog/pg_event_trigger.h"
+#include "lib/ilist.h"
 #include "nodes/parsenodes.h"
 #include "knl/knl_session.h"
 #include "catalog/objectaddress.h"
@@ -55,6 +56,22 @@ typedef struct EventTriggerQueryState
 #define AT_REWRITE_ALTER_COMPRESSION   0x0B
 
 #define currentEventTriggerState ((EventTriggerQueryState*)(u_sess->exec_cxt.EventTriggerState))
+
+/* Support for dropped objects */
+typedef struct SQLDropObject {
+   ObjectAddress   address;
+   const char     *schemaname;
+   const char     *objname;
+   const char     *objidentity;
+   const char     *objecttype;
+   List             *addrnames;
+   List             *addrargs;
+   bool             original;
+   bool             normal;
+   bool             istemp;
+   slist_node       next;
+} SQLDropObject;
+
 /*
  * EventTriggerData is the node type that is passed as fmgr "context" info
  * when a function is called by the event trigger manager.

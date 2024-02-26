@@ -139,6 +139,9 @@ static int g_restoredEntries = 0;
 static volatile bool g_progressFlag = false;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+static bool disable_progress;
+#endif
 
 static ArchiveHandle* _allocAH(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode);
 static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* AH);
@@ -404,21 +407,27 @@ static void out_drop_stmt(ArchiveHandle* AH, const TocEntry* te)
 static void *ProgressReportRestore(void *arg)
 {
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    return nullptr;
+    if (disable_progress) {
+        return nullptr;
+    }
 #endif
-    char progressBar[52];
+    if (g_totalEntries == 0) {
+        return nullptr;
+    }
+    char progressBar[53];
     int percent;
     do {
         /* progress report */
         percent = (int)(g_restoredEntries * 100 / g_totalEntries);
         GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \r",
+        fprintf(stdout, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \r",
             progressBar, percent, g_restoredEntries, g_totalEntries);
                 pthread_mutex_lock(&g_mutex);
         timespec timeout;
         timeval now;
         gettimeofday(&now, nullptr);
         timeout.tv_sec = now.tv_sec + 1;
+        timeout.tv_nsec = 0;
         int ret = pthread_cond_timedwait(&g_cond, &g_mutex, &timeout);
         pthread_mutex_unlock(&g_mutex);
         if (ret == ETIMEDOUT) {
@@ -427,10 +436,11 @@ static void *ProgressReportRestore(void *arg)
             break;
         }
     } while ((g_restoredEntries  < g_totalEntries) && !g_progressFlag);
-        percent = 100;
-        GenerateProgressBar(percent, progressBar);
-        fprintf(stderr, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
-                progressBar, percent, g_restoredEntries, g_totalEntries);
+    percent = 100;
+    GenerateProgressBar(percent, progressBar);
+    fprintf(stdout, "Progress: %s %d%% (%d/%d, restored_entries/total_entries). restore entires \n",
+            progressBar, percent, g_restoredEntries, g_totalEntries);
+    return nullptr;
 }
 
 /* Public */
@@ -446,6 +456,10 @@ void RestoreArchive(Archive* AHX)
     AH->stage = STAGE_INITIALIZING;
 
     g_totalEntries = AH->tocCount;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    disable_progress = ropt->disable_progress;
+#endif
+
     /*
      * Check for nonsensical option combinations.
      *
@@ -909,10 +923,11 @@ static int restore_toc_entry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ro
                          * TRUNCATE with ONLY so that child tables are not
                          * wiped.
                          */
-                        (void)ahprintf(AH,
-                            "TRUNCATE TABLE %s%s;\n\n",
-                            (PQserverVersion(AH->connection) >= 80400 ? "ONLY " : ""),
-                            fmtId(te->tag));
+                        if (PQserverVersion(AH->connection) >= 80400) {
+                            (void)ahprintf(AH, "TRUNCATE TABLE ONLY (%s);\n\n", fmtId(te->tag));
+                        } else {
+                            (void)ahprintf(AH, "TRUNCATE TABLE %s;\n\n", fmtId(te->tag));
+                        }
                     }
 
                     /*
@@ -2625,6 +2640,15 @@ static teReqs _tocEntryRequired(TocEntry* te, teSection curSection, RestoreOptio
     /* ENCODING and STDSTRINGS items are treated specially */
     if (strcmp(te->desc, "ENCODING") == 0 || strcmp(te->desc, "STDSTRINGS") == 0)
         return REQ_SPECIAL;
+
+    /*
+     * DATABASE and DATABASE PROPERTIES also have a special rule: they are
+     * restored in createDB mode, and not restored otherwise, independently of
+     * all else.
+     */
+    if (strcmp(te->desc, "DATABASE") == 0 || strcmp(te->desc, "DATABASE PROPERTIES") == 0) {
+        return ropt->createDB ? REQ_SCHEMA : (teReqs)0;
+    }
 
     /* If it's an ACL, maybe ignore it */
     if (ropt->aclsSkip && _tocEntryIsACL(te))

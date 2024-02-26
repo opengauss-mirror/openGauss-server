@@ -334,6 +334,26 @@ Oid fill_relation_collation(const char* collate, int charset, List** options, Oi
     return coll_oid;
 }
 
+static bool is_create_as_col_store(CreateStmt* stmt)
+{
+    ListCell *cell = NULL;
+    char* storeTypeStr = NULL;
+    foreach(cell, stmt->options) {
+        DefElem *def = (DefElem *)lfirst(cell);
+        if (pg_strcasecmp(def->defname, "orientation") == 0) {
+            if (nodeTag(def->arg) == T_String) {
+                storeTypeStr = strVal(def->arg);
+            } else if (nodeTag(def->arg) == T_TypeName) {
+                storeTypeStr = TypeNameToString((TypeName *)def->arg);
+            } else {
+                Assert(false);
+            }
+        }
+    }
+    return storeTypeStr && (pg_strcasecmp(storeTypeStr, ORIENTATION_COLUMN) == 0 ||
+        pg_strcasecmp(storeTypeStr, ORIENTATION_ORC) == 0);
+}
+
 List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids, bool preCheck,
 Oid *namespaceid, bool isFirstNode)
 {
@@ -834,9 +854,11 @@ Oid *namespaceid, bool isFirstNode)
     checkClusterConstraints(&cxt);
 
     /*
-     * Check reserve column
+     * Check reserve column if the table is column store
      */
-    checkReserveColumn(&cxt);
+    if (is_create_as_col_store(stmt)) {
+        checkReserveColumn(&cxt);
+    }
 
     /*
      * Output results.
@@ -1040,17 +1062,18 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     seqstmt = makeNode(CreateSeqStmt);
     seqstmt->sequence = makeRangeVar(snamespace, sname, -1);
     seqstmt->options = is_autoinc ? GetAutoIncSeqOptions(cxt) : NULL;
-
+    seqstmt->is_autoinc = is_autoinc;
 #ifdef PGXC
     seqstmt->is_serial = true;
 #endif
     seqstmt->is_large = large;
 
     /* Assign UUID for create sequence */
+    seqstmt->uuid = INVALIDSEQUUID;
+#ifdef ENABLE_MUTIPLE_NODES
     if (!IS_SINGLE_NODE)
         seqstmt->uuid = gen_uuid(cxt->uuids);
-    else
-        seqstmt->uuid = INVALIDSEQUUID;
+#endif
 
     /*
      * If this is ALTER ADD COLUMN, make sure the sequence will be owned
@@ -1089,6 +1112,7 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     attnamelist = list_make3(makeString(snamespace), makeString(cxt->relation->relname), makeString(column->colname));
     altseqstmt->options = list_make1(makeDefElem("owned_by", (Node*)attnamelist));
     altseqstmt->is_large = large;
+    altseqstmt->is_autoinc = is_autoinc;
 
     cxt->alist = lappend(cxt->alist, altseqstmt);
 
@@ -2577,7 +2601,7 @@ static void transformTableLikePartitionKeys(
                     RelationGetRelationName(relation))));
     }
 
-    AssertEreport(n_key_column <= RANGE_PARTKEYMAXNUM, MOD_OPT, "");
+    AssertEreport(n_key_column <= MAX_RANGE_PARTKEY_NUMS, MOD_OPT, "");
 
     /* Get int2 array of partition key column numbers */
     attnums = (int16*)ARR_DATA_PTR(partkey_columns);
@@ -3794,6 +3818,10 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         ReleaseSysCache(tup_idx);
 
         index->indexOid = index_oid;
+
+        /* save the original index name, it wll be replace by constraint */
+        DefElem *def = makeDefElem("origin_indexname", (Node*)makeString(constraint->indexname));
+        index->options = lappend(index->options, def);
     }
 
     /*
@@ -5100,9 +5128,11 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
     checkClusterConstraints(&cxt);
 
     /*
-     * Check reserve column
+     * Check reserve column if the table is column store
      */
-    checkReserveColumn(&cxt);
+    if (RelationIsColStore(rel)) {
+        checkReserveColumn(&cxt);
+    }
 
     if ((stmt->relkind == OBJECT_FOREIGN_TABLE || stmt->relkind == OBJECT_STREAM) && cxt.alist != NIL) {
         Oid relationId;
@@ -5720,11 +5750,11 @@ void checkPartitionSynax(CreateStmt* stmt)
     }
 
     /* check partition key number for none value-partition table */
-    if (!value_partition && stmt->partTableState->partitionKey->length > PARTITION_PARTKEYMAXNUM) {
+    if (!value_partition && stmt->partTableState->partitionKey->length > MAX_PARTKEY_NUMS) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("too many partition keys for partitioned table"),
-                errhint("Partittion key columns can not be more than %d", PARTITION_PARTKEYMAXNUM)));
+                errhint("Partittion key columns can not be more than %d", MAX_PARTKEY_NUMS)));
     }
 
     /* check PARTITIONS clause */
@@ -6771,8 +6801,8 @@ static void get_rel_partition_info(Relation partTableRel, List** pos, Const** up
         return; /* nothing to do */
 
     partMap = (RangePartitionMap*)partTableRel->partMap;
-    partitionKey = partMap->partitionKey;
-    partKeyNum = partMap->partitionKey->dim1;
+    partitionKey = partMap->base.partitionKey;
+    partKeyNum = partMap->base.partitionKey->dim1;
 
     /* get position of the partition key */
     if (pos != NULL) {
@@ -6871,7 +6901,7 @@ static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* s
     } else {
         Assert(PointerIsValid(splitState->partition_for_values));
         splitState->partition_for_values = transformConstIntoTargetType(
-            partTableRel->rd_att->attrs, partMap->partitionKey, splitState->partition_for_values);
+            partTableRel->rd_att->attrs, partMap->base.partitionKey, splitState->partition_for_values);
         srcPartOid = PartitionValuesGetPartitionOid(
             partTableRel, splitState->partition_for_values, AccessExclusiveLock, true, false, false);    }
 

@@ -75,12 +75,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92920;
+const uint32 GRAND_VERSION_NUM = 92926;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
 const uint32 UPSERT_ALIAS_VERSION_NUM = 92920;
 const uint32 SUPPORT_GS_DEPENDENCY_VERSION_NUM = 92916;
 const uint32 SPQ_VERSION_NUM = 92915;
@@ -120,6 +121,7 @@ const uint32 PLAN_SELECT_VERSION_NUM = 92826;
 const uint32 MULTI_PARTITIONS_VERSION_NUM = 92825;
 const uint32 MULTI_MODIFY_VERSION_NUM = 92814;
 const uint32 CSN_TIME_BARRIER_VERSION = 92801;
+const uint32 SELECT_STMT_HAS_USERVAR = 92924;
 
 const uint32 SQL_PATCH_VERSION_NUM = 92675;
 const uint32 SWITCH_ROLE_VERSION_NUM = 92668;

@@ -996,6 +996,18 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->LocalBufferContext = NULL;
     storage_cxt->partition_dml_oids = NIL;
     storage_cxt->partition_ddl_oids = NIL;
+
+    /* pre-read params */
+    storage_cxt->bulk_io_is_in_progress = false;
+    storage_cxt->bulk_io_in_progress_count = 0;
+    storage_cxt->bulk_io_in_progress_buf = NULL;
+    storage_cxt->bulk_io_is_for_input = NULL;
+    storage_cxt->bulk_io_count = 0;
+    storage_cxt->bulk_io_error_count = 0;
+    storage_cxt->bulk_buf_read = NULL;
+    storage_cxt->bulk_buf_vacuum = NULL;
+    storage_cxt->max_heap_bulk_read_size = 0;
+    storage_cxt->max_vacuum_bulk_read_size = 0;
 }
 
 static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)
@@ -1415,6 +1427,12 @@ static void knl_u_spq_init(knl_u_spq_context* spq_cxt)
     spq_cxt->s_tupSerMemCtxt = NULL;
     spq_cxt->spq_opt_initialized = false;
     spq_cxt->remoteQuerys = NIL;
+    spq_cxt->adp_connections = NIL;
+    spq_cxt->snapshot = (SnapshotData*)palloc0(sizeof(SnapshotData));
+    spq_cxt->mdcache_invalidation_counter_registered = false;
+    spq_cxt->mdcache_invalidation_counter = 0;
+    spq_cxt->last_mdcache_invalidation_counter = 0;
+    spq_cxt->direct_read_map = NIL;
 }
 #endif
 
@@ -1448,6 +1466,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     sess_cxt->top_transaction_mem_cxt = NULL;
     sess_cxt->self_mem_cxt = NULL;
     sess_cxt->temp_mem_cxt = NULL;
+    sess_cxt->pre_read_mem_cxt = NULL;
     sess_cxt->dbesql_mem_cxt = NULL;
     sess_cxt->guc_variables = NULL;
     sess_cxt->num_guc_variables = 0;

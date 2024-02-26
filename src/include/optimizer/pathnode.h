@@ -114,7 +114,7 @@ extern Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_
  * prototypes for relnode.c
  */
 extern void setup_simple_rel_arrays(PlannerInfo* root);
-extern RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind);
+extern RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind, Bitmapset *parent = NULL);
 extern RelOptInfo* find_base_rel(PlannerInfo* root, int relid);
 extern RelOptInfo* find_join_rel(PlannerInfo* root, Relids relids);
 extern void remove_join_rel(PlannerInfo *root, RelOptInfo *rel);

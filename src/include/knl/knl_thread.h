@@ -212,6 +212,16 @@ read page worker    get a record           make lsn forwarder   get new item    
 startup             get a record           check stop           delay redo                 dispatch(total)
          decode                  null                  null          null
 
+for ondemand extreme rto
+thread                step1                     step2                 step3                 step4
+               step5                 step6                step7        step8
+seg redo worker     get a record           redo record(total)     redo seg xlog          get a record
+               null                  null                 null         null
+hashmap manager   prune seg record    prune hashmap(history)    prune hashmap(lastest)   get a record(instruct)
+               null                  null                 null          null
+ctrl worker       update usedblknum         request primary ckpt       null                  null
+               null                  null                 null          null
+
 for parallel redo
 thread     step1            step2               step3                 step4                step5
           step6              step7                  step8                    step9
@@ -1836,6 +1846,9 @@ typedef struct knl_t_utils_context {
     /* flag to indicate g_instance.baselock is help by current thread */
     bool holdProcBaseLock;
     bool SortColumnOptimize;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool holdLoadPluginLock[DB_CMPT_MAX];
+#endif
 
 #ifndef WIN32
     timer_t sigTimerId;
@@ -3022,6 +3035,8 @@ typedef struct knl_t_locale_context {
     char lc_numeric_envbuf[LC_ENV_BUFSIZE];
 
     char lc_time_envbuf[LC_ENV_BUFSIZE];
+
+    char lc_messages_envbuf[LC_ENV_BUFSIZE];
 
 } knl_t_locale_context;
 

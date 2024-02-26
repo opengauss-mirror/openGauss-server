@@ -97,24 +97,6 @@
  * This array provides a common part of system object structure; to help
  * consolidate routines to handle various kind of object classes.
  */
-typedef struct {
-    Oid class_oid;               /* oid of catalog */
-    Oid oid_index_oid;           /* oid of index on system oid column */
-    int oid_catcache_id;         /* id of catcache on system oid column	*/
-    int         name_catcache_id;   /* id of catcache on (name,namespace), or
-                                     * (name) if the object does not live in a
-                                     * namespace */
-    AttrNumber  attnum_name;    /* attnum of name field */
-    AttrNumber  attnum_namespace;   /* attnum of namespace field */
-    AttrNumber  attnum_owner;   /* attnum of owner field */
-    AttrNumber  attnum_acl;     /* attnum of acl field */
-    ObjectType  objtype;        /* OBJECT_* of this object type */
-    bool        is_nsp_name_unique; /* can the nsp/name combination (or name
-                                     * alone, if there's no namespace) be
-                                     * considered a unique identifier for an
-                                     * object of this class? */
-    
-} ObjectPropertyType;
 
 static THR_LOCAL const ObjectPropertyType ObjectProperty[] = {
     {
@@ -2228,6 +2210,9 @@ static void getRelationTypeDescription(StringInfo buffer, Oid relid, int32 objec
                        break;
                case RELKIND_FOREIGN_TABLE:
                        appendStringInfoString(buffer, "foreign table");
+                       break;
+               case RELKIND_GLOBAL_INDEX:
+                       appendStringInfoString(buffer, "index");
                        break;
                default:
                        /* should not here */

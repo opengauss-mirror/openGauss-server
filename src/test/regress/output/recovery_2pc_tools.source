@@ -284,6 +284,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_hdfs_predicate_pushdown                   | bool    |      |           | 
  enable_huge_pages                                | bool    |      |           | 
  enable_hypo_index                                | bool    |      |           | 
+ enable_ignore_case_in_dquotes                    | bool    |      |           | 
  enable_incremental_catchup                       | bool    |      |           | 
  enable_incremental_checkpoint                    | bool    |      |           | 
  enable_index_nestloop                            | bool    |      |           | 
@@ -338,6 +339,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sort                                      | bool    |      |           | 
  enable_sortgroup_agg                             | bool    |      |           | 
  ss_enable_dorado                                 | bool    |      |           | 
+ ss_stream_cluster                                | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 
@@ -647,6 +649,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_enable_catalog_centralized                    | bool    |      |           | 
  ss_enable_dms                                    | bool    |      |           | 
  ss_enable_dss                                    | bool    |      |           | 
+ ss_enable_ondemand_realtime_build                | bool    |      |           | 
  ss_enable_ondemand_recovery                      | bool    |      |           | 
  ss_enable_reform                                 | bool    |      |           | 
  ss_enable_scrlock                                | bool    |      |           | 
@@ -678,7 +681,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_scrlock_worker_bind_core                      | string  |      |           | 
  ss_scrlock_worker_count                          | integer |      | 2         | 16
  ss_txnstatus_cache_size                          | integer |      | 0         | 524288
- ss_work_thread_count                             | integer |      | 16        | 128
+ ss_work_thread_count                             | integer |      | 0         | 128
+ ss_work_thread_pool_attr                         | string  |      |           | 
  standard_conforming_strings                      | bool    |      |           | 
  standby_force_recyle_ratio                       | real    |      | 0         | 1
  standby_max_query_time                           | integer | s    | 0         | 86400
@@ -761,21 +765,14 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  user_metric_retention_time                       | integer |      | 0         | 3650
  use_workload_manager                             | bool    |      |           | 
  ustore_attr                                      | string  |      |           | 
- uwal_batch_io_size                               | integer |      | 8192      | 2097152
  uwal_devices_path                                | string  |      |           | 
- uwal_disk_block_size                             | int64   |      | 0         | 9223372036854775807
- uwal_disk_size                                   | int64   |      | 0         | 9223372036854775807
- uwal_ip                                          | string  |      |           | 
  uwal_log_path                                    | string  |      |           | 
- uwal_nodeid                                      | integer |      | 0         | 7
- uwal_port                                        | integer |      | 9000      | 65535
- uwal_protocol                                    | string  |      |           | 
+ uwal_config                                      | string  |      |           | 
+ uwal_disk_size                                   | int64   |      | 50331648  | 4398046511104
  uwal_rpc_compression_switch                      | bool    |      |           | 
  uwal_rpc_flowcontrol_switch                      | bool    |      |           | 
  uwal_rpc_flowcontrol_value                       | integer |      | 0         | 65535
- uwal_rpc_rndv_switch                             | bool    |      |           | 
- uwal_rpc_timeout                                 | integer |      | 0         | 65535
- uwal_rpc_worker_thread_num                       | integer |      | 0         | 65535
+ uwal_async_append_switch                         | bool    |      |           | 
  vacuum_cost_delay                                | integer | ms   | 0         | 100
  vacuum_cost_limit                                | integer |      | 1         | 10000
  vacuum_cost_page_dirty                           | integer |      | 0         | 10000

@@ -1356,7 +1356,7 @@ static int /* 0 couldn't, 1 could */
             case COMPATIBLE: /* swap the two arcs, more or less */
                 /* need an intermediate state, but might have one already */
                 for (s = *intermediates; s != NULL; s = s->tmp) {
-                    assert(s->nins > 0 && s->nouts > 0);
+                    Assert(s->nins > 0 && s->nouts > 0);
                     if (s->ins->from == a->from && s->outs->to == to)
                         break;
                 }
@@ -1490,7 +1490,7 @@ static int /* 0 couldn't, 1 could */
             case COMPATIBLE: /* swap the two arcs, more or less */
                              /* need an intermediate state, but might have one already */
                 for (s = *intermediates; s != NULL; s = s->tmp) {
-                    assert(s->nins > 0 && s->nouts > 0);
+                    Assert(s->nins > 0 && s->nouts > 0);
                     if (s->ins->from == from && s->outs->to == a->to)
                         break;
                 }

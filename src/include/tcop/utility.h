@@ -218,5 +218,6 @@ extern void ClearCreateSeqStmtUUID(CreateSeqStmt* stmt);
 extern void ClearCreateStmtUUIDS(CreateStmt* stmt);
 extern bool IsSchemaInDistribution(const Oid namespaceOid);
 extern Oid GetNamespaceIdbyRelId(const Oid relid);
-
+extern char *flatten_reloptions(Oid relid);
+extern void get_opclass_name(Oid opclass, Oid actual_datatype, StringInfo buf);
 #endif /* UTILITY_H */

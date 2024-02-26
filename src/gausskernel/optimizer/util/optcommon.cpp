@@ -177,6 +177,9 @@ void GetPlanNodePlainText(
             else
                 *pname = *sname = *pt_options = "Spq Bitmap Heap Scan";
             break;
+        case T_SplitUpdate:
+            *pname = *sname = *pt_operation = "Split";
+            break;
 #endif
         case T_CStoreScan:
             *pt_operation = "TABLE ACCESS";

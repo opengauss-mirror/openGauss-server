@@ -73,14 +73,16 @@ elif [[ -f "/etc/kylin-release" ]]; then
     os_name="Kylin"
 elif [[ -f "/etc/asianux-release" ]]; then
     os_name="Asianux"
+elif [[ -f "/etc/CSIOS-release" ]]; then
+    os_name="CSIOS"
 else
     os_name=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z | sed 's/.*/\L&/; s/[a-z]*/\u&/g')
 fi
 
 ##add platform architecture information
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-    if [ "$os_name" != "openEuler" ] && [ "$os_name" != "EulerOS" ] && [ "$os_name" != "FusionOS" ] && [ "$os_name" != "Kylin" ] && [ "$dist_version" != "Asianux" ]; then
-        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64), FusionOS(aarch64), Kylin(aarch64), Asianux platform."
+    if [ "$os_name" != "openEuler" ] && [ "$os_name" != "EulerOS" ] && [ "$os_name" != "FusionOS" ] && [ "$os_name" != "Kylin" ] && [ "$dist_version" != "Asianux" ] && [ "$os_name" != "CSIOS" ]; then
+        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64), FusionOS(aarch64), Kylin(aarch64), Asianux, CSIOS(aarch64) platform."
         exit 1
     fi
     GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
@@ -102,6 +104,10 @@ if [ -d "${USE_CCACHE}$BUILD_TOOLS_PATH/gcc10.3" ]; then
     gcc_version="10.3"
 else
     gcc_version="7.3"
+fi
+
+if [ "$PLATFORM_ARCH"X == "loongarch64"X ];then
+    gcc_version="8.3"
 fi
 
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] && [ "$gcc_version" == "10.3" ]; then

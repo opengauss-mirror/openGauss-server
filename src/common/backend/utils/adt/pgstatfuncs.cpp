@@ -32,6 +32,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_publication.h"
 #include "commands/dbcommands.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
@@ -82,6 +83,9 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
 #include "ddes/dms/ss_dms_recovery.h"
+#include "utils/json.h"
+#include "utils/jsonapi.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -93,6 +97,7 @@
 #define DISPLACEMENTS_VALUE 32
 #define MAX_DURATION_TIME 60
 #define DSS_IO_STAT_COLUMN_NUM 3
+#define ONDEMAND_RECOVERY_STAT_COLUMN_NUM 10
 
 const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
@@ -3408,6 +3413,28 @@ Datum locktag_decode(PG_FUNCTION_ARGS)
 
     text* result = cstring_to_text(tag);
     pfree_ext(tag);
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum pubddl_decode(PG_FUNCTION_ARGS)
+{
+    int64 pubddl = DatumGetInt64(PG_GETARG_DATUM(0));
+    StringInfoData tmpbuf;
+    initStringInfo(&tmpbuf);
+    if (pubddl == PUBDDL_NONE) {
+        appendStringInfo(&tmpbuf, "%s", "none");
+    } else if (pubddl == PUBDDL_ALL) {
+        appendStringInfo(&tmpbuf, "%s", "all");
+    } else {
+        bool first = true;
+        if (ENABLE_PUBDDL_TYPE(pubddl, PUBDDL_TABLE)) {
+            appendStringInfo(&tmpbuf, "%s", "table");
+            first = false;
+        }
+    }
+    text *result = cstring_to_text(tmpbuf.data);
+    
+    FreeStringInfo(&tmpbuf);
     PG_RETURN_TEXT_P(result);
 }
 
@@ -14729,6 +14756,116 @@ Datum track_memory_context_detail(PG_FUNCTION_ARGS)
     }
 }
 
+Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_ONDEMAND_RECOVERY) {
+        ereport(ERROR, (errmsg("This function only supports when enable ss_enable_ondemand_recovery.")));
+    }
+    Datum result;
+    TupleDesc tupdesc;
+    ondemand_recovery_stat stat;
+    errno_t errorno = EOK;
+
+    ondemand_extreme_rto::GetOndemandRecoveryStatus(&stat);
+    // tuple header
+    int i = 1;
+    tupdesc = CreateTemplateTupleDesc(ONDEMAND_RECOVERY_STAT_COLUMN_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "primary_checkpoint_redo_lsn", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "realtime_build_replayed_lsn", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_used_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_total_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "trxn_queue_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "seg_queue_blocks", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "in_ondemand_recovery", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "ondemand_recovery_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "realtime_build_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "recovery_pause_status", TEXTOID, -1, 0);
+
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    // tuple body
+    char redoLocation[MAXFNAMELEN];
+    char replayedLocation[MAXFNAMELEN];
+
+    errorno = snprintf_s(redoLocation, sizeof(redoLocation), sizeof(redoLocation) - 1, "%X/%X",
+                         (uint32)(stat.checkpointPtr >> 32), (uint32)stat.checkpointPtr);
+    securec_check_ss(errorno, "", "");
+    errorno = snprintf_s(replayedLocation, sizeof(replayedLocation), sizeof(replayedLocation) - 1, "%X/%X",
+                         (uint32)(stat.replayedPtr >> 32), (uint32)stat.replayedPtr);
+    securec_check_ss(errorno, "", "");
+
+    Datum values[ONDEMAND_RECOVERY_STAT_COLUMN_NUM];
+    bool nulls[ONDEMAND_RECOVERY_STAT_COLUMN_NUM] = {false};
+    i = 0;
+    values[i++] = CStringGetTextDatum(redoLocation);
+    values[i++] = CStringGetTextDatum(replayedLocation);
+    values[i++] = UInt32GetDatum(stat.hmpUsedBlkNum);
+    values[i++] = UInt32GetDatum(stat.hmpTotalBlkNum);
+    values[i++] = UInt32GetDatum(stat.trxnQueueNum);
+    values[i++] = UInt32GetDatum(stat.segQueueNum);
+    values[i++] = BoolGetDatum(stat.inOndemandRecovery);
+
+    switch (stat.ondemandRecoveryStatus) {
+        case CLUSTER_IN_ONDEMAND_BUILD:
+            values[i++] = CStringGetTextDatum("ONDEMAND_RECOVERY_BUILD");
+            break;
+        case CLUSTER_IN_ONDEMAND_REDO:
+            values[i++] = CStringGetTextDatum("ONDEMAND_RECOVERY_REDO");
+            break;
+        case CLUSTER_NORMAL:
+            values[i++] = CStringGetTextDatum("NORMAL");
+            break;
+        default:
+            ereport(ERROR, (errmsg("Invalid ondemand recovery status.")));
+            break;
+    }
+
+    switch (stat.realtimeBuildStatus) {
+        case DISABLED:
+            values[i++] = CStringGetTextDatum("DISABLED");
+            break;
+        case BUILD_NORMAL:
+            values[i++] = CStringGetTextDatum("BUILD_NORMAL");
+            break;
+        case READY_TO_BUILD:
+            values[i++] = CStringGetTextDatum("READY_TO_BUILD");
+            break;
+        case BUILD_TO_DISABLED:
+            values[i++] = CStringGetTextDatum("BUILD_TO_DISABLED");
+            break;
+        case BUILD_TO_REDO:
+            values[i++] = CStringGetTextDatum("BUILD_TO_REDO");
+            break;
+        default:
+            ereport(ERROR, (errmsg("Invalid realtime build status.")));
+            break;
+    }
+
+    switch (stat.recoveryPauseStatus) {
+        case NOT_PAUSE:
+            values[i] = CStringGetTextDatum("NOT PAUSE");
+            break;
+        case PAUSE_FOR_SYNC_REDO:
+            values[i] = CStringGetTextDatum("PAUSE(for sync record)");
+            break;
+        case PAUSE_FOR_PRUNE_HASHMAP:
+            values[i] = CStringGetTextDatum("PAUSE(for hashmap full)");
+            break;
+        case PAUSE_FOR_PRUNE_TRXN_QUEUE:
+            values[i] = CStringGetTextDatum("PAUSE(for trxn queue full)");
+            break;
+        case PAUSE_FOR_PRUNE_SEG_QUEUE:
+            values[i] = CStringGetTextDatum("PAUSE(for seg queue full)");
+            break;
+        default:
+            ereport(ERROR, (errmsg("Invalid recovery pause status.")));
+            break;
+    }
+
+    HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(heap_tuple);
+    PG_RETURN_DATUM(result);
+}
 
 /*
  * @Description : Get the statistical information for DSS IO, including read bytes, write bytes and io times.
@@ -14912,37 +15049,17 @@ TupleDesc create_query_node_reform_info_tupdesc()
     TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "reform_node_id", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "reform_type", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)3, "reform_start_time", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)4, "reform_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "reform_start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "reform_end_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "is_reform_success", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)10, "action", TEXTOID, -1, 0);
     BlessTupleDesc(tupdesc);
     return tupdesc;
 }
-
-/*
-* @Description : Convert timeval to string
-* @in          : time
-* @out         : buffer
-*/
-void timeval_to_string(timeval time, char* buffer, int buf_size)
-{
-    if (buffer == NULL || buf_size == 0 || time.tv_sec == 0) {
-        return;
-    }
-    time_t format_time = time.tv_sec;
-    struct tm *p_time = localtime(&format_time);
-    
-    char tmp_buf[32] = {0};
-    strftime(tmp_buf, sizeof(tmp_buf), "%Y-%m-%d %H:%M:%S", p_time);
-    errno_t rc = sprintf_s(buffer, buf_size - 1, "%s.%ld ", tmp_buf, time.tv_usec / 1000);
-    securec_check_ss(rc, "\0", "\0");
-}
-
 
 typedef struct {
     uint64 changed_inst_list;
@@ -14988,13 +15105,15 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
     ss_reform_info_t reform_info = iterate->reform_info;
     for (uint64 i = iterate->iterate_idx; i < DMS_MAX_INSTANCE; i++) {
         if (!((reform_info.old_bitmap | reform_info.new_bitmap) & (((uint64)1) << i))) {
+            iterate->iterate_idx++;
             continue;
         }
 
 #define MAX_BUF_SIZE 256
         char tmp_buf[MAX_BUF_SIZE] = {0};
         Datum values[10];
-        values[0] = UInt16GetDatum(i);
+        bool nulls[10] = {false};
+        values[0] = UInt64GetDatum(i);
         if (i == (uint64)SS_MY_INST_ID) {
             switch (reform_info.reform_type) {
                 case DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS:
@@ -15010,41 +15129,34 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
                     values[1] = CStringGetTextDatum("NULL");
             }
 
-            timeval_to_string(reform_info.reform_start_time, tmp_buf, MAX_BUF_SIZE);
-            values[2] = CStringGetTextDatum(tmp_buf);
-
-            timeval_to_string(reform_info.reform_end_time, tmp_buf, MAX_BUF_SIZE);
-            values[3] = CStringGetTextDatum(tmp_buf);
+            values[2] = TimestampTzGetDatum(reform_info.reform_start_time);
+            values[3] = TimestampTzGetDatum(reform_info.reform_end_time);
             values[4] = BoolGetDatum(reform_info.reform_success);
 
             if (reform_info.reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
-                timeval_to_string(reform_info.redo_start_time, tmp_buf, MAX_BUF_SIZE);
-                values[5] = CStringGetTextDatum(tmp_buf);
-
-                timeval_to_string(reform_info.redo_end_time, tmp_buf, MAX_BUF_SIZE);
-                values[6] = CStringGetTextDatum(tmp_buf);
-
+                values[5] = TimestampTzGetDatum(reform_info.redo_start_time);
+                if (reform_info.redo_start_time > reform_info.redo_end_time) {
+                    nulls[6] = true;
+                } else {
+                    values[6] = TimestampTzGetDatum(reform_info.redo_end_time);
+                }
                 values[7] = UInt64GetDatum(reform_info.redo_total_bytes);
-
-                timeval_to_string(reform_info.construct_hashmap, tmp_buf, MAX_BUF_SIZE);
-                values[8] = CStringGetTextDatum(tmp_buf);
+                values[8] = TimestampTzGetDatum(reform_info.construct_hashmap);
             } else {
-                sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
-                values[5] = CStringGetTextDatum(tmp_buf);
-                values[6] = CStringGetTextDatum(tmp_buf);
                 values[7] = UInt64GetDatum(-1);
-                values[8] = CStringGetTextDatum(tmp_buf);
+                nulls[5] = true;
+                nulls[6] = true;
+                nulls[8] = true;
             }
         } else {
             values[1] = CStringGetTextDatum("-");
-            sprintf_s(tmp_buf, MAX_BUF_SIZE, "-");
-            values[2] = CStringGetTextDatum(tmp_buf);
-            values[3] = CStringGetTextDatum(tmp_buf);
             values[4] = BoolGetDatum(reform_info.reform_success);
-            values[5] = CStringGetTextDatum(tmp_buf);
-            values[6] = CStringGetTextDatum(tmp_buf);
             values[7] = UInt64GetDatum(-1);
-            values[8] = CStringGetTextDatum(tmp_buf);
+            nulls[2] = true;
+            nulls[3] = true;
+            nulls[5] = true;
+            nulls[6] = true;
+            nulls[8] = true;
         }
 
         if (iterate->changed_inst_list & (1 << i)) {
@@ -15058,7 +15170,7 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
         }
         
         values[9] = CStringGetTextDatum(tmp_buf);
-        bool nulls[10] = {false};
+        
         HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         if (tuple != NULL) {
             iterate->iterate_idx++;
@@ -15144,7 +15256,7 @@ int compute_copy_insts_count(uint64 bitmap)
 
 /* this struct is used to control the iteration during query_page_distribution_info */
 typedef struct st_dms_iterate {
-    stat_drc_info_t *drc_info;
+    dv_drc_buf_info *drc_info;
     uint8 iterate_idx;
 } dms_iterate_t;
 
@@ -15170,7 +15282,7 @@ Datum query_page_distribution_info_internal(text* relname, ForkNumber fork, Bloc
 
         funcctx = SRF_FIRSTCALL_INIT();
         MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-        stat_drc_info_t *drc_info = (stat_drc_info_t*)palloc0(sizeof(stat_drc_info_t));
+        dv_drc_buf_info *drc_info = (dv_drc_buf_info*)palloc0(sizeof(dv_drc_buf_info));
         InitDmsBufContext(&drc_info->dms_ctx, tag);
         drc_info->claimed_owner = CM_INVALID_ID8;
         drc_info->buf_info[0] = buf_info;
@@ -15262,4 +15374,182 @@ Datum query_page_distribution_info(PG_FUNCTION_ARGS)
     ForkNumber fork = PG_GETARG_INT64(1);
     BlockNumber blockno = PG_GETARG_INT64(2);
     return query_page_distribution_info_internal(relname, fork, blockno, fcinfo);
+}
+
+#define REFORM_INFO_ROW_NUM 27
+TupleDesc create_query_node_reform_info_from_dms_tupdesc()
+{
+    int column = 2;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "NAME", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "DESCRIPTION", TEXTOID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+typedef struct RecordsetState {
+    JsonLexContext *lex;
+    Datum row_info[REFORM_INFO_ROW_NUM][2];
+    int row_id;
+    int cur_row_id;
+    char *saved_scalar;
+} RecordsetState;
+
+static void recordset_object_field_end(void *state, char *fname, bool isnull)
+{
+    RecordsetState *_state = (RecordsetState *)state;
+
+    if (_state->row_id >= REFORM_INFO_ROW_NUM) {
+        ereport(ERROR, (errmsg("the row number returned from dms exceeds max row number")));
+    }
+    _state->row_info[_state->row_id][0] = CStringGetTextDatum(fname);
+    _state->row_info[_state->row_id][1] = CStringGetTextDatum(_state->saved_scalar);
+    _state->row_id++;
+}
+
+static void recordset_scalar(void *state, char *token, JsonTokenType tokentype)
+{
+    RecordsetState *_state = (RecordsetState *)state;
+
+    if (_state->saved_scalar != NULL) {
+        pfree(_state->saved_scalar);
+    }
+    _state->saved_scalar = token;
+}
+
+Datum query_node_reform_info_from_dms(PG_FUNCTION_ARGS)
+{
+    dms_info_id_e reform_info_id =
+        PG_GETARG_INT64(0) == 0 ? dms_info_id_e::DMS_INFO_REFORM_LAST : dms_info_id_e::DMS_INFO_REFORM_CURRENT;
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_node_reform_info_from_dms without shared storage deployment!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        char *json = (char *)palloc0(4096 * sizeof(char));  // 4k is enough
+        json[0] = '\0';
+        if (!dms_info(json, 4096, reform_info_id) == GS_SUCCESS) {
+            ereport(ERROR, (errmsg("[SS] get reform infomation from dms fail!")));
+        }
+        if (json[0] == '\0') {
+            ereport(WARNING, (errmsg("[SS] dms not init!")));
+            SRF_RETURN_DONE(funcctx);
+        }
+
+        RecordsetState *state = (RecordsetState *)palloc0(sizeof(RecordsetState));
+        state->row_id = 0;
+        JsonLexContext *lex = makeJsonLexContext(cstring_to_text(json), true);
+        pfree(json);
+        JsonSemAction *sem = (JsonSemAction *)palloc0(sizeof(JsonSemAction));
+        sem->semstate = (void *)state;
+        sem->scalar = recordset_scalar;
+        sem->object_field_end = recordset_object_field_end;
+        state->lex = lex;
+        pg_parse_json(lex, sem);
+
+        state->cur_row_id = 0;
+        funcctx->user_fctx = (void *)state;
+        funcctx->tuple_desc = create_query_node_reform_info_from_dms_tupdesc();
+        MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+
+    RecordsetState *state = (RecordsetState *)funcctx->user_fctx;
+    if (state->cur_row_id < state->row_id) {
+        bool nulls[2] = {false};
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, state->row_info[state->cur_row_id], nulls);
+        state->cur_row_id++;
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    pfree_ext(state);
+    SRF_RETURN_DONE(funcctx);
+}
+
+TupleDesc create_query_all_drc_info_tupdesc()
+{
+    int column = 18;
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(column, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "RESOURCE_ID", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "MASTER_ID", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "COPY_INSTS", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "CLAIMED_OWNER", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "LOCK_MODE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "LAST_EDP", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "TYPE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "IN_RECOVERY", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "COPY_PROMOTE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "PART_ID", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)11, "EDP_MAP", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)12, "LSN", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "LEN", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)14, "RECOVERY_SKIP", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)15, "RECYCLING", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)16, "CONVERTING_INST_ID", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)17, "CONVERTING_CURR_MODE", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)18, "CONVERTING_REQ_MODE", INT4OID, -1, 0);
+    BlessTupleDesc(tupdesc);
+    return tupdesc;
+}
+
+void fill_drc_info_to_values(dv_drc_buf_info *drc_info, Datum *values)
+{
+    values[0] = CStringGetTextDatum(drc_info->data);
+    values[1] = UInt32GetDatum((uint32)drc_info->master_id);
+    values[2] = UInt64GetDatum(drc_info->copy_insts);
+    values[3] = UInt32GetDatum((uint32)drc_info->claimed_owner);
+    values[4] = UInt32GetDatum((uint32)drc_info->lock_mode);
+    values[5] = UInt32GetDatum((uint32)drc_info->last_edp);
+    values[6] = UInt32GetDatum((uint32)drc_info->type);
+    values[7] = UInt32GetDatum((uint32)drc_info->in_recovery);
+    values[8] = UInt32GetDatum((uint32)drc_info->copy_promote);
+    values[9] = UInt16GetDatum(drc_info->part_id);
+    values[10] = UInt64GetDatum(drc_info->edp_map);
+    values[11] = UInt64GetDatum(drc_info->lsn);
+    values[12] = UInt16GetDatum(drc_info->len);
+    values[13] = UInt32GetDatum((uint32)drc_info->recovery_skip);
+    values[14] = UInt32GetDatum((uint32)drc_info->recycling);
+    values[15] = UInt32GetDatum((uint32)drc_info->converting_req_info_inst_id);
+    values[16] = UInt32GetDatum((uint32)drc_info->converting_req_info_curr_mode);
+    values[17] = UInt32GetDatum((uint32)drc_info->converting_req_info_req_mode);
+}
+
+Datum query_all_drc_info(PG_FUNCTION_ARGS)
+{
+    int type = PG_GETARG_INT64(0) == 0 ? en_drc_res_type::DRC_RES_PAGE_TYPE : en_drc_res_type::DRC_RES_LOCK_TYPE;
+    if (!ENABLE_DMS) {
+        ereport(ERROR, (errmsg("[SS] cannot query query_all_drc_info without shared storage deployment!")));
+    }
+    if (!SS_PRIMARY_MODE) {
+        ereport(WARNING, (errmsg("[SS] query only in primary node. current node is standby!")));
+    }
+
+    FuncCallContext *funcctx = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        unsigned long long *rowid = (unsigned long long *)palloc0(sizeof(unsigned long long));
+        *rowid = 0;
+        funcctx->user_fctx = (void*)rowid;
+        funcctx->tuple_desc = create_query_all_drc_info_tupdesc();
+        MemoryContextSwitchTo(oldcontext);
+    }
+    funcctx = SRF_PERCALL_SETUP();
+
+    dv_drc_buf_info drc_info = {0};
+    unsigned long long *rowid = (unsigned long long *)funcctx->user_fctx;
+    dms_get_buf_res(rowid, &drc_info, type);
+    Datum values[18];
+    bool nulls[18] = {false};
+    if (drc_info.is_valid) {
+        fill_drc_info_to_values(&drc_info, values);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    pfree_ext(rowid);
+    SRF_RETURN_DONE(funcctx);
 }

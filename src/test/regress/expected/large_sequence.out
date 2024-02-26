@@ -443,11 +443,8 @@ SELECT * FROM nextval('foo');
 ALTER LARGE SEQUENCE IF EXISTS foo NOMAXVALUE;
 -- alter other attributes are not supported
 ALTER LARGE SEQUENCE IF EXISTS foo MINVALUE 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 ALTER LARGE SEQUENCE IF EXISTS foo NO CYCLE;
-ERROR:  ALTER SEQUENCE is not yet supported.
 ALTER LARGE SEQUENCE IF EXISTS foo START 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 ALTER LARGE SEQUENCE IF EXISTS foo CACHE 100;
 -- test for largeserial
 CREATE TABLE serialTest (f1 text, f2 largeserial);

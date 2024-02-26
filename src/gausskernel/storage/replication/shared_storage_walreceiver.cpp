@@ -30,7 +30,7 @@
 #include "miscadmin.h"
 #include "replication/walreceiver.h"
 #include "replication/shared_storage_walreceiver.h"
-#include "replication/ss_cluster_replication.h"
+#include "replication/ss_disaster_cluster.h"
 #include "replication/slot.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
@@ -369,7 +369,7 @@ bool shared_storage_connect(char *conninfo, XLogRecPtr *startpoint, char *slotna
     walrcv->peer_state = NORMAL_STATE;
     walrcv->isFirstTimeAccessStorage = true;
 
-    if (SS_REPLICATION_DORADO_CLUSTER) {
+    if (SS_DORADO_CLUSTER) {
         libpgConnected = libpqrcv_connect(conninfo, startpoint, slotname, channel_identifier);
         return libpgConnected; 
     }
@@ -438,7 +438,7 @@ bool shared_storage_receive(int timeout, unsigned char *type, char **buffer, int
      * When ss cluster replication enabled, no xlog will receive, so return false directly.
      * Xlog will replicated by Dorado synchronous replication.
      */
-    if (SS_REPLICATION_DORADO_CLUSTER) {
+    if (SS_DORADO_CLUSTER) {
         return false;
     }
 
@@ -447,7 +447,7 @@ bool shared_storage_receive(int timeout, unsigned char *type, char **buffer, int
 
 void shared_storage_send(const char *buffer, int nbytes)
 {
-    if (IS_SHARED_STORAGE_STANBY_MODE || SS_REPLICATION_DORADO_CLUSTER) {
+    if (IS_SHARED_STORAGE_STANBY_MODE || SS_DORADO_CLUSTER) {
         if (t_thrd.libwalreceiver_cxt.streamConn)
             libpqrcv_send(buffer, nbytes);
     }

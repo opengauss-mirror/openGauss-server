@@ -1,7 +1,10 @@
 --
 --FOR BLACKLIST FEATURE: WITH OIDS、INHERITS、CREATE TYPE/DOMAIN/AGGREGATE/OPERATOR/SEQUENCES is not supported.
 --
+create database test_privileges;
+\c test_privileges;
 GRANT CREATE ON SCHEMA public TO PUBLIC;
+
 --
 -- Test access privileges
 --
@@ -49,87 +52,87 @@ SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 SET search_path to public;
 SELECT session_user, current_user;
 
-CREATE TABLE atest1 ( a int, b text );
-SELECT * FROM atest1;
-INSERT INTO atest1 VALUES (1, 'one');
-DELETE FROM atest1;
-UPDATE atest1 SET a = 1 WHERE b = 'blech';
-TRUNCATE atest1;
+CREATE TABLE atest1_privileges_test ( a int, b text );
+SELECT * FROM atest1_privileges_test;
+INSERT INTO atest1_privileges_test VALUES (1, 'one');
+DELETE FROM atest1_privileges_test;
+UPDATE atest1_privileges_test SET a = 1 WHERE b = 'blech';
+TRUNCATE atest1_privileges_test;
 START TRANSACTION;
-LOCK atest1 IN ACCESS EXCLUSIVE MODE;
+LOCK atest1_privileges_test IN ACCESS EXCLUSIVE MODE;
 COMMIT;
 
-REVOKE ALL ON atest1 FROM PUBLIC;
-SELECT * FROM atest1;
+REVOKE ALL ON atest1_privileges_test FROM PUBLIC;
+SELECT * FROM atest1_privileges_test;
 
-GRANT ALL ON atest1 TO regressuser2;
-GRANT SELECT ON atest1 TO regressuser3, regressuser4;
-SELECT * FROM atest1;
+GRANT ALL ON atest1_privileges_test TO regressuser2;
+GRANT SELECT ON atest1_privileges_test TO regressuser3, regressuser4;
+SELECT * FROM atest1_privileges_test;
 
-CREATE TABLE atest2 (col1 varchar(10), col2 boolean);
-GRANT SELECT ON atest2 TO regressuser2;
-GRANT UPDATE ON atest2 TO regressuser3;
-GRANT INSERT ON atest2 TO regressuser4;
-GRANT TRUNCATE ON atest2 TO regressuser5;
+CREATE TABLE atest2_privileges_test (col1 varchar(10), col2 boolean);
+GRANT SELECT ON atest2_privileges_test TO regressuser2;
+GRANT UPDATE ON atest2_privileges_test TO regressuser3;
+GRANT INSERT ON atest2_privileges_test TO regressuser4;
+GRANT TRUNCATE ON atest2_privileges_test TO regressuser5;
 
 
 SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
 SELECT session_user, current_user;
 
--- try various combinations of queries on atest1 and atest2
+-- try various combinations of queries on atest1_privileges_test and atest2_privileges_test
 
-SELECT * FROM atest1; -- ok
-SELECT * FROM atest2; -- ok
-INSERT INTO atest1 VALUES (2, 'two'); -- ok
-INSERT INTO atest2 VALUES ('foo', true); -- fail
-INSERT INTO atest1 SELECT 1, b FROM atest1; -- ok
-UPDATE atest1 SET a = 1 WHERE a = 2; -- ok
-UPDATE atest2 SET col2 = NOT col2; -- fail
---SELECT * FROM atest1 ORDER BY 1 FOR UPDATE; -- ok
---SELECT * FROM atest2 ORDER BY 1 FOR UPDATE; -- fail
-DELETE FROM atest2; -- fail
-TRUNCATE atest2; -- fail
+SELECT * FROM atest1_privileges_test; -- ok
+SELECT * FROM atest2_privileges_test; -- ok
+INSERT INTO atest1_privileges_test VALUES (2, 'two'); -- ok
+INSERT INTO atest2_privileges_test VALUES ('foo', true); -- fail
+INSERT INTO atest1_privileges_test SELECT 1, b FROM atest1_privileges_test; -- ok
+UPDATE atest1_privileges_test SET a = 1 WHERE a = 2; -- ok
+UPDATE atest2_privileges_test SET col2 = NOT col2; -- fail
+SELECT * FROM atest1_privileges_test ORDER BY 1 FOR UPDATE; -- ok
+SELECT * FROM atest2_privileges_test ORDER BY 1 FOR UPDATE; -- fail
+DELETE FROM atest2_privileges_test; -- fail
+TRUNCATE atest2_privileges_test; -- fail
 START TRANSACTION;
-LOCK atest2 IN ACCESS EXCLUSIVE MODE; -- fail
+LOCK atest2_privileges_test IN ACCESS EXCLUSIVE MODE; -- fail
 COMMIT;
-COPY atest2 FROM stdin; -- fail
-GRANT ALL ON atest1 TO PUBLIC; -- fail
+COPY atest2_privileges_test FROM stdin; -- fail
+GRANT ALL ON atest1_privileges_test TO PUBLIC; -- fail
 
 -- checks in subquery, both ok
-SELECT * FROM atest1 WHERE ( b IN ( SELECT col1 FROM atest2 ) );
-SELECT * FROM atest2 WHERE ( col1 IN ( SELECT b FROM atest1 ) );
+SELECT * FROM atest1_privileges_test WHERE ( b IN ( SELECT col1 FROM atest2_privileges_test ) );
+SELECT * FROM atest2_privileges_test WHERE ( col1 IN ( SELECT b FROM atest1_privileges_test ) );
 
 
 SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 SELECT session_user, current_user;
 
-SELECT * FROM atest1 ORDER BY 1; -- ok
-SELECT * FROM atest2; -- fail
-INSERT INTO atest1 VALUES (2, 'two'); -- fail
-INSERT INTO atest2 VALUES ('foo', true); -- fail
-INSERT INTO atest1 SELECT 1, b FROM atest1; -- fail
-UPDATE atest1 SET a = 1 WHERE a = 2; -- fail
-UPDATE atest2 SET col2 = NULL; -- ok
-UPDATE atest2 SET col2 = NOT col2; -- fails; requires SELECT on atest2
-UPDATE atest2 SET col2 = true FROM atest1 WHERE atest1.a = 5; -- ok
-SELECT * FROM atest1 FOR UPDATE; -- fail
-SELECT * FROM atest2 FOR UPDATE; -- fail
-DELETE FROM atest2; -- fail
-TRUNCATE atest2; -- fail
+SELECT * FROM atest1_privileges_test ORDER BY 1; -- ok
+SELECT * FROM atest2_privileges_test; -- fail
+INSERT INTO atest1_privileges_test VALUES (2, 'two'); -- fail
+INSERT INTO atest2_privileges_test VALUES ('foo', true); -- fail
+INSERT INTO atest1_privileges_test SELECT 1, b FROM atest1_privileges_test; -- fail
+UPDATE atest1_privileges_test SET a = 1 WHERE a = 2; -- fail
+UPDATE atest2_privileges_test SET col2 = NULL; -- ok
+UPDATE atest2_privileges_test SET col2 = NOT col2; -- fails; requires SELECT on atest2_privileges_test
+UPDATE atest2_privileges_test SET col2 = true FROM atest1_privileges_test WHERE atest1_privileges_test.a = 5; -- ok
+SELECT * FROM atest1_privileges_test FOR UPDATE; -- fail
+SELECT * FROM atest2_privileges_test FOR UPDATE; -- fail
+DELETE FROM atest2_privileges_test; -- fail
+TRUNCATE atest2_privileges_test; -- fail
 START TRANSACTION;
-LOCK atest2 IN ACCESS EXCLUSIVE MODE; -- ok
+LOCK atest2_privileges_test IN ACCESS EXCLUSIVE MODE; -- ok
 COMMIT;
-COPY atest2 FROM stdin; -- fail
+COPY atest2_privileges_test FROM stdin; -- fail
 
 -- checks in subquery, both fail
-SELECT * FROM atest1 WHERE ( b IN ( SELECT col1 FROM atest2 ) );
-SELECT * FROM atest2 WHERE ( col1 IN ( SELECT b FROM atest1 ) );
+SELECT * FROM atest1_privileges_test WHERE ( b IN ( SELECT col1 FROM atest2_privileges_test ) );
+SELECT * FROM atest2_privileges_test WHERE ( col1 IN ( SELECT b FROM atest1_privileges_test ) );
 
 SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
-COPY atest2 FROM stdin; -- ok
+COPY atest2_privileges_test FROM stdin; -- ok
 bar	true
 \.
-SELECT * FROM atest1 ORDER BY 1; -- ok
+SELECT * FROM atest1_privileges_test ORDER BY 1; -- ok
 
 
 -- groups
@@ -148,9 +151,9 @@ DELETE FROM atest3; -- ok
 
 SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 
-CREATE VIEW atestv1 AS SELECT * FROM atest1; -- ok
+CREATE VIEW atestv1 AS SELECT * FROM atest1_privileges_test; -- ok
 /* The next *should* fail, but it's not implemented that way yet. */
-CREATE VIEW atestv2 AS SELECT * FROM atest2;
+CREATE VIEW atestv2 AS SELECT * FROM atest2_privileges_test;
 CREATE VIEW atestv3 AS SELECT * FROM atest3; -- ok
 
 SELECT * FROM atestv1 order by 1, 2; -- ok
@@ -162,10 +165,10 @@ SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 
 SELECT * FROM atestv1 order by 1, 2; -- ok
 SELECT * FROM atestv2; -- fail
-SELECT * FROM atestv3; -- fail due to issue 3520503, see above
+SELECT * FROM atestv3; -- ok
 
 CREATE VIEW atestv4 AS SELECT * FROM atestv3; -- nested view
-SELECT * FROM atestv4; -- fail due to issue 3520503, see above
+SELECT * FROM atestv4; -- ok
 GRANT SELECT ON atestv4 TO regressuser2;
 
 SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
@@ -176,8 +179,8 @@ SELECT * FROM atestv3; -- fail
 -- fail due to issue 3520503, see above
 SELECT * FROM atestv4; -- ok (even though regressuser2 cannot access underlying atestv3)
 
-SELECT * FROM atest2; -- ok
-SELECT * FROM atestv2; -- fail (even though regressuser2 can access underlying atest2)
+SELECT * FROM atest2_privileges_test; -- ok
+SELECT * FROM atestv2; -- fail (even though regressuser2 can access underlying atest2_privileges_test)
 
 -- Test column level permissions
 
@@ -203,11 +206,11 @@ SELECT 1 FROM atest5 a JOIN atest5 b USING (two); -- fail
 SELECT 1 FROM atest5 a NATURAL JOIN atest5 b; -- fail
 SELECT (j.*) IS NULL FROM (atest5 a JOIN atest5 b USING (one)) j; -- fail
 SELECT 1 FROM atest5 WHERE two = 2; -- fail
-SELECT * FROM atest1, atest5; -- fail
-SELECT atest1.* FROM atest1, atest5 order by 1, 2; -- ok
-SELECT atest1.*,atest5.one FROM atest1, atest5 order by 1, 2, 3; -- ok 
-SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.two); -- fail
-SELECT atest1.*,atest5.one FROM atest1 JOIN atest5 ON (atest1.a = atest5.one); -- ok 
+SELECT * FROM atest1_privileges_test, atest5; -- fail
+SELECT atest1_privileges_test.* FROM atest1_privileges_test, atest5 order by 1, 2; -- ok
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test, atest5 order by 1, 2, 3; -- ok 
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test JOIN atest5 ON (atest1_privileges_test.a = atest5.two); -- fail
+SELECT atest1_privileges_test.*,atest5.one FROM atest1_privileges_test JOIN atest5 ON (atest1_privileges_test.a = atest5.one); -- ok 
 SELECT one, two FROM atest5; -- fail
 
 SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
@@ -302,14 +305,14 @@ DELETE FROM atest5 WHERE two = 2; -- ok
 
 -- check inheritance cases
 SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
-CREATE TABLE atestp1 (f1 int, f2 int) WITH OIDS;
-CREATE TABLE atestp2 (fx int, fy int) WITH OIDS;
-CREATE TABLE atestc (fz int) INHERITS (atestp1, atestp2);
-GRANT SELECT(fx,fy,oid) ON atestp2 TO regressuser2;
-GRANT SELECT(fx) ON atestc TO regressuser2;
+CREATE TABLE atestp1 (f1 int, f2 int) WITH OIDS;	-- to be failed
+CREATE TABLE atestp2 (fx int, fy int) WITH OIDS;	-- to be failed
+CREATE TABLE atestc (fz int) INHERITS (atestp1, atestp2);	-- to be failed
+GRANT SELECT(fx,fy,oid) ON atestp2 TO regressuser2;	-- to be failed
+GRANT SELECT(fx) ON atestc TO regressuser2;	-- to be failed
 
 SET SESSION AUTHORIZATION regressuser2 PASSWORD 'gauss@123';
-SELECT fx FROM atestp2; -- ok
+SELECT fx FROM atestp2; -- to be failed
 SELECT fy FROM atestp2; -- fail due to issue 3520503, see above
 SELECT atestp2 FROM atestp2; -- fail due to issue 3520503, see above
 SELECT oid FROM atestp2; -- fail due to issue 3520503, see above
@@ -346,7 +349,7 @@ GRANT ALL PRIVILEGES ON FUNCTION testfunc1(int) TO regressuser4;
 GRANT ALL PRIVILEGES ON FUNCTION testfunc_nosuch(int) TO regressuser4;
 
 CREATE FUNCTION testfunc4(boolean) RETURNS text
-  AS 'select col1 from atest2 where col2 = $1;'
+  AS 'select col1 from atest2_privileges_test where col2 = $1;'
   LANGUAGE sql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION testfunc4(boolean) TO regressuser3;
 
@@ -356,7 +359,7 @@ CREATE FUNCTION testfunc3(int) RETURNS int AS 'select 2 * $1;' LANGUAGE sql; -- 
 
 SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 SELECT testfunc1(5); -- fail
-SELECT col1 FROM atest2 WHERE col2 = true; -- fail
+SELECT col1 FROM atest2_privileges_test WHERE col2 = true; -- fail
 SELECT testfunc4(true); -- fail due to issue 3520503, see above
 
 SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
@@ -483,7 +486,7 @@ DROP DOMAIN testdomain1; -- ok
 -- truncate
 SET SESSION AUTHORIZATION regressuser5 PASSWORD 'gauss@123';
 SET search_path TO public;
-TRUNCATE atest2; -- ok
+TRUNCATE atest2_privileges_test; -- ok
 TRUNCATE atest3; -- fail
 
 -- has_table_privilege function
@@ -561,32 +564,32 @@ from (select oid from pg_class where relname = 'pg_class') as t1;
 select has_table_privilege(t1.oid,'trigger')
 from (select oid from pg_class where relname = 'pg_class') as t1;
 
-select has_table_privilege(current_user,'atest1','select');
-select has_table_privilege(current_user,'atest1','insert');
+select has_table_privilege(current_user,'atest1_privileges_test','select');
+select has_table_privilege(current_user,'atest1_privileges_test','insert');
 
-select has_table_privilege(t2.oid,'atest1','update')
+select has_table_privilege(t2.oid,'atest1_privileges_test','update')
 from (select oid from pg_roles where rolname = current_user) as t2;
-select has_table_privilege(t2.oid,'atest1','delete')
+select has_table_privilege(t2.oid,'atest1_privileges_test','delete')
 from (select oid from pg_roles where rolname = current_user) as t2;
 
 select has_table_privilege(current_user,t1.oid,'references')
-from (select oid from pg_class where relname = 'atest1') as t1;
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1;
 
 select has_table_privilege(t2.oid,t1.oid,'select')
-from (select oid from pg_class where relname = 'atest1') as t1,
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1,
   (select oid from pg_roles where rolname = current_user) as t2;
 select has_table_privilege(t2.oid,t1.oid,'insert')
-from (select oid from pg_class where relname = 'atest1') as t1,
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1,
   (select oid from pg_roles where rolname = current_user) as t2;
 
-select has_table_privilege('atest1','update');
-select has_table_privilege('atest1','delete');
-select has_table_privilege('atest1','truncate');
+select has_table_privilege('atest1_privileges_test','update');
+select has_table_privilege('atest1_privileges_test','delete');
+select has_table_privilege('atest1_privileges_test','truncate');
 
 select has_table_privilege(t1.oid,'select')
-from (select oid from pg_class where relname = 'atest1') as t1;
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1;
 select has_table_privilege(t1.oid,'trigger')
-from (select oid from pg_class where relname = 'atest1') as t1;
+from (select oid from pg_class where relname = 'atest1_privileges_test') as t1;
 
 
 -- Grant options
@@ -622,7 +625,7 @@ CREATE SEQUENCE x_seq;
 
 GRANT USAGE on x_seq to regressuser2;
 
-SELECT has_sequence_privilege('regressuser1', 'atest1', 'SELECT');
+SELECT has_sequence_privilege('regressuser1', 'atest1_privileges_test', 'SELECT');
 SELECT has_sequence_privilege('regressuser1', 'x_seq', 'INSERT');
 SELECT has_sequence_privilege('regressuser1', 'x_seq', 'SELECT');
 
@@ -636,11 +639,11 @@ SELECT has_sequence_privilege('x_seq', 'USAGE');
 SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 SET search_path TO public;
 
-SELECT lo_create(1001);
-SELECT lo_create(1002);
-SELECT lo_create(1003);
-SELECT lo_create(1004);
-SELECT lo_create(1005);
+SELECT lo_create(1001);	-- to be failed
+SELECT lo_create(1002);	-- to be failed
+SELECT lo_create(1003);	-- to be failed
+SELECT lo_create(1004);	-- to be failed
+SELECT lo_create(1005);	-- to be failed
 
 GRANT ALL ON LARGE OBJECT 1001 TO PUBLIC;
 GRANT SELECT ON LARGE OBJECT 1003 TO regressuser2;
@@ -684,12 +687,12 @@ SELECT oid, pg_get_userbyid(lomowner) ownername, lomacl FROM pg_largeobject_meta
 SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 SET search_path TO public;
 
-SELECT loread(lo_open(1001, x'40000'::int), 32);
-SELECT loread(lo_open(1003, x'40000'::int), 32);	-- to be denied
-SELECT loread(lo_open(1005, x'40000'::int), 32);
+SELECT loread(lo_open(1001, x'40000'::int), 32);	-- to be failed
+SELECT loread(lo_open(1003, x'40000'::int), 32);	-- to be failed
+SELECT loread(lo_open(1005, x'40000'::int), 32);	-- to be failed
 
-SELECT lo_truncate(lo_open(1005, x'20000'::int), 10);	-- to be denied
-SELECT lo_truncate(lo_open(2001, x'20000'::int), 10);
+SELECT lo_truncate(lo_open(1005, x'20000'::int), 10);	-- to be failed
+SELECT lo_truncate(lo_open(2001, x'20000'::int), 10);	-- to be failed
 
 -- compatibility mode in largeobject permission
 \c -
@@ -697,11 +700,11 @@ SET lo_compat_privileges = false;	-- default setting
 SET SESSION AUTHORIZATION regressuser4 PASSWORD 'gauss@123';
 SET search_path TO public;
 
-SELECT loread(lo_open(1002, x'40000'::int), 32);	-- to be denied
-SELECT lowrite(lo_open(1002, x'20000'::int), 'abcd');	-- to be denied
-SELECT lo_truncate(lo_open(1002, x'20000'::int), 10);	-- to be denied
-SELECT lo_unlink(1002);					-- to be denied
-SELECT lo_export(1001, '/dev/null');			-- to be denied
+SELECT loread(lo_open(1002, x'40000'::int), 32);	-- to be failed
+SELECT lowrite(lo_open(1002, x'20000'::int), 'abcd');	-- to be failed
+SELECT lo_truncate(lo_open(1002, x'20000'::int), 10);	-- to be failed
+SELECT lo_unlink(1002);					-- to be failed
+SELECT lo_export(1001, '/dev/null');	-- to be failed
 
 \c -
 SET lo_compat_privileges = true;	-- compatibility mode
@@ -942,8 +945,8 @@ DROP VIEW atestv3 CASCADE;
 -- this should complain "does not exist"
 DROP VIEW atestv4;
 
-DROP TABLE atest1;
-DROP TABLE atest2;
+DROP TABLE atest1_privileges_test;
+DROP TABLE atest2_privileges_test;
 DROP TABLE atest3;
 DROP TABLE atest4;
 DROP TABLE atest5;
@@ -1124,3 +1127,6 @@ reset role;
 
 drop user createrole_user01;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+\c regression;
+drop database test_privileges;

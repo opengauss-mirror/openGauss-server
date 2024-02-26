@@ -1,0 +1,7 @@
+\! @abs_bindir@/gs_dumpall -p @portstring@ --insert > gs_dumpall_for_test.sql
+\! grep 'query failed: ERROR' gs_dumpall_for_test.sql
+\! grep 'dumpall operation successful' gs_dumpall_for_test.sql -o
+-- Ensure that the table exists and contains data
+\! grep 'table' gs_dumpall_for_test.sql -o -i | head -n 1 
+\! grep 'insert' gs_dumpall_for_test.sql -o -i | head -n 1
+\! rm gs_dumpall_for_test.sql

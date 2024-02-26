@@ -2582,9 +2582,9 @@ select pg_get_tabledef('pt_at_modify'::regclass);
  WITH (orientation=row, compression=no)                                                                        +
  PARTITION BY RANGE (a)                                                                                        +
  (                                                                                                             +
-     PARTITION p1 VALUES LESS THAN (100) TABLESPACE pg_default,                                                +
-     PARTITION p2 VALUES LESS THAN (1000) TABLESPACE pg_default,                                               +
-     PARTITION p3 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                            +
+     PARTITION p1 VALUES LESS THAN (100),                                                                      +
+     PARTITION p2 VALUES LESS THAN (1000),                                                                     +
+     PARTITION p3 VALUES LESS THAN (MAXVALUE)                                                                  +
  )                                                                                                             +
  ENABLE ROW MOVEMENT;                                                                                          +
  ALTER TABLE pt_at_modify ADD CONSTRAINT pt_at_modify_b_tableoid_key UNIQUE USING btree (b) INCLUDE (tableoid);+

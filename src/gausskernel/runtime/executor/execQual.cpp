@@ -1097,6 +1097,7 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
         if (found) {
             if (entry->isParse) {
                 con = (Const *)uservar->value;
+                entry->isParse = false;
             } else {
                 Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
                     -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
@@ -2188,25 +2189,41 @@ static void tupledesc_match(TupleDesc dst_tupdesc, TupleDesc src_tupdesc)
 
 void set_result_for_plpgsql_language_function_with_outparam(FuncExprState *fcache, Datum *result, bool *isNull)
 {
-   if (!IsA(fcache->xprstate.expr, FuncExpr)) {
-       return;
-   }
-   FuncExpr *func = (FuncExpr *)fcache->xprstate.expr;
-   if (!is_function_with_plpgsql_language_and_outparam(func->funcid)) {
-       return;
-   }
-   HeapTupleHeader td = DatumGetHeapTupleHeader(*result);
-   TupleDesc tupdesc = lookup_rowtype_tupdesc_copy(HeapTupleHeaderGetTypeId(td), HeapTupleHeaderGetTypMod(td));
-   HeapTupleData tup;
-   tup.t_len = HeapTupleHeaderGetDatumLength(td);
-   tup.t_data = td;
-   Datum *values = (Datum *)palloc(sizeof(Datum) * tupdesc->natts);
-   bool *nulls = (bool *)palloc(sizeof(bool) * tupdesc->natts);
-   heap_deform_tuple(&tup, tupdesc, values, nulls);
-   *result = values[0];
-   *isNull = nulls[0];
-   pfree(values);
-   pfree(nulls);
+    if (!IsA(fcache->xprstate.expr, FuncExpr)) {
+        return;
+    }
+    FuncExpr *func = (FuncExpr *)fcache->xprstate.expr;
+    if (!is_function_with_plpgsql_language_and_outparam(func->funcid)) {
+        return;
+    }
+    HeapTupleHeader td = DatumGetHeapTupleHeader(*result);
+    TupleDesc tupdesc;
+    PG_TRY();
+    {
+        tupdesc = lookup_rowtype_tupdesc_copy(HeapTupleHeaderGetTypeId(td), HeapTupleHeaderGetTypMod(td));
+    }
+    PG_CATCH();
+    {
+        int ecode = geterrcode();
+        if (ecode == ERRCODE_CACHE_LOOKUP_FAILED) {
+            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmodule(MOD_PLSQL),
+                           errmsg("tuple is null"),
+                           errdetail("it may be because change guc behavior_compat_options in one session")));
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+    HeapTupleData tup;
+    tup.t_len = HeapTupleHeaderGetDatumLength(td);
+    tup.t_data = td;
+    Datum *values = (Datum *)palloc(sizeof(Datum) * tupdesc->natts);
+    bool *nulls = (bool *)palloc(sizeof(bool) * tupdesc->natts);
+    heap_deform_tuple(&tup, tupdesc, values, nulls);
+    *result = values[0];
+    *isNull = nulls[0];
+    pfree(values);
+    pfree(nulls);
 }
 
 bool ExecSetArgIsByValue(FunctionCallInfo fcinfo)
@@ -3559,32 +3576,25 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
     cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
 
     if (func->funcformat == COERCE_EXPLICIT_CAST || func->funcformat == COERCE_IMPLICIT_CAST) {
-        target_type = func->funcresulttype;
-        source_type = fcache->fcinfo_data.argTypes[0];
 
         HeapTuple proc_tuple = SearchSysCache(PROCOID, ObjectIdGetDatum(func->funcid), 0, 0, 0);
         if (HeapTupleIsValid(proc_tuple)) {
             Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tuple);
             source_type = proc_struct->proargtypes.values[0];
             ReleaseSysCache(proc_tuple);
-        }
-        HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
-                                                ObjectIdGetDatum(target_type));
-
-        if (HeapTupleIsValid(cast_tuple)) {
-            Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
-            int castowner_Anum = Anum_pg_cast_castowner;
-            if (castowner_Anum <= (int)HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
-                bool isnull = true;
-                Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
-                if (!isnull) {
-                    u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
-                } else {
-                    u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
-                }
+            target_type = func->funcresulttype;
+            HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
+                                                   ObjectIdGetDatum(target_type));
+            if (HeapTupleIsValid(cast_tuple)) {
+               bool isnull = false;
+               Datum datum = SysCacheGetAttr(CASTSOURCETARGET, cast_tuple, Anum_pg_cast_castowner, &isnull);
+               if (!isnull) {
+                   u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
+               } else {
+                   u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
+               }
+               ReleaseSysCache(cast_tuple);
             }
-            heap_close(cast_rel, AccessShareLock);
-            ReleaseSysCache(cast_tuple);
         }
     }
 

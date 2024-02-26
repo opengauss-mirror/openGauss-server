@@ -37,7 +37,9 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#ifdef ENABLE_BBOX
 #include "gs_bbox.h"
+#endif
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
@@ -164,6 +166,8 @@ const int MS_PER_S = 1000;
 const int BUFSIZE = 1024;
 const int MAX_CPU_NUMS = 104;
 const int MAXLENS = 5;
+const int SS_WORK_THREAD_POOL_MAX_CNT_UPPER = 128;
+const int SS_WORK_THREAD_POOL_MAX_CNT_LOWER = 16;
 /* options for cstore_insert_mode */
 #define TO_AUTO 1  /* means enable_delta_store = true, tail data to delta table */
 #define TO_MAIN 2  /* means enable_delta_store = false, all data to hdfs store */
@@ -217,11 +221,13 @@ static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
 static bool check_normal_cluster_replication_config_para(char** newval, void** extra, GucSource source);
 static bool check_ss_cluster_replication_control_para(bool* newval, void** extra, GucSource source);
+static bool check_ss_cluster_disaster_control_para(bool* newval, void** extra, GucSource source);
 
 #ifdef USE_ASSERT_CHECKING
 static void assign_ss_enable_verify_page(bool newval, void *extra);
 #endif
 static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource source);
+static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSource source);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
@@ -243,6 +249,9 @@ static void assign_ss_log_level(int newval, void *extra);
 static void assign_ss_log_max_file_size(int newval, void *extra);
 static void assign_ss_log_backup_file_count(int newval, void *extra);
 
+static void assign_vacuum_bulk_read_buffer_reallocate(int newval, void* extra);
+static void assign_heap_bulk_read_buffer_reallocate(int newval, void* extra);
+
 static void InitStorageConfigureNamesBool();
 static void InitStorageConfigureNamesInt();
 static void InitStorageConfigureNamesInt64();
@@ -252,10 +261,9 @@ static void InitStorageConfigureNamesEnum();
 
 static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source);
 static void assign_logical_decode_options_default(const char* newval, void* extra);
-static bool check_nodeid(int* newval, void** extra, GucSource source);
 static bool check_uwal_devices_path(char** newval, void** extra, GucSource source);
 static bool check_uwal_log_path(char** newval, void** extra, GucSource source);
-static bool check_uwal_protocol(char** newval, void** extra, GucSource source);
+static void assign_recovery_parallelism(int newval, void* extra);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -343,16 +351,6 @@ static const struct config_enum_entry dcf_run_mode_options[] = {
 };
 #endif
 
-static const struct config_enum_entry uwal_protocol_options[] = {
-    {"tcp", TCP, false},
-    {"rdma", RDMA, false},
-    {NULL, TCP, false}
-};
-static const struct config_enum_entry uwal_nic_type_options[] = {
-    {"tcp", TCP, false},
-    {"rdma", RDMA, false},
-    {NULL, TCP, false}
-};
 /*
  * Contents of GUC tables
  *
@@ -1083,6 +1081,19 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"ss_enable_ondemand_realtime_build",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use on-demand real time build"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"ss_enable_ondemand_recovery",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -1175,6 +1186,7 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+
         {{"ss_enable_dorado",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -1185,6 +1197,19 @@ static void InitStorageConfigureNamesBool()
             &g_instance.attr.attr_storage.ss_enable_dorado,
             false,
             check_ss_cluster_replication_control_para,
+            NULL,
+            NULL},
+
+        {{"ss_stream_cluster",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("Use to enabel disaster in ss disaster recovery cluster mode."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.ss_stream_cluster,
+            false,
+            check_ss_cluster_disaster_control_para,
             NULL,
             NULL},
 
@@ -1300,7 +1325,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
         {{"enable_uwal",
             PGC_POSTMASTER,
-            NODE_SINGLENODE, 
+            NODE_SINGLENODE,
             UWAL,
             gettext_noop("Whether to enable uwal"),
             NULL},
@@ -1310,32 +1335,32 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
         {{"uwal_rpc_compression_switch",
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Whether to compress RPC messages"), 
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Whether to compress RPC messages"),
             NULL},
             &g_instance.attr.attr_storage.uwal_rpc_compression_switch,
             false,
             NULL,
             NULL,
             NULL},
-        {{"uwal_rpc_rndv_switch", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Whether to use the rndv mode to transmit RPC messages"), 
+        {{"uwal_async_append_switch",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Whether to append uwal async"),
             NULL},
-            &g_instance.attr.attr_storage.uwal_rpc_rndv_switch,
+            &g_instance.attr.attr_storage.uwal_async_append_switch,
             false,
             NULL,
             NULL,
             NULL},
-        {{"uwal_rpc_flowcontrol_switch", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Whether to limit RPC traffic"), 
+        {{"uwal_rpc_flowcontrol_switch",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Whether to limit RPC traffic"),
             NULL},
             &g_instance.attr.attr_storage.uwal_rpc_flowcontrol_switch,
             false,
@@ -1408,6 +1433,34 @@ static void InitStorageConfigureNamesInt()
             INT_MAX / 2,
             NULL,
             NULL,
+            NULL},
+        {{"vacuum_bulk_read_size",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            RESOURCES_MEM,
+            gettext_noop("bulk blocks number for vacuum pre-read."),
+            NULL,
+            GUC_UNIT_BLOCKS},
+            &u_sess->attr.attr_storage.vacuum_bulk_read_size,
+            0,
+            0,
+            64,
+            NULL,
+            assign_vacuum_bulk_read_buffer_reallocate,
+            NULL},
+        {{"heap_bulk_read_size",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            RESOURCES_MEM,
+            gettext_noop("bulk blocks number for seqscan pre-read."),
+            NULL,
+            GUC_UNIT_BLOCKS},
+            &u_sess->attr.attr_storage.heap_bulk_read_size,
+            0,
+            0,
+            64,
+            NULL,
+            assign_heap_bulk_read_buffer_reallocate,
             NULL},
         {{"huge_page_size",
             PGC_POSTMASTER,
@@ -3247,7 +3300,7 @@ static void InitStorageConfigureNamesInt()
             1,
             INT_MAX,
             NULL,
-            NULL,
+            assign_recovery_parallelism,
             NULL},
         
         {{"parallel_recovery_batch",
@@ -3796,7 +3849,7 @@ static void InitStorageConfigureNamesInt()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.scrlock_server_port,
             8000,
-            0,
+            1024,
             65535,
             NULL,
             NULL,
@@ -3913,70 +3966,6 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"uwal_port", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Uwal listen port."), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_port,
-            9999,
-            9000,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_nodeid",
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE,
-            UWAL, 
-            gettext_noop("Unique node id in uwal"), NULL},
-            &g_instance.attr.attr_storage.uwal_nodeid,
-            NULL,
-            0,
-            7,
-            check_nodeid,
-            NULL,
-            NULL},
-        {{"uwal_batch_io_size", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Specifies the I/O size(Byte) for concurrent uwal writes"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_batch_io_size,
-            262144,
-            8192,
-            2097152,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_rpc_worker_thread_num", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Number of RPC connections"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_rpc_worker_thread_num,
-            1,
-            0,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_rpc_timeout", 
-            PGC_POSTMASTER, 
-            NODE_SINGLENODE, 
-            UWAL, 
-            gettext_noop("Maximum time(ms) for processing RPC messages"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_rpc_timeout,
-            1,
-            0,
-            65535,
-            NULL,
-            NULL,
-            NULL},
         {{"uwal_rpc_flowcontrol_value", 
             PGC_POSTMASTER, 
             NODE_SINGLENODE, 
@@ -3984,9 +3973,9 @@ static void InitStorageConfigureNamesInt()
             gettext_noop("RPC traffic limit per second(MB/s)"), 
             NULL},
             &g_instance.attr.attr_storage.uwal_rpc_flowcontrol_value,
-            1,
-            0,
-            65535,
+            128,
+            8,
+            2048,
             NULL,
             NULL,
             NULL},
@@ -4315,21 +4304,8 @@ static void InitStorageConfigureNamesInt64()
             NULL},
             &g_instance.attr.attr_storage.uwal_disk_size,
             8589934592,
-            0,
-            9223372036854775807 ,
-            NULL,
-            NULL,
-            NULL},
-        {{"uwal_disk_block_size", 
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            UWAL, 
-            gettext_noop("Size(Byte) of a single uwal object, align 2MB"), 
-            NULL},
-            &g_instance.attr.attr_storage.uwal_disk_block_size,
-            8589934592,
-            0,
-            9223372036854775807 ,
+            8589934592,        /* 8GB */
+            4398046511104,   /* 4TB */
             NULL,
             NULL,
             NULL},
@@ -4956,26 +4932,16 @@ static void InitStorageConfigureNamesString()
             check_ss_rdma_work_config,
             NULL,
             NULL},
-        {{"uwal_ip",
+        {{"ss_work_thread_pool_attr",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
-            UWAL,
-            gettext_noop("IP address used by uwal"),
-            NULL},
-            &g_instance.attr.attr_storage.uwal_ip,
-            "127.0.0.1",
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the attr to work threadpool"),
             NULL,
-            NULL,
-            NULL},
-        {{"uwal_protocol",
-            PGC_POSTMASTER,
-            NODE_SINGLENODE,
-            UWAL,
-            gettext_noop("Transmission mode used by uwal"),
-            NULL},
-            &g_instance.attr.attr_storage.uwal_protocol,
-            "rdma",
-            check_uwal_protocol,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.work_thread_pool_attr,
+            "",
+            check_ss_work_thread_pool_attr,
             NULL,
             NULL},
         {{"uwal_devices_path",
@@ -4987,6 +4953,17 @@ static void InitStorageConfigureNamesString()
             &g_instance.attr.attr_storage.uwal_devices_path,
             "",
             check_uwal_devices_path,
+            NULL,
+            NULL},
+        {{"uwal_config",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UWAL,
+            gettext_noop("Sets config string for uwal."),
+            NULL},
+            &g_instance.attr.attr_storage.uwal_config,
+            "",
+            NULL,
             NULL,
             NULL},
         {{"uwal_log_path",
@@ -6414,6 +6391,13 @@ static bool check_normal_cluster_replication_config_para(char** newval, void** e
         return false; 
     }
 
+    if (g_instance.attr.attr_storage.ss_stream_cluster) {
+        ereport(ERROR, (errmsg("Do not allow both enable normal cluster replication "
+            "and disaster replication with \"ss_stream_cluster\" = %d", \
+            g_instance.attr.attr_storage.ss_stream_cluster)));
+        return false;
+    }
+
     return true;
 }
 
@@ -6423,9 +6407,39 @@ static bool check_ss_cluster_replication_control_para(bool* newval, void** extra
         return true;
     }
 
+    if (*newval && g_instance.attr.attr_storage.ss_stream_cluster) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and disaster replication with \"ss_stream_cluster\" = %d", \
+            g_instance.attr.attr_storage.ss_stream_cluster)));
+        return false;
+    }
+
     if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
         ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
             "and normal cluster repliction with \"xlog_file_path\" = %s", \
+            g_instance.attr.attr_storage.xlog_file_path)));
+        return false;
+    }
+
+    return true;
+}
+
+static bool check_ss_cluster_disaster_control_para(bool* newval, void** extra, GucSource source)
+{
+    if (!(*newval)) {
+        return true;
+    }
+    
+    if (g_instance.attr.attr_storage.ss_enable_dorado) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and dorado replication with \"ss_enable_dorado\" = %d", \
+            g_instance.attr.attr_storage.ss_enable_dorado)));
+        return false;
+    }
+
+    if (g_instance.attr.attr_storage.xlog_file_path != NULL) {
+        ereport(ERROR, (errmsg("Do not allow both enable ss cluster replication "
+            "and normal cluster replication with \"xlog_file_path\" = %s", \
             g_instance.attr.attr_storage.xlog_file_path)));
         return false;
     }
@@ -6648,6 +6662,14 @@ static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource s
     return true;
 }
 
+static void assign_recovery_parallelism(int newval, void* extra)
+{
+    if (IsUnderPostmaster && !(t_thrd.role == STARTUP && t_thrd.is_inited)) {
+        return;
+    }
+    g_instance.attr.attr_storage.real_recovery_parallelism = newval;
+}
+
 #ifndef ENABLE_MULTIPLE_NODES
 
 static void assign_dcf_election_timeout(int newval, void* extra)
@@ -6791,6 +6813,37 @@ static void assign_ss_log_backup_file_count(int newval, void *extra)
     }
 }
 
+static void assign_vacuum_bulk_read_buffer_reallocate(int newval, void* extra)
+{
+    /* If pre_read_mem_cxt is NULL, it means we naver use heap bulk read, buffer will init later */
+    if (u_sess->storage_cxt.max_vacuum_bulk_read_size <= newval && u_sess->pre_read_mem_cxt != NULL) {
+        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        /* It be safe to charge again */
+        if (u_sess->storage_cxt.bulk_buf_vacuum != NULL) {
+            pfree(u_sess->storage_cxt.bulk_buf_vacuum);
+            u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(newval * BLCKSZ); 
+        }
+        (void) MemoryContextSwitchTo(oldContext);
+    }
+    /* Whever we resize the buffer, we always record the max heap bulk extend size for farther compare*/
+    u_sess->storage_cxt.max_vacuum_bulk_read_size = Max(u_sess->storage_cxt.max_vacuum_bulk_read_size, newval);
+}
+
+static void assign_heap_bulk_read_buffer_reallocate(int newval, void* extra)
+{
+    /* If pre_read_mem_cxt is NULL, it means we naver use heap bulk read, buffer will init later */
+    if (u_sess->storage_cxt.max_heap_bulk_read_size <= newval && u_sess->pre_read_mem_cxt != NULL) {
+        MemoryContext oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        /* It be safe to charge again */
+        if (u_sess->storage_cxt.bulk_buf_read != NULL) {
+            pfree(u_sess->storage_cxt.bulk_buf_read);
+            u_sess->storage_cxt.bulk_buf_read = (char*)palloc(newval * BLCKSZ); 
+        }
+        (void) MemoryContextSwitchTo(oldContext);
+    }
+    /* Whever we resize the buffer, we always record the max heap bulk extend size for farther compare*/
+    u_sess->storage_cxt.max_heap_bulk_read_size = Max(u_sess->storage_cxt.max_heap_bulk_read_size, newval);
+}
 
 static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source)
 {
@@ -6818,18 +6871,6 @@ static bool check_logical_decode_options_default(char** newval, void** extra, Gu
 static void assign_logical_decode_options_default(const char* newval, void* extra)
 {
     u_sess->attr.attr_storage.logical_decode_options_default = extra;
-}
-
-static bool check_nodeid(int* newval, void** extra, GucSource source)
-{
-    if (source == PGC_S_DEFAULT) {
-        return true;
-    }
-    if (g_instance.attr.attr_storage.enable_uwal && NULL == newval) {
-        ereport(ERROR, (errmsg("enabled uwal but nodeid is not configured")));
-        return false;
-    }
-    return true;
 }
 
 static bool check_uwal_devices_path(char **newval, void **extra, GucSource source)
@@ -6860,16 +6901,34 @@ static bool check_uwal_log_path(char **newval, void **extra, GucSource source)
     return true;
 }
 
-static bool check_uwal_protocol(char **newval, void **extra, GucSource source)
+static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSource source)
 {
-    if (source == PGC_S_DEFAULT) {
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt = 0;
         return true;
     }
-    if (g_instance.attr.attr_storage.enable_uwal) {
-        if (newval == NULL || *newval == NULL || **newval == '\0') {
-            ereport(ERROR, (errmsg("enabled uwal but uwal_protocol is not configured")));
-            return false;
-        }
+
+    char* replStr = NULL;
+    replStr = pstrdup(*newval);
+
+    if (!check_str_is_digit(replStr)) {
+        ereport(ERROR, (errmsg("invalid parameter ss_work_thread_pool_attr:%s should be number",
+            replStr)));
+        pfree(replStr);
+        return false;
     }
+
+    int max_cnt = pg_strtoint32(replStr);
+    if (max_cnt < SS_WORK_THREAD_POOL_MAX_CNT_LOWER ||
+        max_cnt > SS_WORK_THREAD_POOL_MAX_CNT_UPPER) {
+        ereport(ERROR, (errmsg("invalid parameter ss_work_thread_pool_attr:%s, max_cnt:%u should between "
+            "SS_WORK_THREAD_POOL_MAX_CNT_LOWER:%u and SS_WORK_THREAD_POOL_MAX_CNT_UPPER:%u",
+            replStr, max_cnt, SS_WORK_THREAD_POOL_MAX_CNT_LOWER, SS_WORK_THREAD_POOL_MAX_CNT_UPPER)));
+        pfree(replStr);
+        return false;
+    }
+
+    g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt = max_cnt;
+    pfree(replStr);
     return true;
 }

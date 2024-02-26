@@ -333,19 +333,10 @@ int partitonKeyCompare(Const** value1, Const** value2, int len, bool nullEqual)
 
 bool IsPartkeyInTargetList(Relation rel, List* targetList)
 {
-    PartitionMap* map = NULL;
-    int2vector* partKey = NULL;
+    Assert (rel != NULL && rel->partMap != NULL);
+    int2vector* partKey = rel->partMap->partitionKey;
     ListCell *lc = NULL;
-    int j = 0;
-
-    map = rel->partMap;
-    if (map->type == PART_TYPE_LIST) {
-        partKey = ((ListPartitionMap *)map)->partitionKey;
-    } else if (map->type == PART_TYPE_HASH) {
-        partKey = ((HashPartitionMap *)map)->partitionKey;
-    } else {
-        partKey = ((RangePartitionMap *)map)->partitionKey;
-    }
+    
     foreach (lc, targetList) {
         TargetEntry *entry = (TargetEntry *)lfirst(lc);
 
@@ -354,7 +345,7 @@ bool IsPartkeyInTargetList(Relation rel, List* targetList)
         }
 
         /* check partkey has the column */
-        for (j = 0; j < partKey->dim1; j++) {
+        for (int j = 0; j < partKey->dim1; j++) {
             if (partKey->values[j] == entry->resno) {
                 return true;
             }
@@ -413,7 +404,7 @@ bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq)
 {
     Assert(partMap && partKeyValues);
-    Assert(partkeyColumnNum == partMap->partitionKey->dim1);
+    Assert(partkeyColumnNum == partMap->base.partitionKey->dim1);
 
     int compareBottom = 0;
     int compareTop = 0;
@@ -423,21 +414,21 @@ bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValue
     if (0 == partSeq) {
         /* is in first partition (-inf, boundary) */
         greaterThanBottom = true;
-        partitonKeyCompareForRouting(partKeyValues, partMap->rangeElements[0].boundary, (uint32)partkeyColumnNum,
+        partitionKeyCompareForRouting(partKeyValues, partMap->rangeElements[0].boundary, (uint32)partkeyColumnNum,
                                      compareTop);
         if (compareTop < 0) {
             lessThanTop = true;
         }
     } else {
         /* is in [last_partiton_boundary,  boundary) */
-        partitonKeyCompareForRouting(
+        partitionKeyCompareForRouting(
             partKeyValues, partMap->rangeElements[partSeq - 1].boundary, (uint32)partkeyColumnNum, compareBottom);
 
         if (compareBottom >= 0) {
             greaterThanBottom = true;
         }
 
-        partitonKeyCompareForRouting(
+        partitionKeyCompareForRouting(
             partKeyValues, partMap->rangeElements[partSeq].boundary, (uint32)partkeyColumnNum, compareTop);
 
         if (compareTop < 0) {
@@ -453,7 +444,7 @@ int comparePartitionKey(RangePartitionMap* partMap, Const** partkey_value, Const
     int compare = 0;
 
     incre_partmap_refcount((PartitionMap*)partMap);
-    partitonKeyCompareForRouting(partkey_value, partkey_bound, (uint32)partKeyNum, compare);
+    partitionKeyCompareForRouting(partkey_value, partkey_bound, (uint32)partKeyNum, compare);
     decre_partmap_refcount((PartitionMap*)partMap);
 
     return compare;
@@ -461,13 +452,7 @@ int comparePartitionKey(RangePartitionMap* partMap, Const** partkey_value, Const
 
 int2vector* GetPartitionKey(const PartitionMap* partMap)
 {
-    if (partMap->type == PART_TYPE_LIST) {
-        return ((ListPartitionMap*)partMap)->partitionKey;
-    } else if (partMap->type == PART_TYPE_HASH) {
-        return ((HashPartitionMap*)partMap)->partitionKey;
-    } else {
-        return ((RangePartitionMap*)partMap)->partitionKey;
-    }
+    return partMap->partitionKey;
 }
 
 /*
@@ -542,7 +527,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
         listPartDef->boundary = (List *)copyObject(partitionKeyValuesList);
         listPartDef->boundary = transformListPartitionValue(pstate, listPartDef->boundary, false, true);
         listPartDef->boundary = transformConstIntoTargetType(
-            rel->rd_att->attrs, ((ListPartitionMap *)rel->partMap)->partitionKey, listPartDef->boundary);
+            rel->rd_att->attrs, rel->partMap->partitionKey, listPartDef->boundary);
 
         rte->plist = listPartDef->boundary;
 
@@ -555,7 +540,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
         hashPartDef->boundary = (List *)copyObject(partitionKeyValuesList);
         hashPartDef->boundary = transformListPartitionValue(pstate, hashPartDef->boundary, false, true);
         hashPartDef->boundary = transformIntoTargetType(
-            rel->rd_att->attrs, (((HashPartitionMap *)rel->partMap)->partitionKey)->values[0], hashPartDef->boundary);
+            rel->rd_att->attrs, rel->partMap->partitionKey->values[0], hashPartDef->boundary);
 
         rte->plist = hashPartDef->boundary;
 
@@ -570,7 +555,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
         transformPartitionValue(pstate, (Node *)rangePartDef, false);
 
         rangePartDef->boundary = transformConstIntoTargetType(
-            rel->rd_att->attrs, ((RangePartitionMap *)rel->partMap)->partitionKey, rangePartDef->boundary);
+            rel->rd_att->attrs, ((RangePartitionMap *)rel->partMap)->base.partitionKey, rangePartDef->boundary);
 
         rte->plist = rangePartDef->boundary;
 
@@ -606,11 +591,11 @@ static void SplitValuesList(List *ValuesList, List **partitionKeyValuesList, Lis
     ListCell *cell = NULL;
 
     if (rel->partMap->type == PART_TYPE_RANGE) {
-        len = (((RangePartitionMap *)rel->partMap)->partitionKey)->dim1;
+        len = rel->partMap->partitionKey->dim1;
     } else if (rel->partMap->type == PART_TYPE_LIST) {
-        len = (((ListPartitionMap *)rel->partMap)->partitionKey)->dim1;
+        len = rel->partMap->partitionKey->dim1;
     } else if (rel->partMap->type == PART_TYPE_HASH) {
-        len = (((HashPartitionMap *)rel->partMap)->partitionKey)->dim1;
+        len = rel->partMap->partitionKey->dim1;
     } else {
         /* shouldn't happen */
         ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -633,21 +618,15 @@ static void SplitValuesList(List *ValuesList, List **partitionKeyValuesList, Lis
 
 static void CheckPartitionValuesList(Relation rel, List *subPartitionKeyValuesList)
 {
-    int len = 0;
-
-    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
-        len = (((RangePartitionMap *)rel->partMap)->partitionKey)->dim1;
-    } else if (rel->partMap->type == PART_TYPE_LIST) {
-        len = (((ListPartitionMap *)rel->partMap)->partitionKey)->dim1;
-    } else if (rel->partMap->type == PART_TYPE_HASH) {
-        len = (((HashPartitionMap *)rel->partMap)->partitionKey)->dim1;
-    } else {
+    Assert (rel != NULL && rel->partMap != NULL);
+    if (!PartitionMapTypeIsValid(rel->partMap)) {
         /* shouldn't happen */
         ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                         (errmsg("unsupported partition type"), errdetail("N/A."), errcause("System error."),
                          erraction("Contact engineer to support."))));
     }
 
+    int len = rel->partMap->partitionKey->dim1;
     if (subPartitionKeyValuesList == NIL || len != subPartitionKeyValuesList->length) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                         (errmsg("number of partitionkey values is not equal to the number of partitioning columns"),

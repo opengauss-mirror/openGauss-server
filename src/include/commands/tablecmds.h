@@ -236,6 +236,9 @@ extern void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_tab
 extern bool ConstraintSatisfyAutoIncrement(HeapTuple tuple, TupleDesc desc, AttrNumber attrnum, char contype);
 extern void CheckRelAutoIncrementIndex(Oid relid, LOCKMODE lockmode);
 extern void RebuildDependViewForProc(Oid proc_oid);
+extern void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute attForm, int2 old_attnum,
+    char** attName, List **old_query_str);
+extern void ReplaceViewQueryFirstAfter(List *query_str);
 #ifdef USE_SPQ
 extern void spq_btbuild_update_pg_class(Relation heap, Relation index);
 #endif

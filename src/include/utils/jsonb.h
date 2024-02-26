@@ -287,7 +287,7 @@ extern int    compareJsonbSuperHeaderValue(JsonbSuperHeader a, JsonbSuperHeader 
 extern JsonbValue *findJsonbValueFromSuperHeader(JsonbSuperHeader sheader, uint32 flags,
     uint32 *lowbound, JsonbValue *key);
 extern JsonbValue *getIthJsonbValueFromSuperHeader(JsonbSuperHeader sheader, uint32 i);
-extern JsonbValue *pushJsonbValue(JsonbParseState **pstate, int seq, JsonbValue *scalarVal);
+extern JsonbValue *pushJsonbValue(JsonbParseState **pstate, int seq, JsonbValue *jbval);
 extern JsonbIterator *JsonbIteratorInit(JsonbSuperHeader buffer);
 extern int JsonbIteratorNext(JsonbIterator **it, JsonbValue *val, bool skipNested);
 extern Jsonb *JsonbValueToJsonb(JsonbValue *val);

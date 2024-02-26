@@ -197,6 +197,7 @@ extern int optreset; /* might not be declared by system headers */
 #include "replication/libpqsw.h"
 #include "replication/walreceiver.h"
 #include "libpq/libpq-int.h"
+#include "tcop/autonomoustransaction.h"
 
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
@@ -291,6 +292,7 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
 static void ForceModifyExpiredPwd(const char* queryString, const List* parsetreeList);
 #if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
 static void InitGlobalNodeDefinition(PlannedStmt* planstmt);
+extern void SetRemoteDestTupleReceiverParams(DestReceiver *self);
 #endif
 static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params);
 extern void CancelAutoAnalyze();
@@ -1276,6 +1278,11 @@ static List* pg_rewrite_query(Query* query)
             PrepareStmt *stmt = (PrepareStmt *)query->utilityStmt;
             if (IsA(stmt->query, UserVar)) {
                 querytree_list = QueryRewritePrepareStmt(query);
+            } else if (IsA(stmt->query, Const)) {
+                if (((Const *)stmt->query)->constisnull) {
+                    ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg("userdefined variable in prepare statement must be text type.")));
+                }
             } else {
                 querytree_list = list_make1(query);
             }
@@ -1601,6 +1608,33 @@ const char* CreateCommandTagForPlan(CmdType commandType)
     }
     return tag;
 }
+
+#ifdef USE_SPQ
+void ChangeDMLPlanForRONode(PlannedStmt* plan)
+{
+    if (IS_SPQ_EXECUTOR && !SS_PRIMARY_MODE &&
+        (plan->commandType == CMD_INSERT || plan->commandType == CMD_UPDATE || plan->commandType == CMD_DELETE)) {
+        if (IsA(plan->planTree, ModifyTable)) {
+            ModifyTable* node = (ModifyTable*)plan->planTree;
+            ListCell* l = NULL;
+            foreach (l, node->plans) {
+                plan->planTree = (Plan*)lfirst(l);
+            }
+        }
+        ListCell *rtcell;
+        RangeTblEntry *rte;
+        AclMode removeperms = ACL_INSERT | ACL_UPDATE | ACL_DELETE | ACL_SELECT_FOR_UPDATE;
+
+        /* Just reading, so don't check INS/DEL/UPD permissions. */
+        foreach(rtcell, plan->rtable) {
+            rte = (RangeTblEntry *)lfirst(rtcell);
+            if (rte->rtekind == RTE_RELATION &&
+                0 != (rte->requiredPerms & removeperms))
+                rte->requiredPerms &= ~removeperms;
+        }
+    }
+}
+#endif
 /*
  * exec_simple_plan
  *
@@ -1617,6 +1651,8 @@ void exec_simple_plan(PlannedStmt* plan)
     if (plan == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("Invaild parameter.")));
     }
+
+    ChangeDMLPlanForRONode(plan);
 
     plpgsql_estate = NULL;
 
@@ -1812,7 +1848,7 @@ void exec_simple_plan(PlannedStmt* plan)
         /*
          * Start the portal.  No parameters here.
          */
-        PortalStart(portal, NULL, 0, InvalidSnapshot);
+        PortalStart(portal, NULL, 0, u_sess->spq_cxt.snapshot);
 
         /*
          * Select the appropriate output format: text unless we are doing a
@@ -1829,6 +1865,10 @@ void exec_simple_plan(PlannedStmt* plan)
         receiver = CreateDestReceiver(dest);
         if (dest == DestRemote)
             SetRemoteDestReceiverParams(receiver, portal);
+#ifdef USE_SPQ
+        if (IS_SPQ_RUNNING && dest == DestRemote)
+            SetRemoteDestTupleReceiverParams(receiver);
+#endif
 
         /*
          * Switch back to transaction context for execution.
@@ -3187,6 +3227,8 @@ static void exec_plan_with_params(StringInfo input_message)
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("Invaild parameter.")));
     }
 
+    ChangeDMLPlanForRONode(planstmt);
+
     if (ThreadIsDummy(planstmt->planTree)) {
         u_sess->stream_cxt.dummy_thread = true;
         u_sess->exec_cxt.executorStopFlag = true;
@@ -3412,7 +3454,7 @@ static void exec_plan_with_params(StringInfo input_message)
          */
         PortalDefineQuery(portal, NULL, "DUMMY", commandTag, lappend(NULL, planstmt), NULL);
 
-        PortalStart(portal, params, 0, InvalidSnapshot);
+        PortalStart(portal, params, 0, u_sess->spq_cxt.snapshot);
 
         PortalSetResultFormat(portal, numRFormats, rformats);
 
@@ -3423,6 +3465,10 @@ static void exec_plan_with_params(StringInfo input_message)
         if (dest == DestRemote) {
             SetRemoteDestReceiverParams(receiver, portal);
         }
+#ifdef USE_SPQ
+        if (IS_SPQ_RUNNING && dest == DestRemote)
+            SetRemoteDestTupleReceiverParams(receiver);
+#endif
 
         if (max_rows <= 0) {
             max_rows = FETCH_ALL;
@@ -3460,9 +3506,6 @@ static void exec_plan_with_params(StringInfo input_message)
     }
 
     finish_xact_command();
-    if (planstmt->enable_adaptive_scan) {
-        disconnect_qc_conn(planstmt);
-    }
 }
 #endif
 
@@ -7643,10 +7686,17 @@ void RemoveTempNamespace()
 
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 #define INITIAL_USER_ID 10
-/* IMPORTANT: load plugin should call after process is normal, cause heap_create_with_catalog will check it */
+/*
+ * IMPORTANT:
+ * 1. load plugin should call after process is normal, cause heap_create_with_catalog will check it.
+ * 2. load plugin should call after mask_password_mem_cxt is created, cause maskPassword is called
+ *      when create extension, which need mask_password_mem_cxt.
+ */
 void LoadSqlPlugin()
 {
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
+        /* start_xact_command will change CurrentResourceOwner, so save it here */
+        ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
         if (!u_sess->attr.attr_sql.dolphin &&
 #ifdef ENABLE_LITE_MODE
             u_sess->attr.attr_common.upgrade_mode == 0
@@ -7660,6 +7710,7 @@ void LoadSqlPlugin()
                     errmsg("Please use the original role to connect B-compatibility database first, to load extension dolphin")));
             }
             /* recheck and load dolphin within lock */
+            t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = true;
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
 
             PG_TRY();
@@ -7676,13 +7727,17 @@ void LoadSqlPlugin()
             PG_CATCH();
             {
                 pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+                t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
+                t_thrd.utils_cxt.CurrentResourceOwner = save;
                 PG_RE_THROW();
             }
             PG_END_TRY();
             pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+            t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
         } else if (u_sess->attr.attr_sql.dolphin) {
             InitBSqlPluginHookIfNeeded();
         }
+        t_thrd.utils_cxt.CurrentResourceOwner = save;
     } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
         InitASqlPluginHookIfNeeded();
     }
@@ -8375,6 +8430,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         StreamNodeGroup::MarkRecursiveVfdInvalid();
 
         BgworkerListSyncQuit();
+        
+        /* clean autonomous session */
+        DestoryAutonomousSession(true);
         /*
          * Abort the current transaction in order to recover.
          */
@@ -8978,9 +9036,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 exec_simple_plan(planstmt);
 
-                if (planstmt->enable_adaptive_scan) {
-                    disconnect_qc_conn(planstmt);
-                }
                 MemoryContextSwitchTo(old_cxt);
 
                 // After query done, producer container is not usable anymore.
@@ -9953,6 +10008,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 /* Set top consumer at the very beginning. */
                 StreamTopConsumerIam();
+                List* oidlist = NIL;
+                int oidcount = 0;
 
                 /* Set the query id we were passed down */
                 errno_t rc = memcpy_s(&u_sess->debug_query_id,
@@ -9961,6 +10018,17 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     sizeof(uint64));
                 securec_check(rc, "\0", "\0");
                 ereport(DEBUG1, (errmsg("Received new query id %lu", u_sess->debug_query_id)));
+                rc = memcpy_s(&oidcount, sizeof(int),
+                    pq_getmsgbytes(&input_message, sizeof(int)), sizeof(int));
+                securec_check(rc,"\0","\0");
+                for (int i = 0; i < oidcount; i++) {
+                    Oid tmp = InvalidOid;
+                    rc = memcpy_s(&tmp, sizeof(Oid),
+                        pq_getmsgbytes(&input_message, sizeof(Oid)), sizeof(Oid));
+                    securec_check(rc,"\0","\0");
+                    oidlist = lappend_oid(oidlist, tmp);
+                }
+
                 pq_getmsgend(&input_message);
 
                 /*
@@ -9971,6 +10039,30 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  */
                 StreamNodeGroup::grantStreamConnectPermission();
 
+                StringInfoData buf;
+                pq_beginmessage(&buf, 'l');
+                pq_sendint16(&buf, g_instance.attr.attr_network.comm_control_port);
+                pq_sendint16(&buf, g_instance.attr.attr_network.comm_sctp_port);
+                uint16 len = strlen(g_instance.attr.attr_common.PGXCNodeName) + 1;
+                pq_sendint16(&buf, len);
+                pq_sendbytes(&buf, g_instance.attr.attr_common.PGXCNodeName, len);
+                pq_endmessage(&buf);
+                if (SS_PRIMARY_MODE && oidcount > 0) {
+                    StringInfoData bufoid;
+                    pq_beginmessage(&bufoid, 'i');
+                    pq_sendint(&bufoid, oidcount, 4);
+                    ListCell *oid;
+                    foreach (oid, oidlist) {
+                        Oid relOid = lfirst_oid(oid);
+                        Relation rel = heap_open(relOid, AccessShareLock);
+                        BlockNumber ReadBlkNum = RelationGetNumberOfBlocks(rel);
+                        heap_sync(rel);
+                        heap_close(rel, AccessShareLock);
+                        pq_sendint(&bufoid, (int)relOid, 4);
+                        pq_sendint(&bufoid, (int)ReadBlkNum, 4);
+                    }
+                    pq_endmessage(&bufoid);
+                }
                 pq_putemptymessage('O'); /* PlanIdComplete */
                 pq_flush();
             } break;
@@ -10000,10 +10092,30 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 pq_getmsgend(&input_message);
             } break;
-
+#endif
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 's': /* snapshot */
             {
+#ifdef USE_SPQ
                 errno_t rc = EOK;
+                Snapshot cursnap = u_sess->spq_cxt.snapshot;
+                int satisfies;
+                rc = memcpy_s(&satisfies, sizeof(int),
+                                  pq_getmsgbytes(&input_message, sizeof(int)), sizeof(int));
+                    securec_check(rc,"\0","\0");
+                cursnap->satisfies = (SnapshotSatisfiesMethod)satisfies;
+                rc = memcpy_s(&cursnap->xmin, sizeof(TransactionId),
+                                  pq_getmsgbytes(&input_message, sizeof(TransactionId)), sizeof(TransactionId));
+                    securec_check(rc,"\0","\0");
+                rc = memcpy_s(&cursnap->xmax, sizeof(TransactionId),
+                                  pq_getmsgbytes(&input_message, sizeof(TransactionId)), sizeof(TransactionId));
+                    securec_check(rc,"\0","\0");
+                rc = memcpy_s(&cursnap->snapshotcsn, sizeof(CommitSeqNo),
+                                  pq_getmsgbytes(&input_message, sizeof(CommitSeqNo)), sizeof(CommitSeqNo));
+                    securec_check(rc,"\0","\0");
+                break;
+            }
+#else
                 int gtm_snapshot_type = -1;
 
                 if (GTM_LITE_MODE) { /* gtm lite mode */
@@ -10053,7 +10165,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                             u_sess->attr.attr_common.xc_maintenance_mode ? "on" : "off")));
                 break;
             }
-
+#endif
+#endif
+#ifdef ENABLE_MULTIPLE_NODES
             case 't': /* timestamp */
                 /* Set statement_timestamp() */
                 gtmstart_timestamp = (TimestampTz)pq_getmsgint64(&input_message);

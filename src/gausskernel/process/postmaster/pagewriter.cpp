@@ -426,6 +426,7 @@ bool is_dirty_page_queue_full(BufferDesc* buf)
     return false;
 }
 
+#if (defined(__x86_64__) || defined(__aarch64__)) && !defined(__USE_SPINLOCK)
 bool atomic_push_pending_flush_queue(XLogRecPtr* queue_head_lsn, uint64* new_tail_loc)
 {
     uint128_u compare;
@@ -458,6 +459,7 @@ loop:
     *new_tail_loc -= 1;
     return true;
 }
+#endif
 
 bool push_pending_flush_queue(Buffer buffer)
 {
@@ -465,10 +467,10 @@ bool push_pending_flush_queue(Buffer buffer)
     uint64 actual_loc;
     XLogRecPtr queue_head_lsn = InvalidXLogRecPtr;
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
-    bool push_finish = false;
 
     Assert(XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn)));
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
+    bool push_finish = false;
     push_finish = atomic_push_pending_flush_queue(&queue_head_lsn, &new_tail_loc);
     if (!push_finish) {
         return false;
@@ -476,11 +478,15 @@ bool push_pending_flush_queue(Buffer buffer)
 #else
     SpinLockAcquire(&g_instance.ckpt_cxt_ctl->queue_lock);
 
-    if ((uint64)(get_dirty_page_num() + PAGE_QUEUE_SLOT_MIN_RESERVE_NUM) >=
+    if ((uint64)(g_instance.ckpt_cxt_ctl->dirty_page_queue_tail
+                  - g_instance.ckpt_cxt_ctl->dirty_page_queue_head
+                  + PAGE_QUEUE_SLOT_MIN_RESERVE_NUM) >=
         g_instance.ckpt_cxt_ctl->dirty_page_queue_size) {
         SpinLockRelease(&g_instance.ckpt_cxt_ctl->queue_lock);
         return false;
     }
+
+    queue_head_lsn = g_instance.ckpt_cxt_ctl->dirty_page_queue_reclsn;
     new_tail_loc = g_instance.ckpt_cxt_ctl->dirty_page_queue_tail;
     g_instance.ckpt_cxt_ctl->dirty_page_queue_tail++;
     SpinLockRelease(&g_instance.ckpt_cxt_ctl->queue_lock);
@@ -509,7 +515,7 @@ uint64 get_dirty_page_queue_tail()
 {
     uint64 tail = 0;
 
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) && !defined(__USE_SPINLOCK)
     tail = pg_atomic_barrier_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_tail);
 #else
     SpinLockAcquire(&g_instance.ckpt_cxt_ctl->queue_lock);

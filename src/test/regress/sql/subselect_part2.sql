@@ -362,3 +362,48 @@ drop table if exists item_inventory_plan cascade;
 drop table if exists item_inventory cascade;
 drop  view usview03;
 
+create table tab_sa1 (t1_id1 int, t1_id2 int, t1_id3 int);
+create table tab_sa2 (t2_id1 int, t2_id2 int, t2_id3 int);
+create table tab_sa3 (t3_id1 int, t3_id2 int, t3_id3 int);
+create table tab_sa4 (t4_id1 int, t4_id2 int, t4_id3 int);
+create table tab_sa5 (t1_id1 int, t1_id2 int, t1_id3 int);
+insert into tab_sa1 values(1,1,1),(2,2,2),(3,3,3);
+insert into tab_sa2 values(1,1,1),(2,2,2),(3,3,3);
+insert into tab_sa3 values(1,1,1),(2,2,2),(5,5,5);
+insert into tab_sa4 values(1,1,1),(2,2,2),(5,5,5);
+insert into tab_sa5 values(1,1,1),(2,2,2),(5,5,5);
+select A.t1_id1, B.t2_id2 from tab_sa1 A, tab_sa2 B where A.t1_id1 = B.t2_id1 and exists (
+   select * from tab_sa3 A, tab_sa4 B where A.t3_id1 = B.t4_id1 and A.t1_id1 = 5 );
+select A.t1_id1, B.t2_id2 from tab_sa1 A, tab_sa2 B where A.t1_id1 = B.t2_id1 and exists (
+   select * from tab_sa3 A, tab_sa4 B where A.t3_id1 = B.t4_id1 and A.t1_id1 = 3 );
+select * from tab_sa1 A, tab_sa2 B where A.t1_id1 = B.t2_id1 and exists (
+   select * from tab_sa3 A, tab_sa4 B where A.t3_id1 = B.t4_id1 and A.t3_id1 = 5 );
+select * from tab_sa1 A, tab_sa2 B where A.t1_id1 = B.t2_id1 and exists (
+   select * from tab_sa5 A, tab_sa4 B where A.t1_id1 = B.t4_id1 and A.t1_id1 = 5 );
+select * from tab_sa1 A, tab_sa2 B where A.t1_id1 = B.t2_id1 and exists (
+   select * from tab_sa3 A, tab_sa4 B where A.t3_id1 = B.t4_id1 and A.t5_id1 = 5 );
+drop table tab_sa1;
+drop table tab_sa2;
+drop table tab_sa3;
+drop table tab_sa4;
+drop table tab_sa5;
+
+set rewrite_rule = 'remove_redundant_distinct_group_by';
+create table subselect_t1 (a int);
+create table subselect_t2 (a int, b int);
+insert into subselect_t1 values (1);
+insert into subselect_t1 values (2);
+insert into subselect_t1 values (-1);
+insert into subselect_t2 values (1, 1);
+insert into subselect_t2 values (2, 2);
+insert into subselect_t2 values (-1, -1);
+
+explain (costs off) select * from subselect_t1 where a in (select distinct a from subselect_t2);
+select * from subselect_t1 where a in (select distinct a from subselect_t2);
+
+explain (costs off) select * from subselect_t1 where a in (select a from subselect_t2 group by a);
+select * from subselect_t1 where a in (select a from subselect_t2 group by a);
+
+explain (costs off) select * from subselect_t1 where a in (select distinct on (abs(a)) a from subselect_t2);
+select * from subselect_t1 where a in (select distinct on (abs(a)) a from subselect_t2);
+reset rewrite_rule;

@@ -1261,9 +1261,7 @@ static void RemoveLocalLock(LOCALLOCK *locallock)
     if (!hash_search(t_thrd.storage_cxt.LockMethodLocalHash, (void *)&(locallock->tag), HASH_REMOVE, NULL))
         ereport(WARNING, (errmsg("locallock table corrupted")));
 
-    if (!RecoveryInProgress()) {
-        SSDmsLockRelease(locallock);
-    }
+    SSDmsLockRelease(locallock);
 }
 
 inline  bool IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)

@@ -40,7 +40,7 @@ ALL_PO_FILES = $(addprefix po/, $(addsuffix .po, $(AVAIL_LANGUAGES)))
 MO_FILES = $(addprefix po/, $(addsuffix .mo, $(LANGUAGES)))
 
 ifdef XGETTEXT
-XGETTEXT += -ctranslator --copyright-holder='PostgreSQL Global Development Group' --msgid-bugs-address=pgsql-bugs@postgresql.org --no-wrap --sort-by-file --package-name='$(CATALOG_NAME) (PostgreSQL)' --package-version='$(MAJORVERSION)'
+XGETTEXT += -ctranslator --copyright-holder='PostgreSQL Global Development Group' --msgid-bugs-address=pgsql-bugs@postgresql.org --no-wrap --sort-by-file --package-name='$(CATALOG_NAME) (PostgreSQL)' --package-version='$(MAJORVERSION)' --from-code=UTF-8
 endif
 
 ifdef MSGMERGE
@@ -57,12 +57,12 @@ BACKEND_COMMON_GETTEXT_TRIGGERS = \
     errmsg errmsg_plural:1,2 \
     errdetail errdetail_log errdetail_plural:1,2 \
     errhint \
-    errcontext
+    errcontext errcause erraction errquery
 BACKEND_COMMON_GETTEXT_FLAGS = \
     errmsg:1:c-format errmsg_plural:1:c-format errmsg_plural:2:c-format \
     errdetail:1:c-format errdetail_log:1:c-format errdetail_plural:1:c-format errdetail_plural:2:c-format \
     errhint:1:c-format \
-    errcontext:1:c-format
+    errcontext:1:c-format errcause:1:c-format erraction:1:c-format errquery:1:c-format
 
 
 all-po: $(MO_FILES)

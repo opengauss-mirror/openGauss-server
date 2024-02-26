@@ -34,3 +34,16 @@ select * from skiplocked_t1 order by id for update;
   5 | five
 (5 rows)
 
+create view skiplocked_v1 as select * from skiplocked_t1;
+create view skiplocked_v2 as select * from skiplocked_t2;
+create view skiplocked_v3 as select * from skiplocked_t3;
+select * from skiplocked_v1 order by 1 limit 1 for update skip locked;
+ id | info 
+----+------
+  1 | one
+(1 row)
+
+select * from skiplocked_v2 order by 1 limit 1 for update skip locked;
+ERROR:  SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE with skip locked only be used with AStore table "skiplocked_v2"
+select * from skiplocked_v3 order by 1 limit 1 for update skip locked;
+ERROR:  SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with view "skiplocked_v3" based on column table

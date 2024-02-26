@@ -41,6 +41,7 @@
 ./bin/server.key.cipher
 ./bin/server.key.rand
 ./bin/gs_plan_simulator.sh
+./bin/gs_retrieve
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  
 ./etc/kerberos/krb5.conf  
@@ -70,8 +71,6 @@
 ./share/postgresql/extension/dolphin--3.0--2.0.sql
 ./share/postgresql/extension/dolphin--2.0--2.0.1.sql
 ./share/postgresql/extension/dolphin--2.0.1--2.0.sql
-./share/postgresql/extension/whale.control
-./share/postgresql/extension/whale--1.0.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/file_fdw--1.0.sql
 ./share/postgresql/extension/plpgsql.control
@@ -766,7 +765,6 @@
 ./lib/postgresql/proc_srclib
 ./lib/postgresql/security_plugin.so
 ./lib/postgresql/dolphin.so
-./lib/postgresql/whale.so
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/postgres_fdw.so

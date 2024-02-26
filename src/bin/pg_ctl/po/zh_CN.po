@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pg_ctl (PostgreSQL 9.0)\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2013-01-29 13:46+0000\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
 "PO-Revision-Date: 2012-10-19 15:51+0800\n"
 "Last-Translator: Xiong He <iihero@qq.com>\n"
 "Language-Team: Chinese (Simplified)\n"
@@ -16,561 +16,2212 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: Poedit 1.5.4\n"
 
-#: ../../port/exec.c:125 ../../port/exec.c:239 ../../port/exec.c:282
+# startup.c:502
+#: ../../common/port/exec.cpp:64
+#, c-format
+msgid "wrong environment variable \"%s\""
+msgstr "错误的环境变量\"%s\""
+
+#: ../../common/port/exec.cpp:70
+#, c-format
+msgid "Error: environment variable \"%s\" contain invaild symbol\n"
+msgstr "错误:环境变量\"%s\"包含无效符号\n"
+
+#: ../../common/port/exec.cpp:153 ../../common/port/exec.cpp:273
+#: pg_ctl.cpp:4481 pg_ctl.cpp:4643 pg_ctl.cpp:4910 pg_ctl.cpp:5218
 #, c-format
 msgid "could not identify current directory: %s"
 msgstr "无法确认当前目录: %s"
 
 # command.c:122
-#: ../../port/exec.c:144
+#: ../../common/port/exec.cpp:172
 #, c-format
 msgid "invalid binary \"%s\""
 msgstr "无效的二进制码 \"%s\""
 
 # command.c:1103
-#: ../../port/exec.c:193
+#: ../../common/port/exec.cpp:225
 #, c-format
 msgid "could not read binary \"%s\""
 msgstr "无法读取二进制码 \"%s\""
 
-#: ../../port/exec.c:200
+#: ../../common/port/exec.cpp:233
 #, c-format
 msgid "could not find a \"%s\" to execute"
 msgstr "未能找到一个 \"%s\" 来执行"
 
-#: ../../port/exec.c:255 ../../port/exec.c:291
-#, c-format
-msgid "could not change directory to \"%s\""
-msgstr "无法进入目录 \"%s\""
-
-#: ../../port/exec.c:270
+#: ../../common/port/exec.cpp:289
 #, c-format
 msgid "could not read symbolic link \"%s\""
 msgstr "无法读取符号链结 \"%s\""
 
-#: ../../port/exec.c:526
+#: ../../common/port/exec.cpp:530
 #, c-format
 msgid "child process exited with exit code %d"
 msgstr "子进程已退出, 退出码为 %d"
 
-#: ../../port/exec.c:530
+#: ../../common/port/exec.cpp:533
 #, c-format
 msgid "child process was terminated by exception 0x%X"
 msgstr "子进程被例外(exception) 0x%X 终止"
 
-#: ../../port/exec.c:539
+#: ../../common/port/exec.cpp:546
 #, c-format
 msgid "child process was terminated by signal %s"
 msgstr "子进程被信号 %s 终止"
 
-#: ../../port/exec.c:542
+#: ../../common/port/exec.cpp:549
 #, c-format
 msgid "child process was terminated by signal %d"
 msgstr "子进程被信号 %d 终止"
 
-#: ../../port/exec.c:546
+#: ../../common/port/exec.cpp:553
 #, c-format
 msgid "child process exited with unrecognized status %d"
 msgstr "子进程已退出, 未知状态 %d"
 
-#: pg_ctl.c:243 pg_ctl.c:258 pg_ctl.c:2137
+# command.c:1148
+#: ../../common/port/exec.cpp:644 ../../common/port/exec.cpp:680
+#: ../../common/port/exec.cpp:753
 #, c-format
-msgid "%s: out of memory\n"
-msgstr "%s: 内存溢出\n"
+msgid "could not allocate %lu bytes of memory"
+msgstr "无法分配%lu内存字节数"
 
-#: pg_ctl.c:292
+#: ../../common/port/exec.cpp:649 ../../common/port/exec.cpp:766
 #, c-format
-msgid "%s: could not open PID file \"%s\": %s\n"
-msgstr "%s: 无法打开 PID 文件 \"%s\": %s\n"
+msgid "could not get token information: error code %lu"
+msgstr "无法获取token信息:错误码%lu"
 
-#: pg_ctl.c:299
+#: ../../common/port/exec.cpp:653 ../../common/port/exec.cpp:757
 #, c-format
-msgid "%s: invalid data in PID file \"%s\"\n"
-msgstr "%s: PID文件 \"%s\" 中存在无效数据\n"
+msgid "could not get token information buffer size: error code %lu"
+msgstr "无法获取token信息缓冲区大小:错误码%lu"
 
-#: pg_ctl.c:510
+#: ../../common/port/exec.cpp:661
 #, c-format
+msgid "could not get ACL information: error code %lu"
+msgstr "无法获取ACL信息:错误码%lu"
+
+#: ../../common/port/exec.cpp:670
+#, c-format
+msgid "could not get user token: error code %lu"
+msgstr "无法获得用户token:错误码%lu"
+
+#: ../../common/port/exec.cpp:685
+#, c-format
+msgid "could not initialize ACL: error code %lu"
+msgstr "无法初始化ACL:错误码%lu"
+
+#: ../../common/port/exec.cpp:692
+#, c-format
+msgid "could not get ACE: error code %lu"
+msgstr "无法获取ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:697
+#, c-format
+msgid "could not add ACE: error code %lu"
+msgstr "无法添加ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:704
+#, c-format
+msgid "could not add access allowed ACE: error code %lu"
+msgstr "不能添加访问允许ACE:错误码%lu"
+
+#: ../../common/port/exec.cpp:712
+#, c-format
+msgid "could not set token information: error code %lu"
+msgstr "无法设置token信息:错误码%lu"
+
+#: backup.cpp:171
+msgid " Out of memory occured during creating tablespace list"
+msgstr "创建表空间列表时内存溢出"
+
+#: backup.cpp:225 pg_ctl.cpp:4794
+#, c-format
+msgid " could not identify maxlsn: %s"
+msgstr "无法识别maxlsn:%s"
+
+#: backup.cpp:232
+#, c-format
+msgid " could not identify maxlsn, got %d rows and %d fields\n"
+msgstr "无法识别maxlsn, 得到了吗%d行和%d字段\n"
+
+#: backup.cpp:241
+msgid " get remote lsn failed\n"
+msgstr "获取远程LSN失败\n"
+
+#: backup.cpp:247
+msgid " get remote lsn style failed\n"
+msgstr "获取远程LSN样式失败\n"
+
+#: backup.cpp:260
+msgid " get remote node name failed.\n"
+msgstr "获取远程节点名称失败.\n"
+
+#: backup.cpp:269 pg_ctl.cpp:4808
+#, c-format
+msgid " get remote node name failed from %s.\n"
+msgstr "获取远程节点名失败%s.\n"
+
+#: backup.cpp:284
+#, c-format
+msgid " get remote lsn failed from %s.\n"
+msgstr "获取远程LSN失败%s.\n"
+
+#: backup.cpp:314
+#, c-format
+msgid " failed to rename %s to %s.\n"
+msgstr "将%s重命名为%s失败了.\n"
+
+#: backup.cpp:397
+#, c-format
+msgid " could not read from ready pipe: %s\n"
+msgstr "无法从就绪管道读取:%s\n"
+
+#: backup.cpp:402
+#, c-format
+msgid " could not parse xlog end position \"%s\"\n"
+msgstr "无法解析xlog结束位置\"%s\"\n"
+
+#: backup.cpp:515 backup.cpp:530
+#, c-format
+msgid " invalid format of xlog location: %s.\n"
+msgstr "xlog位置格式无效:%s.\n"
+
+#: backup.cpp:568
+#, c-format
+msgid " could not create background process: %s.\n"
+msgstr "无法创建后台进程:%s.\n"
+
+#: backup.cpp:581
+#, c-format
+msgid " could not create background thread: %s.\n"
+msgstr "无法创建后台线程:%s.\n"
+
+#: backup.cpp:612 backup.cpp:639 backup.cpp:913
+#, c-format
+msgid "could not create directory \"%s\": %s\n"
+msgstr "无法创建目录 \"%s\": %s\n"
+
+#: backup.cpp:628
+msgid "in gs_rewind proecess,so no need remove.\n"
+msgstr "在gs_rewind过程中, 所以不需要删除.\n"
+
+#: backup.cpp:631
+#, c-format
+msgid "directory \"%s\" exists but is not empty,so remove and recreate it\n"
+msgstr "目录\"%s\"存在但不是空的, 因此删除并重新创建它\n"
+
+#: backup.cpp:634 backup.cpp:1890 pg_build.cpp:1386 pg_build.cpp:1616
+#: pg_build.cpp:1631
+#, c-format
+msgid "failed to remove dir %s.\n"
+msgstr "删除目录失败%s.\n"
+
+#: backup.cpp:648
+#, c-format
+msgid "could not access directory \"%s\": %s\n"
+msgstr "无法访问目录\"%s\":%s\n"
+
+#
+#: backup.cpp:721
+msgid "receiving and unpacking files...\n"
+msgstr "接收和解压文件…\n"
+
+#: backup.cpp:738
+msgid "PQgetvalue get value failed\n"
+msgstr "获取值失败\n"
+
+#: backup.cpp:790
+#, c-format
+msgid "could not get COPY data stream: %s"
+msgstr "无法获取COPY数据流:%s"
+
+#
+#: backup.cpp:807
+msgid "build walreceiver process terminated abnormally\n"
+msgstr "构建walreceiver进程异常终止\n"
+
+#: backup.cpp:830
+#, c-format
+msgid "could not read COPY data: %s\n"
+msgstr "无法读取COPY数据:%s\n"
+
+#: backup.cpp:844
+#, c-format
+msgid "invalid tar block header size: %d\n"
+msgstr "无效的tar block header大小:%d\n"
+
+#
+#: backup.cpp:853
+msgid "could not parse file size\n"
+msgstr "无法解析文件大小\n"
+
+#
+#: backup.cpp:861
+msgid "could not parse file mode\n"
+msgstr "无法解析文件模式\n"
+
+#: backup.cpp:871
+msgid "current_len_left is invalid\n"
+msgstr "Current_len_left无效\n"
+
+#: backup.cpp:923
+#, c-format
+msgid "could not set permissions on directory \"%s\": %s\n"
+msgstr "无法在目录上设置权限\"%s\":%s\n"
+
+#: backup.cpp:939 backup.cpp:962
+#, c-format
+msgid "could not create symbolic link from \"%s\" to \"%s\": %s\n"
+msgstr "无法为\"%s\"创建符号链接\"%s\":%s\n"
+
+#: backup.cpp:970
+#, c-format
+msgid "unrecognized link indicator \"%c\"\n"
+msgstr "未识别链接指示器\"%c\"\n"
+
+#: backup.cpp:988
+#, c-format
+msgid "could not create file \"%s\": %s\n"
+msgstr "无法创建文件\"%s\":%s\n"
+
+#: backup.cpp:996
+#, c-format
+msgid "could not set permissions on file \"%s\": %s\n"
+msgstr "无法在文件上设置权限\"%s\":%s\n"
+
+#: backup.cpp:1026
+msgid "file size %d. \n"
+msgstr "文件大小%d. \n"
+
+#: backup.cpp:1032 backup.cpp:1040
+#, c-format
+msgid "could not write to file \"%s\": %s\n"
+msgstr "无法写入文件 \"%s\": %s\n"
+
+#
+#: backup.cpp:1076
+msgid "COPY stream ended before last file was finished\n"
+msgstr "拷贝流在最后一个文件完成之前结束\n"
+
+# fe-misc.c:389 fe-misc.c:423 fe-misc.c:838
+#: backup.cpp:1103
+#, c-format
+msgid " realpath %s failed : %s\n"
+msgstr "realpath%s失败:%s\n"
+
+#: backup.cpp:1108
+#, c-format
+msgid " could not create file %s : %s\n"
+msgstr "无法创建文件%s: %s\n"
+
+#
+#: backup.cpp:1129
+msgid "could not read anything from file pg_control. \n"
+msgstr "无法从文件pg_control中读取任何内容.\n"
+
+#: backup.cpp:1205 backup.cpp:1868 backup.cpp:2157
+#, c-format
+msgid "could not stat directory or file: %s\n"
+msgstr "无法统计目录或文件:%s\n"
+
+#: backup.cpp:1210 backup.cpp:1874 backup.cpp:2162 pg_ctl.cpp:472
+#: pg_ctl.cpp:1953
+msgid "the file being chmod is a symbol link\n"
+msgstr "chmod文件是一个符号链接\n"
+
+#: backup.cpp:1253 backup.cpp:2196
+#, c-format
+msgid "could not create file %s.\n"
+msgstr "无法创建文件%s.\n"
+
+#: backup.cpp:1263
+#, c-format
+msgid "could not create file again %s.\n"
+msgstr "无法再次创建文件%s.\n"
+
+#: backup.cpp:1280 backup.cpp:1303
+#, c-format
+msgid "could not identify system: %s\n"
+msgstr "无法识别系统:%s\n"
+
+#: backup.cpp:1281
+msgid "IDENTIFY_SYSTEM failed for the first time. Retry once again.\n"
+msgstr "IDENTIFY_SYSTEM第一次失败.重试一次.\n"
+
+#: backup.cpp:1310 pg_ctl.cpp:4871 pg_ctl.cpp:4984
+#, c-format
+msgid "could not identify system, got %d rows and %d fields\n"
+msgstr "无法识别系统, 得到了%d行和%d字段\n"
+
+# fe-connect.c:1322
+#: backup.cpp:1363
+#, c-format
+msgid "could not send base backup command: %s\n"
+msgstr "无法发送基本备份命令:%s\n"
+
+# command.c:240
+#: backup.cpp:1375
+#, c-format
+msgid "could not get xlog location: %s\n"
+msgstr "无法获取xlog位置:%s\n"
+
+#
+#: backup.cpp:1383
+msgid "no xlog location returned from server\n"
+msgstr "没有从服务器返回xlog位置\n"
+
+#: backup.cpp:1393
+msgid "get xlog location failed\n"
+msgstr "获取xlog位置失败\n"
+
+#: backup.cpp:1415
+#, c-format
+msgid "could not initiate base backup: %s\n"
+msgstr "无法启动基本备份:%s\n"
+
+#
+#: backup.cpp:1423
+msgid "no start point returned from server\n"
+msgstr "没有从服务器返回的起点\n"
+
+#: backup.cpp:1432
+msgid "get xlog start point failed\n"
+msgstr "获取xlog起始点失败\n"
+
+#: backup.cpp:1458 backup.cpp:1922
+#, c-format
+msgid "could not get backup header. Please check server's information. Error message: %s\n"
+msgstr "无法获得备份报头.请检查服务器信息.错误信息:%s\n"
+
+#
+#: backup.cpp:1467 backup.cpp:1929
+msgid "no data returned from server\n"
+msgstr "没有从服务器返回数据\n"
+
+# Here, we need to understand what's the content "database has"? 
+# Is it the stdout fd? or anything else? Please correct me here.
+#: backup.cpp:1539
+#, c-format
+msgid "can only write single tablespace to stdout, database has %d\n"
+msgstr "只能写单个表空间到标准输出, 数据库有%d\n"
+
+#: backup.cpp:1581
+#, c-format
+msgid "could not get WAL end position from server: %s\n"
+msgstr "无法从服务器获取WAL端位置:%s\n"
+
+#
+#: backup.cpp:1587
+msgid "no WAL end position returned from server\n"
+msgstr "没有WAL结束位置从服务器返回\n"
+
+#: backup.cpp:1594
+msgid "get xlog end point failed\n"
+msgstr "获取xlog端点失败\n"
+
+#: backup.cpp:1612
+msgid "Received nfields from PQ is less than 2\n"
+msgstr "从PQ接收的nfields小于2\n"
+
+#: backup.cpp:1621
+msgid "Unexpected paxos index specified!\n"
+msgstr "指定了意外的paxos索引!\n"
+
+#: backup.cpp:1628
+msgid "Failed to write paxos index to a file!\n"
+msgstr "将paxos索引写入文件失败!\n"
+
+#: backup.cpp:1634
+#, c-format
+msgid "Enable DCF and paxos index written in paxosindex file is %llu\n"
+msgstr "启用DCF和paxos索引写入paxosindex文件是%llu\n"
+
+#: backup.cpp:1641
+#, c-format
+msgid "final receive failed: %s\n"
+msgstr "最终接收失败: %s\n"
+
+#: backup.cpp:1660
+#, c-format
+msgid "unexpected result received after final result, status: %u\n"
+msgstr "最终结果后收到意外结果, 状态: %u\n"
+
+#
+#: backup.cpp:1690 backup.cpp:2267
+msgid "waiting for background process to finish streaming...\n"
+msgstr "等待后台进程完成流…\n"
+
+#: backup.cpp:1695 backup.cpp:2271
+#, c-format
+msgid "could not send command to background pipe: %s\n"
+msgstr "无法将命令发送到后台管道:%s\n"
+
+#: backup.cpp:1703 backup.cpp:2279
+#, c-format
+msgid "could not wait for child process: %s\n"
+msgstr "无法等待子进程:%s\n"
+
+#: backup.cpp:1708 backup.cpp:2284
+#, c-format
+msgid "child %d died, expected %d\n"
+msgstr "子进程 %d 已终止, 预计%d\n"
+
+#
+#: backup.cpp:1713 backup.cpp:2289
+msgid "child process did not exit normally\n"
+msgstr "子进程未正常退出\n"
+
+#: backup.cpp:1718 backup.cpp:2294
+#, c-format
+msgid "child process exited with error %d\n"
+msgstr "子进程退出出错%d\n"
+
+#: backup.cpp:1731
+#, c-format
+msgid "could not parse xlog end position \"%s\"\n"
+msgstr "无法解析xlog结束位置\"%s\"\n"
+
+#: backup.cpp:1740
+#, c-format
+msgid "could not wait for child thread: %s\n"
+msgstr "不能等待子线程:%s\n"
+
+#: backup.cpp:1746
+#, c-format
+msgid "could not get child thread exit status: %s\n"
+msgstr "无法获取子线程退出状态:%s\n"
+
+#: backup.cpp:1751
+#, c-format
+msgid "child thread exited with error %u\n"
+msgstr "子线程退出出错%u\n"
+
+#: backup.cpp:1879
+msgid "start copy remote files.\n"
+msgstr "开始拷贝远程文件.\n"
+
+#: backup.cpp:1884
+#, c-format
+msgid "could not stat gs_secure_files: %s\n"
+msgstr "无法统计gs_secure_files:%s\n"
+
+#: backup.cpp:1887
+msgid "old gs_secure_files dir not exist.\n"
+msgstr "旧的gs_secure_files目录不存在.\n"
+
+#: backup.cpp:1893
+msgid "old gs_secure_files dir has been deleted.\n"
+msgstr "旧的gs_secure_files目录已被删除.\n"
+
+#: backup.cpp:1897 backup.cpp:2394
+#, c-format
+msgid "failed to make dir %s.\n"
+msgstr "创建dir失败%s.\n"
+
+#
+#: backup.cpp:1900
+msgid "new gs_secure_files dir has been made.\n"
+msgstr "已创建新的gs_secure_files目录.\n"
+
+#
+#: backup.cpp:1905 pg_ctl.cpp:4846 pg_ctl.cpp:4959
+msgid "could not connect to server.\n"
+msgstr "无法连接到服务器.\n"
+
+#
+#: backup.cpp:1909
+msgid "remote server connected.\n"
+msgstr "已连接远程服务器.\n"
+
+# fe-connect.c:1322
+#: backup.cpp:1916
+#, c-format
+msgid "could not send backup command: %s\n"
+msgstr "无法发送备份命令: %s\n"
+
+#
+#: backup.cpp:1934
+msgid "begin receive tar files\n"
+msgstr "开始接收tar文件\n"
+
+#: backup.cpp:1947
+#, c-format
+msgid "could not open directory after copy : %s!\n"
+msgstr "复制后无法打开目录: %s!\n"
+
+#: backup.cpp:1964
+#, c-format
+msgid "the directory %s after copy is null.\n"
+msgstr "目录%s拷贝后为空.\n"
+
+#: backup.cpp:1970
+msgid "copy remote secure files completed\n"
+msgstr "复制远程安全文件完成\n"
+
+#: backup.cpp:2021
+msgid " full backup label buffer too small\n"
+msgstr "全备份标签缓冲区太小\n"
+
+# fe-misc.c:389 fe-misc.c:423 fe-misc.c:838
+#: backup.cpp:2061 backup.cpp:2115
+#, c-format
+msgid "realpath failed : %s!\n"
+msgstr "Realpath失败: %s!\n"
+
+#: backup.cpp:2072 backup.cpp:2120 pg_ctl.cpp:1355
+#, c-format
+msgid " could not read file \"%s\"\n"
+msgstr "无法读取文件 \"%s\"\n"
+
+#: backup.cpp:2086
+#, c-format
+msgid " invalid wal data in file \"%s\"\n"
+msgstr "文件中的wal数据无效 \"%s\"\n"
+
+#: backup.cpp:2094 backup.cpp:2141
+#, c-format
+msgid " close file hanler failed\"%s\"\n"
+msgstr "关闭文件处理程序失败\"%s\"\n"
+
+#: backup.cpp:2125
+#, c-format
+msgid " invalid sysidentifier data in file \"%s\"\n"
+msgstr "文件中的sy标识符数据无效 \"%s\"\n"
+
+#: backup.cpp:2133
+#, c-format
+msgid " invalid timeline data in file \"%s\"\n"
+msgstr "文件中的时间轴数据无效 \"%s\"\n"
+
+#: backup.cpp:2166
+#, c-format
+msgid "could not set permissions on data directory \"%s\": %s\n"
+msgstr "无法对数据目录设置权限 \"%s\": %s\n"
+
+#: backup.cpp:2192
+msgid "increment build started.\n"
+msgstr "开始增量构建.\n"
+
+#
+#: backup.cpp:2213
+msgid "get xlog postion failed.\n"
+msgstr "获取xlog位置失败.\n"
+
+#: backup.cpp:2229
+#, c-format
+msgid "could not connect to server(%s).\n"
+msgstr "无法连接到服务器(%s).\n"
+
+# common.c:298
+#
+#: backup.cpp:2233
+msgid "connect to server, incremental build started.\n"
+msgstr "连接到服务器, 增量构建启动.\n"
+
+#
+#: backup.cpp:2241 backup.cpp:2796
+msgid "starting background WAL receiver\n"
+msgstr "启动背景WAL接收机\n"
+
+#: backup.cpp:2245 backup.cpp:2801
+msgid "start log streamer failed \n"
+msgstr "启动日志拖流失败\n"
+
+#: backup.cpp:2334
+#, c-format
+msgid " exists illegal characters %s, %s ,%s\n"
+msgstr "存在非法字符%s, %s, %s\n"
+
+#: backup.cpp:2352 backup.cpp:2358
+#, c-format
+msgid " exceed max characters %s, %s ,%s\n"
+msgstr "超过最大字符数%s, %s, %s\n"
+
+#: backup.cpp:2370 pg_ctl.cpp:1719 pg_ctl.cpp:5629
+#, c-format
+msgid "%s\n"
+msgstr "%s\n"
+
+#: backup.cpp:2413 backup.cpp:2482
+#, c-format
+msgid "could not create file %s: %s\n"
+msgstr "无法创建文件%s: %s\n"
+
+#: backup.cpp:2419 backup.cpp:2488
+msgid "out of memory"
+msgstr "内存溢出"
+
+#: backup.cpp:2429 backup.cpp:2498
+#, c-format
+msgid "could not write data to file %s: %s\n"
+msgstr "无法将数据写入文件%s: %s\n"
+
+#: backup.cpp:2459 backup.cpp:2473
+#, c-format
+msgid "could not get canonical path for file %s: %s\n"
+msgstr "无法获取文件的规范路径%s: %s\n"
+
+#
+#: backup.cpp:2544 pg_build.cpp:1375 pg_build.cpp:1523 pg_build.cpp:1607
+msgid "could not read symbolic link.\n"
+msgstr "无法读取符号链接.\n"
+
+#
+#: backup.cpp:2547 pg_build.cpp:1379 pg_build.cpp:1527 pg_build.cpp:1610
+msgid "symbolic link target is too long.\n"
+msgstr "符号链接目标过长.\n"
+
+#
+#: backup.cpp:2551 pg_build.cpp:1399 pg_build.cpp:1566 pg_build.cpp:1625
+msgid "symbolic links are not supported on this platform.\n"
+msgstr "此平台不支持符号链接.\n"
+
+#: backup.cpp:2586
+#, c-format
+msgid "Canonicalize paxos index file %s failed!"
+msgstr "规范化paxos索引文件%s失败了!"
+
+#: backup.cpp:2591
+#, c-format
+msgid "Open paxos index file %s failed: %s\n"
+msgstr "打开paxos索引文件%s失败: %s\n"
+
+#: backup.cpp:2596
+#, c-format
+msgid "Write paxos index file %s failed: %s\n"
+msgstr "修改paxos索引文件%s失败: %s\n"
+
+#: backup.cpp:2601
+#, c-format
+msgid "could not fsync dcf paxos index file: %s\n"
+msgstr "无法同步DCF paxos索引文件: %s\n"
+
+#: backup.cpp:2606
+#, c-format
+msgid "could not close dcf paxos index file: %s\n"
+msgstr "无法关闭DCF paxos索引文件: %s\n"
+
+#: backup.cpp:2630
+#, c-format
+msgid "could not open directory : %s!\n"
+msgstr "无法打开目录: %s!\n"
+
+#: backup.cpp:2642
+#, c-format
+msgid "could not lstat file or directory : %s!\n"
+msgstr "无法lstat文件或目录: %s!\n"
+
+#: backup.cpp:2697
+#, c-format
+msgid "could not lstat file: %s!\n"
+msgstr "无法lstat文件: %s!\n"
+
+#: backup.cpp:2704
+#, c-format
+msgid "the file %s should be unlink without origin file\n"
+msgstr "该文件%s应在没有原始文件的情况下取消链接\n"
+
+#: backup.cpp:2718
+#, c-format
+msgid "the file %s before file does not exist\n"
+msgstr "该文件%s之前的文件不存在\n"
+
+#: backup.cpp:2752
+#, c-format
+msgid "open tablespace dir %s failed when rename tablespace dir.\n"
+msgstr "打开表空间目录%s重命名表空间目录时失败.\n"
+
+#: backup.cpp:2770
+#, c-format
+msgid "failed to stat \"%s\".\n"
+msgstr "统计失败\"%s\".\n"
+
+#: backup.cpp:2776
+#, c-format
+msgid "failed to rename tablespace dir: %s\n"
+msgstr "重命名表空间目录失败: %s\n"
+
+#: backup.cpp:2782
+msgid "rename table space dir success.\n"
+msgstr "重命名表空间目录成功.\n"
+
+#
+#: backup.cpp:2806 pg_ctl.cpp:4522
+msgid "build failed \n"
+msgstr "构建失败\n"
+
+#: pg_build.cpp:91
+msgid "Max repl_uuid string length is 63.\n"
+msgstr "最大repl_uuid字符串长度为63.\n"
+
+#: pg_build.cpp:97
+msgid "repl_uuid only accepts alphabetic or digital character, case insensitive.\n"
+msgstr "Repl_uuid只接受字母或数字字符, 不区分大小写.\n"
+
+# describe.c:1375
+#
+#: pg_build.cpp:607
+msgid "filename is NULL"
+msgstr "文件名为空"
+
+#: pg_build.cpp:702
+msgid "replication_type invalid.\n"
+msgstr "replication_type无效.\n"
+
+#: pg_build.cpp:762 pg_build.cpp:1685 pg_ctl.cpp:1596 pg_ctl.cpp:1637
+#: pg_ctl.cpp:4772
+#, c-format
+msgid "%s cannot be opened.\n"
+msgstr "无法打开 %s.\n"
+
+#: pg_build.cpp:877
+msgid "build connection failed cause get connection is null.\n"
+msgstr "建立连接失败, 原因是获取连接为空.\n"
+
+#: pg_build.cpp:881
+#, c-format
+msgid "build connection to %s failed cause %s.\n"
+msgstr "建立联系%s失败的原因%s.\n"
+
+#: pg_build.cpp:1188
+#, c-format
+msgid "DCF path is %s\n"
+msgstr "DCF路径为%s\n"
+
+#: pg_build.cpp:1211
+#, c-format
+msgid "Final DCF path is %s\n"
+msgstr "最终DCF路径为%s\n"
+
+#: pg_build.cpp:1309 pg_build.cpp:1344
+#, c-format
+msgid "could not stat file or directory %s.\n"
+msgstr "不能统计文件或目录%s.\n"
+
+#: pg_build.cpp:1312
+#, c-format
+msgid "failed to remove dcf data dir %s.\n"
+msgstr "删除dcf数据目录失败%s.\n"
+
+#: pg_build.cpp:1315
+#, c-format
+msgid "Remove dcf data dir %s.\n"
+msgstr "删除dcf数据目录%s.\n"
+
+#: pg_build.cpp:1358
+#, c-format
+msgid "Skip dcf log path %s.\n"
+msgstr "跳过dcf日志路径%s.\n"
+
+#: pg_build.cpp:1426
+#, c-format
+msgid "failed to remove dir %s,errno=%d.\n"
+msgstr "删除目录%s失败, errno=%d.\n"
+
+#: pg_build.cpp:1435
+#, c-format
+msgid "failed to remove dir %s, errno=%d.\n"
+msgstr "删除目录%s失败, errno=%d.\n"
+
+#: pg_build.cpp:1470
+#, c-format
+msgid "failed to remove file %s.\n"
+msgstr "删除文件%s失败.\n"
+
+# fe-connect.c:2744
+#
+#: pg_build.cpp:1499
+msgid "input parameter is NULL.\n"
+msgstr "输入参数为NULL.\n"
+
+#: pg_build.cpp:1545
+#, c-format
+msgid "failed to remove %s.\n"
+msgstr "删除%s失败.\n"
+
+#: pg_build.cpp:1556
+#, c-format
+msgid "could not remove symbolic link file \"%s\": %s\n"
+msgstr "无法删除符号链接文件\"%s\": %s\n"
+
+#: pg_build.cpp:1652
+msgid "the parameter filename is NULL in function get_replconn_number()"
+msgstr "函数get_replconn_number()中的参数filename为NULL"
+
+#: pg_build.cpp:1814 pg_build.cpp:1885
+#, c-format
+msgid "could not stat file \"%s\": %s\n"
+msgstr "无法统计文件\"%s\": %s\n"
+
+#: pg_build.cpp:1862
+#, c-format
+msgid "could not open directory \"%s\": %s\n"
+msgstr "无法打开目录 \"%s\": %s\n"
+
+#: pg_build.cpp:1896
+#, c-format
+msgid "could not read directory \"%s\": %s\n"
+msgstr "无法读取目录 \"%s\": %s\n"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_build.cpp:1943
+#, c-format
+msgid "could not open file \"%s\": %s\n"
+msgstr "无法打开文件 \"%s\": %s\n"
+
+#: pg_build.cpp:1954
+#, c-format
+msgid "could not fsync file \"%s\": %s\n"
+msgstr "无法fsync文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:430 pg_ctl.cpp:457
+#, c-format
+msgid " could not open PID file \"%s\": %s\n"
+msgstr "无法打开PID文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:435 pg_ctl.cpp:462
+#, c-format
+msgid " invalid data in PID file \"%s\"\n"
+msgstr " PID文件中的数据无效\"%s\"\n"
+
+# input.c:210
+#: pg_ctl.cpp:467 pg_ctl.cpp:1948
+#, c-format
+msgid "could not stat directory or file pid_file %s: %s\n"
+msgstr "无法统计目录或文件pid_file %s: %s\n"
+
+#: pg_ctl.cpp:476 pg_ctl.cpp:1906 pg_ctl.cpp:1957
+#, c-format
+msgid "could not set permissions of file \"%s\": %s\n"
+msgstr "无法设置文件权限\"%s\": %s\n"
+
+#: pg_ctl.cpp:479
+#, c-format
+msgid "Delete %s failed ,please try to delete it manually again.\n"
+msgstr "删除%s失败, 请重新手动删除.\n"
+
+#: pg_ctl.cpp:518
+msgid "-w option is not supported when starting a pre-9.1 server\n"
+msgstr "在启动9.1版本之前的服务器时, 不支持-w选项\n"
+
+#: pg_ctl.cpp:574
 msgid ""
 "\n"
-"%s: -w option is not supported when starting a pre-9.1 server\n"
+"-w option cannot use a relative socket directory specification\n"
 msgstr ""
 "\n"
-"%s: -w 选项不能用于9.1以前版本的服务器启动\n"
+"-w 选项不能用于相对套接字目录规范\n"
 
-#: pg_ctl.c:580
+# command.c:915
+# command.c:939
+# startup.c:187
+# startup.c:205
+#: pg_ctl.cpp:649
 #, c-format
-msgid ""
-"\n"
-"%s: -w option cannot use a relative socket directory specification\n"
-msgstr ""
-"\n"
-"%s: -w 选项不能用于相对套接字目录\n"
+msgid "Password for user %s: "
+msgstr "用户密码%s: "
 
-#: pg_ctl.c:628
+#
+#: pg_ctl.cpp:722 pg_ctl.cpp:4452
+msgid "could not connect to the local server: connection failed!\n"
+msgstr "无法连接到本地服务器:连接失败!\n"
+
+#: pg_ctl.cpp:727
+msgid "Getting state from gaussdb.state!\n"
+msgstr "从gaussdb.state获取状态!\n"
+
+#: pg_ctl.cpp:736
 #, c-format
-msgid ""
-"\n"
-"%s: this data directory appears to be running a pre-existing postmaster\n"
-msgstr ""
-"\n"
-"%s: 数据目录里可能正在运行着一个已经存在的postmaster进程\n"
+msgid "could not get local role from the local server: %s"
+msgstr "无法从本地服务器获取本地角色: %s"
 
-#: pg_ctl.c:678
+#: pg_ctl.cpp:747
 #, c-format
-msgid "%s: cannot set core file size limit; disallowed by hard limit\n"
-msgstr "%s: 不能设置核心文件大小的限制;磁盘限额不允许\n"
+msgid "invalid response from primary server: Expected 1 tuple with 1 fields, got %d tuples with %d fields."
+msgstr "来自主服务器的无效响应:期望得到1个包含1个字段的元组%d元组与%d字段."
 
-#: pg_ctl.c:703
+#: pg_ctl.cpp:841 pg_ctl.cpp:1029 pg_ctl.cpp:1067
 #, c-format
-msgid "%s: could not read file \"%s\"\n"
-msgstr "%s: 无法读取文件 \"%s\"\n"
+msgid " could not start server: %s\n"
+msgstr "无法启动服务器: %s\n"
 
-#: pg_ctl.c:708
+#: pg_ctl.cpp:858
 #, c-format
-msgid "%s: option file \"%s\" must have exactly one line\n"
-msgstr "%s: 选项文件 \"%s\" 只能有一行\n"
+msgid "%s: could not start server due to setsid() failure: %s\n"
+msgstr "%s:由于setsid()失败, 无法启动服务器:%s\n"
 
-#: pg_ctl.c:756
+#: pg_ctl.cpp:872
+msgid "could not get correct path or the abs path is too long!\n"
+msgstr "不能得到正确的路径或腹肌路径太长!\n"
+
+#: pg_ctl.cpp:878
+#, c-format
+msgid "could not stat file %s: %s\n"
+msgstr "无法统计文件%s: %s\n"
+
+#: pg_ctl.cpp:885
+#, c-format
+msgid "file %s is not exist\n"
+msgstr "文件%s不存在\n"
+
+# fe-misc.c:389 fe-misc.c:423 fe-misc.c:838
+#: pg_ctl.cpp:887
+#, c-format
+msgid "open file %s failed: %s\n"
+msgstr "打开的文件%s失败: %s\n"
+
+#: pg_ctl.cpp:893 pg_ctl.cpp:896
+#, c-format
+msgid "invalid data in file %s"
+msgstr "文件中的数据无效%s"
+
+#
+#: pg_ctl.cpp:1137
+msgid " -w option is not supported when starting a pre-9.1 server\n"
+msgstr "在启动9.1版本之前的服务器时, 不支持-w选项\n"
+
+#
+#: pg_ctl.cpp:1212
+msgid " -w option cannot use a relative socket directory specification\n"
+msgstr "-w选项不能使用相对套接字目录规范\n"
+
+#: pg_ctl.cpp:1264
+#, c-format
+msgid "waitpid %lu failed, exitstatus is %d, ret is %d\n"
+msgstr "waitpid%lu失败, exitstatus为%d, ret为%d\n"
+
+#: pg_ctl.cpp:1269 pg_ctl.cpp:1804
+#, c-format
+msgid "could not stat file gaussdb_state_file %s: %s\n"
+msgstr "无法统计文件gaussdb_state_file%s: %s\n"
+
+#: pg_ctl.cpp:1288
+#, c-format
+msgid " gaussDB state is %s\n"
+msgstr " gaussDB 状态为 %s\n"
+
+#: pg_ctl.cpp:1320
+msgid "."
+msgstr "."
+
+#
+#: pg_ctl.cpp:1336
+msgid " cannot set core file size limit; disallowed by hard limit\n"
+msgstr "无法设置核心文件大小限制;被强制限制不允许\n"
+
+#: pg_ctl.cpp:1358
+#, c-format
+msgid " option file \"%s\" must have exactly one line\n"
+msgstr "选择文件\"%s\"必须只有一行\n"
+
+#: pg_ctl.cpp:1463
+#, c-format
+msgid "%s: could not send stop signal (PID: %ld): %s\n"
+msgstr "%s: 无法发送停止信号 (PID: %ld): %s\n"
+
+#: pg_ctl.cpp:1493
 #, c-format
 msgid ""
 "The program \"%s\" is needed by %s but was not found in the\n"
 "same directory as \"%s\".\n"
 "Check your installation.\n"
 msgstr ""
-"%2$s需要程序\"%1$s\", 但是在同一个目录\"%3$s\"中没找到.\n"
-"\n"
+"程序\"%s\" 被%s需要\n"
+"但是在同一个目录\"%s\"中没找到.\n"
 "请检查您的安装.\n"
 
-#: pg_ctl.c:762
+#: pg_ctl.cpp:1502
 #, c-format
 msgid ""
 "The program \"%s\" was found by \"%s\"\n"
 "but was not the same version as %s.\n"
 "Check your installation.\n"
 msgstr ""
-"\"%2$s\"找到程序 \"%1$s\", 但是和版本 \"%3$s\" 不一致.\n"
-"\n"
-"检查您的安装.\n"
+"程序 \"%s\" 被 \"%s\"找到\n"
+"但是和版本 \"%s\" 不一致.\n"
+"请检查您的安装.\n"
 
-#: pg_ctl.c:795
+#
+#: pg_ctl.cpp:1549
+msgid " database system initialization failed\n"
+msgstr " 数据库系统初始化失败\n"
+
+#: pg_ctl.cpp:1563
+msgid "the parameter filename is NULL in function get_data_directory()"
+msgstr "函数get_instance_port()中的参数filename为NULL"
+
+#: pg_ctl.cpp:1610
+msgid "the parameter filename is NULL in function get_instance_port()"
+msgstr "函数get_instance_port()中的参数filename为NULL"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_ctl.cpp:1661
 #, c-format
-msgid "%s: database system initialization failed\n"
-msgstr "%s: 数据库系统初始化失败\n"
+msgid "can not open file \"%s\"\n"
+msgstr "无法打开文件\"%s\"\n"
 
-#: pg_ctl.c:810
+#: pg_ctl.cpp:1666
 #, c-format
-msgid "%s: another server might be running; trying to start server anyway\n"
-msgstr "%s: 其他服务器进程可能正在运行; 尝试启动服务器进程\n"
+msgid "can not read file \"%s\"\n"
+msgstr "无法读取文件\"%s\"\n"
 
-#: pg_ctl.c:847
+#: pg_ctl.cpp:1689
 #, c-format
-msgid "%s: could not start server: exit code was %d\n"
-msgstr "%s: 无法启动服务器进程: 退出码为 %d\n"
+msgid "get value by sscanf_s return error:%d"
+msgstr "通过sscanf_s获取值返回错误:%d"
 
-#: pg_ctl.c:854
-msgid "waiting for server to start..."
-msgstr "等待服务器进程启动 ..."
+#: pg_ctl.cpp:1698
+#, c-format
+msgid ""
+"port:%d already in use. /proc/net/tcp:\n"
+"%s \n"
+"%s"
+msgstr ""
+"端口:%d已经被占用. /proc/net/tcp:\n"
+"%s \n"
+"%s"
 
-#: pg_ctl.c:859 pg_ctl.c:960 pg_ctl.c:1051
+#: pg_ctl.cpp:1713
+#, c-format
+msgid "run popen command failed. %s\n"
+msgstr "SQL 命令失败. %s\n"
+
+#: pg_ctl.cpp:1717
+#, c-format
+msgid "CheckPort: popen(command:%s).\n"
+msgstr "检查端口: popen(命令:%s).\n"
+
+#
+#: pg_ctl.cpp:1767
+msgid " another server might be running; Please use the restart command\n"
+msgstr "另一个服务器可能正在运行;请使用restart命令\n"
+
+#
+#: pg_ctl.cpp:1801
+msgid "port conflict when start server\n"
+msgstr "启动服务器时端口冲突\n"
+
+#
+#: pg_ctl.cpp:1821
+msgid "waiting for server to start...\n"
+msgstr "等待服务器启动…\n"
+
+#: pg_ctl.cpp:1824 pg_ctl.cpp:1829 pg_ctl.cpp:1834 pg_ctl.cpp:1845
+#: pg_ctl.cpp:2739 pg_ctl.cpp:2975 pg_ctl.cpp:3022
+msgid "\n"
+msgstr "\n"
+
+#: pg_ctl.cpp:1825 pg_ctl.cpp:1971 pg_ctl.cpp:2066 pg_ctl.cpp:2279
 msgid " done\n"
 msgstr " 完成\n"
 
-#: pg_ctl.c:860
-msgid "server started\n"
-msgstr "服务器进程已经启动\n"
+#: pg_ctl.cpp:1826
+#, c-format
+msgid "server started (%s)\n"
+msgstr "服务器启动(%s)\n"
 
-#: pg_ctl.c:863 pg_ctl.c:867
-msgid " stopped waiting\n"
-msgstr " 已停止等待\n"
+#
+#: pg_ctl.cpp:1830 pg_ctl.cpp:1835
+msgid "stopped waiting\n"
+msgstr "停止等待\n"
 
-#: pg_ctl.c:864
+#: pg_ctl.cpp:1831
 msgid "server is still starting up\n"
 msgstr "服务器仍在启动过程中\n"
 
-#: pg_ctl.c:868
-#, c-format
+#
+#: pg_ctl.cpp:1837
 msgid ""
-"%s: could not start server\n"
+"could not start server\n"
 "Examine the log output.\n"
 msgstr ""
-"%s: 无法启动服务器进程\n"
+"无法启动服务器进程\n"
 "检查日志输出.\n"
 
-#: pg_ctl.c:874 pg_ctl.c:952 pg_ctl.c:1042
-msgid " failed\n"
-msgstr " 失败\n"
+#
+#: pg_ctl.cpp:1846
+msgid "failed\n"
+msgstr "失败\n"
 
-#: pg_ctl.c:875
-#, c-format
-msgid "%s: could not wait for server because of misconfiguration\n"
-msgstr "%s: 因为配制错误，而无法等待服务器\n"
+#
+#: pg_ctl.cpp:1847
+msgid " could not wait for server because of misconfiguration\n"
+msgstr "不能等待服务器, 因为配置错误\n"
 
-#: pg_ctl.c:881
+#: pg_ctl.cpp:1855
 msgid "server starting\n"
 msgstr "正在启动服务器进程\n"
 
-#: pg_ctl.c:896 pg_ctl.c:982 pg_ctl.c:1072 pg_ctl.c:1112
+#: pg_ctl.cpp:1881
 #, c-format
-msgid "%s: PID file \"%s\" does not exist\n"
-msgstr "%s: PID 文件 \"%s\" 不存在\n"
+msgid " PID file \"%s\" does not exist.\n"
+msgstr "PID文件\"%s\"不存在.\n"
 
-#: pg_ctl.c:897 pg_ctl.c:984 pg_ctl.c:1073 pg_ctl.c:1113
+#: pg_ctl.cpp:1882 pg_ctl.cpp:1993 pg_ctl.cpp:2084 pg_ctl.cpp:2133
+#: pg_ctl.cpp:2302 pg_ctl.cpp:2540 pg_ctl.cpp:2547 pg_ctl.cpp:2619
+#: pg_ctl.cpp:2818 pg_ctl.cpp:5921
+#, c-format
 msgid "Is server running?\n"
 msgstr "服务器进程是否正在运行?\n"
 
-#: pg_ctl.c:903
+#: pg_ctl.cpp:1891
 #, c-format
-msgid "%s: cannot stop server; single-user server is running (PID: %ld)\n"
-msgstr "%s: 无法停止服务器进程; 正在运行 单用户模式服务器进程(PID: %ld)\n"
+msgid " cannot stop server; single-user server is running (PID: %ld)"
+msgstr "无法停止服务器; 单用户服务器运行(PID:%ld)"
 
-#: pg_ctl.c:911 pg_ctl.c:1006
+#: pg_ctl.cpp:1899
 #, c-format
-msgid "%s: could not send stop signal (PID: %ld): %s\n"
-msgstr "%s: 无法发送停止信号 (PID: %ld): %s\n"
+msgid " cannot stop server; single-user server is running (PID: %ld)  %s\n"
+msgstr "无法停止服务器; 单用户服务器运行(PID:%ld) %s\n"
 
-#: pg_ctl.c:918
+#: pg_ctl.cpp:1917
 msgid "server shutting down\n"
 msgstr "正在关闭服务器进程\n"
 
-#: pg_ctl.c:933 pg_ctl.c:1021
+#: pg_ctl.cpp:1927 pg_ctl.cpp:2035
 msgid ""
 "WARNING: online backup mode is active\n"
 "Shutdown will not complete until pg_stop_backup() is called.\n"
 "\n"
 msgstr ""
 "警告: 在线备份模式处于激活状态\n"
-"关闭命令将不会完成，直到调用了pg_stop_backup().\n"
+"关闭命令将不会完成, 直到调用了pg_stop_backup().\n"
+"\n"
 
-#: pg_ctl.c:937 pg_ctl.c:1025
+#: pg_ctl.cpp:1931 pg_ctl.cpp:2039
 msgid "waiting for server to shut down..."
 msgstr "等待服务器进程关闭 ..."
 
-#: pg_ctl.c:954 pg_ctl.c:1044
-#, c-format
-msgid "%s: server does not shut down\n"
-msgstr "%s: server进程没有关闭\n"
+#: pg_ctl.cpp:1961 pg_ctl.cpp:2049 pg_ctl.cpp:2275
+msgid " failed\n"
+msgstr " 失败\n"
 
-#: pg_ctl.c:956 pg_ctl.c:1046
+#: pg_ctl.cpp:1962
+#, c-format
+msgid " server does not shut down (%s)\n"
+msgstr "服务器未关闭(%s)\n"
+
+#: pg_ctl.cpp:1967 pg_ctl.cpp:2054
 msgid ""
 "HINT: The \"-m fast\" option immediately disconnects sessions rather than\n"
 "waiting for session-initiated disconnection.\n"
 msgstr ""
-"提示: \"-m fast\" 选项可以立即断开会话, 而不用\n"
-"等待会话发起的断连.\n"
+"提示: \"-m fast\" 选项可以立即断开会话\n"
+"而不用等待会话发起的断连.\n"
 
-#: pg_ctl.c:962 pg_ctl.c:1052
+#: pg_ctl.cpp:1973 pg_ctl.cpp:2067 pg_ctl.cpp:5364
 msgid "server stopped\n"
 msgstr "服务器进程已经关闭\n"
 
-#: pg_ctl.c:985 pg_ctl.c:1058
+#: pg_ctl.cpp:1994 pg_ctl.cpp:2070
 msgid "starting server anyway\n"
 msgstr "正在启动服务器进程\n"
 
-#: pg_ctl.c:994
+#: pg_ctl.cpp:2004
 #, c-format
-msgid "%s: cannot restart server; single-user server is running (PID: %ld)\n"
-msgstr "%s: 无法重启服务器进程; 单用户模式服务器进程正在运行 (PID: %ld)\n"
+msgid " cannot restart server; single-user server is running (PID: %ld)\n"
+msgstr "无法重新启动服务器;单用户服务器运行(PID:%ld)\n"
 
-#: pg_ctl.c:997 pg_ctl.c:1082
+#: pg_ctl.cpp:2007 pg_ctl.cpp:2092
 msgid "Please terminate the single-user server and try again.\n"
-msgstr "请终止单用户模式服务器进程，然后再重试.\n"
+msgstr "请终止单用户模式服务器进程, 然后再重试.\n"
 
-#: pg_ctl.c:1056
+#: pg_ctl.cpp:2019
 #, c-format
-msgid "%s: old server process (PID: %ld) seems to be gone\n"
-msgstr "%s: 原有的进程(PID: %ld)可能已经不存在了\n"
+msgid " could not send stop signal (PID: %ld): %s\n"
+msgstr "无法发送停止信号(PID: %ld): %s\n"
 
-#: pg_ctl.c:1079
+#
+#: pg_ctl.cpp:2051
+msgid " server does not shut down\n"
+msgstr "服务器没有关闭\n"
+
+#: pg_ctl.cpp:2065
+msgid "postmaster.pid is delete, while the prcoess is still alive\n"
+msgstr "当进程仍然存在时, postmaster.pid被删除\n"
+
+#: pg_ctl.cpp:2069
 #, c-format
-msgid "%s: cannot reload server; single-user server is running (PID: %ld)\n"
-msgstr ""
-"%s: 无法重新加载服务器进程；正在运行单用户模式的服务器进程 (PID: %ld)\n"
+msgid " old server process (PID: %ld) seems to be gone\n"
+msgstr "旧服务器进程(PID:%ld)似乎不见了\n"
 
-#: pg_ctl.c:1088
+#: pg_ctl.cpp:2083 pg_ctl.cpp:2182 pg_ctl.cpp:2301 pg_ctl.cpp:2539
+#: pg_ctl.cpp:2618 pg_ctl.cpp:5920
 #, c-format
-msgid "%s: could not send reload signal (PID: %ld): %s\n"
-msgstr "%s: 无法发送重载信号 (PID: %ld): %s\n"
+msgid " PID file \"%s\" does not exist\n"
+msgstr "PID文件\"%s\"不存在\n"
 
-#: pg_ctl.c:1093
+#: pg_ctl.cpp:2089
+#, c-format
+msgid " cannot reload server; single-user server is running (PID: %ld)\n"
+msgstr "无法重新加载服务器; 单用户服务器运行(PID: %ld)\n"
+
+#: pg_ctl.cpp:2097
+#, c-format
+msgid " could not send reload signal (PID: %ld): %s\n"
+msgstr "无法发送重载信号(PID: %ld): %s\n"
+
+#: pg_ctl.cpp:2101
 msgid "server signaled\n"
 msgstr "服务器进程发出信号\n"
 
-#: pg_ctl.c:1119
+#: pg_ctl.cpp:2115
+msgid "fail to open finish redo file\n"
+msgstr "无法打开finish redo文件\n"
+
+#: pg_ctl.cpp:2120
+msgid "fail to write finish redo file\n"
+msgstr "写finish redo文件失败\n"
+
+#: pg_ctl.cpp:2124
+msgid "fail to close finish redo file\n"
+msgstr "关闭finish redo文件失败\n"
+
+#: pg_ctl.cpp:2132
 #, c-format
-msgid "%s: cannot promote server; single-user server is running (PID: %ld)\n"
+msgid "PID file \"%s\" does not exist\n"
+msgstr "PID文件\"%s\"不存在\n"
+
+#: pg_ctl.cpp:2139
+#, c-format
+msgid "cannot finish redo server: single-user server is running (PID: %ld)\n"
+msgstr "无法finish redo服务器: 单用户服务器正在运行(PID: %ld)\n"
+
+#: pg_ctl.cpp:2146
+#, c-format
+msgid "could not send finish redo signal (PID: %ld): %s\n"
+msgstr "无法发送finish redo信号(PID: %ld): %s\n"
+
+#: pg_ctl.cpp:2148
+#, c-format
+msgid "could not remove finish redo file \"%s\": %s\n"
+msgstr "无法删除finish redo文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:2166
+#, c-format
+msgid "failover term (%u)\n"
+msgstr "故障转移期限(%u)\n"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#
+#: pg_ctl.cpp:2169
+msgid "could not open file successfully\n"
+msgstr "无法成功打开文件\n"
+
+#
+#: pg_ctl.cpp:2173
+msgid "could not write file successfully\n"
+msgstr "无法成功写入文件\n"
+
+# command.c:1436
+#
+#: pg_ctl.cpp:2176
+msgid "file is closed\n"
+msgstr "文件已关闭\n"
+
+#
+#: pg_ctl.cpp:2183
+msgid " Is server running?\n"
+msgstr "服务器正在运行吗?\n"
+
+#: pg_ctl.cpp:2188
+#, c-format
+msgid " cannot failover server;single-user server is running (PID: %ld)\n"
+msgstr "单用户服务器正在运行(PID:%ld)\n"
+
+#: pg_ctl.cpp:2196 pg_ctl.cpp:2280
+#, c-format
+msgid " failover completed (%s)\n"
+msgstr "failover完成(%s)\n"
+
+#: pg_ctl.cpp:2200
+msgid " cannot failover server:server mode is unknown\n"
+msgstr "无法failover服务器:服务器模式未知\n"
+
+#
+#: pg_ctl.cpp:2207
+msgid " cannot failover server; server is not in standby or cascade standby mode\n"
+msgstr "无法failover服务器;服务器未处于备用或级联备用模式\n"
+
+#: pg_ctl.cpp:2213
+msgid "Failover is not supported in dcf mode.\n"
+msgstr "DCF模式下不支持failover.\n"
+
+#
+#: pg_ctl.cpp:2218
+msgid " server starting failover\n"
+msgstr "服务器开始failover\n"
+
+#
+#: pg_ctl.cpp:2220
+msgid " waiting for server to failover...\n"
+msgstr "等待服务器failover…\n"
+
+#: pg_ctl.cpp:2239
+#, c-format
+msgid " could not create failover signal file \"%s\": %s\n"
+msgstr "无法创建failover信号文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:2243
+#, c-format
+msgid " could not write failover signal file \"%s\": %s\n"
+msgstr "无法写入failover信号文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:2251
+#, c-format
+msgid " could not send failover signal (PID: %ld): %s\n"
+msgstr "无法发送failover信号(PID:%ld): %s\n"
+
+#: pg_ctl.cpp:2254
+#, c-format
+msgid " could not remove failover signal file \"%s\": %s\n"
+msgstr "无法删除failover信号文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:2276
+#, c-format
+msgid " failover failed (%s)\n"
+msgstr "故障转移失败(%s)\n"
+
+#
+#: pg_ctl.cpp:2296
+msgid "the parameter of notify must be specified\n"
+msgstr "必须指定notify参数\n"
+
+#: pg_ctl.cpp:2307
+#, c-format
+msgid " cannot notify server; single-user server is running (PID: %ld)\n"
+msgstr "不能通知服务器;单用户服务器运行(PID:%ld)\n"
+
+#
+#: pg_ctl.cpp:2325
+msgid " the parameter of notify is not recognized\n"
+msgstr "无法识别notify参数\n"
+
+#
+#: pg_ctl.cpp:2332
+msgid " cannot notify server: server mode is unknown\n"
+msgstr "无法通知服务器:服务器模式未知\n"
+
+#: pg_ctl.cpp:2341
+msgid " only support notify server in pending mode; or notify server to primary in normal mode"
+msgstr "仅支持通知pending模式服务器;或在normal模式下通知服务器到主服务器"
+
+#: pg_ctl.cpp:2349
+#, c-format
+msgid "notify primary term (%u)"
+msgstr "notify primary term (%u)"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_ctl.cpp:2355
+#, c-format
+msgid "failed to open file \"%s\": %s\n"
+msgstr "打开文件失败\"%s\":%s\n"
+
+#: pg_ctl.cpp:2361
+#, c-format
+msgid "failed to write file \"%s\": %s\n"
+msgstr "写文件失败\"%s\":%s\n"
+
+#: pg_ctl.cpp:2364
+#, c-format
+msgid "failed to close file \"%s\": %s\n"
+msgstr "关闭文件失败\"%s\":%s\n"
+
+#: pg_ctl.cpp:2370
+#, c-format
+msgid " could not create notify signal file \"%s\": %s"
+msgstr "无法创建通知信号文件\"%s\":%s"
+
+#: pg_ctl.cpp:2376
+#, c-format
+msgid " could not write notify signal file \"%s\": %s"
+msgstr "无法写入通知信号文件\"%s\":%s"
+
+#: pg_ctl.cpp:2385
+#, c-format
+msgid " could not send notify signal (PID: %ld): %s"
+msgstr "无法发送通知信号(PID:%ld): %s"
+
+#: pg_ctl.cpp:2387
+#, c-format
+msgid " could not remove notify signal file \"%s\": %s"
+msgstr "无法删除通知信号文件\"%s\":%s"
+
+#
+#: pg_ctl.cpp:2397
+msgid "server starting notify"
+msgstr "服务器启动通知"
+
+#
+#: pg_ctl.cpp:2399
+msgid "waiting for server to response..."
+msgstr "等待服务器响应…"
+
+#
+#: pg_ctl.cpp:2407
+msgid " "
+msgstr " "
+
+#
+#: pg_ctl.cpp:2409
+msgid "failed"
+msgstr "失败"
+
+#: pg_ctl.cpp:2411
+#, c-format
+msgid " notify server failed, notify %s, current is %s\n"
+msgstr "通知服务器失败, notify%s, current为%s\n"
+
+#
+#: pg_ctl.cpp:2416
+msgid "done"
+msgstr "完成"
+
+#: pg_ctl.cpp:2417
+#, c-format
+msgid "notify server completed, mode change to %s\n"
+msgstr "通知服务器完成, 模式更改为%s\n"
+
+#: pg_ctl.cpp:2438
+#, c-format
+msgid "can't create lock file \"%s\" : %s"
+msgstr "无法创建锁文件\"%s\": %s"
+
+#: pg_ctl.cpp:2443
+#, c-format
+msgid "can't chmod lock file \"%s\" : %s"
+msgstr "不能chmod锁文件\"%s\": %s"
+
+#: pg_ctl.cpp:2452
+#, c-format
+msgid "can't write lock file \"%s\" : %s"
+msgstr "不能写锁文件\"%s\": %s"
+
+#: pg_ctl.cpp:2460
+#, c-format
+msgid " could open lock file \"%s\" : %s\n"
+msgstr "可以打开锁文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:2543
+#, c-format
+msgid " could not connect to the local server, the postmaster process %d is not running"
+msgstr "无法连接到本地服务器, postmaster进程%d未运行"
+
+#: pg_ctl.cpp:2546
+#, c-format
+msgid " The process recorded in PID file \"%s\" is not current server\n"
+msgstr "PID文件\"%s\"中记录的过程不是当前服务器\n"
+
+#: pg_ctl.cpp:2567 pg_ctl.cpp:2572
+#, c-format
+msgid " %-20s\n"
+msgstr " %-20s\n"
+
+#: pg_ctl.cpp:2592
+#, c-format
+msgid "switchover term (%u)\n"
+msgstr "switchover term (%u)\n"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_ctl.cpp:2597 pg_ctl.cpp:5900
+#, c-format
+msgid "fail to open file \"%s\": %s\n"
+msgstr "无法打开文件\"%s\": %s\n"
+
+#: pg_ctl.cpp:2601
+#, c-format
+msgid "fail to write file \"%s\": %s\n"
+msgstr "写文件失败\"%s\": %s\n"
+
+#: pg_ctl.cpp:2606
+#, c-format
+msgid "fail to close file \"%s\": %s\n"
+msgstr "关闭文件失败\"%s\": %s\n"
+
+#: pg_ctl.cpp:2612
+msgid "datanode does not support smart or immediate switchover\n"
+msgstr "数据节点不支持smart或者immediate switchover\n"
+
+#: pg_ctl.cpp:2624
+#, c-format
+msgid " cannot switchover server; single-user server is running (PID: %ld)\n"
+msgstr "不能switchover服务器;单用户服务器运行(PID: %ld)\n"
+
+#: pg_ctl.cpp:2633 pg_ctl.cpp:2764
+#, c-format
+msgid "switchover completed (%s)\n"
+msgstr "switchover完成(%s)\n"
+
+#
+#: pg_ctl.cpp:2644
+msgid " cannot switchover server; server is not in standby or cascade standby mode\n"
+msgstr "不能switchover服务器;服务器未处于备用或级联备用模式\n"
+
+#: pg_ctl.cpp:2650
+#, c-format
+msgid " could not create switchover signal file \"%s\": %s\n"
+msgstr "无法创建switchover信号文件\"%s\":%s\n"
+
+#: pg_ctl.cpp:2654
+#, c-format
+msgid " could not write switchover signal file \"%s\": %s\n"
+msgstr "无法写入switchover信号文件\"%s\":%s\n"
+
+#: pg_ctl.cpp:2660
+#, c-format
+msgid " could not close switchover signal file \"%s\": %s\n"
+msgstr "无法关闭switchover信号文件\"%s\":%s\n"
+
+#: pg_ctl.cpp:2668 pg_ctl.cpp:2670
+#, c-format
+msgid " could not send switchover signal (PID: %ld): %s\n"
+msgstr "无法发送switchover信号(PID:%ld): %s\n"
+
+#
+#: pg_ctl.cpp:2675
+msgid "server starting switchover\n"
+msgstr "服务器开始switchover\n"
+
+#
+#: pg_ctl.cpp:2690
+msgid "waiting for server to switchover..."
+msgstr "等待服务器switchover…"
+
+#: pg_ctl.cpp:2709 pg_ctl.cpp:5967
+#, c-format
+msgid "Read %s failed!\n"
+msgstr "读%s失败了!\n"
+
+#: pg_ctl.cpp:2718
+#, c-format
+msgid "DCF switchover failed with status %d!\n"
+msgstr "DCF切换失败%d!\n"
+
+#: pg_ctl.cpp:2742
+msgid ""
+"\n"
+" switchover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"
 msgstr ""
-"%s: 无法重新加载服务器进程；正在运行单用户模式的服务器进程 (PID: %ld)\n"
+"\n"
+"在 %d 秒后switchover超时了, 请手动检查集群状态.\n"
 
-#: pg_ctl.c:1128
-#, c-format
-msgid "%s: cannot promote server; server is not in standby mode\n"
-msgstr "%s: 无法重新加载服务器进程；服务器没有运行在standby模式下\n"
+#: pg_ctl.cpp:2745
+msgid " could not create switchover timeout signal file \"%s\": %s\n"
+msgstr "无法创建switchover超时信号文件\"%s\": %s\n"
 
-#: pg_ctl.c:1136
-#, c-format
-msgid "%s: could not create promote signal file \"%s\": %s\n"
-msgstr "%s: 无法创建重新加载信号文件 \"%s\": %s\n"
+#: pg_ctl.cpp:2750
+msgid " could not write switchover timeout signal file \"%s\": %s\n"
+msgstr "无法写入switchover超时信号文件\"%s\": %s\n"
 
-#: pg_ctl.c:1142
-#, c-format
-msgid "%s: could not write promote signal file \"%s\": %s\n"
-msgstr "%s: 无法写入重新加载文件 \"%s\": %s\n"
+#: pg_ctl.cpp:2757 pg_ctl.cpp:2759
+msgid " could not send switchover timeout signal (PID: %ld): %s\n"
+msgstr "无法发送switchover超时信号(PID: %ld): %s\n"
 
-#: pg_ctl.c:1150
-#, c-format
-msgid "%s: could not send promote signal (PID: %ld): %s\n"
-msgstr "%s: 无法发送重载信号(PID: %ld): %s\n"
+#: pg_ctl.cpp:2763
+msgid "done\n"
+msgstr "完成\n"
 
-#: pg_ctl.c:1153
-#, c-format
-msgid "%s: could not remove promote signal file \"%s\": %s\n"
-msgstr "%s: 无法移动重新加载信号文件 \"%s\": %s\n"
-
-#: pg_ctl.c:1158
-msgid "server promoting\n"
-msgstr "服务器重新加载中\n"
-
-#: pg_ctl.c:1205
+#: pg_ctl.cpp:2809
 #, c-format
 msgid "%s: single-user server is running (PID: %ld)\n"
 msgstr "%s: 正在运行单用户模式服务器进程 (PID: %ld)\n"
 
-#: pg_ctl.c:1217
+#: pg_ctl.cpp:2817
+#, c-format
+msgid "%s: The process recorded in PID file \"%s\" is not current server\n"
+msgstr "%s: PID文件中记录的进程\"%s\"不是当前服务器\n"
+
+#: pg_ctl.cpp:2826
 #, c-format
 msgid "%s: server is running (PID: %ld)\n"
 msgstr "%s: 正在运行服务器进程(PID: %ld)\n"
 
-#: pg_ctl.c:1228
+#: pg_ctl.cpp:2839
 #, c-format
-msgid "%s: no server running\n"
-msgstr "%s:没有服务器进程正在运行\n"
+msgid "no server running\n"
+msgstr "没有服务器正在运行\n"
 
-#: pg_ctl.c:1246
+#: pg_ctl.cpp:2853
 #, c-format
-msgid "%s: could not send signal %d (PID: %ld): %s\n"
-msgstr "%s: 无法发送信号 %d (PID: %ld): %s\n"
+msgid " could not send signal %d (PID: %ld): %s\n"
+msgstr "无法发送信号%d(PID:%ld): %s\n"
 
-#: pg_ctl.c:1280
+#: pg_ctl.cpp:2930
+msgid " display querybuild failed could not get information from gaussdb.state\n"
+msgstr "显示querybuild失败, 无法从gaussdb.state获取信息\n"
+
+#: pg_ctl.cpp:2948 pg_ctl.cpp:3009
+msgid " HA state:\n"
+msgstr "HA状态:\n"
+
+#: pg_ctl.cpp:2949 pg_ctl.cpp:2951 pg_ctl.cpp:2952 pg_ctl.cpp:2964
+#: pg_ctl.cpp:2965 pg_ctl.cpp:2968 pg_ctl.cpp:3011 pg_ctl.cpp:3015
+#: pg_ctl.cpp:3017 pg_ctl.cpp:3019
 #, c-format
-msgid "%s: could not find own program executable\n"
-msgstr "%s: 无法找到执行文件\n"
+msgid "        %-30s: %s\n"
+msgstr "        %-30s: %s\n"
 
-#: pg_ctl.c:1290
+#: pg_ctl.cpp:2950 pg_ctl.cpp:3013
 #, c-format
-msgid "%s: could not find postgres program executable\n"
-msgstr "%s: 无法找到postgres程序的执行文件\n"
+msgid "        %-30s: %d\n"
+msgstr "        %-30s: %d\n"
 
-#: pg_ctl.c:1355 pg_ctl.c:1387
+#: pg_ctl.cpp:2956
+msgid " Build state:\n"
+msgstr " 构建状态:\n"
+
+#: pg_ctl.cpp:2958
 #, c-format
-msgid "%s: could not open service manager\n"
-msgstr "%s: 无法打开服务管理器\n"
+msgid "        %-30s: Full\n"
+msgstr "        %-30s: 全\n"
 
-#: pg_ctl.c:1361
+#: pg_ctl.cpp:2960
 #, c-format
-msgid "%s: service \"%s\" already registered\n"
-msgstr "%s: 服务 \"%s\" 已经注册了\n"
+msgid "        %-30s: Incremental\n"
+msgstr "        %-30s: 增量\n"
 
-#: pg_ctl.c:1372
+#: pg_ctl.cpp:2966
 #, c-format
-msgid "%s: could not register service \"%s\": error code %lu\n"
-msgstr "%s: 无法注册服务 \"%s\": 错误码 %lu\n"
+msgid "        %-30s: %d%%\n"
+msgstr "        %-30s: %d%%\n"
 
-#: pg_ctl.c:1393
+#: pg_ctl.cpp:2994
 #, c-format
-msgid "%s: service \"%s\" not registered\n"
-msgstr "%s: 服务 \"%s\" 没有注册\n"
+msgid "%s: display query failed, could not get information from gaussdb.state\n"
+msgstr "%s: 显示query失败, 无法从gaussdb.state获取信息\n"
 
-#: pg_ctl.c:1400
+#: pg_ctl.cpp:3024
+msgid " Senders info:\n"
+msgstr "发送者信息:\n"
+
+#: pg_ctl.cpp:3025 pg_ctl.cpp:3027
+msgid "        No information\n"
+msgstr "        没有任何信息\n"
+
+#: pg_ctl.cpp:3026
+msgid " Receiver info:\n"
+msgstr "接收方信息:\n"
+
+#
+#: pg_ctl.cpp:3103
+msgid " Could not get information from gaussdb.state\n"
+msgstr "无法从gaussdb.state获取信息\n"
+
+#: pg_ctl.cpp:3110
 #, c-format
-msgid "%s: could not open service \"%s\": error code %lu\n"
-msgstr "%s: 无法打开服务 \"%s\": 错误码 %lu\n"
+msgid " file \"%s\" is not exist\n"
+msgstr "文件\"%s\"不存在\n"
 
-#: pg_ctl.c:1407
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_ctl.cpp:3112
 #, c-format
-msgid "%s: could not unregister service \"%s\": error code %lu\n"
-msgstr "%s: 无法注销服务 \"%s\": 错误码 %lu\n"
+msgid " open file \"%s\" failed : %s\n"
+msgstr "打开的文件\"%s\"失败: %s\n"
 
-#: pg_ctl.c:1492
+#: pg_ctl.cpp:3117
+#, c-format
+msgid " read file \"%s\" failed\n"
+msgstr "读文件\"%s\"失败的\n"
+
+#
+#: pg_ctl.cpp:3148
+msgid " could not find own program executable\n"
+msgstr "找不到自己的可执行程序\n"
+
+#
+#: pg_ctl.cpp:3154
+msgid " could not find gaussdb program executable\n"
+msgstr "无法找到gaussdb可执行程序\n"
+
+#
+#: pg_ctl.cpp:3237 pg_ctl.cpp:3275
+msgid " could not open service manager\n"
+msgstr "无法打开服务管理器\n"
+
+#: pg_ctl.cpp:3242
+#, c-format
+msgid " service \"%s\" already registered\n"
+msgstr "服务\"%s\"已经注册\n"
+
+#: pg_ctl.cpp:3261
+#, c-format
+msgid " could not register service \"%s\": error code %lu\n"
+msgstr "无法注册服务\"%s\":错误码%lu\n"
+
+#: pg_ctl.cpp:3280
+#, c-format
+msgid " service \"%s\" not registered\n"
+msgstr "服务\"%s\"未注册\n"
+
+#: pg_ctl.cpp:3286
+#, c-format
+msgid " could not open service \"%s\": error code %lu\n"
+msgstr "无法开启服务\"%s\":错误码%lu\n"
+
+#: pg_ctl.cpp:3293
+#, c-format
+msgid " could not unregister service \"%s\": error code %lu\n"
+msgstr "无法注销服务\"%s\":错误码%lu\n"
+
+#: pg_ctl.cpp:3377
 msgid "Waiting for server startup...\n"
 msgstr "等待服务器进程启动 ...\n"
 
-#: pg_ctl.c:1495
+#: pg_ctl.cpp:3379
 msgid "Timed out waiting for server startup\n"
 msgstr "在等待服务器启动时超时\n"
 
-#: pg_ctl.c:1499
+#: pg_ctl.cpp:3383
 msgid "Server started and accepting connections\n"
 msgstr "服务器进程已启动并且接受连接\n"
 
-#: pg_ctl.c:1543
+#: pg_ctl.cpp:3424
 #, c-format
-msgid "%s: could not start service \"%s\": error code %lu\n"
-msgstr "%s: 无法启动服务 \"%s\": 错误码 %lu\n"
+msgid " could not start service \"%s\": error code %lu\n"
+msgstr "无法启动服务\"%s\":错误码%lu\n"
 
-#: pg_ctl.c:1615
+#
+#: pg_ctl.cpp:3494
+msgid " WARNING: cannot create restricted tokens on this platform\n"
+msgstr "警告:不能在此平台上创建受限token\n"
+
+#: pg_ctl.cpp:3502
 #, c-format
-msgid "%s: WARNING: cannot create restricted tokens on this platform\n"
-msgstr "%s: 警告: 该平台上无法创建受限令牌\n"
+msgid " could not open process token: error code %lu\n"
+msgstr "无法打开进程token:错误码%lu\n"
 
-#: pg_ctl.c:1624
+#: pg_ctl.cpp:3530
 #, c-format
-msgid "%s: could not open process token: error code %lu\n"
-msgstr "%s: 无法打开进程令牌 (token): 错误码 %lu\n"
+msgid " could not allocate SIDs: error code %lu\n"
+msgstr "无法分配sid:错误码%lu\n"
 
-#: pg_ctl.c:1637
+#: pg_ctl.cpp:3550
 #, c-format
-msgid "%s: could not allocate SIDs: error code %lu\n"
-msgstr "%s: 无法分配SID: 错误码 %lu\n"
+msgid " could not create restricted token: error code %lu\n"
+msgstr "无法创建受限token:错误码%lu\n"
 
-#: pg_ctl.c:1656
-#, c-format
-msgid "%s: could not create restricted token: error code %lu\n"
-msgstr "%s: 无法创建继承套接字: 错误码为 %lu\n"
+#
+#: pg_ctl.cpp:3590
+msgid " WARNING: could not locate all job object functions in system API\n"
+msgstr "警告:无法在系统API中找到所有作业对象函数\n"
 
-#: pg_ctl.c:1694
-#, c-format
-msgid "%s: WARNING: could not locate all job object functions in system API\n"
-msgstr "%s: 警告: 系统API中无法定位所有工作对象函数\n"
-
-#: pg_ctl.c:1780
+#: pg_ctl.cpp:3671
 #, c-format
 msgid "Try \"%s --help\" for more information.\n"
-msgstr "试用 \"%s --help\" 获取更多的信息.\n"
+msgstr "用 \"%s --help\" 获取更多的信息.\n"
 
-#: pg_ctl.c:1788
+#: pg_ctl.cpp:3678
+#, c-format
+msgid "  %s member         [-O OPERATION] [-u DCF-NODE-ID] [-i DCF-NODE-IP] [-e DCF-NODE-PORT] [-D PRIMARY-DATADIR]\n"
+msgstr "  %s member         [-O OPERATION] [-u DCF-NODE-ID] [-i DCF-NODE-IP] [-e DCF-NODE-PORT] [-D PRIMARY-DATADIR]\n"
+
+#: pg_ctl.cpp:3681
+#, c-format
+msgid "  %s changerole     [-R DCF-ROLE] [-D DATADIR] [-t SEC]\n"
+msgstr "  %s changerole     [-R DCF-ROLE] [-D DATADIR] [-t SEC]\n"
+
+#: pg_ctl.cpp:3682
+#, c-format
+msgid "  %s setrunmode     [-x XMODE] [-v VOTE-NUM] [-D PRIMARY-DATADIR]\n"
+msgstr "  %s setrunmode     [-x XMODE] [-v VOTE-NUM] [-D PRIMARY-DATADIR]\n"
+
+#: pg_ctl.cpp:3687
 #, c-format
 msgid ""
-"%s is a utility to initialize, start, stop, or control a PostgreSQL server.\n"
+"\n"
+"Options for DCF:\n"
+msgstr ""
+"\n"
+"DCF选项:\n"
+
+#: pg_ctl.cpp:3688
+#, c-format
+msgid "  -O, --operation=OPERATION          Operation of adding or removing or change a DN configuration.\n"
+msgstr "-O, --operation=OPERATION            增加、删除或更改DN配置的操作.\n"
+
+#: pg_ctl.cpp:3689
+#, c-format
+msgid "  -u, --nodeid=DCF-NODE-ID           It is required for member command.\n"
+msgstr "  -u, --nodeid=DCF-NODE-ID           成员命令必须.\n"
+
+#: pg_ctl.cpp:3690
+#, c-format
+msgid "  -i, --ip=DCF-NODE-IP               It is required when OPERATION of member command is \"add\".\n"
+msgstr "  -i, --ip=DCF-NODE-IP                当member命令的OPERATION为时必选\"add\".\n"
+
+#: pg_ctl.cpp:3691
+#, c-format
+msgid "  -e, --port=DCF-NODE-PORT           It is required when OPERATION of member command is \"add\".\n"
+msgstr "  -e, --port=DCF-NODE-PORT           当member命令为OPERATION时需要\"add\".\n"
+
+#: pg_ctl.cpp:3692
+#, c-format
+msgid "  -R, --role=DCF-NODE-ROLE           The option is \"follower\" or \"passive\".\n"
+msgstr "  -R, --role=DCF-NODE-ROLE           选项为\"follower\"或\"passive\".\n"
+
+#: pg_ctl.cpp:3693
+#, c-format
+msgid "  -v, --votenum=VOTE-NUM             It is required when XMODE is \"minority\".\n"
+msgstr "  -v, --votenum=VOTE-NUM             当XMODE为\"minority\"时需要.\n"
+
+#: pg_ctl.cpp:3694
+#, c-format
+msgid "  -x, --xmode=XMODE                  The option can be \"minority\" or \"normal\" mode in DCF.\n"
+msgstr "  -x, --xmode=XMODE                  选项为\"minority\"或DCF模式中的\"normal\".\n"
+
+#: pg_ctl.cpp:3695
+#, c-format
+msgid "  -G,                                The option is a int type to set group number in DCF.\n"
+msgstr "  -G,                                该选项是一个int类型, 用于设置DCF中的组号.\n"
+
+#: pg_ctl.cpp:3696
+#, c-format
+msgid "  --priority,                        The option is a int type to set priority number in DCF.\n"
+msgstr "  --priority,                        该选项是一个int类型, 用于设置DCF中的优先级编号.\n"
+
+#: pg_ctl.cpp:3701
+#, c-format
+msgid ""
+"\n"
+"OPERATION are:\n"
+msgstr ""
+"\n"
+"OPERATION是:\n"
+
+#: pg_ctl.cpp:3702
+#, c-format
+msgid "  add            add a member to DCF configuration.\n"
+msgstr "  add            添加一个成员到DCF配置.\n"
+
+#: pg_ctl.cpp:3703
+#, c-format
+msgid "  remove         remove a member from DCF configuration.\n"
+msgstr "  remove         从DCF配置中移除一个成员.\n"
+
+#: pg_ctl.cpp:3704
+#, c-format
+msgid "  change         change DCF node configuration.\n"
+msgstr "  change         更改DCF节点配置.\n"
+
+#: pg_ctl.cpp:3705
+#, c-format
+msgid ""
+"\n"
+"XMODE are:\n"
+msgstr ""
+"\n"
+"XMODE有如下几种:\n"
+
+#: pg_ctl.cpp:3706
+#, c-format
+msgid "  minority       the leader in DCF can reach consensus when getting less than half nodes' response.\n"
+msgstr "  mimority       在DCF中, 少数领导者在得到不到一半节点响应时可以达成共识.\n"
+
+#: pg_ctl.cpp:3707
+#, c-format
+msgid "  normal         the leader in DCF can reach consensus when getting more than half nodes' response.\n"
+msgstr "  normal         通常情况下, DCF的领导者在得到一半以上节点的响应时可以达成共识.\n"
+
+#: pg_ctl.cpp:3708
+#, c-format
+msgid ""
+"\n"
+"DCF-NODE-ROLE are:\n"
+msgstr ""
+"\n"
+"DCF-NODE-ROLE有如下几种:\n"
+
+#: pg_ctl.cpp:3709
+#, c-format
+msgid "  follower       follower role in DCF\n"
+msgstr "  follower       DCF中的追随者角色\n"
+
+#: pg_ctl.cpp:3710
+#, c-format
+msgid "  passive        passive role in DCF\n"
+msgstr "  passive        被动的被动角色在DCF\n"
+
+#: pg_ctl.cpp:3718
+msgid ""
+"%s is a utility to initialize, start, stop, or control an openGauss server.\n"
 "\n"
 msgstr ""
 "%s 是一个用于初始化、启动、停止或控制PostgreSQL服务器的工具.\n"
 "\n"
 
-#: pg_ctl.c:1789
+#: pg_ctl.cpp:3719
 #, c-format
 msgid "Usage:\n"
-msgstr "使用方法:\n"
+msgstr "用法:\n"
 
-#: pg_ctl.c:1790
+#: pg_ctl.cpp:3720
 #, c-format
 msgid "  %s init[db]               [-D DATADIR] [-s] [-o \"OPTIONS\"]\n"
-msgstr "  %s init[db]               [-D 数据目录] [-s] [-o \"选项\"]\n"
+msgstr "  %s init[db]                [-D DATADIR] [-s] [-o \"OPTIONS\"]\n"
 
-#: pg_ctl.c:1791
+#: pg_ctl.cpp:3722
+#, c-format
+msgid "  %s start   [-w] [-t SECS] [-Z NODE-TYPE] [-D DATADIR] [-s] [-l FILENAME] [-o \"OPTIONS\"] [-M SERVERMODE]\n"
+msgstr "  %s start   [-w] [-t SECS] [-Z NODE-TYPE] [-D DATADIR] [-s] [-l FILENAME] [-o \"OPTIONS\"] [-M SERVERMODE]\n"
+
+#: pg_ctl.cpp:3725
 #, c-format
 msgid ""
-"  %s start   [-w] [-t SECS] [-D DATADIR] [-s] [-l FILENAME] [-o \"OPTIONS"
-"\"]\n"
+"  %s restart [-w] [-t SECS] [-Z NODE-TYPE] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
+"                 [-o \"OPTIONS\"]\n"
 msgstr ""
-"  %s start   [-w]  [-t 秒数] [-D 数据目录] [-s] [-l 文件名] [-o \"选项\"]\n"
+"  %s restart [-w] [-t SECS] [-Z NODE-TYPE] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
+"                 [-o \"OPTIONS\"]\n"
 
-#: pg_ctl.c:1792
+#: pg_ctl.cpp:3728
 #, c-format
-msgid "  %s stop    [-W] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
-msgstr "  %s stop   [-w]  [-t 秒数] [-D 数据目录] [-s] [-m 关闭模式]\n"
+msgid "  %s build   [-D DATADIR] [-Z NODE-TYPE] [-b BUILD_MODE] [-r SECS] [-C CONNECTOR] [-q]\n"
+msgstr "  %s build   [-D DATADIR] [-Z NODE-TYPE] [-b BUILD_MODE] [-r SECS] [-C CONNECTOR] [-q]\n"
 
-#: pg_ctl.c:1793
+#: pg_ctl.cpp:3729
+#, c-format
+msgid "  %s restore [-D DATADIR] [-Z NODE-TYPE] [-s] [--remove-backup]\n"
+msgstr "  %s restore [-D DATADIR] [-Z NODE-TYPE] [-s] [--remove-backup]\n"
+
+#: pg_ctl.cpp:3732
+#, c-format
+msgid "  %s start   [-w] [-t SECS] [-D DATADIR] [-s] [-l FILENAME] [-o \"OPTIONS\"] [-M SERVERMODE]\n"
+msgstr "  %s start   [-w] [-t SECS] [-D DATADIR] [-s] [-l FILENAME] [-o .\"OPTIONS\"] [-M SERVERMODE]\n"
+
+#: pg_ctl.cpp:3733
 #, c-format
 msgid ""
 "  %s restart [-w] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
 "                 [-o \"OPTIONS\"]\n"
 msgstr ""
-"  %s restart [-w] [-t 秒数] [-D 数据目录] [-s] [-m 关闭模式]\n"
-"                [-o \"选项\"]\n"
+"  %s restart [-w] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
+"                 [-o \"OPTIONS\"]\n"
 
-#: pg_ctl.c:1795
+#: pg_ctl.cpp:3736
+#, c-format
+msgid "  %s build   [-D DATADIR] [-b MODE] [-r SECS] [-C CONNECTOR] [-q] [-M SERVERMODE]\n"
+msgstr "  %s build   [-D DATADIR] [-b MODE] [-r SECS] [-C CONNECTOR] [-q] [-M SERVERMODE]\n"
+
+#: pg_ctl.cpp:3739
+#, c-format
+msgid "  %s stop    [-W] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
+msgstr "  %s stop    [-W]  [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
+
+#: pg_ctl.cpp:3740
 #, c-format
 msgid "  %s reload  [-D DATADIR] [-s]\n"
-msgstr "  %s reload  [-D 数据目录] [-s]\n"
+msgstr "  %s reload  [-D DATADIR] [-s]\n"
 
-#: pg_ctl.c:1796
+#: pg_ctl.cpp:3741
 #, c-format
 msgid "  %s status  [-D DATADIR]\n"
-msgstr "  %s status  [-D 数据目录]\n"
+msgstr "  %s status  [-D DATADIR]\n"
 
-#: pg_ctl.c:1797
+#: pg_ctl.cpp:3742
 #, c-format
-msgid "  %s promote [-D DATADIR] [-s]\n"
-msgstr "  %s promote  [-D 数据目录] [-s]\n"
+msgid "  %s finishredo [-D DATADIR] [-s]\n"
+msgstr "  %s finishredo [-D DATADIR] [-s]\n"
 
-#: pg_ctl.c:1798
+#: pg_ctl.cpp:3744
+#, c-format
+msgid "  %s failover               [-W] [-t SECS] [-D DATADIR] [-U USERNAME] [-P PASSWORD] [-T TERM]\n"
+msgstr "  %s failover               [-W] [-t SECS] [-D DATADIR] [-U USERNAME] [-P PASSWORD] [-T TERM]\n"
+
+#: pg_ctl.cpp:3745
+#, c-format
+msgid "  %s switchover             [-W] [-D DATADIR] [-m SWITCHOVER-MODE] [-U USERNAME] [-P PASSWORD] [-f]\n"
+msgstr "  %s switchover             [-W] [-D DATADIR] [-m SWITCHOVER-MODE] [-U USERNAME] [-P PASSWORD] [-f]\n"
+
+#: pg_ctl.cpp:3747
+#, c-format
+msgid "  %s query   [-D DATADIR] [-U USERNAME] [-P PASSWORD] [-L lsn]\n"
+msgstr "  %s query   [-D DATADIR] [-U USERNAME] [-P PASSWORD] [-L lsn]\n"
+
+#: pg_ctl.cpp:3748
+#, c-format
+msgid "  %s notify   -M SERVERMODE [-D DATADIR] [-U USERNAME] [-P PASSWORD]\n"
+msgstr "  %s notify   -M SERVERMODE [-D DATADIR] [-U USERNAME] [-P PASSWORD]\n"
+
+#: pg_ctl.cpp:3749
 #, c-format
 msgid "  %s kill    SIGNALNAME PID\n"
 msgstr "  %s kill    信号名称 进程号\n"
 
-#: pg_ctl.c:1800
+#: pg_ctl.cpp:3751
 #, c-format
 msgid ""
 "  %s register   [-N SERVICENAME] [-U USERNAME] [-P PASSWORD] [-D DATADIR]\n"
 "                    [-S START-TYPE] [-w] [-t SECS] [-o \"OPTIONS\"]\n"
 msgstr ""
-"  %s register   [-N 服务名称] [-U 用户名] [-P 口令] [-D 数据目录]\n"
-"          [-S 启动类型] [-w] [-t 秒数] [-o \"选项\"]\n"
+"  %s register   [-N SERVICENAME] [-U USERNAME] [-P PASSWORD] [-D DATADIR]\n"
+"                    [-S START-TYPE] [-w] [-t SECS] [-o \"OPTIONS\"]\n"
 
-#: pg_ctl.c:1802
+#: pg_ctl.cpp:3754
 #, c-format
 msgid "  %s unregister [-N SERVICENAME]\n"
-msgstr "  %s unregister [-N 服务名称]\n"
+msgstr "  %s unregister [-N SERVICENAME]\n"
 
-#: pg_ctl.c:1805
+#: pg_ctl.cpp:3756
+#, c-format
+msgid "  %s querybuild   [-D DATADIR]\n"
+msgstr "  %squerybuild [-D DATADIR]\n"
+
+#: pg_ctl.cpp:3757
+#, c-format
+msgid "  %s copy   [-D DATADIR] [-Q COPYMODE]\n"
+msgstr "  %s copy   [-D DATADIR] [-Q COPYMODE]\n"
+
+#: pg_ctl.cpp:3759
+#, c-format
+msgid "  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"
+msgstr "  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"
+
+#: pg_ctl.cpp:3761
+#, c-format
+msgid "  %s stack [-D DATADIR] [-I lwtid]\n"
+msgstr "  %s stack [-D DATADIR] [-I lwtid]\n"
+
+#: pg_ctl.cpp:3768
 #, c-format
 msgid ""
 "\n"
 "Common options:\n"
 msgstr ""
 "\n"
-"普通选项:\n"
+"常用选项:\n"
 
-#: pg_ctl.c:1806
+#: pg_ctl.cpp:3769
+msgid "  -b,  --mode=MODE\t the mode of building the datanode or coordinator.MODE can be \"full\", \"incremental\", \"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", \"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"
+msgstr "- b,  --mode=MODE\t 构建datanode或协调器的模式.MODE可以是 \"full\", \"incremental\", \"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", \"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"
+
+
+#: pg_ctl.cpp:3773
 #, c-format
 msgid "  -D, --pgdata=DATADIR   location of the database storage area\n"
-msgstr "  -D, --pgdata=数据目录  数据库存储区域的位置\n"
+msgstr "  -D, --pgdata=DATADIR   数据库存储区域的位置\n"
 
-#: pg_ctl.c:1807
+#: pg_ctl.cpp:3774
 #, c-format
 msgid "  -s, --silent           only print errors, no informational messages\n"
 msgstr "  -s, --silent           只打印错误信息, 没有其他信息\n"
 
-#: pg_ctl.c:1808
+#: pg_ctl.cpp:3775
 #, c-format
 msgid "  -t, --timeout=SECS     seconds to wait when using -w option\n"
-msgstr "  -t, --timeout=SECS    当使用-w 选项时需要等待的秒数\n"
+msgstr "  -t, --timeout=SECS     当使用-w 选项时需要等待的秒数\n"
 
-#: pg_ctl.c:1809
+#: pg_ctl.cpp:3776
 #, c-format
 msgid "  -V, --version          output version information, then exit\n"
-msgstr "  -V, --version           输出版本信息, 然后退出\n"
+msgstr "  -V, --version          输出版本信息, 然后退出\n"
 
-#: pg_ctl.c:1810
+#: pg_ctl.cpp:3777
 #, c-format
 msgid "  -w                     wait until operation completes\n"
 msgstr "  -w                     等待直到操作完成\n"
 
-#: pg_ctl.c:1811
+#: pg_ctl.cpp:3778
 #, c-format
 msgid "  -W                     do not wait until operation completes\n"
 msgstr "  -W                     不用等待操作完成\n"
 
-#: pg_ctl.c:1812
+#: pg_ctl.cpp:3779
 #, c-format
-msgid "  -?, --help             show this help, then exit\n"
-msgstr "  -?, --help             显示此帮助, 然后退出\n"
+msgid "  -M                     the database start as the appointed  mode\n"
+msgstr "  -M                     数据库启动为指定模式\n"
 
-#: pg_ctl.c:1813
+#: pg_ctl.cpp:3780
+#, c-format
+msgid "  -T                     Failover requires a term\n"
+msgstr "-T                       Failover需要一个术语\n"
+
+#: pg_ctl.cpp:3781
+#, c-format
+msgid "  -q                     do not start automatically after build finishing, needed start by caller\n"
+msgstr "  -q                     不会在构建完成后自动启动, 需要由调用者启动\n"
+
+#: pg_ctl.cpp:3782
+#, c-format
+msgid "  -d                     more debug info will be print\n"
+msgstr "  -d                     将打印更多的调试信息\n"
+
+#: pg_ctl.cpp:3783
+#, c-format
+msgid "  -L                     query lsn:XX/XX validity and show the max_lsn\n"
+msgstr "  -L                     query lsn:XX/XX有效性, 并显示max_lsn\n"
+
+#: pg_ctl.cpp:3784
+#, c-format
+msgid "  -P PASSWORD            password of account to connect local server\n"
+msgstr "  -P PASSWORD            连接本地服务器的帐号密码\n"
+
+#: pg_ctl.cpp:3785
+#, c-format
+msgid "  -U USERNAME            user name of account to connect local server\n"
+msgstr "  -U USERNAME            连接本地服务器的用户名\n"
+
+#: pg_ctl.cpp:3787
+#, c-format
+msgid "  -Z NODE-TYPE           can be \"coordinator\" or \"datanode\" (openGauss)\n"
+msgstr "  -Z NODE-TYPE            可以为\"coordinator\"或\"datanode\"(openGauss)\n"
+
+#: pg_ctl.cpp:3788
+#, c-format
+msgid "  --obsmode                  build to obs, only support full build and restore from obs\n"
+msgstr "  --obsmode                   build to obs, 只支持完全build 和从obs恢复\n"
+
+#: pg_ctl.cpp:3789
+#, c-format
+msgid "  -K, --slotname=SLOTNAME    which obs slot to be build or restore\n"
+msgstr "  -K, --slotname=SLOTNAME      要构建或恢复的哪一个obs槽\n"
+
+#: pg_ctl.cpp:3790
+#, c-format
+msgid "  -k, --keycn=KEYCN          which cn used to restore\n"
+msgstr "  -k, --keycn=KEYCN          用来恢复的keycn\n"
+
+#: pg_ctl.cpp:3791
+#, c-format
+msgid "  -I, --taskid=TASKID        obs build task result file in obs\n"
+msgstr "  -I, --taskid=TASKID        obs中构建obs任务的结果文件\n"
+
+#: pg_ctl.cpp:3792
+#, c-format
+msgid "  -E, --dbport=DBPORT        database port\n"
+msgstr "  -E, --dbport=DBPORT        数据库端口\n"
+
+#: pg_ctl.cpp:3793
+#, c-format
+msgid "  -X, --barrierid=BARRIERID  recovery target for standby\n"
+msgstr "  -X, --barrierid=BARRIERID  备用恢复目标\n"
+
+#: pg_ctl.cpp:3795
+#, c-format
+msgid "  -Z NODE-TYPE           can be \"single_node\"\n"
+msgstr "  -Z NODE-TYPE           可以为\"single_node\"\n"
+
+#: pg_ctl.cpp:3797
+#, c-format
+msgid "  -?, -h, --help             show this help, then exit\n"
+msgstr "  -?, -h, --help             显示帮助, 然后退出\n"
+
+#: pg_ctl.cpp:3798
 #, c-format
 msgid ""
-"(The default is to wait for shutdown, but not for start or restart.)\n"
+"(The default is to wait for shutdown, start and restart.)\n"
 "\n"
 msgstr ""
-"(默认为关闭等待, 但不是启动或重启.)\n"
+"(默认为等待关闭, 启动和重启.)\n"
 "\n"
 
-#: pg_ctl.c:1814
+#: pg_ctl.cpp:3799
 #, c-format
 msgid "If the -D option is omitted, the environment variable PGDATA is used.\n"
-msgstr "如果省略了 -D 选项, 将使用 PGDATA 环境变量.\n"
+msgstr "如果省略-D选项, 则使用环境变量PGDATA.\n"
 
-#: pg_ctl.c:1816
+#: pg_ctl.cpp:3801
 #, c-format
 msgid ""
 "\n"
@@ -579,36 +2230,36 @@ msgstr ""
 "\n"
 "启动或重启的选项:\n"
 
-#: pg_ctl.c:1818
+#: pg_ctl.cpp:3803
 #, c-format
-msgid "  -c, --core-files       allow postgres to produce core files\n"
-msgstr "  -c, --core-files       允许postgres进程产生核心文件\n"
+msgid "  -c, --core-files       allow openGauss to produce core files\n"
+msgstr "  -c, --core-files       允许openGauss产生core文件\n"
 
-#: pg_ctl.c:1820
+#: pg_ctl.cpp:3805
 #, c-format
 msgid "  -c, --core-files       not applicable on this platform\n"
 msgstr "  -c, --core-files       在这种平台上不可用\n"
 
-#: pg_ctl.c:1822
+#: pg_ctl.cpp:3807
 #, c-format
 msgid "  -l, --log=FILENAME     write (or append) server log to FILENAME\n"
 msgstr "  -l, --log=FILENAME    写入 (或追加) 服务器日志到文件FILENAME\n"
 
-#: pg_ctl.c:1823
+#: pg_ctl.cpp:3808
 #, c-format
 msgid ""
-"  -o OPTIONS             command line options to pass to postgres\n"
-"                         (PostgreSQL server executable) or initdb\n"
+"  -o OPTIONS             command line options to pass to openGauss\n"
+"                         (openGauss server executable) or gs_initdb\n"
 msgstr ""
-"  -o OPTIONS             传递给postgres的命令行选项\n"
-"                      (PostgreSQL 服务器执行文件)或initdb\n"
+"  -o OPTIONS             传递给openGauss的命令行选项\n"
+"                         (openGauss服务器可执行文件)或gs_initdb\n"
 
-#: pg_ctl.c:1825
+#: pg_ctl.cpp:3810
 #, c-format
 msgid "  -p PATH-TO-POSTGRES    normally not necessary\n"
-msgstr "  -p PATH-TO-POSTMASTER  正常情况不必要\n"
+msgstr "  -p PATH-TO-POSTGRES    通常不需要\n"
 
-#: pg_ctl.c:1826
+#: pg_ctl.cpp:3811
 #, c-format
 msgid ""
 "\n"
@@ -617,40 +2268,144 @@ msgstr ""
 "\n"
 "停止或重启的选项:\n"
 
-#: pg_ctl.c:1827
+#: pg_ctl.cpp:3812
+#, c-format
+msgid "  -m, --mode=MODE        MODE can be \"fast\" or \"immediate\"\n"
+msgstr "  -m, --mode=MODE        可以是 \"fast\", 或者 \"immediate\"\n"
+
+#: pg_ctl.cpp:3814
 #, c-format
 msgid ""
-"  -m, --mode=MODE        MODE can be \"smart\", \"fast\", or \"immediate\"\n"
+"\n"
+"Options for restore:\n"
 msgstr ""
-"  -m, --mode=MODE        可以是 \"smart\", \"fast\", 或者 \"immediate\"\n"
+"\n"
+"停止或重启的选项:\n"
 
-#: pg_ctl.c:1829
+#: pg_ctl.cpp:3815
+#, c-format
+msgid "  --remove-backup        Remove the pg_rewind_bak dir after restore with \"restore\" command\n"
+msgstr "  --Remove-backup        使用\"restore\"命令, 在恢复后删除pg_rewind_bak目录\n"
+
+#: pg_ctl.cpp:3817
+#, c-format
+msgid ""
+"\n"
+"Options for xlog copy:\n"
+msgstr ""
+"\n"
+"停止或重启的选项:\n"
+
+#: pg_ctl.cpp:3819
+#, c-format
+msgid "  -Q, --mode=MODE        MODE can be \"copy_from_local\", \"force_copy_from_local\", \"copy_from_share\"\n"
+msgstr "  -Q, --mode=MODE        MODE可为\"copy_from_local\"、\"force_copy_from_local\"、\"copy_from_share\"\n"
+
+#: pg_ctl.cpp:3822
+#, c-format
+msgid ""
+"\n"
+"Options for hotpatch:\n"
+msgstr ""
+"\n"
+"停止或重启的选项:\n"
+
+#: pg_ctl.cpp:3823
+#, c-format
+msgid "  -a ACTION   patch command, ACTION can be \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"
+msgstr "  -a ACTION   patch 命令, ACTION可为 \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"
+
+#: pg_ctl.cpp:3825
+#, c-format
+msgid "  -n NAME     patch name, NAME should be patch name with path\n"
+msgstr "  -n NAME     patch 名称, NAME为带路径的补丁名称\n"
+
+#: pg_ctl.cpp:3833
+#, c-format
+msgid ""
+"\n"
+"Options for stack:\n"
+msgstr ""
+"\n"
+"停止或重启的选项:\n"
+
+#: pg_ctl.cpp:3834
+#, c-format
+msgid "  -I lwtid    light weight thread id. get stack of specific thread according to it's lwtid\n"
+msgstr "  -I lwtid     轻量级线程id.获得堆栈的特定线程根据它的lwtid\n"
+
+#: pg_ctl.cpp:3836
 #, c-format
 msgid ""
 "\n"
 "Shutdown modes are:\n"
 msgstr ""
 "\n"
-"关闭模式有如下几种:\n"
+"Shutdown模式有如下几种:\n"
 
-#: pg_ctl.c:1830
-#, c-format
-msgid "  smart       quit after all clients have disconnected\n"
-msgstr "  smart       所有客户端断开连接后退出\n"
-
-#: pg_ctl.c:1831
+#: pg_ctl.cpp:3837
 #, c-format
 msgid "  fast        quit directly, with proper shutdown\n"
 msgstr "  fast        直接退出, 正确的关闭\n"
 
-#: pg_ctl.c:1832
+#: pg_ctl.cpp:3838
 #, c-format
-msgid ""
-"  immediate   quit without complete shutdown; will lead to recovery on "
-"restart\n"
+msgid "  immediate   quit without complete shutdown; will lead to recovery on restart\n"
 msgstr "  immediate   不完全的关闭退出; 重启后恢复\n"
 
-#: pg_ctl.c:1834
+#: pg_ctl.cpp:3840
+#, c-format
+msgid ""
+"\n"
+"Switchover modes are:\n"
+msgstr ""
+"\n"
+"Switchover模式有如下几种:\n"
+
+#: pg_ctl.cpp:3841
+#, c-format
+msgid "  -f          quit directly, with proper shutdown and do not perform checkpoint\n"
+msgstr "  -f          直接退出, 正确关机, 不执行checkpoint\n"
+
+#: pg_ctl.cpp:3842
+#, c-format
+msgid "  fast        demote primary directly, with proper shutdown\n"
+msgstr "  fast         使用适当的关闭将主数据库直接降级\n"
+
+#: pg_ctl.cpp:3844
+#, c-format
+msgid ""
+"\n"
+"SERVERMODE are:\n"
+msgstr "" 
+"\n"
+"SERVERMODE 有如下几种:\n"
+
+#: pg_ctl.cpp:3845
+#, c-format
+msgid "  primary         database system run as a primary server, send xlog to standby server\n"
+msgstr "  primary          数据库系统作为主服务器运行, 将xlog发送到备用服务器\n"
+
+#: pg_ctl.cpp:3846
+#, c-format
+msgid "  standby         database system run as a standby server, receive xlog from primary server\n"
+msgstr "  standby          数据库系统作为备用服务器运行, 从主服务器接收xlog\n"
+
+#: pg_ctl.cpp:3847
+#, c-format
+msgid "  cascade_standby database system run as a cascade standby server, receive xlog from standby server\n"
+msgstr "  cascade_standby 数据库系统作为级联备用服务器运行, 从备用服务器接收xlog\n"
+
+#: pg_ctl.cpp:3848
+#, c-format
+msgid ""
+"  pending         database system run as a pending server, wait for promoting to primary or demoting to standby\n"
+"\t\t\t       Only used in start command\n"
+msgstr ""
+"  pending         数据库系统作为挂起的服务器运行, 等待升级为主服务器或降级为备用服务器\n"
+"\t\t\t       仅用于启动命令\n"
+
+#: pg_ctl.cpp:3851
 #, c-format
 msgid ""
 "\n"
@@ -659,7 +2414,7 @@ msgstr ""
 "\n"
 "允许关闭的信号名称:\n"
 
-#: pg_ctl.c:1838
+#: pg_ctl.cpp:3855
 #, c-format
 msgid ""
 "\n"
@@ -668,160 +2423,1146 @@ msgstr ""
 "\n"
 "注册或注销的选项:\n"
 
-#: pg_ctl.c:1839
+#: pg_ctl.cpp:3856
 #, c-format
-msgid ""
-"  -N SERVICENAME  service name with which to register PostgreSQL server\n"
-msgstr "  -N 服务名称     注册到 PostgreSQL 服务器的服务名称\n"
+msgid "  -N SERVICENAME  service name with which to register openGauss server\n"
+msgstr "  -N SERVICENAME  注册到openGauss服务器的服务名称\n"
 
-#: pg_ctl.c:1840
+#: pg_ctl.cpp:3857
 #, c-format
-msgid "  -P PASSWORD     password of account to register PostgreSQL server\n"
-msgstr "  -P 口令         注册到 PostgreSQL 服务器帐户的口令\n"
+msgid "  -P PASSWORD     password of account to register openGauss server\n"
+msgstr "  -P PASSWORD     注册openGauss服务器的帐号密码\n"
 
-#: pg_ctl.c:1841
+#: pg_ctl.cpp:3858
 #, c-format
-msgid "  -U USERNAME     user name of account to register PostgreSQL server\n"
-msgstr "  -U 用户名       注册到 PostgreSQL 服务器帐户的用户名\n"
+msgid "  -U USERNAME     user name of account to register openGauss server\n"
+msgstr "  -U USERNAME     注册openGauss服务器的用户名\n"
 
-#: pg_ctl.c:1842
+#: pg_ctl.cpp:3859
 #, c-format
-msgid "  -S START-TYPE   service start type to register PostgreSQL server\n"
-msgstr "  -S START-TYPE   注册到PostgreSQL服务器的服务启动类型\n"
+msgid "  -S START-TYPE   service start type to register openGauss server\n"
+msgstr "  -S START-TYPE   服务启动类型, 注册opengaus服务器\n"
 
-#: pg_ctl.c:1844
+#: pg_ctl.cpp:3861
 #, c-format
 msgid ""
 "\n"
 "Start types are:\n"
 msgstr ""
 "\n"
-"启动类型有:\n"
+"启动类型有如下几种:\n"
 
-#: pg_ctl.c:1845
+#: pg_ctl.cpp:3862
 #, c-format
-msgid ""
-"  auto       start service automatically during system startup (default)\n"
+msgid "  auto       start service automatically during system startup (default)\n"
 msgstr "  auto       在系统启动时自动启动服务(默认选项)\n"
 
-#: pg_ctl.c:1846
+#: pg_ctl.cpp:3863
 #, c-format
 msgid "  demand     start service on demand\n"
 msgstr "  demand     按需启动服务\n"
 
-#: pg_ctl.c:1849
+#: pg_ctl.cpp:3866
 #, c-format
 msgid ""
 "\n"
-"Report bugs to <pgsql-bugs@postgresql.org>.\n"
+"Build connection option:\n"
 msgstr ""
 "\n"
-"臭虫报告至 <pgsql-bugs@postgresql.org>.\n"
+"Build connection选项:\n"
 
-#: pg_ctl.c:1874
+#: pg_ctl.cpp:3867
 #, c-format
-msgid "%s: unrecognized shutdown mode \"%s\"\n"
-msgstr "%s: 无效的关闭模式 \"%s\"\n"
+msgid "  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"
+msgstr "  -r, --recvtimeout=INTERVAL    接收端等待服务器通信的时间(单位:秒)\n"
 
-#: pg_ctl.c:1906
+#: pg_ctl.cpp:3868
 #, c-format
-msgid "%s: unrecognized signal name \"%s\"\n"
-msgstr "%s: 无效信号名称 \"%s\"\n"
+msgid "  -C, connector    CN/DN connect to specified CN/DN for build\n"
+msgstr "  -C, connector    CN/DN连接到指定的CN/DN进行构建\n"
 
-#: pg_ctl.c:1923
+#: pg_ctl.cpp:3870
+msgid "  --enable-dss    enable dss function\n"
+msgstr "  --enable-dss      启用dss模式\n"
+
+#: pg_ctl.cpp:3871
 #, c-format
-msgid "%s: unrecognized start type \"%s\"\n"
-msgstr "%s: 无法识别的启动类型 \"%s\"\n"
+msgid "  --instance-id=instance_id      id number of instance when dss and dms are enabled\n"
+msgstr "  --instance-id=instance_id       启用dss和dms时实例的id号\n"
 
-#: pg_ctl.c:1976
+#: pg_ctl.cpp:3872
 #, c-format
-msgid "%s: could not determine the data directory using command \"%s\"\n"
-msgstr "%s: 使用命令 \"%s\"无法确定数据目录\n"
+msgid "  --vgname         vg name in dss  when dss is enabled\n"
+msgstr "  --vgname        dss启用时dss中的卷组名称\n"
 
-#: pg_ctl.c:2049
+#: pg_ctl.cpp:3873
+#, c-format
+msgid "  --socketpath=socketpath  \n"
+msgstr "  --socketpath=socketpath  \n"
+
+#: pg_ctl.cpp:3896
+#, c-format
+msgid " unrecognized shutdown mode \"%s\"\n"
+msgstr "未识别关机模式\"%s\"\n"
+
+#: pg_ctl.cpp:3910
+#, c-format
+msgid "unrecognized member operation \"%s\"\n"
+msgstr "未识别成员操作\"%s\"\n"
+
+#: pg_ctl.cpp:3932
+#, c-format
+msgid " unrecognized signal name \"%s\"\n"
+msgstr "无法识别的信号名称\"%s\"\n"
+
+#: pg_ctl.cpp:3946
+#, c-format
+msgid " unrecognized start type \"%s\"\n"
+msgstr "无法识别的启动类型\"%s\"\n"
+
+#: pg_ctl.cpp:4036
+#, c-format
+msgid "data directory is set to %s according to data_directory in config file.\n"
+msgstr "根据配置文件中的data_directory, 数据目录设置为%s.\n"
+
+#: pg_ctl.cpp:4072 pg_ctl.cpp:4077
+#, c-format
+msgid " could not determine the data directory using command \"%s\"\n"
+msgstr "使用命令无法确定数据目录\"%s\"\n"
+
+#: pg_ctl.cpp:4155
+#, c-format
+msgid "The local server run as %s,build cannot be executed.\n"
+msgstr "本地服务器运行为%s, 构建无法执行.\n"
+
+#: pg_ctl.cpp:4187
+#, c-format
+msgid "%s: create rewind file failed(%s).\n"
+msgstr "%s: 创建倒带文件失败(%s).\n"
+
+#: pg_ctl.cpp:4197
+#, c-format
+msgid "%s: open rewind file failed(%s).\n"
+msgstr "%s: 打开倒带文件失败(%s).\n"
+
+#: pg_ctl.cpp:4203
+#, c-format
+msgid "%s: write rewind file failed(%s).\n"
+msgstr "%s: 写倒带文件失败(%s).\n"
+
+#: pg_ctl.cpp:4272
+msgid "inc build failed due to primary connection failure, skip full build.\n"
+msgstr "由于主要连接失败, Inc构建失败, 跳过完整构建.\n"
+
+#: pg_ctl.cpp:4276
+msgid "inc build failed, change to full build.\n"
+msgstr "Inc构建失败, 更改为完全构建.\n"
+
+#: pg_ctl.cpp:4325 pg_ctl.cpp:4922 pg_ctl.cpp:5251
+#, c-format
+msgid "%s failed(%s).\n"
+msgstr "%s失败(%s).\n"
+
+#: pg_ctl.cpp:4327 pg_ctl.cpp:5255
+#, c-format
+msgid "%s build completed(%s).\n"
+msgstr "%s构建完成(%s).\n"
+
+#: pg_ctl.cpp:4335
+msgid "Can't run incremental build in DCF mode!\n"
+msgstr "不能在DCF模式下运行增量构建!\n"
+
+#
+#: pg_ctl.cpp:4400
+msgid "terminating restore process due to gaussdb is still alive"
+msgstr "由于gaussdb仍然存在, 正在终止恢复进程"
+
+#
+#: pg_ctl.cpp:4416
+msgid "terminating xlog copy process due to gaussdb is still alive"
+msgstr "由于gaussdb仍然存在, 正在终止xlog复制进程"
+
+#
+#: pg_ctl.cpp:4423
+msgid "no copy mode specified.\n"
+msgstr "未指定复制模式.\n"
+
+#: pg_ctl.cpp:4458 streamutil.cpp:287
+#, c-format
+msgid "failed to execute sql [%s]!\n"
+msgstr "执行SQL失败[%s]!\n"
+
+#: pg_ctl.cpp:4484 pg_ctl.cpp:4646 pg_ctl.cpp:4913 pg_ctl.cpp:5221
+#, c-format
+msgid "current workdir is (%s).\n"
+msgstr "当前工作目录为(%s).\n"
+
+#
+#: pg_ctl.cpp:4488 pg_ctl.cpp:4653
+msgid "terminating backup process due to gaussdb is not alive"
+msgstr "由于gaussdb不存在, 正在终止备份进程"
+
+#
+#: pg_ctl.cpp:4496
+msgid "backup process is runing"
+msgstr "备份进程正在运行"
+
+#
+#: pg_ctl.cpp:4505
+msgid "terminating backup process due to connect gaussdb failed"
+msgstr "连接gaussdb失败, 终止备份进程"
+
+#: pg_ctl.cpp:4528 pg_ctl.cpp:4704
+#, c-format
+msgid "execute command [%s] failed \n"
+msgstr "执行命令[%s]失败\n"
+
+#: pg_ctl.cpp:4534
+msgid "failed to upload backup file!\n"
+msgstr "上传备份文件失败!\n"
+
+#: pg_ctl.cpp:4597
+msgid "failed get key cn or gausshome \n"
+msgstr "获取密钥cn或gausshome失败\n"
+
+#: pg_ctl.cpp:4666
+msgid "set gaussdb state file when full restore in obs mode:db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(FULL_RESTORE).\n"
+msgstr "设置obs模式全量恢复时gaussdb的状态文件:db state(BUILDING_STATE), 服务器模式(STANDBY_MODE), 构建模式(FULL_RESTORE).\n"
+
+#: pg_ctl.cpp:4684
+msgid "failed to down backup file!\n"
+msgstr "备份文件失败!\n"
+
+#: pg_ctl.cpp:4688
+msgid "there it no backup file to restore!\n"
+msgstr "没有备份文件可以恢复!\n"
+
+#: pg_ctl.cpp:4701
+msgid "delete data dir success\n"
+msgstr "删除数据目录成功\n"
+
+#
+#: pg_ctl.cpp:4707
+msgid "Decompress data success\n"
+msgstr "解压数据成功\n"
+
+#
+#: pg_ctl.cpp:4725
+msgid " the parameter of build is not recognized\n"
+msgstr "无法识别构建参数\n"
+
+#: pg_ctl.cpp:4749
 #, c-format
 msgid ""
-"%s: cannot be run as root\n"
+"There is nested config file in postgresql.conf: %sWhich is not supported by build. Please move out the nested config files from %s and comment the 'include' config in postgresql.conf.\n"
+"You can add option '-q' to disable autostart during build and restore the change manually before starting gaussdb.\n"
+msgstr ""
+"postgresql.conf中有嵌套的配置文件:%s, build不支持该文件.请从%s中移出嵌套配置文件, 并在postgresql.conf中注释'include'配置.\n"
+"您可以添加选项'-q'以在构建期间禁用自动启动, 并在启动gaussdb之前手动恢复更改\n"
+
+#: pg_ctl.cpp:4800
+#, c-format
+msgid "could not identify maxlsn, got %d rows and %d fields\n"
+msgstr "无法识别maxlsn, 得到 %d 行和 %d 字段\n"
+
+#: pg_ctl.cpp:4864 pg_ctl.cpp:4977
+#, c-format
+msgid "could not identify system: %s"
+msgstr "无法识别系统:%s"
+
+#: pg_ctl.cpp:4921
+msgid "Build check result : full build\n"
+msgstr "构建检查结果: 完全构建\n"
+
+#: pg_ctl.cpp:4924
+msgid "%s completed(%s).\n"
+msgstr "%s 完成(%s).\n"
+
+#: pg_ctl.cpp:4995
+msgid "could not get remote node name when cross cluster build.\n"
+msgstr "构建跨集群时无法获得远程节点名称.\n"
+
+#: pg_ctl.cpp:5025
+msgid "fetch MOT checkpoint: could not connect to server.\n"
+msgstr "获取MOT检查点:无法连接到服务器.\n"
+
+#: pg_ctl.cpp:5064
+msgid "inc build failed.\n"
+msgstr "Inc构建失败.\n"
+
+#: pg_ctl.cpp:5148
+msgid "start to overwrite xlog from local pg_xlog to shared storage.\n"
+msgstr "开始从本地pg_xlog覆盖xlog到共享存储.\n"
+
+#: pg_ctl.cpp:5152
+msgid "start to force overwrite xlog local pg_xlog to shared storage.\n"
+msgstr "开始强制覆盖xlog本地pg_xlog到共享存储.\n"
+
+#: pg_ctl.cpp:5155
+msgid "start to overwrite xlog from shared storage to local pg_xlog.\n"
+msgstr "开始将xlog从共享存储覆盖到本地pg_xlog.\n"
+
+#: pg_ctl.cpp:5157
+#, c-format
+msgid " unrecognized xlog copy mode \"%s\"\n"
+msgstr "无法识别的xlog复制模式\"%s\"\n"
+
+#: pg_ctl.cpp:5166
+msgid "overwrite xlog: fail.\n"
+msgstr "overwrite xlog:失败.\n"
+
+#: pg_ctl.cpp:5169
+msgid "overwrite xlog: success.\n"
+msgstr "overwrite xlog: 成功.\n"
+
+#: pg_ctl.cpp:5237
+#, c-format
+msgid "set gaussdb state file when %s build:db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(FULL_BUILD).\n"
+msgstr "设置gaussdb状态文件when%s构建:db状态(BUILDING_STATE), 服务器模式(STANDBY_MODE), 构建模式(FULL_BUILD).\n"
+
+#: pg_ctl.cpp:5280
+#, c-format
+msgid "the current work directory: %s could not be changed"
+msgstr "当前工作目录:%s无法更改"
+
+#: pg_ctl.cpp:5312
+msgid "set gaussdb state file when full build:db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(FULL_BUILD).\n"
+msgstr "db state(BUILDING_STATE), 服务器模式(STANDBY_MODE), 构建模式(FULL_BUILD).\n"
+
+#: pg_ctl.cpp:5323
+#, c-format
+msgid "build %s(%s).\n"
+msgstr "构建%s（%s）.\n"
+
+#: pg_ctl.cpp:5342
+msgid "stop failed, killing gaussdb by force ...\n"
+msgstr "停止失败, 强制关闭gaussdb…\n"
+
+#: pg_ctl.cpp:5346
+msgid " get realpath failed!\n"
+msgstr "get realpath失败!\n"
+
+#: pg_ctl.cpp:5358
+#, c-format
+msgid "command [%s] path: [%s] \n"
+msgstr "命令[%s]路径:[%s]\n"
+
+#
+#: pg_ctl.cpp:5360
+msgid "execute command failed \n"
+msgstr "执行命令失败\n"
+
+#: pg_ctl.cpp:5456
+#, c-format
+msgid " fscanf_s build_pid_file \"%s\" failed, could not set the build process pid: %s\n"
+msgstr "fscanf_s build_pid_file\"%s\"失败, 无法设置构建进程pid:%s\n"
+
+#: pg_ctl.cpp:5471
+#, c-format
+msgid " open build pid file \"%s\" failed, could not set the build process pid: %s\n"
+msgstr "打开构建pid文件\"%s\"失败, 无法设置构建进程pid:%s\n"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_ctl.cpp:5476
+#, c-format
+msgid "fopen build pid file \"%s\" success\n"
+msgstr "fopen build pid文件\"%s\"成功\n"
+
+#: pg_ctl.cpp:5481
+#, c-format
+msgid "fprintf build pid file \"%s\" failed, could not set the build process pid: %s\n"
+msgstr "fprintf构建pid文件\"%s\"失败, 无法设置构建进程pid:%s\n"
+
+#: pg_ctl.cpp:5486
+#, c-format
+msgid "fprintf build pid file \"%s\" success\n"
+msgstr "Fprintf构建pid文件\"%s\"成功\n"
+
+#: pg_ctl.cpp:5491
+#, c-format
+msgid "fsync build pid file \"%s\" failed, could not set the build process pid: %s\n"
+msgstr "Fsync build pid文件\"%s\"失败, 无法设置构建进程pid:%s\n"
+
+#: pg_ctl.cpp:5496
+#, c-format
+msgid "fsync build pid file \"%s\" success\n"
+msgstr "Fsync build pid文件\"%s\"成功\n"
+
+#: pg_ctl.cpp:5609
+msgid "[PATCH-ERROR]: Hotpatch timeout!\n"
+msgstr "[PATCH-ERROR]: Hotpatch 超时!\n"
+
+#: pg_ctl.cpp:5619
+msgid "[PATCH-ERROR] Read hotpatch result failed!\n"
+msgstr "[PATCH-ERROR] 读取 hotpatch result 失败!\n"
+
+#: pg_ctl.cpp:5645
+msgid "[PATCH-ERROR] Can not get instance pid\n"
+msgstr "[PATCH-ERROR] 无法获取实例pid\n"
+
+#: pg_ctl.cpp:5650
+#, c-format
+msgid "[PATCH-ERROR] Action [%s] is not supported\n"
+msgstr "[PATCH-ERROR] 处理步骤[%s]不支持\n"
+
+#: pg_ctl.cpp:5655
+msgid "[PATCH-ERROR] Can not remove result file. maybe other process patching now\n"
+msgstr "[PATCH-ERROR] 不能删除结果文件.也许现在正在进行其他进程的补丁\n"
+
+#: pg_ctl.cpp:5666
+#, c-format
+msgid "[PATCH-ERROR] Set hotpatch cmd failed on %d\n"
+msgstr "[PATCH-ERROR] 在 %d 设置hotpatch命令失败\n"
+
+#: pg_ctl.cpp:5673
+msgid "[PATCH-ERROR] send hotpatch signal failed\n"
+msgstr "[PATCH-ERROR] 发送hotpatch信号失败\n"
+
+#: pg_ctl.cpp:5690
+#, c-format
+msgid "[PATCH-ERROR]: invalid hotpatch name \"%s\"\n"
+msgstr "[PATCH-ERROR]: 无效的hotpatch名称\"%s\"\n"
+
+#: pg_ctl.cpp:5731 pg_ctl.cpp:5737
+#, c-format
+msgid "[STACK-ERROR] Invalid lwtid! \"%s\"\n"
+msgstr "[STACK-ERROR] 无效的lwtid!\"%s\"\n"
+
+#: pg_ctl.cpp:5769
+msgid "[STACK-ERROR] Invalid stack size or section size!\n"
+msgstr "[STACK-ERROR] 无效的堆栈大小或区段大小!\n"
+
+#
+#: pg_ctl.cpp:5775
+msgid "[STACK-ERROR] out of memory!\n"
+msgstr "[STACK-ERROR] 内存溢出!\n"
+
+#: pg_ctl.cpp:5780
+msgid "gs_stack start:\n"
+msgstr "gs_stack开始:\n"
+
+#: pg_ctl.cpp:5786
+msgid "[STACK-ERROR] Read stack failed!\n"
+msgstr "[STACK-ERROR] 读堆栈失败!\n"
+
+#: pg_ctl.cpp:5791
+#, c-format
+msgid "%s"
+msgstr "%s"
+
+#: pg_ctl.cpp:5810
+msgid "[STACK-ERROR]: Stack timeout!\n"
+msgstr "[STACK-ERROR]: 堆叠超时!\n"
+
+#: pg_ctl.cpp:5820
+msgid "[STACK-ERROR] Read stack size failed!\n"
+msgstr "[STACK-ERROR] 读取堆栈大小失败!\n"
+
+#: pg_ctl.cpp:5829
+msgid "[STACK-ERROR] unlink stack ret file failed!\n"
+msgstr "[STACK-ERROR] unlink stack ret文件失败!\n"
+
+#: pg_ctl.cpp:5832
+msgid "gs_stack finished!\n"
+msgstr "gs_stack完成!\n"
+
+#: pg_ctl.cpp:5843
+msgid "[STACK-ERROR] Can not get instance pid\n"
+msgstr "[STACK-ERROR] 无法获取实例pid\n"
+
+#: pg_ctl.cpp:5848
+msgid "[STACK-ERROR] Can not remove result file. maybe other process stacking now\n"
+msgstr "不能删除结果文件.也许其他进程正在堆叠\n"
+
+#: pg_ctl.cpp:5854
+msgid "[STACK-ERROR] Set stack cmd failed\n"
+msgstr "[STACK-ERROR] 设置堆栈命令失败\n"
+
+#: pg_ctl.cpp:5857
+msgid "[STACK-ERROR] unlink stack tmp file failed\n"
+msgstr "[STACK-ERROR] unlink stack tmp文件失败\n"
+
+#: pg_ctl.cpp:5864
+msgid "[STACK-ERROR] send stack signal failed\n"
+msgstr "[STACK-ERROR] 发送堆叠信号失败\n"
+
+#: pg_ctl.cpp:5867
+msgid "[STACK-ERROR] unlink stack file failed\n"
+msgstr "[STACK-ERROR] unlink stack文件失败\n"
+
+#: pg_ctl.cpp:5905
+#, c-format
+msgid "fail to write file \"%s\": %s.\n"
+msgstr "写文件失败\"%s\":%s.\n"
+
+#: pg_ctl.cpp:5909
+#, c-format
+msgid "fail to close file \"%s\": %s.\n"
+msgstr "关闭文件失败\"%s\":%s.\n"
+
+#: pg_ctl.cpp:5926
+#, c-format
+msgid " cannot run command; single-user server is running (PID: %ld)\n"
+msgstr "不能运行命令;单用户服务器运行(PID:%ld)\n"
+
+#: pg_ctl.cpp:5933
+#, c-format
+msgid "could not send signal (PID: %ld): %s\n"
+msgstr "无法发送信号(PID:%ld): %s\n"
+
+#: pg_ctl.cpp:5946
+#, c-format
+msgid "could not remove file \"%s\": %s\n"
+msgstr "无法删除文件 \"%s\": %s\n"
+
+#: pg_ctl.cpp:5973
+msgid "Failed status was read!\n"
+msgstr "已读取失败状态!\n"
+
+#: pg_ctl.cpp:5978
+msgid "Timeout status was read!\n"
+msgstr "超时状态已读取!\n"
+
+#: pg_ctl.cpp:5996 pg_ctl.cpp:6039 pg_ctl.cpp:6072
+msgid "Can't run this command in non DCF mode!\n"
+msgstr "不能在非DCF模式下执行此命令!\n"
+
+#: pg_ctl.cpp:6002
+msgid "Can't add a member in a non-primary node\n"
+msgstr "不能在非主节点中添加成员\n"
+
+#: pg_ctl.cpp:6007
+msgid "Were invalid node id, ip and port provided?\n"
+msgstr "是否提供了无效的节点id、ip和端口?\n"
+
+#: pg_ctl.cpp:6019
+#, c-format
+msgid "Start adding a new member with node id %u ip %s port %u role %u timeout %u.\n"
+msgstr "开始添加新成员:id %u ip %s 端口 %u 角色 %u 超时时间 %u.\n"
+
+#: pg_ctl.cpp:6028
+msgid "Adding member failed!"
+msgstr "添加成员失败!"
+
+#: pg_ctl.cpp:6031
+msgid "Please check adding member result by command 'gs_ctl query'"
+msgstr "请通过命令“gs_ctl query”检查添加成员的结果"
+
+#: pg_ctl.cpp:6044
+msgid "Can't remove a member in a non-primary node\n"
+msgstr "不能删除非主节点中的成员\n"
+
+#: pg_ctl.cpp:6049
+msgid "Was invalid node ID provided?\n"
+msgstr "提供的节点ID无效?\n"
+
+#: pg_ctl.cpp:6053
+#, c-format
+msgid "Start removing a member with node id %u.\n"
+msgstr "开始删除带有节点id的成员%u.\n"
+
+#: pg_ctl.cpp:6061
+msgid "Removing member failed!"
+msgstr "移除成员失败!"
+
+#: pg_ctl.cpp:6064
+msgid "Please check removing member result by command 'gs_ctl query'"
+msgstr "请使用命令“gs_ctl query”检查移除成员的结果"
+
+#: pg_ctl.cpp:6083
+msgid "Can't change primary role.\n"
+msgstr "不能改变主要角色.\n"
+
+#: pg_ctl.cpp:6092
+#, c-format
+msgid "The timeout is out of range and please set it lower than %d.\n"
+msgstr "超时时间超出范围, 请将其设置为小于%d.\n"
+
+#: pg_ctl.cpp:6095
+msgid "Start changing local DCF node role.\n"
+msgstr "开始修改本地DCF节点角色.\n"
+
+#: pg_ctl.cpp:6134
+msgid "Change role success"
+msgstr "转换角色成功"
+
+#: pg_ctl.cpp:6138
+#, c-format
+msgid "Change role timeout after %d seconds!\n"
+msgstr "修改角色超时在%d秒后超时!\n"
+
+#: pg_ctl.cpp:6141
+msgid "Change role failed!\n"
+msgstr "修改角色失败!\n"
+
+#: pg_ctl.cpp:6148
+msgid "Start set run mode.\n"
+msgstr "启动设置运行模式.\n"
+
+#: pg_ctl.cpp:6154
+msgid "Can't run this command in non-DCF mode!\n"
+msgstr "不能在非dcf模式下执行此命令!\n"
+
+#: pg_ctl.cpp:6159
+msgid "Was invalid xmode provided?\n"
+msgstr "是否提供了无效的xmode?\n"
+
+#
+#: pg_ctl.cpp:6173
+msgid "Was invalid vote number provided?\n"
+msgstr "是否提供无效投票号码?\n"
+
+#: pg_ctl.cpp:6177
+#, c-format
+msgid "DCF going to set run mode with xmode %u vote num %u!\n"
+msgstr "DCF将使用xmode设置运行模式%u 投票数%u!\n"
+
+#: pg_ctl.cpp:6197
+msgid "Set run mode success!\n"
+msgstr "设置运行模式成功!\n"
+
+#: pg_ctl.cpp:6201
+#, c-format
+msgid "Setting run-mode timeout after %d seconds!\n"
+msgstr "之后设置运行模式在%d秒后超时!\n"
+
+#
+#: pg_ctl.cpp:6204
+msgid "Set run mode failed!\n"
+msgstr "设置运行模式失败!\n"
+
+#: pg_ctl.cpp:6214 pg_ctl.cpp:6229
+#, c-format
+msgid "Invalid ipv4 format: %s!\n"
+msgstr "ipv4格式无效:%s!\n"
+
+#: pg_ctl.cpp:6238
+#, c-format
+msgid "Invalid number: %s!\n"
+msgstr "无效数字:%s!\n"
+
+#
+#: pg_ctl.cpp:6430
+msgid ""
+" cannot be run as root\n"
 "Please log in (using, e.g., \"su\") as the (unprivileged) user that will\n"
 "own the server process.\n"
 msgstr ""
-"%s: 无法以 root 用户运行\n"
-"请以服务器进程所属用户 (非特权用户) 登录 (或使用 \"su\")\n"
-"\n"
+"无法以 root 用户运行\n"
+"请以服务器进程所属用户 (非特权用户) 登录\n"
+"(比如使用\"su\")\n"
 
-#: pg_ctl.c:2120
-#, c-format
-msgid "%s: -S option not supported on this platform\n"
-msgstr "%s: -S 选项在该平台上不支持\n"
+#: pg_ctl.cpp:6497 pg_ctl.cpp:6840 pg_ctl.cpp:6856 pg_ctl.cpp:6869
+msgid "max path length is exceeded\n"
+msgstr "超过最大路径长度\n"
 
-#: pg_ctl.c:2167
-#, c-format
-msgid "%s: too many command-line arguments (first is \"%s\")\n"
-msgstr "%s: 命令行参数太多 (第一个是 \"%s\")\n"
+#
+#: pg_ctl.cpp:6523 pg_ctl.cpp:6662
+msgid "unexpected number specified\n"
+msgstr "指定的数量超出预期\n"
 
-#: pg_ctl.c:2191
-#, c-format
-msgid "%s: missing arguments for kill mode\n"
-msgstr "%s: 缺少 kill 模式参数\n"
+#: pg_ctl.cpp:6537
+msgid "Performing a Forced Switchover\n"
+msgstr "强制执行Switchover\n"
 
-#: pg_ctl.c:2209
-#, c-format
-msgid "%s: unrecognized operation mode \"%s\"\n"
-msgstr "%s: 无效的操作模式 \"%s\"\n"
+# command.c:122
+#
+#: pg_ctl.cpp:6598
+msgid "invalid stop barrier command \n"
+msgstr "无效的停止屏障命令\n"
 
-#: pg_ctl.c:2219
-#, c-format
-msgid "%s: no operation specified\n"
-msgstr "%s: 没有指定操作\n"
+#: pg_ctl.cpp:6613
+msgid " --coordinator and --datanode option are not supported on single node mode\n"
+msgstr "单节点模式不支持 --coordinator和 --datanode选项\n"
 
-#: pg_ctl.c:2240
+#
+#: pg_ctl.cpp:6633
+msgid " -S option not supported on this platform\n"
+msgstr "-S 选项在此平台上不支持\n"
+
+#
+#: pg_ctl.cpp:6640
+msgid "unexpected wait seconds specified\n"
+msgstr "指定的意外等待秒数\n"
+
+#
+#: pg_ctl.cpp:6651
+msgid "unexpected term specified\n"
+msgstr "指定的术语出乎意料\n"
+
+#
+#: pg_ctl.cpp:6674 pg_ctl.cpp:6812 pg_ctl.cpp:6831
+msgid "unexpected vote number specified\n"
+msgstr "指定了意外投票数\n"
+
+#: pg_ctl.cpp:6687
 #, c-format
+msgid "invalid xmode \"%s\"\n"
+msgstr "无效的xmode\"%s\"\n"
+
+#: pg_ctl.cpp:6699
+#, c-format
+msgid "wrong name length: %zu"
+msgstr "名字长度错误: %zu"
+
+#: pg_ctl.cpp:6704
+msgid "out of memory\n"
+msgstr "内存溢出\n"
+
+#: pg_ctl.cpp:6738
+msgid " invalid recv timeout\n"
+msgstr "无效的recv超时\n"
+
+# command.c:122
+#: pg_ctl.cpp:6749
+#, c-format
+msgid "invalid role \"%s\"\n"
+msgstr "无效的作用\"%s\"\n"
+
+# command.c:122
+#: pg_ctl.cpp:6761 pg_ctl.cpp:6767
+#, c-format
+msgid "invalid lsn \"%s\"\n"
+msgstr "无效的lsn\"%s\"\n"
+
+# command.c:122
+#
+#: pg_ctl.cpp:6785
+msgid "invalid hotpatch command \n"
+msgstr "无效的hotpatch命令\n"
+
+#
+#: pg_ctl.cpp:6889
+msgid "too many command-line arguments (first is)\n"
+msgstr "太多的命令行参数(第一个是)\n"
+
+#
+#: pg_ctl.cpp:6928
+msgid " missing arguments for kill mode\n"
+msgstr "终止模式缺少参数\n"
+
+#: pg_ctl.cpp:6957
+#, c-format
+msgid " unrecognized operation mode \"%s\"\n"
+msgstr "无法识别的操作模式\"%s\"\n"
+
+#
+#: pg_ctl.cpp:6966
+msgid " no operation specified\n"
+msgstr "未指定操作\n"
+
+#: pg_ctl.cpp:6975
+msgid " Coordinator or Datanode option not specified (-Z)\n"
+msgstr "没有指定协调器或Datanode选项(-Z)\n"
+
+#
+#: pg_ctl.cpp:7015
+msgid " no database directory specified and environment variable PGDATA unset\n"
+msgstr "没有指定数据库目录、环境变量PGDATA未设置\n"
+
+#: pg_ctl.cpp:7046
+msgid "failed to init dss device\n"
+msgstr "初始化dss设备失败\n"
+
+#: pg_ctl.cpp:7079
+#, c-format
+msgid "gs_ctl init,datadir is %s \n"
+msgstr "gs_ctl init, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7083
+#, c-format
+msgid "gs_ctl status,datadir is %s \n"
+msgstr "gs_ctl status, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7087
+#, c-format
+msgid "gs_ctl started,datadir is %s \n"
+msgstr "gs_ctl started, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7092
+msgid "Another gs_ctl command is still running,start failed !\n"
+msgstr "另一个gs_ctl命令仍在运行, 启动失败!\n"
+
+#: pg_ctl.cpp:7096
+#, c-format
+msgid "gs_ctl restarted ,datadir is %s \n"
+msgstr "gs_ctl restarted, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7101
+msgid "Another gs_ctl command is still running,restart failed !\n"
+msgstr "另一个gs_ctl命令仍在运行, 重启失败!\n"
+
+#: pg_ctl.cpp:7105
+#, c-format
+msgid "gs_ctl stopped ,datadir is %s \n"
+msgstr "gs_ctl stopped, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7109
+#, c-format
+msgid "gs_ctl reload ,datadir is %s \n"
+msgstr "gs_ctl reload, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7113
+#, c-format
+msgid "gs_ctl finish redo ,datadir is %s \n"
+msgstr "gs_ctl finish redo, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7117
+#, c-format
+msgid "gs_ctl failover ,datadir is %s \n"
+msgstr "gs_ctl failover, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7122
+msgid "Another gs_ctl command is still running,failover failed !\n"
+msgstr "另一个gs_ctl命令仍在运行, 故障转移失败!\n"
+
+#: pg_ctl.cpp:7127
+#, c-format
+msgid "gs_ctl switchover ,datadir is %s \n"
+msgstr "gs_ctl switchover, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7131
+msgid "Another gs_ctl command is still running,switchover failed !\n"
+msgstr "另一个gs_ctl命令仍在运行, 切换失败!\n"
+
+#: pg_ctl.cpp:7136
+#, c-format
+msgid "gs_ctl notify ,datadir is %s \n"
+msgstr "gs_ctl notify, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7140
+#, c-format
+msgid "gs_ctl query ,datadir is %s \n"
+msgstr "gs_ctl query, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7144
+#, c-format
+msgid "gs_ctl build query ,datadir is %s \n"
+msgstr "gs_ctl build query, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7148
+#, c-format
+msgid "gs_ctl kill ,datadir is %s \n"
+msgstr "gs_ctl kill, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7165
+msgid "When copy secure files from remote, need remote host and authentication!\n"
+msgstr "当从远程复制安全文件时, 需要远程主机和认证!\n"
+
+#: pg_ctl.cpp:7171
+#, c-format
+msgid "gs_ctl full build ,datadir is %s,conn_str is '%s'\n"
+msgstr "gs_ctl full build, 数据目录为%s, conn_str为'%s'\n"
+
+#: pg_ctl.cpp:7176
+#, c-format
+msgid "gs_ctl standby full build ,datadir is %s,conn_str is '%s'\n"
+msgstr "gs_ctl standby full build, 数据目录为%s, conn_str为'%s'\n"
+
+#: pg_ctl.cpp:7181
+#, c-format
+msgid "gs_ctl copy secure files from remote build ,datadir is %s,conn_str is '%s'\n"
+msgstr "gs_ctl从远程构建复制安全文件, 数据目录为%s, conn_str为'%s'\n"
+
+#: pg_ctl.cpp:7186
+msgid "gs_ctl build check ,datadir is %s,conn_str is '%s'\n"
+msgstr "gs_ctl build check, 数据目录为%s, conn_str为'%s'\n"
+
+#: pg_ctl.cpp:7191
+#, c-format
+msgid "gs_ctl incremental build ,datadir is %s,conn_str is '%s'\n"
+msgstr "gs_ctl incremental build, 数据目录为%s, conn_str为'%s'\n"
+
+#: pg_ctl.cpp:7198
+#, c-format
+msgid "gs_ctl full build ,datadir is %s\n"
+msgstr "gs_ctl full build, 数据目录为%s\n"
+
+#: pg_ctl.cpp:7202
+#, c-format
+msgid "gs_ctl standby full build ,datadir is %s\n"
+msgstr "gs_ctl standby full build, 数据目录为%s\n"
+
+#: pg_ctl.cpp:7206
+#, c-format
+msgid "gs_ctl full backup to obs ,datadir is %s\n"
+msgstr "gs_ctl full backup到obs, 数据目录为%s\n"
+
+#: pg_ctl.cpp:7210
+msgid "gs_ctl build check ,datadir is %s\n"
+msgstr "gs_ctl build check, 数据目录为%s \n"
+
+#: pg_ctl.cpp:7214
+#, c-format
+msgid "gs_ctl incremental build ,datadir is %s\n"
+msgstr "gs_ctl incremental build, 数据目录为%s\n"
+
+#: pg_ctl.cpp:7226
+msgid "Another gs_ctl command is still running,build failed !\n"
+msgstr "另一个gs_ctl命令仍在运行, 构建失败!\n"
+
+#: pg_ctl.cpp:7235
+msgid "[PATCH-ERROR] Another gs_ctl command is still running,hotpatch failed !\n"
+msgstr "[PATCH-ERROR] 另一个gs_ctl命令仍在运行, hotpatch失败!\n"
+
+#: pg_ctl.cpp:7243
+msgid "[STACK-ERROR] Another gs_ctl command is still running,gs_stack failed !\n"
+msgstr "[STACK-ERROR] 另一个gs_ctl命令仍在运行, gs_stack失败!\n"
+
+#: pg_ctl.cpp:7252
+msgid "Another gs_ctl command is still running, add member failed.\n"
+msgstr "另一个gs_ctl命令仍在运行, 添加成员失败.\n"
+
+#: pg_ctl.cpp:7261
+msgid "Another gs_ctl command is still running, remove member failed.\n"
+msgstr "另一个gs_ctl命令仍在运行, 删除成员失败.\n"
+
+#: pg_ctl.cpp:7270
+msgid "Another gs_ctl command is still running, change role failed.\n"
+msgstr "另一个gs_ctl命令仍在运行, 更改角色失败.\n"
+
+#: pg_ctl.cpp:7279
+msgid "Another gs_ctl command is still running, minority start failed.\n"
+msgstr "另一个gs_ctl命令仍在运行, 少数派启动失败.\n"
+
+#: pg_ctl.cpp:7293
+msgid "Another gs_ctl command is still running, restore failed.\n"
+msgstr "另一个gs_ctl命令仍在运行, 恢复失败.\n"
+
+#: pg_ctl.cpp:7301
+msgid "Another gs_ctl command is still running, copy failed.\n"
+msgstr "另一个gs_ctl命令仍在运行, 复制失败.\n"
+
+#: pg_ctl.cpp:7351
+msgid "can not contain interconnect nodes.\n"
+msgstr "不能包含互连节点.\n"
+
+#: receivelog.cpp:107
+msgid "%s: WAL segment path that will open is %s \n"
+msgstr "%s: 将打开的WAL段路径为%s \n"
+
+#: receivelog.cpp:111
+#, c-format
+msgid "%s: realpath WAL segment path %s failed : %s\n"
+msgstr "%s: realpath WAL段路径%s失败: %s\n"
+
+#: receivelog.cpp:117
+#, c-format
+msgid "%s: Could not open WAL segment %s: %s\n"
+msgstr "%s: 无法打开WAL段%s: %s\n"
+
+#: receivelog.cpp:126
+#, c-format
+msgid "%s: could not stat WAL segment %s: %s\n"
+msgstr "%s: 无法统计WAL段%s: %s\n"
+
+#: receivelog.cpp:128 receivelog.cpp:143 receivelog.cpp:159 receivelog.cpp:174
+#: receivelog.cpp:196
+#, c-format
+msgid "%s: close file failed %s: %s\n"
+msgstr "%s: 关闭文件失败%s: %s\n"
+
+#: receivelog.cpp:137
+msgid "%s: WAL segment %s is %d bytes, should be 0 or %lu\n"
+msgstr "%s: WAL段%s是%d字节, 应该是0或%lu\n"
+
+#: receivelog.cpp:157
+msgid "%s: could not write to file %s: %s\n"
+msgstr "%s: 无法写入文件%s: %s\n"
+
+#: receivelog.cpp:163 receivelog.cpp:178
+#, c-format
+msgid "%s: unlink file failed %s: %s\n"
+msgstr "%s:解链接文件失败%s: %s\n"
+
+#: receivelog.cpp:172
+#, c-format
+msgid "%s: could not pad WAL segment %s: %s\n"
+msgstr "%s: 无法填充WAL段%s: %s\n"
+
+#: receivelog.cpp:191
+#, c-format
+msgid "%s: could not seek back to beginning of WAL segment %s: %s\n"
+msgstr "%s: 无法寻回WAL段的开始%s: %s\n"
+
+#: receivelog.cpp:276
+#, c-format
+msgid "%s: could not get current position in file %s: %s\n"
+msgstr "%s: 无法在文件中获取当前位置%s: %s\n"
+
+#: receivelog.cpp:281
+#, c-format
+msgid "%s: could not fsync file %s: %s\n"
+msgstr "%s: 无法同步文件%s: %s\n"
+
+#: receivelog.cpp:286
+#, c-format
+msgid "%s: could not close file %s: %s\n"
+msgstr "%s: 无法关闭文件%s: %s\n"
+
+#: receivelog.cpp:304
+#, c-format
+msgid "%s: could not rename file %s: %s\n"
+msgstr "%s: 不能重命名文件%s: %s\n"
+
+#: receivelog.cpp:308
+#, c-format
+msgid "%s: not renaming %s, segment is not complete.\n"
+msgstr "%s: 不重命名%s, 段不完整.\n"
+
+#: receivelog.cpp:380
+#, c-format
+msgid "%s: could not send feedback packet: %s"
+msgstr "%s: 无法发送回馈包: %s"
+
+#
+#: receivelog.cpp:416
 msgid ""
-"%s: no database directory specified and environment variable PGDATA unset\n"
-msgstr "%s: 没有指定数据目录, 并且没有设置 PGDATA 环境变量\n"
+"\n"
+"terminating XLogStream receiver due to timeout\n"
+msgstr ""
+"\n"
+"由于超时而终止XLogStream接收器\n"
 
-#~ msgid "%s: invalid option %s\n"
-#~ msgstr "%s: 无效选项 %s\n"
+#: receivelog.cpp:440
+#, c-format
+msgid "%s: received xlog record for offset %u with no file open\n"
+msgstr "%s: 收到的xlog记录用于偏移量%u没有打开文件\n"
 
-#~ msgid "%s: a standalone backend \"postgres\" is running (PID: %ld)\n"
-#~ msgstr "%s: 一个独立的后端 \"postgres\" 正在运行 (PID: %ld)\n"
+#: receivelog.cpp:448
+#, c-format
+msgid "%s: got WAL data offset %08x, expected %08x\n"
+msgstr "%s: 得到WAL数据偏移 %08x, 期望值为 %08x\n"
 
-#~ msgid "%s: neither postmaster nor postgres running\n"
-#~ msgstr "%s: postmaster 或者 postgres 没有运行\n"
+#: receivelog.cpp:477
+#, c-format
+msgid "%s: could not write %u bytes to WAL file %s: %s\n"
+msgstr "%s:无法写%u字节到WAL文件%s:%s\n"
 
-#~ msgid ""
-#~ "The program \"postmaster\" was found by \"%s\"\n"
-#~ "but was not the same version as %s.\n"
-#~ "Check your installation.\n"
-#~ msgstr ""
-#~ "%s 找到程序 \"postmaster\", 但版本和 \"%s\" 不一致.\n"
-#~ "\n"
-#~ "检查您的安装.\n"
+#: receivelog.cpp:589
+#, c-format
+msgid " could not identify system: %s\n"
+msgstr "无法识别系统:%s\n"
 
-#~ msgid ""
-#~ "The program \"postmaster\" is needed by %s but was not found in the\n"
-#~ "same directory as \"%s\".\n"
-#~ "Check your installation.\n"
-#~ msgstr ""
-#~ "程序 \"postmaster\" 是 %s 需要的, 但没有在同一个目录 \"%s\" 发现.\n"
-#~ "\n"
-#~ "检查您的安装.\n"
+#: receivelog.cpp:595
+#, c-format
+msgid " could not identify system, got %d rows and %d fields\n"
+msgstr "无法识别系统, 得到了%d行和%d字段\n"
 
-#~ msgid "could not start server\n"
-#~ msgstr "无法启动服务器进程\n"
+#
+#: receivelog.cpp:602
+msgid " system identifier does not match between base backup and streaming connection\n"
+msgstr "基本备份和流连接之间的系统标识符不匹配\n"
 
-#~ msgid "  --version              output version information, then exit\n"
-#~ msgstr "  --version              显示版本信息, 然后退出\n"
+#
+#: receivelog.cpp:607
+msgid " timeline does not match between base backup and streaming connection\n"
+msgstr "基本备份和流连接之间的时间轴不匹配\n"
 
-#~ msgid "  --help                 show this help, then exit\n"
-#~ msgstr "  --help                 显示此帮助信息, 然后退出\n"
+#: receivelog.cpp:614
+msgid "check identify system success\n"
+msgstr "检查识别系统成功\n"
 
-#~ msgid ""
-#~ "%s is a utility to start, stop, restart, reload configuration files,\n"
-#~ "report the status of a PostgreSQL server, or signal a PostgreSQL "
-#~ "process.\n"
-#~ "\n"
-#~ msgstr ""
-#~ "%s 是一个启动, 停止, 重启, 重载配置文件, 报告 PostgreSQL 服务器状态,\n"
-#~ "或者杀掉 PostgreSQL 进程的工具\n"
-#~ "\n"
+# command.c:1103
+#: receivelog.cpp:627
+#, c-format
+msgid "could not start replication: %s\n"
+msgstr "无法启动复制:%s\n"
+
+#: receivelog.cpp:633
+#, c-format
+msgid "send %s success\n"
+msgstr "发送%s成功\n"
+
+# fe-misc.c:389 fe-misc.c:423 fe-misc.c:838
+#: receivelog.cpp:719
+#, c-format
+msgid " select() failed: %s\n"
+msgstr "select()失败:%s\n"
+
+#: receivelog.cpp:725
+#, c-format
+msgid " Could not receive data from WAL stream, please check network state and configuration, e.g timeout setting: %s\n"
+msgstr "无法从WAL流接收数据, 请检查网络状态和配置, 例如超时设置:%s\n"
+
+#: receivelog.cpp:742
+#, c-format
+msgid " Could not read copy data, please check network state and configuration: %s\n"
+msgstr "无法读取副本数据, 请检查网络状态和配置:%s\n"
+
+#: receivelog.cpp:756
+#, c-format
+msgid " keepalive message is incorrect size: %d\n"
+msgstr "Keepalive消息大小不正确:%d\n"
+
+#
+#: receivelog.cpp:759
+msgid " keepalive message is received\n"
+msgstr "收到Keepalive消息\n"
+
+#: receivelog.cpp:779
+msgid "skip gaussdb config file while receiving xlog.\n"
+msgstr "接收xlog时跳过gaussdb配置文件.\n"
+
+#: receivelog.cpp:782
+#, c-format
+msgid " unrecognized streaming header: \"%c\".\n"
+msgstr "无法识别的streaming header:\"%c\".\n"
+
+#: receivelog.cpp:787
+#, c-format
+msgid " wal streaming header is too small: %d.\n"
+msgstr "Wal streaming header太小:%d.\n"
+
+#: receivelog.cpp:790
+msgid " wal streaming body is empty.\n"
+msgstr "wal streaming body是空的.\n"
+
+#: receivelog.cpp:841
+#, c-format
+msgid " unexpected termination of replication stream: %s.\n"
+msgstr "复制流异常终止:%s.\n"
+
+#: receivelog.cpp:852 receivelog.cpp:866
+#, c-format
+msgid " could not close file \"%s\": %s.\n"
+msgstr "无法关闭文件\"%s\":%s.\n"
+
+#: streamutil.cpp:51 streamutil.cpp:68
+#, c-format
+msgid "%s: out of memory\n"
+msgstr "%s: 内存溢出\n"
+
+#: streamutil.cpp:63
+#, c-format
+msgid "%s: malloc 0\n"
+msgstr "%s: malloc 0\n"
+
+#: streamutil.cpp:104
+#, c-format
+msgid "invalid port number \"%s\"\n"
+msgstr "无效端口号\"%s\"\n"
+
+#: streamutil.cpp:174
+msgid "Password: "
+msgstr "密码: "
+
+#: streamutil.cpp:186
+#, c-format
+msgid "%s: could not connect to server\n"
+msgstr "%s: 无法连接到服务器\n"
+
+#: streamutil.cpp:199
+#, c-format
+msgid "%s: could not connect to server: %s\n"
+msgstr "%s: 无法连接到服务器: %s\n"
+
+#: streamutil.cpp:221
+#, c-format
+msgid "%s: could not determine server setting for integer_datetimes\n"
+msgstr "%s: 无法确定服务器上integer_datetimes的配置\n"
+
+#: streamutil.cpp:233
+#, c-format
+msgid "%s: integer_datetimes compile flag does not match server\n"
+msgstr "%s: integer_datetimes编译开关与服务器端不匹配\n"

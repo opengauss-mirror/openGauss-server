@@ -119,6 +119,9 @@ DATA(insert OID = 4993 ( "dbe_pldeveloper" PGUID 0 _null_ n f _null_));
 DESCR("dbe_pldeveloper schema");
 #define DBE_PLDEVELOPER_NAMESPACE 4993
 #endif
+DATA(insert OID = 4994 ( "coverage" PGUID 0 _null_ n f _null_));
+DESCR("coverage schema");
+#define PROC_COVERAGE_NAMESPACE 4994
 
 DATA(insert OID = 9049 ( "dbe_sql_util" PGUID 0 _null_ n f _null_));
 DESCR("sql util schema");

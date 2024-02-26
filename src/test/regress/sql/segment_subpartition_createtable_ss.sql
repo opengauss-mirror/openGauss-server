@@ -34,7 +34,7 @@ insert into list_list values('201902', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
 insert into list_list values('201903', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
-select * from list_list;
+select * from list_list order by month_code;
 drop table list_list;
 
 CREATE TABLE list_hash
@@ -63,7 +63,7 @@ insert into list_hash values('201902', '3', '1', 1);
 insert into list_hash values('201903', '4', '1', 1);
 insert into list_hash values('201903', '5', '1', 1);
 insert into list_hash values('201903', '6', '1', 1);
-select * from list_hash;
+select * from list_hash order by month_code;
 drop table list_hash;
 
 CREATE TABLE list_range
@@ -93,7 +93,7 @@ insert into list_range values('201903', '4', '1', 1);
 insert into list_range values('201903', '5', '1', 1);
 insert into list_range values('201903', '6', '1', 1);
 
-select * from list_range;
+select * from list_range order by month_code;
 drop table list_range;
 
 CREATE TABLE range_list
@@ -123,7 +123,7 @@ insert into range_list values('201903', '2', '1', 1);
 insert into range_list values('201903', '1', '1', 1);
 insert into range_list values('201903', '2', '1', 1);
 
-select * from range_list;
+select * from range_list order by month_code;
 drop table range_list;
 
 CREATE TABLE range_hash
@@ -153,7 +153,7 @@ insert into range_hash values('201903', '2', '1', 1);
 insert into range_hash values('201903', '1', '1', 1);
 insert into range_hash values('201903', '2', '1', 1);
 
-select * from range_hash;
+select * from range_hash order by month_code;
 drop table range_hash;
 
 CREATE TABLE range_range
@@ -213,7 +213,7 @@ insert into hash_list values('201903', '2', '1', 1);
 insert into hash_list values('201903', '1', '1', 1);
 insert into hash_list values('201903', '2', '1', 1);
 
-select * from hash_list;
+select * from hash_list order by month_code;
 drop table hash_list;
 
 CREATE TABLE hash_hash
@@ -243,7 +243,7 @@ insert into hash_hash values('201903', '2', '1', 1);
 insert into hash_hash values('201903', '1', '1', 1);
 insert into hash_hash values('201903', '2', '1', 1);
 
-select * from hash_hash;
+select * from hash_hash order by month_code;
 drop table hash_hash;
 
 CREATE TABLE hash_range
@@ -273,7 +273,7 @@ insert into hash_range values('201903', '2', '1', 1);
 insert into hash_range values('201903', '1', '1', 1);
 insert into hash_range values('201903', '2', '1', 1);
 
-select * from hash_range;
+select * from hash_range order by month_code;
 drop table hash_range;
 
 
@@ -903,6 +903,7 @@ PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_codeXXX)
     SUBPARTITION p_201902_b VALUES ( '2' )
   )
 );
+drop table list_list;
 
 
 CREATE TABLE list_range
@@ -956,8 +957,8 @@ insert into list_list values('201902', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
 insert into list_list values('201903', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
-select  * from list_list partition (p_201901);
-select  * from list_list partition (p_201902);
+select  * from list_list partition (p_201901) order by month_code;
+select  * from list_list partition (p_201902) order by month_code;
 drop table list_list;
 
 CREATE TABLE list_list

@@ -111,7 +111,8 @@ msgstr "期望空值或一个字符串"
 #, c-format
 msgid ""
 "PL/Python trigger function returned \"MODIFY\" in a DELETE trigger -- ignored"
-msgstr "在DELETE触发器中的PL/Python 触发器函数返回 \"MODIFY\"  -- 忽略"
+msgstr ""
+"在DELETE触发器中的PL/Python 触发器函数返回 \"MODIFY\"  -- 忽略"
 
 #: plpy_exec.c:315
 #, c-format
@@ -132,7 +133,8 @@ msgstr "当设置参数的同时, 执行PyDict_SetItemString()失败"
 #, c-format
 msgid ""
 "function returning record called in context that cannot accept type record"
-msgstr "返回值类型是记录的函数在不接受使用记录类型的环境中调用"
+msgstr ""
+"返回值类型是记录的函数在不接受使用记录类型的环境中调用"
 
 #: plpy_exec.c:450
 #, c-format
@@ -147,7 +149,7 @@ msgstr "在构建触发器参数的同时无法创建新的字典."
 #: plpy_exec.c:664
 #, c-format
 msgid "TD[\"new\"] deleted, cannot modify row"
-msgstr "TD[\"new\"] 已删除，无法修改记录"
+msgstr "TD[\"new\"] 已删除, 无法修改记录"
 
 #: plpy_exec.c:667
 #, c-format
@@ -164,7 +166,9 @@ msgstr "在顺序位置%d的TD[\"new\"]字典键值不是字符串"
 msgid ""
 "key \"%s\" found in TD[\"new\"] does not exist as a column in the triggering "
 "row"
-msgstr "在 TD[\"new\"]中找到的键 \"%s\"在正在触发的记录中不是作为列而存在."
+msgstr "" 
+"在 TD[\"new\"]中找到的键 \"%s\"在正在触发的记录中不是作为列而存在."
+""
 
 #: plpy_exec.c:778
 #, c-format
@@ -187,7 +191,8 @@ msgid ""
 "This session has previously used Python major version %d, and it is now "
 "attempting to use Python major version %d."
 msgstr ""
-"这个会话先前已经使用的Python主版本是%d，现在它试图使用的Python主版本是%d "
+"这个会话先前已经使用的Python主版本是%d, 现在它试图使用的Python主版本是%d "
+""
 
 #: plpy_main.c:104
 #, c-format
@@ -357,7 +362,7 @@ msgstr "无法创建新的字典"
 #: plpy_typeio.c:408
 #, c-format
 msgid "PL/Python does not support conversion to arrays of row types."
-msgstr "PL/Python不支持对行类型数组的转换。"
+msgstr "PL/Python不支持对行类型数组的转换."
 
 #: plpy_typeio.c:584
 #, c-format
@@ -389,13 +394,16 @@ msgstr "无法创建Python对象的字符串表达式"
 msgid ""
 "could not convert Python object into cstring: Python string representation "
 "appears to contain null bytes"
-msgstr "无法将Python对象转换为cstring: Python字符串表达式可能包含空字节"
+msgstr ""
+"无法将Python对象转换为cstring: Python字符串表达式可能包含空字节"
+"似乎包含空字节"
 
 #: plpy_typeio.c:787
 #, c-format
 msgid ""
 "return value of function with array return type is not a Python sequence"
-msgstr "带有数组返回类型的函数返回值不是一个Python序列"
+msgstr "" 
+"带有数组返回类型的函数返回值不是一个Python序列"
 
 #: plpy_typeio.c:886
 #, c-format
@@ -407,7 +415,9 @@ msgstr "在映射中没有找到键\"%s\""
 msgid ""
 "To return null in a column, add the value None to the mapping with the key "
 "named after the column."
-msgstr "为了在一列中返回空值, 需要在列的后面对带有已命名键的映射添加值None"
+msgstr ""
+"为了在一列中返回空值, "
+"需要在列的后面对带有已命名键的映射添加值None"
 
 #: plpy_typeio.c:935
 #, c-format
@@ -425,7 +435,8 @@ msgid ""
 "To return null in a column, let the returned object have an attribute named "
 "after column with value None."
 msgstr ""
-"为了在一列中返回空值, 需要让返回的对象在带有值None的列后面的带有已命名属性"
+"为了在一列中返回空值, "
+"需要让返回的对象在带有值None列后面的带有已命名属性"
 
 #: plpy_util.c:70
 #, c-format
@@ -454,7 +465,7 @@ msgstr "无法从已编码字符串里提取相应字节码值"
 #~ "达式"
 
 #~ msgid "out of memory"
-#~ msgstr "内存用尽"
+#~ msgstr "内存溢出"
 
 #~ msgid "PL/Python: %s"
 #~ msgstr "PL/Python: %s"

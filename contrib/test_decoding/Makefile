@@ -50,6 +50,17 @@ regresscheck: all | submake-regress submake-test_decoding
 	    --outputdir=./regression_output \
 	    $(REGRESSCHECKS)
 
+all: objfiles.txt
+     
+ # generate libpq objfiles.txt to suspend duplicate make of gaussdb
+objfiles.txt: $(OBJS)
+	@echo "" > objfiles.txt
+
+objfiles_clean:
+	rm -f objfiles.txt
+
+clean: objfiles_clean
+
 regresscheck-install-force: | submake-regress submake-test_decoding
 	$(pg_regress_installcheck) \
 	    --extra-install=contrib/test_decoding \

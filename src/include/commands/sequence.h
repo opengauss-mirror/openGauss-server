@@ -136,6 +136,20 @@ typedef struct xl_seq_rec {
     /* SEQUENCE TUPLE DATA FOLLOWS AT THE END */
 } xl_seq_rec;
 
+/* Information needed to define a sequence. */
+typedef struct sequence_values
+{
+    bool large;
+    char *sequence_name;
+    char *last_value;
+    char *start_value;
+    char *increment_by;
+    char *max_value;
+    char *min_value;
+    char *cache_value;
+    bool is_cycled;
+} sequence_values;
+
 /*
  * We don't want to log each fetching of a value from a sequence,
  * so we pre-log a few fetches in advance. In the event of
@@ -178,6 +192,7 @@ extern void seq_desc(StringInfo buf, XLogReaderState* record);
 extern const char* seq_type_name(uint8 subtype);
 extern GTM_UUID get_uuid_from_rel(Relation rel);
 extern void lockNextvalOnCn(Oid relid);
+extern sequence_values *get_sequence_values(Oid sequenceId);
 
 extern void get_sequence_params(Relation rel, int64* uuid, int64* start, int64* increment, int64* maxvalue,
     int64* minvalue, int64* cache, bool* cycle);

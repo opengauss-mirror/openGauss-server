@@ -74,6 +74,7 @@
 #include "utils/evp_cipher.h"
 #include "replication/walsender_private.h"
 #include "replication/walsender.h"
+#include "replication/ss_disaster_cluster.h"
 #include "workload/workload.h"
 #include "utils/builtins.h"
 #include "catalog/pg_namespace.h"
@@ -1630,6 +1631,77 @@ Buffer ReadBuffer(Relation reln, BlockNumber block_num)
     return ReadBufferExtended(reln, MAIN_FORKNUM, block_num, RBM_NORMAL, NULL);
 }
 
+Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                                     BufferAccessStrategy strategy, int maxBulkCount, bool isVacuum)
+{
+    bool hit;
+    Buffer buf;
+    char* bufRead;
+    int paramNum = 0;
+    MemoryContext* memCxt = NULL;
+    MemoryContext oldContext;
+
+    if (block_num == P_NEW) {
+        STORAGE_SPACE_OPERATION(reln, BLCKSZ);
+    }
+
+    RelationOpenSmgr(reln);
+    if (RELATION_IS_OTHER_TEMP(reln) && fork_num <= INIT_FORKNUM) {
+        /* We would be likely to get wrong data since we have no visibility into the owning session's local buffers. */
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot access temporary tables of other sessions")));
+    }
+
+    /* Read the buffer. */
+    pgstat_count_buffer_read(reln);
+    pgstatCountBlocksFetched4SessionLevel();
+
+    if (RelationisEncryptEnable(reln)) {
+        reln->rd_smgr->encrypt = true;
+    }
+     /*
+      * We will charge what parms we will use by isVacuum.
+      * Two Branch is same, we will check cxt and bulk_buf.
+      */
+    paramNum = isVacuum ? u_sess->attr.attr_storage.vacuum_bulk_read_size : u_sess->attr.attr_storage.heap_bulk_read_size;
+    if (u_sess->pre_read_mem_cxt == NULL) {
+        u_sess->pre_read_mem_cxt = AllocSetContextCreate(
+                u_sess->top_mem_cxt, "Memory Context for pre-read and pre-extend", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+        oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        /*
+         * Due to vacuum_bulk_read_size can be writed into postgres.conf,
+         * we should try to load max_vacuum_bulk_read_size at first.
+         */
+        u_sess->storage_cxt.max_vacuum_bulk_read_size = Max(u_sess->storage_cxt.max_vacuum_bulk_read_size, 
+            u_sess->attr.attr_storage.vacuum_bulk_read_size);
+
+        u_sess->storage_cxt.bulk_buf_vacuum = (char*)palloc(u_sess->storage_cxt.max_vacuum_bulk_read_size * BLCKSZ);
+        u_sess->storage_cxt.bulk_buf_read = (char*)palloc(u_sess->storage_cxt.max_heap_bulk_read_size * BLCKSZ);
+        (void) MemoryContextSwitchTo(oldContext);
+    }
+
+    bufRead = isVacuum ? u_sess->storage_cxt.bulk_buf_vacuum : u_sess->storage_cxt.bulk_buf_read;
+    buf = MultiBulkReadBufferCommon(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num, block_num, mode, strategy, &hit, maxBulkCount, NULL, paramNum, bufRead);
+    
+    if (hit) {
+        /* Update pgstat counters to reflect a cache hit */
+        pgstat_count_buffer_hit(reln);
+        u_sess->storage_cxt.bulk_read_count++;
+    } else if (u_sess->storage_cxt.is_in_pre_read) {
+        /* if not first to unhit, need to record */
+        u_sess->storage_cxt.bulk_read_max = Max(u_sess->storage_cxt.bulk_read_count + 1, u_sess->storage_cxt.bulk_read_max);
+        u_sess->storage_cxt.bulk_read_min = Min(u_sess->storage_cxt.bulk_read_count + 1, u_sess->storage_cxt.bulk_read_min);
+        u_sess->storage_cxt.bulk_read_count = 0;
+    } else {
+        /* if first time to unhit, it is normal to start */
+        u_sess->storage_cxt.is_in_pre_read = true;
+        u_sess->storage_cxt.bulk_read_max = 1;
+        u_sess->storage_cxt.bulk_read_min = MAX_BULK_IO_SIZE + 1;
+    }
+    return buf;
+
+}
+
 Buffer buffer_read_extended_internal(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                                      BufferAccessStrategy strategy)
 {
@@ -1715,8 +1787,10 @@ Buffer buffer_read_extended_internal(Relation reln, ForkNumber fork_num, BlockNu
  */
 Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
                           BufferAccessStrategy strategy)
-{
-    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker()) {
+{   
+    /* In ss replication dorado cluster mode, it is not supported that standby read in extreme rto. */
+    if (IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker() &&
+        !SS_DISASTER_STANDBY_CLUSTER) {
         return standby_read_buf(reln, fork_num, block_num, mode, strategy);
     } else {
         return buffer_read_extended_internal(reln, fork_num, block_num, mode, strategy);
@@ -2240,6 +2314,220 @@ static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
     }
 }
 
+/* 
+ * 
+ * MultiBulkReadBufferCommon
+ * This function is prepared for pre-read, and it cant be use to allocate new buffer
+ */
+Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber firstBlockNum,
+                                ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, int maxBulkCount, const XLogPhyBlock *pblk, int paramNum, char* bufRead)
+{
+    BufferDesc *bufHdr = NULL;
+    BufferDesc *firstBufHdr = NULL;
+    char* buf_read = NULL;
+    Block bufBlock;
+    int index = 0;
+    int actual_bulk_count = 0;
+    int remaining_lwlock = 0;
+    bool found = false;
+    bool isLocalBuf = SmgrIsTemp(smgr);
+    MemoryContext oldContext;
+    bool* check_fail;
+
+    *hit = false;
+
+    maxBulkCount = Min(paramNum, maxBulkCount);
+
+    if (firstBlockNum == P_NEW || maxBulkCount <= 1 || mode != RBM_NORMAL || IsSegmentFileNode(smgr->smgr_rnode.node) 
+        || IS_COMPRESSED_MAINFORK(smgr, forkNum) || ENABLE_DSS) {
+        /* If dont have qualify to pre-read (PS: including DSS)*/
+        return ReadBuffer_common(smgr, relpersistence, forkNum, firstBlockNum, mode, strategy, hit, pblk);
+    }
+    /* Formmer BufferAlloc and TerimateIO cant satisfied this condition，so we must use more array */
+    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress);
+    Assert(u_sess->storage_cxt.bulk_io_in_progress_count == 0);
+
+    u_sess->storage_cxt.bulk_io_is_in_progress = true;
+
+    /* Allocate Memory Context for arrays once */
+    /* If bulk_io_in_progress_buf is not NULL, it means we have mem_cxt already */
+    if (u_sess->storage_cxt.bulk_io_in_progress_buf == NULL) {
+        /* The first switch is to create the bulk buf for record buffer reading */
+        oldContext = MemoryContextSwitchTo(u_sess->pre_read_mem_cxt);
+        u_sess->storage_cxt.bulk_io_in_progress_buf = (BufferDesc**)palloc(MAX_BULK_IO_SIZE * sizeof(u_sess->storage_cxt.bulk_io_in_progress_buf[0]));
+        u_sess->storage_cxt.bulk_io_is_for_input = (bool*)palloc(MAX_BULK_IO_SIZE * sizeof(u_sess->storage_cxt.bulk_io_is_for_input[0]));
+        (void) MemoryContextSwitchTo(oldContext);
+        Assert(u_sess->storage_cxt.bulk_io_is_for_input != NULL);
+    } 
+
+    *hit = false;
+    /* Make sure we will have room to remember the buffer pin */
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);   
+    /* IO compand operation */
+
+    TRACE_POSTGRESQL_BUFFER_READ_START(forkNum, firstBlockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
+                                       smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, false);
+
+    if (isLocalBuf) {
+        bufHdr = LocalBufferAlloc(smgr, forkNum, firstBlockNum, &found);
+        if (found) {
+            u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
+        } else {
+            u_sess->instr_cxt.pg_buffer_usage->local_blks_read++;
+            pgstatCountLocalBlocksRead4SessionLevel();
+        }
+    } else {
+        /*
+         * lookup the buffer.  IO_IN_PROGRESS is set if the requested block is
+         * not currently in memory.
+         */
+        bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, firstBlockNum, strategy, &found, pblk);
+        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+            bufHdr->extra->encrypt = smgr->encrypt ? true : false; 
+        }
+        if (found) {
+            u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
+        } else {
+            u_sess->instr_cxt.pg_buffer_usage->shared_blks_read++;
+            pgstatCountSharedBlocksRead4SessionLevel();
+        }
+    }
+found_branch:
+    if (found) {
+        *hit = true;
+        t_thrd.vacuum_cxt.VacuumPageHit++;
+
+        if (t_thrd.vacuum_cxt.VacuumCostActive)
+            t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageHit;
+
+        TRACE_POSTGRESQL_BUFFER_READ_DONE(forkNum, firstBlockNum, smgr->smgr_rnode.node.spcNode,
+                                          smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode,
+                                          smgr->smgr_rnode.backend, isExtend, found);
+        /*
+         * Mode cannot be RBM_ZERO_AND_CLEANUP_LOCK/RBM_ZERO_AND_LOCK here.
+         * So, "In RBM_ZERO_AND_LOCK mode the caller expects the page to
+         * be locked on return." can be ignored.
+         */
+        if (!isLocalBuf && t_thrd.role != PAGEREDO && SS_ONDEMAND_BUILD_DONE && SS_PRIMARY_MODE) {
+            /* Mode cannot be RBM_ZERO_AND_CLEANUP_LOCK/RBM_ZERO_AND_LOCK here */
+            bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, firstBlockNum, mode);
+        }
+        u_sess->storage_cxt.bulk_io_is_in_progress = false;
+        return BufferDescriptorGetBuffer(bufHdr);
+    }
+    /* If we must read buffers from disk right now. */
+    Assert(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID)); /* spinlock not needed */
+    Assert(u_sess->storage_cxt.bulk_io_in_progress_count == 1);
+    Assert(u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count - 1] == bufHdr);
+
+    /* The first buffer Desc for return */
+    firstBufHdr =bufHdr;
+
+    /* We should caculate the max-blocks again, MAX_SIMUL_LWLOCKS is 4224 */
+    maxBulkCount = Min(maxBulkCount, (BlockNumber) RELSEG_SIZE - (firstBlockNum % (BlockNumber) RELSEG_SIZE));
+    remaining_lwlock = MAX_SIMUL_LWLOCKS - t_thrd.storage_cxt.num_held_lwlocks;
+    maxBulkCount = Min(remaining_lwlock, maxBulkCount);
+
+    /* We start to allocate buffers array for preparing reading */
+    for (index = 1; index < maxBulkCount; index++) {
+        BlockNumber blockNum = firstBlockNum + index;
+        ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+        if (isLocalBuf) {
+            bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
+        } else {
+            bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
+            if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+                bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
+            }
+        }
+        if(found) {
+            /* If we found a needed block, we should stop pre-read right now */
+            ReleaseBuffer(BufferDescriptorGetBuffer(bufHdr));
+            break;
+        }
+        Assert(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));   /* spinlock not needed */
+    }
+
+    Assert(index == u_sess->storage_cxt.bulk_io_in_progress_count);
+
+    /* The numbers of blocks we really need to pre-read */
+    actual_bulk_count = u_sess->storage_cxt.bulk_io_in_progress_count;
+
+    if (actual_bulk_count == 1) {
+        buf_read = isLocalBuf ? (char*)LocalBufHdrGetBlock(firstBufHdr) : (char*)BufHdrGetBlock(firstBufHdr);
+    } else {
+        buf_read = bufRead;
+    }
+    
+    /* Bulk-read function, read a batch of pages from disk */
+    smgrbulkread(smgr, forkNum, firstBlockNum, actual_bulk_count, buf_read);
+    
+    /* We start to get blocks from buf_read one by one */
+    for (index = 0; index < actual_bulk_count; index++) {
+        BlockNumber blockNum = firstBlockNum + index;
+        bufBlock = (Block)(buf_read + index * BLCKSZ);
+
+        /* If the page is not legal, it always occurs by CRC error */
+        if (!PageIsVerified((Page)bufBlock, blockNum)) {
+            u_sess->storage_cxt.bulk_io_error_count++;
+            if (u_sess->attr.attr_security.zero_damaged_pages) {
+                ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+                                  errmsg("invalid page in block %u of relation %s; zeroing out page", blockNum,
+                                         relpath(smgr->smgr_rnode, forkNum)),
+                                  handle_in_client(true)));
+                MemSet((char *)bufBlock, 0, BLCKSZ);
+            } else {
+                ereport(ERROR,
+                            (errcode(ERRCODE_DATA_CORRUPTED),
+                             errmsg("invalid page in block %u of relation %s",
+                                    blockNum,
+                                    relpath(smgr->smgr_rnode, forkNum))));
+            }
+        } else {
+            PageDataDecryptIfNeed((Page)bufBlock);
+        }
+    }
+
+    /* We will fill blocks in buffers one by one */
+    for (index = actual_bulk_count -1; index >= 0; index--) {
+        bufHdr = u_sess->storage_cxt.bulk_io_in_progress_buf[index];
+
+        bufBlock = isLocalBuf ? LocalBufHdrGetBlock(bufHdr) : BufHdrGetBlock(bufHdr);
+        if (actual_bulk_count != 1) {
+            memcpy((char *)bufBlock, buf_read + index * BLCKSZ, BLCKSZ);
+        }
+
+        /* Attension, in local buffer, we do bulk_io_in_progress_count-- directly*/
+        if (isLocalBuf) {
+            uint64 buf_state = pg_atomic_read_u64(&bufHdr->state);
+            buf_state |= BM_VALID;
+            pg_atomic_write_u64(&bufHdr->state, buf_state);
+            u_sess->storage_cxt.bulk_io_in_progress_count--;
+        } else {
+            TerminateBufferIO(bufHdr, false, BM_VALID);
+        }
+
+        /* important: buffers except firstBlockNum should release pin */
+        if (index != 0) {
+            ReleaseBuffer(BufferDescriptorGetBuffer(bufHdr));
+        }
+
+        t_thrd.vacuum_cxt.VacuumPageMiss++;
+        if (t_thrd.vacuum_cxt.VacuumCostActive) {
+            t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageMiss; 
+        }
+    }
+    TRACE_POSTGRESQL_BUFFER_READ_DONE(forkNum, firstBlockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
+                                      smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, isExtend, found);
+
+    /*  We will record the number we really done */
+    u_sess->storage_cxt.bulk_io_count += actual_bulk_count;
+    u_sess->storage_cxt.bulk_io_is_in_progress = false;
+    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress);
+    Assert(u_sess->storage_cxt.bulk_io_in_progress_count == 0);
+    return BufferDescriptorGetBuffer(firstBufHdr);
+}
+
 /*
  * ReadBuffer_common -- common logic for all ReadBuffer variants
  *
@@ -2254,6 +2542,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
     bool isExtend = false;
     bool isLocalBuf = SmgrIsTemp(smgr);
     bool need_repair = false;
+    dms_buf_ctrl_t *buf_ctrl = NULL;
 
     *hit = false;
 
@@ -2261,6 +2550,13 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
     isExtend = (blockNum == P_NEW);
+
+    if (!ENABLE_DMS && IsSegmentFileNode(smgr->smgr_rnode.node) && RecoveryInProgress() &&
+        !t_thrd.xlog_cxt.InRecovery) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("bucket and undo segment standby read is not yet supported.")));
+    }
 
     TRACE_POSTGRESQL_BUFFER_READ_START(forkNum, blockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
                                        smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, isExtend);
@@ -2318,6 +2614,13 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
         }
     }
 
+    if (ENABLE_DMS) {
+        buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+        if (mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) {
+            buf_ctrl->state |= BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
+        }
+    }
+
 found_branch:
     /* At this point we do NOT hold any locks.
      *
@@ -2346,7 +2649,7 @@ found_branch:
             if (!isLocalBuf) {
                 if (mode == RBM_ZERO_AND_LOCK) {
                     if (ENABLE_DMS) {
-                        GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+                        buf_ctrl->state |= BUF_READ_MODE_ZERO_LOCK;
                         LockBuffer(BufferDescriptorGetBuffer(bufHdr), BUFFER_LOCK_EXCLUSIVE);
                     } else {
                         LWLockAcquire(bufHdr->content_lock, LW_EXCLUSIVE);
@@ -2362,7 +2665,7 @@ found_branch:
                     BufferDescSetPBLK(bufHdr, pblk);
                 } else if (mode == RBM_ZERO_AND_CLEANUP_LOCK) {
                     if (ENABLE_DMS) {
-                        GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+                        buf_ctrl->state |= BUF_READ_MODE_ZERO_LOCK;
                     }
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
                 }
@@ -2466,22 +2769,15 @@ found_branch:
                     goto found_branch;
                 }
 
-                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
                 LWLockMode req_lock_mode = isExtend ? LW_EXCLUSIVE : LW_SHARED;
                 if (!LockModeCompatible(buf_ctrl, req_lock_mode)) {
                     if (!StartReadPage(bufHdr, req_lock_mode)) {
                         TerminateBufferIO(bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
-                        if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                        if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
-
-                        if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
-                            SSUnPinBuffer(bufHdr);
-                            return InvalidBuffer;
-                        }
-
                         pg_usleep(5000L);
                         continue;
                     }
@@ -2496,7 +2792,13 @@ found_branch:
                 break;
             } while (true);
 
-            return TerminateReadPage(bufHdr, mode, pblk);
+            Buffer tmp_buffer =  TerminateReadPage(bufHdr, mode, pblk);
+            if (BufferIsInvalid(tmp_buffer) && (mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) &&
+                !(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
+                SSUnPinBuffer(bufHdr);
+                return InvalidBuffer;
+            }
+            return tmp_buffer;
         }
         ClearReadHint(bufHdr->buf_id);
     }
@@ -2652,7 +2954,7 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint64 *oldFlags, bool *needGetLoc
 #ifdef USE_ASSERT_CHECKING
 void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags)
 {
-    if (SS_REFORM_REFORMER) {
+    if (SS_REFORM_REFORMER || SS_DISASTER_STANDBY_CLUSTER) {
         return;
     }
 
@@ -2787,7 +3089,7 @@ retry:
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
 
-        if (!SSHelpFlushBufferIfNeed(buf)) {
+        if (!SSHelpFlushBufferIfNeed(buf) || !SSOndemandRealtimeBuildAllowFlush(buf)) {
             // for dms this page cannot eliminate, get another one 
             UnpinBuffer(buf, true);
             continue;
@@ -5916,10 +6218,14 @@ retry:
     if (ENABLE_DMS && mode != BUFFER_LOCK_UNLOCK) {
         LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
         Buffer tmp_buffer;
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         ReadBufferMode read_mode = RBM_NORMAL;
-        if (lock_mode == LW_EXCLUSIVE && (GetDmsBufCtrl(buffer - 1)->state & BUF_READ_MODE_ZERO_LOCK)) {
+        if (lock_mode == LW_EXCLUSIVE && (buf_ctrl->state & BUF_READ_MODE_ZERO_LOCK)) {
             read_mode = RBM_ZERO_AND_LOCK;
-            GetDmsBufCtrl(buffer - 1)->state &= ~BUF_READ_MODE_ZERO_LOCK;
+            buf_ctrl->state &= ~BUF_READ_MODE_ZERO_LOCK;
+        }
+        if (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD) {
+            read_mode = RBM_FOR_ONDEMAND_REALTIME_BUILD;
         }
         bool with_io_in_progress = true;
 
@@ -5938,7 +6244,7 @@ retry:
                     TerminateBufferIO(buf, false, 0);
                 }
             }
-            
+
             LWLockRelease(buf->content_lock);
 
             if (AmDmsReformProcProcess() && dms_reform_failed()) {
@@ -5948,6 +6254,11 @@ retry:
 
             if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
                 g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
+            }
+
+            if ((read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) &&
+                !(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
+                return;
             }
 
             dms_retry_times++;
@@ -5961,6 +6272,9 @@ retry:
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf->buf_id))));
                 t_thrd.postgres_cxt.whereToSendOutput = output_backup;
+            }
+            if (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) {
+                sleep_time = SS_BUF_WAIT_TIME_IN_ONDEMAND_REALTIME_BUILD;
             }
             pg_usleep(sleep_time);
             goto retry;
@@ -6481,8 +6795,16 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
     buf_state |= BM_IO_IN_PROGRESS;
     UnlockBufHdr(buf, buf_state);
 
-    t_thrd.storage_cxt.InProgressBuf = buf;
-    t_thrd.storage_cxt.IsForInput = for_input;
+    /* If we under the pre-read model, we will use customized array instead of InProgressBuf */
+    if (!u_sess->storage_cxt.bulk_io_is_in_progress) {
+        t_thrd.storage_cxt.InProgressBuf = buf;
+        t_thrd.storage_cxt.IsForInput = for_input;
+    } else {
+        /* We will record current buf for Abort at some times */
+        u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count] = buf;
+        u_sess->storage_cxt.bulk_io_is_for_input[u_sess->storage_cxt.bulk_io_in_progress_count] = for_input;
+        u_sess->storage_cxt.bulk_io_in_progress_count++;
+    }
 
     return true;
 }
@@ -6511,9 +6833,18 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
  */
 void TerminateBufferIO(volatile BufferDesc *buf, bool clear_dirty, uint64 set_flag_bits)
 {
-    Assert(buf == t_thrd.storage_cxt.InProgressBuf);
+    /* Parmas check */
+    Assert(u_sess->storage_cxt.bulk_io_is_in_progress || buf == t_thrd.storage_cxt.InProgressBuf);
+    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress || u_sess->storage_cxt.bulk_io_in_progress_count > 0);
+    Assert(!u_sess->storage_cxt.bulk_io_is_in_progress || buf == u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count - 1]);
+
     TerminateBufferIO_common((BufferDesc *)buf, clear_dirty, set_flag_bits);
-    t_thrd.storage_cxt.InProgressBuf = NULL;
+    /* When in pre-read, we focus in bulk_io_in_progress_count instead of InProgressBuf */
+    if (!u_sess->storage_cxt.bulk_io_is_in_progress) {
+        t_thrd.storage_cxt.InProgressBuf = NULL;
+    } else {
+        u_sess->storage_cxt.bulk_io_in_progress_count--;
+    }
     LWLockRelease(((BufferDesc *)buf)->io_in_progress_lock);
 }
 
@@ -6630,7 +6961,11 @@ void AbortBufferIO(void)
     BufferDesc *buf = (BufferDesc *)t_thrd.storage_cxt.InProgressBuf;
     bool isForInput = (bool)t_thrd.storage_cxt.IsForInput;
 
-    if (buf != NULL) {
+bulk_read_loop:
+    if (buf && buf->buf_id < 0) {
+        /* If it is in local storage now. It seems not come to here, protect this branch. */
+        u_sess->storage_cxt.bulk_io_in_progress_count--;
+    } else if (buf != NULL) {
         /*
          * For Sync I/O
          * LWLockReleaseAll was already been called, so we're not holding
@@ -6644,6 +6979,17 @@ void AbortBufferIO(void)
     }
 
     AbortSegBufferIO();
+
+    /* If it is in pre-read process, we will loop for many times because of having many blocks. */
+    if (u_sess->storage_cxt.bulk_io_is_in_progress) {
+        if (u_sess->storage_cxt.bulk_io_in_progress_count > 0) {
+            buf = u_sess->storage_cxt.bulk_io_in_progress_buf[u_sess->storage_cxt.bulk_io_in_progress_count - 1];
+            isForInput = u_sess->storage_cxt.bulk_io_is_for_input[u_sess->storage_cxt.bulk_io_in_progress_count - 1];
+            goto bulk_read_loop;
+        }
+        /* u_sess->storage_cxt.bulk_io_in_progress_count is zero means all is over */
+        u_sess->storage_cxt.bulk_io_is_in_progress = false;
+    }
 }
 
 /*
@@ -7407,4 +7753,71 @@ void buffer_in_progress_push()
     t_thrd.storage_cxt.InProgressBuf = t_thrd.storage_cxt.ParentInProgressBuf;
     t_thrd.storage_cxt.IsForInput = t_thrd.storage_cxt.ParentIsForInput;
     t_thrd.storage_cxt.ParentInProgressBuf = NULL;
+}
+
+void SSTryEliminateBuf(uint64 times)
+{
+    BufferDesc *buf = NULL;
+    uint64 buf_state;
+    LWLock *partition_lock = NULL;
+    BufferTag tag;
+    uint64 flags;
+    uint32 hash;
+
+    buf = SSTryGetBuffer(times, &buf_state);
+    if (buf == NULL) {
+        return;
+    }
+
+    UnlockBufHdr(buf, buf_state);
+    tag = buf->tag;
+    hash = BufTableHashCode(&tag);
+    partition_lock = BufMappingPartitionLock(hash);
+    if (!LWLockAcquire(partition_lock, LW_EXCLUSIVE)) {
+        return;
+    }
+
+    buf_state = LockBufHdr(buf);
+    if (!BUFFERTAGS_EQUAL(buf->tag, tag)) {
+        UnlockBufHdr(buf, buf_state);
+        LWLockRelease(partition_lock);
+        return;
+    }
+
+    if (BUF_STATE_GET_REFCOUNT(buf_state) != 0) {
+        UnlockBufHdr(buf, buf_state);
+        LWLockRelease(partition_lock);
+        return;
+    }
+
+    tag = buf->tag;
+    flags = buf_state & BUF_FLAG_MASK;
+    if (flags & BM_DIRTY) {
+        UnlockBufHdr(buf, buf_state);
+        LWLockRelease(partition_lock);
+        return;
+    }
+
+    if (flags & BM_TAG_VALID) {
+        if (!DmsReleaseOwner(tag, buf->buf_id)) {
+            UnlockBufHdr(buf, buf_state);
+            LWLockRelease(partition_lock);
+            return;
+        }
+    }
+
+    ereport(LOG, (errmodule(MOD_DMS), (errmsg("try eliminate buf, buf tag:[%u/%u/%u/%d %d-%u], buf id:%d",
+                                              tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                                              tag.rnode.bucketNode, tag.forkNum, tag.blockNum, buf->buf_id))));
+
+    CLEAR_BUFFERTAG(tag);
+    buf_state &= ~(BUF_FLAG_MASK | BUF_USAGECOUNT_MASK);
+    UnlockBufHdr(buf, buf_state);
+
+    if (flags & BM_TAG_VALID) {
+        BufTableDelete(&tag, hash);
+    }
+
+    ereport(LOG, (errmodule(MOD_DMS), (errmsg("try eliminate buf success"))));
+    LWLockRelease(partition_lock);
 }

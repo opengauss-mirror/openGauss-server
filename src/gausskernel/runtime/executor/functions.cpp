@@ -165,8 +165,8 @@ static Node* sql_fn_param_ref(ParseState* p_state, ParamRef* p_ref);
 static Node* sql_fn_post_column_ref(ParseState* p_state, ColumnRef* c_ref, Node* var);
 static Node* sql_fn_make_param(SQLFunctionParseInfoPtr p_info, int param_no, int location);
 static Node* sql_fn_resolve_param_name(SQLFunctionParseInfoPtr p_info, const char* param_name, int location);
-static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fcache, bool lazy_eval_ok);
-static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok);
+static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fcache, bool lazy_eval_ok, bool can_ignore);
+static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok, bool can_ignore);
 static void postquel_start(execution_state* es, SQLFunctionCachePtr fcache);
 static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr fcache);
 static void postquel_end(execution_state* es);
@@ -467,7 +467,7 @@ static Node* sql_fn_resolve_param_name(SQLFunctionParseInfoPtr p_info, const cha
  * The input is a List of Lists of parsed and rewritten, but not planned,
  * querytrees.	The sublist structure denotes the original query boundaries.
  */
-static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fcache, bool lazy_eval_ok)
+static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fcache, bool lazy_eval_ok, bool can_ignore)
 {
     List* es_list = NIL;
     execution_state* last_tages = NULL;
@@ -503,6 +503,9 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fca
                 PG_END_TRY();
 
                 recover_set_hint(nest_level);
+                if (likely(stmt != NULL && IsA(stmt, PlannedStmt))) {
+                    ((PlannedStmt*)stmt)->hasIgnore = can_ignore;
+                }
             }
 
             /* Precheck all commands for validity in a function */
@@ -572,7 +575,7 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fca
 /*
  * Initialize the SQLFunctionCache for a SQL function
  */
-static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
+static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok, bool can_ignore)
 {
     Oid f_oid = finfo->fn_oid;
     MemoryContext f_context;
@@ -748,7 +751,7 @@ static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
     }
 
     /* Finally, plan the queries */
-    fcache->func_state = init_execution_state(query_tree_list, fcache, lazy_eval_ok);
+    fcache->func_state = init_execution_state(query_tree_list, fcache, lazy_eval_ok, can_ignore);
 
     /* Mark fcache with time of creation to show it's valid */
     fcache->lxid = t_thrd.proc->lxid;
@@ -1055,7 +1058,6 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     bool old_running_in_fmgr = t_thrd.codegen_cxt.g_runningInFmgr;
     t_thrd.codegen_cxt.g_runningInFmgr = true;
     bool need_snapshot = !ActiveSnapshotSet();
-    NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
 #ifdef ENABLE_MULTIPLE_NODES
     bool outer_is_stream = false;
@@ -1124,7 +1126,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     }
 
     if (fcache == NULL) {
-        init_sql_fcache(fcinfo->flinfo, PG_GET_COLLATION(), lazy_eval_ok);
+        init_sql_fcache(fcinfo->flinfo, PG_GET_COLLATION(), lazy_eval_ok, fcinfo->can_ignore);
         fcache = (SQLFunctionCachePtr)fcinfo->flinfo->fn_extra;
     }
 
@@ -1215,7 +1217,6 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
             pushed_snapshot = true;
         }
 
-        t_thrd.postgres_cxt.cur_command_tag = es->qd->operation == CMD_SELECT ? T_SelectStmt : T_CreateStmt;
         completed = postquel_getnext(es, fcache);
         /*
          * If we ran the command to completion, we can shut it down now. Any
@@ -1416,7 +1417,6 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     u_sess->opt_cxt.query_dop = outerDop;
 #endif
     t_thrd.codegen_cxt.g_runningInFmgr = old_running_in_fmgr;
-    t_thrd.postgres_cxt.cur_command_tag  = old_node_tag;
     return result;
 }
 
@@ -1604,6 +1604,10 @@ void check_if_exist_client_logic_type(List *tlist, Oid ret_type)
 bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool* modify_target_list,
     JunkFilter** junk_filter, bool plpgsql_validation)
 {
+    if (u_sess->hook_cxt.checkSqlFnRetvalHook != NULL) {
+        return ((checkSqlFnRetval)(u_sess->hook_cxt.checkSqlFnRetvalHook))(
+            func_id, ret_type, query_tree_list, modify_target_list, junk_filter, plpgsql_validation);
+    }
     Query* parse = NULL;
     List** tlist_ptr;
     List* tlist = NIL;

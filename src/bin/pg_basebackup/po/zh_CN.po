@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pg_basebackup (PostgreSQL) 9.2\n"
 "Report-Msgid-Bugs-To: pgsql-bugs@postgresql.org\n"
-"POT-Creation-Date: 2013-01-29 13:46+0000\n"
+"POT-Creation-Date: 2023-11-16 10:05+0000\n"
 "PO-Revision-Date: 2012-10-19 10:56+0800\n"
 "Last-Translator: Xiong He <iihero@qq.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,26 +18,63 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 "X-Generator: Poedit 1.5.4\n"
 
-#: pg_basebackup.c:103
+#: pg_basebackup.cpp:133
+#, c-format
+msgid "%s: invalid tablespace mapping format \"%s\", must be \"OLDDIR=NEWDIR\"\n"
+msgstr "%s: 无效的表空间映射格式\"%s\", 一定是 \"OLDDIR=NEWDIR\"\n"
+
+#: pg_basebackup.cpp:144
+#, c-format
+msgid "%s: old directory is not an absolute path in tablespace mapping: %s\n"
+msgstr "%s: old目录在表空间映射中不是绝对路径:%s\n"
+
+#: pg_basebackup.cpp:150
+#, c-format
+msgid "%s: new directory is not an absolute path in tablespace mapping: %s\n"
+msgstr "%s: new目录在表空间映射中不是绝对路径:%s\n"
+
+#: pg_basebackup.cpp:161 streamutil.cpp:108
+#, c-format
+msgid "invalid port number \"%s\"\n"
+msgstr "无效端口号\"%s\"\n"
+
+#: pg_basebackup.cpp:181
+#, c-format
+msgid "%s: directory name too long\n"
+msgstr "%s: 目录名称太长\n"
+
+#: pg_basebackup.cpp:189
+#, c-format
+msgid "%s: multiple \"=\" signs in tablespace mapping\n"
+msgstr "%s: 表空间映射了多个\"=\"符号\n"
+
+#: pg_basebackup.cpp:230
+#, c-format
+msgid "%s\n"
+msgstr "%s\n"
+
+#: pg_basebackup.cpp:235
 #, c-format
 msgid ""
-"%s takes a base backup of a running PostgreSQL server.\n"
+"%s takes a base backup of a running openGauss server.\n"
 "\n"
 msgstr ""
-"%s 在运行的PostgreSQL服务器上执行基础备份.\n"
+"%s 在运行的openGauss服务器上执行基本备份.\n"
 "\n"
 
-#: pg_basebackup.c:105 pg_receivexlog.c:59
+#: pg_basebackup.cpp:236 pg_basebackup.cpp:277 pg_receivexlog.cpp:58
+#: pg_recvlogical.cpp:75
 #, c-format
 msgid "Usage:\n"
-msgstr "使用方法:\n"
+msgstr "用法:\n"
 
-#: pg_basebackup.c:106 pg_receivexlog.c:60
+#: pg_basebackup.cpp:237 pg_basebackup.cpp:278 pg_receivexlog.cpp:59
+#: pg_recvlogical.cpp:76
 #, c-format
 msgid "  %s [OPTION]...\n"
 msgstr "  %s [选项]...\n"
 
-#: pg_basebackup.c:107
+#: pg_basebackup.cpp:238 pg_basebackup.cpp:279
 #, c-format
 msgid ""
 "\n"
@@ -46,23 +83,31 @@ msgstr ""
 "\n"
 "控制输出的选项:\n"
 
-#: pg_basebackup.c:108
+#: pg_basebackup.cpp:239
 #, c-format
 msgid "  -D, --pgdata=DIRECTORY receive base backup into directory\n"
-msgstr " -D, --pgdata=DIRECTORY 接收基础备份到指定目录\n"
+msgstr "  -D, --pgdata=DIRECTORY 接收基础备份到指定目录\n"
 
-#: pg_basebackup.c:109
+#: pg_basebackup.cpp:240
 #, c-format
 msgid "  -F, --format=p|t       output format (plain (default), tar)\n"
 msgstr "  -F, --format=p|t       输出格式 (纯文本 (缺省值), tar压缩格式)\n"
 
-#: pg_basebackup.c:110
+#: pg_basebackup.cpp:241
 #, c-format
 msgid ""
-"  -x, --xlog             include required WAL files in backup (fetch mode)\n"
+"  -T, --tablespace-mapping=OLDDIR=NEWDIR\n"
+"                         relocate tablespace in OLDDIR to NEWDIR\n"
+msgstr ""
+"  -T, --tablespace-mapping=OLDDIR=NEWDIR\n"
+"                         将OLDDIR中的表空间重新定位到NEWDIR\n"
+
+#: pg_basebackup.cpp:243
+#, c-format
+msgid "  -x, --xlog             include required WAL files in backup (fetch mode)\n"
 msgstr "  -x, --xlog             在备份中包含必需的WAL文件(fetch 模式)\n"
 
-#: pg_basebackup.c:111
+#: pg_basebackup.cpp:244
 #, c-format
 msgid ""
 "  -X, --xlog-method=fetch|stream\n"
@@ -71,27 +116,26 @@ msgstr ""
 "  -X, --xlog-method=fetch|stream\n"
 "                         按指定的模式包含必需的WAL日志文件\n"
 
-#: pg_basebackup.c:113
+#: pg_basebackup.cpp:246
 #, c-format
 msgid "  -z, --gzip             compress tar output\n"
 msgstr "  -z, --gzip             对tar文件进行压缩输出\n"
 
-#: pg_basebackup.c:114
+#: pg_basebackup.cpp:247
 #, c-format
-msgid ""
-"  -Z, --compress=0-9     compress tar output with given compression level\n"
+msgid "  -Z, --compress=0-9     compress tar output with given compression level\n"
 msgstr "  -Z, --compress=0-9     按给定的压缩级别对tar文件进行压缩输出\n"
 
-#: pg_basebackup.c:115
+#: pg_basebackup.cpp:248
 #, c-format
 msgid ""
 "\n"
 "General options:\n"
 msgstr ""
 "\n"
-"一般选项:\n"
+"常规选项:\n"
 
-#: pg_basebackup.c:116
+#: pg_basebackup.cpp:249
 #, c-format
 msgid ""
 "  -c, --checkpoint=fast|spread\n"
@@ -100,410 +144,586 @@ msgstr ""
 "  -c, --checkpoint=fast|spread\n"
 "                         设置检查点方式(fast或者spread)\n"
 
-#: pg_basebackup.c:118
+#: pg_basebackup.cpp:251
 #, c-format
 msgid "  -l, --label=LABEL      set backup label\n"
 msgstr "  -l, --label=LABEL      设置备份标签\n"
 
-#: pg_basebackup.c:119
+#: pg_basebackup.cpp:252
 #, c-format
 msgid "  -P, --progress         show progress information\n"
 msgstr "  -P, --progress         显示进度信息\n"
 
-#: pg_basebackup.c:120 pg_receivexlog.c:64
+#: pg_basebackup.cpp:253 pg_receivexlog.cpp:63 pg_recvlogical.cpp:80
 #, c-format
 msgid "  -v, --verbose          output verbose messages\n"
 msgstr "  -v, --verbose          输出详细的消息\n"
 
-#: pg_basebackup.c:121 pg_receivexlog.c:65
+#: pg_basebackup.cpp:254 pg_receivexlog.cpp:64 pg_recvlogical.cpp:81
 #, c-format
 msgid "  -V, --version          output version information, then exit\n"
 msgstr "  -V, --version          输出版本信息, 然后退出\n"
 
-#: pg_basebackup.c:122 pg_receivexlog.c:66
+#: pg_basebackup.cpp:255 pg_receivexlog.cpp:65 pg_recvlogical.cpp:82
 #, c-format
 msgid "  -?, --help             show this help, then exit\n"
 msgstr "  -?, --help             显示帮助, 然后退出\n"
 
-#: pg_basebackup.c:123 pg_receivexlog.c:67
+#: pg_basebackup.cpp:256 pg_receivexlog.cpp:66 pg_recvlogical.cpp:83
 #, c-format
 msgid ""
 "\n"
 "Connection options:\n"
 msgstr ""
 "\n"
-"联接选项:\n"
+"连接选项:\n"
 
-#: pg_basebackup.c:124 pg_receivexlog.c:68
+#: pg_basebackup.cpp:257 pg_receivexlog.cpp:67 pg_recvlogical.cpp:85
 #, c-format
 msgid "  -h, --host=HOSTNAME    database server host or socket directory\n"
 msgstr "  -h, --host=HOSTNAME    数据库服务器主机或者是socket目录\n"
 
-#: pg_basebackup.c:125 pg_receivexlog.c:69
+#: pg_basebackup.cpp:258 pg_receivexlog.cpp:68 pg_recvlogical.cpp:86
 #, c-format
 msgid "  -p, --port=PORT        database server port number\n"
 msgstr "  -p, --port=PORT        数据库服务器端口号\n"
 
-#: pg_basebackup.c:126 pg_receivexlog.c:70
+#: pg_basebackup.cpp:259 pg_receivexlog.cpp:69
 #, c-format
 msgid ""
 "  -s, --status-interval=INTERVAL\n"
-"                         time between status packets sent to server (in "
-"seconds)\n"
+"                         time between status packets sent to server (in seconds)\n"
 msgstr ""
 "  -s, --status-interval=INTERVAL\n"
 "                         发往服务器的状态包的时间间隔 (以秒计)\n"
 
-#: pg_basebackup.c:128 pg_receivexlog.c:72
+#: pg_basebackup.cpp:261
+#, c-format
+msgid ""
+"  -t, --rw-timeout=RW_TIMEOUT\n"
+"                         read-write timeout during idle connection.(in seconds)\n"
+msgstr ""
+"  -t, --rw-timeout=RW_TIMEOUT\n"
+"                         空闲连接期间的读写超时时间.（以秒计）\n"
+
+#: pg_basebackup.cpp:263 pg_receivexlog.cpp:71 pg_recvlogical.cpp:87
 #, c-format
 msgid "  -U, --username=NAME    connect as specified database user\n"
 msgstr "  -U, --username=NAME    指定连接所需的数据库用户名\n"
 
-#: pg_basebackup.c:129 pg_receivexlog.c:73
+#: pg_basebackup.cpp:264 pg_receivexlog.cpp:72 pg_recvlogical.cpp:88
 #, c-format
 msgid "  -w, --no-password      never prompt for password\n"
 msgstr "  -w, --no-password      禁用输入密码的提示\n"
 
-#: pg_basebackup.c:130 pg_receivexlog.c:74
+#: pg_basebackup.cpp:265 pg_receivexlog.cpp:73 pg_recvlogical.cpp:89
 #, c-format
-msgid ""
-"  -W, --password         force password prompt (should happen "
-"automatically)\n"
+msgid "  -W, --password         force password prompt (should happen automatically)\n"
 msgstr "  -W, --password         强制提示输入密码 (应该自动发生)\n"
 
-#: pg_basebackup.c:131 pg_receivexlog.c:75
+#: pg_basebackup.cpp:268 pg_receivexlog.cpp:76
 #, c-format
 msgid ""
 "\n"
-"Report bugs to <pgsql-bugs@postgresql.org>.\n"
+"Report bugs to GaussDB support.\n"
 msgstr ""
 "\n"
-"错误报告至 <pgsql-bugs@postgresql.org>.\n"
+"报告错误到GaussDB support\n"
 
-#: pg_basebackup.c:172
+#: pg_basebackup.cpp:270 pg_receivexlog.cpp:78
+#, c-format
+msgid ""
+"\n"
+"Report bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"
+msgstr ""
+"\n"
+"报告错误到community@opengauss.org> 或者加入opengauss社区<https://opengauss.org>.\n"
+
+#: pg_basebackup.cpp:276
+#, c-format
+msgid ""
+"%s untars files created by gs_basebackup tar format.\n"
+"\n"
+msgstr ""
+"%s解压gs_basebackup创建的tar格式文件.\n"
+"\n"
+
+#: pg_basebackup.cpp:280
+#, c-format
+msgid "  -D, --destination=DIRECTORY   untar files into directory\n"
+msgstr "  -D, --destination=DIRECTORY将文件解压缩到目录\n"
+
+#: pg_basebackup.cpp:281
+#, c-format
+msgid "  -F, --filename=FILENAME       filename to be untar\n"
+msgstr "  -F, --filename=FILENAME       要解压的文件名\n"
+
+#: pg_basebackup.cpp:282
+msgid "  -V, --version                 output version information, then exit\n"
+msgstr "  -V, --version                输出版本信息, 然后退出\n"
+
+#: pg_basebackup.cpp:283
+msgid "  -?, --help                    show this help, then exit\n"
+msgstr "  -?, --help                   显示此帮助, 然后退出\n"
+
+#: pg_basebackup.cpp:293
+msgid " Out of memory occured during creating tablespace list"
+msgstr "创建表空间列表时内存溢出"
+
+#: pg_basebackup.cpp:345
 #, c-format
 msgid "%s: could not read from ready pipe: %s\n"
 msgstr "%s: 无法从准备就绪的管道: %s读\n"
 
-#: pg_basebackup.c:180 pg_basebackup.c:271 pg_basebackup.c:1187
-#: pg_receivexlog.c:256
+#: pg_basebackup.cpp:352 pg_basebackup.cpp:427 pg_basebackup.cpp:1472
+#: pg_receivexlog.cpp:266
 #, c-format
 msgid "%s: could not parse transaction log location \"%s\"\n"
 msgstr "%s: 无法解析来自 \"%s\"的事务日志\n"
 
-#: pg_basebackup.c:283
+#: pg_basebackup.cpp:434
 #, c-format
 msgid "%s: could not create pipe for background process: %s\n"
 msgstr "%s: 无法为后台进程: %s创建管道\n"
 
-#: pg_basebackup.c:316
+#: pg_basebackup.cpp:467
 #, c-format
 msgid "%s: could not create background process: %s\n"
 msgstr "%s: 无法创建后台进程: %s\n"
 
-#: pg_basebackup.c:328
+#: pg_basebackup.cpp:479
 #, c-format
 msgid "%s: could not create background thread: %s\n"
 msgstr "%s: 无法创建后台线程: %s\n"
 
-#: pg_basebackup.c:353 pg_basebackup.c:821
+#: pg_basebackup.cpp:501 pg_basebackup.cpp:1012
 #, c-format
 msgid "%s: could not create directory \"%s\": %s\n"
 msgstr "%s: 无法创建目录 \"%s\": %s\n"
 
-#: pg_basebackup.c:370
+#: pg_basebackup.cpp:516
 #, c-format
 msgid "%s: directory \"%s\" exists but is not empty\n"
-msgstr "%s: 目录\"%s\"已存在，但不是空的\n"
+msgstr "%s: 目录\"%s\"已存在, 但不是空的\n"
 
-#: pg_basebackup.c:378
+#: pg_basebackup.cpp:523
 #, c-format
 msgid "%s: could not access directory \"%s\": %s\n"
 msgstr "%s: 无法访问目录 \"%s\": %s\n"
 
-#: pg_basebackup.c:425
+#: pg_basebackup.cpp:574
 #, c-format
 msgid "%s/%s kB (100%%), %d/%d tablespace %35s"
 msgid_plural "%s/%s kB (100%%), %d/%d tablespaces %35s"
 msgstr[0] "%s/%s kB (100%%), %d/%d 表空间 %35s"
 
-#: pg_basebackup.c:432
+#: pg_basebackup.cpp:579
 #, c-format
 msgid "%s/%s kB (%d%%), %d/%d tablespace (%-30.30s)"
 msgid_plural "%s/%s kB (%d%%), %d/%d tablespaces (%-30.30s)"
 msgstr[0] "%s/%s kB (%d%%), %d/%d 表空间 (%-30.30s)"
 
-#: pg_basebackup.c:440
+#: pg_basebackup.cpp:585
 #, c-format
 msgid "%s/%s kB (%d%%), %d/%d tablespace"
 msgid_plural "%s/%s kB (%d%%), %d/%d tablespaces"
 msgstr[0] "%s/%s kB (%d%%), %d/%d 表空间"
 
-#: pg_basebackup.c:486 pg_basebackup.c:506 pg_basebackup.c:534
+#: pg_basebackup.cpp:625
+#, c-format
+msgid "%s: could not allocate dup fd by fileno(stdout): %s\n"
+msgstr "%s: fileno(stdout)不能分配dup fd: %s\n"
+
+#: pg_basebackup.cpp:632 pg_basebackup.cpp:652
 #, c-format
 msgid "%s: could not set compression level %d: %s\n"
 msgstr "%s: 无法设置压缩级别 %d: %s\n"
 
-#: pg_basebackup.c:555
+#: pg_basebackup.cpp:691
 #, c-format
 msgid "%s: could not create compressed file \"%s\": %s\n"
 msgstr "%s: 无法创建压缩文件 \"%s\": %s\n"
 
-#: pg_basebackup.c:566 pg_basebackup.c:863
+#: pg_basebackup.cpp:704 pg_basebackup.cpp:1078
 #, c-format
 msgid "%s: could not create file \"%s\": %s\n"
 msgstr "%s: 无法创建文件 \"%s\": %s\n"
 
-#: pg_basebackup.c:578 pg_basebackup.c:725
+#: pg_basebackup.cpp:714 pg_basebackup.cpp:837
 #, c-format
 msgid "%s: could not get COPY data stream: %s"
 msgstr "%s: 无法得到复制数据流: %s"
 
-#: pg_basebackup.c:612 pg_basebackup.c:670
-#, c-format
-msgid "%s: could not write to compressed file \"%s\": %s\n"
-msgstr "%s: 无法往压缩文件里写\"%s\": %s\n"
-
-#: pg_basebackup.c:623 pg_basebackup.c:680 pg_basebackup.c:903
-#, c-format
-msgid "%s: could not write to file \"%s\": %s\n"
-msgstr "%s: 无法写文件 \"%s\": %s\n"
-
-#: pg_basebackup.c:635
+#: pg_basebackup.cpp:735
 #, c-format
 msgid "%s: could not close compressed file \"%s\": %s\n"
 msgstr "%s: 无法关闭压缩文件 \"%s\": %s\n"
 
-#: pg_basebackup.c:648 receivelog.c:157 receivelog.c:630 receivelog.c:639
+#: pg_basebackup.cpp:750 pg_recvlogical.cpp:781
 #, c-format
 msgid "%s: could not close file \"%s\": %s\n"
 msgstr "%s: 无法关闭文件 \"%s\": %s\n"
 
-#: pg_basebackup.c:659 pg_basebackup.c:754 receivelog.c:473
+#: pg_basebackup.cpp:761 pg_basebackup.cpp:938 pg_recvlogical.cpp:633
 #, c-format
 msgid "%s: could not read COPY data: %s"
 msgstr "%s: 无法读取复制数据: %s"
 
-#: pg_basebackup.c:768
+#: pg_basebackup.cpp:769
+#, c-format
+msgid "%s: could not write to compressed file \"%s\": %s\n"
+msgstr "%s: 无法往压缩文件里写\"%s\": %s\n"
+
+#: pg_basebackup.cpp:783 pg_basebackup.cpp:1112
+#, c-format
+msgid "%s: could not write to file \"%s\": %s\n"
+msgstr "%s: 无法写文件 \"%s\": %s\n"
+
+#: pg_basebackup.cpp:895
+msgid "PQgetvalue get value failed\n"
+msgstr "PQgetvalue获取值失败\n"
+
+#: pg_basebackup.cpp:950
 #, c-format
 msgid "%s: invalid tar block header size: %d\n"
 msgstr "%s: 无效的tar压缩块头大小: %d\n"
 
-#: pg_basebackup.c:776
+#: pg_basebackup.cpp:956
 #, c-format
 msgid "%s: could not parse file size\n"
 msgstr "%s: 无法解析文件大小\n"
 
-#: pg_basebackup.c:784
+#: pg_basebackup.cpp:962
 #, c-format
 msgid "%s: could not parse file mode\n"
 msgstr "%s: 无法解析文件模式\n"
 
-#: pg_basebackup.c:829
+#: pg_basebackup.cpp:970
+#, c-format
+msgid "%s: the file '%s' is too big or file size is invalid\n"
+msgstr "%s: 文件'%s'太大或文件大小无效\n"
+
+#: pg_basebackup.cpp:980
+#, c-format
+msgid "%s: the copybuf/current_path file path including .. is unallowed: %s\n"
+msgstr "%s: copybuf/current_path文件路径, 包括..是不允许的:%s\n"
+
+#: pg_basebackup.cpp:994
+#, c-format
+msgid "%s: path is illegal \n"
+msgstr "%s: 路径不合法\n"
+
+#: pg_basebackup.cpp:1021
 #, c-format
 msgid "%s: could not set permissions on directory \"%s\": %s\n"
 msgstr "%s: 无法设置目录权限 \"%s\": %s\n"
 
-#: pg_basebackup.c:842
+#: pg_basebackup.cpp:1032
+#, c-format
+msgid "WARNING: could not create symbolic link for pg_xlog, will backup data to \"%s\" directly\n"
+msgstr "警告: 不能为pg_xlog创建符号链接, 这会直接将数据备份到\"%s\"直接\n"
+
+#: pg_basebackup.cpp:1036
 #, c-format
 msgid "%s: could not create symbolic link from \"%s\" to \"%s\": %s\n"
-msgstr "%s: 无法创建从 \"%s\" 到 \"%s\"的符号链接: %s\n"
+msgstr "%s: 无法创建 \"%s\" 的符号链接 \"%s\": %s\n"
 
-#: pg_basebackup.c:850
+#: pg_basebackup.cpp:1060
 #, c-format
-msgid "%s: unrecognized link indicator \"%c\"\n"
-msgstr "%s: 无法识别的链接标识符 \"%c\"\n"
+msgid "could not create symbolic link from \"%s\" to \"%s\": %s\n"
+msgstr "无法创建 \"%s\" 的符号链接 \"%s\": %s\n"
 
-#: pg_basebackup.c:870
+#: pg_basebackup.cpp:1066
+#, c-format
+msgid "unrecognized link indicator \"%c\"\n"
+msgstr "未识别链路指示器\"%c\"\n"
+
+#: pg_basebackup.cpp:1084
 #, c-format
 msgid "%s: could not set permissions on file \"%s\": %s\n"
 msgstr "%s: 无法设置文件 \"%s\"的访问权限: %s\n"
 
-#: pg_basebackup.c:929
+#: pg_basebackup.cpp:1139
 #, c-format
 msgid "%s: COPY stream ended before last file was finished\n"
-msgstr "%s: 复制流在最后一个文件结束前终止\n"
+msgstr "%s: COPY流在最后一个文件结束前终止\n"
 
-#: pg_basebackup.c:965 pg_basebackup.c:994 pg_receivexlog.c:239
-#: receivelog.c:303 receivelog.c:340
+#: pg_basebackup.cpp:1178 pg_basebackup.cpp:1207 pg_receivexlog.cpp:246
+#: pg_recvlogical.cpp:1164 pg_recvlogical.cpp:1198 pg_recvlogical.cpp:1238
 #, c-format
 msgid "%s: could not send replication command \"%s\": %s"
 msgstr "%s: 无法发送复制命令 \"%s\": %s"
 
-#: pg_basebackup.c:972 pg_receivexlog.c:247 receivelog.c:311
+#: pg_basebackup.cpp:1184 pg_receivexlog.cpp:255 pg_recvlogical.cpp:1173
 #, c-format
-msgid ""
-"%s: could not identify system: got %d rows and %d fields, expected %d rows "
-"and %d fields\n"
-msgstr "%s: 无法识别系统: 得到 %d 行和 %d 列, 期望值为: %d 行和 %d 列\n"
+msgid "%s: could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields\n"
+msgstr "%s: 无法识别系统: 已得到%d行和%d字段,预计%d行和%d或更多字段\n"
 
-#: pg_basebackup.c:1005
+#: pg_basebackup.cpp:1190
+#, c-format
+msgid "%s: strdup for sysidentifier failed! \n"
+msgstr "%s: strdup for sysidentifier 失败! \n"
+
+#: pg_basebackup.cpp:1218
+#, c-format
+msgid "could not get xlog location: %s"
+msgstr "无法获取xlog位置:%s"
+
+#
+#: pg_basebackup.cpp:1224
+msgid "no xlog location returned from server\n"
+msgstr "没有从服务器返回xlog位置\n"
+
+#: pg_basebackup.cpp:1232
+msgid "get xlog location failed\n"
+msgstr "获取xlog位置失败\n"
+
+#: pg_basebackup.cpp:1246
 #, c-format
 msgid "%s: could not initiate base backup: %s"
-msgstr "%s: 无法发起基础备份: %s"
+msgstr "%s: 无法发起基本备份: %s"
 
-#: pg_basebackup.c:1011
+#: pg_basebackup.cpp:1252
 #, c-format
 msgid "%s: no start point returned from server\n"
 msgstr "%s: 服务器没有返回起始点\n"
 
-#: pg_basebackup.c:1027
+#: pg_basebackup.cpp:1272
 #, c-format
 msgid "%s: could not get backup header: %s"
 msgstr "%s: 无法得到备份头: %s"
 
-#: pg_basebackup.c:1033
+#: pg_basebackup.cpp:1278
 #, c-format
 msgid "%s: no data returned from server\n"
 msgstr "%s: 服务器没有数据返回\n"
 
 # Here, we need to understand what's the content "database has"? 
 # Is it the stdout fd? or anything else? Please correct me here.
-#: pg_basebackup.c:1062
+#: pg_basebackup.cpp:1331
 #, c-format
 msgid "%s: can only write single tablespace to stdout, database has %d\n"
 msgstr "%s: 只能把表空间写往标准输出, 数据库拥有标准输出: %d\n"
 
-#: pg_basebackup.c:1074
+#: pg_basebackup.cpp:1347
 #, c-format
 msgid "%s: starting background WAL receiver\n"
 msgstr "%s: 启动后台 WAL 接收进程\n"
 
-#: pg_basebackup.c:1104
+#: pg_basebackup.cpp:1378
 #, c-format
 msgid "%s: could not get transaction log end position from server: %s"
 msgstr "%s: 无法得到来自服务器的事务日志终止位置: %s"
 
-#: pg_basebackup.c:1111
+#: pg_basebackup.cpp:1383
 #, c-format
 msgid "%s: no transaction log end position returned from server\n"
 msgstr "%s: 服务器端没有返回事务日志的终止位置\n"
 
-#: pg_basebackup.c:1123
+#: pg_basebackup.cpp:1395
 #, c-format
 msgid "%s: final receive failed: %s"
 msgstr "%s: 最终接收失败: %s"
 
-#: pg_basebackup.c:1139
+#: pg_basebackup.cpp:1413
+#, c-format
+msgid "%s: unexpected result received after final result, status: %u\n"
+msgstr "%s:最终结果后收到的意外结果, 状态:%u\n"
+
+#: pg_basebackup.cpp:1436
 #, c-format
 msgid "%s: waiting for background process to finish streaming...\n"
 msgstr "%s: 等待后台进程终止流操作...\n"
 
-#: pg_basebackup.c:1145
+#: pg_basebackup.cpp:1441
 #, c-format
 msgid "%s: could not send command to background pipe: %s\n"
 msgstr "%s: 无法发送命令到后台管道: %s\n"
 
-#: pg_basebackup.c:1154
+#: pg_basebackup.cpp:1448
 #, c-format
 msgid "%s: could not wait for child process: %s\n"
 msgstr "%s: 无法等待子进程: %s\n"
 
-#: pg_basebackup.c:1160
+#: pg_basebackup.cpp:1452
 #, c-format
 msgid "%s: child %d died, expected %d\n"
 msgstr "%s: 子进程 %d 已终止, 期望值为 %d\n"
 
-#: pg_basebackup.c:1166
+#: pg_basebackup.cpp:1456
 #, c-format
 msgid "%s: child process did not exit normally\n"
 msgstr "%s: 子进程没有正常退出\n"
 
-#: pg_basebackup.c:1172
+#: pg_basebackup.cpp:1460
 #, c-format
 msgid "%s: child process exited with error %d\n"
 msgstr "%s: 子进程退出, 错误码为: %d\n"
 
-#: pg_basebackup.c:1198
+#: pg_basebackup.cpp:1481
 #, c-format
 msgid "%s: could not wait for child thread: %s\n"
 msgstr "%s: 无法等待子线程: %s\n"
 
-#: pg_basebackup.c:1205
+#: pg_basebackup.cpp:1486
 #, c-format
 msgid "%s: could not get child thread exit status: %s\n"
 msgstr "%s: 无法得到子线程退出状态: %s\n"
 
-#: pg_basebackup.c:1211
+#: pg_basebackup.cpp:1490
 #, c-format
 msgid "%s: child thread exited with error %u\n"
 msgstr "%s: 子线程退出, 错误码为: %u\n"
 
-#: pg_basebackup.c:1292
+#: pg_basebackup.cpp:1525
+#, c-format
+msgid "could not get canonical path for file %s: %s\n"
+msgstr "无法获取文件的规范路径%s:%s\n"
+
+# fe-lobj.c:400 fe-lobj.c:483
+#: pg_basebackup.cpp:1556
+#, c-format
+msgid "could not open file %s: %s\n"
+msgstr "无法打开文件%s:%s\n"
+
+#: pg_basebackup.cpp:1562
+msgid "out of memory"
+msgstr "内存溢出"
+
+#: pg_basebackup.cpp:1572
+#, c-format
+msgid "could not write data to file %s: %s\n"
+msgstr "无法将数据写入文件%s:%s\n"
+
+#: pg_basebackup.cpp:1591
+#, c-format
+msgid "unsupported progname: %s"
+msgstr "不支持progname:%s"
+
+#: pg_basebackup.cpp:1612
+#, c-format
+msgid "-D option and -F option are required.\n"
+msgstr "-D 选项 和 -F选项是必须的.\n"
+
+#: pg_basebackup.cpp:1631
+#, c-format
+msgid "%s: destination dir \"%s\" no empty.\n"
+msgstr "%s: 目标目录\"%s\"没有空的.\n"
+
+#: pg_basebackup.cpp:1663
+#, c-format
+msgid "%s: destination dir \"%s\" failed: %m\n"
+msgstr "%s: 目标目录\"%s\"失败:%m\n"
+
+#: pg_basebackup.cpp:1678 pg_basebackup.cpp:2136 pg_basebackup.cpp:2152
+#: pg_basebackup.cpp:2162 pg_basebackup.cpp:2171 pg_basebackup.cpp:2180
+#: pg_basebackup.cpp:2186 pg_receivexlog.cpp:414 pg_receivexlog.cpp:425
+#: pg_receivexlog.cpp:434 pg_recvlogical.cpp:1027 pg_recvlogical.cpp:1037
+#: pg_recvlogical.cpp:1106 pg_recvlogical.cpp:1112 pg_recvlogical.cpp:1118
+#: pg_recvlogical.cpp:1124 pg_recvlogical.cpp:1130 pg_recvlogical.cpp:1136
+#, c-format
+msgid "Try \"%s --help\" for more information.\n"
+msgstr "用 \"%s --help\" 获取更多的信息.\n"
+
+#: pg_basebackup.cpp:1700
+#, c-format
+msgid "WARNING: %s not found!\n"
+msgstr "警告: %s未找到!\n"
+
+#: pg_basebackup.cpp:1968
+msgid "%s: The option '-' is not a valid option.\n"
+msgstr "%s: 选项'-'不是一个有效的选项.\n"
+
+#: pg_basebackup.cpp:1982 pg_basebackup.cpp:1992
+#, c-format
+msgid "%s: The option '-%c' need a parameter.\n"
+msgstr "%s: 选项 '-%c'需要一个参数.\n"
+
+#: pg_basebackup.cpp:2006 pg_receivexlog.cpp:359
+#, c-format
+msgid "%s: realpath dir \"%s\" failed: %m\n"
+msgstr "%s: realpath dir\"%s\"失败: %m\n"
+
+#: pg_basebackup.cpp:2023
 #, c-format
 msgid "%s: invalid output format \"%s\", must be \"plain\" or \"tar\"\n"
 msgstr "%s: 无效输出格式: \"%s\", 有效值为: \"plain\" 或者 \"tar\"\n"
 
-#: pg_basebackup.c:1301 pg_basebackup.c:1313
+#: pg_basebackup.cpp:2032
 #, c-format
-msgid "%s: cannot specify both --xlog and --xlog-method\n"
-msgstr "%s: 不能同时指定两个选项: --xlog and --xlog-method\n"
+msgid "%s: invalid output length"
+msgstr "%s: 无效输出长度"
 
-#: pg_basebackup.c:1328
+#: pg_basebackup.cpp:2048
 #, c-format
-msgid ""
-"%s: invalid xlog-method option \"%s\", must be \"fetch\" or \"stream\"\n"
-msgstr ""
-"%s: 无效的xlog-method 选项: \"%s\", 必须是: \"fetch\" 或者 \"stream\"\n"
+msgid "%s: invalid xlog-method option \"%s\", must be \"fetch\" or \"stream\"\n"
+msgstr "%s: 无效的xlog-method 选项: \"%s\", 必须是: \"fetch\" 或者 \"stream\"\n"
 
-#: pg_basebackup.c:1347
+#: pg_basebackup.cpp:2072
 #, c-format
 msgid "%s: invalid compression level \"%s\"\n"
 msgstr "%s: 无效的压缩级别值: \"%s\"\n"
 
-#: pg_basebackup.c:1359
+#: pg_basebackup.cpp:2083
 #, c-format
-msgid ""
-"%s: invalid checkpoint argument \"%s\", must be \"fast\" or \"spread\"\n"
+msgid "%s: invalid checkpoint argument \"%s\", must be \"fast\" or \"spread\"\n"
 msgstr "%s: 无效的检查点参数: \"%s\", 必须是: \"fast\" 或 \"spread\"\n"
 
-#: pg_basebackup.c:1383 pg_receivexlog.c:370
+#: pg_basebackup.cpp:2113 pg_receivexlog.cpp:393
 #, c-format
 msgid "%s: invalid status interval \"%s\"\n"
 msgstr "%s: 无效的状态间隔值: \"%s\"\n"
 
-#: pg_basebackup.c:1399 pg_basebackup.c:1413 pg_basebackup.c:1424
-#: pg_basebackup.c:1437 pg_basebackup.c:1447 pg_receivexlog.c:386
-#: pg_receivexlog.c:400 pg_receivexlog.c:411
+#: pg_basebackup.cpp:2120
 #, c-format
-msgid "Try \"%s --help\" for more information.\n"
-msgstr "请用 \"%s --help\" 获取更多的信息.\n"
+msgid "%s: invalid read-write timeout \"%s\"\n"
+msgstr "%s:无效读写超时\"%s\"\n"
 
-#: pg_basebackup.c:1411 pg_receivexlog.c:398
+#: pg_basebackup.cpp:2150
+#, c-format
+msgid "%s:The specified port is missing, it can be specified by -p parameter or import environment variables PGPORT.\n"
+msgstr "%s:指定的端口缺失, 可以通过-p参数指定, 也可以导入环境变量PGPORT.\n"
+
+#: pg_basebackup.cpp:2161 pg_receivexlog.cpp:424 pg_recvlogical.cpp:1036
 #, c-format
 msgid "%s: too many command-line arguments (first is \"%s\")\n"
 msgstr "%s: 命令行参数太多 (第一个是 \"%s\")\n"
 
-#: pg_basebackup.c:1423 pg_receivexlog.c:410
+#: pg_basebackup.cpp:2170 pg_receivexlog.cpp:433
 #, c-format
 msgid "%s: no target directory specified\n"
 msgstr "%s: 没有指定目标目录\n"
 
-#: pg_basebackup.c:1435
+#: pg_basebackup.cpp:2179
 #, c-format
 msgid "%s: only tar mode backups can be compressed\n"
 msgstr "%s: 只有tar模式备份才能进行压缩\n"
 
-#: pg_basebackup.c:1445
+#: pg_basebackup.cpp:2185
 #, c-format
 msgid "%s: wal streaming can only be used in plain mode\n"
 msgstr "%s: wal 流只能在plain模式下使用\n"
 
-#: pg_basebackup.c:1456
+#: pg_basebackup.cpp:2192
 #, c-format
 msgid "%s: this build does not support compression\n"
 msgstr "%s: 这个编译版本不支持压缩\n"
 
-#: pg_receivexlog.c:57
+#: pg_basebackup.cpp:2209
+#, c-format
+msgid "%s: base backup successfully\n"
+msgstr "%s: 基本备份成功\n"
+
+#: pg_receivexlog.cpp:57
 #, c-format
 msgid ""
-"%s receives PostgreSQL streaming transaction logs.\n"
+"%s receives openGauss streaming transaction logs.\n"
 "\n"
 msgstr ""
-"%s 接收PostgreSQL的流事务日志.\n"
+"%s 接收openGauss的流事务日志.\n"
 "\n"
 
-#: pg_receivexlog.c:61
+#: pg_receivexlog.cpp:60 pg_recvlogical.cpp:77
 #, c-format
 msgid ""
 "\n"
@@ -512,206 +732,533 @@ msgstr ""
 "\n"
 "选项:\n"
 
-#: pg_receivexlog.c:62
+#: pg_receivexlog.cpp:61
 #, c-format
-msgid ""
-"  -D, --directory=DIR    receive transaction log files into this directory\n"
-msgstr "  -D, --directory=DIR    接收事务日志到指定的目录\n"
+msgid "  -D, --directory=DIR    receive transaction log files into this directory\n"
+msgstr "  -D, --directory=DIR    接收事务日志文件到此目录\n"
 
-#: pg_receivexlog.c:63
+#: pg_receivexlog.cpp:62 pg_recvlogical.cpp:79
 #, c-format
 msgid "  -n, --no-loop          do not loop on connection lost\n"
 msgstr "  -n, --no-loop          连接丢失时不进行循环处理\n"
 
-#: pg_receivexlog.c:82
+#: pg_receivexlog.cpp:74
+#, c-format
+msgid "      --slot             replication slot to use\n"
+msgstr "      --slot             复制插槽使用\n"
+
+#: pg_receivexlog.cpp:86
 #, c-format
 msgid "%s: finished segment at %X/%X (timeline %u)\n"
-msgstr "%s: finished segment at %X/%X (timeline %u)\n"
+msgstr "%s: 在 %X/%X 结束段 (时间线 %u)\n"
 
-#: pg_receivexlog.c:87
+#: pg_receivexlog.cpp:93
 #, c-format
 msgid "%s: received interrupt signal, exiting.\n"
 msgstr "%s: 接收到终断信号, 正在退出.\n"
 
-#: pg_receivexlog.c:114
+#: pg_receivexlog.cpp:117
 #, c-format
 msgid "%s: could not open directory \"%s\": %s\n"
 msgstr "%s: 无法打开目录 \"%s\": %s\n"
 
-#: pg_receivexlog.c:155
+#: pg_receivexlog.cpp:151
 #, c-format
 msgid "%s: could not parse transaction log file name \"%s\"\n"
 msgstr "%s: 无法解析事务日志文件名: \"%s\"\n"
 
-#: pg_receivexlog.c:168
+#: pg_receivexlog.cpp:165
 #, c-format
 msgid "%s: could not stat file \"%s\": %s\n"
 msgstr "%s: 无法统计文件: \"%s\": %s\n"
 
-#: pg_receivexlog.c:187
+#: pg_receivexlog.cpp:178
 #, c-format
 msgid "%s: segment file \"%s\" has incorrect size %d, skipping\n"
 msgstr "%s: 段文件 \"%s\" 大小值: %d不正确, 跳过\n"
 
-#: pg_receivexlog.c:277
+#: pg_receivexlog.cpp:235
+#, c-format
+msgid "%s: unsupported server version %s\n"
+msgstr "%s: 不支持的服务器版本 %s\n"
+
+#: pg_receivexlog.cpp:287
 #, c-format
 msgid "%s: starting log streaming at %X/%X (timeline %u)\n"
-msgstr "%s: 在时间点: %X/%X (时间安排%u)启动日志的流操作 \n"
+msgstr "%s: 在时间点: %X/%X (时间线%u)启动日志的流操作 \n"
 
-#: pg_receivexlog.c:351
+#: pg_receivexlog.cpp:301
+#, c-format
+msgid "%s: ReceiveXlogStream failed.\n"
+msgstr "%s: ReceiveXlogStream失败.\n"
+
+#: pg_receivexlog.cpp:372 pg_recvlogical.cpp:925
 #, c-format
 msgid "%s: invalid port number \"%s\"\n"
 msgstr "%s: 无效端口号 \"%s\"\n"
 
-#: pg_receivexlog.c:433
+#: pg_receivexlog.cpp:451 pg_recvlogical.cpp:1283
 #, c-format
 msgid "%s: disconnected.\n"
 msgstr "%s: 连接已断开.\n"
 
 #. translator: check source for value for %d
-#: pg_receivexlog.c:440
+#: pg_receivexlog.cpp:456 pg_recvlogical.cpp:1288
 #, c-format
 msgid "%s: disconnected. Waiting %d seconds to try again.\n"
 msgstr "%s: 连接已断开. %d 秒后尝试重连.\n"
 
-#: receivelog.c:72
-#, c-format
-msgid "%s: could not open transaction log file \"%s\": %s\n"
-msgstr "%s: 无法打开事务日志文件 \"%s\": %s\n"
-
-#: receivelog.c:84
-#, c-format
-msgid "%s: could not stat transaction log file \"%s\": %s\n"
-msgstr "%s: 无法统计事务日志文件 \"%s\": %s\n"
-
-#: receivelog.c:94
-#, c-format
-msgid "%s: transaction log file \"%s\" has %d bytes, should be 0 or %d\n"
-msgstr "%s: 事务日志文件 \"%s\" 大小为 %d 字节, 正确值应该是 0 或 %d字节\n"
-
-#: receivelog.c:107
-#, c-format
-msgid "%s: could not pad transaction log file \"%s\": %s\n"
-msgstr "%s: 无法填充事务日志文件 \"%s\": %s\n"
-
-#: receivelog.c:120
-#, c-format
-msgid "%s: could not seek to beginning of transaction log file \"%s\": %s\n"
-msgstr "%s: 无法定位事务日志文件 \"%s\"的开始位置: %s\n"
-
-#: receivelog.c:143
-#, c-format
-msgid "%s: could not determine seek position in file \"%s\": %s\n"
-msgstr "%s: 无法确定文件 \"%s\"的当前位置: %s\n"
-
-#: receivelog.c:150
-#, c-format
-msgid "%s: could not fsync file \"%s\": %s\n"
-msgstr "%s: 无法对文件 \"%s\"进行fsync同步: %s\n"
-
-#: receivelog.c:177
-#, c-format
-msgid "%s: could not rename file \"%s\": %s\n"
-msgstr "%s: 无法重命名文件 \"%s\": %s\n"
-
-#: receivelog.c:184
-#, c-format
-msgid "%s: not renaming \"%s\", segment is not complete\n"
-msgstr "%s: 没有重命名 \"%s\", 段没有完成\n"
-
-#: receivelog.c:319
+#: pg_recvlogical.cpp:74
 #, c-format
 msgid ""
-"%s: system identifier does not match between base backup and streaming "
-"connection\n"
-msgstr "%s: 基础备份和流连接的系统标识符不匹配\n"
+"%s receives logical change stream.\n"
+"\n"
+msgstr ""
+"%s接收逻辑更改流.\n"
+"\n"
 
-#: receivelog.c:327
+#: pg_recvlogical.cpp:78
+#, c-format
+msgid "  -f, --file=FILE        receive log into this file. - for stdout\n"
+msgstr "  -f, --file=FILENAME    输出文件或目录名\n"
+
+#: pg_recvlogical.cpp:84
+#, c-format
+msgid "  -d, --dbname=DBNAME    database to connect to\n"
+msgstr "  -d, --dbname=DBNAME    要连接的dbname数据库\n"
+
+#: pg_recvlogical.cpp:90
 #, c-format
 msgid ""
-"%s: timeline does not match between base backup and streaming connection\n"
-msgstr "%s: 基础备份和流连接的时间安排不匹配\n"
+"\n"
+"Replication options:\n"
+msgstr ""
+"\n"
+"连接选项:\n"
 
-#: receivelog.c:398
+#: pg_recvlogical.cpp:91
+#, c-format
+msgid ""
+"  -F  --fsync-interval=INTERVAL\n"
+"                         frequency of syncs to the output file (in seconds, defaults to 10)\n"
+msgstr ""
+"  -F  --fsync-interval=INTERVAL\n"
+"                         同步到输出文件的频率(以秒计,默认为10)\n"
+
+#: pg_recvlogical.cpp:93
+#, c-format
+msgid ""
+"  -o, --option=NAME[=VALUE]\n"
+"                         Specify option NAME with optional value VAL, to be passed\n"
+"                         to the output plugin\n"
+msgstr ""
+"  -o, --option=NAME[=VALUE]\n"
+"                         使用可选值VAL指定选项NAME, 传递给输出插件\n"
+"\n"
+
+#: pg_recvlogical.cpp:96
+#, c-format
+msgid "  -P, --plugin=PLUGIN    use output plugin PLUGIN (defaults to mppdb_decoding)\n"
+msgstr "  -P, --plugin=PLUGIN    使用输出插件插件(默认为mppdb_decoding)\n"
+
+#: pg_recvlogical.cpp:97
+#, c-format
+msgid ""
+"  -s, --status-interval=INTERVAL\n"
+"                         time between status packets sent to server (in seconds, defaults to 10)\n"
+msgstr ""
+"  -s, --status-interval=INTERVAL\n"
+"                         发往服务器的状态包的时间间隔 (以秒计,默认为10)\n"
+
+#: pg_recvlogical.cpp:99
+#, c-format
+msgid "  -S, --slot=SLOT        use existing replication slot SLOT instead of starting a new one\n"
+msgstr "  -S, --slot=SLOT       使用现有的复制槽位slot, 而不是开始一个新的复制槽位\n"
+
+#: pg_recvlogical.cpp:100
+#, c-format
+msgid "  -I, --startpos=PTR     Where in an existing slot should the streaming start\n"
+msgstr "  -I, --startpos=PTR     流应该在现有插槽的哪个位置开始\n"
+
+#: pg_recvlogical.cpp:101
+#, c-format
+msgid "  -r, --raw              parallel decoding output raw results without converting to text format\n"
+msgstr "  -r, --raw               并行解码输出原始结果, 不转换为文本格式\n"
+
+#: pg_recvlogical.cpp:102
+#, c-format
+msgid ""
+"\n"
+"Action to be performed:\n"
+msgstr ""
+"\n"
+"“要执行的操作:\n"
+
+#: pg_recvlogical.cpp:103
+#, c-format
+msgid "      --create           create a new replication slot (for the slotname see --slot)\n"
+msgstr "      --create           创建一个新的复制槽(关于槽名请参阅——slot)\n"
+
+#: pg_recvlogical.cpp:104
+#, c-format
+msgid "      --start            start streaming in a replication slot (for the slotname see --slot)\n"
+msgstr "      --start             在复制槽中启动流(关于槽名请参阅——slot)\n"
+
+#: pg_recvlogical.cpp:105
+#, c-format
+msgid "      --drop             drop the replication slot (for the slotname see --slot)\n"
+msgstr "      --drop             删除复制插槽(有关插槽名请参阅——slot)\n"
+
+#: pg_recvlogical.cpp:106
+#, c-format
+msgid "\n"
+msgstr "\n"
+
+#: pg_recvlogical.cpp:164
+#, c-format
+msgid "%s: confirming write up to %X/%X, flush to %X/%X (slot %s) %ld\n"
+msgstr "%s: 确认写到%X/%X, 冲到%X/%X(槽%s)%ld\n"
+
+#: pg_recvlogical.cpp:191 receivelog.cpp:409
 #, c-format
 msgid "%s: could not send feedback packet: %s"
 msgstr "%s: 无法发送回馈包: %s"
 
-#: receivelog.c:454
+#: pg_recvlogical.cpp:216
 #, c-format
-msgid "%s: select() failed: %s\n"
-msgstr "%s: select() 失败: %s\n"
+msgid "%s: could not fsync log file \"%s\": %s\n"
+msgstr "%s:无法同步日志文件\"%s\":%s\n"
 
-#: receivelog.c:462
+#: pg_recvlogical.cpp:235
 #, c-format
-msgid "%s: could not receive data from WAL stream: %s"
-msgstr "%s: 无法接收来自WAL流的数据: %s"
+msgid "%s: create exp buffer failed, out of memory.\n"
+msgstr "%s: 创建exp缓冲区失败, 内存溢出.\n"
 
-#: receivelog.c:486
+#: pg_recvlogical.cpp:240
 #, c-format
-msgid "%s: keepalive message has incorrect size %d\n"
-msgstr "%s: keepalive(保持活连接)的消息大小 %d 不正确 \n"
+msgid "%s: starting log streaming at %X/%X (slot %s)\n"
+msgstr "%s: 开始日志流%X/%X(槽%s)\n"
 
-#: receivelog.c:494
+#: pg_recvlogical.cpp:276
 #, c-format
-msgid "%s: unrecognized streaming header: \"%c\"\n"
-msgstr "%s: 无法识别的流头: \"%c\"\n"
+msgid "%s: could not send replication command \"%s\": %s\n"
+msgstr "%s: 不能发送复制命令\"%s\":%s\n"
 
-#: receivelog.c:500
-#, c-format
-msgid "%s: streaming header too small: %d\n"
-msgstr "%s: 流头大小: %d 值太小\n"
-
-#: receivelog.c:519
-#, c-format
-msgid "%s: received transaction log record for offset %u with no file open\n"
-msgstr "%s: 偏移位置 %u 处接收到的事务日志记录没有打开文件\n"
-
-#: receivelog.c:531
-#, c-format
-msgid "%s: got WAL data offset %08x, expected %08x\n"
-msgstr "%s: 得到WAL数据偏移 %08x, 期望值为 %08x\n"
-
-#: receivelog.c:567
-#, c-format
-msgid "%s: could not write %u bytes to WAL file \"%s\": %s\n"
-msgstr "%s: 无法写入 %u 字节到 WAL 文件 \"%s\": %s\n"
-
-#: receivelog.c:613
+#: pg_recvlogical.cpp:496
 #, c-format
 msgid "%s: unexpected termination of replication stream: %s"
 msgstr "%s: 流复制异常终止: %s"
 
-#: receivelog.c:622
+#: pg_recvlogical.cpp:535
 #, c-format
-msgid "%s: replication stream was terminated before stop point\n"
-msgstr "%s: 流复制在停止点之前异常终止\n"
+msgid "%s: initiated streaming\n"
+msgstr "%s: 启动流\n"
 
-#: streamutil.c:46 streamutil.c:63
+#: pg_recvlogical.cpp:612
+#, c-format
+msgid "%s: select() failed: %s\n"
+msgstr "%s: select() 失败: %s\n"
+
+#: pg_recvlogical.cpp:625
+#, c-format
+msgid "%s: could not receive data from WAL stream: %s"
+msgstr "%s: 无法接收来自WAL流的数据: %s"
+
+#: pg_recvlogical.cpp:664
+#, c-format
+msgid "%s: written_lsn = %lu, current time = %ld \n"
+msgstr "%s: written_lsn =%lu, 当前时间=%ld \n"
+
+#: pg_recvlogical.cpp:680
+#, c-format
+msgid "%s: unrecognized streaming header: \"%c\"\n"
+msgstr "%s: 无法识别的流头: \"%c\"\n"
+
+#: pg_recvlogical.cpp:694
+#, c-format
+msgid "%s: streaming header too small: %d\n"
+msgstr "%s: streaming header太小: %d\n"
+
+# command.c:1148
+#: pg_recvlogical.cpp:723
+#, c-format
+msgid "%s: could not open log file \"%s\": %s\n"
+msgstr "%s: 无法开启日志档 \"%s\": %s\n"
+
+#: pg_recvlogical.cpp:749 pg_recvlogical.cpp:764
+#, c-format
+msgid "%s: could not write %d bytes to log file \"%s\": %s\n"
+msgstr "%s: 无法书写%d日志文件的字节数\"%s\": %s\n"
+
+#: pg_recvlogical.cpp:976
+#, c-format
+msgid "%s: status interval reset to 0\n"
+msgstr "%s: 状态间隔重置为0\n"
+
+#: pg_recvlogical.cpp:988
+#, c-format
+msgid "%s: fsync interval reset to 0\n"
+msgstr "%s: fsync间隔重置为0\n"
+
+#: pg_recvlogical.cpp:1006
+#, c-format
+msgid "%s: could not parse start position \"%s\"\n"
+msgstr "%s: 无法解析起始位置\"%s\"\n"
+
+#: pg_recvlogical.cpp:1105
+#, c-format
+msgid "%s: no slot specified\n"
+msgstr "%s: 没有指定槽位\n"
+
+#: pg_recvlogical.cpp:1111
+#, c-format
+msgid "%s: no target file specified\n"
+msgstr "%s: 没有指定目标文件\n"
+
+#: pg_recvlogical.cpp:1117
+#, c-format
+msgid "%s: no database specified\n"
+msgstr "%s: 没有指定数据库\n"
+
+#: pg_recvlogical.cpp:1123
+#, c-format
+msgid "%s: at least one action needs to be specified\n"
+msgstr "%s: 至少需要指定一个动作\n"
+
+#: pg_recvlogical.cpp:1129
+#, c-format
+msgid "%s: --stop cannot be combined with --init or --start\n"
+msgstr "%s: --top不能与 --init、--start组合使用\n"
+
+#: pg_recvlogical.cpp:1135
+#, c-format
+msgid "%s: --startpos cannot be combined with --init or --stop\n"
+msgstr "%s: --startpos不能与 --init、--stop组合使用\n"
+
+#: pg_recvlogical.cpp:1191
+#, c-format
+msgid "%s: freeing replication slot \"%s\"\n"
+msgstr "%s: 释放复制槽位\"%s\"\n"
+
+#: pg_recvlogical.cpp:1204
+#, c-format
+msgid "%s: could not stop logical rep: got %d rows and %d fields, expected %d rows and %d fields\n"
+msgstr "%s: 不能停止逻辑代表:得到%d行和%d领域,预计%d行和%d字段\n"
+
+#: pg_recvlogical.cpp:1225
+#, c-format
+msgid "%s: initializing replication slot \"%s\"\n"
+msgstr "%s: 初始化复制槽位\"%s\"\n"
+
+#: pg_recvlogical.cpp:1244
+#, c-format
+msgid "%s: could not init logical rep: got %d rows and %d fields, expected %d rows and %d fields\n"
+msgstr "%s: 不能init逻辑代表:got%d行和%d领域,预计%d行和%d字段\n"
+
+#: pg_recvlogical.cpp:1254
+#, c-format
+msgid "%s: could not parse log location \"%s\"\n"
+msgstr "%s: 无法解析日志位置\"%s\"\n"
+
+#: receivelog.cpp:144
+#, c-format
+msgid "%s: realpath WAL segment path %s failed : %s\n"
+msgstr "%s: realpath WAL段路径%s失败:%s\n"
+
+#: receivelog.cpp:149
+#, c-format
+msgid "%s: Could not open WAL segment %s: %s\n"
+msgstr "%s: 无法打开WAL段%s:%s\n"
+
+#: receivelog.cpp:158
+#, c-format
+msgid "%s: could not stat WAL segment %s: %s\n"
+msgstr "%s: 无法统计WAL段%s:%s\n"
+
+#: receivelog.cpp:160 receivelog.cpp:175 receivelog.cpp:187 receivelog.cpp:208
+#, c-format
+msgid "%s: close file failed %s: %s\n"
+msgstr "%s: 关闭文件失败%s:%s\n"
+
+#: receivelog.cpp:169
+msgid "%s: WAL segment %s is %d bytes, should be 0 or %lu\n"
+msgstr "%s: WAL段%s是%d字节, 应该是0或%lu\n"
+
+#: receivelog.cpp:185
+#, c-format
+msgid "%s: could not pad WAL segment %s: %s\n"
+msgstr "%s: 无法填充WAL段%s:%s\n"
+
+#: receivelog.cpp:191
+#, c-format
+msgid "%s: unlink file failed %s: %s\n"
+msgstr "%s: 解链接文件失败%s:%s\n"
+
+#: receivelog.cpp:203
+#, c-format
+msgid "%s: could not seek back to beginning of WAL segment %s: %s\n"
+msgstr "%s: 无法寻回WAL段的开始%s:%s\n"
+
+#: receivelog.cpp:303
+#, c-format
+msgid "%s: could not get current position in file \"%s/%s\": %s\n"
+msgstr "%s: 无法在文件中获取当前位置\"%s/%s\":%s\n"
+
+#: receivelog.cpp:309
+#, c-format
+msgid "%s: could not fsync file \"%s/%s\": %s\n"
+msgstr "%s: 无法fsync文件\"%s/%s\":%s\n"
+
+#: receivelog.cpp:314
+#, c-format
+msgid "%s: could not close file \"%s/%s\": %s\n"
+msgstr "%s: 无法关闭文件\"%s/%s\":%s\n"
+
+#: receivelog.cpp:332
+#, c-format
+msgid "%s: could not rename file \"%s/%s\": %s\n"
+msgstr "%s: 不能重命名文件\"%s/%s\":%s\n"
+
+#: receivelog.cpp:337
+#, c-format
+msgid "%s: not renaming \"%s/%s\", segment is not complete.\n"
+msgstr "%s: 不重命名\"%s/%s\", 段不完整.\n"
+
+#: receivelog.cpp:445
+msgid ""
+"\n"
+"terminating XLogStream receiver due to timeout\n"
+msgstr ""
+"\n"
+"由于复制超时, 中断walreceiver进程\n"
+
+#: receivelog.cpp:469
+#, c-format
+msgid "%s: received xlog record for offset %u with no file open\n"
+msgstr "%s: 收到的xlog记录用于偏移量%u没有打开文件\n"
+
+#: receivelog.cpp:477
+#, c-format
+msgid "%s: got WAL data offset %08x, expected %08x\n"
+msgstr "%s: 得到WAL数据偏移 %08x, 期望值为 %08x\n"
+
+#: receivelog.cpp:506
+#, c-format
+msgid "%s: could not write %u bytes to WAL file %s: %s\n"
+msgstr "%s: 无法书写%u字节到WAL文件%s: %s\n"
+
+#: receivelog.cpp:616
+#, c-format
+msgid " could not identify system: %s\n"
+msgstr "无法识别系统:%s\n"
+
+#: receivelog.cpp:622
+#, c-format
+msgid " could not identify system, got %d rows and %d fields\n"
+msgstr " 无法识别系统, 得到了吗%d行和%d字段\n"
+
+#
+#: receivelog.cpp:629
+msgid " system identifier does not match between base backup and streaming connection\n"
+msgstr " 基本备份和流连接之间的系统标识符不匹配\n"
+
+#
+#: receivelog.cpp:634
+msgid " timeline does not match between base backup and streaming connection\n"
+msgstr " 基本备份和流连接之间的时间轴不匹配\n"
+
+#: receivelog.cpp:643
+msgid " check identify system success\n"
+msgstr " 检查识别系统成功\n"
+
+# command.c:1103
+#: receivelog.cpp:656
+#, c-format
+msgid " could not start replication: %s\n"
+msgstr " 无法启动复制:%s\n"
+
+#: receivelog.cpp:664
+#, c-format
+msgid " send %s success\n"
+msgstr " 发送%s成功\n"
+
+#: receivelog.cpp:756
+#, c-format
+msgid " select() failed: %m\n"
+msgstr " 选择()失败:%m\n"
+
+#: receivelog.cpp:762
+#, c-format
+msgid " Could not receive data from WAL stream, please check network state and configuration, e.g timeout setting: %s\n"
+msgstr " 无法从WAL流接收数据, 请检查网络状态和配置, 例如超时设置:%s\n"
+
+#: receivelog.cpp:779
+#, c-format
+msgid " Could not read copy data, please check network state and configuration: %s\n"
+msgstr " 无法读取副本数据, 请检查网络状态和配置:%s\n"
+
+#: receivelog.cpp:793
+#, c-format
+msgid " keepalive message is incorrect size: %d\n"
+msgstr " Keepalive消息大小不正确:%d\n"
+
+#: receivelog.cpp:798
+msgid " keepalive message is received\n"
+msgstr " 收到Keepalive消息\n"
+
+#: receivelog.cpp:818
+msgid "skip gaussdb config file while receiving xlog.\n"
+msgstr "接收xlog时跳过gaussdb配置文件.\n"
+
+#: receivelog.cpp:821
+#, c-format
+msgid " unrecognized streaming header: \"%c\".\n"
+msgstr " 无法识别streaming header:\"%c\".\n"
+
+#: receivelog.cpp:826
+#, c-format
+msgid " wal streaming header is too small: %d.\n"
+msgstr " wal streaming header太小:%d.\n"
+
+#: receivelog.cpp:829
+msgid " wal streaming body is empty.\n"
+msgstr " wal streaming body是空的.\n"
+
+#: receivelog.cpp:879
+#, c-format
+msgid " unexpected termination of replication stream: %s.\n"
+msgstr " 复制流异常终止:%s.\n"
+
+#: receivelog.cpp:890 receivelog.cpp:905
+#, c-format
+msgid " could not close file \"%s/%s\": %s.\n"
+msgstr " 无法关闭文件\"%s/%s\":%s.\n"
+
+#: streamutil.cpp:78 streamutil.cpp:95
 #, c-format
 msgid "%s: out of memory\n"
 msgstr "%s: 内存溢出\n"
 
-#: streamutil.c:142
-msgid "Password: "
-msgstr "口令: "
-
-#: streamutil.c:155
+#: streamutil.cpp:90
 #, c-format
-msgid "%s: could not connect to server\n"
-msgstr "%s: 无法连接到服务器\n"
+msgid "%s: malloc 0\n"
+msgstr "%s: malloc 0\n"
 
-#: streamutil.c:171
+#: streamutil.cpp:217
+msgid "Password: "
+msgstr "密码: "
+
+#: streamutil.cpp:238
 #, c-format
 msgid "%s: could not connect to server: %s\n"
 msgstr "%s: 无法连接到服务器: %s\n"
 
-#: streamutil.c:191
+#: streamutil.cpp:260
 #, c-format
 msgid "%s: could not determine server setting for integer_datetimes\n"
 msgstr "%s: 无法确定服务器上integer_datetimes的配置\n"
 
-#: streamutil.c:204
+#: streamutil.cpp:272
 #, c-format
 msgid "%s: integer_datetimes compile flag does not match server\n"
 msgstr "%s: integer_datetimes编译开关与服务器端不匹配\n"

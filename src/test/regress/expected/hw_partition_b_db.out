@@ -347,28 +347,28 @@ DROP TABLE t_hash_hash_subpartitions_clause;
 CREATE TABLE T_HASH_HASH_SUBPARTITIONS_CLAUSE (a int, b int, c int)
 PARTITION BY HASH(a) PARTITIONS 2 SUBPARTITION BY HASH(c) SUBPARTITIONS 2;
 SELECT pg_get_tabledef('T_HASH_HASH_SUBPARTITIONS_CLAUSE');
-                  pg_get_tabledef                  
----------------------------------------------------
- SET search_path = partition_a_db_schema;         +
- CREATE TABLE t_hash_hash_subpartitions_clause (  +
-     a integer,                                   +
-     b integer,                                   +
-     c integer                                    +
- )                                                +
- WITH (orientation=row, compression=no)           +
- PARTITION BY HASH (a) SUBPARTITION BY HASH (c)   +
- (                                                +
-     PARTITION p0 TABLESPACE pg_default           +
-     (                                            +
-         SUBPARTITION p0sp0 TABLESPACE pg_default,+
-         SUBPARTITION p0sp1 TABLESPACE pg_default +
-     ),                                           +
-     PARTITION p1 TABLESPACE pg_default           +
-     (                                            +
-         SUBPARTITION p1sp0 TABLESPACE pg_default,+
-         SUBPARTITION p1sp1 TABLESPACE pg_default +
-     )                                            +
- )                                                +
+                 pg_get_tabledef                 
+-------------------------------------------------
+ SET search_path = partition_a_db_schema;       +
+ CREATE TABLE t_hash_hash_subpartitions_clause (+
+     a integer,                                 +
+     b integer,                                 +
+     c integer                                  +
+ )                                              +
+ WITH (orientation=row, compression=no)         +
+ PARTITION BY HASH (a) SUBPARTITION BY HASH (c) +
+ (                                              +
+     PARTITION p0                               +
+     (                                          +
+         SUBPARTITION p0sp0,                    +
+         SUBPARTITION p0sp1                     +
+     ),                                         +
+     PARTITION p1                               +
+     (                                          +
+         SUBPARTITION p1sp0,                    +
+         SUBPARTITION p1sp1                     +
+     )                                          +
+ )                                              +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -382,22 +382,22 @@ DROP TABLE T_HASH_HASH_SUBPARTITIONS_CLAUSE;
 CREATE TABLE T_HASH_HASH_SUBPARTITIONS_CLAUSE (a int, b int, c int)
 PARTITION BY HASH (a) SUBPARTITION BY HASH(c);
 SELECT pg_get_tabledef('T_HASH_HASH_SUBPARTITIONS_CLAUSE');
-                        pg_get_tabledef                        
----------------------------------------------------------------
- SET search_path = partition_a_db_schema;                     +
- CREATE TABLE t_hash_hash_subpartitions_clause (              +
-     a integer,                                               +
-     b integer,                                               +
-     c integer                                                +
- )                                                            +
- WITH (orientation=row, compression=no)                       +
- PARTITION BY HASH (a) SUBPARTITION BY HASH (c)               +
- (                                                            +
-     PARTITION p0 TABLESPACE pg_default                       +
-     (                                                        +
-         SUBPARTITION p0_subpartdefault1 TABLESPACE pg_default+
-     )                                                        +
- )                                                            +
+                 pg_get_tabledef                 
+-------------------------------------------------
+ SET search_path = partition_a_db_schema;       +
+ CREATE TABLE t_hash_hash_subpartitions_clause (+
+     a integer,                                 +
+     b integer,                                 +
+     c integer                                  +
+ )                                              +
+ WITH (orientation=row, compression=no)         +
+ PARTITION BY HASH (a) SUBPARTITION BY HASH (c) +
+ (                                              +
+     PARTITION p0                               +
+     (                                          +
+         SUBPARTITION p0_subpartdefault1        +
+     )                                          +
+ )                                              +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -416,8 +416,8 @@ SELECT pg_get_tabledef('T_HASH_PARTITIONS_CLAUSE');
  WITH (orientation=row, compression=no)  +
  PARTITION BY HASH (a)                   +
  (                                       +
-     PARTITION p0 TABLESPACE pg_default, +
-     PARTITION p1 TABLESPACE pg_default  +
+     PARTITION p0,                       +
+     PARTITION p1                        +
  )                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
@@ -437,7 +437,7 @@ SELECT pg_get_tabledef('T_HASH_PARTITIONS_CLAUSE');
  WITH (orientation=row, compression=no)  +
  PARTITION BY HASH (a)                   +
  (                                       +
-     PARTITION p0 TABLESPACE pg_default  +
+     PARTITION p0                        +
  )                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
@@ -571,11 +571,11 @@ SELECT pg_get_tabledef('t_multi_keys_list_default'::regclass);
  WITH (orientation=row, compression=no)                                                                                                                                                                                                               +
  PARTITION BY LIST (a, b)                                                                                                                                                                                                                             +
  (                                                                                                                                                                                                                                                    +
-     PARTITION p2 VALUES ((0,'1'),(0,'2'),(0,'3'),(1,'1'),(1,'2')) TABLESPACE pg_default,                                                                                                                                                             +
-     PARTITION p1 VALUES ((0,NULL)) TABLESPACE pg_default,                                                                                                                                                                                            +
-     PARTITION p4 VALUES ((3,'2'),(NULL,NULL)) TABLESPACE pg_default,                                                                                                                                                                                 +
-     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default,                                                                                                                                                                                             +
-     PARTITION p3 VALUES ((NULL,'0'),(2,'1')) TABLESPACE pg_default                                                                                                                                                                                   +
+     PARTITION p2 VALUES ((0,'1'),(0,'2'),(0,'3'),(1,'1'),(1,'2')),                                                                                                                                                                                   +
+     PARTITION p1 VALUES ((0,NULL)),                                                                                                                                                                                                                  +
+     PARTITION p4 VALUES ((3,'2'),(NULL,NULL)),                                                                                                                                                                                                       +
+     PARTITION pd VALUES (DEFAULT),                                                                                                                                                                                                                   +
+     PARTITION p3 VALUES ((NULL,'0'),(2,'1'))                                                                                                                                                                                                         +
  )                                                                                                                                                                                                                                                    +
  ENABLE ROW MOVEMENT;                                                                                                                                                                                                                                 +
  CREATE INDEX t_multi_keys_list_default_idx_l ON t_multi_keys_list_default USING btree (a, b, c) LOCAL(PARTITION p3_a_b_c_idx, PARTITION p1_a_b_c_idx, PARTITION p2_a_b_c_idx, PARTITION p4_a_b_c_idx, PARTITION pd_a_b_c_idx)  TABLESPACE pg_default;
@@ -1540,11 +1540,11 @@ SELECT pg_get_tabledef('t_multi_keys_list_default'::regclass);
  WITH (orientation=row, compression=no)                                                                                                                                                                                                               +
  PARTITION BY LIST (a, b)                                                                                                                                                                                                                             +
  (                                                                                                                                                                                                                                                    +
-     PARTITION p2 VALUES ((0,'1'),(0,'2'),(0,'3'),(1,'1'),(1,'2')) TABLESPACE pg_default,                                                                                                                                                             +
+     PARTITION p2 VALUES ((0,'1'),(0,'2'),(0,'3'),(1,'1'),(1,'2')),                                                                                                                                                                                   +
      PARTITION p1 VALUES ((0,NULL)) TABLESPACE part_adb_temp_tbspc,                                                                                                                                                                                   +
-     PARTITION p4 VALUES ((3,'2'),(NULL,NULL)) TABLESPACE pg_default,                                                                                                                                                                                 +
-     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default,                                                                                                                                                                                             +
-     PARTITION p3 VALUES ((NULL,'0'),(2,'1')) TABLESPACE pg_default                                                                                                                                                                                   +
+     PARTITION p4 VALUES ((3,'2'),(NULL,NULL)),                                                                                                                                                                                                       +
+     PARTITION pd VALUES (DEFAULT),                                                                                                                                                                                                                   +
+     PARTITION p3 VALUES ((NULL,'0'),(2,'1'))                                                                                                                                                                                                         +
  )                                                                                                                                                                                                                                                    +
  ENABLE ROW MOVEMENT;                                                                                                                                                                                                                                 +
  CREATE INDEX test_multi_list_key_gi ON t_multi_keys_list_default USING btree (c) TABLESPACE pg_default;                                                                                                                                              +
@@ -1615,10 +1615,10 @@ SELECT pg_get_tabledef('t_multi_keys_list_default'::regclass);
  WITH (orientation=row, compression=no)                                                                                                                                                                                       +
  PARTITION BY LIST (a, b)                                                                                                                                                                                                     +
  (                                                                                                                                                                                                                            +
-     PARTITION p2 VALUES ((0,'1'),(0,'2'),(0,'3'),(1,'1'),(1,'2')) TABLESPACE pg_default,                                                                                                                                     +
+     PARTITION p2 VALUES ((0,'1'),(0,'2'),(0,'3'),(1,'1'),(1,'2')),                                                                                                                                                           +
      PARTITION p0 VALUES ((0,NULL)) TABLESPACE part_adb_temp_tbspc,                                                                                                                                                           +
-     PARTITION p4 VALUES ((3,'2'),(NULL,NULL)) TABLESPACE pg_default,                                                                                                                                                         +
-     PARTITION pd VALUES (DEFAULT) TABLESPACE pg_default                                                                                                                                                                      +
+     PARTITION p4 VALUES ((3,'2'),(NULL,NULL)),                                                                                                                                                                               +
+     PARTITION pd VALUES (DEFAULT)                                                                                                                                                                                            +
  )                                                                                                                                                                                                                            +
  ENABLE ROW MOVEMENT;                                                                                                                                                                                                         +
  CREATE INDEX t_multi_keys_list_default_idx_l ON t_multi_keys_list_default USING btree (a, b, c) LOCAL(PARTITION p1_a_b_c_idx, PARTITION p2_a_b_c_idx, PARTITION p4_a_b_c_idx, PARTITION pd_a_b_c_idx)  TABLESPACE pg_default;
@@ -1980,46 +1980,46 @@ PARTITION BY RANGE COLUMNS(a) PARTITIONS 2 SUBPARTITION BY HASH(c) SUBPARTITIONS
     PARTITION p2 VALUES LESS THAN (200)
 );
 SELECT pg_get_tabledef('t_range_hash_subpartitions_clause'::regclass);
-                                                    pg_get_tabledef                                                     
-------------------------------------------------------------------------------------------------------------------------
- SET search_path = partition_b_db_schema;                                                                              +
- CREATE TABLE t_range_hash_subpartitions_clause (                                                                      +
-     a integer,                                                                                                        +
-     b integer,                                                                                                        +
-     c integer                                                                                                         +
- )                                                                                                                     +
- WITH (orientation=row, compression=no)                                                                                +
- PARTITION BY RANGE (a) SUBPARTITION BY HASH (c)                                                                       +
- (                                                                                                                     +
-     PARTITION p1111111111111111111111111111111111111111111111111111111111 VALUES LESS THAN (100) TABLESPACE pg_default+
-     (                                                                                                                 +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp0 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp1 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp2 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp3 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp4 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp5 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp6 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp7 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp8 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp9 TABLESPACE pg_default,            +
-         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp10 TABLESPACE pg_default            +
-     ),                                                                                                                +
-     PARTITION p2 VALUES LESS THAN (200) TABLESPACE pg_default                                                         +
-     (                                                                                                                 +
-         SUBPARTITION p2sp0 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp1 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp2 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp3 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp4 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp5 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp6 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp7 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp8 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp9 TABLESPACE pg_default,                                                                     +
-         SUBPARTITION p2sp10 TABLESPACE pg_default                                                                     +
-     )                                                                                                                 +
- )                                                                                                                     +
+                                         pg_get_tabledef                                          
+--------------------------------------------------------------------------------------------------
+ SET search_path = partition_b_db_schema;                                                        +
+ CREATE TABLE t_range_hash_subpartitions_clause (                                                +
+     a integer,                                                                                  +
+     b integer,                                                                                  +
+     c integer                                                                                   +
+ )                                                                                               +
+ WITH (orientation=row, compression=no)                                                          +
+ PARTITION BY RANGE (a) SUBPARTITION BY HASH (c)                                                 +
+ (                                                                                               +
+     PARTITION p1111111111111111111111111111111111111111111111111111111111 VALUES LESS THAN (100)+
+     (                                                                                           +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp0,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp1,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp2,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp3,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp4,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp5,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp6,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp7,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp8,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp9,            +
+         SUBPARTITION p1111111111111111111111111111111111111111111111111111111111sp10            +
+     ),                                                                                          +
+     PARTITION p2 VALUES LESS THAN (200)                                                         +
+     (                                                                                           +
+         SUBPARTITION p2sp0,                                                                     +
+         SUBPARTITION p2sp1,                                                                     +
+         SUBPARTITION p2sp2,                                                                     +
+         SUBPARTITION p2sp3,                                                                     +
+         SUBPARTITION p2sp4,                                                                     +
+         SUBPARTITION p2sp5,                                                                     +
+         SUBPARTITION p2sp6,                                                                     +
+         SUBPARTITION p2sp7,                                                                     +
+         SUBPARTITION p2sp8,                                                                     +
+         SUBPARTITION p2sp9,                                                                     +
+         SUBPARTITION p2sp10                                                                     +
+     )                                                                                           +
+ )                                                                                               +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -2227,22 +2227,22 @@ PARTITION BY RANGE COLUMNS(a)
     PARTITION p4 VALUES LESS THAN MAXVALUE
 );
 SELECT pg_get_tabledef('t_single_key_range'::regclass);
-                          pg_get_tabledef                           
---------------------------------------------------------------------
- SET search_path = partition_b_db_schema;                          +
- CREATE TABLE t_single_key_range (                                 +
-     a integer,                                                    +
-     b integer,                                                    +
-     c integer                                                     +
- )                                                                 +
- WITH (orientation=row, compression=no)                            +
- PARTITION BY RANGE (a)                                            +
- (                                                                 +
-     PARTITION p1 VALUES LESS THAN (100) TABLESPACE pg_default,    +
-     PARTITION p2 VALUES LESS THAN (200) TABLESPACE pg_default,    +
-     PARTITION p3 VALUES LESS THAN (300) TABLESPACE pg_default,    +
-     PARTITION p4 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
- )                                                                 +
+               pg_get_tabledef                
+----------------------------------------------
+ SET search_path = partition_b_db_schema;    +
+ CREATE TABLE t_single_key_range (           +
+     a integer,                              +
+     b integer,                              +
+     c integer                               +
+ )                                           +
+ WITH (orientation=row, compression=no)      +
+ PARTITION BY RANGE (a)                      +
+ (                                           +
+     PARTITION p1 VALUES LESS THAN (100),    +
+     PARTITION p2 VALUES LESS THAN (200),    +
+     PARTITION p3 VALUES LESS THAN (300),    +
+     PARTITION p4 VALUES LESS THAN (MAXVALUE)+
+ )                                           +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -2279,23 +2279,23 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 SELECT pg_get_tabledef('t_multi_keys_range'::regclass);
-                               pg_get_tabledef                                
-------------------------------------------------------------------------------
- SET search_path = partition_b_db_schema;                                    +
- CREATE TABLE t_multi_keys_range (                                           +
-     a integer,                                                              +
-     b integer,                                                              +
-     c integer                                                               +
- )                                                                           +
- WITH (orientation=row, compression=no)                                      +
- PARTITION BY RANGE (a, b)                                                   +
- (                                                                           +
-     PARTITION p1 VALUES LESS THAN (100, 100) TABLESPACE pg_default,         +
-     PARTITION p2 VALUES LESS THAN (200, 200) TABLESPACE pg_default,         +
-     PARTITION p3 VALUES LESS THAN (300, 300) TABLESPACE pg_default,         +
-     PARTITION p4 VALUES LESS THAN (400, MAXVALUE) TABLESPACE pg_default,    +
-     PARTITION p5 VALUES LESS THAN (MAXVALUE, MAXVALUE) TABLESPACE pg_default+
- )                                                                           +
+                    pg_get_tabledef                     
+--------------------------------------------------------
+ SET search_path = partition_b_db_schema;              +
+ CREATE TABLE t_multi_keys_range (                     +
+     a integer,                                        +
+     b integer,                                        +
+     c integer                                         +
+ )                                                     +
+ WITH (orientation=row, compression=no)                +
+ PARTITION BY RANGE (a, b)                             +
+ (                                                     +
+     PARTITION p1 VALUES LESS THAN (100, 100),         +
+     PARTITION p2 VALUES LESS THAN (200, 200),         +
+     PARTITION p3 VALUES LESS THAN (300, 300),         +
+     PARTITION p4 VALUES LESS THAN (400, MAXVALUE),    +
+     PARTITION p5 VALUES LESS THAN (MAXVALUE, MAXVALUE)+
+ )                                                     +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -2366,11 +2366,11 @@ SELECT pg_get_tabledef('t_part_by_key'::regclass);
  WITH (orientation=row, compression=no)  +
  PARTITION BY HASH (a)                   +
  (                                       +
-     PARTITION p1 TABLESPACE pg_default, +
-     PARTITION p2 TABLESPACE pg_default, +
-     PARTITION p3 TABLESPACE pg_default, +
-     PARTITION p4 TABLESPACE pg_default, +
-     PARTITION p5 TABLESPACE pg_default  +
+     PARTITION p1,                       +
+     PARTITION p2,                       +
+     PARTITION p3,                       +
+     PARTITION p4,                       +
+     PARTITION p5                        +
  )                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
@@ -2502,22 +2502,22 @@ PARTITION BY LIST COLUMNS(a,b)
     PARTITION p4 VALUES IN ( (3,2), (3,3) )
 );
 SELECT pg_get_tabledef('t_multi_keys_list'::regclass);
-                                pg_get_tabledef                                 
---------------------------------------------------------------------------------
- SET search_path = partition_b_db_schema;                                      +
- CREATE TABLE t_multi_keys_list (                                              +
-     a integer,                                                                +
-     b integer,                                                                +
-     c integer                                                                 +
- )                                                                             +
- WITH (orientation=row, compression=no)                                        +
- PARTITION BY LIST (a, b)                                                      +
- (                                                                             +
-     PARTITION p1 VALUES ((0,0)) TABLESPACE pg_default,                        +
-     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)) TABLESPACE pg_default,+
-     PARTITION p3 VALUES ((2,0),(2,1)) TABLESPACE pg_default,                  +
-     PARTITION p4 VALUES ((3,2),(3,3)) TABLESPACE pg_default                   +
- )                                                                             +
+                     pg_get_tabledef                      
+----------------------------------------------------------
+ SET search_path = partition_b_db_schema;                +
+ CREATE TABLE t_multi_keys_list (                        +
+     a integer,                                          +
+     b integer,                                          +
+     c integer                                           +
+ )                                                       +
+ WITH (orientation=row, compression=no)                  +
+ PARTITION BY LIST (a, b)                                +
+ (                                                       +
+     PARTITION p1 VALUES ((0,0)),                        +
+     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)),+
+     PARTITION p3 VALUES ((2,0),(2,1)),                  +
+     PARTITION p4 VALUES ((3,2),(3,3))                   +
+ )                                                       +
  ENABLE ROW MOVEMENT;
 (1 row)
 
@@ -2586,10 +2586,10 @@ SELECT pg_get_tabledef('t_multi_keys_list_null'::regclass);
  WITH (orientation=row, compression=no)                                                                                                                                                                                 +
  PARTITION BY LIST (a, b)                                                                                                                                                                                               +
  (                                                                                                                                                                                                                      +
-     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)) TABLESPACE pg_default,                                                                                                                                         +
-     PARTITION p1 VALUES ((0,NULL)) TABLESPACE pg_default,                                                                                                                                                              +
-     PARTITION p4 VALUES ((3,2),(NULL,NULL)) TABLESPACE pg_default,                                                                                                                                                     +
-     PARTITION p3 VALUES ((NULL,0),(2,1)) TABLESPACE pg_default                                                                                                                                                         +
+     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)),                                                                                                                                                               +
+     PARTITION p1 VALUES ((0,NULL)),                                                                                                                                                                                    +
+     PARTITION p4 VALUES ((3,2),(NULL,NULL)),                                                                                                                                                                           +
+     PARTITION p3 VALUES ((NULL,0),(2,1))                                                                                                                                                                               +
  )                                                                                                                                                                                                                      +
  ENABLE ROW MOVEMENT;                                                                                                                                                                                                   +
  CREATE INDEX t_multi_keys_list_null_idx_l ON t_multi_keys_list_null USING btree (a, b, c) LOCAL(PARTITION p3_a_b_c_idx, PARTITION p1_a_b_c_idx, PARTITION p2_a_b_c_idx, PARTITION p4_a_b_c_idx)  TABLESPACE pg_default;
@@ -3112,10 +3112,10 @@ SELECT pg_get_tabledef('t_multi_keys_list_null'::regclass);
  WITH (orientation=row, compression=no)                                                                                                                                                                                 +
  PARTITION BY LIST (a, b)                                                                                                                                                                                               +
  (                                                                                                                                                                                                                      +
-     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)) TABLESPACE pg_default,                                                                                                                                         +
+     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)),                                                                                                                                                               +
      PARTITION p1 VALUES ((0,NULL)) TABLESPACE part_bdb_temp_tbspc,                                                                                                                                                     +
-     PARTITION p4 VALUES ((3,2),(NULL,NULL)) TABLESPACE pg_default,                                                                                                                                                     +
-     PARTITION p3 VALUES ((NULL,0),(2,1)) TABLESPACE pg_default                                                                                                                                                         +
+     PARTITION p4 VALUES ((3,2),(NULL,NULL)),                                                                                                                                                                           +
+     PARTITION p3 VALUES ((NULL,0),(2,1))                                                                                                                                                                               +
  )                                                                                                                                                                                                                      +
  ENABLE ROW MOVEMENT;                                                                                                                                                                                                   +
  CREATE INDEX test_multi_list_key_gi ON t_multi_keys_list_null USING btree (c) TABLESPACE pg_default;                                                                                                                   +
@@ -3202,10 +3202,10 @@ SELECT pg_get_tabledef('t_multi_keys_list_null'::regclass);
  WITH (orientation=row, compression=no)                                                                                                                                                                                 +
  PARTITION BY LIST (a, b)                                                                                                                                                                                               +
  (                                                                                                                                                                                                                      +
-     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)) TABLESPACE pg_default,                                                                                                                                         +
+     PARTITION p2 VALUES ((0,1),(0,2),(0,3),(1,1),(1,2)),                                                                                                                                                               +
      PARTITION p0 VALUES ((0,NULL)) TABLESPACE part_bdb_temp_tbspc,                                                                                                                                                     +
-     PARTITION p4 VALUES ((3,2),(NULL,NULL)) TABLESPACE pg_default,                                                                                                                                                     +
-     PARTITION p5 VALUES ((4,4)) TABLESPACE pg_default                                                                                                                                                                  +
+     PARTITION p4 VALUES ((3,2),(NULL,NULL)),                                                                                                                                                                           +
+     PARTITION p5 VALUES ((4,4))                                                                                                                                                                                        +
  )                                                                                                                                                                                                                      +
  ENABLE ROW MOVEMENT;                                                                                                                                                                                                   +
  CREATE INDEX test_multi_list_key_gi ON t_multi_keys_list_null USING btree (c) TABLESPACE pg_default;                                                                                                                   +

@@ -1655,6 +1655,10 @@ static Query* _readQuery(void)
     IF_EXIST(indexhintList) {
         READ_NODE_FIELD(indexhintList);
     }
+    IF_EXIST(has_uservar)
+    {
+        READ_BOOL_FIELD(has_uservar);
+    }
 
     READ_DONE();
 }
@@ -1698,6 +1702,7 @@ static AlterTableStmt* _readAlterTableStmt(void)
 {
     READ_LOCALS(AlterTableStmt);
     READ_NODE_FIELD(relation);
+    READ_BOOL_FIELD(fromReplace);
 
     READ_DONE();
 }
@@ -4099,7 +4104,7 @@ static Unique* _readUnique(Unique* local_node)
     READ_ATTR_ARRAY(uniqColIdx, numCols);
     READ_OPERATOROID_ARRAY(uniqOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(uniq_collations, numCols);
     }
 #endif
@@ -4346,7 +4351,16 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(targetlists) {
         READ_NODE_FIELD(targetlists);
     }
-	
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+        READ_NODE_FIELD(withCheckOptionLists);
+    }
+#ifdef USE_SPQ
+    if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
+        IF_EXIST(isSplitUpdates) {
+            READ_NODE_FIELD(isSplitUpdates);
+	}
+    }
+#endif
     READ_DONE();
 }
 
@@ -4484,7 +4498,7 @@ static Group* _readGroup(Group* local_node)
     READ_ATTR_ARRAY(grpColIdx, numCols);
     READ_OPERATOROID_ARRAY(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(grp_collations, numCols);
     }
 #endif
@@ -4550,7 +4564,7 @@ static HashJoin* _readHashJoin(HashJoin* local_node)
     read_mem_info(&local_node->mem_info);
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_NODE_FIELD(hash_collations);
     }
 #endif
@@ -4714,6 +4728,7 @@ static PlannedStmt* _readPlannedStmt(void)
     READ_INT_FIELD(current_id);
     READ_BOOL_FIELD(enable_adaptive_scan);
     READ_BOOL_FIELD(is_spq_optmized);
+    READ_INT_FIELD(write_node_index);
 #endif
 
     READ_DONE();
@@ -4772,6 +4787,7 @@ static SpqSeqScan* _readSpqSeqScan(void)
     READ_BOOL_FIELD(isFullTableScan);
     READ_BOOL_FIELD(isAdaptiveScan);
     READ_BOOL_FIELD(isDirectRead);
+    READ_UINT_FIELD(DirectReadBlkNum);
  
     READ_END();
 }
@@ -4839,6 +4855,27 @@ static Sequence* _readSequence(void)
  
     READ_END();
 }
+
+static DMLActionExpr * _readDMLActionExpr(void)
+{
+    READ_LOCALS_NO_FIELDS(DMLActionExpr);
+
+    READ_END();
+}
+
+static SplitUpdate * _readSplitUpdate(void)
+{
+    READ_LOCALS(SplitUpdate);
+
+    READ_INT_FIELD(actionColIdx);
+    READ_INT_FIELD(tupleoidColIdx);
+    READ_NODE_FIELD(insertColIdx);
+    READ_NODE_FIELD(deleteColIdx);
+
+    _readPlan(&local_node->plan);
+
+    READ_END();
+}
 #endif
 
 static SetOp* _readSetOp(SetOp* local_node)
@@ -4855,7 +4892,7 @@ static SetOp* _readSetOp(SetOp* local_node)
     READ_ATTR_ARRAY(dupColIdx, numCols);
     READ_OPERATOROID_ARRAY(dupOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
         READ_OPERATOROID_ARRAY(dup_collations, numCols);
     }
 #endif
@@ -6520,6 +6557,10 @@ Node* parseNodeString(void)
         return_value = _readSpqIndexOnlyScan();
     } else if (MATCH("SPQBITMAPHEAPSCAN", 17)) {
         return_value = _readSpqBitmapHeapScan();
+    } else if (MATCH("DMLACTIONEXPR", 13)) {
+        return_value = _readDMLActionExpr();
+    } else if (MATCH("SPLITUPDATE", 11)) {
+        return_value = _readSplitUpdate();
 #endif
     } else if (MATCH("BITMAPHEAPSCAN", 14)) {
         return_value = _readBitmapHeapScan(NULL);

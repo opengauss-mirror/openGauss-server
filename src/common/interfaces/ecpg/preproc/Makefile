@@ -93,16 +93,13 @@ ecpg_kwlist_d.h: ecpg_kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --varname ScanECPGKeywords $<
 
 # Force these dependencies to be known even without dependency info built:
-ecpg_keywords.o c_keywords.o keywords.o preproc.o parser.o: preproc.hpp kwlist_d.h
+ecpg_keywords.o c_keywords.o keywords.o preproc.o parser.o: preproc.hpp $(top_srcdir)/src/include/parser/kwlist_d.h
 ecpg_keywords.o: ecpg_kwlist_d.h
 c_keywords.o: c_kwlist_d.h
 keywords.o: $(top_srcdir)/src/include/parser/kwlist.h
 
 kwlookup.cpp: % : $(top_srcdir)/src/common/backend/parser/%
 	rm -f $@ && $(LN_S) $< .
-
-kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
-	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
 
 distprep: preproc.y preproc.cpp preproc.hpp pgc.cpp
 

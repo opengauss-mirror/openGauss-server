@@ -41,6 +41,7 @@
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
 #include "utils/builtins.h"
+#include "utils/bytea.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -308,6 +309,15 @@ static bool viewSecurityPassDown(Node* node, void* context)
         /* Do what we came for */
         if (rte->rtekind == RTE_RELATION) {
             rte->checkAsUser = *asUser;
+            /* Check namespace permissions. */
+            AclResult aclresult;
+            /* No lock here ,cause relation already opend */
+            Relation rel = heap_open(rte->relid, NoLock);
+            Oid namespaceId = RelationGetNamespace(rel);
+            aclresult = pg_namespace_aclcheck(namespaceId, *asUser, ACL_USAGE);
+            if (aclresult != ACLCHECK_OK)
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            heap_close(rel, NoLock);
         }
         /* allow rangetable entry continue */
         return false;
@@ -5084,7 +5094,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED, true);
     }
 
     /* CREATE MATILIZED VIEW AS*/
@@ -5097,7 +5107,7 @@ List* QueryRewriteCTAS(Query* parsetree)
         proutility_cxt.readOnlyTree = false;
         proutility_cxt.params = NULL;
         proutility_cxt.is_top_level = true;
-        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED);
+        ProcessUtility(&proutility_cxt, NULL, false, NULL, PROCESS_UTILITY_GENERATED, true);
 
         create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
 
@@ -5235,7 +5245,24 @@ Node* QueryRewriteNonConstant(Node *node)
     /* deparse the SQL statement from the subquery. */
     deparse_query(cparsetree, select_sql, NIL, false, false);
 
-    StmtResult *result = execute_stmt(select_sql->data, true);
+    StmtResult *result = NULL;
+    if (u_sess->attr.attr_sql.dolphin) {
+        int origin = u_sess->attr.attr_common.bytea_output;
+        u_sess->attr.attr_common.bytea_output = BYTEA_OUTPUT_HEX;
+        PG_TRY();
+        {
+            result = execute_stmt(select_sql->data, true);
+        }
+        PG_CATCH();
+        {
+            u_sess->attr.attr_common.bytea_output = origin;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+        u_sess->attr.attr_common.bytea_output = origin;
+    } else {
+        result = execute_stmt(select_sql->data, true);
+    }
 
     DestroyStringInfo(select_sql);
 

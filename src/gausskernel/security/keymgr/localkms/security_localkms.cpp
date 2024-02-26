@@ -532,6 +532,7 @@ KmUnStr kms_mk_encrypt(KeyMgr *kmgr, KeyInfo info, KmUnStr plain)
 
     cipher.val = _cipher->ustr_val;
     cipher.len = _cipher->ustr_len;
+    km_safe_free(_cipher);
     return cipher;
 }
 

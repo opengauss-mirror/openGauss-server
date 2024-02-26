@@ -104,6 +104,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_txn_of_master));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_opengauss_page_status));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_thread_init));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_register_thread_deinit));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_release_owner));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_wait_reform));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_event));
@@ -130,6 +131,10 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_mes_max_watting_rooms));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_send_opengauss_oldest_xmin));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_drc_info));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_info));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_buf_res));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_cmd_stat));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_req_opengauss_immediate_ckpt));
 
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
@@ -264,6 +269,11 @@ int dms_register_thread_init(dms_thread_init_t thrd_init)
     return g_ss_dms_func.dms_register_thread_init(thrd_init);
 }
 
+int dms_register_thread_deinit(dms_thread_deinit_t thrd_deinit)
+{
+    return g_ss_dms_func.dms_register_thread_deinit(thrd_deinit);
+}
+
 int dms_release_owner(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned char *released)
 {
     return g_ss_dms_func.dms_release_owner(dms_ctx, ctrl, released);
@@ -361,7 +371,31 @@ int dms_send_opengauss_oldest_xmin(dms_context_t *dms_ctx, unsigned long long ol
     return g_ss_dms_func.dms_send_opengauss_oldest_xmin(dms_ctx, oldest_xmin, dest_id);
 }
 
-int get_drc_info(int* is_found, stat_drc_info_t* drc_info)
+int get_drc_info(int *is_found, dv_drc_buf_info *drc_info)
 {
     return g_ss_dms_func.dms_get_drc_info(is_found, drc_info);
+}
+
+int dms_info(char *buf, unsigned int len, dms_info_id_e id)
+{
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.dms_info(buf, len, id);
+    } else {
+        return DMS_SUCCESS;
+    }
+}
+
+void dms_get_buf_res(unsigned long long *row_id, dv_drc_buf_info *drc_info, int type)
+{
+    g_ss_dms_func.dms_get_buf_res(row_id, drc_info, type);
+}
+
+void dms_get_cmd_stat(int index, wait_cmd_stat_result_t *cmd_stat_result)
+{
+    g_ss_dms_func.dms_get_cmd_stat(index, cmd_stat_result);
+}
+
+int dms_req_opengauss_immediate_checkpoint(dms_context_t *dms_ctx, unsigned long long *redo_lsn)
+{
+    return g_ss_dms_func.dms_req_opengauss_immediate_ckpt(dms_ctx, redo_lsn);
 }

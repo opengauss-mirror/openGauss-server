@@ -32,6 +32,9 @@ then
 elif [ -f "/etc/kylin-release" ]
 then
     kernel=$(cat /etc/kylin-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/CSIOS-release" ]
+then
+    kernel=$(cat /etc/CSIOS-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 else
     kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
 fi
@@ -175,6 +178,15 @@ fi
 if [ "$kernel"x = "asianux"x ]
 then
     plat_form_str=asianux7.5_"$cpu_bit"
+fi
+
+##################################################################################
+# csios platform
+# the result form like this: csios_x86_64
+##################################################################################
+if [ "$kernel"x = "csios"x ]
+then
+    plat_form_str=csios_"$cpu_bit"
 fi
 
 ##################################################################################

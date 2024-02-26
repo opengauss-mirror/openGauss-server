@@ -909,8 +909,6 @@ void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource,
         StorePreparedStatementCNGPC(stmt_name, plansource, from_sql, false);
         return;
     }
-    PreparedStatement* entry = NULL;
-    TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
     bool found = false;
 
     /* Initialize the hash table, if necessary */
@@ -1558,7 +1556,7 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
 
 Datum pg_prepared_statement_global(PG_FUNCTION_ARGS)
 {
-    if (!superuser()) {
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "pg_prepared_statements");
     }
 

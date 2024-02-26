@@ -622,6 +622,12 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
      * Do the normal non-recursive ANALYZE.
      */
     do_analyze_rel(onerel, vacstmt, relpages, false, elevel, analyzemode);
+	
+    /*
+     * If there are child tables, do recursive ANALYZE.
+     */
+    if (onerel->rd_rel->relhassubclass)
+        do_analyze_rel(onerel, vacstmt, relpages, true, elevel, analyzemode);
 
     /*
      * Close source relation now, but keep lock so that no one deletes it

@@ -18,6 +18,7 @@
 #include <ctype.h>
 
 #include "catalog/pg_proc.h"
+#include "common/int.h"
 #include "funcapi.h"
 #include "libpq/pqformat.h"
 #include "utils/array.h"
@@ -3008,19 +3009,32 @@ ArrayType* array_set(ArrayType* array, int nSubscripts, const int* indx, Datum d
     addedbefore = addedafter = 0;
 
     /*
-     * Check subscripts
+     * Check subscripts. We assume the existing subscripts passed
+     * ArrayCheckBounds, so that dim[i] + lb[i] can be computed without
+     * overflow. But we must beware of other overflows in our calculations of
+     * new dim[] values.
      */
     if (ndim == 1) {
         if (indx[0] < lb[0]) {
-            addedbefore = lb[0] - indx[0];
-            dim[0] += addedbefore;
+            if (pg_sub_s32_overflow(lb[0], indx[0], &addedbefore) ||
+            pg_add_s32_overflow(dim[0], addedbefore, &dim[0]))
+            ereport(ERROR,
+                    (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmsg("array size exceeds the maximum allowed (%d)",
+                        (int) MaxArraySize)));
+            
             lb[0] = indx[0];
             if (addedbefore > 1)
                 newhasnulls = true; /* will insert nulls */
         }
         if (indx[0] >= (dim[0] + lb[0])) {
-            addedafter = indx[0] - (dim[0] + lb[0]) + 1;
-            dim[0] += addedafter;
+            if (pg_sub_s32_overflow(indx[0], dim[0] + lb[0], &addedafter) ||
+                pg_add_s32_overflow(addedafter, 1, &addedafter) ||
+                pg_add_s32_overflow(dim[0], addedafter, &dim[0]))
+                ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("array size exceeds the maximum allowed (%d)",
+                        (int) MaxArraySize)));
             if (addedafter > 1)
                 newhasnulls = true; /* will insert nulls */
         }
@@ -3247,7 +3261,10 @@ ArrayType* array_set_slice(ArrayType* array, int nSubscripts, int* upperIndx, in
     addedbefore = addedafter = 0;
 
     /*
-     * Check subscripts
+     * Check subscripts. We assume the existing subscripts passed
+     * ArrayCheckBounds, so that dim[i] + lb[i] can be computed without
+     * overflow. But we must beware of other overflows in our calculations of
+     * new dim[] values.
      */
     if (ndim == 1) {
         Assert(nSubscripts == 1);
@@ -3255,17 +3272,26 @@ ArrayType* array_set_slice(ArrayType* array, int nSubscripts, int* upperIndx, in
             ereport(
                 ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("upper bound cannot be less than lower bound")));
         if (lowerIndx[0] < lb[0]) {
-            if (upperIndx[0] < lb[0] - 1)
-                newhasnulls = true; /* will insert nulls */
-            addedbefore = lb[0] - lowerIndx[0];
-            dim[0] += addedbefore;
+            if (pg_sub_s32_overflow(lb[0], lowerIndx[0], &addedbefore) ||
+                pg_add_s32_overflow(dim[0], addedbefore, &dim[0]))
+                ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("array size exceeds the maximum allowed (%d)",
+                               (int) MaxArraySize)));
             lb[0] = lowerIndx[0];
+            if (addedbefore > 1)
+                newhasnulls = true; /*will insert nulls*/
         }
         if (upperIndx[0] >= (dim[0] + lb[0])) {
-            if (lowerIndx[0] > (dim[0] + lb[0]))
+            if (pg_sub_s32_overflow(upperIndx[0], dim[0] + lb[0], &addedafter) ||
+                pg_add_s32_overflow(addedafter, 1, &addedafter) ||
+                pg_add_s32_overflow(dim[0], addedafter, &dim[0]))
+                ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("array size exceeds the maximum allowed (%d)",
+                        (int) MaxArraySize)));
+            if (addedafter > 1)
                 newhasnulls = true; /* will insert nulls */
-            addedafter = upperIndx[0] - (dim[0] + lb[0]) + 1;
-            dim[0] += addedafter;
         }
     } else {
         /*

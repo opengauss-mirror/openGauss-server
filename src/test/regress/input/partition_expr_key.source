@@ -370,6 +370,16 @@ partition p3 values less than(400)
 );
 CREATE INDEX t1_c2_idx ON t1 USING btree (c2) LOCAL(PARTITION p1_c2_idx, PARTITION p2_c2_idx, PARTITION p3_c2_idx);
 ALTER TABLE t1 ADD CONSTRAINT t3_pkey PRIMARY KEY USING btree  (c1) INCLUDE (tableoid);
+create table t(id int, c int default null)
+partition by range(abs(id))
+(PARTITION p_2017 VALUES LESS THAN (2017),
+ PARTITION p_2018 VALUES LESS THAN (2018),
+ PARTITION p_2019 VALUES LESS THAN (2019),
+PARTITION p_others VALUES LESS THAN (MAXVALUE));
+insert into t values (null,1);
+-- The null value is expected to be inserted into the last partition.
+select count(*) from t partition (p_2017);
+select count(*) from t partition (p_others);
 \c regression
 
 drop database if exists part_expr_key_db;
