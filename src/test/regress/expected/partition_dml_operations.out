@@ -1684,15 +1684,17 @@ select * from t_multi_parts_order partition (pd) order by col limit 10;
 (10 rows)
 
 rollback;
-explain delete from t_multi_parts_order partition(pd, p1) order by col limit 10;
-                                                             QUERY PLAN                                                              
--------------------------------------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=0.00..0.45 rows=10 width=14)
-   ->  Partition Iterator  (cost=0.00..108.28 rows=2402 width=14)
-         Iterations: 2
-         ->  Partitioned Index Scan using tbl_idx_t_multi_parts_order on t_multi_parts_order  (cost=0.00..108.28 rows=2402 width=14)
-               Selected Partitions:  1..2
-(5 rows)
+explain (costs off) delete from t_multi_parts_order partition(pd, p1) order by col limit 10;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Delete on t_multi_parts_order
+   ->  Sort
+         Sort Key: col
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on t_multi_parts_order
+                     Selected Partitions:  1..2
+(7 rows)
 
 begin;
 delete from t_multi_parts_order partition(p1, pd) order by col desc limit 10;
@@ -1758,15 +1760,17 @@ select * from t_multi_parts_order partition (pd) order by col desc limit 10;
 (10 rows)
 
 rollback;
-explain delete from t_multi_parts_order partition(pd, p1) order by col desc limit 10;
-                                                                  QUERY PLAN                                                                  
-----------------------------------------------------------------------------------------------------------------------------------------------
- Delete on t_multi_parts_order  (cost=0.00..0.45 rows=10 width=14)
-   ->  Partition Iterator Scan Backward  (cost=0.00..108.28 rows=2402 width=14)
-         Iterations: 2
-         ->  Partitioned Index Scan Backward using tbl_idx_t_multi_parts_order on t_multi_parts_order  (cost=0.00..108.28 rows=2402 width=14)
-               Selected Partitions:  1..2
-(5 rows)
+explain (costs off) delete from t_multi_parts_order partition(pd, p1) order by col desc limit 10;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Delete on t_multi_parts_order
+   ->  Sort
+         Sort Key: col DESC
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on t_multi_parts_order
+                     Selected Partitions:  1..2
+(7 rows)
 
 drop table if exists t_multi_parts_order;
 -- range partitions with global index, single column

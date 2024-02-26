@@ -1,33 +1,31 @@
 --
 -- SUBSELECT TEST
 -- 子查询可以出现在目标列、FROM子句、WHERE子句、JOIN/ON子句、GROUPBY子句、HAVING子句、ORDERBY子句等位置。
-
+--
 create  table test_tbl1 (f1 numeric);
 insert into test_tbl1 values (1), (1.000000000000000000001), (2), (3);
-
 create  table test_tbl2 (f2 float8);
 insert into test_tbl2 values (1), (2), (3);
 select * from test_tbl2
   where f2 in (select f1 from test_tbl1) 
   ORDER BY f2;
  f2 
------------
-         1
-         2
-         3
+----
+  1
+  2
+  3
 (3 rows)
 
 select * from test_tbl1
   where f1 in (select f2 from test_tbl2) 
   ORDER BY f1;
-         f1         
+           f1            
 -------------------------
                        1
  1.000000000000000000001
                        2
                        3
 (4 rows)
-
 
 DROP TABLE IF EXISTS test_table;
 NOTICE:  table "test_table" does not exist, skipping

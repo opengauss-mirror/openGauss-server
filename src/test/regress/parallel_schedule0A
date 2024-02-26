@@ -105,7 +105,7 @@ test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
 test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
-test: partition_param_path hw_subpartition_add_drop_partition_1
+test: partition_param_path hw_subpartition_add_drop_partition_1 null_in_partition
 #test: partition_cost_model
 test: row_partition_iterator_elimination col_partition_iterator_elimination
 

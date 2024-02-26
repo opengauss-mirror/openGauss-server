@@ -556,12 +556,25 @@ List* build_index_pathkeys(PlannerInfo* root, IndexOptInfo* index, ScanDirection
         /* We assume we don't need to make a copy of the tlist item */
         indexkey = indextle->expr;
 
+
+        
         if (ScanDirectionIsBackward(scandir)) {
             reverse_sort = !index->reverse_sort[i];
             nulls_first = !index->nulls_first[i];
         } else {
             reverse_sort = index->reverse_sort[i];
             nulls_first = index->nulls_first[i];
+        }
+        
+        /* 
+         * in B format, null value in insert into the minimal partition 
+         * if index is default nulls last, set to nulls first
+         * if index is nulls first, dothing
+         * */
+        if (index->ispartitionedindex && !index->isGlobal && DB_IS_CMPT(B_FORMAT)) {
+            if (!index->nulls_first[i]) {
+                nulls_first = !nulls_first;
+            }
         }
 
         /* OK, try to make a canonical pathkey for this sort key */

@@ -1113,7 +1113,7 @@ test: test_object_alter
 test: event_trigger object_address
 test: event_trigger_dump_restore
 # partition expression key
-test: partition_expr_key instr_query_plan_threshold
+test: partition_expr_key instr_query_plan_threshold null_in_partition
 test: alter_foreign_schema
 
 # test for slow_sql
