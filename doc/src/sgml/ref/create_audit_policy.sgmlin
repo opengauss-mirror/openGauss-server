@@ -22,7 +22,7 @@ where filter_group_clause can be:
 FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }
 
 where DDL can be:
-{ ( ALTER | ANALYZE | COMMENT | CREATE | DROP | GRANT | REVOKE | SET | SHOW | LOGIN_ACCESS | LOGIN_FAILURE | LOGOUT | LOGIN ) }
+{ ( ALTER | ANALYZE | COMMENT | CREATE | DROP | GRANT | REVOKE | SET | SHOW ) }
 
 where DML can be:
 { ( COPY | DEALLOCATE | DELETE_P | EXECUTE | REINDEX | INSERT | PREPARE | SELECT | TRUNCATE | UPDATE ) }
