@@ -711,7 +711,15 @@ int main(int argc, char** argv)
     } else if (archiveFormat == archNull) {
         exit_horribly(NULL, "Compress mode is not supported for plain text.\n");
     }
-
+    
+    /*
+	 * If emitting an archive format, we always want to emit a DATABASE item,
+	 * in case --create is specified at pg_restore time.
+     */
+    if (!plainText) {
+        outputCreateDB = 1;
+    }
+    
     // Overwrite  the file if file already exists and overwrite option is specified
     if ((NULL != filename) && (archDirectory != archiveFormat) && (true == dont_overwritefile) &&
         (true == fileExists(filename))) {
