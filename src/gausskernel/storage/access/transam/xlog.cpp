@@ -20276,7 +20276,6 @@ static int SSStreamReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePt
     XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
     XLogSegNo replayedSegNo;
     uint32 actualBytes;
-    bool havedata = false;
 
     targetPageOff = targetPagePtr % XLogSegSize;
 
@@ -20286,7 +20285,7 @@ static int SSStreamReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePt
          * last one.
          */
         if (t_thrd.xlog_cxt.StandbyModeRequested &&
-            (t_thrd.xlog_cxt.bgwriterLaunched || t_thrd.xlog_cxt.pagewriter_launched) && !dummyStandbyMode) {
+            (t_thrd.xlog_cxt.bgwriterLaunched || t_thrd.xlog_cxt.pagewriter_launched)) {
             if (get_real_recovery_parallelism() > 1) {
                 XLByteToSeg(GetXLogReplayRecPtr(NULL), replayedSegNo);
             } else {
@@ -20305,17 +20304,8 @@ static int SSStreamReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePt
         t_thrd.xlog_cxt.readSource = 0;
     }
 
-    t_thrd.xlog_cxt.readOff = targetPageOff;
-    t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
     XLByteToSeg(targetPagePtr, t_thrd.xlog_cxt.readSegNo);
     XLByteAdvance(RecPtr, reqLen);
-
-    XLogRecPtr expectedRecPtr = RecPtr;
-    if (RecPtr % XLogSegSize == 0) {
-        XLByteAdvance(expectedRecPtr, SizeOfXLogLongPHD);
-    } else if (RecPtr % XLOG_BLCKSZ == 0) {
-        XLByteAdvance(expectedRecPtr, SizeOfXLogShortPHD);
-    }
 
 retry:
     /* See if we need to retrieve more data */
@@ -20337,6 +20327,8 @@ retry:
 
                 CheckRecoveryConsistency();
                 if (WalRcvInProgress()) {
+                    XLogRecPtr expectedRecPtr = RecPtr;
+                    bool havedata = false;
 
                     if (t_thrd.xlog_cxt.failedSources & XLOG_FROM_STREAM) {
                         ProcTxnWorkLoad(true);
@@ -20402,10 +20394,6 @@ retry:
                     pg_memory_barrier();
 
                     if (WalRcvIsDone() && (CheckForSwitchoverTrigger() || CheckForFailoverTrigger())) {
-                        if (t_thrd.xlog_cxt.is_cascade_standby && t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
-                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
-                            continue;
-                        }
                         goto retry;
                     }
                     if (!processtrxn) {
@@ -20640,8 +20628,8 @@ retry:
     /* Read the requested page */
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
-    actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
-    if (actualBytes != t_thrd.xlog_cxt.readLen) {
+    actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ, t_thrd.xlog_cxt.readOff);
+    if (actualBytes != XLOG_BLCKSZ) {
         if (t_thrd.xlog_cxt.readSource == XLOG_FROM_STREAM) {
             ereport(LOG, (errmsg("%s read failed", SS_XLOGDIR)));
         } else {

@@ -873,8 +873,8 @@ bool HasBuildReason()
     HaRebuildReason reason =
         t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl];
 
-    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
-        t_thrd.postmaster_cxt.HaShmData->is_cascade_standby) {
+    if ((t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+        t_thrd.postmaster_cxt.HaShmData->is_cascade_standby) || SS_STREAM_CLUSTER) {
         return !(reason == NONE_REBUILD || reason == CONNECT_REBUILD || reason == WALSEGMENT_REBUILD);
     } else {
         return !(reason == NONE_REBUILD || reason == CONNECT_REBUILD);

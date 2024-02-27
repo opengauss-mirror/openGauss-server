@@ -963,7 +963,7 @@ retry:
                                            (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc,
                                            (uint32)(remoteMaxLsn >> 32), (uint32)remoteMaxLsn)));
                             return false;
-                        } else {
+                        } else if (!SS_STREAM_CLUSTER) {
                             ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
                             ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                                     errmsg("standby's local request lsn[%X/%X] 's crc mismatched with remote server "
