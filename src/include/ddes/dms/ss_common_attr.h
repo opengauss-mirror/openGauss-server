@@ -195,6 +195,7 @@ typedef enum SSOndemandRequestRedoStatus {
     ONDEMAND_REDO_DONE = 0,
     ONDEMAND_REDO_SKIP,
     ONDEMAND_REDO_FAIL,
+    ONDEMAND_REDO_ERROR,
     ONDEMAND_REDO_TIMEOUT
 } SSOndemandRequestRedoStatus;
 

@@ -2129,40 +2129,43 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     Assert(SS_PRIMARY_MODE);
     // do nothing if not in ondemand recovery
     if (!SS_IN_ONDEMAND_RECOVERY) {
-        ereport(DEBUG1, (errmsg("[On-demand] ignore redo page request, spc/db/rel/bucket "
+        ereport(DEBUG1, (errmsg("[On-demand] Ignore standby redo page request, spc/db/rel/bucket "
                          "fork-block: %u/%u/%u/%d %d-%u", tag->rnode.spcNode, tag->rnode.dbNode,
                          tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
         *redo_status = ONDEMAND_REDO_SKIP;
         return GS_SUCCESS;;
     }
 
-    Buffer buffer;
+    Buffer buffer = InvalidBuffer;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     *redo_status = ONDEMAND_REDO_DONE;
     smgrcloseall();
     PG_TRY();
     {
         buffer = SSReadBuffer(tag, RBM_NORMAL);
-        ReleaseBuffer(buffer);
+        if (BufferIsInvalid(buffer)) {
+            *redo_status = ONDEMAND_REDO_FAIL;
+        } else {
+            ReleaseBuffer(buffer);
+        }
     }
     PG_CATCH();
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         /* Save error info */
         ErrorData* edata = CopyErrorData();
+        ereport(WARNING,
+            (errmsg("[On-demand] Error happend when primary redo page for standby, spc/db/rel/bucket "
+                "fork-block: %u/%u/%u/%d %d-%u", tag->rnode.spcNode, tag->rnode.dbNode,
+                tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum),
+                errdetail("%s", edata->detail)));
         FlushErrorState();
         FreeErrorData(edata);
-        ereport(PANIC, (errmsg("[On-demand] Error happend when primary redo page for standby, spc/db/rel/bucket "
-                        "fork-block: %u/%u/%u/%d %d-%u", tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
-                        tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+        *redo_status = ONDEMAND_REDO_ERROR;
     }
     PG_END_TRY();
 
-    if (BufferIsInvalid(buffer)) {
-        *redo_status = ONDEMAND_REDO_FAIL;
-    }
-
-    ereport(DEBUG1, (errmsg("[On-demand] redo page for standby done, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, "
+    ereport(DEBUG1, (errmsg("[On-demand] Redo page for standby done, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, "
                             "redo status: %d", tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
                             tag->rnode.bucketNode, tag->forkNum, tag->blockNum, *redo_status)));
     return GS_SUCCESS;;
