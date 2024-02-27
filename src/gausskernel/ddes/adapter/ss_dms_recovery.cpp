@@ -288,24 +288,6 @@ void ss_failover_dw_init()
     g_instance.dms_cxt.dw_init = true;
 }
 
-/* In serial switchover scenario, prevent this promoting node from reinitializing dw. */
-void ss_switchover_promoting_dw_init()
-{
-    for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
-        if (g_instance.pid_cxt.PageWriterPID[i] != 0) {
-            signal_child(g_instance.pid_cxt.PageWriterPID[i], SIGTERM, -1);
-        }
-    }
-    ckpt_shutdown_pagewriter();
-    
-    dw_exit(true);
-    dw_exit(false);
-    dw_ext_init();
-    dw_init();
-    g_instance.dms_cxt.dw_init = true;
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] dw init finished")));
-}
-
 XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn()
 {
     XLogRecPtr primaryRedoLsn = InvalidXLogRecPtr;

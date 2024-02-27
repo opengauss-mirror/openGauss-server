@@ -487,6 +487,9 @@ void dw_force_reset_single_file(uint32 dw_version)
 
 void dw_recovery_partial_write_single()
 {
+    if (SS_REFORM_REFORMER) {
+        return;
+    }
     knl_g_dw_context* single_cxt = &g_instance.dw_single_cxt;
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW single flush file recovery start.")));

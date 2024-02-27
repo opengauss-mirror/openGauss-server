@@ -271,9 +271,6 @@ void dw_ext_init();
  */
 inline bool dw_enabled()
 {
-    if (ENABLE_DSS) {
-        return false;
-    }
     return (ENABLE_INCRE_CKPT && g_instance.attr.attr_storage.enable_double_write);
 }
 

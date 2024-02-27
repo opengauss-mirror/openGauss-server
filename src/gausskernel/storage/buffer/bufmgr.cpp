@@ -5879,7 +5879,8 @@ void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl)
         ReservePrivateRefCountEntry();
 
         buf_state = LockBufHdr(buf_desc);
-        if (!flush_buffer_match(buf_desc, rel, db_id) || !dw_buf_valid_dirty(buf_state)) {
+        if (!flush_buffer_match(buf_desc, rel, db_id) ||
+            !(dw_buf_valid_dirty(buf_state) && dw_buf_valid_aio_finished(buf_desc, buf_state))) {
             UnlockBufHdr(buf_desc, buf_state);
             continue;
         }

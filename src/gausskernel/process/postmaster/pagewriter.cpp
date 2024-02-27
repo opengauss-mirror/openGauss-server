@@ -2072,26 +2072,19 @@ static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext *wb_context)
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
-    if (ENABLE_DMS) {
+    /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
+    for (int i = 0; i < runs; i++) {
+        /* Last batch, take the rest of the buffers */
+        int offset = i * dw_batch_page_max;
+        int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
+        uint32 flush_num;
+
         pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-        num_actual_flush = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, 0, need_flush_num);
+        dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
+        flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-    } else {
-        /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
-        for (int i = 0; i < runs; i++) {
-            /* Last batch, take the rest of the buffers */
-            int offset = i * dw_batch_page_max;
-            int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
-            uint32 flush_num;
-
-            pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
-            pgwr->thrd_dw_cxt.dw_page_idx = -1;
-            dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
-            flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
-            pgwr->thrd_dw_cxt.dw_page_idx = -1;
-            num_actual_flush += flush_num;
-        }
+        num_actual_flush += flush_num;
     }
 
     (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->page_writer_actual_flush, num_actual_flush);
@@ -2116,27 +2109,21 @@ static void incre_ckpt_pgwr_flush_dirty_list(WritebackContext *wb_context, uint3
     qsort(dirty_buf_list, need_flush_num, sizeof(CkptSortItem), ckpt_buforder_comparator);
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
-    if (ENABLE_DMS) {
+    /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
+    for (int i = 0; i < runs; i++) {
+        /* Last batch, take the rest of the buffers */
+        int offset = i * dw_batch_page_max;
+        int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
+        uint32 flush_num;
+
         pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-        num_actual_flush = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, 0, need_flush_num);
+        dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
+        flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-    } else {
-        /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
-        for (int i = 0; i < runs; i++) {
-            /* Last batch, take the rest of the buffers */
-            int offset = i * dw_batch_page_max;
-            int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
-            uint32 flush_num;
-
-            pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
-            pgwr->thrd_dw_cxt.dw_page_idx = -1;
-            dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
-            flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
-            pgwr->thrd_dw_cxt.dw_page_idx = -1;
-            num_actual_flush += flush_num;
-        }
+        num_actual_flush += flush_num;
     }
+
     (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->page_writer_actual_flush, num_actual_flush);
     (void)pg_atomic_fetch_add_u32(&g_instance.ckpt_cxt_ctl->page_writer_last_flush, num_actual_flush);
 

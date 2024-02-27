@@ -997,6 +997,9 @@ static void dw_check_batch_parameter_change(knl_g_dw_context *batch_cxt)
 
 void dw_recover_all_partial_write_batch(knl_g_dw_context *batch_cxt)
 {
+    if (SS_REFORM_PARTNER) {
+        return;
+    }
     int i;
     int dw_file_num;
     dw_batch_file_context* batch_file_cxt;
@@ -1310,9 +1313,7 @@ void dw_file_check_rebuild()
     dw_batch_meta_file batch_meta_file;
 
     if (!file_exists(DW_BUILD_FILE_NAME)) {
-        if (!ENABLE_DMS || (ENABLE_DMS && !g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile)) {
-            return;
-        }
+        return;
     }
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double write initializing after build")));
@@ -1660,14 +1661,6 @@ void dw_recover_batch_meta_file(int fd, dw_batch_meta_file *batch_meta_file)
 
 void dw_remove_batch_meta_file()
 {
-    knl_g_dw_context *dw_cxt = &g_instance.dw_batch_cxt;
-    if (ENABLE_DSS && dw_cxt->fd > 0) {
-        int rc = close(dw_cxt->fd);
-        if (rc == -1) {
-            ereport(ERROR, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("DW file close failed")));
-        }
-    }
-
     ereport(LOG, (errmodule(MOD_DW), errmsg("start remove dw_batch_meta_file.")));
     dw_remove_file(DW_META_FILE);
 }

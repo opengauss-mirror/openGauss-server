@@ -9740,7 +9740,8 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if ((ENABLE_REFORM && SS_REFORM_REFORMER && !SS_STANDBY_FAILOVER && !SS_PERFORMING_SWITCHOVER) ||
+    if ((ENABLE_REFORM && !SS_STANDBY_FAILOVER && !SS_PERFORMING_SWITCHOVER &&
+         !SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) ||
         !ENABLE_DMS || !ENABLE_REFORM) {
         /* process assist file of chunk recycling */
         dw_ext_init();
@@ -9750,11 +9751,7 @@ void StartupXLOG(void)
         }
     }
 
-    if (SS_REFORM_REFORMER && SS_STANDBY_PROMOTING) {
-        ss_switchover_promoting_dw_init();
-    }
-
-    if (SS_IN_FAILOVER && SS_REFORM_REFORMER) {
+    if (SS_STANDBY_FAILOVER) {
         ss_failover_dw_init();
     }
 

@@ -960,6 +960,14 @@ bool SSTryFlushBuffer(BufferDesc *buf)
         return false;
     }
 
+    if (ENABLE_INCRE_CKPT) {
+        for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
+            if (g_instance.pid_cxt.PageWriterPID[i] == 0) {
+                g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+            }
+        }
+    }
+
     if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
         if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
             if (!free_space_enough(buf->buf_id)) {
