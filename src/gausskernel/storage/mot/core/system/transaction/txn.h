@@ -404,9 +404,9 @@ public:
      * @brief Searches for a row in the local cache by a row.
      * @detail Rows may be updated concurrently, so the cache layer needs to be
      * consulted to retrieves the most recent version of a row.
-     * @param table The table in which the row is to be searched.
-     * @param type The purpose for retrieving the row.
-     * @param originalRow The original row to search for an updated version of it.
+     * @param type The operation requested RD/WR/DEL/INS.
+     * @param originalSentinel The key for the local cache.
+     * @param rc The return code.
      * @return The cached row or the original row if none was found in the cache (in
      * which case the original row is stored in the cache for subsequent searches).
      */
@@ -418,9 +418,9 @@ public:
      * @brief Searches for a row in the local cache by a row.
      * @detail Rows may be updated concurrently, so the cache layer needs to be
      * consulted to retrieves the most recent version of a row.
-     * @param table The table in which the row is to be searched.
-     * @param type The purpose for retrieving the row.
-     * @param originalRow The original row to search for an updated version of it.
+     * @param type The operation requested RD/WR/DEL/INS.
+     * @param originalSentinel The key for the local cache.
+     * @param localRow The cached row or null pointer if the row is not cached.
      * @return The cached row or the original row if none was found in the cache (in
      * which case the original row is stored in the cache for subsequent searches).
      */
