@@ -1425,6 +1425,7 @@ static bool gsplsql_check_var_attrs(PLpgSQL_datum *datum, ListCell *attr_list)
             }
             return false;
         } break;
+        case PLPGSQL_DTYPE_CURSORROW:
         case PLPGSQL_DTYPE_REC: {
             PLpgSQL_rec* rec = (PLpgSQL_rec*)datum;
             if (rec->tupdesc == NULL) {

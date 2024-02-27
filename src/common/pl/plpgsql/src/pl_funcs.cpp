@@ -112,6 +112,11 @@ void plpgsql_add_pkg_ns(PLpgSQL_package* pkg)
                 case PLPGSQL_DTYPE_UNKNOWN:
                     plpgsql_ns_additem(PLPGSQL_NSTYPE_UNKNOWN, varno, objname, pkgname);
                     break;
+                case PLPGSQL_DTYPE_CURSORROW:
+                    if (((PLpgSQL_rec*)datum)->addNamespace) {
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_CURSORROW, varno, objname, pkgname);
+                    }
+                    break;
                 case PLPGSQL_DTYPE_COMPOSITE:
                     break;    
                 default:
@@ -974,6 +979,10 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
                 break;
             case PLPGSQL_DTYPE_RECORD_TYPE:
                 break;
+            case PLPGSQL_DTYPE_CURSORROW: {
+                PLpgSQL_rec* rec = (PLpgSQL_rec*)d;
+                free_expr(rec->expr);
+            } break;
             default:
                 ereport(ERROR,
                     (errmodule(MOD_PLSQL),
@@ -1084,6 +1093,10 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
                 break;
             case PLPGSQL_DTYPE_RECORD_TYPE:
                 break;
+            case PLPGSQL_DTYPE_CURSORROW: {
+                PLpgSQL_rec* rec = (PLpgSQL_rec*)d;
+                free_expr(rec->expr);
+            } break;
             default:
                 ereport(ERROR,
                     (errmodule(MOD_PLSQL),

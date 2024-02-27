@@ -260,7 +260,6 @@ static void check_autonomous_nest_tablevar(PLpgSQL_var* var);
 static bool is_unreserved_keyword_func(const char *name);
 static PLpgSQL_stmt *funcname_is_call(const char* name, int location);
 #ifndef ENABLE_MULTIPLE_NODES
-static PLpgSQL_type* build_type_from_cursor_var(PLpgSQL_var* var);
 static bool checkAllAttrName(TupleDesc tupleDesc);
 static void BuildForQueryVariable(PLpgSQL_expr* expr, PLpgSQL_row **row, PLpgSQL_rec **rec,
     const char* refname, int lineno);
@@ -815,6 +814,7 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
                         newp->datatype->cursorCompositeOid = IS_ANONYMOUS_BLOCK ? 
                             InvalidOid : createCompositeTypeForCursor(newp, $8);
+                        newp->datatype->cursorExpr = $8;
                         pfree_ext($2->name);
                         pfree($2);
                         $$ = NULL;
@@ -1295,7 +1295,9 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                     ((PLpgSQL_var *) var)->default_val = $6;
                                 else if (var->dtype == PLPGSQL_DTYPE_ROW || var->dtype == PLPGSQL_DTYPE_RECORD) {
                                     ((PLpgSQL_row *) var)->default_val = $6;
-                                } 
+                                } else if (var->dtype == PLPGSQL_DTYPE_CURSORROW) {
+                                     ((PLpgSQL_rec *) var)->default_val = $6;
+                                }
                                 else {
                                     const char* message = "default value for rec variable is not supported";
                                     InsertErrorMessage(message, plpgsql_yylloc);
@@ -1359,6 +1361,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
                         newp->datatype->cursorCompositeOid = IS_ANONYMOUS_BLOCK ? 
                             InvalidOid : createCompositeTypeForCursor(newp, $7);
+                        newp->datatype->cursorExpr = $7;
                         pfree_ext($2->name);
 						pfree($2);
                     }
@@ -6702,7 +6705,7 @@ yylex_outparam(char** fieldnames,
             varnos[nfields] = yylval.wdatum.dno;
             *row = (PLpgSQL_row *)yylval.wdatum.datum;
         }
-        else if (PLPGSQL_DTYPE_REC == yylval.wdatum.datum->dtype)
+        else if (PLPGSQL_DTYPE_REC == yylval.wdatum.datum->dtype || PLPGSQL_DTYPE_CURSORROW == yylval.wdatum.datum->dtype)
         {
             check_assignable(yylval.wdatum.datum, yylloc);
             fieldnames[nfields] = pstrdup(NameOfDatum(&yylval.wdatum));
@@ -9686,13 +9689,9 @@ read_datatype(int tok)
                     if(var && var->datatype 
                            && var->datatype->typoid == REFCURSOROID)
                     {
-#ifndef ENABLE_MULTIPLE_NODES
-                        if (OidIsValid(var->datatype->cursorCompositeOid))
-                            return build_type_from_cursor_var(var);
-                        else
-#endif
-                            return plpgsql_build_datatype(RECORDOID, -1, InvalidOid);
-                        
+                        PLpgSQL_type *newp = plpgsql_build_datatype(UNKNOWNOID, -1, InvalidOid);
+                        newp->cursorExpr = var->cursor_explicit_expr;
+                        return newp;
                     }
                 } else if (ns && ns->itemtype == PLPGSQL_NSTYPE_ROW)
                 {
@@ -10769,7 +10768,8 @@ make_return_stmt(int location)
                 case T_DATUM:
                     if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_ROW ||
                         yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_REC ||
-                        yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_RECORD)
+                        yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_RECORD||
+                        yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_CURSORROW)
                         newp->retvarno = yylval.wdatum.dno;
                     else {
                         const char* message = "RETURN must specify a record or row variable in function returning row";
@@ -11037,6 +11037,7 @@ check_assignable(PLpgSQL_datum *datum, int location)
             }
             break;
         case PLPGSQL_DTYPE_UNKNOWN:
+        case PLPGSQL_DTYPE_CURSORROW:
             /* package variable? */
             break;
         default:
@@ -11492,7 +11493,8 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firstto
                 }
                 plpgsql_push_back_token(tok);
             }
-            else if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_REC)
+            else if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_REC||
+                     yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_CURSORROW)
             {
                 check_assignable(yylval.wdatum.datum, yylloc);
                 *rec = (PLpgSQL_rec *) yylval.wdatum.datum;
@@ -12534,24 +12536,6 @@ static Oid createCompositeTypeForCursor(PLpgSQL_var* var, PLpgSQL_expr* expr)
     pfree_ext(pkgtypname);
     return newtypeoid;
 }
-
-#ifndef ENABLE_MULTIPLE_NODES
-static PLpgSQL_type* build_type_from_cursor_var(PLpgSQL_var* var)
-{
-    PLpgSQL_type *newp = NULL;
-    Oid typeOid = var->datatype->cursorCompositeOid;
-    /* build datatype of the created composite type. */
-    newp = plpgsql_build_datatype(typeOid, -1, InvalidOid);
-    newp->dtype = PLPGSQL_DTYPE_COMPOSITE;
-    newp->ttype = PLPGSQL_TTYPE_ROW;
-
-    /* add the composite type to datum and namespace. */
-    int varno = plpgsql_adddatum((PLpgSQL_datum*)newp);
-    plpgsql_ns_additem(PLPGSQL_NSTYPE_COMPOSITE, varno, var->datatype->typname );
-
-    return newp;
-}
-#endif
 
 /*
  * the record type will be nested or referenced by another package, check if it valid.

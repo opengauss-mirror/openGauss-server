@@ -1031,6 +1031,12 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
                 rec->pkg = pkg;
                 rec->pkg_name = GetPackageListName(NameStr(pkg_struct->pkgname), namespaceOid);
             }       
+        } else if (pkg->datums[i]->dtype == PLPGSQL_DTYPE_CURSORROW) {
+            PLpgSQL_rec* rec = (PLpgSQL_rec*)pkg->datums[i];
+            if (rec->pkg == NULL) {
+                rec->pkg = pkg;
+                rec->pkg_name = GetPackageListName(NameStr(pkg_struct->pkgname), namespaceOid);
+            }
         }
     }
     

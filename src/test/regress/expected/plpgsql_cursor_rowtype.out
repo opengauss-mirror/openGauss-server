@@ -201,6 +201,139 @@ v1 varchar2;
 procedure proc1(a1 in v1%type);
 end pck4;
 /
+create table int_4(a NUMBER, b VARCHAR2(5));
+insert into int_4(a) values(3,'johan');
+ERROR:  INSERT has more expressions than target columns
+LINE 1: insert into int_4(a) values(3,'johan');
+                                      ^
+create or replace package pck3_1 is
+cursor cur1 is select a,b from int_4;
+var1 cur1%rowtype:=(3, 'ada');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3_1;
+/
+create or replace package body pck3_1 is
+procedure ppp1() is
+cursor cur2 is
+select a,b from int_4;
+begin
+var1.a:=var1.a + 5;
+raise info '(ppp1)var1: %', var1.a;
+ppp2(var1);
+raise info '(ppp1)var1: %', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    var1.a:=8+var1.a;
+    a.a := a.a + 2;
+	raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+	var1.a:=8+var1.a;
+    raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+end;
+end pck3_1;
+/
+call pck3_1.ppp1();
+INFO:  (ppp1)var1: 8
+INFO:  [ppp2]a: 10
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 16
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]a: 10
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 24
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  (ppp1)var1: 24
+ ppp1 
+------
+ 
+(1 row)
+
+call pck3_1.ppp1();
+INFO:  (ppp1)var1: 29
+INFO:  [ppp2]a: 10
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 37
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]a: 10
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 45
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  (ppp1)var1: 45
+ ppp1 
+------
+ 
+(1 row)
+
+call pck3_1.ppp1();
+INFO:  (ppp1)var1: 50
+INFO:  [ppp2]a: 10
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 58
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]a: 10
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 66
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  (ppp1)var1: 66
+ ppp1 
+------
+ 
+(1 row)
+
+--test: drop column
+create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
+insert into int_4_2(a, d, b) values(3, 6,'johan');
+create or replace package pck32 is
+cursor cur1 is select * from int_4;
+var1 cur1%rowtype:=(3, 'ada');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck32;
+/
+create or replace package body pck32 is
+procedure ppp1() is
+cursor cur2 is select * from int_4_2;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    raise info '%', a.a;
+end;
+end pck32;
+/
+ALTER TABLE int_4_2 DROP COLUMN d;
+call pck32.ppp1();
+INFO:  3
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 5 at PERFORM
+INFO:  3
+ ppp1 
+------
+ 
+(1 row)
+
+drop table int_4_2 cascade;
 create or replace package body pck4
 is 
 procedure proc1(a1 in v1%type) 
@@ -488,6 +621,84 @@ select * from FOR_LOOP_TEST_002;
      10 | CLARK                                                                                                |  20000
 (1 row)
 
+create or replace package pck31 is
+cursor cur1 is select a,b from int_4;
+var1 cur1%rowtype:=(3, 'ada');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck31;
+/
+create or replace package body pck31 is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    raise info '%', a.a;
+end;
+end pck31;
+/
+call pck31.ppp1();
+ERROR:  invalid input syntax for type numeric: "a"
+CONTEXT:  PL/pgSQL function ppp1() line 5 at FETCH
+create or replace package pck12 is
+cursor cur1 is select a from int_4;
+var1 cur1%rowtype:=(6);
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck12;
+/
+create or replace package body pck12 is
+procedure ppp1() is
+cursor cur2 is
+select a,b from int_4;
+begin
+var1.a:=var1.a + 5;
+raise info '(ppp1)var1: %', var1.a;
+ppp2(var1);
+raise info '(ppp1)var1: %', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    var1.a:=8+var1.a;
+    a.a := a.a + 2;
+	raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+	var1.a:=8+var1.a;
+    raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+end;
+end pck12;
+/
+call pck12.ppp1();
+INFO:  (ppp1)var1: 11
+INFO:  [ppp2]a: 13
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 19
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]a: 13
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  [ppp2]var1: 27
+CONTEXT:  SQL statement "CALL ppp2(var1)"
+PL/pgSQL function ppp1() line 6 at PERFORM
+INFO:  (ppp1)var1: 27
+ ppp1 
+------
+ 
+(1 row)
+
+drop table int_4 cascade;
 --test execption close cursor 
 create or replace package pckg_test1 as
 procedure p1;
@@ -1047,20 +1258,1062 @@ NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop package pckg_test2;
 NOTICE:  drop cascades to function plpgsql_cursor_rowtype.p1()
 drop schema plpgsql_cursor_rowtype cascade;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 26 other objects
 DETAIL:  drop cascades to table emp
 drop cascades to function pro_cursor_no_args_1()
 drop cascades to function pro_cursor_no_args_2()
 drop cascades to table test12
+--?.*
+drop cascades to function plpgsql_cursor_rowtype.ppp1()
+--?.*
+--?.*
+drop cascades to function plpgsql_cursor_rowtype.ppp1()
+--?.*
 drop cascades to function cursor1()
 drop cascades to table tb1
 drop cascades to function pro_cursor_args()
 drop cascades to table for_loop_test_001
 drop cascades to table for_loop_test_002
 drop cascades to function test_forloop_001()
+--?.*
+drop cascades to function plpgsql_cursor_rowtype.ppp1()
+--?.*
+--?.*
+drop cascades to function plpgsql_cursor_rowtype.ppp1()
+--?.*
 drop cascades to function pro_close_cursor1()
 drop cascades to function pro_close_cursor2()
 drop cascades to function check_compile_1()
 drop cascades to type foo
 drop schema schema1 cascade;
 NOTICE:  drop cascades to table schema1.t11
+create schema cursor_rowtype;
+set current_schema=cursor_rowtype;
+-- ==========================================================
+-- not open precompile
+-- ANONYMOUS BLOCK: If table does not exist -----error
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+ERROR:  execute failed when parse the query: SELECT first_name,last_name
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  PL/pgSQL function inline_code_block during initialization of execution state
+-- FUNC: If table does not exist
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2); -----error
+ERROR:  execute failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+create table jointest(oid int, jname varchar(20));
+insert into jointest(oid, jname) values (1,'jj');
+-- ==========================================================
+-- if table exist data
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+-- PKG: normal
+CREATE OR REPLACE PACKAGE emp_bonus IS
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+PROCEDURE testpro1(var3 int);
+END emp_bonus;
+/
+create or replace package body emp_bonus is
+var4 int:=4;
+procedure testpro1(var3 int)
+is
+begin
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+end;
+end emp_bonus;
+/
+call emp_bonus.testpro1(1);
+NOTICE:  Jane
+ testpro1 
+----------
+ 
+(1 row)
+
+-- ANONYMOUS BLOCK: assign record
+DECLARE
+  TYPE name_rec IS RECORD (
+    last1   jointest.jname%TYPE DEFAULT 'Doe',
+    first1  employees.first_name%TYPE DEFAULT 'John'
+  );
+  CURSOR c IS
+    SELECT jname,first_name
+    FROM employees join jointest on employees.oid = jointest.oid;
+  
+  t1 name_rec;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.jname := 'Smith';
+  t1 := source;
+  raise notice '%', t1.last1;
+  raise notice '%', t1.first1;
+  open c;
+  fetch c into source;
+  t1 := source;
+  raise notice '%', t1.last1;
+  raise notice '%', t1.first1;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+NOTICE:  jj
+NOTICE:  johan
+-- ANONYMOUS BLOCK: insert data
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source.oid, source.first_name, source.last_name);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: insert data -- error
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+ERROR:  INSERT has more target columns than expressions
+LINE 1: insert into employees(oid, first_name, last_name) values (so...
+                                   ^
+QUERY:  insert into employees(oid, first_name, last_name) values (source)
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at SQL statement
+-- ANONYMOUS BLOCK: normale before open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: normale after open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  fetch c into source;
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+NOTICE:  mikumiku
+NOTICE:  johan
+-- ANONYMOUS BLOCK: normale after fetch
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: If the column does not exist -----error
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+ERROR:  record "source" has no field "oid" in assignment.
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at assignment
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- FUNC: If the column does not exist
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2); -----error
+NOTICE:  Smith
+NOTICE:  Jane
+ERROR:  record "source" has no field "oid" in assignment.
+CONTEXT:  PL/pgSQL function f1(integer) line 11 at assignment
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+ERROR:  record "source" has no field "first_name" in assignment.
+CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+drop table employees;
+call f1(2); -----error
+ERROR:  execute failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+delete from employees;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- ==========================================================
+-- if table does not exist data
+delete from employees;
+-- ANONYMOUS BLOCK: assign record
+DECLARE
+  TYPE name_rec IS RECORD (
+    last1   jointest.jname%TYPE DEFAULT 'Doe',
+    first1  employees.first_name%TYPE DEFAULT 'John'
+  );
+  CURSOR c IS
+    SELECT jname,first_name
+    FROM employees join jointest on employees.oid = jointest.oid;
+  
+  t1 name_rec;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.jname := 'Smith';
+  t1 := source;
+  raise notice '%', t1.last1;
+  raise notice '%', t1.first1;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: insert data
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source.oid, source.first_name, source.last_name);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: insert data -- error
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+ERROR:  INSERT has more target columns than expressions
+LINE 1: insert into employees(oid, first_name, last_name) values (so...
+                                   ^
+QUERY:  insert into employees(oid, first_name, last_name) values (source)
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at SQL statement
+-- ANONYMOUS BLOCK: normale before open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: normale after open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  fetch c into source;
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: normale after fetch
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+-- ANONYMOUS BLOCK: If the column does not exist -----error
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+NOTICE:  Smith
+NOTICE:  Jane
+ERROR:  record "source" has no field "oid" in assignment.
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at assignment
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- FUNC: If the column does not exist
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2); -----error
+NOTICE:  Smith
+NOTICE:  Jane
+ERROR:  record "source" has no field "oid" in assignment.
+CONTEXT:  PL/pgSQL function f1(integer) line 11 at assignment
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+ERROR:  record "source" has no field "first_name" in assignment.
+CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+drop table employees;
+call f1(2); -----error
+ERROR:  execute failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+delete from employees;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+drop table employees;
+-- ==========================================================
+-- open precompile
+set behavior_compat_options='allow_procedure_compile_check';
+-- FUNC: If table does not exist -----error
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+ERROR:  compile failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 3
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+-- ==========================================================
+-- if table exist data
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- FUNC: If the column does not exist -----error
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+ERROR:  "source.oid" is not a known variable
+LINE 12:   source.oid := 5;
+           ^
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+ERROR:  "source.first_name" is not a known variable
+LINE 10:   source.first_name := 'Jane';
+           ^
+QUERY:  
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 9
+drop table employees;
+call f1(2); -----error
+ERROR:  compile failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 3
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+delete from employees;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- ==========================================================
+-- if table does not exist data
+delete from employees;
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- FUNC: If the column does not exist -----error
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+ERROR:  "source.oid" is not a known variable
+LINE 12:   source.oid := 5;
+           ^
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+ERROR:  "source.first_name" is not a known variable
+LINE 10:   source.first_name := 'Jane';
+           ^
+QUERY:  
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 9
+drop table employees;
+call f1(2); -----error
+ERROR:  compile failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  compilation of PL/pgSQL function "f1" near line 3
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+delete from employees;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,NULL,2,4);
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+ERROR:  number of source and target fields in assignment does not match
+DETAIL:  strict_multi_assignment check is active.
+HINT:  Make sure the query returns the exact list of columns.
+CONTEXT:  PL/pgSQL function inline_code_block line 5 during statement block local variable initialization
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,NULL,'A');
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+NOTICE:  A
+NOTICE:  <NULL>
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,'a','B');
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+NOTICE:  B
+NOTICE:  a
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,'a');
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+ERROR:  number of source and target fields in assignment does not match
+DETAIL:  strict_multi_assignment check is active.
+HINT:  Make sure the query returns the exact list of columns.
+CONTEXT:  PL/pgSQL function inline_code_block line 5 during statement block local variable initialization
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= ('DASDAS','a','DAS');
+BEGIN
+  raise notice '%', source.oid;
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+ERROR:  invalid input syntax for integer: "DASDAS"
+CONTEXT:  PL/pgSQL function inline_code_block line 5 during statement block local variable initialization
+-- PROC: normale
+create or replace PROCEDURE p1(b int) is
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+call p1(2);
+NOTICE:  Jane
+ p1 
+----
+ 
+(1 row)
+
+-- PROC: If the column does not exist
+create or replace PROCEDURE P1(b int) IS
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+ERROR:  "source.oid" is not a known variable
+--?.*
+           ^
+QUERY:  DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END
+call P1(2); -----error
+NOTICE:  Jane
+ p1 
+----
+ 
+(1 row)
+
+-- PROC: If change table struct
+create or replace function f1(b int) is
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+ERROR:  syntax error at or near "is"
+LINE 1: create or replace function f1(b int) is
+                                             ^
+  source c%ROWTYPE;
+ERROR:  syntax error at or near "source"
+LINE 1: source c%ROWTYPE;
+        ^
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+ERROR:  "c" is not a known variable
+LINE 2: BEGIN open c;
+                   ^
+QUERY:  DECLARE 
+BEGIN open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+ERROR:  record "source" has no field "first_name" in assignment.
+CONTEXT:  PL/pgSQL function f1(integer) line 10 at assignment
+drop table employees;
+call f1(2); -----error
+ERROR:  execute failed when parse the query: SELECT *
+    FROM employees
+DETAIL:  relation "employees" does not exist on datanode1
+CONTEXT:  PL/pgSQL function f1(integer) during initialization of execution state
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+delete from employees;
+call f1(2);
+NOTICE:  Jane
+ f1 
+----
+  2
+(1 row)
+
+set current_schema=public;
+drop schema cursor_rowtype cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table cursor_rowtype.jointest
+--?.*
+drop cascades to function cursor_rowtype.testpro1(integer)
+drop cascades to function cursor_rowtype.f1(integer)
+drop cascades to function cursor_rowtype.p1(integer)
+drop cascades to table cursor_rowtype.employees

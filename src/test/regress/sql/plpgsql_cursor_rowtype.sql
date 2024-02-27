@@ -173,6 +173,77 @@ procedure proc1(a1 in v1%type);
 end pck4;
 /
 
+create table int_4(a NUMBER, b VARCHAR2(5));
+insert into int_4(a) values(3,'johan');
+create or replace package pck3_1 is
+cursor cur1 is select a,b from int_4;
+var1 cur1%rowtype:=(3, 'ada');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3_1;
+/
+
+create or replace package body pck3_1 is
+procedure ppp1() is
+cursor cur2 is
+select a,b from int_4;
+begin
+var1.a:=var1.a + 5;
+raise info '(ppp1)var1: %', var1.a;
+ppp2(var1);
+raise info '(ppp1)var1: %', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    var1.a:=8+var1.a;
+    a.a := a.a + 2;
+	raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+	var1.a:=8+var1.a;
+    raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+end;
+end pck3_1;
+/
+
+call pck3_1.ppp1();
+call pck3_1.ppp1();
+call pck3_1.ppp1();
+
+--test: drop column
+create table int_4_2(a NUMBER, d NUMBER, b VARCHAR2(5));
+insert into int_4_2(a, d, b) values(3, 6,'johan');
+
+create or replace package pck32 is
+cursor cur1 is select * from int_4;
+var1 cur1%rowtype:=(3, 'ada');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck32;
+/
+
+create or replace package body pck32 is
+procedure ppp1() is
+cursor cur2 is select * from int_4_2;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    raise info '%', a.a;
+end;
+end pck32;
+/
+
+ALTER TABLE int_4_2 DROP COLUMN d;
+call pck32.ppp1();
+drop table int_4_2 cascade;
+
 create or replace package body pck4
 is 
 procedure proc1(a1 in v1%type) 
@@ -409,6 +480,68 @@ end;
 call test_forloop_001();
 select * from FOR_LOOP_TEST_001;
 select * from FOR_LOOP_TEST_002;
+
+create or replace package pck31 is
+cursor cur1 is select a,b from int_4;
+var1 cur1%rowtype:=(3, 'ada');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck31;
+/
+
+create or replace package body pck31 is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    raise info '%', a.a;
+end;
+end pck31;
+/
+
+call pck31.ppp1();
+
+create or replace package pck12 is
+cursor cur1 is select a from int_4;
+var1 cur1%rowtype:=(6);
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck12;
+/
+create or replace package body pck12 is
+procedure ppp1() is
+cursor cur2 is
+select a,b from int_4;
+begin
+var1.a:=var1.a + 5;
+raise info '(ppp1)var1: %', var1.a;
+ppp2(var1);
+raise info '(ppp1)var1: %', var1.a;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    var1.a:=8+var1.a;
+    a.a := a.a + 2;
+	raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+	var1.a:=8+var1.a;
+    raise info '[ppp2]a: %', a.a;
+	raise info '[ppp2]var1: %', var1.a;
+end;
+end pck12;
+/
+
+call pck12.ppp1();
+drop table int_4 cascade;
 
 --test execption close cursor 
 create or replace package pckg_test1 as
@@ -808,3 +941,783 @@ drop package pckg_test1;
 drop package pckg_test2;
 drop schema plpgsql_cursor_rowtype cascade;
 drop schema schema1 cascade;
+
+create schema cursor_rowtype;
+set current_schema=cursor_rowtype;
+
+-- ==========================================================
+-- not open precompile
+-- ANONYMOUS BLOCK: If table does not exist -----error
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- FUNC: If table does not exist
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2); -----error
+
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+create table jointest(oid int, jname varchar(20));
+insert into jointest(oid, jname) values (1,'jj');
+-- ==========================================================
+-- if table exist data
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+
+-- PKG: normal
+CREATE OR REPLACE PACKAGE emp_bonus IS
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+PROCEDURE testpro1(var3 int);
+END emp_bonus;
+/
+
+create or replace package body emp_bonus is
+var4 int:=4;
+procedure testpro1(var3 int)
+is
+begin
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+end;
+end emp_bonus;
+/
+
+call emp_bonus.testpro1(1);
+
+-- ANONYMOUS BLOCK: assign record
+DECLARE
+  TYPE name_rec IS RECORD (
+    last1   jointest.jname%TYPE DEFAULT 'Doe',
+    first1  employees.first_name%TYPE DEFAULT 'John'
+  );
+
+  CURSOR c IS
+    SELECT jname,first_name
+    FROM employees join jointest on employees.oid = jointest.oid;
+  
+  t1 name_rec;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.jname := 'Smith';
+  t1 := source;
+  raise notice '%', t1.last1;
+  raise notice '%', t1.first1;
+  open c;
+  fetch c into source;
+  t1 := source;
+  raise notice '%', t1.last1;
+  raise notice '%', t1.first1;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: insert data
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source.oid, source.first_name, source.last_name);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: insert data -- error
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: normale before open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: normale after open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  fetch c into source;
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: normale after fetch
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: If the column does not exist -----error
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+
+-- FUNC: If the column does not exist
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2); -----error
+
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+drop table employees;
+call f1(2); -----error
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+delete from employees;
+call f1(2);
+
+-- ==========================================================
+-- if table does not exist data
+delete from employees;
+
+-- ANONYMOUS BLOCK: assign record
+DECLARE
+  TYPE name_rec IS RECORD (
+    last1   jointest.jname%TYPE DEFAULT 'Doe',
+    first1  employees.first_name%TYPE DEFAULT 'John'
+  );
+
+  CURSOR c IS
+    SELECT jname,first_name
+    FROM employees join jointest on employees.oid = jointest.oid;
+  
+  t1 name_rec;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.jname := 'Smith';
+  t1 := source;
+  raise notice '%', t1.last1;
+  raise notice '%', t1.first1;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: insert data
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source.oid, source.first_name, source.last_name);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: insert data -- error
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.oid := 6; source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  insert into employees(oid, first_name, last_name) values (source);
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: normale before open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: normale after open
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  fetch c into source;
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: normale after fetch
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+
+-- ANONYMOUS BLOCK: If the column does not exist -----error
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  close c;
+END;
+/
+
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+
+-- FUNC: If the column does not exist
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2); -----error
+
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+drop table employees;
+call f1(2); -----error
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+delete from employees;
+call f1(2);
+drop table employees;
+
+-- ==========================================================
+-- open precompile
+set behavior_compat_options='allow_procedure_compile_check';
+
+-- FUNC: If table does not exist -----error
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+-- ==========================================================
+-- if table exist data
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+
+-- FUNC: If the column does not exist -----error
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+drop table employees;
+call f1(2); -----error
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+delete from employees;
+call f1(2);
+
+-- ==========================================================
+-- if table does not exist data
+delete from employees;
+
+-- FUNC: normale
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+
+-- FUNC: If the column does not exist -----error
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+call f1(2);
+
+-- FUNC: If change table struct
+create or replace function f1(b int) returns int
+as $$
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+  return b;
+END;
+$$language plpgsql;
+
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+drop table employees;
+call f1(2); -----error
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+delete from employees;
+call f1(2);
+
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,NULL,2,4);
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,NULL,'A');
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,'a','B');
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= (1,'a');
+BEGIN
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE:= ('DASDAS','a','DAS');
+BEGIN
+  raise notice '%', source.oid;
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+END;
+/
+
+-- PROC: normale
+create or replace PROCEDURE p1(b int) is
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+call p1(2);
+
+-- PROC: If the column does not exist
+create or replace PROCEDURE P1(b int) IS
+DECLARE
+  CURSOR c IS
+    SELECT first_name,last_name
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  source.first_name := 'Jane'; source.last_name := 'Smith';
+  raise notice '%', source.last_name;
+  raise notice '%', source.first_name;
+  source.oid := 5;
+  raise notice '%', source.oid;
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+call P1(2); -----error
+
+-- PROC: If change table struct
+create or replace function f1(b int) is
+DECLARE
+  CURSOR c IS
+    SELECT *
+    FROM employees;
+  source c%ROWTYPE;
+BEGIN
+  open c;
+  fetch c into source;
+  source.first_name := 'Jane';
+  raise notice '%', source.first_name;
+  close c;
+END;
+/
+drop table employees;
+create table employees(a varchar(20),b int);
+insert into employees(a,b) values ('johan',22);
+call f1(2); -----error
+drop table employees;
+call f1(2); -----error
+create table employees(oid int, first_name varchar(20), last_name varchar(20));
+insert into employees(oid, first_name, last_name) values (1,'johan','mikumiku');
+call f1(2);
+delete from employees;
+call f1(2);
+
+set current_schema=public;
+drop schema cursor_rowtype cascade;

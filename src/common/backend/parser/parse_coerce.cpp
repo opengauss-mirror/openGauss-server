@@ -1297,6 +1297,9 @@ static Node* coerce_record_to_complex(
 
         rte = GetRTEByRangeTablePosn(pstate, rtindex, sublevels_up);
         expandRTE(rte, rtindex, sublevels_up, vlocation, false, NULL, &args);
+    } else if( node && IsA(node, Param) && ((Param*)node)->paramkind == PARAM_EXTERN
+            && ((Param*)node)->paramtype == RECORDOID && ((Param*)node)->recordVarTypOid == UNKNOWNOID) {
+        args = ((Param*)node)->args;
     } else {
         bool isParamExtenRecord = node && IsA(node, Param) && ((Param*)node)->paramkind == PARAM_EXTERN
             && ((Param*)node)->paramtype == RECORDOID;

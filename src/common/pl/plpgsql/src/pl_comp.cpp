@@ -54,6 +54,7 @@
 #include "catalog/pg_type_fn.h"
 #include "storage/lmgr.h"
 #include "access/hash.h"
+#include "access/tableam.h"
 
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
@@ -1994,6 +1995,7 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
                 return make_datum_param(expr, nse->itemno, cref->location);
             }
             break;
+        case PLPGSQL_NSTYPE_CURSORROW:
         case PLPGSQL_NSTYPE_REC:
             if (nnames == nnames_wholerow) {
                 return make_datum_param(expr, nse->itemno, cref->location);
@@ -2144,6 +2146,31 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
     param->tableOfIndexTypeList = tableOfIndexType;
     if (datum->dtype == PLPGSQL_DTYPE_RECORD) {
         param->recordVarTypOid = ((PLpgSQL_row*)datum)->recordVarTypOid;
+    } else if (datum->dtype == PLPGSQL_DTYPE_CURSORROW) {
+        Datum value;
+        bool isnull;
+        param->recordVarTypOid = UNKNOWNOID;
+        param->args = NIL;
+        PLpgSQL_rec* rec = (PLpgSQL_rec*)datum;
+        TupleDesc tupdesc = rec->tupdesc;
+        int attrnum = tupdesc->natts;
+        for (int i = 0; i < attrnum; i++) {
+            Const* cnst = makeNode(Const);
+            Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+            cnst->xpr.type = T_Const;
+            cnst->consttype = attr->atttypid;
+            cnst->consttypmod = TupleDescAttr(tupdesc, i)->atttypmod;
+            cnst->constcollid = attr->attcollation;
+            cnst->constlen = attr->attlen;
+            cnst->constvalue = SPI_getbinval(rec->tup, tupdesc, i + 1, &isnull);
+            cnst->constisnull = isnull;
+            cnst->constbyval = attr->attbyval;
+            cnst->location = -1; /* "unknown" */
+            cnst->ismaxvalue = false;
+            
+            param->args = lappend(param->args, cnst);
+        }
     } else {
         param->recordVarTypOid = InvalidOid;
     }
@@ -2478,6 +2505,7 @@ bool plpgsql_parse_word(char* word1, const char* yytxt, PLwdatum* wdatum, PLword
                 case PLPGSQL_NSTYPE_REC:
                 case PLPGSQL_NSTYPE_RECORD:
                 case PLPGSQL_NSTYPE_UNKNOWN:
+                case PLPGSQL_NSTYPE_CURSORROW:
                     wdatum->datum = curr_compile->plpgsql_Datums[ns->itemno];
                     wdatum->ident = word1;
                     wdatum->quoted = (yytxt[0] == '"');
@@ -2695,8 +2723,24 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                     wdatum->quoted = false; /* not used */
                     wdatum->idents = idents;
                     wdatum->dno = ns->itemno;
-                    return true; 
-
+                    return true;
+                case PLPGSQL_NSTYPE_CURSORROW: {
+                    PLpgSQL_rec *rec = (PLpgSQL_rec *)(curr_compile->plpgsql_Datums[ns->itemno]);
+                    if (rec && HeapTupleIsValid(rec->tup)) {
+                        bool exist = false;
+                        for (int i = 0; i < rec->tupdesc->natts; i++) {
+                            Form_pg_attribute attr = &rec->tupdesc->attrs[i];
+                            if (!attr->attisdropped && strcmp(NameStr(attr->attname), word2) == 0) {
+                                exist = true;
+                                /* Leave the for loop and continue the process after PLPGSQL_NSTYPE_REC. */
+                                break;
+                            }
+                        }
+                        if (!exist) {
+                            break;
+                        }
+                    }
+                }
                 case PLPGSQL_NSTYPE_REC:
                 case PLPGSQL_NSTYPE_RECORD:
                     if (nnames == 1) {
@@ -2825,6 +2869,7 @@ bool plpgsql_parse_tripword(char* word1, char* word2, char* word3, PLwdatum* wda
         if (ns != NULL && nnames == 2) {
             switch (ns->itemtype) {
                 case PLPGSQL_NSTYPE_REC:
+                case PLPGSQL_NSTYPE_CURSORROW:
                 case PLPGSQL_NSTYPE_RECORD: {
                     /*
                      * words 1/2 are a record name, so third word could be
@@ -3776,6 +3821,58 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             result = (PLpgSQL_variable*)row;
             break;
         }
+        case PLPGSQL_TTYPE_CURSORROW: {
+            PLpgSQL_rec* rec = (PLpgSQL_rec*)palloc0(sizeof(PLpgSQL_rec));
+            rec->dtype = PLPGSQL_DTYPE_CURSORROW;
+            rec->refname = pstrdup(refname);
+            rec->lineno = lineno;
+            rec->expr = dtype->cursorExpr;
+            rec->addNamespace = add2namespace;
+            if (ALLOW_PROCEDURE_COMPILE_CHECK) {
+                MemoryContext temp = NULL;
+                MemoryContext target_cxt = NULL;
+                bool *nulls = NULL;
+                errno_t rc = EOK;
+
+                if(u_sess->plsql_cxt.curr_compile_context != NULL && 
+                   u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt != NULL) {
+                    target_cxt = u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt;
+                    temp = MemoryContextSwitchTo(target_cxt);
+                }
+
+                rec->tupdesc = getCursorTupleDesc(rec->expr, false, false);
+
+                nulls = (bool*)palloc(rec->tupdesc->natts * sizeof(bool));
+                rc = memset_s(nulls, rec->tupdesc->natts * sizeof(bool), true, rec->tupdesc->natts * sizeof(bool));
+                securec_check(rc, "\0", "\0");
+
+                rec->tup = (HeapTuple)tableam_tops_form_tuple(rec->tupdesc, NULL, nulls);
+                rec->freetupdesc = (rec->tupdesc != NULL) ? true : false;
+                rec->freetup = (rec->tup != NULL) ? true : false;
+                pfree_ext(nulls);
+
+                if (target_cxt) {
+                    temp = MemoryContextSwitchTo(temp);
+                }
+            } else {
+                rec->tup = NULL;
+                rec->tupdesc = NULL;
+                rec->freetupdesc = false;
+                rec->freetup = false;
+            }
+
+            varno = plpgsql_adddatum((PLpgSQL_datum*)rec);
+            if (add2namespace) {
+                plpgsql_ns_additem(PLPGSQL_NSTYPE_CURSORROW, varno, refname, pkgname);
+            }
+            if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+                rec->pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+            }
+            result = (PLpgSQL_variable*)rec;
+            break;
+        }
         case PLPGSQL_TTYPE_REC: {
             /* "record" type -- build a record variable */
             PLpgSQL_rec* rec = NULL;
@@ -4290,6 +4387,11 @@ PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation)
     typ->typnamespace = get_namespace_name((type_struct->typnamespace));
     switch (type_struct->typtype) {
         case TYPTYPE_BASE:
+            if (typ->typoid == UNKNOWNOID)
+                typ->ttype = PLPGSQL_TTYPE_CURSORROW;
+            else
+                typ->ttype = PLPGSQL_TTYPE_SCALAR;
+            break;
         case TYPTYPE_DOMAIN:
         case TYPTYPE_ENUM:
         case TYPTYPE_RANGE:
@@ -4405,6 +4507,12 @@ static bool plpgsql_check_cross_pkg_val(PLpgSQL_datum* val)
                 return true;
             break;
         }
+        case PLPGSQL_DTYPE_CURSORROW: {
+            PLpgSQL_rec* rec = (PLpgSQL_rec*)val;
+            if (rec->pkg && rec->pkg->pkg_oid != curPkgOid)
+                return true;
+            break;
+        }
         /* keep compiler quite */
         default:
             break;
@@ -4442,6 +4550,7 @@ int plpgsql_add_initdatums(int** varnos)
         switch (curr_compile->plpgsql_Datums[i]->dtype) {
             case PLPGSQL_DTYPE_VAR:
             case PLPGSQL_DTYPE_ROW:
+            case PLPGSQL_DTYPE_CURSORROW:
             case PLPGSQL_DTYPE_RECORD:
 #ifndef ENABLE_MULTIPLE_NODES
                 if (!plpgsql_check_cross_pkg_val(curr_compile->plpgsql_Datums[i]))
@@ -4462,6 +4571,7 @@ int plpgsql_add_initdatums(int** varnos)
                 switch (curr_compile->plpgsql_Datums[i]->dtype) {
                     case PLPGSQL_DTYPE_VAR:
                     case PLPGSQL_DTYPE_ROW:
+                    case PLPGSQL_DTYPE_CURSORROW:
                     case PLPGSQL_DTYPE_RECORD:
 #ifndef ENABLE_MULTIPLE_NODES
                         if (!plpgsql_check_cross_pkg_val(curr_compile->plpgsql_Datums[i]))
