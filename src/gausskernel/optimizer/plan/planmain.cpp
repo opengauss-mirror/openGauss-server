@@ -79,6 +79,7 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
     RelOptInfo* final_rel = NULL;
     Index rti;
     double total_pages;
+    Relids non_keypreserved = NULL;
 
     /*
      * Init planner lists to empty.
@@ -180,7 +181,7 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
 
     find_lateral_references(root);
 
-    joinlist = deconstruct_jointree(root);
+    joinlist = deconstruct_jointree(root, &non_keypreserved);
 
     process_security_clause_appendrel(root);
 
@@ -276,7 +277,8 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
     /*
      * Ready to do the primary planning.
      */
-    final_rel = make_one_rel(root, joinlist);
+    final_rel = make_one_rel(root, joinlist, non_keypreserved);
+    bms_free(non_keypreserved);
 
     if (final_rel == NULL || final_rel->cheapest_total_path == NIL) {
         ereport(ERROR,

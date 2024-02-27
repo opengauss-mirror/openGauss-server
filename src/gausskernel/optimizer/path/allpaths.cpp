@@ -68,7 +68,7 @@ const int max_parallel_maintenance_workers = 32;
 static bool check_func_walker(Node* node, bool* found);
 static bool check_func(Node* node);
 
-static void set_base_rel_pathlists(PlannerInfo* root);
+static void set_base_rel_pathlists(PlannerInfo* root, Relids non_keypreserved);
 static void set_correlated_rel_pathlist(PlannerInfo* root, RelOptInfo* rel);
 static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
 static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
@@ -183,7 +183,7 @@ static inline void updateRelOptInfoMinSecurity(RelOptInfo* rel)
  *	  Finds all possible access paths for executing a query, returning a
  *	  single rel that represents the join of all base rels in the query.
  */
-RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist)
+RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist, Relids non_keypreserved)
 {
     RelOptInfo* rel = NULL;
     int rti;
@@ -283,7 +283,7 @@ RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist)
         u_sess->opt_cxt.op_work_mem = Min(root->glob->estiopmem, OPT_MAX_OP_MEM);
         Assert(u_sess->opt_cxt.op_work_mem > 0);
     }
-    set_base_rel_pathlists(root);
+    set_base_rel_pathlists(root, non_keypreserved);
 
     u_sess->opt_cxt.op_work_mem = work_mem_orig;
     root->glob->estiopmem = esti_op_mem_orig;
@@ -459,11 +459,16 @@ static Path *make_predpush_subpath(PlannerInfo* root, RelOptInfo* rel, Path *pat
  *	  Sequential scan and any available indices are considered.
  *	  Each useful path is attached to its relation's 'pathlist' field.
  */
-static void set_base_rel_pathlists(PlannerInfo* root)
+static void set_base_rel_pathlists(PlannerInfo* root, Relids non_keypreserved)
 {
     int rti;
-
-    for (rti = 1; rti < root->simple_rel_array_size; rti++) {
+    TableSampleClause* tsc= NULL;
+    bool needTablesample = root->simple_rel_array[1] == NULL && root->simple_rte_array[1]->tablesample != NULL;
+    int pos =  bms_first_member(non_keypreserved);
+    if (needTablesample) {
+        tsc = root->simple_rte_array[1]->tablesample;
+    }
+    for (rti = root->simple_rel_array_size - 1; rti >= 1; rti--) {
         RelOptInfo* rel = root->simple_rel_array[rti];
         RangeTblEntry* rte = root->simple_rte_array[rti];
 
@@ -476,7 +481,10 @@ static void set_base_rel_pathlists(PlannerInfo* root)
         /* ignore RTEs that are "other rels" */
         if (rel->reloptkind != RELOPT_BASEREL)
             continue;
-
+        if ((pos == -1 || pos == rti) && needTablesample && !rte->tablesample) {
+            rte->tablesample = tsc;
+            pos = 0;
+        }
         set_rel_pathlist(root, rel, rti, root->simple_rte_array[rti]);
 
         /*

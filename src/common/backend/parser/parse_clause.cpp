@@ -793,7 +793,7 @@ static TableSampleClause* transformRangeTableSample(ParseState* pstate, RangeTab
         Node* arg = (Node*)lfirst(larg);
 
         arg = transformExpr(pstate, arg, EXPR_KIND_FROM_FUNCTION);
-        arg = coerce_to_specific_type(pstate, arg, FLOAT4OID, "TABLESAMPLE");
+        arg = coerce_to_specific_type(pstate, arg, FLOAT8OID, "TABLESAMPLE");
         assign_expr_collations(pstate, arg);
         fargs = lappend(fargs, arg);
     }
@@ -982,11 +982,11 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
         rtr = (RangeTblRef*)rel;
         rte = rt_fetch(rtr->rtindex, pstate->p_rtable);
 
-        /* We only support this on plain relations */
-        if (rte->relkind != RELKIND_RELATION) {
+        /* We only support this on plain relations and views, materialized views and join views with kp-tables */
+        if (rte->relkind != RELKIND_RELATION && rte->relkind != RELKIND_MATVIEW && rte->relkind != RELKIND_VIEW) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("TABLESAMPLE clause can only be applied to tables."),
+    errmsg("TABLESAMPLE clause can only be applied to tables, materialized views and key-preserved join views."),
                     parser_errposition(pstate, exprLocation(rts->relation))));
         }
 

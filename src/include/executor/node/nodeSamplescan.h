@@ -33,8 +33,12 @@
 #define NEWBLOCK 0   /* Identify we have got a new block. */
 #define NONEWBLOCK 1 /* Identify we are under scanning tuple in old block. */
 
-#define MIN_PERCENT_ARG 0   /* Minimum value of percent. */
+#define MIN_PERCENT_ARG 0.000001   /* Minimum value of percent. */
 #define MAX_PERCENT_ARG 100 /* Maxmum value of percent. */
+
+#define MIN_SEED_ARG 0   /* Minimum value of seed. */
+#define MAX_SEED_ARG 4294967295 /* Maxmum value of seed. */
+
 
 /* The flag identify the tuple or block is valid or not for sample scan. */
 typedef enum { VALIDDATA, NEXTDATA, INVALIDBLOCKNO, INVALIDOFFSET } ScanValid;

@@ -243,7 +243,7 @@ test: sqlbypass_partition_prepare
 # Please fell free to execute each case independently
 test: srf_fusion srf_fusion_basic srf_fusion_agg
  
-test: string_digit_to_numeric tablesample_3
+test: string_digit_to_numeric tablesample_3 tablesample_4
 # Another group of parallel tests
 # ----------
 #test: collate tablesample tablesample_1 tablesample_2 matview

@@ -24584,6 +24584,42 @@ table_ref:	relation_expr		%prec UMINUS
 					$1->indexhints = $7;
 					$$ = (Node *)$1;
 				}
+			| relation_expr PARTITION '(' name ')' tablesample_clause
+				{
+					RangeTableSample *n = (RangeTableSample *) $6;
+					$1->partitionname = $4;
+					$1->ispartition = true;
+					/* relation_expr goes inside the RangeTableSample node */
+					n->relation = (Node *) $1;
+					$$ = (Node *) n;
+				}
+			| relation_expr SUBPARTITION '(' name ')' tablesample_clause
+				{
+					RangeTableSample *n = (RangeTableSample *) $6;
+					$1->subpartitionname = $4;
+					$1->issubpartition = true;
+					/* relation_expr goes inside the RangeTableSample node */
+					n->relation = (Node *) $1;
+					$$ = (Node *) n;
+				}
+			| relation_expr PARTITION_FOR '(' expr_list ')' tablesample_clause
+				{
+					RangeTableSample *n = (RangeTableSample *) $6;
+					$1->partitionKeyValuesList = $4;
+					$1->ispartition = true;
+					/* relation_expr goes inside the RangeTableSample node */
+					n->relation = (Node *) $1;
+					$$ = (Node *) n;
+				}
+			| relation_expr SUBPARTITION_FOR '(' expr_list ')' tablesample_clause
+				{
+					RangeTableSample *n = (RangeTableSample *) $6;
+					$1->partitionKeyValuesList = $4;
+					$1->issubpartition = true;
+					/* relation_expr goes inside the RangeTableSample node */
+					n->relation = (Node *) $1;
+					$$ = (Node *) n;
+				}
 			| func_table		%prec UMINUS
 				{
 					RangeFunction *n = makeNode(RangeFunction);

@@ -34,6 +34,8 @@
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "utils/lsyscache.h"
+#include "catalog/index.h"
+#include "catalog/pg_amop.h"
 
 /* Elements of the postponed_qual_list used during deconstruct_recurse */
 typedef struct PostponedQual
@@ -43,7 +45,7 @@ typedef struct PostponedQual
 } PostponedQual;
 static void extract_lateral_references(PlannerInfo *root, RelOptInfo *brel, Index rtindex);
 static List* deconstruct_recurse(
-    PlannerInfo* root, Node* jtnode, bool below_outer_join, Relids* qualscope, Relids* inner_join_rels, List **postponed_qual_list);
+    PlannerInfo* root, Node* jtnode, bool below_outer_join, Relids* qualscope, Relids* inner_join_rels, List **postponed_qual_list, Relids* non_keypreserved = NULL);
 static SpecialJoinInfo* make_outerjoininfo(
     PlannerInfo* root, Relids left_rels, Relids right_rels, Relids inner_join_rels, JoinType jointype, List* clause);
 static bool check_outerjoin_delay(PlannerInfo* root, Relids* relids_p, Relids* nullable_relids_p, bool is_pushed_down);
@@ -462,7 +464,7 @@ void add_lateral_info(PlannerInfo *root, Index rhs, Relids lhs)
  * clauses appearing above it.	This forces those clauses to be delayed until
  * application of the outer join (or maybe even higher in the join tree).
  */
-List* deconstruct_jointree(PlannerInfo* root)
+List* deconstruct_jointree(PlannerInfo* root, Relids* non_keypreserved)
 {
     List *result = NIL;
     Relids qualscope = NULL;
@@ -474,7 +476,7 @@ List* deconstruct_jointree(PlannerInfo* root)
         root->parse->jointree != NULL && IsA(root->parse->jointree, FromExpr), MOD_OPT, "From expression is required.");
 
     result = deconstruct_recurse(root, (Node *) root->parse->jointree, false,
-                                &qualscope, &inner_join_rels, &postponed_qual_list);
+                                &qualscope, &inner_join_rels, &postponed_qual_list, non_keypreserved);
 
     /* Shouldn't be any leftover quals */
     Assert(postponed_qual_list == NIL);
@@ -529,6 +531,228 @@ static void process_security_barrier_quals(
     Assert(security_level <= root->qualSecurityLevel);
 }
 
+#define JATTR_TAB_HASH_SIZE 64
+
+typedef struct JoinAttrEntry {
+    Index relidx;
+    Bitmapset* attrs;
+} JoinAttrEntry;
+
+static bool is_equals_operator(int operid)
+{
+    bool result = false;
+    CatCList* catlist = NULL;
+    int i;
+    /*
+     * Search pg_amop to see if the operid is registered as the "="
+     */
+    catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(operid));
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+        Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
+        if (aform->amopstrategy == BTEqualStrategyNumber) {
+            result = true;
+            break;
+        }
+    }
+    ReleaseSysCacheList(catlist);
+    return result;
+
+}
+
+static bool rel_is_member_of_non_keypreserved(PlannerInfo* root, Index relidx, Relids non_keypreserved)
+{
+    Relids tmpset = bms_copy(non_keypreserved);
+    int x = 0;
+    Oid relid = root->simple_rte_array[relidx]->relid;
+    while ((x = bms_first_member(tmpset)) >= 0) {
+        if (relid ==  root->simple_rte_array[x]->relid) {
+            bms_free_ext(tmpset);
+            return true;
+        }
+    }
+    bms_free_ext(tmpset);
+    return false;
+}
+
+static void find_non_keypreservered_rels(PlannerInfo* root, HTAB* htab, Relids* non_keypreserved,
+                                                 JoinType type, RangeTblRef* leftpart, RangeTblRef* rightpart)
+{
+    HASH_SEQ_STATUS status;
+    JoinAttrEntry *entry = NULL;
+    hash_seq_init(&status, htab);
+    bool left_is_key_preserved = true;
+    bool right_is_key_preserved = true;
+    while ((entry = (JoinAttrEntry *) hash_seq_search(&status)) != NULL) {
+        if (bms_num_members(*non_keypreserved) > 1) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("Cannot sample a join view without a key-preserved table")));
+        }
+        Index relidx = entry->relidx;
+        Oid relid = root->simple_rte_array[relidx]->relid;
+        Relids jattrs = entry->attrs;
+        Relation relation = relation_open(relid, AccessShareLock);
+        Assert(!RelationIsBucket(relation) && !RelationIsPartition(relation));
+        /* Fast path if definitely no indexes */
+        if (!RelationGetForm(relation)->relhasindex) {
+            *non_keypreserved = bms_add_member(*non_keypreserved, relidx);
+            relation_close(relation, AccessShareLock);
+            continue;
+        }
+        List* indexoidlist = NIL;
+        ListCell* l = NULL;
+        Oid relpkindex;
+        bool is_key_preserved = false;
+        /* Get cached list of index OIDs */
+        indexoidlist = RelationGetIndexList(relation);
+        /* Fall out if no indexes (but relhasindex was set) */
+        if (indexoidlist == NIL) {
+            *non_keypreserved = bms_add_member(*non_keypreserved, relidx);
+            relation_close(relation, AccessShareLock);
+            continue;
+        }
+        relpkindex = relation->rd_pkindex;
+        foreach (l, indexoidlist) {
+            Oid indexOid = lfirst_oid(l);
+            Relation indexDesc;
+            IndexInfo* indexInfo = NULL;
+            int i;
+            bool isKey = false;    /* candidate key */
+            bool isPK;            /* primary key */
+            Bitmapset* uindexattrs = NULL;
+            Bitmapset* pkindexattrs = NULL;       /* columns in the primary index */
+            indexDesc = index_open(indexOid, AccessShareLock);
+            /* Extract index key information from the index's pg_index row */
+            indexInfo = BuildIndexInfo(indexDesc);
+            /* Is this a primary key? */
+            isPK = (indexOid == relpkindex);
+            /* Can this index be referenced by a foreign key? */
+            isKey = indexInfo->ii_Unique && indexInfo->ii_Expressions == NIL && indexInfo->ii_Predicate == NIL;
+            if (!isPK && !isKey) {
+                index_close(indexDesc, AccessShareLock);
+                continue;
+            }
+            /* Collect simple attribute references */
+            for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
+               int attrnum = indexInfo->ii_KeyAttrNumbers[i];
+               if (attrnum != 0) {
+                   if (isKey && i < indexInfo->ii_NumIndexKeyAttrs) {
+                       uindexattrs = bms_add_member(uindexattrs, attrnum);
+                   }    
+                   if (isPK) {
+                       pkindexattrs = bms_add_member(pkindexattrs, attrnum);
+                   }
+               }
+            }    
+            index_close(indexDesc, AccessShareLock);
+            if ((!bms_is_empty(uindexattrs) && bms_is_subset(uindexattrs, jattrs)) ||
+                (!bms_is_empty(pkindexattrs) && bms_is_subset(pkindexattrs, jattrs))) { /* the rel is key-preserved*/
+                is_key_preserved = true;
+                break;
+            }
+        }
+        if (leftpart && !is_key_preserved && relidx == leftpart->rtindex) {
+            left_is_key_preserved = false;
+        }
+        if (rightpart && !is_key_preserved && relidx == rightpart->rtindex) {
+            right_is_key_preserved = false;
+        }
+        if ((!is_key_preserved && rel_is_member_of_non_keypreserved(root, relidx, *non_keypreserved)) ||
+            (type == JOIN_LEFT && !right_is_key_preserved) ||
+            (type == JOIN_INNER && !right_is_key_preserved && !left_is_key_preserved)) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("Cannot sample a join view without a key-preserved table")));
+        }
+        if (!is_key_preserved) {
+            *non_keypreserved = bms_add_member(*non_keypreserved, relidx);
+        }
+        relation_close(relation, AccessShareLock);
+    }
+}
+
+static void handle_join_view_operand(PlannerInfo* root, Var* operand, HTAB* htab, RangeTblRef* rtref)
+{
+    if (!rtref) {
+        return;
+    }
+    Index varno = ((Var*)operand)->varno;
+    AttrNumber varattno = ((Var*)operand)->varattno;
+    RangeTblEntry* rte = root->simple_rte_array[varno];
+    JoinAttrEntry* attrentry = NULL;
+    Bitmapset* attrs;
+    Assert(rte->rtekind == RTE_RELATION);
+    bool found = false;
+    /* Lookup current element in hashtable, adding it if new */
+    attrentry = (JoinAttrEntry*)hash_search(htab, &varno, HASH_ENTER, &found);
+    if (found) {
+        attrs = attrentry->attrs;
+        attrs = bms_add_member(attrs, varattno);
+    } else {
+        attrs = bms_make_singleton(varattno);
+        attrentry->attrs = attrs;
+    }
+}
+
+static void check_join_view_quals(PlannerInfo* root, List* quals, Relids* non_keypreserved,
+                             JoinType type, RangeTblRef* leftpart, RangeTblRef* rightpart)
+{
+    HASHCTL ctl;
+    HTAB* htab = NULL;
+    errno_t rc = EOK;
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    MemoryContext tmp_hash_context = AllocSetContextCreate(CurrentMemoryContext,
+                                                           "hashtable temporary context",
+                                                           ALLOCSET_DEFAULT_MINSIZE,
+                                                           ALLOCSET_DEFAULT_INITSIZE,
+                                                           ALLOCSET_DEFAULT_MAXSIZE);
+    ctl.keysize = sizeof(Index);
+    ctl.entrysize = sizeof(JoinAttrEntry);
+    ctl.hash = oid_hash;
+    ctl.hcxt = tmp_hash_context;
+    htab = hash_create(
+        "table's attrs of quals", JATTR_TAB_HASH_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+    ListCell* l;
+    foreach (l, quals) {
+        Node* qual = (Node*)lfirst(l);
+        Node* left_operand;
+        Node* right_operand;
+        VariableStatData leftvar;
+        VariableStatData rightvar;
+        /* If it's a binary opclause, check operator and operand*/
+        if (is_opclause(qual) && list_length(((OpExpr*)qual)->args) == 2) {
+            Oid opno = ((OpExpr*)qual)->opno;
+            left_operand = get_leftop((Expr*)qual);
+            right_operand = get_rightop((Expr*)qual);
+            examine_variable(root, left_operand, 0, &leftvar);
+            examine_variable(root, right_operand, 0, &rightvar);
+            if (is_equals_operator(opno)) { /* equal operator */
+                if (IsA(leftvar.var, Var) && IsA(rightvar.var, Var)) {
+                    handle_join_view_operand(root, (Var*)leftvar.var, htab, leftpart);
+                    handle_join_view_operand(root, (Var*)rightvar.var, htab, rightpart);
+                } else if (IsA(leftvar.var, Var) && IsA(rightvar.var, Const)) {
+                    handle_join_view_operand(root, (Var*)leftvar.var, htab, leftpart);
+                } else if (IsA(rightvar.var, Var) && IsA(leftvar.var, Const)) {
+                    handle_join_view_operand(root, (Var*)rightvar.var, htab, rightpart);
+                } else {
+                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                            errmsg("Cannot sample a join view without a key-preserved table")));
+                }
+            } 
+        }
+        ReleaseVariableStats(leftvar);
+        ReleaseVariableStats(rightvar);
+    }
+    /* Check if at most one of the tables associated with the current join is non-key-prereserved */
+    find_non_keypreservered_rels(root, htab, non_keypreserved, type, leftpart, rightpart);
+    if (bms_num_members(*non_keypreserved) > 1) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("Cannot sample a join view without a key-preserved table")));
+    }
+    /* Done with the hash table. */
+    hash_destroy(htab);
+}
+
 /*
  * deconstruct_recurse
  *	  One recursion level of deconstruct_jointree processing.
@@ -550,7 +774,7 @@ static void process_security_barrier_quals(
  */
 static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
                                 bool below_outer_join, Relids* qualscope,
-                            Relids* inner_join_rels, List **postponed_qual_list)
+                            Relids* inner_join_rels, List **postponed_qual_list, Relids* non_keypreserved)
 {
     List* joinlist = NIL;
 
@@ -592,7 +816,7 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
             int sub_members;
 
             sub_joinlist = deconstruct_recurse(root, (Node*)lfirst(l), below_outer_join,
-                        &sub_qualscope, inner_join_rels, &child_postponed_quals);
+                        &sub_qualscope, inner_join_rels, &child_postponed_quals, non_keypreserved);
             *qualscope = bms_add_members(*qualscope, sub_qualscope);
             sub_members = list_length(sub_joinlist);
             remaining--;
@@ -665,10 +889,10 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
             case JOIN_INNER:
                 leftjoinlist = deconstruct_recurse(root, j->larg, below_outer_join,
                                                    &leftids, &left_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 rightjoinlist = deconstruct_recurse(root, j->rarg, below_outer_join,
                                                    &rightids, &right_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 *qualscope = bms_union(leftids, rightids);
                 *inner_join_rels = *qualscope;
                 /* Inner join adds no restrictions for quals */
@@ -679,10 +903,10 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
             case JOIN_LEFT_ANTI_FULL:
                 leftjoinlist = deconstruct_recurse(root, j->larg, below_outer_join,
                                                    &leftids, &left_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 rightjoinlist = deconstruct_recurse(root, j->rarg, true,
                                                    &rightids, &right_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 *qualscope = bms_union(leftids, rightids);
                 *inner_join_rels = bms_union(left_inners, right_inners);
                 nonnullable_rels = leftids;
@@ -690,10 +914,10 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
             case JOIN_SEMI:
                 leftjoinlist = deconstruct_recurse(root, j->larg, below_outer_join,
                                                    &leftids, &left_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 rightjoinlist = deconstruct_recurse(root, j->rarg, below_outer_join,
                                                    &rightids, &right_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 *qualscope = bms_union(leftids, rightids);
                 *inner_join_rels = bms_union(left_inners, right_inners);
                 /* Semi join adds no restrictions for quals */
@@ -702,10 +926,10 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
             case JOIN_FULL:
                 leftjoinlist = deconstruct_recurse(root, j->larg, true,
                                                    &leftids, &left_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 rightjoinlist = deconstruct_recurse(root, j->rarg, true,
                                                    &rightids, &right_inners,
-                                                   &child_postponed_quals);
+                                                   &child_postponed_quals, non_keypreserved);
                 *qualscope = bms_union(leftids, rightids);
                 *inner_join_rels = bms_union(left_inners, right_inners);
                 /* each side is both outer and inner */
@@ -722,6 +946,11 @@ static List* deconstruct_recurse(PlannerInfo* root, Node* jtnode,
                 nonnullable_rels = NULL; /* keep compiler quiet */
                 leftjoinlist = rightjoinlist = NIL;
             } break;
+        }
+        if (root->simple_rel_array[1] == NULL && root->simple_rte_array[1]->tablesample != NULL) {
+            Node* leftpart = (list_length(leftjoinlist) == 1) ? (Node*)linitial(leftjoinlist) : NULL;
+            Node* rightpart = (list_length(rightjoinlist) == 1) ? (Node*)linitial(rightjoinlist) : NULL;
+            check_join_view_quals(root, (List*)j->quals, non_keypreserved, j->jointype, (RangeTblRef*)leftpart, (RangeTblRef*)rightpart);
         }
 
         /*

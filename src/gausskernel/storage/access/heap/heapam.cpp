@@ -1842,7 +1842,7 @@ TableScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int 
      */
     if (!RelationIsPartitioned(relation)) {
         RelationIncrementReferenceCount(relation);
-    } else {
+    } else if ((flags & SO_TYPE_SAMPLESCAN) == 0) {
         /*
          * If the table is a partition table, the current scan must be used by
          * bitmapscan to scan tuples using GPI. Therefore,

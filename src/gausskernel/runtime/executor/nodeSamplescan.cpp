@@ -189,6 +189,7 @@ TupleTableSlot* HbktSeqSampleNext(SeqScanState* node)
 void BaseTableSample::getSeed()
 {
     Datum datum;
+    double input;
     bool isnull = false;
     ExprContext* econtext = sampleScanState->ps.ps_ExprContext;
     ExprState* repeatable = sampleScanState->sampleScanInfo.repeatable;
@@ -201,6 +202,11 @@ void BaseTableSample::getSeed()
                     errmsg("TABLESAMPLE REPEATABLE parameter cannot be null")));
         }
 
+        input = DatumGetFloat8(datum);
+        if (input < MIN_SEED_ARG || input > MAX_SEED_ARG || isnan(input)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TABLESAMPLE_ARGUMENT), errmsg("sample seed must be in the range [0,4294967295]")));
+        }
         /*
          * The REPEATABLE parameter has been coerced to float8 by the parser.
          * The reason for using float8 at the SQL level is that it will
@@ -252,11 +258,11 @@ void BaseTableSample::getPercent()
                 ERROR, (errcode(ERRCODE_INVALID_TABLESAMPLE_ARGUMENT), errmsg("TABLESAMPLE parameter cannot be null")));
         }
 
-        percent[i] = DatumGetFloat4(params[i]);
+        percent[i] = DatumGetFloat8(params[i]);
 
-        if (percent[i] < MIN_PERCENT_ARG || percent[i] > MAX_PERCENT_ARG || isnan(percent[i])) {
+        if (percent[i] < MIN_PERCENT_ARG || percent[i] >= MAX_PERCENT_ARG || isnan(percent[i])) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TABLESAMPLE_ARGUMENT), errmsg("sample percentage must be between 0 and 100")));
+                (errcode(ERRCODE_INVALID_TABLESAMPLE_ARGUMENT), errmsg("sample percentage must be in the range [0.000001,100)")));
         }
 
         i++;

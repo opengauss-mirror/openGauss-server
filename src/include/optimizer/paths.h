@@ -33,7 +33,7 @@ typedef void (*set_join_pathlist_hook_type) (PlannerInfo *root,
                                                List *restrictlist);
 extern THR_LOCAL PGDLLIMPORT set_join_pathlist_hook_type set_join_pathlist_hook;
 
-extern RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist);
+extern RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist, Relids non_keypreserved = NULL);
 extern RelOptInfo* standard_join_search(PlannerInfo* root, int levels_needed, List* initial_rels);
 
 extern void set_base_rel_sizes(PlannerInfo* root, bool onlyRelatinalTable = false);

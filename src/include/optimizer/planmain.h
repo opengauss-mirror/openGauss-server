@@ -158,7 +158,7 @@ extern void add_vars_to_targetlist(PlannerInfo* root, List* vars, Relids where_n
 extern void find_lateral_references(PlannerInfo *root);
 extern void create_lateral_join_info(PlannerInfo *root);
 extern void add_lateral_info(PlannerInfo *root, Index rhs, Relids lhs);
-extern List* deconstruct_jointree(PlannerInfo* root);
+extern List* deconstruct_jointree(PlannerInfo* root, Relids* non_keypreserved = NULL);
 extern void distribute_restrictinfo_to_rels(PlannerInfo* root, RestrictInfo* restrictinfo);
 extern void process_security_clause_appendrel(PlannerInfo *root);
 extern void process_implied_equality(PlannerInfo* root, Oid opno, Oid collation, Expr* item1, Expr* item2,
