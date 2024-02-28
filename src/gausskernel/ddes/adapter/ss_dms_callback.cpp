@@ -349,17 +349,27 @@ static inline void SSResetDemoteReqType(void)
     SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
 }
 
-static inline void SSHandleDemoteFailure(DemoteMode demote_mode)
+static void SSHandleReformFailDuringDemote(DemoteMode demote_mode)
 {
     ereport(WARNING,
         (errmodule(MOD_DMS),
             errmsg("[SS switchover] Failure in %s primary demote, pmState=%d, need reform rcy.",
                 DemoteModeDesc(demote_mode), pmState)));
 
-    /* backends exiting, simply rollback */
-    if (pmState == PM_WAIT_BACKENDS) {
-        pmState = PM_RUN;
+    /*
+     * Shutdown checkpoint would cause concurrency as DMS is starting next round of reform.
+     * If we allow ckpt to finish and recover, DMS would not be aware of the recovery process.
+     * Therefore we flush as many dirty pages as we can, then trigger a DMS normal reform.
+     */
+    if (CheckpointInProgress() || pmState >= PM_SHUTDOWN) {
+        ereport(ERROR,
+            (errmodule(MOD_DMS),
+                errmsg("[SS switchover DFX] reform failed after shutdown ckpt has started, exit now")));
+        _exit(0);
     }
+
+    /* backends exiting, simply rollback */
+    pmState = PM_RUN;
     g_instance.demotion = NoDemote;
     SSResetDemoteReqType();
 }
@@ -400,7 +410,7 @@ static int CBSwitchoverDemote(void *db_handle)
             return DMS_SUCCESS;
         } else {
             if (ntries >= WAIT_DEMOTE || dms_reform_failed()) {
-                SSHandleDemoteFailure(demote_mode);
+                SSHandleReformFailDuringDemote(demote_mode);
                 return DMS_ERROR;
             }
             ntries = 0;
