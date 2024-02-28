@@ -16,6 +16,20 @@
 #define AMAPI_H
 
 #include "access/genam.h"
+#include "pg_config_manual.h"
+
+#define PG_AM_INSERT_ARGS_NUM			6
+#define PG_AM_BEGINSCAN_ARGS_NUM		3
+#define PG_AM_GETTUPLE_ARGS_NUM			2
+#define PG_AM_RESCAN_ARGS_NUM			5
+#define PG_AM_ENDSCAN_ARGS_NUM			1
+#define PG_AM_BUILD_ARGS_NUM			3
+#define PG_AM_BUILDEMPTY_ARGS_NUM		1
+#define PG_AM_BULKDELETE_ARGS_NUM		4
+#define PG_AM_VACUUMCLEANUP_ARGS_NUM	2
+#define PG_AM_COSTESTIMATE_ARGS_NUM		7
+#define PG_AM_OPTIONS_ARGS_NUM			2
+#define PG_AM_FUNC_MAX_ARGS_NUM			PG_AM_COSTESTIMATE_ARGS_NUM
 
 struct IndexInfo;
 
@@ -82,6 +96,48 @@ typedef struct IndexAmRoutine
 {
 	NodeTag		type;
 
+	/*
+	 * Total number of strategies (operators) by which we can traverse/search
+	 * this AM.  Zero if AM does not have a fixed set of strategy assignments.
+	 */
+	uint16		amstrategies;
+	/* total number of support functions that this AM uses */
+	uint16		amsupport;
+	/* opclass options support function number or 0 */
+	uint16		amoptsprocnum;
+	/* does AM support ORDER BY indexed column's value? */
+	bool		amcanorder;
+	/* does AM support ORDER BY result of an operator on indexed column? */
+	bool		amcanorderbyop;
+	/* does AM support backward scanning? */
+	bool		amcanbackward;
+	/* does AM support UNIQUE indexes? */
+	bool		amcanunique;
+	/* does AM support multi-column indexes? */
+	bool		amcanmulticol;
+	/* does AM require scans to have a constraint on the first index column? */
+	bool		amoptionalkey;
+	/* does AM handle ScalarArrayOpExpr quals? */
+	bool		amsearcharray;
+	/* does AM handle IS NULL/IS NOT NULL quals? */
+	bool		amsearchnulls;
+	/* can index storage data type differ from column data type? */
+	bool		amstorage;
+	/* can an index of this type be clustered on? */
+	bool		amclusterable;
+	/* does AM handle predicate locks? */
+	bool		ampredlocks;
+	/* does AM support parallel scan? */
+	bool		amcanparallel;
+	/* does AM support columns included with clause INCLUDE? */
+	bool		amcaninclude;
+	/* does AM use maintenance_work_mem? */
+	bool		amusemaintenanceworkmem;
+	/* OR of parallel vacuum flags.  See vacuum.h for flags. */
+	uint8		amparallelvacuumoptions;
+	/* type of data stored in index, or InvalidOid if variable */
+	Oid			amkeytype;
+
 	ambuild_function ambuild;
 	ambuildempty_function ambuildempty;
 	aminsert_function aminsert;
@@ -99,6 +155,24 @@ typedef struct IndexAmRoutine
 	ammarkpos_function ammarkpos;	
 	amrestrpos_function amrestrpos; 
     ammerge_function ammerge;
+
+	char ambuildfuncname[NAMEDATALEN];
+	char ambuildemptyfuncname[NAMEDATALEN];
+	char aminsertfuncname[NAMEDATALEN];
+	char ambulkdeletefuncname[NAMEDATALEN];
+	char amvacuumcleanupfuncname[NAMEDATALEN];
+	char amcanreturnfuncname[NAMEDATALEN];
+	char amcostestimatefuncname[NAMEDATALEN];
+	char amoptionsfuncname[NAMEDATALEN];
+	char amvalidatefuncname[NAMEDATALEN];
+	char ambeginscanfuncname[NAMEDATALEN];
+	char amrescanfuncname[NAMEDATALEN];
+	char amgettuplefuncname[NAMEDATALEN];
+	char amgetbitmapfuncname[NAMEDATALEN];
+	char amendscanfuncname[NAMEDATALEN];
+	char ammarkposfuncname[NAMEDATALEN];
+	char amrestrposfuncname[NAMEDATALEN];
+    char ammergefuncname[NAMEDATALEN];
 } IndexAmRoutine;
 
 typedef IndexAmRoutine *AmRoutine;

@@ -2277,6 +2277,14 @@ static bool _equalPolicyFilterNode(const PolicyFilterNode* a, const PolicyFilter
 }
 
 
+static bool _equalCreateAmStmt(const CreateAmStmt *a, const CreateAmStmt *b)
+{
+    COMPARE_STRING_FIELD(amname);
+    COMPARE_NODE_FIELD(handler_name);
+
+    return true;
+}
+
 static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* b)
 {
     COMPARE_STRING_FIELD(trigname);
@@ -4154,6 +4162,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_PolicyFilterNode:
             retval = _equalPolicyFilterNode((PolicyFilterNode*)a, (PolicyFilterNode*)b);
+            break;
+        case T_CreateAmStmt:
+            retval = _equalCreateAmStmt((CreateAmStmt*)a, (CreateAmStmt*)b);
             break;
         case T_CreateTrigStmt:
             retval = _equalCreateTrigStmt((CreateTrigStmt*)a, (CreateTrigStmt*)b);

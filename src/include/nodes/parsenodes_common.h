@@ -46,6 +46,7 @@ typedef enum RoleLockType { DO_NOTHING, LOCK_ROLE, UNLOCK_ROLE } RoleLockType;
  * object type.  Note that commands typically don't support all the types.
  */
 typedef enum ObjectType {
+    OBJECT_ACCESS_METHOD,
     OBJECT_AGGREGATE,
     OBJECT_AMOP,
     OBJECT_AMPROC,

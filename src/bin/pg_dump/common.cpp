@@ -100,6 +100,7 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     int numDefaultACLs;
     int numEventTriggers;
     int numEvents;
+    int numAccessMethods;
     if (g_verbose)
         write_msg(NULL, "reading schemas\n");
     nspinfo = getNamespaces(fout, &numNamespaces);
@@ -320,7 +321,12 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     }
     getEventTriggers(fout, &numEventTriggers);
     g_curStep++;
-    
+
+    if (g_verbose)
+        write_msg(NULL, "reading user-defined access methods\n");
+    getAccessMethods(fout, &numAccessMethods);
+    g_curStep++;
+
     *numTablesPtr = numTables;
     GS_FREE(inhinfo);
     return tblinfo;

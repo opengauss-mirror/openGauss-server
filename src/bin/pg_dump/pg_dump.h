@@ -61,6 +61,7 @@ typedef enum {
     DO_FUNC,
     DO_AGG,
     DO_OPERATOR,
+    DO_ACCESS_METHOD,
     DO_OPCLASS,
     DO_OPFAMILY,
     DO_COLLATION,
@@ -195,6 +196,11 @@ typedef struct _oprInfo {
     char oprkind;
     Oid oprcode;
 } OprInfo;
+
+typedef struct _accessMethodInfo {
+    DumpableObject dobj;
+    char       *amhandler;
+} AccessMethodInfo;
 
 typedef struct _opclassInfo {
     DumpableObject dobj;
@@ -538,6 +544,15 @@ typedef struct _SubscriptionInfo {
     char *submatchddlowner;
 } SubscriptionInfo;
 
+/*
+ * We build an array of these with an entry for each object that is an
+ * extension member according to pg_depend.
+ */
+typedef struct _extensionMemberId {
+    CatalogId   catId;          /* tableoid+oid of some member object */
+    ExtensionInfo *ext;         /* owning extension */
+} ExtensionMemberId;
+
 /* global decls */
 extern bool force_quotes; /* double-quotes for identifiers flag */
 extern bool g_verbose;    /* verbose flag */
@@ -591,6 +606,7 @@ extern FuncInfo* getFuncs(Archive* fout, int* numFuncs);
 extern PkgInfo* getPackages(Archive* fout, int* numPackages); 
 extern AggInfo* getAggregates(Archive* fout, int* numAggregates);
 extern OprInfo* getOperators(Archive* fout, int* numOperators);
+extern AccessMethodInfo *getAccessMethods(Archive *fout, int *numAccessMethods);
 extern OpclassInfo* getOpclasses(Archive* fout, int* numOpclasses);
 extern OpfamilyInfo* getOpfamilies(Archive* fout, int* numOpfamilies);
 extern CollInfo* getCollations(Archive* fout, int* numCollations);

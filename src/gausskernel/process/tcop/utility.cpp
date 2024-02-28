@@ -6881,6 +6881,9 @@ ProcessUtilitySlow(Node *parse_tree,
             ExecuteGrantDbStmt((GrantDbStmt*)parse_tree);
 #endif
             break;
+            case T_CreateAmStmt:
+                address = CreateAccessMethod((CreateAmStmt *) parse_tree);
+                break;
             default:
                elog(ERROR, "unrecognized node type: %d",
                     (int) nodeTag(parse_tree));
@@ -8908,6 +8911,9 @@ const char* CreateCommandTag(Node* parse_tree)
                 case OBJECT_PUBLICATION:
                     tag = "DROP PUBLICATION";
                     break;
+                case OBJECT_ACCESS_METHOD:
+                    tag = "DROP ACCESS METHOD";
+                    break;
                 default:
                     tag = "?\?\?";
                     break;
@@ -9034,6 +9040,9 @@ const char* CreateCommandTag(Node* parse_tree)
                     break;
                 case OBJECT_COLLATION:
                     tag = "CREATE COLLATION";
+                    break;
+                case OBJECT_ACCESS_METHOD:
+                    tag = "CREATE ACCESS METHOD";
                     break;
                 default:
                     tag = "?\?\?";
@@ -9460,6 +9469,10 @@ const char* CreateCommandTag(Node* parse_tree)
 
         case T_AlterTSConfigurationStmt:
             tag = "ALTER TEXT SEARCH CONFIGURATION";
+            break;
+
+        case T_CreateAmStmt:
+            tag = "CREATE ACCESS METHOD";
             break;
 
         case T_PrepareStmt:
@@ -10347,6 +10360,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             break;
 
         case T_AlterTSConfigurationStmt:
+            lev = LOGSTMT_DDL;
+            break;
+
+        case T_CreateAmStmt:
             lev = LOGSTMT_DDL;
             break;
 
