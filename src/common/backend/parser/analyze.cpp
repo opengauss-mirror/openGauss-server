@@ -1937,7 +1937,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         sub_pstate->p_resolve_unknowns = false;
 
         selectQuery = transformStmt(sub_pstate, stmt->selectStmt);
-        selectQuery->hasIgnore = stmt->hasIgnore;
         Assert(selectQuery != NULL);
 
         free_parsestate(sub_pstate);
@@ -2301,6 +2300,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     }
 
     assign_query_collations(pstate, qry);
+    assign_query_ignore_flag(pstate, qry);
 
     CheckUnsupportInsertSelectClause(qry);
 
@@ -4191,6 +4191,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     UpdateParseCheck(pstate, (Node *)qry);
 
     assign_query_collations(pstate, qry);
+    assign_query_ignore_flag(pstate, qry);
     qry->hintState = stmt->hintState;
     qry->hasIgnore = stmt->hasIgnore;
 
