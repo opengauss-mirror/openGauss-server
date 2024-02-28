@@ -19322,13 +19322,7 @@ static void atexecset_table_space_internal(Relation rel, RelFileNode& newrnode, 
     
     /* we should not copy relation to the limited space tablespace */
     RelFileNode newFileNode = dstrel->smgr_rnode.node;
-    uint64 tablespaceMaxSize = 0;
-    if (IsSegmentFileNode(newFileNode) && TableSpaceUsageManager::IsLimited(newFileNode.spcNode, &tablespaceMaxSize)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
-            errmsg("Dont support relation movement to limited tablespace segment-page storage!"),
-            errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(newFileNode.spcNode)),
-            errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
-    }
+
     /* copy main fork */
     copy_relation_data(rel, &dstrel, MAIN_FORKNUM, rel->rd_rel->relpersistence);
 
@@ -19620,6 +19614,13 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
      */
     if (IsSegmentFileNode(newFileNode)) {
         TableSpaceUsageManager::IsExceedMaxsize(newFileNode.spcNode, 0, true);
+	    /* We should not remove the data to the limited tablespace under segment mode. */
+	    if (u_sess->cmd_cxt.l_isLimit) {
+	        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
+	            errmsg("Dont support relation movement to limited tablespace segment-page storage!"),
+	            errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(newFileNode.spcNode)),
+	            errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
+	    }
     } else {
         TableSpaceUsageManager::IsExceedMaxsize(newFileNode.spcNode, ((uint64)BLCKSZ) * nblocks, false);
     }
