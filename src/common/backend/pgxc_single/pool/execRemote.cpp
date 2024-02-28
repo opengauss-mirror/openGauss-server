@@ -9959,7 +9959,6 @@ static void pgxc_rq_fire_astriggers(RemoteQueryState* node)
 
 bool IsInheritor(Oid relid)
 {
-    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("10655")));
     Relation pginherits;
     SysScanDesc scan;
     ScanKeyData key[1];

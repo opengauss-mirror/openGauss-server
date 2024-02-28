@@ -1,3 +1,16 @@
+--test analyze verify skip table
+create database ana;
+\c ana;
+create user u1 password 'Aa@12345';
+create user u2 password 'Aa@12345';
+set role u2 password 'Aa@12345';
+create table tb2(id int);
+set role u1 password 'Aa@12345';
+analyze verify fast;
+analyze verify complete;
+\c regression;
+drop database ana;
+
 -- prepare
 CREATE ROLE db_priv_user PASSWORD '1234567i*';
 CREATE ROLE db_priv_user1 PASSWORD '1234567i*';
