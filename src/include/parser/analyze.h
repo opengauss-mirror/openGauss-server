@@ -92,6 +92,7 @@ extern void resetOperatorPlusFlag();
 extern void fixResTargetNameWithTableNameRef(Relation rd, RangeVar* rel, ResTarget* res);
 extern void fixResTargetListWithTableNameRef(Relation rd, RangeVar* rel, List* clause_list);
 extern void UpdateParseCheck(ParseState *pstate, Node *qry);
+extern void assign_query_ignore_flag(ParseState* pstate, Query* query);
 #endif /* !FRONTEND_PARSER */
 
 extern bool getOperatorPlusFlag();

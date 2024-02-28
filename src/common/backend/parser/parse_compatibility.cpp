@@ -95,6 +95,7 @@ static void unsupport_syntax_plus_outerjoin(const OperatorPlusProcessContext* ct
 static bool contain_JoinExpr(List* l);
 static bool contain_AEXPR_AND_OR(Node* clause);
 static bool contain_AEXPR_AND_OR_walker(Node* node, void* context);
+static bool assign_query_ignore_flag_walker(Node* node, void *context);
 
 bool getOperatorPlusFlag()
 {
@@ -1005,5 +1006,47 @@ void transformOperatorPlus(ParseState* pstate, Node** whereClause)
          */
         *whereClause = old_whereclause;
     }
+}
+
+/*
+ * assign_query_ignore_flag
+ *             Mark all query in the given Query with ignore information.
+ *
+ * Now only INSERT and UPDATE support ignore, so it only be called in
+ * InsertStmt and UpdateStmt.
+ */
+void assign_query_ignore_flag(ParseState* pstate, Query* query)
+{
+    /* we only set ignore to true, cause false is default value. So if there is no ignore, we can return */
+    if (!pstate->p_has_ignore) {
+        return;
+    }
+
+    (void)query_tree_walker(query, (bool (*)())assign_query_ignore_flag_walker, NULL, 0);
+}
+
+/*
+ * Walker for assign_query_ignore_flag
+ *
+ * Each expression found by query_tree_walker is processed independently.
+ * Note that query_tree_walker may pass us a whole List, such as the
+ * targetlist, in which case each subexpression must be processed
+ * independently.
+ */
+static bool assign_query_ignore_flag_walker(Node* node, void *context)
+{
+    /* Need do nothing for empty subexpressions */
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Query)) {
+        Query *query = (Query *) node;
+
+        /* set it to true and continue to traverse the query tree */
+        query->hasIgnore = true;
+        return query_tree_walker(query, (bool (*)())assign_query_ignore_flag_walker, NULL, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())assign_query_ignore_flag_walker, NULL);
 }
 
