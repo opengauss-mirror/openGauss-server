@@ -274,7 +274,7 @@ Analyze temp_col1;
 select relname, relpages, reltuples from pg_class where relname = 'temp_col1';
   relname  | relpages | reltuples 
 -----------+----------+-----------
- temp_col1 |       29 |      1000
+ temp_col1 |     1000 |      1000
 (1 row)
 
 select relname, relpages, reltuples from pg_class where relname = 'temp_col2';
