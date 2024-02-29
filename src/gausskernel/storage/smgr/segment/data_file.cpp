@@ -506,7 +506,7 @@ void df_extend_internal(SegLogicFile *sf)
             ereport(ERROR, (errcode_for_file_access(), errmsg("[segpage] could not create file \"%s\": %m", filename)));
         }
 
-        if (fallocate(new_fd, 0, 0, DF_FILE_EXTEND_STEP_SIZE) != 0) {
+        if (ftruncate(new_fd, DF_FILE_EXTEND_STEP_SIZE) != 0) {
             dv_close_file(new_fd);
             ereport(ERROR,
                 (errmodule(MOD_SEGMENT_PAGE),
@@ -535,7 +535,7 @@ void df_extend_internal(SegLogicFile *sf)
             pfree(filename);
         }
 
-        if (fallocate(fd, 0, last_file_size, new_size - last_file_size) != 0) {
+        if (ftruncate(fd, new_size) != 0) {
             char *filename = slice_filename(sf->filename, sf->file_num - 1);
             ereport(ERROR, (errmsg("ftuncate file %s failed during df_extend due to %s", filename, strerror(errno))));
         }

@@ -857,7 +857,7 @@ dms_session_e DMSGetProcType4RequestPage()
     }
 }
 
-bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
+bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc, uint64 flags)
 {
     if (!ENABLE_DMS) {
         return true;
@@ -867,17 +867,16 @@ bool SSPageCheckIfCanEliminate(BufferDesc* buf_desc)
         return false;
     }
 
-    /** this page produced in flush_copy phase, should not eliminate and mark dirty now
+    /** this page produced in flush_copy phase, should not eliminate and mark dirty later
      *  when mark dirty: replay xlog
      *  why not use SS_IN_FLUSHCOPY to judge
      *      in recovery phase, when need to eliminate page, this page with BUF_DIRTY_NEED_FLUSH flag still can be found
      */
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+    if (flags & BM_VALID && buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
         return false;
     }
     return true;
-
 }
 
 bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
@@ -1210,4 +1209,23 @@ bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
         return true;
     }
     return false;
+}
+
+bool SSPinBuffer(BufferDesc *buf_desc)
+{
+    if (IsSegmentBufferID(buf_desc->buf_id)) {
+        return SegPinBuffer(buf_desc);
+    } else {
+        ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+        return PinBuffer(buf_desc, NULL);
+    }
+}
+
+void SSUnPinBuffer(BufferDesc *buf_desc)
+{
+    if (IsSegmentBufferID(buf_desc->buf_id)) {
+        SegUnpinBuffer(buf_desc);
+    } else {
+        UnpinBuffer(buf_desc, true);
+    }
 }
