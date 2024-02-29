@@ -122,6 +122,7 @@ typedef struct st_datadir_t {
 typedef struct DssOptions {
     bool enable_dss;
     bool enable_dorado;
+    bool enable_stream;
     int instance_id;
     int primaryInstId;
     int interNodeNum;

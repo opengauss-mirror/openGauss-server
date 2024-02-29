@@ -2174,7 +2174,7 @@ static void do_failover(uint32 term)
     }
 
     origin_run_mode = run_mode = get_runmode();
-    if (ss_instance_config.dss.enable_dorado) {
+    if (ss_instance_config.dss.enable_dorado || ss_instance_config.dss.enable_stream) {
         if (run_mode == PRIMARY_MODE) {
             pg_log(PG_WARNING,
                 _(" failover completed; "
@@ -2183,9 +2183,14 @@ static void do_failover(uint32 term)
         } else if (run_mode != MAIN_STANDBY_MODE) {
             pg_log(PG_WARNING,
                 _(" cannot failover server; "
-                "server is not main standby node in ss dorado cluster\n"));
+                "server is not main standby node in ss double cluster\n"));
             exit(1);
         }
+    } else if (ss_instance_config.dss.enable_dss) {
+        pg_log(PG_WARNING,
+                _(" cannot failover server; "
+                "server is share storage single cluster mode\n"));
+        exit(1);
     } else {
         if (run_mode == PRIMARY_MODE) {
             pg_log(PG_WARNING, _(" failover completed (%s)\n"), pg_data);
@@ -2266,10 +2271,11 @@ static void do_failover(uint32 term)
             break;
     }
 
+    pg_log(PG_PRINT, "\n");
     if ((origin_run_mode == STANDBY_MODE && get_runmode() != PRIMARY_MODE) ||
         (origin_run_mode == MAIN_STANDBY_MODE && get_runmode() != PRIMARY_MODE) ||
         (origin_run_mode == CASCADE_STANDBY_MODE && get_runmode() != STANDBY_MODE)) {
-        pg_log(PG_WARNING, _(" \nfailover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
+        pg_log(PG_WARNING, _(" failover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
         pg_log(PG_WARNING, _(" failover failed (%s)\n"), pg_data);
         exit(1);
     }
