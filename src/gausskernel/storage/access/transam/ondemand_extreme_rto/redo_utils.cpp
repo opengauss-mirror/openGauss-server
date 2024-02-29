@@ -515,19 +515,6 @@ void OnDemandWaitRedoFinish()
 }
 
 /**
- * Shutdown real-time build when standby node switchover promoting,
- * it will wait until StartUp Thread shutdown.
- */
-void OnDemandWaitRealtimeBuildShutDownInSwitchoverPromoting()
-{
-    if (g_instance.pid_cxt.StartupPID != 0) {
-        Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL);
-        OnDemandWaitRealtimeBuildShutDown();
-        ereport(LOG, (errmsg("[SS reform] Shutdown real-time build when switchover promoting.")));
-    }
-}
-
-/**
  * Reform partner shutdown real-time build when failover,
  * it will wait until Startup Thread shutdown.
  */
