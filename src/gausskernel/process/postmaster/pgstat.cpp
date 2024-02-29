@@ -7166,10 +7166,12 @@ static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg, int len)
     tabentry = pgstat_get_tab_entry(dbentry, msg->m_tableoid, true, msg->m_statFlag);
 
     /* Resetting dead_tuples ... use negtive number to verify Cstore */
-    if (msg->m_tuples < 0)
+    if (msg->m_tuples < 0) {
         tabentry->n_dead_tuples = 0;
-    else
+    } else {
         tabentry->n_dead_tuples = Max(0, tabentry->n_dead_tuples - msg->m_tuples);
+        tabentry->changes_since_analyze += msg->m_tuples;
+    }
 
     if (msg->m_autovacuum) {
         tabentry->autovac_vacuum_timestamp = msg->m_vacuumtime;
