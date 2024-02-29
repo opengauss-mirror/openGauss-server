@@ -508,6 +508,7 @@ static void advance_transition_function(
     fcinfo->argnull[0] = pergroupstate->transValueIsNull;
     fcinfo->argTypes[0] = InvalidOid;
     fcinfo->isnull = false; /* just in case transfn doesn't set it */
+    fcinfo->can_ignore = aggstate->ss.ps.state->es_plannedstmt->hasIgnore;
 
     Node *origin_fcxt = fcinfo->context;
     if (IS_PGXC_DATANODE && peraggstate->is_avg) {
