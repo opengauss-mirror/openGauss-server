@@ -5513,9 +5513,8 @@ XLogRecord *SSXLogReadRecordErgodic(XLogReaderState *state, XLogRecPtr RecPtr,
                 close(t_thrd.xlog_cxt.readFile);
                 t_thrd.xlog_cxt.readFile = -1;
             }
-            
             /* If record which is read from file is NULL, when preReadStartPtr is not set InvalidXlogPreReadStartPtr
-             * then exhchanging file, due to preread 64M now RecPtr < preReadStartPtr, so record still is got from 
+             * then exhchanging file, due to preread 64M now RecPtr < preReadStartPtr, so record still is got from
              * preReadBuf and record still is bad. Therefore, preReadStartPtr need to set InvalidXlogPreReadStartPtr
              * so that record is read from next file on disk instead of preReadBuf.
              */
