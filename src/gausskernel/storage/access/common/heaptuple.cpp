@@ -3445,6 +3445,42 @@ HeapTuple heap_slot_copy_heap_tuple(TupleTableSlot *slot)
 }
 
 /*
+ * Save the pincount on SS standby mode in order to check whether the page got from
+ * SS standby node was pruned by master node. Only called during heap_slot_store_heap as
+ * it's for physical disck tuple. And also save the offset of the tuple.
+ * Note: the function need to be removed after ustore is used in kernel.
+ */
+static void RememberBufferNeedCheckPin(Buffer buf_id, HeapTuple tuple)
+{
+    if (t_thrd.dms_cxt.pincount_array == NULL) {
+        return;
+    }
+
+    dms_buf_ctrl_t *buf_ctrl = &t_thrd.storage_cxt.dmsBufCtl[buf_id - 1];
+    int target_index = -1;
+    for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
+        if (t_thrd.dms_cxt.pincount_array[i].bufid == buf_id) {
+            return;
+        }
+
+        if (t_thrd.dms_cxt.pincount_array[i].bufid == InvalidBuffer && target_index == -1) {
+            target_index = i;
+        }
+    }
+
+    if (target_index > -1) {
+        t_thrd.dms_cxt.pincount_array[target_index].bufid = buf_id;
+        t_thrd.dms_cxt.pincount_array[target_index].lp_offset = ItemPointerGetOffsetNumber(&(tuple->t_self));
+        Page page = BufferGetPage(buf_id);
+        ItemId lpp = HeapPageGetItemId(page, t_thrd.dms_cxt.pincount_array[target_index].lp_offset);
+        t_thrd.dms_cxt.pincount_array[target_index].saved_off = lpp->lp_off;
+        uint32 count = pg_atomic_add_fetch_u32(&(buf_ctrl->pinned_count), 1);
+    } else {
+        ereport(WARNING, (errmsg("t_thrd.dms_cxt.pincount_array count is full")));
+    }
+}
+
+/*
  * Stores heaps physical tuple in the TupleTableSlot. Release the current slots buffer and Free's any slot's
  * minimal and heap tuple.
  *
@@ -3524,11 +3560,29 @@ void heap_slot_store_heap_tuple(Tuple tup, TupleTableSlot* slot, Buffer buffer, 
      */
     if (!batchMode && slot->tts_buffer != buffer) {
         if (BufferIsValid(slot->tts_buffer)) {
+            if (SS_STANDBY_MODE) {
+#ifdef USE_ASSERT_CHECKING
+                int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
+                t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+                BufferDesc *buf_desc = GetBufferDescriptor(slot->tts_buffer - 1);
+                ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] set check pin count, heap_slot_store_heap!",
+                    buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                    (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
+                    buf_desc->tag.blockNum)));
+                t_thrd.postgres_cxt.whereToSendOutput = output_backup;
+#endif
+                t_thrd.dms_cxt.need_check_pincount = true;
+            }
             ReleaseBuffer(slot->tts_buffer);
         }
         slot->tts_buffer = buffer;
         if (BufferIsValid(buffer)) {
             IncrBufferRefCount(buffer);
+            if (SS_STANDBY_MODE && SS_AM_WORKER) {
+                if (!(IsSegmentBufferID(buffer - 1))) {
+                    RememberBufferNeedCheckPin(buffer, tuple);
+                }
+            }
         }
     }
 }

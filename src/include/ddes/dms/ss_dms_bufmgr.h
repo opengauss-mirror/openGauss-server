@@ -85,6 +85,7 @@ Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode);
 void DmsReleaseBuffer(int buffer, bool is_seg);
 bool SSOndemandRealtimeBuildAllowFlush(BufferDesc *buf);
 bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl);
+void ForgetBufferNeedCheckPin(Buffer buf_id);
 
 inline bool SSBufferIsDirty(BufferDesc *buf_desc)
 {

@@ -57,6 +57,8 @@ void InitDmsBufCtrl(void)
             buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
             buf_ctrl->been_loaded = false;
             buf_ctrl->ctrl_lock = LWLockAssign(LWTRANCHE_DMS_BUF_CTRL);
+            buf_ctrl->need_check_pincount = false;
+            buf_ctrl->pinned_count = 0;
         }
     }
 }
@@ -350,6 +352,13 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     }
 
     ClearReadHint(buf_desc->buf_id);
+
+    if (SS_STANDBY_MODE && (buf_desc->state & BM_VALID) && buf_ctrl->need_check_pincount && SS_AM_WORKER) {
+        if (!(IsSegmentBufferID(buf_desc->buf_id))) {
+            ForgetBufferNeedCheckPin(buf_desc->buf_id + 1);
+        }
+    }
+
     TerminateBufferIO(buf_desc, false, BM_VALID);
 
     /*
@@ -1224,3 +1233,77 @@ void SSUnPinBuffer(BufferDesc *buf_desc)
         UnpinBuffer(buf_desc, true);
     }
 }
+
+/*
+ * Check whether the page got from SS standby node was pruned by master node.
+ * Compare the saved offset with latest offset of same linepointer.
+ * Note: the function need to be removed after ustore is used in kernel.
+ */
+static bool LineOffChanged(Buffer buf, int lp_offset, uint16 saved_off)
+{
+    Page page = BufferGetPage(buf + 1);
+    ItemId lpp = HeapPageGetItemId(page, lp_offset);
+    if (lpp->lp_off != saved_off) {
+#ifdef USE_ASSERT_CHECKING
+        int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
+        t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+        BufferDesc *buf_desc = GetBufferDescriptor(buf);
+        ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] lineoffchanged new %d/%d/%d old %d!",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
+            buf_desc->tag.blockNum, lpp->lp_off, lpp->lp_flags, lpp->lp_len, saved_off)));
+        t_thrd.postgres_cxt.whereToSendOutput = output_backup;
+#endif
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Check whether the page got from SS standby node was pruned by master node.
+ * Note: the function need to be removed after ustore is used in kernel.
+ */
+void ForgetBufferNeedCheckPin(Buffer buf_id)
+{
+    if (t_thrd.dms_cxt.pincount_array == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
+        if (t_thrd.dms_cxt.pincount_array[i].bufid == buf_id) {
+            t_thrd.dms_cxt.pincount_array[i].bufid = InvalidBuffer;
+            dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id - 1);
+            if (pg_atomic_read_u32(&buf_ctrl->pinned_count) > 0) {
+                uint32 count = pg_atomic_sub_fetch_u32(&(buf_ctrl->pinned_count), 1);
+#ifdef USE_ASSERT_CHECKING
+                BufferDesc *buf_desc = GetBufferDescriptor(buf_id - 1);
+                int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
+                t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+                ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] ForgetBufferNeedCheckPin %d!",
+                    buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                    (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
+                    buf_desc->tag.blockNum, count)));
+                t_thrd.postgres_cxt.whereToSendOutput = output_backup;
+#endif
+                if (t_thrd.dms_cxt.need_check_pincount &&
+                    LineOffChanged(buf_id - 1, t_thrd.dms_cxt.pincount_array[i].lp_offset,
+                                   t_thrd.dms_cxt.pincount_array[i].saved_off)) {
+                    if (buf_ctrl->need_check_pincount) {
+                        if (pg_atomic_read_u32(&(buf_ctrl->pinned_count)) == 0) {
+                            buf_ctrl->need_check_pincount = false;
+                        }
+                        t_thrd.dms_cxt.need_check_pincount = false;
+                        t_thrd.dms_cxt.pincount_array[i].lp_offset = 0;
+                        t_thrd.dms_cxt.pincount_array[i].saved_off = 0;
+                        ereport(ERROR, (errmsg("The version of page is too old, please requery!")));
+                    }
+                }
+            }
+            t_thrd.dms_cxt.pincount_array[i].lp_offset = 0;
+            t_thrd.dms_cxt.pincount_array[i].saved_off = 0;
+            break;
+        }
+    }
+    t_thrd.dms_cxt.need_check_pincount = false;
+}
+

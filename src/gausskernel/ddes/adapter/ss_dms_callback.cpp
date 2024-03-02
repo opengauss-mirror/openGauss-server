@@ -730,6 +730,9 @@ static void CBLeaveLocalPage(void *db_handle, dms_buf_ctrl_t *buf_ctrl)
     } else {
         UnlockReleaseBuffer(buf_ctrl->buf_id + 1);
     }
+    if (buf_ctrl->need_check_pincount) {
+        (GetDmsBufCtrl(buf_ctrl->buf_id))->need_check_pincount = false;
+    }
 }
 
 static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
@@ -893,6 +896,10 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
+
+    if (buf_ctrl->need_check_pincount && (pg_atomic_read_u32(&(buf_ctrl->pinned_count)) == 0)) {
+        buf_ctrl->need_check_pincount = false;
+    }
 
     if (buf_ctrl->seg_fileno != EXTENT_INVALID) {
         if (buf_desc->extra->seg_fileno == EXTENT_INVALID) {

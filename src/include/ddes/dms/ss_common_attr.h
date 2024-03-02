@@ -157,6 +157,8 @@
 /* max length of max int range as char */
 #define MAX_LEN_OF_MAXINTRANGE      12
 
+#define SS_AM_WORKER  (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)
+
 typedef enum SSBroadcastOp {
     BCAST_CANCEL_TRX_FOR_SWITCHOVER = 0,
     BCAST_SI,

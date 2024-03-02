@@ -892,7 +892,7 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
      * we vacuum, we need to issue a dummy XLOG_BTREE_VACUUM WAL record
      * against the last leaf page in the index, if that one wasn't vacuumed.
      */
-    if (XLogStandbyInfoActive() && vstate.lastBlockVacuumed < vstate.lastBlockLocked) {
+    if (XLogStandbyInfoActive() && vstate.lastBlockVacuumed < vstate.lastBlockLocked && !SS_SINGLE_CLUSTER) {
         Buffer buf;
 
         /*

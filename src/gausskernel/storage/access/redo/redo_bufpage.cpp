@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "storage/buf/bufpage.h"
+#include "storage/buf/bufmgr.h"
 #include "access/itup.h"
 #include "access/htup.h"
 
@@ -576,6 +577,12 @@ void PageRepairFragmentation(Page page)
         }
 
         ((PageHeader)page)->pd_upper = upper;
+
+        if (SS_PRIMARY_MODE) {
+            Buffer buf = BlockGetBuffer((char *)page);
+            dms_buf_ctrl_t *buf_ctrl = &t_thrd.storage_cxt.dmsBufCtl[buf - 1];
+            buf_ctrl->need_check_pincount = true;
+        }
     }
 
     /* Set hint bit for PageAddItem */

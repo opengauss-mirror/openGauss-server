@@ -1741,6 +1741,8 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->latest_snapshot_xmin = 0;
     dms_cxt->latest_snapshot_xmax = 0;
     dms_cxt->latest_snapshot_csn = 0;
+    dms_cxt->pincount_array = (PinnedBufferItem *)palloc0(sizeof(PinnedBufferItem) * REFCOUNT_ARRAY_ENTRIES);
+    dms_cxt->need_check_pincount = false;
 }
 
 static void knl_t_ondemand_xlog_copy_context_init(knl_t_ondemand_xlog_copy_context *ondemand_xlog_copy_cxt)

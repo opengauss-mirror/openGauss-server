@@ -47,6 +47,12 @@ typedef struct LRUQueue {
     TxnStatusEntry *tail;
 } LRUQueue;
 
+typedef struct PinnedBufferItem {
+    uint32 bufid;
+    int lp_offset;
+    uint16 saved_off;
+} PinnedBufferItem;
+
 #define TXNSTATUS_CACHE_LRU_FFACTOR 0.9
 #define TXNSTATUS_CACHE_INVALID_QUEUEID (NUM_TXNSTATUS_CACHE_PARTITIONS + 1)
 #define NUM_TXNSTATUS_CACHE_ENTRIES (g_instance.attr.attr_storage.dms_attr.txnstatus_cache_size)

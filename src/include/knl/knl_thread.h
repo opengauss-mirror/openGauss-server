@@ -3425,6 +3425,8 @@ typedef struct knl_t_dms_context {
     HTAB* SSTxnStatusHash;
     LRUQueue* SSTxnStatusLRU;
     uint32 srsn; /* session rsn used for DMS page request ordering */
+    PinnedBufferItem* pincount_array;
+    bool need_check_pincount;
 } knl_t_dms_context;
 
 typedef struct knl_t_ondemand_xlog_copy_context {
