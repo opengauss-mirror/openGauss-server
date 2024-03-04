@@ -1161,6 +1161,16 @@ DROP DATABASE inherit_multi_update;
 CREATE DATABASE inherit_multi_delete DBCOMPATIBILITY = 'B';
 \c inherit_multi_delete;
 
+create table t_father_opengauss_inherit_alter_inherit_case0001_1 (id int,
+f1_name varchar(20),
+f1_age int
+);
+create table t_son_opengauss_inherit_alter_inherit_case0001_1 (id int,f1_name varchar(20),f1_age int,s_name varchar(20),s_age int);
+
+alter table t_son_opengauss_inherit_alter_inherit_case0001_1 inherit t_father_opengauss_inherit_alter_inherit_case0001_1;
+drop table if exists t_father_opengauss_inherit_alter_inherit_case0001_1 cascade;
+drop table if exists t_son_opengauss_inherit_alter_inherit_case0001_1 cascade;
+
 -- five relation
 DROP TABLE IF EXISTS t_t_mutil_t1;
 DROP TABLE IF EXISTS t_t_mutil_t2;
