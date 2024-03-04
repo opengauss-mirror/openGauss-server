@@ -1103,6 +1103,7 @@ retry1:
          * there is not space to write.
          */
         if (errno == ENOSPC) {
+            ereport(WARNING, (errmsg("No free space left on audit disk.")));
             pg_usleep(1000000);
             goto retry1;
         }
@@ -1137,6 +1138,7 @@ retry:
          * there is not space to write.
          */
         if (errno == ENOSPC) {
+            ereport(WARNING, (errmsg("No free space left on audit disk.")));
             pg_usleep(1000000);
             goto retry;
         }
