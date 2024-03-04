@@ -370,7 +370,7 @@ void OndemandRealtimeBuildHandleFailover()
 
 XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf)
 {
-    if (!ENABLE_DMS) {
+    if (!ENABLE_DMS || SS_DISASTER_STANDBY_CLUSTER) {
         return BLK_NEEDS_REDO;
     }
 
@@ -423,6 +423,10 @@ XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id
 // used for extreme recovery and on-demand recovery
 bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
 {
+    if (!ENABLE_DMS || SS_DISASTER_STANDBY_CLUSTER) {
+        return BLK_NEEDS_REDO;
+    }
+
     RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
     BufferTag tag;
     tag.rnode.spcNode = blockinfo->rnode.spcNode;

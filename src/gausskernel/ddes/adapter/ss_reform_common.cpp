@@ -539,10 +539,20 @@ bool SSPrimaryRestartScenario()
     return false;
 }
 
+/* PRIMARY_CLUSTER and single cluster
+ *      1)standby scenario 2)primary restart -- no need exit
+ *      3)switchover 4)failover -- need exit
+ * STANDBY_CLUSTER
+ *      all scenario  -- need exit
+ */
 bool SSBackendNeedExitScenario()
 {
     if (!SS_IN_REFORM) {
         return false;
+    }
+
+    if (SS_DISASTER_STANDBY_CLUSTER) {
+        return true;
     }
 
     if (SSPerformingStandbyScenario() || SSPrimaryRestartScenario()) {
