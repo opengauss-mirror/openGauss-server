@@ -3732,7 +3732,7 @@ TupleTableSlot *EvalPlanQualNext(EPQState *epqstate)
 
     TupleTableSlot *slot = ExecProcNode(epqstate->planstate);
     /* for multiple modify, fetch the current read slot corresponding to the result relation. */
-    if (resultRelation > 0) {
+    if (resultRelation > 0 && !epqstate->plan->isinherit) {
         origExprContext = epqstate->projInfos[resultRelation]->pi_exprContext;
         epqstate->projInfos[resultRelation]->pi_exprContext = epqstate->planstate->ps_ExprContext;
 

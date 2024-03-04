@@ -3623,11 +3623,11 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
             }
         }
 
-        if (estate->result_rel_index == 0)
+        if (estate->result_rel_index == 0 || node->isinherit)
             EvalPlanQualSetSlot(&node->mt_epqstate, plan_slot);
         slot = plan_slot;
         slot->tts_tupleDescriptor->td_tam_ops = result_rel_info->ri_RelationDesc->rd_tam_ops;
-
+        node->mt_epqstate.plan->isinherit = node->isinherit;
         if (operation == CMD_MERGE) {
             if (junk_filter == NULL) {
                 ereport(ERROR,
