@@ -16,6 +16,9 @@ function case_setup() {
     exec_sql_with_user $db $pub_node1_port "CREATE DATABASE $case_use_db"
     exec_sql_with_user $db $sub_node1_port "CREATE DATABASE $case_use_db"
 
+    exec_sql $case_use_db $pub_node1_port "ALTER DATABASE $case_use_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+    exec_sql $case_use_db $sub_node1_port "ALTER DATABASE $case_use_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+
     if [ -f "${case_use_db}.setup" ]; then
         echo "execute setup ${case_use_db}.setup"
         sh ${case_use_db}.setup $subscription_dir $base_port $case_use_db
