@@ -265,6 +265,7 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(multiple);
     COPY_SCALAR_FIELD(plan_width);
     COPY_SCALAR_FIELD(dop);
+    COPY_SCALAR_FIELD(isinherit);
     COPY_NODE_FIELD(targetlist);
     COPY_NODE_FIELD(qual);
     COPY_NODE_FIELD(lefttree);

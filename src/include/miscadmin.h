@@ -140,6 +140,7 @@ extern const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION;
 extern const uint32 SPQ_VERSION_NUM;
 extern const uint32 UPSERT_ALIAS_VERSION_NUM;
 extern const uint32 SELECT_STMT_HAS_USERVAR;
+extern const uint32 PUBLICATION_DDL_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
