@@ -482,12 +482,8 @@ int GsUwalInit(ServerMode serverMode)
     elem[index].value = UWAL_TIMEOUT;
 
     elem[++index].substr = "ock.uwal.rpc.rndv.switch";
-    if (!strcasecmp(g_uwalConfig.protocol, "rdma")) {
-        elem[index].value = "true";
-    } else {
-        elem[index].value = "false";
-    }
-
+    elem[index].value = "true";
+   
     elem[++index].substr = "ock.uwal.rpc.compression.switch";
     elem[index].value = g_instance.attr.attr_storage.uwal_rpc_compression_switch ? "true" : "false";
 
