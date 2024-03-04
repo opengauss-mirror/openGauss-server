@@ -17149,9 +17149,9 @@ static void bupgrade_set_pg_partition_cstore_oids(
     for (i = 1; i <= partkeynum; i++) {
         if (i == partkeynum)
             appendPQExpBuffer(
-                upgrade_query, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                upgrade_query, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
         else
-            appendPQExpBuffer(upgrade_query, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+            appendPQExpBuffer(upgrade_query, "p.boundaries[%d]::%s NULLS LAST, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
     }
 
     upgrade_res = ExecuteSqlQuery(fout, upgrade_query->data, PGRES_TUPLES_OK);
@@ -17834,10 +17834,10 @@ static void binary_upgrade_set_pg_partition_oids(
         for (i = 1; i <= partkeynum; i++) {
             if (i == partkeynum)
                 appendPQExpBuffer(
-                    upgrade_query, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                    upgrade_query, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
             else
                 appendPQExpBuffer(
-                    upgrade_query, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                    upgrade_query, "p.boundaries[%d]::%s NULLS LAST, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
         }
 
         upgrade_res = ExecuteSqlQuery(fout, upgrade_query->data, PGRES_TUPLES_OK);
@@ -18240,10 +18240,10 @@ static void GenerateSubPartitionDetail(PQExpBuffer result, Archive *fout, TableI
         partOid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
     for (i = 1; i <= subpartkeynum; i++) {
         if (i == subpartkeynum) {
-            appendPQExpBuffer(subPartDetailQ, "p.boundaries[%d]::%s ASC", i,
+            appendPQExpBuffer(subPartDetailQ, "p.boundaries[%d]::%s ASC NULLS LAST", i,
                 tbinfo->atttypnames[subpartkeycols[i - 1] - 1]);
         } else {
-            appendPQExpBuffer(subPartDetailQ, "p.boundaries[%d]::%s, ", i,
+            appendPQExpBuffer(subPartDetailQ, "p.boundaries[%d]::%s NULLS LAST, ", i,
                 tbinfo->atttypnames[subpartkeycols[i - 1] - 1]);
         }
     }
@@ -18508,15 +18508,15 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 if (partkeyexprIsNull) {
                     if (i == partkeynum)
                         appendPQExpBuffer(
-                            partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                            partitionq, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                     else
                         appendPQExpBuffer(
-                            partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                            partitionq, "p.boundaries[%d]::%s NULLS LAST, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                 } else {
                     if (i == partkeynum)
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC", i);
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC NULLS LAST", i);
                     else
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d], ", i);
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] NULLS LAST, ", i);
                 }
             }
         } else {
@@ -18567,7 +18567,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 "UNION ALL SELECT oid, relname, reltablespace, partkey, 'DEFAULT' AS bound_def FROM pg_partition "
                 "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c' AND boundaries[1] IS NULL) p "
                 "LEFT JOIN pg_tablespace t ON p.reltablespace = t.oid "
-                "ORDER BY p.bound_def ASC",
+                "ORDER BY p.bound_def ASC NULLS LAST",
                 tbinfo->dobj.catId.oid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST,
                 tbinfo->dobj.catId.oid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST);
         }
