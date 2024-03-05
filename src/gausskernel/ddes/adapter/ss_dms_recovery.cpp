@@ -424,28 +424,74 @@ XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id
 bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
 {
     RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
-    XLogPhyBlock *pblk = (blockinfo->pblk.relNode != InvalidOid) ? &blockinfo->pblk : NULL;
-    Buffer buf = XLogReadBufferExtended(blockinfo->rnode, blockinfo->forknum, blockinfo->blkno,
-        RBM_NORMAL_NO_LOG, pblk, false);
-    if (BufferIsValid(buf)) {
+    BufferTag tag;
+    tag.rnode.spcNode = blockinfo->rnode.spcNode;
+    tag.rnode.dbNode = blockinfo->rnode.dbNode;
+    tag.rnode.relNode = blockinfo->rnode.relNode;
+    tag.rnode.bucketNode = blockinfo->rnode.bucketNode;
+    tag.rnode.opt = blockinfo->rnode.opt;
+    tag.forkNum = blockinfo->forknum;
+    tag.blockNum = blockinfo->blkno;
+
+    uint32 hash = BufTableHashCode(&tag);
+    bool valid = false;
+    bool retry = false;
+    int buf_id;
+    BufferDesc *buf_desc;
+    do {
+        buf_id = BufTableLookup(&tag, hash);
+        if (buf_id < 0) {
+            return false;
+        }
+
+        buf_desc = GetBufferDescriptor(buf_id);
+        valid = SSPinBuffer(buf_desc);
+        if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, &tag)) {
+            SSUnPinBuffer(buf_desc);
+            retry = true;
+        } else {
+            break;
+        }
+    } while (retry);
+
+    if (!valid) {
+        SSUnPinBuffer(buf_desc);
+        return false;
+    }
+    
+    LWLockAcquire(buf_desc->content_lock, LW_SHARED);
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
+    if (DMS_BUF_CTRL_IS_OWNER(buf_ctrl)) {
+        Buffer buf = buf_id + 1;
         Page page = BufferGetPage(buf);
-        LockBuffer(buf, BUFFER_LOCK_SHARE);
-        if (XLByteLE(xlogLsn, PageGetLSN(page))) {
+        uint64 pageLsn = PageGetLSN(page);
+#ifdef USE_ASSERT_CHECKING
+        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH && XLByteLT(pageLsn, xlogLsn)) {
+        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page should be newest but not, "
+                "xlogLsn:%llu, pageLsn:%llu",
+                blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
+                blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
+                xlogLsn, pageLsn)));
+        }
+#endif
+        if (XLByteLE(xlogLsn, pageLsn)) {
             bufferinfo->buf = buf;
             bufferinfo->lsn = xlogLsn;
             bufferinfo->pageinfo.page = page;
             bufferinfo->pageinfo.pagesize = BufferGetPageSize(buf);
-            ereport(LOG, (errmsg("[SS redo][%u/%u/%u/%d %d-%u] page skip replay",
+#ifdef USE_ASSERT_CHECKING
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page skip replay, "
+                "xlogLsn:%llu, pageLsn:%llu",
                 blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
-                blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno)));
+                blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
+                xlogLsn, pageLsn)));
+#endif
+            // do not release content_lock
             return true;
-        } else {
-            if (IsSegmentBufferID(buf - 1)) {
-                SegUnlockReleaseBuffer(buf);
-            } else {
-                UnlockReleaseBuffer(buf);
-            }
         }
     }
+
+    LWLockRelease(buf_desc->content_lock);
+    SSUnPinBuffer(buf_desc);
     return false;
 }

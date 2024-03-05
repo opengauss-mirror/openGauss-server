@@ -1491,15 +1491,6 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
     return ret;
 }
 
-void SSUnPinBuffer(BufferDesc* buf_desc)
-{
-    if (IsSegmentBufferID(buf_desc->buf_id)) {
-        SegUnpinBuffer(buf_desc);
-    } else {
-        UnpinBuffer(buf_desc, true);
-    }
-}
-
 static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
     unsigned long long *edp_lsn)
 {
