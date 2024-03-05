@@ -1536,6 +1536,68 @@ $$;
 
 drop function f1();
 
+create table source(c1 int,c2 varchar2(100));
+insert into source values(1,'aa');
+insert into source values(2,'bb');
+create table target(c1 int,c2 varchar2(100));
+
+declare
+  cursor cur is
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values(data.c1,data.c2);
+  end loop;
+end;
+/
+
+declare
+  cursor cur is 
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values data;
+  end loop;
+end;
+/
+
+declare
+begin
+  for cur in (select c1,c2 from source) loop
+    insert into target values cur;
+    commit;
+  end loop;
+end;
+/
+
+set behavior_compat_options = 'allow_procedure_compile_check';
+delete from target;
+
+declare
+  cursor cur is 
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values data;
+  end loop;
+end;
+/
+
+select * from target order by c1;
+delete from target;
+
+declare
+begin
+  for cur in (select c1,c2 from source) loop
+    insert into target values cur;
+  end loop;
+end;
+/
+
+select * from target order by c1;
+drop table source;
+drop table target;
+reset behavior_compat_options;
 
 -- clean
 drop schema pl_auto_ref cascade;

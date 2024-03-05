@@ -1912,6 +1912,91 @@ begin
  END;
 $$;
 drop function f1();
+create table source(c1 int,c2 varchar2(100));
+insert into source values(1,'aa');
+insert into source values(2,'bb');
+create table target(c1 int,c2 varchar2(100));
+declare
+  cursor cur is
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values(data.c1,data.c2);
+  end loop;
+end;
+/
+declare
+  cursor cur is 
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values data;
+  end loop;
+end;
+/
+ERROR:  unsupported insert into table from record type without desc, may need set behavior_compat_options to allow_procedure_compile_check. at or near "data"
+LINE 5:     INSERT INTO target values data;
+                                      ^
+QUERY:  DECLARE cursor cur is 
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values data;
+  end loop;
+end
+declare
+begin
+  for cur in (select c1,c2 from source) loop
+    insert into target values cur;
+    commit;
+  end loop;
+end;
+/
+ERROR:  unsupported insert into table from record type without desc, may need set behavior_compat_options to allow_procedure_compile_check. at or near "cur"
+LINE 3:     insert into target values cur;
+                                      ^
+QUERY:  DECLARE begin
+  for cur in (select c1,c2 from source) loop
+    insert into target values cur;
+    commit;
+  end loop;
+end
+set behavior_compat_options = 'allow_procedure_compile_check';
+delete from target;
+declare
+  cursor cur is 
+    select c1,c2 from source;
+begin
+  for data in cur loop
+    INSERT INTO target values data;
+  end loop;
+end;
+/
+select * from target order by c1;
+ c1 | c2 
+----+----
+  1 | aa
+  2 | bb
+(2 rows)
+
+delete from target;
+declare
+begin
+  for cur in (select c1,c2 from source) loop
+    insert into target values cur;
+  end loop;
+end;
+/
+select * from target order by c1;
+ c1 | c2 
+----+----
+  1 | aa
+  2 | bb
+(2 rows)
+
+drop table source;
+drop table target;
+reset behavior_compat_options;
 -- clean
 drop schema pl_auto_ref cascade;
 NOTICE:  drop cascades to 2 other objects

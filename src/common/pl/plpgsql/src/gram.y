@@ -10370,6 +10370,18 @@ make_execsql_stmt(int firsttoken, int location)
                if (i != (nattr - 1)) {
                    appendStringInfoString(&ds, ",");
                }
+               PLpgSQL_recfield* rec_field = NULL;
+               rec_field = (PLpgSQL_recfield*)palloc0(sizeof(PLpgSQL_recfield));
+               rec_field->dtype = PLPGSQL_DTYPE_RECFIELD;
+               rec_field->fieldname = pstrdup(NameStr(pg_att_form->attname));
+               
+               int nnames = 0;
+               PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, rec_data->refname, NameStr(pg_att_form->attname), NULL, &nnames);
+               if (ns == NULL) {
+                   yyerror("insert an nonexistent variable");
+               }
+               rec_field->recparentno = ns->itemno;
+               (void)plpgsql_adddatum((PLpgSQL_datum*)rec_field);
             }
         }
         appendStringInfoString(&ds, ")");
