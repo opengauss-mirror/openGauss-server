@@ -610,6 +610,8 @@ void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressS
     ObjectAddressStack mystack;
     ObjectAddressExtra extra;
 
+    check_stack_depth();
+
     /*
      * If the target object is already being visited in an outer recursion
      * level, just report the current flags back to that level and exit. This
