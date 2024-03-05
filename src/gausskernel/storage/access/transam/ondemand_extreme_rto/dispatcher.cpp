@@ -463,7 +463,7 @@ void StartRecoveryWorkers(XLogReaderState *xlogreader, uint32 privateLen)
             ALLOCSET_DEFAULT_MAXSIZE,
             SHARED_CONTEXT);
         g_instance.comm_cxt.predo_cxt.redoItemHashCtrl = PRInitRedoItemHashForAllPipeline(g_instance.comm_cxt.redoItemCtx);
-        if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        if (ENABLE_ONDEMAND_REALTIME_BUILD && !SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
             errno_t rc = EOK;
             g_dispatcher->restoreControlFile = (ControlFileData *)palloc(sizeof(ControlFileData));
             rc = memcpy_s(g_dispatcher->restoreControlFile, (size_t)sizeof(ControlFileData), &restoreControlFile, (size_t)sizeof(ControlFileData));
