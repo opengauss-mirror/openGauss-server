@@ -3903,7 +3903,7 @@ static int ServerLoop(void)
          *  Standby node start StartUp thread to start ondemand realtime build, 
          *  after reform.
          */
-        if (startup_reform_finish && ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_DISABLED &&
+        if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_DISABLED &&
             SS_NORMAL_STANDBY && SS_CLUSTER_ONDEMAND_NORMAL && pmState == PM_RUN) {
             if (g_instance.pid_cxt.StartupPID == 0) {
                 g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
