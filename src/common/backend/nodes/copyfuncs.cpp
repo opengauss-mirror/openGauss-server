@@ -6396,10 +6396,8 @@ static AlterRlsPolicyStmt* _copyAlterRlsPolicyStmt(const AlterRlsPolicyStmt* fro
 static CreateAmStmt* _copyCreateAmStmt(const CreateAmStmt *from)
 {
     CreateAmStmt *newnode = makeNode(CreateAmStmt);
-
     COPY_STRING_FIELD(amname);
     COPY_NODE_FIELD(handler_name);
-
     return newnode;
 }
 

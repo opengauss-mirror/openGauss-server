@@ -1057,9 +1057,8 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_ACCESS_METHOD:
-            nRet = snprintf(buf, bufsize,
-                "ACCESS METHOD %s  (ID %d OID %u)",
-                obj->name, obj->dumpId, obj->catId.oid);
+            nRet = snprintf_s(
+                buf, bufsize, bufsize - 1, "ACCESS METHOD %s  (ID %d OID %u)",obj->name, obj->dumpId, obj->catId.oid);
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_OPCLASS:

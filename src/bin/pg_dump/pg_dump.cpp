@@ -14568,33 +14568,18 @@ static void dumpAccessMethod(Archive *fout, const AccessMethodInfo *aminfo)
     q = createPQExpBuffer();
     delq = createPQExpBuffer();
     labelq = createPQExpBuffer();
-
     qamname = gs_strdup(fmtId(aminfo->dobj.name));
 
     appendPQExpBuffer(q, "CREATE ACCESS METHOD %s ", qamname);
-
     appendPQExpBuffer(q, "HANDLER %s;\n", aminfo->amhandler);
+    appendPQExpBuffer(delq, "DROP ACCESS METHOD %s;\n", qamname);
+    appendPQExpBuffer(labelq, "ACCESS METHOD %s;\n", qamname);
 
-    appendPQExpBuffer(delq, "DROP ACCESS METHOD %s;\n",
-                      qamname);
-
-    appendPQExpBuffer(labelq, "ACCESS METHOD %s;\n",
-                      qamname);
-
-    ArchiveEntry(fout, aminfo->dobj.catId, aminfo->dobj.dumpId,
-        aminfo->dobj.name,
-        NULL,
-        NULL,
-        "",
-        false, "ACCESS METHOD", SECTION_PRE_DATA,
-        q->data, delq->data, NULL,
-        NULL, 0,
-        NULL, NULL);
+    ArchiveEntry(fout, aminfo->dobj.catId, aminfo->dobj.dumpId, aminfo->dobj.name, NULL, NULL, "",
+        false, "ACCESS METHOD", SECTION_PRE_DATA, q->data, delq->data, NULL, NULL, 0, NULL, NULL);
 
     /* Dump Access Method Comments */
-    dumpComment(fout, labelq->data,
-        NULL, "",
-        aminfo->dobj.catId, 0, aminfo->dobj.dumpId);
+    dumpComment(fout, labelq->data, NULL, "", aminfo->dobj.catId, 0, aminfo->dobj.dumpId);
 
     destroyPQExpBuffer(q);
     destroyPQExpBuffer(delq);

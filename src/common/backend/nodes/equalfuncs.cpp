@@ -2281,7 +2281,6 @@ static bool _equalCreateAmStmt(const CreateAmStmt *a, const CreateAmStmt *b)
 {
     COMPARE_STRING_FIELD(amname);
     COMPARE_NODE_FIELD(handler_name);
-
     return true;
 }
 
