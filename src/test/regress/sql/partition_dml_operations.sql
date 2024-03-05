@@ -1007,7 +1007,7 @@ select * from t_multi_parts_order partition (p1) order by col limit 10;
 select * from t_multi_parts_order partition (pd) order by col limit 10;
 rollback;
 
-explain delete from t_multi_parts_order partition(pd, p1) order by col limit 10;
+explain (costs off) delete from t_multi_parts_order partition(pd, p1) order by col limit 10;
 
 begin;
 delete from t_multi_parts_order partition(p1, pd) order by col desc limit 10;
@@ -1021,7 +1021,7 @@ select * from t_multi_parts_order partition (p1) order by col desc limit 10;
 select * from t_multi_parts_order partition (pd) order by col desc limit 10;
 rollback;
 
-explain delete from t_multi_parts_order partition(pd, p1) order by col desc limit 10;
+explain (costs off) delete from t_multi_parts_order partition(pd, p1) order by col desc limit 10;
 
 
 

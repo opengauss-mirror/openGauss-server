@@ -1112,7 +1112,8 @@ explain(costs off) insert /*+ ignore_error */ into  t_not_null_key_partition val
 (3 rows)
 
 insert /*+ ignore_error */ into  t_not_null_key_partition values (null);
-WARNING:  inserted partition key does not map to any table partition
+WARNING:  null value in column "num" violates not-null constraint
+DETAIL:  Failing row contains (null, null).
 select * from t_not_null_key_partition;
  num | ca_city  
 -----+----------
