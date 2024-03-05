@@ -1947,7 +1947,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
 
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
         FailoverCleanBackends();
-    } else if (!SSPerformingStandbyScenario() && !SSPrimaryRestartScenario()) {
+    } else if (SSBackendNeedExitScenario()) {
         ReformCleanBackends();
     }
 
