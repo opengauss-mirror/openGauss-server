@@ -765,98 +765,102 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        buf_desc = GetBufferDescriptor(buf_id);
-        if (SS_PRIMARY_MODE) {
-            buf_state = LockBufHdr(buf_desc);
-            if (BUF_STATE_GET_REFCOUNT(buf_state) != 0 || BUF_STATE_GET_USAGECOUNT(buf_state) != 0 ||
-               !BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+        do {
+            buf_desc = GetBufferDescriptor(buf_id);
+            if (SS_PRIMARY_MODE) {
+                buf_state = LockBufHdr(buf_desc);
+                if (BUF_STATE_GET_REFCOUNT(buf_state) != 0 || BUF_STATE_GET_USAGECOUNT(buf_state) != 0 ||
+                !BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                    UnlockBufHdr(buf_desc, buf_state);
+                    ret = DMS_ERROR;
+                    break;
+                }
+
+                if (!(buf_state & BM_VALID) || (buf_state & BM_IO_ERROR)) {
+                    ereport(LOG, (errmodule(MOD_DMS),
+                        errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
+                        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                        tag->forkNum, tag->blockNum, buf_desc->state)));
+                    UnlockBufHdr(buf_desc, buf_state);
+                    buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
+                    buf_ctrl->seg_fileno = EXTENT_INVALID;
+                    buf_ctrl->seg_blockno = InvalidBlockNumber;
+                    ret =DMS_SUCCESS;
+                    break;
+                }
+
+                /* For aio (flush disk not finished), dirty, in dirty queue, dirty need flush, can't recycle */
+                if (buf_desc->extra->aio_in_progress || (buf_state & BM_DIRTY) || (buf_state & BM_JUST_DIRTIED) ||
+                    XLogRecPtrIsValid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn)) ||
+                    (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
+                    ereport(DEBUG1, (errmodule(MOD_DMS),
+                        errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%x",
+                        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                        tag->forkNum, tag->blockNum, buf_desc->state)));
+                    ret = DMS_ERROR;
+                } else {
+                    buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
+                    buf_ctrl->seg_fileno = EXTENT_INVALID;
+                    buf_ctrl->seg_blockno = InvalidBlockNumber;
+                }
+
                 UnlockBufHdr(buf_desc, buf_state);
-                return DMS_ERROR;
+                break;
             }
 
-            if (!(buf_state & BM_VALID) || (buf_state & BM_IO_ERROR)) {
+            if (IsSegmentBufferID(buf_id)) {
+                (void)SegPinBuffer(buf_desc);
+            } else {
+                ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+                (void)PinBuffer(buf_desc, NULL);
+            }
+
+            if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
+                break;
+            }
+
+            bool wait_success = SSWaitIOTimeout(buf_desc);
+            if (!wait_success) {
+                DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
+                ret = GS_TIMEOUT;
+                break;
+            }
+
+            if ((!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) ||
+                (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR)) {
                 ereport(LOG, (errmodule(MOD_DMS),
                     errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
-                UnlockBufHdr(buf_desc, buf_state);
+                DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                 buf_ctrl->seg_fileno = EXTENT_INVALID;
                 buf_ctrl->seg_blockno = InvalidBlockNumber;
-                return DMS_SUCCESS;
+                ret = DMS_SUCCESS;
+                break;
             }
 
-            /* For aio (flush disk not finished), dirty, in dirty queue, dirty need flush, can't recycle */
-            if (buf_desc->extra->aio_in_progress || (buf_state & BM_DIRTY) || (buf_state & BM_JUST_DIRTIED) ||
-                XLogRecPtrIsValid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn)) ||
-                (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
-                ereport(DEBUG1, (errmodule(MOD_DMS),
-                    errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%x",
+            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, LW_EXCLUSIVE);
+            if (!get_lock) {
+                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
+                    "buf_id:%d, lwlock:%p",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum, buf_desc->state)));
-                ret = DMS_ERROR;
+                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                ret = GS_TIMEOUT;
             } else {
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                 buf_ctrl->seg_fileno = EXTENT_INVALID;
                 buf_ctrl->seg_blockno = InvalidBlockNumber;
+                LWLockRelease(buf_desc->content_lock);
             }
 
-            UnlockBufHdr(buf_desc, buf_state);
-            return ret;
-        }
-
-        if (IsSegmentBufferID(buf_id)) {
-            (void)SegPinBuffer(buf_desc);
-        } else {
-            ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-            (void)PinBuffer(buf_desc, NULL);
-        }
-
-        if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
-            DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
-            return ret;
-        }
-
-        bool wait_success = SSWaitIOTimeout(buf_desc);
-        if (!wait_success) {
-            DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
-            ret = GS_TIMEOUT;
-            return ret;
-        }
-
-        if ((!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) ||
-            (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR)) {
-            ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
-                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                tag->forkNum, tag->blockNum, buf_desc->state)));
-            DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
-            buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
-            buf_ctrl->seg_fileno = EXTENT_INVALID;
-            buf_ctrl->seg_blockno = InvalidBlockNumber;
-            ret = DMS_SUCCESS;
-            return ret;
-        }
-
-        get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, LW_EXCLUSIVE);
-        if (!get_lock) {
-            ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
-                "buf_id:%d, lwlock:%p",
-                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
-            ret = GS_TIMEOUT;
-        } else {
-            buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
-            buf_ctrl->seg_fileno = EXTENT_INVALID;
-            buf_ctrl->seg_blockno = InvalidBlockNumber;
-            LWLockRelease(buf_desc->content_lock);
-        }
-
-        if (IsSegmentBufferID(buf_id)) {
-            SegReleaseBuffer(buf_id + 1);
-        } else {
-            ReleaseBuffer(buf_id + 1);
-        }
+            if (IsSegmentBufferID(buf_id)) {
+                SegReleaseBuffer(buf_id + 1);
+            } else {
+                ReleaseBuffer(buf_id + 1);
+            }
+        } while(0);
     }
     PG_CATCH();
     {
