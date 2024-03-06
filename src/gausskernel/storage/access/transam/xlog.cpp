@@ -20510,28 +20510,27 @@ retry:
                         if (CheckForFailoverTrigger()) {
                             goto triggered;
                         }
-                        if (!SS_IN_REFORM) {
-                            ProcTxnWorkLoad(false);
-                            /* use volatile pointer to prevent code rearrangement */
-                            volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-                            CheckMaxPageFlushLSN(targetRecPtr);
-                            rename_recovery_conf_for_roach();
-                            ereport(LOG, (errmsg("request xlog stream at %X/%X.",
-                                                    fetching_ckpt ? (uint32)(t_thrd.xlog_cxt.RedoStartLSN >> 32)
-                                                                : (uint32)(targetRecPtr >> 32),
-                                                    fetching_ckpt ? (uint32)t_thrd.xlog_cxt.RedoStartLSN
-                                                                : (uint32)targetRecPtr)));
-                            ShutdownWalRcv();
-                            t_thrd.xlog_cxt.receivedUpto = 0;
-                            SpinLockAcquire(&walrcv->mutex);
-                            walrcv->receivedUpto = 0;
-                            SpinLockRelease(&walrcv->mutex);
 
-                            RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr,
-                                                    t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
-                                                    u_sess->attr.attr_storage.PrimarySlotName);
-                            continue;   
-                        }    
+                        ProcTxnWorkLoad(false);
+                        /* use volatile pointer to prevent code rearrangement */
+                        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+                        CheckMaxPageFlushLSN(targetRecPtr);
+                        rename_recovery_conf_for_roach();
+                        ereport(LOG, (errmsg("request xlog stream at %X/%X.",
+                                                fetching_ckpt ? (uint32)(t_thrd.xlog_cxt.RedoStartLSN >> 32)
+                                                            : (uint32)(targetRecPtr >> 32),
+                                                fetching_ckpt ? (uint32)t_thrd.xlog_cxt.RedoStartLSN
+                                                            : (uint32)targetRecPtr)));
+                        ShutdownWalRcv();
+                        t_thrd.xlog_cxt.receivedUpto = 0;
+                        SpinLockAcquire(&walrcv->mutex);
+                        walrcv->receivedUpto = 0;
+                        SpinLockRelease(&walrcv->mutex);
+
+                        RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr,
+                                                t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
+                                                u_sess->attr.attr_storage.PrimarySlotName);
+                        continue;
                     }
                     /* Don't try to read from a source that just failed */
                     sources &= ~t_thrd.xlog_cxt.failedSources;

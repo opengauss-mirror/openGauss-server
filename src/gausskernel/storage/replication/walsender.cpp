@@ -4926,7 +4926,7 @@ retry:
                  * asked for a too old WAL segment that has already been
                  * removed or recycled.
                  */
-                if (FILE_POSSIBLY_DELETED(errno)) {
+                if (FILE_POSSIBLY_DELETED(errno) && !SS_STREAM_CLUSTER) {
                     /* we suppose wal segments removed happend when we can't open the xlog file. */
                     WalSegmemtRemovedhappened = true;
                     ereport(ERROR,
