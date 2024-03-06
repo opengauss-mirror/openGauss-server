@@ -109,6 +109,94 @@ SELECT v,
  01010101010 | 1010    | 01010    | 101010
 (4 rows)
 
+-- test overflow cases
+SELECT SUBSTRING('01010101'::bit(8) FROM 2 FOR 2147483646) AS "1010101";
+ 1010101 
+---------
+ 1010101
+(1 row)
+
+SELECT SUBSTRING('01010101'::bit(8) FROM -10 FOR 2147483646) AS "01010101";
+ 01010101 
+----------
+ 01010101
+(1 row)
+
+SELECT SUBSTRING('01010101'::bit(8) FROM -10 FOR -2147483646) AS "error";
+ERROR:  negative substring length not allowed
+CONTEXT:  referenced column: error
+SELECT SUBSTRING('01010101'::varbit FROM 2 FOR 2147483646) AS "1010101";
+ 1010101 
+---------
+ 1010101
+(1 row)
+
+SELECT SUBSTRING('01010101'::varbit FROM -10 FOR 2147483646) AS "01010101";
+ 01010101 
+----------
+ 01010101
+(1 row)
+
+SELECT SUBSTRING('01010101'::varbit FROM -10 FOR -2147483646) AS "error";
+ERROR:  negative substring length not allowed
+CONTEXT:  referenced column: error
+-- test overflow cases
+set bytea_output to escape;
+SELECT SUBSTRING('string' FROM 2 FOR 2147483646) AS "tring";
+ tring 
+-------
+ tring
+(1 row)
+
+SELECT SUBSTRING('string' FROM -10 FOR 2147483646) AS "string";
+ string 
+--------
+ string
+(1 row)
+
+SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
+ERROR:  negative substring length not allowed
+CONTEXT:  referenced column: error
+SELECT SUBSTRING('1234567890'::bytea FROM 3) "34567890";
+ 34567890 
+----------
+ 34567890
+(1 row)
+
+SELECT SUBSTRING('1234567890'::bytea FROM 4 FOR 3) AS "456";
+ 456 
+-----
+ 456
+(1 row)
+
+SELECT SUBSTRING('string'::bytea FROM 2 FOR 2147483646) AS "tring";
+ tring 
+-------
+ tring
+(1 row)
+
+SELECT SUBSTRING('string'::bytea FROM -10 FOR 2147483646) AS "string";
+ string 
+--------
+ string
+(1 row)
+
+SELECT SUBSTRING('string'::bytea FROM -10 FOR -2147483646) AS "error";
+ERROR:  negative substring length not allowed
+CONTEXT:  referenced column: error
+SELECT left('abcde', 2147483646) as "abcde";
+ abcde 
+-------
+ abcde
+(1 row)
+
+SELECT left('abcde', 2147483647) as "abcde";
+ abcde 
+-------
+ abcde
+(1 row)
+
+reset bytea_output;
 --- Bit operations
 DROP TABLE varbit_table;
 CREATE TABLE varbit_table (a BIT VARYING(16), b BIT VARYING(16));
