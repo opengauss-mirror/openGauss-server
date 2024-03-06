@@ -79,6 +79,13 @@ select * from "啊啊";
 insert into ￥("￥","$") values(1,2);
 insert into ￥(￥,"$") values(4,3);
 insert into "啊啊"("，",",") values(1,2);
+-- alias
+create table t_ignore_case_in_dquotes_use_case0001(col1 int,col2 varchar(10));
+insert into t_ignore_case_in_dquotes_use_case0001 values(1,'one'),(2,'two'),(3,'three');
+select col1 as "AS_COL1",col2 "AS_COL2" from "t_ignore_case_in_dquotes_use_case0001" where "COL2"='two';
+ERROR:  column "COL2" does not exist
+LINE 1: ...rom "t_ignore_case_in_dquotes_use_case0001" where "COL2"='tw...
+                                                             ^
 -- function
 create function f1(b int) returns int
 as $$
@@ -264,6 +271,12 @@ call "P1"();
  
 (1 row)
 
+select col1 as "AS_COL1",col2 "AS_COL2" from "t_ignore_case_in_dquotes_use_case0001" where "COL2"='two';
+ as_col1 | as_col2 
+---------+---------
+       2 | two
+(1 row)
+
 select * from "TeSt";
  A | a 
 ---+---
@@ -336,6 +349,7 @@ drop index i1;
 drop view test_view;
 drop view "TeSt_view";
 drop table test;
+drop table t_ignore_case_in_dquotes_use_case0001;
 drop table "TeSt";
 drop table "￥￥";
 drop table "$";

@@ -39,6 +39,11 @@ insert into ￥("￥","$") values(1,2);
 insert into ￥(￥,"$") values(4,3);
 insert into "啊啊"("，",",") values(1,2);
 
+-- alias
+create table t_ignore_case_in_dquotes_use_case0001(col1 int,col2 varchar(10));
+insert into t_ignore_case_in_dquotes_use_case0001 values(1,'one'),(2,'two'),(3,'three');
+select col1 as "AS_COL1",col2 "AS_COL2" from "t_ignore_case_in_dquotes_use_case0001" where "COL2"='two';
+
 -- function
 create function f1(b int) returns int
 as $$
@@ -114,6 +119,7 @@ CREATE SEQUENCE "S1" START 801 CACHE 90;-- error
 call p1();
 select * from test;
 call "P1"();
+select col1 as "AS_COL1",col2 "AS_COL2" from "t_ignore_case_in_dquotes_use_case0001" where "COL2"='two';
 select * from "TeSt";
 create table "SCH_ignore_quote_01"."TAB_quote"("A" int);
 insert into tab_quote (a) values (4);
@@ -140,6 +146,7 @@ drop index i1;
 drop view test_view;
 drop view "TeSt_view";
 drop table test;
+drop table t_ignore_case_in_dquotes_use_case0001;
 drop table "TeSt";
 drop table "￥￥";
 drop table "$";
