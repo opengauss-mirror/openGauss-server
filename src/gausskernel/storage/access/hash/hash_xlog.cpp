@@ -244,10 +244,8 @@ static void hash_xlog_split_allocate_page(XLogReaderState *record)
     /* replay the record for new bucket */
     action = SSCheckInitPageXLog(record, 1, &newbuf);
     if (action == BLK_NEEDS_REDO) {
-        XLogInitBufferForRedo(record, 1, &newbuf);
+        XLogReadBufferForRedoExtended(record, 1, RBM_ZERO_AND_CLEANUP_LOCK, true, &newbuf);
         HashRedoSplitAllocatePageOperatorNbukPage(&newbuf, XLogRecGetData(record));
-        if (!IsBufferCleanupOK(newbuf.buf))
-            elog(PANIC, "hash_xlog_split_allocate_page: failed to acquire cleanup lock");
         MarkBufferDirty(newbuf.buf);
     }
 
