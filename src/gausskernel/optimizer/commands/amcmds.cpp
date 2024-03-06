@@ -86,8 +86,11 @@ ObjectAddress CreateAccessMethod(CreateAmStmt *stmt)
     /*
      * Insert tuple into pg_am.
      */
-    memset_s(values, sizeof(values), 0, sizeof(values));
-    memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    errno_t rc;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
 
     values[Anum_pg_am_amname - 1] =
         DirectFunctionCall1(namein, CStringGetDatum(stmt->amname));
