@@ -27,7 +27,7 @@
 #include "fmgr.h"
 #include "vecexecutor/vecfunc.h"
 #include "access/tuptoaster.h"
-
+#include "common/int.h"
 
 /* Comparison Functions used for bpchar type
  * vectorize function
@@ -332,7 +332,7 @@ vec_text_substr(Datum str, int32 start, int32 length, bool *is_null, mblen_conve
 	int32	i;
 	char	*p = NULL;
 	char	*s = NULL;
-	int		E;					/* end position */
+	int32	E;					/* end position */
 	int32	slice_size;
 	int32	slice_strlen;
 	int32	E1;
@@ -382,28 +382,25 @@ vec_text_substr(Datum str, int32 start, int32 length, bool *is_null, mblen_conve
 	}
 	else
 	{
-		E = S + length;
-		/*
-		 * A negative value for L is the only way for the end position to
-		 * be before the start. SQL99 says to throw an error.
-		 */
-		if (E < S)
-		{
+        /*
+         * A negative value for L is the only way for the end position to
+         * be before the start. SQL99 says to throw an error.
+         */
+        if (length < 0) {
+            /* SQL99 says to throw an error for E < S, i.e., negative length */
+            ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
+            L1 = -1; /* silence stupider compilers */
+        } else if (pg_add_s32_overflow(S, length, &E)) {
+            /*
+             * L could be large enough for S + L to overflow, in which case the
+             * substring must run to end of string.
+             */
+            L1 = -1;
+        } else {
+            /* do nothing */
+        }
 
-			if (length < 0)
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_SUBSTRING_ERROR),
-						 errmsg("negative substring length not allowed")));
-			}
-			else
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_SUBSTRING_ERROR),
-						errmsg("the giving length is too long, it lets the end postion integer out of range")));
-			}
-		}
-		/*
+        /*
 		 * A zero or negative value for the end position can happen if the
 		 * start was negative or one. SQL99 says to return a zero-length
 		 * string.

@@ -206,11 +206,17 @@ ERROR:  integer out of range
 CONTEXT:  SQL function "substr" during inlining
 referenced column: substr
 select substr('abc', 2, 2147483647);
-ERROR:  the giving length is too long, it lets the end postion integer out of range
-CONTEXT:  referenced column: substr
+ substr 
+--------
+ bc
+(1 row)
+
 select substr('jkeifkekls', -5, 2147483645);
-ERROR:  the giving length is too long, it lets the end postion integer out of range
-CONTEXT:  referenced column: substr
+ substr 
+--------
+ kekls
+(1 row)
+
 -- tests for numtodsinterval
 set intervalstyle=a;
 select numtodsinterval(1500,'HOUR');
