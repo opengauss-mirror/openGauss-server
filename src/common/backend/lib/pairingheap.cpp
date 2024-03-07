@@ -1,23 +1,27 @@
-/*-------------------------------------------------------------------------
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
- * pairingheap.c
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ *-------------------------------------------------------------------------
+ *
+ * pairingheap.cpp
  *    A Pairing Heap implementation
  *
  * A pairing heap is a data structure that's useful for implementing
  * priority queues. It is simple to implement, and provides amortized O(1)
  * insert and find-min operations, and amortized O(log n) delete-min.
  *
- * The pairing heap was first described in this paper:
- *
- *  Michael L. Fredman, Robert Sedgewick, Daniel D. Sleator, and Robert E.
- *   Tarjan. 1986.
- *  The pairing heap: a new form of self-adjusting heap.
- *  Algorithmica 1, 1 (January 1986), pages 111-129. DOI: 10.1007/BF01840439
- *
- * Portions Copyright (c) 2012-2021, PostgreSQL Global Development Group
- *
  * IDENTIFICATION
- *    src/backend/lib/pairingheap.c
+ *    src/common/backend/lib/pairingheap.cpp
  *
  *-------------------------------------------------------------------------
  */

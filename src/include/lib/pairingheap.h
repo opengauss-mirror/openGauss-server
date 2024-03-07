@@ -1,10 +1,29 @@
 /*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ *------------------------------------------------------------------------- 
  * pairingheap.h
  *
  * A Pairing Heap implementation
  *
- * Portions Copyright (c) 2012-2021, PostgreSQL Global Development Group
- *
+ * 1) use pairingheap_allocate() to create a new palloc'd heap, 
+ *    pairingheap_comparator should be realized by caller
+ * 2) use pairingheap_add to add a new node to heap
+ * 3) use pairingheap_first/pairingheap_remove_first/pairingheap_add for
+ *    node search or adjust position
+ * 4) use pairingheap_remove to delete node from heap
+ * 5) use pairingheap_free to free heap
+ *------------------------------------------------------------------------- 
  * src/include/lib/pairingheap.h
  */
 
