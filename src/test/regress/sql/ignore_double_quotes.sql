@@ -91,8 +91,44 @@ CREATE SEQUENCE s1 START 101 CACHE 20;
 CREATE SEQUENCE "S1" START 801 CACHE 90;
 drop sequence "S1";
 
+set enable_ignore_case_in_dquotes=on;
+CREATE SEQUENCE "SEQ11" START 101 CACHE 20;
+SELECT nextval('"SEQ11"');
+select currval('"SEQ11"'); 
+select setval('"SEQ11"', 1);
+
+CREATE TYPE "cOMP" AS (f3 text, f4 int);
+
+create function "BB"(b int, a "cOMP") returns int
+as $$
+begin
+    b=b+1;
+	  return b;
+end;
+$$language plpgsql;
+
+select regoperatorin('=(int,"inT")');
+select regdictionaryin('"dutch_steM"');
+select regconfigin('"Simple"');
+select regprocin('"BB"');
+select '"chAr"'::regtype;
+select regprocedure('"BB"(integer, "Comp")');
+
+set enable_ignore_case_in_dquotes=off;
+SELECT nextval('"SEQ11"');
+select currval('"SEQ11"'); 
+select setval('"SEQ11"', 1);
+select regoperatorin('=(int,"inT")');
+select regdictionaryin('"dutch_steM"');
+select regconfigin('"Simple"');
+select regprocin('"BB"');
+select '"chAr"'::regtype;
+select regprocedure('"BB"(integer, "Comp")');
+
 -- test enable_ignore_case_in_dquotes=on
 set enable_ignore_case_in_dquotes=on;
+drop function "BB";
+drop TYPE "cOMP";
 
 create table test1 ("A" int, 'a' int);-- error
 insert into test("A","a") values(2,3);-- error
@@ -133,6 +169,7 @@ insert into "啊啊"("，",",") values(10,11);
 
 -- clean
 drop table TAB_quote;
+drop sequence "SEQ11";
 set enable_ignore_case_in_dquotes=off;
 drop materialized view m_test_view;
 drop materialized view "M_teSt_view";
