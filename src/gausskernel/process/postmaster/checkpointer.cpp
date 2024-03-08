@@ -425,7 +425,7 @@ void CheckpointerMain(void)
             u_sess->stat_cxt.BgWriterStats->m_requested_checkpoints++;
         }
 
-        if (t_thrd.checkpoint_cxt.shutdown_requested) {
+        if (t_thrd.checkpoint_cxt.shutdown_requested || pmState == PM_SHUTDOWN) {
             /*
              * From here on, elog(ERROR) should end with exit(1), not send
              * control back to the sigsetjmp block above
