@@ -1518,14 +1518,13 @@ void spq_release_conn(RemoteQueryState* planstate)
             pfree_ext(handle->inBuffer);
             pfree_ext(handle->outBuffer);
             pfree_ext(handle->error);
-            pfree_ext(handle);
-            planstate->spq_connections_info[i] = NULL;
+            pfree_ext(planstate->spq_connections_info[i]);
         }
     }
     pfree_ext(planstate->spq_connections_info);
     pfree_ext(planstate->nodeCons);
-    planstate->spq_connections_info = NULL;
-    planstate->nodeCons = NULL;
+    planstate->connections = NULL;
+    planstate->conn_count = 0;
     u_sess->spq_cxt.remoteQuerys = list_delete_ptr(u_sess->spq_cxt.remoteQuerys, planstate);
 }
 PGXCNodeHandle** spq_get_exec_connections(
