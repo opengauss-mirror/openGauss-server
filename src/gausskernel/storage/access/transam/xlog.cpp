@@ -10282,9 +10282,16 @@ void StartupXLOG(void)
         // Allow read-only connections immediately if we're consistent already.
         CheckRecoveryConsistency();
         ResetXLogStatics();
-        // Find the first record that logically follows the checkpoint --- it
-        //  might physically precede it, though.
-        if (XLByteLT(checkPoint.redo, RecPtr) || SS_STANDBY_PROMOTING) {
+
+        /* Find the first record that logically follows the checkpoint --- it
+         * might physically precede it, though.
+         * When dms is enabled, due to failover and switchover of intercluster could happend frequently,
+         * checkPoint.redo is equel to RecPtr and checkPoint.redo is last record, so here record which
+         * next read should be Startptr of checkPoint.redo, instead of Endptr of checkPoint.redo, which
+         * could be NULL. Otherwise, the process will end in a loop of this function(ReadRecord).
+         */
+        if (XLByteLT(checkPoint.redo, RecPtr) || SS_STANDBY_PROMOTING ||
+            (XLByteLE(checkPoint.redo, RecPtr) && SS_ONDEMAND_REALTIME_BUILD_NORMAL)) {
             /* back up to find the record */
             record = ReadRecord(xlogreader, checkPoint.redo, PANIC, false);
         } else {
