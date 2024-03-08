@@ -1832,7 +1832,7 @@ Datum FunctionCall9Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2,
  * by FunctionCallN().	If the same function is to be invoked repeatedly,
  * do the fmgr_info() once and then use FunctionCallN().
  */
-Datum OidFunctionCall0Coll(Oid functionId, Oid collation)
+Datum OidFunctionCall0Coll(Oid functionId, Oid collation, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -1841,6 +1841,8 @@ Datum OidFunctionCall0Coll(Oid functionId, Oid collation)
     fmgr_info(functionId, &flinfo);
 
     InitFunctionCallInfoData(fcinfo, &flinfo, 0, collation, NULL, NULL);
+
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -1853,7 +1855,7 @@ Datum OidFunctionCall0Coll(Oid functionId, Oid collation)
     return result;
 }
 
-Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1)
+Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -1865,6 +1867,7 @@ Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1)
 
     fcinfo.arg[0] = arg1;
     fcinfo.argnull[0] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -1877,7 +1880,7 @@ Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1)
     return result;
 }
 
-Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2)
+Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -1891,6 +1894,7 @@ Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     fcinfo.arg[1] = arg2;
     fcinfo.argnull[0] = false;
     fcinfo.argnull[1] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -1903,7 +1907,7 @@ Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     return result;
 }
 
-Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3)
+Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -1919,6 +1923,7 @@ Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     fcinfo.argnull[0] = false;
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -1931,7 +1936,8 @@ Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     return result;
 }
 
-Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4)
+Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -1949,6 +1955,7 @@ Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
     fcinfo.argnull[3] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -1961,7 +1968,8 @@ Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     return result;
 }
 
-Datum OidFunctionCall5Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5)
+Datum OidFunctionCall5Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
+    bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -1981,6 +1989,7 @@ Datum OidFunctionCall5Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     fcinfo.argnull[2] = false;
     fcinfo.argnull[3] = false;
     fcinfo.argnull[4] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -1993,8 +2002,8 @@ Datum OidFunctionCall5Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     return result;
 }
 
-Datum OidFunctionCall6Coll(
-    Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6)
+Datum OidFunctionCall6Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
+    Datum arg6, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -2016,6 +2025,7 @@ Datum OidFunctionCall6Coll(
     fcinfo.argnull[3] = false;
     fcinfo.argnull[4] = false;
     fcinfo.argnull[5] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -2028,8 +2038,8 @@ Datum OidFunctionCall6Coll(
     return result;
 }
 
-Datum OidFunctionCall7Coll(
-    Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6, Datum arg7)
+Datum OidFunctionCall7Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
+    Datum arg6, Datum arg7, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -2053,6 +2063,7 @@ Datum OidFunctionCall7Coll(
     fcinfo.argnull[4] = false;
     fcinfo.argnull[5] = false;
     fcinfo.argnull[6] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -2066,7 +2077,7 @@ Datum OidFunctionCall7Coll(
 }
 
 Datum OidFunctionCall8Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
-    Datum arg6, Datum arg7, Datum arg8)
+    Datum arg6, Datum arg7, Datum arg8, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -2092,6 +2103,7 @@ Datum OidFunctionCall8Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     fcinfo.argnull[5] = false;
     fcinfo.argnull[6] = false;
     fcinfo.argnull[7] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -2105,7 +2117,7 @@ Datum OidFunctionCall8Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 }
 
 Datum OidFunctionCall9Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
-    Datum arg6, Datum arg7, Datum arg8, Datum arg9)
+    Datum arg6, Datum arg7, Datum arg8, Datum arg9, bool can_ignore)
 {
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
@@ -2133,6 +2145,7 @@ Datum OidFunctionCall9Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
     fcinfo.argnull[6] = false;
     fcinfo.argnull[7] = false;
     fcinfo.argnull[8] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 

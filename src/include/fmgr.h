@@ -501,21 +501,23 @@ extern Datum FunctionCall9Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datu
  * by FunctionCallN().	If the same function is to be invoked repeatedly,
  * do the FunctionLookup() once and then use FunctionCallN().
  */
-extern Datum OidFunctionCall0Coll(Oid functionId, Oid collation);
-extern Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1);
-extern Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2);
-extern Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3);
-extern Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4);
-extern Datum OidFunctionCall5Coll(
-    Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5);
-extern Datum OidFunctionCall6Coll(
-    Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6);
-extern Datum OidFunctionCall7Coll(
-    Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6, Datum arg7);
+extern Datum OidFunctionCall0Coll(Oid functionId, Oid collation, bool can_ignore = false);
+extern Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1, bool can_ignore = false);
+extern Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, bool can_ignore = false);
+extern Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, 
+    bool can_ignore = false);
+extern Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    bool can_ignore = false);
+extern Datum OidFunctionCall5Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    Datum arg5, bool can_ignore = false);
+extern Datum OidFunctionCall6Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    Datum arg5, Datum arg6, bool can_ignore = false);
+extern Datum OidFunctionCall7Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    Datum arg5, Datum arg6, Datum arg7, bool can_ignore = false);
 extern Datum OidFunctionCall8Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
-    Datum arg5, Datum arg6, Datum arg7, Datum arg8);
+    Datum arg5, Datum arg6, Datum arg7, Datum arg8, bool can_ignore = false);
 extern Datum OidFunctionCall9Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
-    Datum arg5, Datum arg6, Datum arg7, Datum arg8, Datum arg9);
+    Datum arg5, Datum arg6, Datum arg7, Datum arg8, Datum arg9, bool can_ignore = false);
 
 /* These macros allow the collation argument to be omitted (with a default of
  * InvalidOid, ie, no collation).  They exist mostly for backwards
