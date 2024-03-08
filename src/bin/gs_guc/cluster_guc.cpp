@@ -279,6 +279,8 @@ const char* unit_eight_kB_parameter_list[] = {
     "wal_buffers",
     "wal_segment_size",
     "huge_page_size",
+    "heap_bulk_read_size",
+    "vacuum_bulk_read_size"
 };
 /* the size of page, unit is kB */
 #define PAGE_SIZE 8
