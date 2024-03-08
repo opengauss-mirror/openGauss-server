@@ -58,6 +58,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type_fn.h"
 #include "commands/defrem.h"
@@ -390,7 +391,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 		CreateResourcePoolStmt AlterResourcePoolStmt DropResourcePoolStmt
 		CreateWorkloadGroupStmt AlterWorkloadGroupStmt DropWorkloadGroupStmt
 		CreateAppWorkloadGroupMappingStmt AlterAppWorkloadGroupMappingStmt DropAppWorkloadGroupMappingStmt
-		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt
+		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt CreateAmStmt
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
 		AlterGlobalConfigStmt DropGlobalConfigStmt
 		CreatePublicationStmt AlterPublicationStmt
@@ -905,7 +906,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE 
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE 
 	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
 	// DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
@@ -1204,6 +1205,7 @@ stmt :
 			| CompileStmt
 			| ConstraintsSetStmt
 			| CopyStmt
+			| CreateAmStmt
 			| CreateAsStmt
 			| CreateAssertStmt
 			| CreateCastStmt
@@ -11844,6 +11846,22 @@ DropDataSourceStmt: DROP DATA_P SOURCE_P name opt_drop_behavior
 
 /*****************************************************************************
  *
+ *		QUERY:
+ *             CREATE ACCESS METHOD name HANDLER handler_name
+ *
+ *****************************************************************************/
+
+CreateAmStmt: CREATE ACCESS METHOD name TYPE_P INDEX HANDLER handler_name
+				{
+					CreateAmStmt *n = makeNode(CreateAmStmt);
+					n->amname = $4;
+					n->handler_name = $8;
+					$$ = (Node *) n;
+				}
+		;
+
+/*****************************************************************************
+ *
  *		QUERIES :
  *				CREATE TRIGGER ...
  *				DROP TRIGGER ...
@@ -13109,6 +13127,7 @@ drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
 			| COLLATION								{ $$ = OBJECT_COLLATION; }
 			| CONVERSION_P							{ $$ = OBJECT_CONVERSION; }
 			| SCHEMA								{ $$ = OBJECT_SCHEMA; }
+			| ACCESS METHOD                         { $$ = OBJECT_ACCESS_METHOD; }
 			| EVENT_TRIGGER                         { $$ = OBJECT_EVENT_TRIGGER; }
 			| EXTENSION								{ $$ = OBJECT_EXTENSION; }
 			| TEXT_P SEARCH PARSER					{ $$ = OBJECT_TSPARSER; }
@@ -29445,6 +29464,7 @@ unreserved_keyword:
 			| MAXTRANS
 			| MERGE
 			| MESSAGE_TEXT
+			| METHOD
 			| MINEXTENTS
 			| MINUTE_P
 			| MINUTE_SECOND_P

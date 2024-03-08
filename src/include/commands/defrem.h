@@ -176,6 +176,12 @@ extern Datum transformGenericOptions(Oid catalogId, Datum oldOptions, List* opti
 extern Datum optionListToArray(List* options);
 extern List* FindOrRemoveForeignTableOption(List* optList, const char* optName, bool remove, bool* found);
 
+/* support access method in commands/amcmds.cpp */
+extern ObjectAddress CreateAccessMethod(CreateAmStmt *stmt);
+extern void RemoveAccessMethodById(Oid amoid);
+extern char* get_am_name(Oid amoid);
+
+
 /* support routines in commands/define.c */
 
 extern char* defGetString(DefElem* def);

@@ -79,6 +79,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "postgis",
         "packages",
         "ndpplugin",
+        "vector",
 #ifndef ENABLE_MULTIPLE_NODES
         "mysql_fdw",
         "oracle_fdw",
@@ -351,6 +352,10 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
     StringInfo message = makeStringInfo();
 
     switch (objtype) {
+        case OBJECT_ACCESS_METHOD:
+            msg = gettext_noop("access method \"%s\" does not exist, skipping");
+            name = NameListToString(objname);
+            break;
         case OBJECT_TYPE:
         case OBJECT_DOMAIN:
         {

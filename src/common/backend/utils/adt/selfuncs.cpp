@@ -6452,7 +6452,7 @@ static List* add_predicate_to_quals(IndexOptInfo* index, List* indexQuals, Plann
  * visited.  If numIndexTuples is not 0 then it is used as the estimate,
  * otherwise we compute a generic estimate.
  */
-static void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_count, double numIndexTuples,
+void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_count, double numIndexTuples,
     Cost* indexStartupCost, Cost* indexTotalCost, Selectivity* indexSelectivity, double* indexCorrelation)
 {
     IndexOptInfo* index = path->indexinfo;

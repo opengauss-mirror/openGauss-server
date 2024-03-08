@@ -28,6 +28,7 @@
 #define DEFAULT_GIN_INDEX_TYPE "gin"
 #define CSTORE_GINBTREE_INDEX_TYPE "cgin"
 #define DEFAULT_USTORE_INDEX_TYPE "ubtree"
+#define DEFAULT_IVFFLAT_INDEX_TYPE "ivfflat"
 
 /* Typedef for callback function for IndexBuildHeapScan */
 typedef void (*IndexBuildCallback)(Relation index, HeapTuple htup, Datum *values, const bool *isnull,

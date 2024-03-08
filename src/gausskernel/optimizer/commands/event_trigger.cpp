@@ -1034,6 +1034,7 @@ bool EventTriggerSupportsObjectType(ObjectType obtype)
         case OBJECT_EVENT_TRIGGER:
             /* no support for event triggers on event triggers */
             return false;
+        case OBJECT_ACCESS_METHOD:
         case OBJECT_AGGREGATE:
         case OBJECT_AMOP:
         case OBJECT_AMPROC:
@@ -1109,6 +1110,7 @@ bool EventTriggerSupportsObjectClass(ObjectClass objclass)
         case OCLASS_OPERATOR:
         case OCLASS_OPCLASS:
         case OCLASS_OPFAMILY:
+        case OCLASS_AM:
         case OCLASS_AMOP:
         case OCLASS_AMPROC:
         case OCLASS_REWRITE:

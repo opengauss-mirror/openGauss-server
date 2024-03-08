@@ -136,6 +136,33 @@ typedef struct {
     Bitmapset* es_attnums; /* number of correlated attributes */
 } GroupVarInfo;
 
+/*
+ * genericcostestimate is a general-purpose estimator that can be used for
+ * most index types.  In some cases we use genericcostestimate as the base
+ * code and then incorporate additional index-type-specific knowledge in
+ * the type-specific calling function.  To avoid code duplication, we make
+ * genericcostestimate return a number of intermediate values as well as
+ * its preliminary estimates of the output cost values.  The GenericCosts
+ * struct includes all these values.
+ *
+ * Callers should initialize all fields of GenericCosts to zero.  In addition,
+ * they can set numIndexTuples to some positive value if they have a better
+ * than default way of estimating the number of leaf index tuples visited.
+ */
+typedef struct {
+    /* These are the values the cost estimator must return to the planner */
+    Cost        indexStartupCost;   /* index-related startup cost */
+    Cost        indexTotalCost; /* total index-related scan cost */
+    Selectivity indexSelectivity;   /* selectivity of index */
+    double      indexCorrelation;   /* order correlation of index */
+
+    /* Intermediate values we obtain along the way */
+    double      numIndexPages;  /* number of leaf pages visited */
+    double      numIndexTuples; /* number of leaf tuples visited */
+    double      spc_random_page_cost;   /* relevant random_page_cost value */
+    double      num_sa_scans;   /* # indexscans from ScalarArrayOpExprs */
+} GenericCosts;
+
 extern void set_local_rel_size(PlannerInfo* root, RelOptInfo* rel);
 extern double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo);
 extern double get_multiple_by_distkey(PlannerInfo* root, List* distkey, double rows);
@@ -289,4 +316,6 @@ extern double get_windowagg_selectivity(PlannerInfo* root, WindowClause* wc, Win
     int32 constval, double tuples, unsigned int num_datanodes);
 extern bool contain_single_col_stat(List* stat_list);
 extern double convert_timevalue_to_scalar(Datum value, Oid typid);
+extern void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_count, double numIndexTuples,
+    Cost* indexStartupCost, Cost* indexTotalCost, Selectivity* indexSelectivity, double* indexCorrelation);
 #endif /* SELFUNCS_H */

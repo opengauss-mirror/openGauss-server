@@ -100,6 +100,18 @@
 
 static THR_LOCAL const ObjectPropertyType ObjectProperty[] = {
     {
+        AccessMethodRelationId,
+        AmOidIndexId,
+        AMOID,
+        AMNAME,
+        Anum_pg_am_amname,
+        InvalidAttrNumber,
+        InvalidAttrNumber,
+        InvalidAttrNumber,
+        (ObjectType)-1,
+        true
+    },
+    {
         CastRelationId,
         CastOidIndexId,
         -1,
@@ -545,6 +557,8 @@ ObjectTypeMap[] =
     { "operator class", OBJECT_OPCLASS },
     /* OCLASS_OPFAMILY */
     { "operator family", OBJECT_OPFAMILY },
+    /* OCLASS_AM */
+    { "access method", OBJECT_ACCESS_METHOD },
     /* OCLASS_AMOP */
     { "operator of access method", OBJECT_AMOP },
     /* OCLASS_AMPROC */
@@ -790,6 +804,7 @@ ObjectAddress get_object_address(
             case OBJECT_PUBLICATION:
             case OBJECT_SUBSCRIPTION:
             case OBJECT_EVENT_TRIGGER:    
+            case OBJECT_ACCESS_METHOD:
                 address = get_object_address_unqualified(objtype, objname, missing_ok);
                 break;
             case OBJECT_TYPE:
@@ -1013,6 +1028,9 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
         const char* msg = NULL;
 
         switch (objtype) {
+            case OBJECT_ACCESS_METHOD:
+                msg = gettext_noop("access method name cannot be qualified");
+                break;
             case OBJECT_DATABASE:
                 msg = gettext_noop("database name cannot be qualified");
                 break;
@@ -1069,6 +1087,11 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
 
     /* Translate name to OID. */
     switch (objtype) {
+        case OBJECT_ACCESS_METHOD:
+            address.classId = AccessMethodRelationId;
+            address.objectId = get_am_oid(name, missing_ok);
+            address.objectSubId = 0;
+            break;
         case OBJECT_DATABASE:
             address.classId = DatabaseRelationId;
             address.objectId = get_database_oid(name, missing_ok);
@@ -1805,6 +1828,7 @@ void check_object_ownership(
             break;
         case OBJECT_TSPARSER:
         case OBJECT_TSTEMPLATE:
+        case OBJECT_ACCESS_METHOD:
             /* Database Security:  Support separation of privilege.*/
             /* We treat these object types as being owned by superusers */
             if (!(superuser_arg(roleid) || systemDBA_arg(roleid)))
@@ -2050,6 +2074,10 @@ char *getObjectTypeDescription(const ObjectAddress *object)
 
         case OCLASS_OPFAMILY:
             appendStringInfoString(&buffer, "operator family");
+            break;
+
+        case OCLASS_AM:
+            appendStringInfoString(&buffer, "access method");
             break;
 
         case OCLASS_AMOP:
@@ -2643,6 +2671,20 @@ getObjectIdentityParts(const ObjectAddress *object,
         case OCLASS_OPFAMILY:
             getOpFamilyIdentity(&buffer, object->objectId, objname);
             break;
+
+        case OCLASS_AM: {
+            char       *amname;
+
+            amname = get_am_name(object->objectId);
+            if (!amname)
+                elog(ERROR, "cache lookup failed for access method %u", object->objectId);
+
+            appendStringInfoString(&buffer, quote_identifier(amname));
+            if (objname)
+                *objname = list_make1(amname);
+            break;
+        }
+
 
         case OCLASS_AMOP:
             {

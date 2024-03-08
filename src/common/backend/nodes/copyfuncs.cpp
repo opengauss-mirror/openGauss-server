@@ -6394,6 +6394,14 @@ static AlterRlsPolicyStmt* _copyAlterRlsPolicyStmt(const AlterRlsPolicyStmt* fro
     return newnode;
 }
 
+static CreateAmStmt* _copyCreateAmStmt(const CreateAmStmt *from)
+{
+    CreateAmStmt *newnode = makeNode(CreateAmStmt);
+    COPY_STRING_FIELD(amname);
+    COPY_NODE_FIELD(handler_name);
+    return newnode;
+}
+
 static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
 {
     CreateTrigStmt* newnode = makeNode(CreateTrigStmt);
@@ -8566,6 +8574,9 @@ void* copyObject(const void* from)
             break;
         case T_AlterRlsPolicyStmt:
             retval = _copyAlterRlsPolicyStmt((AlterPolicyStmt*)from);
+            break;
+        case T_CreateAmStmt:
+            retval = _copyCreateAmStmt((CreateAmStmt*)from);
             break;
         case T_CreateTrigStmt:
             retval = _copyCreateTrigStmt((CreateTrigStmt*)from);

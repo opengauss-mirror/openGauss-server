@@ -262,6 +262,12 @@ static ObjectAddress CreateOpFamily(char* amname, char* opfname, Oid namespaceoi
     myself.objectId = opfamilyoid;
     myself.objectSubId = 0;
 
+    /* dependency on access method */
+    referenced.classId = AccessMethodRelationId;
+    referenced.objectId = amoid;
+    referenced.objectSubId = 0;
+    recordDependencyOn(&myself, &referenced, DEPENDENCY_AUTO);
+
     /* dependency on namespace */
     referenced.classId = NamespaceRelationId;
     referenced.objectId = namespaceoid;

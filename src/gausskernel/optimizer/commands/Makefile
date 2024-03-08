@@ -19,7 +19,7 @@ endif
 
 SUBDIRS     = sequence
 
-OBJS = aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o  \
+OBJS = aggregatecmds.o alter.o amcmds.o analyze.o async.o cluster.o comment.o  \
 	collationcmds.o constraint.o conversioncmds.o copy.o createas.o \
 	dbcommands.o define.o discard.o dropcmds.o explain.o extension.o \
 	event_trigger.o foreigncmds.o functioncmds.o \

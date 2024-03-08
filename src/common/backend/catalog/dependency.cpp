@@ -30,6 +30,7 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_attrdef.h"
@@ -140,6 +141,7 @@ static const Oid object_classes[MAX_OCLASS] = {
     OperatorRelationId,              /* OCLASS_OPERATOR */
     OperatorClassRelationId,         /* OCLASS_OPCLASS */
     OperatorFamilyRelationId,        /* OCLASS_OPFAMILY */
+    AccessMethodRelationId,          /* OCLASS_AM */
     AccessMethodOperatorRelationId,  /* OCLASS_AMOP */
     AccessMethodProcedureRelationId, /* OCLASS_AMPROC */
     RewriteRelationId,               /* OCLASS_REWRITE */
@@ -1452,6 +1454,10 @@ static void doDeletion(const ObjectAddress* object, int flags)
             RemoveOpFamilyById(object->objectId);
             break;
 
+        case OCLASS_AM:
+            RemoveAccessMethodById(object->objectId);
+            break;
+
         case OCLASS_AMOP:
             RemoveAmOpEntryById(object->objectId);
             break;
@@ -2524,6 +2530,9 @@ ObjectClass getObjectClass(const ObjectAddress* object)
         case OperatorFamilyRelationId:
             return OCLASS_OPFAMILY;
 
+        case AccessMethodRelationId:
+            return OCLASS_AM;
+
         case AccessMethodOperatorRelationId:
             return OCLASS_AMOP;
 
@@ -2839,6 +2848,19 @@ char* getObjectDescription(const ObjectAddress* object)
         case OCLASS_OPFAMILY:
             getOpFamilyDescription(&buffer, object->objectId);
             break;
+
+        case OCLASS_AM: {
+            HeapTuple   tup;
+
+            tup = SearchSysCache1(AMOID, ObjectIdGetDatum(object->objectId));
+            if (!HeapTupleIsValid(tup))
+                elog(ERROR, "cache lookup failed for access method %u", object->objectId);
+
+            appendStringInfo(&buffer, _("access method %s"),
+                NameStr(((Form_pg_am) GETSTRUCT(tup))->amname));
+            ReleaseSysCache(tup);
+            break;
+        }
 
         case OCLASS_AMOP: {
             Relation amopDesc;
