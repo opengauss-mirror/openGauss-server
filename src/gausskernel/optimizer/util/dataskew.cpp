@@ -725,17 +725,20 @@ List* SkewInfo::getSingleColumnStatistics(Node* node)
             &nvalues,
             &numbers,
             &nnumbers);
+        if (have_mcvs) {
+            ret = findMcvValue(vardata.var, nvalues, values, numbers);
 
-        ret = findMcvValue(vardata.var, nvalues, values, numbers);
+            free_attstatsslot(vardata.atttype, values, nvalues, numbers, nnumbers);
 
-        /* find null fraction */
-        if (cal_skew_ratio(stats->stanullfrac, u_sess->opt_cxt.query_dop) > SKEW_RATIO_LIMIT) {
-            ColSkewInfo* csinfo = (ColSkewInfo*)palloc0(sizeof(ColSkewInfo));
-            csinfo->var = vardata.var;
-            csinfo->value = NULL;
-            csinfo->mcv_ratio = stats->stanullfrac;
-            csinfo->is_null = true;
-            ret = lappend(ret, (void*)csinfo);
+            /* find null fraction */
+            if (cal_skew_ratio(stats->stanullfrac, u_sess->opt_cxt.query_dop) > SKEW_RATIO_LIMIT) {
+                ColSkewInfo* csinfo = (ColSkewInfo*)palloc0(sizeof(ColSkewInfo));
+                csinfo->var = vardata.var;
+                csinfo->value = NULL;
+                csinfo->mcv_ratio = stats->stanullfrac;
+                csinfo->is_null = true;
+                ret = lappend(ret, (void*)csinfo);
+            }
         }
     }
 
