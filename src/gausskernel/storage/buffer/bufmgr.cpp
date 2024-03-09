@@ -6261,7 +6261,11 @@ retry:
                 return;
             }
 
-            dms_retry_times++;
+            if (!DmsCheckBufAccessible()) {
+                dms_retry_times = 1;
+            } else {
+                dms_retry_times++;
+            }
             long sleep_time = SSGetBufSleepTime(dms_retry_times);
             if (sleep_time == SS_BUF_MAX_WAIT_TIME && !SS_IN_REFORM) {
                 volatile BufferTag *tag = &buf->tag;
@@ -6384,7 +6388,11 @@ retry:
                 g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
             }
 
-            dms_retry_times++;
+            if (!DmsCheckBufAccessible()) {
+                dms_retry_times = 1;
+            } else {
+                dms_retry_times++;
+            }
             long sleep_time = SSGetBufSleepTime(dms_retry_times);
             if (sleep_time == SS_BUF_MAX_WAIT_TIME && !SS_IN_REFORM) {
                 volatile BufferTag *tag = &buf->tag;
