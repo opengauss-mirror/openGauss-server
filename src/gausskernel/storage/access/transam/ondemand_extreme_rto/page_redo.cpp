@@ -47,6 +47,7 @@
 #include "gssignal/gs_signal.h"
 #include "libpq/pqsignal.h"
 #include "postmaster/postmaster.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/freespace.h"
 #include "storage/smgr/smgr.h"
@@ -141,6 +142,8 @@ void AddRecordReadBlocks(void *rec, uint32 readblocks);
 
 static void AddTrxnHashmap(void *item);
 static void AddSegHashmap(void *item);
+static bool checkBlockRedoDoneFromHashMap(LWLock *lock, HTAB *hashMap, RedoItemTag redoItemTag, bool *getSharedLock);
+static bool tryLockHashMap(LWLock *lock, HTAB *hashMap, RedoItemTag redoItemTag, bool *noNeedRedo);
 static void PageManagerPruneIfRealtimeBuildFailover();
 static void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg);
 static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState);
@@ -2123,6 +2126,118 @@ void RedoPageWorkerRedoBcmBlock(XLogRecParseState *procState)
     }
 }
 
+/**
+ * Check the block if need to redo and try hashmap lock. 
+ * There are three kinds of result as follow:
+ * 1. ONDEMAND_HASHMAP_ENTRY_REDO_DONE: the recordes of this buffer redo done.
+ * 2. ONDEMAND_HASHMAP_ENTRY_REDOING: the reordes of this buffer is redoing
+ * 3. ONDEMAND_HASHMAP_ENTRY_NEED_REDO: the recordes of this buffer has not been redone,
+ *    so get hashmap entry lock.
+ */
+int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum) {
+    LWLock *xlog_partition_lock = NULL;
+    RedoBufferInfo bufferInfo;
+    ondemand_extreme_rto::RedoItemTag redoItemTag;
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+    bool noNeedRedo = false;
+    bool getSharedLock = false;
+
+    /* buffer redo done, no need to check */
+    if (buf_ctrl->state & BUF_ONDEMAND_REDO_DONE) {
+        return ONDEMAND_HASHMAP_ENTRY_REDO_DONE;
+    }
+
+    /* get hashmap by redoItemTag */
+    INIT_REDO_ITEM_TAG(redoItemTag, bufHdr->tag.rnode, forkNum, blockNum);
+    uint32 slotId = GetSlotId(redoItemTag.rNode, 0, 0, GetBatchCount());
+    HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[slotId]->hTab;
+    if (hashMap == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("redo item hash table corrupted, there has invalid hashtable.")));
+    }
+
+    /* get partition lock by redoItemTag */
+    unsigned int partitionLockHash = XlogTrackTableHashCode(&redoItemTag);
+    xlog_partition_lock = XlogTrackMappingPartitionLock(partitionLockHash);
+
+    /* if buffer has be redone, set state to REDO_DONE and return REDO_DONE */
+    if (checkBlockRedoDoneFromHashMap(xlog_partition_lock, hashMap, redoItemTag, &getSharedLock)) {
+        buf_ctrl->state |= BUF_ONDEMAND_REDO_DONE;
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("checkBlockRedoStateAndTryHashMapLock, block redo done or need to redo: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                redoItemTag.forkNum, redoItemTag.blockNum)));
+        return ONDEMAND_HASHMAP_ENTRY_REDO_DONE;
+    /* get partition lock failed, means other process is redoing this buffer, retun REDOING */
+    } else if (!getSharedLock) {
+        return ONDEMAND_HASHMAP_ENTRY_REDOING;
+    /* if get redoItemEntry lock, the buffer has not been redone before, return NOT_REDO */
+    } else if (tryLockHashMap(xlog_partition_lock, hashMap, redoItemTag, &noNeedRedo)) {
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                errmsg("checkBlockRedoStateAndTryHashMapLock, block need to redo and has got partition lock: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                        redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                        redoItemTag.forkNum, redoItemTag.blockNum)));
+        return ONDEMAND_HASHMAP_ENTRY_NEED_REDO;
+    /* buffer has be redone, set state to REDO_DONE and return REDO_DONE */
+    } else if (noNeedRedo){
+        buf_ctrl->state |= BUF_ONDEMAND_REDO_DONE;
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("checkBlockRedoStateAndTryHashMapLock, block redo done or need to redo: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                redoItemTag.forkNum, redoItemTag.blockNum)));
+        return ONDEMAND_HASHMAP_ENTRY_REDO_DONE;
+    }
+
+    /* get partition lock failed, means other process is redoing this buffer, retun REDOING */
+    return ONDEMAND_HASHMAP_ENTRY_REDOING;
+}
+
+/*
+ * Check if the block has been redo done, return true if redo done, return false if may be need to redo,
+ * getSharedLock = false if other process is holding partition lock, may be other process is redoing.
+ */
+bool checkBlockRedoDoneFromHashMap(LWLock *lock, HTAB *hashMap, RedoItemTag redoItemTag, bool *getSharedLock)
+{
+    bool hashFound = false;
+    if (!LWLockConditionalAcquire(lock, LW_SHARED)) {
+        *getSharedLock = false;
+        return false;
+    }
+    *getSharedLock = true;
+
+    RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
+
+    /* Page is already up-to-date, no need to replay. */
+    if (!hashFound || entry->redoItemNum == 0 || entry->redoDone) {
+        LWLockRelease(lock);
+        return true;
+    }
+    LWLockRelease(lock);
+    return false;
+}
+
+/*
+ * Try to get partition exclusive lock, and return if has got it.
+ * noNeedRedo = true if no need to redo and release to partition lock.
+ */
+bool tryLockHashMap(LWLock *lock, HTAB *hashMap, RedoItemTag redoItemTag, bool *noNeedRedo) {
+    bool hashFound = false;
+
+    if (!LWLockConditionalAcquire(lock, LW_EXCLUSIVE)) {
+        *noNeedRedo = false;
+        return false;
+    }
+    RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
+
+    // Page is already up-to-date, no need to lock.
+    if (!hashFound || entry->redoItemNum == 0 || entry->redoDone) {
+        LWLockRelease(lock);
+        *noNeedRedo = true;
+        return false;
+    }
+    return true;
+}
+
 // if holdLock is false, only lock if need redo; otherwise, lock anyway
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock)
@@ -2136,6 +2251,34 @@ bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag
     }
     unsigned int new_hash = XlogTrackTableHashCode(&redoItemTag);
     *lock = XlogTrackMappingPartitionLock(new_hash);
+
+    /*
+     * Backends may have locked when bufferalloc, if the block need to be redone
+     * in ondemand, so need to lock again.
+     */
+    if (LWLockHeldByMe(*lock)) {
+        Assert(LWLockHeldByMeInMode(*lock, LW_EXCLUSIVE));
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                        redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                        redoItemTag.forkNum, redoItemTag.blockNum)));
+        RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
+
+        /* Page is already up-to-date, no need to replay. */
+        if (!hashFound || entry->redoItemNum == 0 || entry->redoDone) {
+            if (!holdLock) {
+                LWLockRelease(*lock);
+                *lock = NULL;
+            }
+            return true;
+        }
+
+        if (redoItemEntry != NULL) {
+            *redoItemEntry = entry;
+        }
+        return false;
+    }
+
     (void)LWLockAcquire(*lock, LW_SHARED);
     RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
 
@@ -2164,6 +2307,11 @@ bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag
     if (redoItemEntry != NULL) {
         *redoItemEntry = entry;
     }
+
+    ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+        errmsg("checkBlockRedoDoneFromHashMapAndLock, block need to redo and has got partition lock: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                redoItemTag.forkNum, redoItemTag.blockNum)));
     return false;
 }
 

@@ -27,6 +27,7 @@
 #include "access/ondemand_extreme_rto/dispatcher.h"
 #include "access/ondemand_extreme_rto/redo_utils.h"
 #include "access/ondemand_extreme_rto/xlog_read.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/lock/lwlock.h"
 #include "catalog/storage_xlog.h"
 
@@ -276,6 +277,12 @@ void OndemandXLogParseBufferRelease(XLogRecParseState *recordstate)
 BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+
+    if (buf_ctrl->state & BUF_ONDEMAND_REDO_DONE) {
+        return bufHdr;
+    }
+
     bool needMarkDirty = false;
     LWLock *xlog_partition_lock = NULL;
     Buffer buf = BufferDescriptorGetBuffer(bufHdr);
@@ -291,6 +298,11 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
     INIT_REDO_ITEM_TAG(redoItemTag, bufHdr->tag.rnode, forkNum, blockNum);
 
     if (checkBlockRedoDoneFromHashMapAndLock(&xlog_partition_lock, redoItemTag, &redoItemEntry, false)) {
+        buf_ctrl->state |= BUF_ONDEMAND_REDO_DONE;
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("RedoForOndemandExtremeRTOQuery, block redo done or need to redo: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                redoItemTag.forkNum, redoItemTag.blockNum)));
         return bufHdr;
     }
 
@@ -363,6 +375,13 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
 
     redoItemEntry->redoDone = true;
+    buf_ctrl->state |= BUF_ONDEMAND_REDO_DONE;
+
+    ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+        errmsg("RedoForOndemandExtremeRTOQuery, block redo done: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                redoItemTag.forkNum, redoItemTag.blockNum)));
+
     LWLockRelease(xlog_partition_lock);
 
     return bufHdr;

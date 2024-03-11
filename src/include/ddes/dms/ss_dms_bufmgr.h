@@ -70,6 +70,7 @@ void SSLockAcquireAll();
 void MarkReadPblk(int buf_id, const XLogPhyBlock *pblk);
 void SSCheckBufferIfNeedMarkDirty(Buffer buf);
 void SSRecheckBufferPool();
+void SSOndemandClearRedoDoneState();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
 bool CheckPageNeedSkipInRecovery(Buffer buf);
 void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);

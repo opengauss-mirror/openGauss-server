@@ -771,6 +771,18 @@ void SSCheckBufferIfNeedMarkDirty(Buffer buf)
     }
 }
 
+void SSOndemandClearRedoDoneState()
+{
+    for (int buffer = 0; buffer < TOTAL_BUFFER_NUM; buffer++) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer);
+
+        // ondemand redo finish, no need to mark
+        if (buf_ctrl->state & BUF_ONDEMAND_REDO_DONE) {
+            buf_ctrl->state &= ~BUF_ONDEMAND_REDO_DONE;
+        }
+    }
+}
+
 static void SSOndemandCheckBufferState()
 {
     for (int buffer = 0; buffer < TOTAL_BUFFER_NUM; buffer++) {

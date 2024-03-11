@@ -42,6 +42,7 @@
 #include "access/xlogproc.h"
 #include "access/double_write.h"
 #include "access/parallel_recovery/dispatcher.h"
+#include "access/ondemand_extreme_rto/page_redo.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/storage_gtt.h"
@@ -2603,6 +2604,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
          * not currently in memory.
          */
         bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
+
         if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
             bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
         }
@@ -3034,6 +3036,16 @@ retry:
             goto retry;
         }
 
+        /*
+         * Checkpoint if buffer need to redo and try hashMap partition lock,
+         * if need to redo but doesn't get lock, unpinbuffer and retry.
+         */
+        if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE &&
+            ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
+            UnpinBuffer(buf, true);
+            goto retry;
+        }
+
         *found = TRUE;
 
         if (!valid) {
@@ -3247,7 +3259,17 @@ retry:
             /* remaining code should match code at top of routine */
             buf = GetBufferDescriptor(buf_id);
 
+retry_new_buffer:
             valid = PinBuffer(buf, strategy);
+            /*
+            * Checkpoint if buffer need to redo and try hashMap partition lock,
+            * if need to redo but doesn't get lock, unpinbuffer and retry.
+            */
+            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE &&
+                ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
+                UnpinBuffer(buf, true);
+                goto retry_new_buffer;
+            }
 
             /* Can release the mapping lock as soon as we've pinned it */
             LWLockRelease(new_partition_lock);
@@ -3362,6 +3384,26 @@ retry:
     }
     LWLockRelease(new_partition_lock);
     UnlockBufHdr(buf, buf_state);
+    
+
+    /*
+    * Checkpoint if buffer need to redo and try hashMap partition lock,
+    * if need to redo but doesn't get lock, unpinbuffer and retry.
+    */
+    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE) {
+        bool hasUnpinned = false;
+        while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
+            if (!hasUnpinned) {
+                 UnpinBuffer(buf, true);
+                 hasUnpinned = true;
+            }
+            pg_usleep(TEN_MICROSECOND);
+        }
+        if (hasUnpinned) {
+            PinBuffer(buf, strategy);
+        }
+    }
+
     /*
      * Buffer contents are currently invalid.  Try to get the io_in_progress
      * lock.  If StartBufferIO returns false, then someone else managed to
