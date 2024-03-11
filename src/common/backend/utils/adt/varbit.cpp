@@ -945,15 +945,19 @@ static VarBit* bitsubstring(VarBit* arg, int32 s, int32 l, bool length_not_speci
     /* If we do not have an upper bound, use end of string */
     if (length_not_specified) {
         e1 = bitlen + 1;
-    } else {
-        e = s + l;
-
+    } else if (l < 0) {
+        /* SQL99 says to throw an error for E < S, i.e., negative length */
+        ereport(ERROR,
+                (errcode(ERRCODE_SUBSTRING_ERROR),
+                 errmsg("negative substring length not allowed")));
+        e1 = -1;				/* silence stupider compilers */
+    } else if (pg_add_s32_overflow(s, l, &e)) {
         /*
-         * A negative value for L is the only way for the end position to be
-         * before the start. SQL99 says to throw an error.
+         * L could be large enough for S + L to overflow, in which case the
+         * substring must run to end of string.
          */
-        if (e < s)
-            ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
+        e1 = bitlen + 1;
+    } else {
         e1 = Min(e, bitlen + 1);
     }
     if (s1 > bitlen || e1 <= s1) {
