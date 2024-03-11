@@ -10314,8 +10314,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
-        if (SS_NORMAL_STANDBY && pmState == PM_RUN && !SS_STANDBY_ONDEMAND_RECOVERY) {
-            SSDoSwitchover();
+        if (SS_NORMAL_STANDBY && pmState == PM_RUN) {
+            if (!SS_STANDBY_ONDEMAND_RECOVERY) {
+                SSDoSwitchover();
+            } else {
+                ereport(LOG, (errmsg("Ondemand recovery is not finished, SS switchover command ignored.")));
+            }
         } else {
             ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
         }
