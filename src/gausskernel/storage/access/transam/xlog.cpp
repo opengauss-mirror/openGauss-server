@@ -13805,7 +13805,7 @@ static void XLogReportParameters(void)
          * to keep them up-to-date to avoid confusion.
          */
         if ((g_instance.attr.attr_storage.wal_level != t_thrd.shemem_ptr_cxt.ControlFile->wal_level || XLogIsNeeded())
-                && !SS_DISASTER_STANDBY_CLUSTER) {
+                && !SS_DISASTER_STANDBY_CLUSTER && !SS_STANDBY_MODE) {
             xl_parameter_change xlrec;
             XLogRecPtr recptr;
 
