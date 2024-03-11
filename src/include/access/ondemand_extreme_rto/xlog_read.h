@@ -31,7 +31,7 @@
 namespace ondemand_extreme_rto {
 XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 XLogRecord *ReadNextXLogRecord(XLogReaderState **xlogreaderptr, int emode);
-XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg);
+XLogRecord *ParallelReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg, char* xlogPath);
 
 }  // namespace ondemand_extreme_rto
 

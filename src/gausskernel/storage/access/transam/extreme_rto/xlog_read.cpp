@@ -547,7 +547,6 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
     int readLen = -1;
     pg_atomic_write_u64(&g_dispatcher->rtoXlogBufState.targetRecPtr, targetRecPtr);
     xlogreader->readBuf = g_dispatcher->rtoXlogBufState.readBuf;
-    errno_t errorno = EOK;
 
     for (;;) {
         uint32 readSource = pg_atomic_read_u32(&(g_recordbuffer->readSource));
@@ -921,7 +920,7 @@ err:
 * in ss dorado double cluster, we need read xlogpath ergodic，
 * we will read xlog in path where last read success
 */
-XLogRecord *SSExtremeXLogReadRecordErgodic(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg)
+XLogRecord *SSExtremeXLogReadRecordFromAllNodes(XLogReaderState *state, XLogRecPtr RecPtr, char **errormsg)
 {
     XLogRecord *record = NULL;
     errno_t errorno = 0;
@@ -973,7 +972,7 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
         char *errormsg = NULL;
         
         if (SS_DORADO_CLUSTER) {
-            record = SSExtremeXLogReadRecordErgodic(xlogreader, InvalidXLogRecPtr, &errormsg);
+            record = SSExtremeXLogReadRecordFromAllNodes(xlogreader, InvalidXLogRecPtr, &errormsg);
         } else {
             record = ParallelReadRecord(xlogreader, InvalidXLogRecPtr, &errormsg, NULL);
         }
