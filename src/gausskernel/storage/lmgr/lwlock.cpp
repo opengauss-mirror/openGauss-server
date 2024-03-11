@@ -202,7 +202,8 @@ static const char *BuiltinTrancheNames[] = {
     "PCABufferContentLock",
     "XlogTrackPartLock",
     "SSTxnStatusCachePartLock",
-    "SSSnapshotXminCachePartLock"
+    "SSSnapshotXminCachePartLock",
+    "DmsBufCtrlLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -376,6 +377,10 @@ int NumLWLocks(void)
 
     /* bufmgr.c needs two for each shared buffer */
     numLocks += 2 * TOTAL_BUFFER_NUM;
+
+    if (ENABLE_DMS) {
+        numLocks += TOTAL_BUFFER_NUM; // dms_buf_ctrl_t lock
+    }
 
     /* each zone owns undo space lock */
     numLocks += MAX(maxConn, maxThreadNum) * numLockFactor * UNDO_ZONE_LOCK;

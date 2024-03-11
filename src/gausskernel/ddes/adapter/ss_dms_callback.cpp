@@ -1430,15 +1430,15 @@ static int32 CBDrcBufValidate(void *db_handle)
 }
 
 // used for find bufferdesc in dms
-static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_desc)
+// no need WaitIO to check valid bit is set or not, we use spinlock to guarantee to lock_mode
+static BufferDesc* SSGetBufferDesc(char *pageid)
 {
     int buf_id;
-    uint32 hash;
     BufferTag *tag = (BufferTag *)pageid;
-    BufferDesc *buf_desc;
-    bool ret = true;
-
+    BufferDesc *buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
+    uint32 hash = BufTableHashCode(tag);
+    bool retry = false;
 
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(relfilenode)) {
@@ -1451,40 +1451,26 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
     }
 #endif
 
-    hash = BufTableHashCode(tag);
-
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
-        buf_id = BufTableLookup(tag, hash);
-        if (buf_id >= 0) {
-            buf_desc = GetBufferDescriptor(buf_id);
-            if (IsSegmentBufferID(buf_id)) {
-                (void)SegPinBuffer(buf_desc);
-            } else {
-                ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-                (void)PinBuffer(buf_desc, NULL);
+        do {
+            buf_id = BufTableLookup(tag, hash);
+            if (buf_id < 0) {
+                buf_desc = NULL;
+                break;
             }
-
+            
+            buf_desc = GetBufferDescriptor(buf_id);
+            (void)SSPinBuffer(buf_desc);
             if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
                 SSUnPinBuffer(buf_desc);
-                *ret_buf_desc = NULL;
-                break;
+                buf_desc = NULL;
+                retry = true;
+            } else {
+                retry = false;
             }
-
-            bool wait_success = SSWaitIOTimeout(buf_desc);
-            if (!wait_success) {
-                SSUnPinBuffer(buf_desc);
-                ret = false;
-                break;
-            }
-
-            Assert(!(pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR));
-            *is_valid = (pg_atomic_read_u64(&buf_desc->state) & BM_VALID) != 0;
-            *ret_buf_desc = buf_desc;
-        } else {
-            *ret_buf_desc = NULL;
-        }
+        } while (retry);
     }
     PG_CATCH();
     {
@@ -1492,100 +1478,60 @@ static bool SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
         ReleaseResource();
     }
     PG_END_TRY();
-    return ret;
+    return buf_desc;
 }
 
 static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
     unsigned long long *edp_lsn)
 {
-    BufferDesc *buf_desc = NULL;
-    bool valid;
+    *is_edp = (unsigned char)false;
     dms_buf_ctrl_t *buf_ctrl = NULL;
-
-    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
-    if (!ret) {
-        ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS] CBConfirmOwner, require LWLock timeout")));
-        return GS_TIMEOUT;
-    }
-
+    BufferDesc *buf_desc = SSGetBufferDesc(pageid);
     if (buf_desc == NULL) {
         *lock_mode = (uint8)DMS_LOCK_NULL;
         return GS_SUCCESS;
     }
 
-    if (!valid) {
-        *lock_mode = (uint8)DMS_LOCK_NULL;
-        *is_edp = (unsigned char)false;
-        SSUnPinBuffer(buf_desc);
-        return GS_SUCCESS;
-    }
-
-    /*
-     * not acquire buf_desc->io_in_progress_lock
-     * consistency guaranteed by reform phase
-     */
     buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
     *lock_mode = buf_ctrl->lock_mode;
-    // opengauss currently no edp
-    Assert(buf_ctrl->is_edp == 0);
-    *is_edp = (unsigned char)false;
+#ifdef USE_ASSERT_CHECKING
+    if (buf_ctrl->is_edp) {
+        BufferTag *tag = &buf_desc->tag;
+        ereport(PANIC, (errmsg("[SS][%u/%u/%u/%d %d-%u] CBConfirmOwner, do not allow edp exist, please check.",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum)));
+    }
+#endif
+    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
     SSUnPinBuffer(buf_desc);
-
     return GS_SUCCESS;
 }
 
 static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn)
 {
-    BufferDesc *buf_desc = NULL;
-    bool valid;
-    dms_buf_ctrl_t *buf_ctrl = NULL;
-
-    *lsn = 0;
+    *lsn = 0; // lsn not used in dms, so need to waste time to PageGetLSN
     *edp_map = 0;
     
-    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
-    if (!ret) {
-        ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS] CBConfirmConverting, require LWLock timeout")));
-        return GS_TIMEOUT;
-    }
-
+    BufferDesc *buf_desc = SSGetBufferDesc(pageid);
     if (buf_desc == NULL) {
         *lock_mode = (uint8)DMS_LOCK_NULL;
         return GS_SUCCESS;
     }
 
-    if (!valid) {
-        *lock_mode = (uint8)DMS_LOCK_NULL;
-        SSUnPinBuffer(buf_desc);
-        return GS_SUCCESS;
-    }
-
-    bool get_lock = SSLWLockAcquireTimeout(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
-    if (get_lock) {
-        buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-        *lock_mode = buf_ctrl->lock_mode;
-        LWLockRelease(buf_desc->io_in_progress_lock);
-        SSUnPinBuffer(buf_desc);
-        return GS_SUCCESS;
-    }
-
-    if (smon_chk) {
-        SSUnPinBuffer(buf_desc);
-        BufferTag *tag = &buf_desc->tag;
-        ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
-            "buf_id:%d, lwlock:%p",
-            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-            tag->forkNum, tag->blockNum, buf_desc->buf_id, buf_desc->io_in_progress_lock))));
-        return GS_TIMEOUT;
-    }
-
-    // without lock
-    buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
     *lock_mode = buf_ctrl->lock_mode;
-
+#ifdef USE_ASSERT_CHECKING
+    if (buf_ctrl->is_edp) {
+        BufferTag *tag = &buf_desc->tag;
+        ereport(PANIC, (errmsg("[SS][%u/%u/%u/%d %d-%u] CBConfirmConverting, do not allow edp exist, please check.",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum)));
+    }
+#endif
+    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
     SSUnPinBuffer(buf_desc);
     return GS_SUCCESS;
 }
@@ -2022,38 +1968,37 @@ static int CBCacheMsg(void *db_handle, char* msg)
 
 static int CBMarkNeedFlush(void *db_handle, char *pageid, unsigned char *is_edp)
 {
-    bool valid = false;
-    BufferDesc *buf_desc = NULL;
+    *is_edp = false;
     BufferTag *tag = (BufferTag *)pageid;
-
-    bool ret = SSGetBufferDesc(pageid, &valid, &buf_desc);
-    if (!ret) {
-        ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS] CBMarkNeedFlush, require LWLock timeout")));
-        return GS_TIMEOUT;
-    }
-
+    BufferDesc *buf_desc = SSGetBufferDesc(pageid);
     if (buf_desc == NULL) {
-        ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS] CBMarkNeedFlush, buf_desc not found")));
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS][%u/%u/%u/%d %d-%u] CBMarkNeedFlush, buf_desc not found",
+                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                tag->forkNum, tag->blockNum)));
         return DMS_ERROR;
     }
 
-    if (!valid) {
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
+    if (!DMS_BUF_CTRL_IS_OWNER(buf_ctrl)) {
+        LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS][%u/%u/%u/%d %d-%u] CBMarkNeedFlush, do not have current page",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum)));
         SSUnPinBuffer(buf_desc);
-        ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS] CBMarkNeedFlush, buf_desc not valid")));
         return DMS_ERROR;
     }
+    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
 
 #ifdef USE_ASSERT_CHECKING
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     if (buf_ctrl->is_edp) {
-        ereport(PANIC, (errmsg("[SS] CBMarkNeedFlush, do not allow edp exist, please check")));
+        ereport(PANIC, (errmsg("[SS][%u/%u/%u/%d %d-%u] CBMarkNeedFlush, do not allow edp exist, please check.",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+            tag->forkNum, tag->blockNum)));
     }
 #endif
-    *is_edp = false;
-
     ereport(LOG, (errmsg("[SS] CBMarkNeedFlush found buf: %u/%u/%u/%d %d-%u",
         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
         tag->forkNum, tag->blockNum)));

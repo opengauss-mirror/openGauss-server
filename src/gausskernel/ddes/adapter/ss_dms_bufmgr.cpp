@@ -57,6 +57,7 @@ void InitDmsBufCtrl(void)
             buf_ctrl->pblk_blkno = InvalidBlockNumber;
             buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
             buf_ctrl->been_loaded = false;
+            buf_ctrl->ctrl_lock = LWLockAssign(LWTRANCHE_DMS_BUF_CTRL);
         }
     }
 }
@@ -181,8 +182,9 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
 
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
-
+    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
     int ret = dms_request_page(&dms_ctx, buf_ctrl, req_mode);
+    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
     return (ret == DMS_SUCCESS);
 }
 
@@ -642,8 +644,10 @@ bool DmsReleaseOwner(BufferTag buf_tag, int buf_id)
     unsigned char released = 0;
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_tag);
-
-    return ((dms_release_owner(&dms_ctx, buf_ctrl, &released) == DMS_SUCCESS) && (released != 0));
+    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
+    int ret = dms_release_owner(&dms_ctx, buf_ctrl, &released);
+    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
+    return ((ret == DMS_SUCCESS) && (released != 0));
 }
 
 void BufValidateDrc(BufferDesc *buf_desc)
