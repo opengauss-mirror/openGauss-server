@@ -74,6 +74,9 @@ void InitDmsContext(dms_context_t *dmsContext)
 
 void InitDmsBufContext(dms_context_t* dmsBufCxt, BufferTag buftag)
 {
+    int32 ret = memset_sp(dmsBufCxt, sizeof(dms_context_t), 0, sizeof(dms_context_t));
+    securec_check(ret, "", "");
+    
     InitDmsContext(dmsBufCxt);
     dmsBufCxt->len   = DMS_PAGEID_SIZE;
     dmsBufCxt->type = (unsigned char)DRC_RES_PAGE_TYPE;
