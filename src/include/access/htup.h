@@ -758,8 +758,9 @@ inline HeapTuple heaptup_alloc(Size size)
  * xl_heap_insert/xl_heap_multi_insert flag values, 8 bits are available
  */
 /* PD_ALL_VISIBLE was cleared */
-#define XLH_INSERT_ALL_VISIBLE_CLEARED		   (1<<0)
-#define XLH_INSERT_CONTAINS_NEW_TUPLE		   (1<<4)
+#define XLH_INSERT_ALL_VISIBLE_CLEARED         (1<<0)
+#define XLH_INSERT_SPLIT_PARTITION             (1<<1)
+#define XLH_INSERT_CONTAINS_NEW_TUPLE          (1<<4)
 #define XLH_INSERT_LAST_IN_MULTI               (1<<7)
 
 /*

@@ -35,6 +35,7 @@
 #define HEAP_INSERT_FROZEN 0x0004
 #define HEAP_INSERT_SPECULATIVE 0x0008
 #define HEAP_INSERT_SKIP_ERROR 0x0010
+#define HEAP_INSERT_SPLIT_PARTITION 0x0020
 
 /* ----------------------------------------------------------------
  *               Scan State Information
