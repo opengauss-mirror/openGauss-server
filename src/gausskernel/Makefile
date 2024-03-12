@@ -653,6 +653,10 @@ ifeq ($(enable_thread_check), yes)
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
+ifeq ($(enable_memory_check), yes)
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libasan.so* '$(DESTDIR)$(libdir)/'
+	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst $(SUB_CC_VERSION),,$(CC_VERSION))/gcc/lib64/libubsan.so* '$(DESTDIR)$(libdir)/'
+endif
 endif
 endif
 
