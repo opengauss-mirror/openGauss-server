@@ -1276,9 +1276,7 @@ static List* pg_rewrite_query(Query* query)
             }
         } else if (IsA(query->utilityStmt, PrepareStmt)) {
             PrepareStmt *stmt = (PrepareStmt *)query->utilityStmt;
-            if (IsA(stmt->query, UserVar)) {
-                querytree_list = QueryRewritePrepareStmt(query);
-            } else if (IsA(stmt->query, Const)) {
+            if (IsA(stmt->query, Const)) {
                 if (((Const *)stmt->query)->constisnull) {
                     ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                             errmsg("userdefined variable in prepare statement must be text type.")));

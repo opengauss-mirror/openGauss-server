@@ -5157,62 +5157,6 @@ List* QueryRewriteCTAS(Query* parsetree)
 }
 
 /*
- * User_defined variables is a string in prepareStmt.
- * Get selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt from user_defined variables by pg_parse_query.
- * Then, execute SQL: PREPARE stmt AS selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt.
- */
-List* QueryRewritePrepareStmt(Query* parsetree)
-{
-    char *sqlstr = NULL;
-    List* raw_parsetree_list = NIL;
-    List* querytree_list = NULL;
-
-    PrepareStmt *stmt = (PrepareStmt *)parsetree->utilityStmt;
-    UserVar *uservar = (UserVar *)stmt->query;
-    Const* value = (Const *)uservar->value;
-
-    if (value->consttype != TEXTOID) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("userdefined variable in prepare statement must be text type.")));
-    }
-    if (value->constvalue == (Datum)0) {
-        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
-    }
-
-    sqlstr = TextDatumGetCString(value->constvalue);
-
-    raw_parsetree_list = pg_parse_query(sqlstr);
-    if (raw_parsetree_list == NIL) {
-        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
-    }
-
-    if (raw_parsetree_list->length != 1) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("prepare user_defined variable can contain only one SQL statement.")));
-    }
-
-    switch (nodeTag(linitial(raw_parsetree_list))) {
-        case T_SelectStmt:
-        case T_InsertStmt:
-        case T_UpdateStmt:
-        case T_DeleteStmt:
-        case T_MergeStmt:
-            stmt->query = (Node *)copyObject((Node *)linitial(raw_parsetree_list));
-            break;
-        default:
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("the statement in prepare is not supported.")));
-            break;
-    }
-
-    querytree_list = pg_analyze_and_rewrite((Node*)stmt, sqlstr, NULL, 0);
-    return querytree_list;
-}
-
-/*
  * Get value from a subquery or non-constant expression by constructing SQL.
  * input:
          node: a subquery expression or non-constant expression.
