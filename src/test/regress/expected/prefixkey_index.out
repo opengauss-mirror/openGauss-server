@@ -464,10 +464,10 @@ DROP TABLE test_prefix_key_len;
 --
 CREATE TABLE test_prefix_table (
     id INTEGER,
-    fchar CHAR(64),
-    fvchar VARCHAR(64),
-    ftext TEXT,
-    fclob CLOB,
+    fchar CHAR(64) collate utf8mb4_bin,
+    fvchar VARCHAR(64) collate utf8mb4_bin,
+    ftext TEXT collate utf8mb4_bin,
+    fclob CLOB collate utf8mb4_bin,
     fblob BLOB,
     fraw RAW,
     fbytea BYTEA
@@ -497,17 +497,17 @@ CREATE INDEX prefix_index_fclob ON test_prefix_table (fclob(5));
 CREATE INDEX prefix_index_fblob ON test_prefix_table (fblob(5));
 CREATE UNIQUE INDEX prefix_index_fraw ON test_prefix_table (fraw(9));
 \d+ test_prefix_table
-                          Table "public.test_prefix_table"
- Column |         Type          | Modifiers | Storage  | Stats target | Description 
---------+-----------------------+-----------+----------+--------------+-------------
- id     | integer               |           | plain    |              | 
- fchar  | character(64)         |           | extended |              | 
- fvchar | character varying(64) |           | extended |              | 
- ftext  | text                  |           | extended |              | 
- fclob  | clob                  |           | extended |              | 
- fblob  | blob                  |           | extended |              | 
- fraw   | raw                   |           | extended |              | 
- fbytea | bytea                 |           | extended |              | 
+                                        Table "public.test_prefix_table"
+ Column |         Type          |               Modifiers                | Storage  | Stats target | Description 
+--------+-----------------------+----------------------------------------+----------+--------------+-------------
+ id     | integer               |                                        | plain    |              | 
+ fchar  | character(64)         | character set UTF8 collate utf8mb4_bin | extended |              | 
+ fvchar | character varying(64) | character set UTF8 collate utf8mb4_bin | extended |              | 
+ ftext  | text                  | character set UTF8 collate utf8mb4_bin | extended |              | 
+ fclob  | clob                  | character set UTF8 collate utf8mb4_bin | extended |              | 
+ fblob  | blob                  |                                        | extended |              | 
+ fraw   | raw                   |                                        | extended |              | 
+ fbytea | bytea                 |                                        | extended |              | 
 Indexes:
     "prefix_index_fraw" UNIQUE, btree (fraw(9)) TABLESPACE pg_default
     "prefix_index_fblob" btree (fblob(5)) TABLESPACE pg_default
@@ -524,10 +524,10 @@ select pg_get_tabledef('test_prefix_table'::regclass);
  SET search_path = public;                                                                                           +
  CREATE TABLE test_prefix_table (                                                                                    +
      id integer,                                                                                                     +
-     fchar character(64),                                                                                            +
-     fvchar character varying(64),                                                                                   +
-     ftext text,                                                                                                     +
-     fclob clob,                                                                                                     +
+     fchar character(64) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,                                                   +
+     fvchar character varying(64) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,                                          +
+     ftext text CHARACTER SET "UTF8" COLLATE utf8mb4_bin,                                                            +
+     fclob clob CHARACTER SET "UTF8" COLLATE utf8mb4_bin,                                                            +
      fblob blob,                                                                                                     +
      fraw raw,                                                                                                       +
      fbytea bytea                                                                                                    +
@@ -647,12 +647,12 @@ analyze test_prefix_table;
 --single table index scan
 EXPLAIN (costs false)
 SELECT ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
-         Index Cond: ((ftext >= 'YYYY'::text) AND (ftext < 'YYYZ'::text))
+         Index Cond: ((ftext >= 'YYYY'::text) AND (ftext <= 'YYYY￿'::text))
          Filter: (ftext ~~ 'YYYY%'::text)
 (5 rows)
 
@@ -671,7 +671,7 @@ SELECT ftext FROM test_prefix_table where ftext like 'YYYYY%' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext = 'YYYYY'::text)
          Filter: (ftext ~~ 'YYYYY%'::text)
@@ -692,7 +692,7 @@ SELECT ftext FROM test_prefix_table where ftext like 'YYYYY-1%' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext = 'YYYYY'::text)
          Filter: (ftext ~~ 'YYYYY-1%'::text)
@@ -709,7 +709,7 @@ SELECT ftext FROM test_prefix_table where ftext like 'YYYYY-210' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext = 'YYYYY'::text)
          Filter: (ftext ~~ 'YYYYY-210'::text)
@@ -723,12 +723,12 @@ SELECT ftext FROM test_prefix_table where ftext like 'YYYYY-210' ORDER BY 1;
 
 EXPLAIN (costs false)
 SELECT ftext FROM test_prefix_table where ftext like '开%' ORDER BY 1;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
-         Index Cond: ((ftext >= '开'::text) AND (ftext < '弁'::text))
+         Index Cond: ((ftext >= '开'::text) AND (ftext <= '开￿￿￿￿'::text))
          Filter: (ftext ~~ '开%'::text)
 (5 rows)
 
@@ -743,7 +743,7 @@ SELECT ftext FROM test_prefix_table where ftext like '开源数据库%' ORDER BY
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext = '开源数据库'::text)
          Filter: (ftext ~~ '开源数据库%'::text)
@@ -760,7 +760,7 @@ SELECT ftext FROM test_prefix_table where ftext like '开源数据库-2%' ORDER 
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext = '开源数据库'::text)
          Filter: (ftext ~~ '开源数据库-2%'::text)
@@ -792,7 +792,7 @@ SELECT ftext FROM test_prefix_table where ftext > '开' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext >= '开'::text)
          Filter: (ftext > '开'::text)
@@ -811,7 +811,7 @@ SELECT ftext FROM test_prefix_table where ftext > '开源数据库' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext >= '开源数据库'::text)
          Filter: (ftext > '开源数据库'::text)
@@ -830,7 +830,7 @@ SELECT ftext FROM test_prefix_table where ftext > '开源数据库-210' ORDER BY
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext >= '开源数据库'::text)
          Filter: (ftext > '开源数据库-210'::text)
@@ -848,7 +848,7 @@ SELECT ftext FROM test_prefix_table where ftext < '开' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext <= '开'::text)
          Filter: (ftext < '开'::text)
@@ -881,7 +881,7 @@ SELECT ftext FROM test_prefix_table where ftext < '开源数据库' ORDER BY 1;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext <= '开源数据库'::text)
          Filter: (ftext < '开源数据库'::text)
@@ -914,7 +914,7 @@ SELECT ftext FROM test_prefix_table where ftext < '开源数据库-210' ORDER BY
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
          Index Cond: (ftext <= '开源数据库'::text)
          Filter: (ftext < '开源数据库-210'::text)
@@ -1277,12 +1277,12 @@ SELECT fbytea FROM test_prefix_table t where fbytea < 'YYYYY-210' ORDER BY 1;
 
 EXPLAIN (costs false)
 SELECT fchar FROM test_prefix_table where fchar ~ '^开' ORDER BY 1;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Sort
-   Sort Key: fchar
+   Sort Key: fchar COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fchar_fbytea on test_prefix_table
-         Index Cond: ((fchar >= '开'::bpchar) AND (fchar < '弁'::bpchar))
+         Index Cond: ((fchar >= '开'::bpchar) AND (fchar <= '开￿￿￿￿'::bpchar))
          Filter: (fchar ~ '^开'::text)
 (5 rows)
 
@@ -1297,7 +1297,7 @@ SELECT fchar FROM test_prefix_table where fchar <= 'YYYYY-100' ORDER BY 1;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Sort
-   Sort Key: fchar
+   Sort Key: fchar COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fchar_fbytea on test_prefix_table
          Index Cond: (fchar <= 'YYYYY'::bpchar)
          Filter: (fchar <= 'YYYYY-100'::bpchar)
@@ -1319,7 +1319,7 @@ SELECT fchar FROM test_prefix_table where fchar <= 'YYYYY' ORDER BY 1;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Sort
-   Sort Key: fchar
+   Sort Key: fchar COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fchar_fbytea on test_prefix_table
          Index Cond: (fchar <= 'YYYYY'::bpchar)
          Filter: (fchar <= 'YYYYY'::bpchar)
@@ -1340,7 +1340,7 @@ SELECT fclob FROM test_prefix_table t where fclob < 'ZZZZZ-210' ORDER BY 1;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
-   Sort Key: fclob
+   Sort Key: fclob COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fclob on test_prefix_table t
          Index Cond: ((fclob)::text <= 'ZZZZZ'::text)
          Filter: ((fclob)::text < 'ZZZZZ-210'::text)
@@ -1370,7 +1370,7 @@ SELECT fclob FROM test_prefix_table t where fclob < 'Z' ORDER BY 1;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
-   Sort Key: fclob
+   Sort Key: fclob COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fclob on test_prefix_table t
          Index Cond: ((fclob)::text <= 'Z'::text)
          Filter: ((fclob)::text < 'Z'::text)
@@ -1396,7 +1396,7 @@ SELECT ftext FROM test_prefix_table t where fvchar >= 'ZZZZZ-210' ORDER BY 1;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fvchar on test_prefix_table t
          Index Cond: ((fvchar)::text >= 'ZZZZZ'::text)
          Filter: ((fvchar)::text >= 'ZZZZZ-210'::text)
@@ -1418,7 +1418,7 @@ SELECT ftext FROM test_prefix_table t where fvchar >= 'ZZZZZ' ORDER BY 1;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fvchar on test_prefix_table t
          Index Cond: ((fvchar)::text >= 'ZZZZZ'::text)
          Filter: ((fvchar)::text >= 'ZZZZZ'::text)
@@ -1443,7 +1443,7 @@ SELECT ftext FROM test_prefix_table t where fvchar > 'ZZZZZ-' and fvchar <> 'ZZZ
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fvchar on test_prefix_table t
          Index Cond: ((fvchar)::text >= 'ZZZZZ'::text)
          Filter: (((fvchar)::text > 'ZZZZZ-'::text) AND ((fvchar)::text <> 'ZZZZZ-210'::text))
@@ -1467,7 +1467,7 @@ SELECT ftext FROM test_prefix_table t where fvchar > left('ZZZZZ-211', 7) and fv
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fvchar on test_prefix_table t
          Index Cond: ((fvchar)::text >= 'ZZZZZ'::text)
          Filter: (((fvchar)::text > 'ZZZZZ-2'::text) AND ((fvchar)::text <> 'ZZZZZ-211'::text))
@@ -1556,8 +1556,8 @@ SELECT DISTINCT fraw FROM test_prefix_table t where fraw IS NOT NULL ORDER BY 1;
 
 EXPLAIN (costs false)
 SELECT fraw FROM test_prefix_table t where fraw IS NULL or ftext like '高%' ORDER BY 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
  Sort
    Sort Key: fraw
    ->  Bitmap Heap Scan on test_prefix_table t
@@ -1567,7 +1567,7 @@ SELECT fraw FROM test_prefix_table t where fraw IS NULL or ftext like '高%' ORD
                ->  Bitmap Index Scan on prefix_index_fraw
                      Index Cond: (fraw IS NULL)
                ->  Bitmap Index Scan on prefix_index_ftext
-                     Index Cond: ((ftext >= '高'::text) AND (ftext < '髙'::text))
+                     Index Cond: ((ftext >= '高'::text) AND (ftext <= '高￿￿￿￿'::text))
 (10 rows)
 
 SELECT fraw FROM test_prefix_table t where fraw IS NULL or ftext like '高%' ORDER BY 1;
@@ -1585,7 +1585,7 @@ SELECT fvchar FROM test_prefix_table t where fraw IS NULL or fvchar > 'ZZZZZ-200
                                                       QUERY PLAN                                                      
 ----------------------------------------------------------------------------------------------------------------------
  Sort
-   Sort Key: fvchar
+   Sort Key: fvchar COLLATE utf8mb4_bin
    ->  Bitmap Heap Scan on test_prefix_table t
          Recheck Cond: ((fraw IS NULL) OR ((fvchar)::text > 'ZZZZZ-200'::text))
          Filter: ((fraw IS NULL) OR (((fvchar)::text > 'ZZZZZ-200'::text) AND ((fvchar)::text <> 'ZZZZZ-210'::text)))
@@ -1644,7 +1644,7 @@ EXPLAIN (costs false) execute testprefixindex('ZZZZZ-200');
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
  Sort
-   Sort Key: fvchar
+   Sort Key: fvchar COLLATE utf8mb4_bin
    ->  Bitmap Heap Scan on test_prefix_table t
          Recheck Cond: ((fraw IS NULL) OR ((fvchar)::text > $1))
          Filter: ((fraw IS NULL) OR (((fvchar)::text > $1) AND ((fvchar)::text <> 'ZZZZZ-210'::text)))
@@ -1674,7 +1674,7 @@ SELECT fvchar FROM test_prefix_table t where (fvchar <> 'ZZZZZ-211') IS false OR
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
-   Sort Key: fvchar
+   Sort Key: fvchar COLLATE utf8mb4_bin
    ->  Seq Scan on test_prefix_table t
          Filter: (((fvchar)::text <> 'ZZZZZ-211'::text) IS FALSE)
 (4 rows)
@@ -1703,10 +1703,10 @@ SELECT left(ftext, 5) FROM test_prefix_table where left(ftext, 5) = 'YYYYY';
 
 EXPLAIN (costs false)
 SELECT ftext FROM test_prefix_table ORDER BY ftext;
-             QUERY PLAN              
--------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Seq Scan on test_prefix_table
 (3 rows)
 
@@ -1723,7 +1723,7 @@ SELECT ftext FROM test_prefix_table where ftext not like 'YYYY%' ORDER BY 1;
                 QUERY PLAN                 
 -------------------------------------------
  Sort
-   Sort Key: ftext
+   Sort Key: ftext COLLATE utf8mb4_bin
    ->  Seq Scan on test_prefix_table
          Filter: (ftext !~~ 'YYYY%'::text)
 (4 rows)
@@ -1736,6 +1736,468 @@ SELECT fvchar FROM test_prefix_table where fvchar = 'YYYYY-100'::name;
    Filter: ((fvchar)::name = 'YYYYY-100'::name)
 (2 rows)
 
+-- single table bitmapscan
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY-2%' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext ~~ 'YYYYY-2%'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext = 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY-2%' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-210
+ YYYYY-211
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY%' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext ~~ 'YYYYY%'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext = 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY%' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+(5 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext ~~ 'YYYY%'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: ((ftext >= 'YYYY'::text) AND (ftext <= 'YYYY￿'::text))
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+(5 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY-100' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext > 'YYYYY-100'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext >= 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY-100' ORDER BY 1;
+     ftext      
+----------------
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+ Z
+ ZZZZZ-000
+ ZZZZZ-111
+ ZZZZZ-123
+ ZZZZZ-210
+ ZZZZZ-211
+ ZZZZZ-300
+ 开源数据库-210
+ 高
+ 高斯数据库-210
+(14 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext > 'YYYYY'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext >= 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY' ORDER BY 1;
+     ftext      
+----------------
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+ Z
+ ZZZZZ-000
+ ZZZZZ-111
+ ZZZZZ-123
+ ZZZZZ-210
+ ZZZZZ-211
+ ZZZZZ-300
+ 开源数据库-210
+ 高
+ 高斯数据库-210
+(15 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYY' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext > 'YYYY'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext >= 'YYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYY' ORDER BY 1;
+     ftext      
+----------------
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+ Z
+ ZZZZZ-000
+ ZZZZZ-111
+ ZZZZZ-123
+ ZZZZZ-210
+ ZZZZZ-211
+ ZZZZZ-300
+ 开源数据库-210
+ 高
+ 高斯数据库-210
+(15 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY-100' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext < 'YYYYY-100'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext <= 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY-100' ORDER BY 1;
+   ftext   
+-----------
+ AAAAA-000
+ AAAAA-111
+ AAAAA-210
+ AAAAA-300
+ Y
+ YYYYY-000
+(6 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext < 'YYYYY'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext <= 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY' ORDER BY 1;
+   ftext   
+-----------
+ AAAAA-000
+ AAAAA-111
+ AAAAA-210
+ AAAAA-300
+ Y
+(5 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYY' ORDER BY 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (ftext < 'YYYY'::text)
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: (ftext <= 'YYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYY' ORDER BY 1;
+   ftext   
+-----------
+ AAAAA-000
+ AAAAA-111
+ AAAAA-210
+ AAAAA-300
+ Y
+(5 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext >= 'YYYYY-1' and ftext <= 'YYYYY-3' ORDER BY 1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: ((ftext >= 'YYYYY-1'::text) AND (ftext <= 'YYYYY-3'::text))
+         ->  Bitmap Index Scan on prefix_index_ftext
+               Index Cond: ((ftext >= 'YYYYY'::text) AND (ftext <= 'YYYYY'::text))
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext >= 'YYYYY-1' and ftext <= 'YYYYY-3' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+(3 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and fbytea = E'\\x59595959592D333030' ORDER BY 1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: ((fchar = 'YYYYY-300'::bpchar) AND (fbytea = '\x59595959592d333030'::bytea))
+         ->  Bitmap Index Scan on prefix_index_fchar_fbytea
+               Index Cond: ((fchar = 'YYYYY'::bpchar) AND (fbytea = '\x5959595959'::bytea))
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and fbytea = E'\\x59595959592D333030' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-300
+(1 row)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'ZZZZZ-300' or fbytea = E'\\x59595959592D333030' ORDER BY 1;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Recheck Cond: ((fchar = 'ZZZZZ-300'::bpchar) OR (fbytea = '\x59595959592d333030'::bytea))
+         Filter: ((fchar = 'ZZZZZ-300'::bpchar) OR (fbytea = '\x59595959592d333030'::bytea))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on prefix_index_fchar_fbytea
+                     Index Cond: (fchar = 'ZZZZZ'::bpchar)
+               ->  Bitmap Index Scan on prefix_index_fchar_fbytea
+                     Index Cond: (fbytea = '\x5959595959'::bytea)
+(10 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'ZZZZZ-300' or fbytea = E'\\x59595959592D333030' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-300
+ ZZZZZ-300
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and ftext = 'YYYYY-300' ORDER BY 1;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Bitmap Heap Scan on test_prefix_table
+   Filter: ((fchar = 'YYYYY-300'::bpchar) AND (ftext = 'YYYYY-300'::text))
+   ->  Bitmap Index Scan on prefix_index_ftext
+         Index Cond: (ftext = 'YYYYY'::text)
+(4 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and ftext = 'YYYYY-300' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-300
+(1 row)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300' ORDER BY 1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Recheck Cond: ((fchar = 'YYYYY-300'::bpchar) OR (ftext = 'ZZZZZ-300'::text))
+         Filter: ((fchar = 'YYYYY-300'::bpchar) OR (ftext = 'ZZZZZ-300'::text))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on prefix_index_fchar_fbytea
+                     Index Cond: (fchar = 'YYYYY'::bpchar)
+               ->  Bitmap Index Scan on prefix_index_ftext
+                     Index Cond: (ftext = 'ZZZZZ'::text)
+(10 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-300
+ ZZZZZ-300
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where (fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300') AND fvchar = 'YYYYY-300' ORDER BY 1;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Filter: (((fvchar)::text = 'YYYYY-300'::text) AND ((fchar = 'YYYYY-300'::bpchar) OR (ftext = 'ZZZZZ-300'::text)))
+         ->  Bitmap Index Scan on prefix_index_fvchar
+               Index Cond: ((fvchar)::text = 'YYYYY'::text)
+(6 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where (fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300') AND fvchar = 'YYYYY-300' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-300
+(1 row)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext = 'ZZZZZ-300' or (fchar = 'YYYYY-300' AND fvchar = 'YYYYY-300') ORDER BY 1;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Recheck Cond: ((ftext = 'ZZZZZ-300'::text) OR ((fvchar)::text = 'YYYYY-300'::text))
+         Filter: ((ftext = 'ZZZZZ-300'::text) OR ((fchar = 'YYYYY-300'::bpchar) AND ((fvchar)::text = 'YYYYY-300'::text)))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on prefix_index_ftext
+                     Index Cond: (ftext = 'ZZZZZ'::text)
+               ->  Bitmap Index Scan on prefix_index_fvchar
+                     Index Cond: ((fvchar)::text = 'YYYYY'::text)
+(10 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext = 'ZZZZZ-300' or (fchar = 'YYYYY-300' AND fvchar = 'YYYYY-300') ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-300
+ ZZZZZ-300
+(2 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar = 'AAAAA-300' OR
+    fvchar = 'YYYYY-300' OR
+    ftext = 'ZZZZZ-300' OR
+    fclob = '高斯数据库-210' OR
+    fblob = 'e5bc80e6ba90e695b0e68daee5ba932d323130'
+ORDER BY 1;
+                                                                                                                 QUERY PLAN                                                                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Recheck Cond: ((fchar = 'AAAAA-300'::bpchar) OR ((fvchar)::text = 'YYYYY-300'::text) OR (ftext = 'ZZZZZ-300'::text) OR ((fclob)::text = '高斯数据库-210'::text) OR ((fblob)::raw = 'E5BC80E6BA90E695B0E68DAEE5BA932D323130'::raw))
+         Filter: ((fchar = 'AAAAA-300'::bpchar) OR ((fvchar)::text = 'YYYYY-300'::text) OR (ftext = 'ZZZZZ-300'::text) OR ((fclob)::text = '高斯数据库-210'::text) OR ((fblob)::raw = 'E5BC80E6BA90E695B0E68DAEE5BA932D323130'::raw))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on prefix_index_fchar_fbytea
+                     Index Cond: (fchar = 'AAAAA'::bpchar)
+               ->  Bitmap Index Scan on prefix_index_fvchar
+                     Index Cond: ((fvchar)::text = 'YYYYY'::text)
+               ->  Bitmap Index Scan on prefix_index_ftext
+                     Index Cond: (ftext = 'ZZZZZ'::text)
+               ->  Bitmap Index Scan on prefix_index_fclob
+                     Index Cond: ((fclob)::text = '高斯数据库'::text)
+               ->  Bitmap Index Scan on prefix_index_fblob
+                     Index Cond: ((fblob)::raw = 'E5BC80E6BA'::raw)
+(16 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar = 'AAAAA-300' OR
+    fvchar = 'YYYYY-300' OR
+    ftext = 'ZZZZZ-300' OR
+    fclob = '高斯数据库-210' OR
+    fblob = 'e5bc80e6ba90e695b0e68daee5ba932d323130'
+ORDER BY 1;
+     ftext      
+----------------
+ AAAAA-300
+ YYYYY-300
+ ZZZZZ-300
+ 开源数据库-210
+ 高斯数据库-210
+(5 rows)
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar like 'AAAAA%' OR
+    fvchar like 'YYYYY%' OR
+    ftext like 'ZZZZZ%' OR
+    fclob like '高斯数据库%'
+ORDER BY 1;
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext COLLATE utf8mb4_bin
+   ->  Bitmap Heap Scan on test_prefix_table
+         Recheck Cond: ((fchar ~~ 'AAAAA%'::text) OR ((fvchar)::text ~~ 'YYYYY%'::text) OR (ftext ~~ 'ZZZZZ%'::text) OR ((fclob)::text ~~ '高斯数据库%'::text))
+         Filter: ((fchar ~~ 'AAAAA%'::text) OR ((fvchar)::text ~~ 'YYYYY%'::text) OR (ftext ~~ 'ZZZZZ%'::text) OR ((fclob)::text ~~ '高斯数据库%'::text))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on prefix_index_fchar_fbytea
+                     Index Cond: (fchar = 'AAAAA'::bpchar)
+               ->  Bitmap Index Scan on prefix_index_fvchar
+                     Index Cond: ((fvchar)::text = 'YYYYY'::text)
+               ->  Bitmap Index Scan on prefix_index_ftext
+                     Index Cond: (ftext = 'ZZZZZ'::text)
+               ->  Bitmap Index Scan on prefix_index_fclob
+                     Index Cond: ((fclob)::text = '高斯数据库'::text)
+(14 rows)
+
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar like 'AAAAA%' OR
+    fvchar like 'YYYYY%' OR
+    ftext like 'ZZZZZ%' OR
+    fclob like '高斯数据库%'
+ORDER BY 1;
+     ftext      
+----------------
+ AAAAA-000
+ AAAAA-111
+ AAAAA-210
+ AAAAA-300
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+ ZZZZZ-000
+ ZZZZZ-111
+ ZZZZZ-123
+ ZZZZZ-210
+ ZZZZZ-211
+ ZZZZZ-300
+ 高斯数据库-210
+(16 rows)
+
 set enable_bitmapscan=false;
 set enable_material=false;
 set enable_hashjoin=false;
@@ -1746,7 +2208,7 @@ SELECT t1.ftext,t2.fchar FROM test_prefix_table t1 join test_prefix_table t2 on 
                                QUERY PLAN                                
 -------------------------------------------------------------------------
  Sort
-   Sort Key: t1.ftext, t2.fchar
+   Sort Key: t1.ftext COLLATE utf8mb4_bin, t2.fchar COLLATE utf8mb4_bin
    ->  Nested Loop
          ->  Seq Scan on test_prefix_table t2
          ->  Index Scan using prefix_index_ftext on test_prefix_table t1
@@ -1781,12 +2243,12 @@ SELECT t1.ftext,t2.fchar FROM test_prefix_table t1 join test_prefix_table t2 on 
 
 EXPLAIN (costs false)
 SELECT count(1) FROM test_prefix_table t1 join test_prefix_table t2 on (t2.fvchar LIKE 'X%' AND t1.ftext > t2.fvchar);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
  Aggregate
    ->  Nested Loop
          ->  Index Scan using prefix_index_fvchar on test_prefix_table t2
-               Index Cond: (((fvchar)::text >= 'X'::text) AND ((fvchar)::text < 'Y'::text))
+               Index Cond: (((fvchar)::text >= 'X'::text) AND ((fvchar)::text <= 'X￿￿￿￿'::text))
                Filter: ((fvchar)::text ~~ 'X%'::text)
          ->  Index Scan using prefix_index_ftext on test_prefix_table t1
                Index Cond: (ftext >= (t2.fvchar)::text(5))
@@ -1804,7 +2266,7 @@ SELECT t1.ftext FROM test_prefix_table t1 join test_prefix_table t2 on  t1.ftext
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
-   Sort Key: t1.ftext
+   Sort Key: t1.ftext COLLATE utf8mb4_bin
    ->  Nested Loop
          ->  Seq Scan on test_prefix_table t1
                Filter: (id = 30)
@@ -1830,7 +2292,7 @@ SELECT t1.ftext,t2.fvchar FROM test_prefix_table t1, test_prefix_table t2 where 
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
-   Sort Key: t1.ftext
+   Sort Key: t1.ftext COLLATE utf8mb4_bin
    ->  Nested Loop
          ->  Seq Scan on test_prefix_table t1
                Filter: (id = 30)
@@ -1856,7 +2318,7 @@ SELECT t1.fvchar,t2.fvchar FROM test_prefix_table t1 left join test_prefix_table
                                                 QUERY PLAN                                                 
 -----------------------------------------------------------------------------------------------------------
  Sort
-   Sort Key: t1.fvchar, t2.fvchar
+   Sort Key: t1.fvchar COLLATE utf8mb4_bin, t2.fvchar COLLATE utf8mb4_bin
    ->  Nested Loop Left Join
          ->  Seq Scan on test_prefix_table t1
          ->  Index Scan using prefix_index_fvchar on test_prefix_table t2
@@ -1984,7 +2446,7 @@ SELECT fbpchar FROM test_prefix_tb where fbpchar > '开源' ORDER BY 1;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Sort
-   Sort Key: fbpchar
+   Sort Key: fbpchar COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_fchar_fbytea on test_prefix_tb
          Index Cond: (fbpchar >= '开源'::bpchar)
          Filter: (fbpchar > '开源'::bpchar)
@@ -2004,7 +2466,7 @@ SELECT fbpchar FROM test_prefix_tb where fbpchar like '高斯数据库-%' ORDER 
                     QUERY PLAN                     
 ---------------------------------------------------
  Sort
-   Sort Key: fbpchar
+   Sort Key: fbpchar COLLATE utf8mb4_bin
    ->  Seq Scan on test_prefix_tb
          Filter: (fbpchar ~~ '高斯数据库-%'::text)
 (4 rows)
@@ -3138,5 +3600,236 @@ ERROR:  access method "cbtree" does not support prefix key
 CREATE INDEX prefix_cindex_ftext ON test_prefix_cstore (ftext(5));
 ERROR:  access method "psort" does not support prefix key
 DROP TABLE IF EXISTS test_prefix_cstore;
+-- fk not supported
+CREATE TABLE test_foreign(
+    a text,
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext) ON DELETE SET NULL
+);
+ERROR:  syntax error at or near "("
+LINE 3:     FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext) O...
+                          ^
+CREATE TABLE test_foreign(
+    a text,
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext(9)) ON DELETE SET NULL
+);
+ERROR:  syntax error at or near "("
+LINE 3:     FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext(9)...
+                          ^
+CREATE TABLE test_foreign(
+    a varchar(64),
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext) ON DELETE SET NULL
+);
+ERROR:  syntax error at or near "("
+LINE 3:     FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext) O...
+                          ^
+CREATE TABLE test_foreign(
+    a varchar(64),
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext(9)) ON DELETE SET NULL
+);
+ERROR:  syntax error at or near "("
+LINE 3:     FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext(9)...
+                          ^
+CREATE TABLE test_foreign(
+    a varchar(64),
+    FOREIGN KEY (a) REFERENCES test_prefix_table(ftext) ON DELETE SET NULL
+);
+ERROR:  relation "test_prefix_table" does not exist
+-- alter table add CONSTRAINT
+CREATE TABLE test_prefix_table(
+    id INTEGER,
+    fchar CHAR(64),
+    "Fvchar" VARCHAR(64),
+    ftext TEXT
+);
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-300', 'YYYYY-300', 'YYYYY-300');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-000', 'YYYYY-000', 'YYYYY-000');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-211', 'YYYYY-211', 'YYYYY-211');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-111', 'YYYYY-111', 'YYYYY-111');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-210', 'YYYYY-210', 'YYYYY-210');
+INSERT INTO test_prefix_table VALUES(20, 'Y', 'Y', 'Y');
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210');
+INSERT INTO test_prefix_table VALUES(20, '开源数据库-210', '开源数据库-210', '开源数据库-210');
+INSERT INTO test_prefix_table VALUES(20, '高-210', '高-210', '高-210');
+-- -- ADD CONSTRAINT
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_pk1 PRIMARY KEY(ftext(5)); -- not supported
+ERROR:  primary keys cannot be expressions
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk1 UNIQUE(ftext(5)); -- duplicate key
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "prefix_uk1" for table "test_prefix_table"
+ERROR:  could not create unique index "prefix_uk1"
+DETAIL:  Key (ftext(5))=(YYYYY) is duplicated.
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk1 UNIQUE(ftext(9));
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "prefix_uk1" for table "test_prefix_table"
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk2 UNIQUE("Fvchar"(9));
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "prefix_uk2" for table "test_prefix_table"
+SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='prefix_uk2';
+ pg_get_constraintdef 
+----------------------
+ UNIQUE ("Fvchar"(9))
+(1 row)
+
+SELECT pg_get_indexdef('prefix_uk2'::regclass);
+                                           pg_get_indexdef                                           
+-----------------------------------------------------------------------------------------------------
+ CREATE UNIQUE INDEX prefix_uk2 ON test_prefix_table USING btree ("Fvchar"(9)) TABLESPACE pg_default
+(1 row)
+
+SELECT pg_get_tabledef('test_prefix_table'::regclass);
+                                      pg_get_tabledef                                      
+-------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                +
+ CREATE TABLE test_prefix_table (                                                         +
+     id integer,                                                                          +
+     fchar character(64),                                                                 +
+     "Fvchar" character varying(64),                                                      +
+     ftext text                                                                           +
+ )                                                                                        +
+ WITH (orientation=row, compression=no);                                                  +
+ ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk2 UNIQUE USING btree ("Fvchar"(9));+
+ ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk1 UNIQUE USING btree (ftext(9));
+(1 row)
+
+\d test_prefix_table
+      Table "public.test_prefix_table"
+ Column |         Type          | Modifiers 
+--------+-----------------------+-----------
+ id     | integer               | 
+ fchar  | character(64)         | 
+ Fvchar | character varying(64) | 
+ ftext  | text                  | 
+Indexes:
+    "prefix_uk1" UNIQUE CONSTRAINT, btree (ftext(9)) TABLESPACE pg_default
+    "prefix_uk2" UNIQUE CONSTRAINT, btree ("Fvchar"(9)) TABLESPACE pg_default
+
+-- -- -- constraint TEST
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-300', 'YYYYY-300', 'YYYYY-300'); -- duplicate key
+ERROR:  duplicate key value violates unique constraint "prefix_uk1"
+DETAIL:  Key (ftext(9))=(YYYYY-300) already exists.
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210'); -- duplicate key
+ERROR:  duplicate key value violates unique constraint "prefix_uk1"
+DETAIL:  Key (ftext(9))=(高斯数据库-210) already exists.
+INSERT INTO test_prefix_table VALUES(20, '开源数据库-2101', '开源数据库-2101', '开源数据库-2101'); -- duplicate key
+ERROR:  duplicate key value violates unique constraint "prefix_uk1"
+DETAIL:  Key (ftext(9))=(开源数据库-210) already exists.
+-- -- -- QUERY PLAN
+set enable_seqscan=false;
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext like 'YYYY%' ORDER BY 1;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: ftext
+   ->  Index Scan using prefix_uk1 on test_prefix_table t
+         Index Cond: ((ftext >= 'YYYY'::text) AND (ftext < 'YYYZ'::text))
+         Filter: (ftext ~~ 'YYYY%'::text)
+(5 rows)
+
+SELECT ftext FROM test_prefix_table t where ftext like 'YYYY%' ORDER BY 1;
+   ftext   
+-----------
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+(5 rows)
+
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext like '开源数据库-210%' ORDER BY 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Sort Key: ftext
+   ->  Index Scan using prefix_uk1 on test_prefix_table t
+         Index Cond: (ftext = '开源数据库-210'::text)
+         Filter: (ftext ~~ '开源数据库-210%'::text)
+(5 rows)
+
+SELECT ftext FROM test_prefix_table t where ftext like '开源数据库-210%' ORDER BY 1;
+     ftext      
+----------------
+ 开源数据库-210
+(1 row)
+
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext < 'YYYYY-210' ORDER BY 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Sort Key: ftext
+   ->  Index Scan using prefix_uk1 on test_prefix_table t
+         Index Cond: (ftext <= 'YYYYY-210'::text)
+         Filter: (ftext < 'YYYYY-210'::text)
+(5 rows)
+
+SELECT ftext FROM test_prefix_table t where ftext < 'YYYYY-210' ORDER BY 1;
+   ftext   
+-----------
+ Y
+ YYYYY-000
+ YYYYY-111
+(3 rows)
+
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext >= 'YYYYY' ORDER BY 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Sort Key: ftext
+   ->  Index Scan using prefix_uk1 on test_prefix_table t
+         Index Cond: (ftext >= 'YYYYY'::text)
+         Filter: (ftext >= 'YYYYY'::text)
+(5 rows)
+
+SELECT ftext FROM test_prefix_table t where ftext >= 'YYYYY' ORDER BY 1;
+     ftext      
+----------------
+ YYYYY-000
+ YYYYY-111
+ YYYYY-210
+ YYYYY-211
+ YYYYY-300
+ 开源数据库-210
+ 高-210
+ 高斯数据库-210
+(8 rows)
+
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext IS NULL ORDER BY 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Sort Key: ftext
+   ->  Index Scan using prefix_uk1 on test_prefix_table t
+         Index Cond: (ftext IS NULL)
+(4 rows)
+
+SELECT ftext FROM test_prefix_table t where ftext IS NULL ORDER BY 1;
+ ftext 
+-------
+(0 rows)
+
+DROP TABLE test_prefix_table;
+-- create table CONSTRAINTS
+CREATE TABLE test_prefix_table(
+    id INTEGER,
+    fchar CHAR(64),
+    "Fvchar" VARCHAR(64),
+    ftext TEXT,
+    CONSTRAINT prefix_pk1 PRIMARY KEY(ftext(5))
+); -- error
+ERROR:  primary keys cannot be expressions
+CREATE TABLE test_prefix_table(
+    id INTEGER,
+    fchar CHAR(64),
+    "Fvchar" VARCHAR(64),
+    ftext TEXT,
+    CONSTRAINT prefix_pk1 UNIQUE(ftext(5))
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "prefix_pk1" for table "test_prefix_table"
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210');
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210'); -- duplicate key
+ERROR:  duplicate key value violates unique constraint "prefix_pk1"
+DETAIL:  Key (ftext(5))=(高斯数据库) already exists.
+DROP TABLE test_prefix_table;
 \c regression
 drop database prefix_index_db;

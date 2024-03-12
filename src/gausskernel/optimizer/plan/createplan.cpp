@@ -101,11 +101,12 @@ static CStoreScan* create_cstorescan_plan(PlannerInfo* root, Path* best_path, Li
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* create_tsstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 #endif   /* ENABLE_MULTIPLE_NODES */
-static Scan* create_indexscan_plan(
-    PlannerInfo* root, IndexPath* best_path, List* tlist, List* scan_clauses, bool indexonly);
+static Scan* create_indexscan_plan(PlannerInfo* root, IndexPath* best_path, List* tlist, List* scan_clauses,
+    bool indexonly, Bitmapset** out_prefixkeys = NULL);
 static BitmapHeapScan* create_bitmap_scan_plan(
     PlannerInfo* root, BitmapHeapPath* best_path, List* tlist, List* scan_clauses);
-static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** qual, List** indexqual, List** indexECs);
+static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** qual, List** indexqual,
+    List** indexECs, Bitmapset** out_prefixkeys);
 static TidScan* create_tidscan_plan(PlannerInfo* root, TidPath* best_path, List* tlist, List* scan_clauses);
 static SubqueryScan* create_subqueryscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static FunctionScan* create_functionscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -2469,9 +2470,8 @@ static TsStoreScan* create_tsstorescan_plan(PlannerInfo* root, Path* best_path, 
  }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
-static bool clause_relate_to_prefixkey(RestrictInfo* rinfo, IndexOptInfo* index, Bitmapset* prefixkeys)
+static bool clause_relate_to_prefixkey(RestrictInfo* rinfo, Index relid, Bitmapset* prefixkeys)
 {
-    Index relid = index->rel->relid;
     Bitmapset* columns = NULL;
 
     if (prefixkeys == NULL || bms_is_empty(prefixkeys) || !bms_is_member(relid, rinfo->clause_relids)) {
@@ -2492,7 +2492,7 @@ static bool clause_relate_to_prefixkey(RestrictInfo* rinfo, IndexOptInfo* index,
  * create_bitmap_subplan needs to be able to override the prior decision.
  */
 static Scan* create_indexscan_plan(
-    PlannerInfo* root, IndexPath* best_path, List* tlist, List* scan_clauses, bool indexonly)
+    PlannerInfo* root, IndexPath* best_path, List* tlist, List* scan_clauses, bool indexonly, Bitmapset** out_prefixkeys)
 {
     Scan* scan_plan = NULL;
     List* indexquals = best_path->indexquals;
@@ -2570,7 +2570,7 @@ static Scan* create_indexscan_plan(
 
         if (list_member_ptr(indexquals, rinfo))
             continue; /* simple duplicate */
-        if (clause_relate_to_prefixkey(rinfo, best_path->indexinfo, prefixkeys)) {
+        if (clause_relate_to_prefixkey(rinfo, baserelid, prefixkeys)) {
             qpqual = lappend(qpqual, rinfo);
             continue;
         }
@@ -2666,6 +2666,12 @@ static Scan* create_indexscan_plan(
     add_distribute_info(root, &(scan_plan->plan), baserelid, &(best_path->path), opquals);
 #endif
 
+    if (out_prefixkeys != NULL) {
+        *out_prefixkeys = prefixkeys;
+    } else {
+        bms_free(prefixkeys);
+    }
+
     copy_path_costsize(&scan_plan->plan, &best_path->path);
 
     return scan_plan;
@@ -2709,13 +2715,15 @@ static BitmapHeapScan* create_bitmap_scan_plan(
     List* qpqual = NIL;
     ListCell* l = NULL;
     BitmapHeapScan* scan_plan = NULL;
+    Bitmapset* prefixkeys = NULL;
 
     /* it should be a base rel... */
     Assert(baserelid > 0);
     Assert(best_path->path.parent->rtekind == RTE_RELATION);
 
     /* Process the bitmapqual tree into a Plan tree and qual lists */
-    bitmapqualplan = create_bitmap_subplan(root, best_path->bitmapqual, &bitmapqualorig, &indexquals, &indexECs);
+    bitmapqualplan = create_bitmap_subplan(root, best_path->bitmapqual, &bitmapqualorig, &indexquals, &indexECs,
+        &prefixkeys);
 
     /*
      * The qpqual list must contain all restrictions not automatically handled
@@ -2755,6 +2763,10 @@ static BitmapHeapScan* create_bitmap_scan_plan(
             continue; /* we may drop pseudoconstants here */
         if (CheckBitmapScanQualExists(root, indexquals, clause))
             continue; /* simple duplicate */
+        if (clause_relate_to_prefixkey(rinfo, baserelid, prefixkeys)) {
+            qpqual = lappend(qpqual, rinfo);
+            continue;
+        }
         if (rinfo->parent_ec && list_member_ptr(indexECs, rinfo->parent_ec))
             continue; /* derived from same EquivalenceClass */
         if (!contain_mutable_functions(clause)) {
@@ -2768,6 +2780,7 @@ static BitmapHeapScan* create_bitmap_scan_plan(
 
     /* Release indexquals */
     list_free_ext(indexquals);
+    bms_free(prefixkeys);
 
     /* Sort clauses into best execution order */
     qpqual = order_qual_clauses(root, qpqual);
@@ -2831,7 +2844,8 @@ static BitmapHeapScan* create_bitmap_scan_plan(
  * Note: if you find yourself changing this, you probably need to change
  * make_restrictinfo_from_bitmapqual too.
  */
-static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** qual, List** indexqual, List** indexECs)
+static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** qual, List** indexqual, List** indexECs,
+    Bitmapset** out_prefixkeys)
 {
     Plan* plan = NULL;
 
@@ -2841,6 +2855,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
         List* subquals = NIL;
         List* subindexquals = NIL;
         List* subindexECs = NIL;
+        Bitmapset* prefixkeys = NULL;
         ListCell* l = NULL;
 
         /*
@@ -2855,13 +2870,19 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
             List* subqual = NIL;
             List* subindexqual = NIL;
             List* subindexEC = NIL;
+            Bitmapset* sub_prefixkeys = NULL;
+            Bitmapset* tmp_prefixkeys = prefixkeys;
 
-            subplan = create_bitmap_subplan(root, (Path*)lfirst(l), &subqual, &subindexqual, &subindexEC);
+            subplan = create_bitmap_subplan(root, (Path*)lfirst(l), &subqual, &subindexqual, &subindexEC,
+                &sub_prefixkeys);
             subplans = lappend(subplans, subplan);
             subquals = list_concat_unique(subquals, subqual);
             subindexquals = list_concat_unique(subindexquals, subindexqual);
             /* Duplicates in indexECs aren't worth getting rid of */
             subindexECs = list_concat(subindexECs, subindexEC);
+            prefixkeys = bms_union(tmp_prefixkeys, sub_prefixkeys);
+            bms_free(tmp_prefixkeys);
+            bms_free(sub_prefixkeys);
         }
         if (apath->path.parent->orientation == REL_COL_ORIENTED) {
             plan = (Plan*)make_cstoreindex_and(subplans);
@@ -2880,11 +2901,13 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
         *qual = subquals;
         *indexqual = subindexquals;
         *indexECs = subindexECs;
+        *out_prefixkeys = prefixkeys;
     } else if (IsA(bitmapqual, BitmapOrPath)) {
         BitmapOrPath* opath = (BitmapOrPath*)bitmapqual;
         List* subplans = NIL;
         List* subquals = NIL;
         List* subindexquals = NIL;
+        Bitmapset* prefixkeys = NULL;
         bool const_true_subqual = false;
         bool const_true_subindexqual = false;
         ListCell* l = NULL;
@@ -2903,8 +2926,11 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
             List* subqual = NIL;
             List* subindexqual = NIL;
             List* subindexEC = NIL;
+            Bitmapset* sub_prefixkeys = NULL;
+            Bitmapset* tmp_prefixkeys = prefixkeys;
 
-            subplan = create_bitmap_subplan(root, (Path*)lfirst(l), &subqual, &subindexqual, &subindexEC);
+            subplan = create_bitmap_subplan(root, (Path*)lfirst(l), &subqual, &subindexqual, &subindexEC,
+                &sub_prefixkeys);
             subplans = lappend(subplans, subplan);
             if (subqual == NIL)
                 const_true_subqual = true;
@@ -2914,6 +2940,9 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
                 const_true_subindexqual = true;
             else if (!const_true_subindexqual)
                 subindexquals = lappend(subindexquals, make_ands_explicit(subindexqual));
+            prefixkeys = bms_union(tmp_prefixkeys, sub_prefixkeys);
+            bms_free(tmp_prefixkeys);
+            bms_free(sub_prefixkeys);
         }
 
         /*
@@ -2951,21 +2980,28 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
             *qual = subquals;
         else
             *qual = list_make1(make_orclause(subquals));
-        if (const_true_subindexqual)
+        if (const_true_subindexqual) {
             *indexqual = NIL;
-        else if (list_length(subindexquals) <= 1)
+            *out_prefixkeys = NULL;
+            bms_free(prefixkeys);
+        } else if (list_length(subindexquals) <= 1) {
             *indexqual = subindexquals;
-        else
+            *out_prefixkeys = prefixkeys;
+        } else {
             *indexqual = list_make1(make_orclause(subindexquals));
+            *out_prefixkeys = prefixkeys;
+        }
         *indexECs = NIL;
     } else if (IsA(bitmapqual, IndexPath)) {
         IndexPath* ipath = (IndexPath*)bitmapqual;
         Plan* indexscan = NULL;
         List* subindexECs = NIL;
         ListCell* l = NULL;
+        Bitmapset* prefixkeys = NULL;
 
         if (ipath->path.parent->orientation == REL_COL_ORIENTED) {
-            CStoreIndexScan* iscan = (CStoreIndexScan*)create_indexscan_plan(root, ipath, NIL, NIL, false);
+            CStoreIndexScan* iscan = (CStoreIndexScan*)create_indexscan_plan(root, ipath, NIL, NIL, false,
+                &prefixkeys);
             Assert(IsA(iscan, CStoreIndexScan));
             plan = (Plan*)make_cstoreindex_ctidscan(
                 root, iscan->scan.scanrelid, iscan->indexid, iscan->indexqual, iscan->indexqualorig, iscan->indextlist);
@@ -2976,7 +3012,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
                     errmsg("Unsupported Bitmap Index Scan FOR TIMESERIES.")));
         } else {
             /* Use the regular indexscan plan build machinery... */
-            IndexScan* iscan = (IndexScan*)create_indexscan_plan(root, ipath, NIL, NIL, false);
+            IndexScan* iscan = (IndexScan*)create_indexscan_plan(root, ipath, NIL, NIL, false, &prefixkeys);
             Assert(IsA(iscan, IndexScan));
             /* then convert to a bitmap indexscan */
             plan = (Plan*)make_bitmap_indexscan(
@@ -3035,6 +3071,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
                 subindexECs = lappend(subindexECs, rinfo->parent_ec);
         }
         *indexECs = subindexECs;
+        *out_prefixkeys = prefixkeys;
     } else {
         ereport(ERROR,
             (errmodule(MOD_OPT),

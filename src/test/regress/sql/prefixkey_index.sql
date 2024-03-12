@@ -189,10 +189,10 @@ DROP TABLE test_prefix_key_len;
 --
 CREATE TABLE test_prefix_table (
     id INTEGER,
-    fchar CHAR(64),
-    fvchar VARCHAR(64),
-    ftext TEXT,
-    fclob CLOB,
+    fchar CHAR(64) collate utf8mb4_bin,
+    fvchar VARCHAR(64) collate utf8mb4_bin,
+    ftext TEXT collate utf8mb4_bin,
+    fclob CLOB collate utf8mb4_bin,
     fblob BLOB,
     fraw RAW,
     fbytea BYTEA
@@ -416,7 +416,86 @@ EXPLAIN (costs false)
 SELECT ftext FROM test_prefix_table where ftext not like 'YYYY%' ORDER BY 1;
 EXPLAIN (costs false)
 SELECT fvchar FROM test_prefix_table where fvchar = 'YYYYY-100'::name;
+-- single table bitmapscan
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY-2%' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY-2%' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY%' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYYY%' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
 
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY-100' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY-100' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYYY' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYY' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext > 'YYYY' ORDER BY 1;
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY-100' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY-100' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYYY' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYY' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext < 'YYYY' ORDER BY 1;
+
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext >= 'YYYYY-1' and ftext <= 'YYYYY-3' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext >= 'YYYYY-1' and ftext <= 'YYYYY-3' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and fbytea = E'\\x59595959592D333030' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and fbytea = E'\\x59595959592D333030' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'ZZZZZ-300' or fbytea = E'\\x59595959592D333030' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'ZZZZZ-300' or fbytea = E'\\x59595959592D333030' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and ftext = 'YYYYY-300' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' and ftext = 'YYYYY-300' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where (fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300') AND fvchar = 'YYYYY-300' ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where (fchar = 'YYYYY-300' or ftext = 'ZZZZZ-300') AND fvchar = 'YYYYY-300' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext = 'ZZZZZ-300' or (fchar = 'YYYYY-300' AND fvchar = 'YYYYY-300') ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext = 'ZZZZZ-300' or (fchar = 'YYYYY-300' AND fvchar = 'YYYYY-300') ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar = 'AAAAA-300' OR
+    fvchar = 'YYYYY-300' OR
+    ftext = 'ZZZZZ-300' OR
+    fclob = '高斯数据库-210' OR
+    fblob = 'e5bc80e6ba90e695b0e68daee5ba932d323130'
+ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar = 'AAAAA-300' OR
+    fvchar = 'YYYYY-300' OR
+    ftext = 'ZZZZZ-300' OR
+    fclob = '高斯数据库-210' OR
+    fblob = 'e5bc80e6ba90e695b0e68daee5ba932d323130'
+ORDER BY 1;
+EXPLAIN (costs false)
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar like 'AAAAA%' OR
+    fvchar like 'YYYYY%' OR
+    ftext like 'ZZZZZ%' OR
+    fclob like '高斯数据库%'
+ORDER BY 1;
+SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where
+    fchar like 'AAAAA%' OR
+    fvchar like 'YYYYY%' OR
+    ftext like 'ZZZZZ%' OR
+    fclob like '高斯数据库%'
+ORDER BY 1;
 
 set enable_bitmapscan=false;
 set enable_material=false;
@@ -811,6 +890,99 @@ CREATE TABLE test_prefix_cstore(
 CREATE INDEX prefix_cindex_fchar_fbytea ON test_prefix_cstore using btree (fchar(5), fbytea(5));
 CREATE INDEX prefix_cindex_ftext ON test_prefix_cstore (ftext(5));
 DROP TABLE IF EXISTS test_prefix_cstore;
+
+-- fk not supported
+CREATE TABLE test_foreign(
+    a text,
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext) ON DELETE SET NULL
+);
+CREATE TABLE test_foreign(
+    a text,
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext(9)) ON DELETE SET NULL
+);
+CREATE TABLE test_foreign(
+    a varchar(64),
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext) ON DELETE SET NULL
+);
+CREATE TABLE test_foreign(
+    a varchar(64),
+    FOREIGN KEY (a(9)) REFERENCES test_prefix_table(ftext(9)) ON DELETE SET NULL
+);
+CREATE TABLE test_foreign(
+    a varchar(64),
+    FOREIGN KEY (a) REFERENCES test_prefix_table(ftext) ON DELETE SET NULL
+);
+
+-- alter table add CONSTRAINT
+CREATE TABLE test_prefix_table(
+    id INTEGER,
+    fchar CHAR(64),
+    "Fvchar" VARCHAR(64),
+    ftext TEXT
+);
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-300', 'YYYYY-300', 'YYYYY-300');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-000', 'YYYYY-000', 'YYYYY-000');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-211', 'YYYYY-211', 'YYYYY-211');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-111', 'YYYYY-111', 'YYYYY-111');
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-210', 'YYYYY-210', 'YYYYY-210');
+INSERT INTO test_prefix_table VALUES(20, 'Y', 'Y', 'Y');
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210');
+INSERT INTO test_prefix_table VALUES(20, '开源数据库-210', '开源数据库-210', '开源数据库-210');
+INSERT INTO test_prefix_table VALUES(20, '高-210', '高-210', '高-210');
+
+-- -- ADD CONSTRAINT
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_pk1 PRIMARY KEY(ftext(5)); -- not supported
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk1 UNIQUE(ftext(5)); -- duplicate key
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk1 UNIQUE(ftext(9));
+ALTER TABLE test_prefix_table ADD CONSTRAINT prefix_uk2 UNIQUE("Fvchar"(9));
+SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='prefix_uk2';
+SELECT pg_get_indexdef('prefix_uk2'::regclass);
+SELECT pg_get_tabledef('test_prefix_table'::regclass);
+\d test_prefix_table
+
+-- -- -- constraint TEST
+INSERT INTO test_prefix_table VALUES(20, 'YYYYY-300', 'YYYYY-300', 'YYYYY-300'); -- duplicate key
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210'); -- duplicate key
+INSERT INTO test_prefix_table VALUES(20, '开源数据库-2101', '开源数据库-2101', '开源数据库-2101'); -- duplicate key
+
+-- -- -- QUERY PLAN
+set enable_seqscan=false;
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext like 'YYYY%' ORDER BY 1;
+SELECT ftext FROM test_prefix_table t where ftext like 'YYYY%' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext like '开源数据库-210%' ORDER BY 1;
+SELECT ftext FROM test_prefix_table t where ftext like '开源数据库-210%' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext < 'YYYYY-210' ORDER BY 1;
+SELECT ftext FROM test_prefix_table t where ftext < 'YYYYY-210' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext >= 'YYYYY' ORDER BY 1;
+SELECT ftext FROM test_prefix_table t where ftext >= 'YYYYY' ORDER BY 1;
+EXPLAIN (costs false)
+SELECT ftext FROM test_prefix_table t where ftext IS NULL ORDER BY 1;
+SELECT ftext FROM test_prefix_table t where ftext IS NULL ORDER BY 1;
+
+DROP TABLE test_prefix_table;
+
+-- create table CONSTRAINTS
+CREATE TABLE test_prefix_table(
+    id INTEGER,
+    fchar CHAR(64),
+    "Fvchar" VARCHAR(64),
+    ftext TEXT,
+    CONSTRAINT prefix_pk1 PRIMARY KEY(ftext(5))
+); -- error
+CREATE TABLE test_prefix_table(
+    id INTEGER,
+    fchar CHAR(64),
+    "Fvchar" VARCHAR(64),
+    ftext TEXT,
+    CONSTRAINT prefix_pk1 UNIQUE(ftext(5))
+);
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210');
+INSERT INTO test_prefix_table VALUES(20, '高斯数据库-210', '高斯数据库-210', '高斯数据库-210'); -- duplicate key
+DROP TABLE test_prefix_table;
 
 \c regression
 drop database prefix_index_db;

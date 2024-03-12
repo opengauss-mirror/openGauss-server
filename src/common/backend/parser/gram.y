@@ -14838,6 +14838,21 @@ constraint_elem: ColId con_asc_desc
 					$$->ordering = SORTBY_DEFAULT;
 					$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
 				}
+			| ColId '(' Iconst ')' opt_asc_desc
+				{
+					PrefixKey* pk = makeNode(PrefixKey);
+					pk->arg = (Expr*)makeColumnRef(pstrdup($1), NIL, @1, yyscanner);
+					pk->length = $3;
+
+					$$ = makeNode(IndexElem);
+					$$->name = NULL;
+					$$->expr = (Node*)pk;
+					$$->indexcolname = NULL;
+					$$->collation = NIL;
+					$$->opclass = NIL;
+					$$->ordering = (SortByDir)$5;
+					$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+				}
 			| '(' a_expr ')' opt_asc_desc
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	

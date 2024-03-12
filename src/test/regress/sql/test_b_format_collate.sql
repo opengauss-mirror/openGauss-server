@@ -40,6 +40,83 @@ create table t1(a blob);
 SET b_format_behavior_compat_options = 'enable_multi_charset';
 SHOW b_format_behavior_compat_options;
 
+-- test index collation
+DROP TABLE if exists t_collate_index;
+CREATE TABLE t_collate_index(id int, a text collate "C");
+INSERT INTO t_collate_index VALUES(1, 'ABC');
+INSERT INTO t_collate_index VALUES(1, 'ABC  ');
+CREATE INDEX idx_t_collate_index ON t_collate_index(a);
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%';
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a collate "C" like 'abc%';
+
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci;
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci;
+
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%';
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a COLLATE utf8mb4_general_ci like 'abc%';
+DROP TABLE if exists t_collate_index;
+
+CREATE TABLE t_collate_index(id int, a varchar(16) collate utf8mb4_bin);
+INSERT INTO t_collate_index VALUES(1, 'abc');
+INSERT INTO t_collate_index VALUES(1, 'abc ');
+INSERT INTO t_collate_index VALUES(1, 'abc  ');
+INSERT INTO t_collate_index VALUES(1, 'abc   ');
+CREATE INDEX idx_t_collate_index ON t_collate_index(a);
+
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %';
+DROP TABLE if exists t_collate_index;
+
+CREATE TABLE t_collate_index(id int, a char(16) collate utf8mb4_bin);
+INSERT INTO t_collate_index VALUES(1, 'abc');
+INSERT INTO t_collate_index VALUES(1, 'abc ');
+INSERT INTO t_collate_index VALUES(1, 'abc  ');
+INSERT INTO t_collate_index VALUES(1, 'abc   ');
+SELECT LENGTH(a) FROM t_collate_index ORDER BY 1;
+CREATE INDEX idx_t_collate_index ON t_collate_index(a);
+
+EXPLAIN (costs off)
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
+-- different with mdb
+SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %'
+INTERSECT
+SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc %';
+DROP TABLE if exists t_collate_index;
+
 -- test create table/alter table
 drop table if exists t_collate;
 create table t_collate(id int, f1 text collate "utf8mb4_general_ci");
