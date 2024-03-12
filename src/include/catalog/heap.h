@@ -181,7 +181,7 @@ extern void heap_truncate_one_part(Relation rel , Oid partOid);
 extern Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTableSlot* slot, int *partitionno, bool isDDL = false, bool canIgnore = false);
 extern Oid heapTupleGetPartitionOid(Relation rel, void *tuple, int *partitionno, bool isDDL = false,
     bool canIgnore = false, bool partExprKeyIsNull = true);
-extern Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple);
+extern Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple, EState* estate, TupleTableSlot* slot);
 extern void heap_truncate(List *relids);
 extern void heap_truncate_one_rel(Relation rel);
 extern void heap_truncate_check_FKs(List *relations, bool tempTables);
