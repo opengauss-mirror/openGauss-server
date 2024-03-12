@@ -1949,6 +1949,7 @@ static char *GetXLogBuffer(XLogRecPtr ptr, PGPROC *proc)
 {
     int idx;
     XLogRecPtr endptr;
+    XLogRecPtr pastEndPtr = NULL;
     XLogRecPtr expectedEndPtr;
 
     /*
@@ -2000,10 +2001,12 @@ static char *GetXLogBuffer(XLogRecPtr ptr, PGPROC *proc)
         XLogWaitBufferInit(waitEndPtr);
 
         pgstat_report_waitevent(WAIT_EVENT_END);
-
+        pastEndPtr = endptr;
         endptr = t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[idx];
         if (expectedEndPtr != endptr) {
-            ereport(PANIC, (errmsg("could not find WAL buffer for %X/%X", (uint32)(ptr >> 32), (uint32)ptr)));
+            ereport(PANIC, (errmsg("could not find WAL buffer for %X/%X", (uint32)(ptr >> 32), (uint32)ptr),
+                errdetail("endptr is %X/%X, pastEndptr is %X/%X.", (uint32)(endptr >> 32), (uint32)endptr, 
+                    (uint32)(pastEndPtr >> 32), (uint32)pastEndPtr)));
         }
     } else {
         /*
