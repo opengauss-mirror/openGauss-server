@@ -192,38 +192,34 @@ void SSGetRecoveryXlogPath()
 
 char* SSGetNextXLogPath(TimeLineID tli, XLogRecPtr startptr)
 {
+    static int index = 0;
     char path[MAXPGPATH];
     char fileName[MAXPGPATH];
-    char temp[MAXPGPATH];
-    struct stat buffer;
     errno_t rc = EOK;
     XLogSegNo segno;
     XLByteToSeg(startptr, segno);
     rc = snprintf_s(fileName, MAXPGPATH, MAXPGPATH - 1, "%08X%08X%08X", tli,
-                        (uint32)((segno) / XLogSegmentsPerXLogId),
-                        (uint32)((segno) % XLogSegmentsPerXLogId));
+                    (uint32)((segno) / XLogSegmentsPerXLogId),
+                    (uint32)((segno) % XLogSegmentsPerXLogId));
     securec_check_ss_c(rc, "\0", "\0");
 
-    for (int i = 1; i < DMS_MAX_INSTANCE; i++) {
-        if (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i][0] == '\0') {
-            ereport(LOG, (errmsg("No valid next xlog file path")));
+    while (true) { 
+        index++;
+        if (index >= DMS_MAX_INSTANCE || (g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index][0] == '\0')) {
+            index = 0;
             break;
         }
-        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], fileName);
+
+        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index], fileName);
         securec_check_ss_c(rc, "\0", "\0");
 
+        struct stat buffer;
         if (stat(path, &buffer) == 0) {
-            rc = strcpy_s(temp, sizeof(temp), g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i]);
-            securec_check_c(rc, "\0", "\0");
-            rc = strcpy_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[i], MAXPGPATH, g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0]);
-            securec_check_c(rc, "\0", "\0");
-            rc = strcpy_s(g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0], MAXPGPATH, temp);
-            securec_check_c(rc, "\0", "\0");
             break;
         }
     }
 
-    return g_instance.dms_cxt.SSRecoveryInfo.xlog_list[0];
+    return g_instance.dms_cxt.SSRecoveryInfo.xlog_list[index];
 }
 
 void SSDisasterGetXlogPathList()
