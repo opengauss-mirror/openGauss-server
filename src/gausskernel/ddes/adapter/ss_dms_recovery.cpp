@@ -148,10 +148,6 @@ bool SSRecoveryNodes()
 
 bool SSRecoveryApplyDelay()
 {
-    if (!ENABLE_REFORM) {
-        return false;
-    }
-    
     if (SS_DISASTER_STANDBY_CLUSTER) {
         return true;
     }

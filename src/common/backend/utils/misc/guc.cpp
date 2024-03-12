@@ -5334,10 +5334,6 @@ void InitializePostmasterGUC()
 #endif
     g_instance.attr.attr_network.PoolerPort = g_instance.attr.attr_network.PostPortNumber + 1;
     parseDmsInstanceCount();
-#ifndef USE_ASSERT_CHECKING
-    /* in Release, this param is ON and undisclosed */
-    g_instance.attr.attr_storage.dms_attr.enable_reform = true;
-#endif
 }
 
 /*

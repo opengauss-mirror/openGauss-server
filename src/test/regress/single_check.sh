@@ -141,6 +141,7 @@ function real_regresscheck_ss()
 {
     set_hotpatch_env
     set_common_env $1 $2
+    set_cm_env
 
     if [ -d $TEMP_INSTALL ];then
         rm -rf $TEMP_INSTALL
@@ -314,6 +315,11 @@ function check_enum()
         exit 1
     fi
     cd $old_path
+}
+
+function set_cm_env()
+{
+    export CM_CONFIG_PATH=$ROOT_CODE_PATH/src/test/ss/cm_config.ini
 }
 
 function set_common_env()

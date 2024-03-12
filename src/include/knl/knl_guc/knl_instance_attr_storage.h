@@ -111,7 +111,6 @@ typedef struct knl_instance_attr_dms {
     char* ock_log_path;
     int channel_count;
     int work_thread_count;
-    bool enable_reform;
     bool enable_ssl;
     int inst_count;
     bool enable_log_level;

@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           146
+#define DMS_LOCAL_VERSION           148
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -659,6 +659,8 @@ typedef enum en_dms_reform_type {
     // New type need to be added start from here
     DMS_REFORM_TYPE_FOR_RST_RECOVER,
     DMS_REFORM_TYPE_FOR_NEW_JOIN,
+    DMS_REFORM_TYPE_FOR_OLD_REMOVE,
+    DMS_REFORM_TYPE_FOR_SHUTDOWN_CONSISTENCY,
     DMS_REFORM_TYPE_FOR_STANDBY_MAINTAIN,
     DMS_REFORM_TYPE_FOR_NORMAL_STANDBY,
     DMS_REFORM_TYPE_FOR_AZ_SWITCHOVER_DEMOTE,
@@ -964,6 +966,7 @@ typedef int (*dms_get_alock_wait_info)(void *db_handle, char *resid, char *info_
 typedef int (*dms_az_failover_promote_phase1)(void *db_handle);
 typedef int (*dms_az_failover_promote_resetlog)(void *db_handle);
 typedef int (*dms_az_failover_promote_phase2)(void *db_handle);
+typedef int (*dms_check_shutdown_consistency)(void *db_handle, instance_list_t *old_remove);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1153,6 +1156,7 @@ typedef struct st_dms_callback {
 
     dms_dyn_log dyn_log;
     dms_get_alock_wait_info get_alock_wait_info;
+    dms_check_shutdown_consistency check_shutdown_consistency;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1198,7 +1202,6 @@ typedef struct st_dms_profile {
     unsigned char rdma_rpc_bind_core_start;
     unsigned char rdma_rpc_bind_core_end;
     char ock_log_path[DMS_OCK_LOG_PATH_LEN];
-    unsigned char enable_reform;
     // ock scrlock configs
     unsigned char enable_scrlock;
     unsigned int primary_inst_id;

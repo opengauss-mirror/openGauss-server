@@ -393,7 +393,6 @@ static void setDMSProfile(dms_profile_t* profile)
     setScrlConfig(profile);
     SetOckLogPath(dms_attr, profile->ock_log_path);
     profile->inst_map = 0;
-    profile->enable_reform = (unsigned char)dms_attr->enable_reform;
     profile->parallel_thread_num = dms_attr->parallel_thread_num;
     profile->max_wait_time = DMS_MSG_MAX_WAIT_TIME;
 
@@ -462,12 +461,6 @@ void DMSInit()
     }
     rc = memset_s(g_instance.dms_cxt.conninfo, MAXCONNINFO, '\0', MAXCONNINFO);
     securec_check(rc, "", "");
-
-#ifdef USE_ASSERT_CHECKING
-    if (!ENABLE_REFORM && SS_NORMAL_STANDBY) {
-        SSStandbySetLibpqswConninfo();
-    }
-#endif
 }
 
 void GetSSLogPath(char *sslog_path)

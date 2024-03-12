@@ -9740,9 +9740,8 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if ((ENABLE_REFORM && !SS_STANDBY_FAILOVER && !SS_PERFORMING_SWITCHOVER &&
-         !SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) ||
-        !ENABLE_DMS || !ENABLE_REFORM) {
+    if ((!SS_STANDBY_FAILOVER && !SS_PERFORMING_SWITCHOVER &&
+         !SS_ONDEMAND_REALTIME_BUILD_READY_TO_BUILD) || !ENABLE_DMS) {
         /* process assist file of chunk recycling */
         dw_ext_init();
         dw_init();
@@ -11119,7 +11118,7 @@ void StartupXLOG(void)
     }
 #endif
 
-    if (ENABLE_DMS && ENABLE_REFORM && !SS_PRIMARY_DEMOTED && !SS_DISASTER_STANDBY_CLUSTER) {
+    if (ENABLE_DMS && !SS_PRIMARY_DEMOTED && !SS_DISASTER_STANDBY_CLUSTER) {
         StartupWaitReform();
     }
 

@@ -3066,7 +3066,7 @@ int PostmasterMain(int argc, char* argv[])
             g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
         Assert(src_id >= 0 && src_id <= DMS_MAX_INSTANCE - 1);
 
-        if (!SS_OFFICIAL_PRIMARY && g_instance.attr.attr_storage.dms_attr.enable_reform) {
+        if (!SS_OFFICIAL_PRIMARY) {
             const long SLEEP_ONE_SEC = 1000000L;
             while (g_instance.dms_cxt.SSReformerControl.list_stable == 0) {
                 pg_usleep(SLEEP_ONE_SEC);
@@ -3130,7 +3130,7 @@ int PostmasterMain(int argc, char* argv[])
     /* init sharestorge(dorado) */
     ShareStorageInit();
     exrto_standby_read_init();
-    if (ENABLE_DMS && ENABLE_REFORM) {
+    if (ENABLE_DMS) {
         if (!DMSWaitInitStartup()) {
             if (g_instance.pid_cxt.StartupPID == 0) {
                 ereport(LOG, (errmsg("[SS reform] Node:%d first startup fail and exit", SS_MY_INST_ID)));
@@ -3936,8 +3936,7 @@ static int ServerLoop(void)
         gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
         (void)gs_signal_unblock_sigusr2();
 
-        if (ENABLE_DMS && ENABLE_REFORM && g_instance.dms_cxt.SSRecoveryInfo.startup_reform
-            && !startup_reform_finish) {
+        if (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.startup_reform && !startup_reform_finish) {
             ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform start wait.", SS_MY_INST_ID)));
             if (!DMSWaitReform()) {
                 ereport(WARNING, (errmsg("[SS reform] Node:%d first-round reform failed, shutdown now",
