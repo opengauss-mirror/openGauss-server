@@ -1751,6 +1751,20 @@ static void knl_t_rc_init(knl_t_rc_context* rc_cxt)
     securec_check(rc, "\0", "\0");
     return;
 }
+
+static void knl_t_inval_msg_init(knl_t_invalidation_message_context* inval_msg_cxt)
+{
+    inval_msg_cxt->in_progress_list_maxlen = INVAL_MSG_CXT_LIST_INIT_SIZE;
+    inval_msg_cxt->in_progress_list_len = 0;
+    inval_msg_cxt->in_progress_list =
+        (InProgressEnt *)MemoryContextAllocZero(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT),
+                                                inval_msg_cxt->in_progress_list_maxlen * sizeof(InProgressEnt));
+
+    inval_msg_cxt->b_can_not_process = false;
+
+    return;
+}
+
 #ifdef ENABLE_MOT
 static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
 {
@@ -1965,6 +1979,7 @@ void knl_thread_init(knl_thread_role role)
 #ifdef USE_SPQ
     knlTSPQCxtInit(&t_thrd.spq_ctx);
 #endif
+    knl_t_inval_msg_init(&t_thrd.inval_msg_cxt);
 }
 
 __attribute__ ((__used__)) knl_thrd_context *GetCurrentThread()

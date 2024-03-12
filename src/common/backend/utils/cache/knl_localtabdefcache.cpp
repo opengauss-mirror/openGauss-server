@@ -736,6 +736,8 @@ void LocalTabDefCache::InvalidateGlobalRelation(Oid db_id, Oid rel_oid, bool is_
 void LocalTabDefCache::InvalidateRelationAll()
 {
     if (!m_is_inited_phase2) {
+        /* Any RelationBuildDesc() on the stack must start over. */
+        SetInvalMsgProcListInvalAll();
         return;
     }
     /*
@@ -820,6 +822,9 @@ void LocalTabDefCache::InvalidateRelationAll()
         RelationClearRelation(rel, true);
     }
     list_free_ext(rebuildList);
+
+    /* Any RelationBuildDesc() on the stack must start over. */
+    SetInvalMsgProcListInvalAll();
 }
 
 void LocalTabDefCache::InvalidateRelationNodeList()

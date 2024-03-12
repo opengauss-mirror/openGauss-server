@@ -875,6 +875,7 @@ static void TestCodeToForceCacheFlushes()
  */
 void AcceptInvalidationMessages()
 {
+    AssertEreport(t_thrd.inval_msg_cxt.b_can_not_process == false, MOD_OPT, "unable to accept invalidation messages");
     if (!DeepthInAcceptInvalidationMessageNotZero()) {
         t_thrd.rc_cxt.rcNum = 0;
     }
