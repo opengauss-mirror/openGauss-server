@@ -1908,6 +1908,12 @@ static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, 
     TargetEntry* tle = NULL;
     bool found = false;
 
+    if (DB_IS_CMPT(B_FORMAT) && gexpr && IsA(gexpr, UserSetElem)) {
+        pretransformAggWithUserSet(pstate, targetlist, gexpr, EXPR_KIND_GROUP_BY);
+        /* means nothing to deal in group by */
+        return 0;
+    }
+
     if (useSQL99) {
         tle = findTargetlistEntrySQL99(pstate, gexpr, targetlist, exprKind);
     } else {
@@ -2951,4 +2957,31 @@ static Node* transformFrameOffset(ParseState* pstate, int frameOptions, Node* cl
     checkExprIsVarFree(pstate, node, constructName);
 
     return node;
+}
+
+/*
+ * special handle for UserSetElement used in group clause 
+ * it must set at top of targetList to get value before real 
+ * targetList to ensure @var appeard in real List got right
+ * value. resjunk must be true, because we do not want this
+ * UserSetElement actually appeared
+ */
+void pretransformAggWithUserSet(ParseState* pstate, List** targetList, Node* groupClause, ParseExprKind exprKind)
+{
+    ListCell* tllc = NULL;
+    TargetEntry* target = NULL;
+
+    Expr* expr = (Expr*)transformExpr(pstate, groupClause, exprKind);
+
+    TargetEntry* entry = makeTargetEntry((Expr*)expr, 1, NULL, true);
+
+    foreach (tllc, *targetList) {
+        target = (TargetEntry*)lfirst(tllc);
+        target->resno++; 
+    }
+    pstate->p_next_resno++;
+    *targetList = list_concat(list_make1(entry), *targetList);
+    pstate->p_target_list = *targetList;
+
+    return;
 }
