@@ -1331,6 +1331,7 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
     PgXmlErrorContext* xmlerrcxt = NULL;
     volatile xmlParserCtxtPtr ctxt = NULL;
     volatile xmlDocPtr doc = NULL;
+    volatile bool ignore_fail = false;
 
     len = VARSIZE(data) - VARHDRSZ; /* will be useful later */
     string = xml_text2xmlChar(data);
@@ -1363,6 +1364,7 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
                 xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_DOCUMENT,
                             "invalid XML document");
                 /* if invalid content value error is ignorable, report warning and return 'null' */
+                ignore_fail = true;
                 goto ignorable_error_handle;
             }
         } else {
@@ -1376,6 +1378,7 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
                 if (can_ignore) {
                     xml_ereport(xmlerrcxt, WARNING, ERRCODE_INVALID_XML_DOCUMENT, "invalid XML document");
                     /* if invalid content value error is ignorable, report warning and return 'null' */
+                    ignore_fail = true;
                     goto ignorable_error_handle;
                 } else {
                     xml_ereport_by_code(ERROR, ERRCODE_INVALID_XML_CONTENT,
@@ -1393,9 +1396,14 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
                 xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_CONTENT,
                             "invalid XML content");
                 /* if invalid content value error is ignorable, report warning and return 'null' */
+                ignore_fail = true;
                 goto ignorable_error_handle;
             }
         }
+
+ignorable_error_handle:
+        /* no more code add here */
+        ;
     }
     PG_CATCH();
     {
@@ -1410,22 +1418,20 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
     }
     PG_END_TRY();
 
+    if (ignore_fail) {
+        if (doc != NULL)
+            xmlFreeDoc(doc);
+        text *new_data = cstring_to_text("null");
+        xmlChar *new_utf8string = pg_do_encoding_conversion(xml_text2xmlChar(new_data),
+                                                            VARSIZE(new_data) - VARHDRSZ, encoding, PG_UTF8);
+        doc = xmlCtxtReadDoc(
+            ctxt, new_utf8string, NULL, "UTF-8",
+            XML_PARSE_NOENT | XML_PARSE_DTDATTR | (preserve_whitespace ? 0 : XML_PARSE_NOBLANKS));
+    }
+
     xmlFreeParserCtxt(ctxt);
-
-    pg_xml_done(xmlerrcxt, false);
-
+    pg_xml_done(xmlerrcxt, ignore_fail);
     return doc;
-
-ignorable_error_handle:
-    text *new_data = cstring_to_text("null");
-    xmlChar *new_utf8string = pg_do_encoding_conversion(xml_text2xmlChar(new_data),
-                                                        VARSIZE(new_data) - VARHDRSZ, encoding, PG_UTF8);
-    volatile xmlDocPtr new_doc = xmlCtxtReadDoc(
-        ctxt, new_utf8string, NULL, "UTF-8",
-        XML_PARSE_NOENT | XML_PARSE_DTDATTR | (preserve_whitespace ? 0 : XML_PARSE_NOBLANKS));
-    xmlFreeParserCtxt(ctxt);
-    pg_xml_done(xmlerrcxt, false);
-    return new_doc;
 }
 
 /*
