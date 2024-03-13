@@ -10532,7 +10532,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
-        PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
+        if (SS_STANDBY_FAILOVER) {
+            PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
+        } else {
+            PMUpdateDBState(STARTING_STATE, get_cur_mode(), get_cur_repl_num());
+        }
         t_thrd.dms_cxt.CloseAllSessionsFailed = false;
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));
         if (ENABLE_THREAD_POOL) {
