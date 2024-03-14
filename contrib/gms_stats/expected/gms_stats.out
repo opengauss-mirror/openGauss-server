@@ -1,0 +1,57 @@
+create extension gms_stats;
+create schema gms_stats_test;
+set search_path=gms_stats_test;
+create table normal_table(a int, b char(10));
+insert into normal_table select generate_series(1,500), 'abc';
+create table partition_table(a int) partition by range(a) (partition p1 values less than(100),partition p2 values less than(maxvalue));
+insert into partition_table select generate_series(1,600);
+create materialized view mv_tb as select * from normal_table;
+select schemaname, tablename, attname, avg_width, most_common_vals, most_common_freqs from pg_stats where schemaname='gms_stats_test' order by tablename, attname;
+ schemaname | tablename | attname | avg_width | most_common_vals | most_common_freqs 
+------------+-----------+---------+-----------+------------------+-------------------
+(0 rows)
+
+begin
+gms_stats.gather_schema_stats('gms_stats_test');
+end;
+/
+NOTICE:  PL/SQL procedure successfully completed.
+CONTEXT:  SQL statement "CALL gms_stats.gather_schema_stats('gms_stats_test')"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+select schemaname, tablename, attname, avg_width, most_common_vals, most_common_freqs from pg_stats where schemaname='gms_stats_test' order by tablename, attname;
+   schemaname   |    tablename    | attname | avg_width | most_common_vals | most_common_freqs 
+----------------+-----------------+---------+-----------+------------------+-------------------
+ gms_stats_test | mv_tb           | a       |         4 |                  | 
+ gms_stats_test | mv_tb           | b       |        11 | {"abc       "}   | {1}
+ gms_stats_test | normal_table    | a       |         4 |                  | 
+ gms_stats_test | normal_table    | b       |        11 | {"abc       "}   | {1}
+ gms_stats_test | partition_table | a       |         4 |                  | 
+(5 rows)
+
+create table normal_table2(a int, b char(10));
+insert into normal_table2 select generate_series(1,700), 'abc';
+call gms_stats.gather_schema_stats('gms_stats_test');
+NOTICE:  PL/SQL procedure successfully completed.
+ gather_schema_stats 
+---------------------
+ 
+(1 row)
+
+select schemaname, tablename, attname, avg_width, most_common_vals, most_common_freqs from pg_stats where schemaname='gms_stats_test' order by tablename, attname;
+   schemaname   |    tablename    | attname | avg_width | most_common_vals | most_common_freqs 
+----------------+-----------------+---------+-----------+------------------+-------------------
+ gms_stats_test | mv_tb           | a       |         4 |                  | 
+ gms_stats_test | mv_tb           | b       |        11 | {"abc       "}   | {1}
+ gms_stats_test | normal_table    | a       |         4 |                  | 
+ gms_stats_test | normal_table    | b       |        11 | {"abc       "}   | {1}
+ gms_stats_test | normal_table2   | a       |         4 |                  | 
+ gms_stats_test | normal_table2   | b       |        11 | {"abc       "}   | {1}
+ gms_stats_test | partition_table | a       |         4 |                  | 
+(7 rows)
+
+drop schema gms_stats_test cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table normal_table
+drop cascades to table partition_table
+drop cascades to materialized view mv_tb
+drop cascades to table normal_table2
