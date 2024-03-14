@@ -7276,6 +7276,9 @@ static void reaper(SIGNAL_ARGS)
             if (!SS_REPLAYED_BY_ONDEMAND) {
                 write_stderr("%s LOG: database system is ready to accept connections\n",
                     GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+                if (g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
+                    g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting = false;
+                }
             }
 
             continue;
@@ -9707,6 +9710,9 @@ static void handle_promote_signal()
                 t_thrd.postmaster_cxt.audit_primary_failover = true;
                 /* Tell startup process to finish recovery */
                 ereport(LOG, (errmsg("Instance to do failover.")));
+                if (SS_DISASTER_MAIN_STANDBY_NODE) {
+                    g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting = true;
+                }
                 SendNotifySignal(NOTIFY_FAILOVER, g_instance.pid_cxt.StartupPID);
            }
         }
@@ -10160,7 +10166,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
         if (SS_DISASTER_MAIN_STANDBY_NODE) {
             ereport(LOG,
-                (errmsg("Failover between two dorado cluster start, change current run mode and dssserver mode to primary_cluster")));
+                (errmsg("Failover between two disaster cluster start, change current run mode to primary_cluster")));
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
             SSDisasterRefreshMode();
             SSGrantDSSWritePermission();
@@ -12844,6 +12850,8 @@ DbState get_local_dbstate(void)
             db_state = PROMOTING_STATE;
         } else if (SS_IN_REFORM) {
             db_state = STARTING_STATE;
+        } else if (SS_DISASTER_CLUSTER && g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
+            db_state = PROMOTING_STATE;
         } else {
             db_state = NORMAL_STATE;
         }

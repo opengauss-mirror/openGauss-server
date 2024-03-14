@@ -3940,6 +3940,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data, char* xlogPath)
         t_thrd.walsender_cxt.timeoutCheckInternal < MINUTE_30) {
         t_thrd.walsender_cxt.timeoutCheckInternal = MINUTE_30;
     }
+    if (SS_STREAM_CLUSTER && xlogPath != NULL) {
+        ereport(LOG, (errmsg("walsender will send xlog in %s", xlogPath)));
+    }
 
     ResourceOwner tmpOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     Assert(!IsTransactionOrTransactionBlock() &&

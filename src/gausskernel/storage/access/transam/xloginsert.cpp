@@ -96,7 +96,7 @@ void XLogBeginInsert(void)
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("XLogBeginInsert was already called")));
 
-    if (SS_DISASTER_STANDBY_CLUSTER) {
+    if (SS_DORADO_STANDBY_CLUSTER && !g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
         ereport(LOG, (errmsg("SS dorado standby cluster cannot insert XLOG entries")));
         return;
     }
