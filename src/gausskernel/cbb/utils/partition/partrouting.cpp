@@ -120,7 +120,7 @@ Oid heapTupleGetPartitionOid(Relation rel, void *tuple, int *partitionno, bool i
     return partitionOid;
 }
 
-Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple)
+Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple, EState* estate, TupleTableSlot* slot)
 {
     Oid partitionId = InvalidOid;
     Oid subPartitionId = InvalidOid;
@@ -128,11 +128,11 @@ Oid heapTupleGetSubPartitionOid(Relation rel, void *tuple)
     Partition part = NULL;
     Relation partRel = NULL;
     /* get partititon oid for the record */
-    partitionId = heapTupleGetPartitionOid(rel, tuple, &partitionno);
+    partitionId = getPartitionIdFromTuple(rel, tuple, estate, slot, NULL);
     part = PartitionOpenWithPartitionno(rel, partitionId, partitionno, RowExclusiveLock);
     partRel = partitionGetRelation(rel, part);
     /* get subpartititon oid for the record */
-    subPartitionId = heapTupleGetPartitionOid(partRel, tuple, NULL);
+    subPartitionId = getPartitionIdFromTuple(partRel, tuple, estate, slot, NULL);
     
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, RowExclusiveLock);

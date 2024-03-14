@@ -1236,7 +1236,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 Oid targetOid = InvalidOid;
                 if (is_partition_rel) {
                     if (RelationIsSubPartitioned(result_relation_desc)) {
-                        targetOid = heapTupleGetSubPartitionOid(result_relation_desc, tuple);
+                        targetOid = heapTupleGetSubPartitionOid(result_relation_desc, tuple, estate, slot);
                     } else {
                         targetOid = heapTupleGetPartitionOid(result_relation_desc, tuple, NULL, false, false, !partExprKeyStr);
                     }
