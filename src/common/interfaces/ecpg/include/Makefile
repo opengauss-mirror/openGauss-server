@@ -23,8 +23,14 @@ install-headers: $(ecpg_headers) $(informix_headers)
 	$(INSTALL_DATA) $(addprefix $(srcdir)/,$(informix_headers)) '$(DESTDIR)$(informix_esql_dir)/'
 	$(INSTALL_DATA) $(ecpg_config_h) '$(DESTDIR)$(includedir)'
 
+	$(MKDIR_P) '$(DESTDIR)$(includedir_server)/ecpg'
+	for header_file in $(wildcard $(srcdir)/*.h); do \
+		$(INSTALL_DATA) $$header_file '$(DESTDIR)$(includedir_server)/ecpg' || exit; \
+	done
+
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(includedir)' '$(DESTDIR)$(informix_esql_dir)'
+
 
 uninstall:
 	rm -f $(addprefix '$(DESTDIR)$(includedir)'/, $(ecpg_headers))
@@ -33,3 +39,4 @@ uninstall:
 
 distclean maintainer-clean:
 	rm -f ecpg_config.h stamp-h
+	rm -r '$(DESTDIR)$(includedir_server)/ecpg'
