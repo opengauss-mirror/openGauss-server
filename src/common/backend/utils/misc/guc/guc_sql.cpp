@@ -3781,9 +3781,8 @@ static void assign_convert_string_to_digit(bool newval, void* extra)
 static bool check_enable_ignore_case_in_dquotes(bool* newval, void** extra, GucSource source)
 {
     if (*newval && (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
-        ereport(WARNING, (errmsg("if tables with the same name but different case already\n"
-        "exists in the database, this will result in only being able to\n"
-        "manipulate tables with table names that are entirely lowercase.")));
+        ereport(WARNING, (errmsg("Please avoid turn on this param when already created\n"
+        "uppercase named objects or using double quotes in PL.")));
     }
     return true;
 }
