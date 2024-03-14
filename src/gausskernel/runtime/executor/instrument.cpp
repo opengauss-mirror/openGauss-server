@@ -434,7 +434,11 @@ void SetInstrNull()
 
 void CalculateContextSize(MemoryContext ctx, int64* memory_size)
 {
+#ifndef ENABLE_MEMORY_CHECK
     AllocSetContext* aset = (AllocSetContext*)ctx;
+#else
+    AsanSetContext* aset = (AsanSetContext*)ctx;
+#endif
     MemoryContext child;
 
     if (ctx == NULL)
