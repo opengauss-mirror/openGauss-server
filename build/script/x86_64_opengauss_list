@@ -5,6 +5,7 @@
 ./bin/dms_contrl.sh
 ./bin/dss_clear.sh
 ./bin/dss_contrl.sh
+./bin/ecpg
 ./bin/gsql
 ./bin/gaussdb
 ./bin/gstrace
@@ -808,6 +809,10 @@
 ./lib/libpq_ce.so
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
+./lib/libecpg.so.6.4
+./lib/libecpg_compat.so.3.4
+./lib/libecpg.a
+./lib/libecpg_compat.a
 ./lib/libgauss_cl_jni.so
 ./lib/libcgroup.so*
 ./lib/libcom_err_gauss.so*
@@ -1029,6 +1034,11 @@
 ./include/postgresql/server/gstrace/gstrace_infra.h
 ./include/postgresql/server/extension_dependency.h
 ./include/postgresql/server/libpq/libpq-fe.h
+./include/postgresql/server/ecpg/ecpgerrno.h
+./include/postgresql/server/ecpg/ecpglib.h
+./include/postgresql/server/ecpg/ecpgtype.h
+./include/postgresql/server/ecpg/ecpg_informix.h
+./include/postgresql/server/ecpg/ecpg_config.h
 ./include/postgresql/server/access/clog.h
 ./include/postgresql/server/storage/proc.h
 ./include/postgresql/server/access/xlog.h
