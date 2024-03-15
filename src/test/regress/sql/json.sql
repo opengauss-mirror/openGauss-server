@@ -428,3 +428,204 @@ select * from json_to_record('{"a":1,"b":"foo","c":"bar"}',true)
 
 select * from json_to_recordset('[{"a":1,"b":"foo","d":false},{"a":2,"b":"bar","c":true}]',false)
     as x(a int, b text, c boolean);
+
+create schema json_agg_schema;
+set current_schema to json_agg_schema;
+
+CREATE TABLE jsonaggvalue_object_cfg_t (
+    c1 bigint NOT NULL,
+    c2 bigint,
+    c3 bigint,
+    c4 varchar(50) NOT NULL,
+    c5 varchar(500),
+    c6 numeric(38,10),
+    c7 varchar(240),
+    c8 bigint,
+    c9 bigint,
+    c10 varchar(30),
+    c11 varchar(30),
+    c12 numeric(38,10),
+    c13 varchar(500),
+    c14 varchar(1) NOT NULL,
+    c15 varchar(1) NOT NULL,
+    c16 bigint NOT NULL,
+    c17 timestamp without time zone NOT NULL,
+    c18 bigint NOT NULL,
+    c19 timestamp without time zone NOT NULL,
+    c20 varchar(100)
+)
+;
+
+CREATE TABLE jsonaggvalue_object_quality_t (
+    c21 bigint NOT NULL,
+    c1 bigint NOT NULL,
+    c22 varchar(30),
+    c23 varchar(50),
+    c24 varchar(30),
+    c14 varchar(1) NOT NULL,
+    c15 varchar(1) NOT NULL,
+    c16 bigint NOT NULL,
+    c17 timestamp without time zone NOT NULL,
+    c18 bigint NOT NULL,
+    c19 timestamp without time zone NOT NULL
+)
+;
+
+CREATE TABLE jsonaggvalue_object_hierarchy_t (
+    c3 bigint NOT NULL,
+    c25 bigint,
+    c26 varchar(30),
+    c27 varchar(500),
+    c28 numeric(38,10),
+    c7 varchar(240),
+    c29 bigint,
+    c30 bigint,
+    c13 varchar(500),
+    c14 varchar(1) NOT NULL,
+    c15 varchar(1) NOT NULL,
+    c16 bigint NOT NULL,
+    c17 timestamp without time zone NOT NULL,
+    c18 bigint NOT NULL,
+    c19 timestamp without time zone NOT NULL
+)
+;
+
+CREATE TABLE jsonaggvalue_tree_t (
+    c31 bigint NOT NULL,
+    c32 varchar(30),
+    c33 varchar(200),
+    c34 varchar(30),
+    c35 varchar(240),
+    c36 varchar(1),
+    c14 varchar(1) NOT NULL,
+    c15 varchar(1) NOT NULL,
+    c16 bigint NOT NULL,
+    c17 timestamp without time zone NOT NULL,
+    c18 bigint NOT NULL,
+    c19 timestamp without time zone NOT NULL,
+    c37 varchar(10),
+    c38 integer,
+    c39 varchar(30),
+    c40 varchar(30),
+    c41 numeric(2,0),
+    c42 varchar(15),
+    c43 numeric(38,18)
+)
+;
+
+CREATE TABLE jsonaggvalue_tree_object_t (
+    c29 bigint NOT NULL,
+    c31 bigint,
+    c44 bigint,
+    c45 numeric(38,10),
+    c15 varchar(1) NOT NULL,
+    c14 varchar(1) NOT NULL,
+    c16 bigint NOT NULL,
+    c17 timestamp without time zone NOT NULL,
+    c18 bigint NOT NULL,
+    c19 timestamp without time zone NOT NULL,
+    c7 varchar(240)
+)
+;
+
+insert into jsonaggvalue_object_cfg_t values 
+(15296,15295,16336,3,'cc',null,null,null,null,null,null,null,null,'Y','N',123456789123456,'2022-12-14 14:41:06.628',123456789123456,'2022-12-14 14:41:06.628'),
+(15299,15298,16336,3,'价格',null,null,null,null,null,null,null,null,'Y','N',123456789123456,'2022-12-14 14:41:06.628',123456789123456,'2022-12-14 14:41:06.628'),
+(15308,15307,16336,3,'啊',null,null,null,null,null,null,null,null,'Y','N',123456789123456,'2022-12-14 15:19:01.517',123456789123456,'2022-12-14 15:19:01.517');
+
+insert into jsonaggvalue_object_quality_t values 
+(10108,15296,1,'重要性评分',1,'Y','N',123456789123456,'2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10109,15296,2,'测试',2,'Y','N',123456789123456,      '2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10110,15296,2,'fdsa',3,'Y','N',123456789123456,      '2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10114,15299,2,'fdsa',2,'Y','N',123456789123456,      '2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10115,15299,2,'gfds',1,'Y','N',123456789123456,      '2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10116,15308,1,'重要性评分',2,'Y','N',123456789123456,'2022-12-14 15:19:01.517',123456789123456,'2022-12-14 15:19:01.517'),
+(10117,15308,2,'测试',3,'Y','N',123456789123456,      '2022-12-14 15:19:01.517',123456789123456,'2022-12-14 15:19:01.517'),
+(10118,15308,2,'fdsa',4,'Y','N',123456789123456,      '2022-12-14 15:19:01.517',123456789123456,'2022-12-14 15:19:01.517'),
+(10119,15308,2,'gfds',4,'Y','N',123456789123456,      '2022-12-14 15:19:01.517',123456789123456,'2022-12-14 15:19:01.517'),
+(10111,15296,2,'gfds',4,'Y','N',123456789123456,      '2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10112,15299,1,'重要性评分',4,'Y','N',123456789123456,'2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517'),
+(10113,15299,2,'测试',3,'Y','N',123456789123456,      '2022-12-14 14:52:26.397',123456789123456,'2022-12-14 15:19:01.517');
+
+insert into jsonaggvalue_tree_t values (101179,'ZAQ123456789123','test000112','Q','test00022',0,'Y','N',123456789123456,'2022-12-14 14:38:36.488',131269511,'2024-01-12 17:56:45.249');
+
+insert into jsonaggvalue_tree_object_t values (101344,101179,106789,null,'N','Y',123456789123456,'2022-12-14 14:38:36.488',123456789123456,'2022-12-14 14:41:06.628');
+
+insert into jsonaggvalue_object_hierarchy_t values (16336,null,-1,'associator',null,null,101344,null,null,'Y','N',123456789123456,'2022-12-14 14:38:36.488',123456789123456,'2022-12-14 14:38:36.488');
+
+WITH RECURSIVE
+    value_object_cfg AS (
+        SELECT voc.c1 AS h_configure_id,
+             voc.c3 AS h_node_id,
+             voc.*
+         FROM jsonaggvalue_object_cfg_t voc
+         WHERE voc.c4 = '3'
+           AND voc.c14 = 'Y'
+           AND voc.c15 = 'N'
+         UNION
+         SELECT voct.h_configure_id,
+             voct.h_node_id,
+             voc.*
+         FROM jsonaggvalue_object_cfg_t voc
+         INNER JOIN value_object_cfg voct
+         ON voct.c2 = voc.c1
+         WHERE voc.c14 = 'Y'
+           AND voc.c15 = 'N'),
+  
+    value_object_quality AS (
+        SELECT voqt.c1,
+             JSON_OBJECT_AGG(CONCAT('analysis_', tmp.c21, '_Id'), voqt.c21)::json AS aidjson,
+             JSON_OBJECT_AGG(CONCAT('analysis_', tmp.c21, '_Name'), voqt.c23)::json AS anamejson,
+             JSON_OBJECT_AGG(CONCAT('analysis_', tmp.c21, '_Result'), voqt.c24)::json AS aresultjson
+         FROM jsonaggvalue_object_quality_t voqt
+         INNER JOIN jsonaggvalue_object_cfg_t voct
+         ON voct.c1 = voqt.c1
+         AND voct.c4 = '3'
+         AND voct.c14 = 'Y'
+         AND voct.c15 = 'N'
+         LEFT JOIN
+         (SELECT voc.c3,
+              voq.c21,
+              voq.c23,
+              voq.c22
+          FROM jsonaggvalue_object_quality_t voq
+          INNER JOIN jsonaggvalue_object_cfg_t voc
+          ON voc.c1 = voq.c1
+          AND voc.c4 = '-1'
+          AND voc.c14 = 'Y'
+          AND voc.c15 = 'N'
+          WHERE voq.c14 = 'Y'
+            AND voq.c15 = 'N') tmp
+         ON tmp.c3 = voct.c3
+         AND voqt.c22 = tmp.c22
+         AND voqt.c23 = tmp.c23
+         WHERE voqt.c14 = 'Y'
+           AND voqt.c15 = 'N'
+         GROUP BY voqt.c1
+),
+   tmp AS (
+      SELECT vt.c31,
+          voct.h_configure_id
+      FROM jsonaggvalue_tree_t vt
+      INNER JOIN jsonaggvalue_tree_object_t vto
+      ON vto.c31 = vt.c31
+          AND vto.c14 = 'Y'
+          AND vto.c15 = 'N'
+      INNER JOIN jsonaggvalue_object_hierarchy_t voh
+      ON voh.c29 = vto.c29
+          AND voh.c26 = '-1'
+          AND voh.c14 = 'Y'
+          AND voh.c15 = 'N'
+      INNER JOIN value_object_cfg voct
+      ON voct.h_node_id = voh.c3
+          AND voct.c4 != '-1'
+          AND voct.c14 = 'Y'
+          AND voct.c15 = 'N'
+      WHERE vt.c34 = 'Q'
+        AND vt.c14 = 'Y'
+        AND vt.c15 = 'N'
+        AND vt.c31 in (101179)
+      GROUP BY vt.c31,
+          voct.h_configure_id)
+select tmp.*, voqt.* FROM  tmp , value_object_quality voqt where voqt.c1 = tmp.h_configure_id order by c31,h_configure_id;
+drop schema json_agg_schema cascade;
