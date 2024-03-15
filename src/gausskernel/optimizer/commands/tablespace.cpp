@@ -898,7 +898,8 @@ void DropTableSpace(DropTableSpaceStmt* stmt)
     tablespaceoid = HeapTupleGetOid(tuple);
     /* Must be tablespace owner or have drop privileges of the target object. */
     AclResult aclresult = pg_tablespace_aclcheck(tablespaceoid, GetUserId(), ACL_DROP);
-    if (aclresult != ACLCHECK_OK && !pg_tablespace_ownercheck(tablespaceoid, GetUserId())) {
+    if (aclresult != ACLCHECK_OK && !pg_tablespace_ownercheck(tablespaceoid, GetUserId())
+        && (!is_member_of_role(GetUserId(), DEFAULT_ROLE_TABLESPACE) || !DB_IS_CMPT(B_FORMAT))) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_TABLESPACE, tablespacename);
     }
 
