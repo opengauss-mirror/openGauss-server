@@ -1151,14 +1151,13 @@ void RedoPageManagerMain()
         CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_1],
                             g_redoWorker->timeCostList[TIME_COST_STEP_2]);
         PageManagerRedoDistributeItems(record_block_state);
+        t_thrd.log_cxt.error_context_stack = err_context.previous;
         SPSCBlockingQueuePop(g_redoWorker->queue);
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2]);
         RedoInterruptCallBack();
         clean_smgr(clear_redo_fd_count);
         ADD_ABNORMAL_POSITION(5);
         GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
-
-        t_thrd.log_cxt.error_context_stack = err_context.previous;
     }
 
     SPSCBlockingQueuePop(g_redoWorker->queue);
