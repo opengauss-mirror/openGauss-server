@@ -9967,6 +9967,8 @@ void StartupXLOG(void)
         if (ArchiveRecoveryByPending) {
             RecoveryByPending = true;
         }
+    } else if (!SSOndemandRecoveryExitNormal) {
+        t_thrd.xlog_cxt.InRecovery = true;
     }
 
     if (SS_STANDBY_MODE && t_thrd.xlog_cxt.InRecovery == true && SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
