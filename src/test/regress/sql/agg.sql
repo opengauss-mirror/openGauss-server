@@ -3,6 +3,23 @@ set current_schema='aggregate';
 create table t1 (a int , b int);
 insert into t1 values(1,2);
 
+explain (costs off)
+select count(*) from (
+  select row_number() over(partition by a, b) as rn,
+      first_value(a) over(partition by b, a) as fv,
+      * from t1
+  )
+where rn = 1;
+set qrw_inlist2join_optmode = 'disable';
+explain  (costs off)
+select count(*) from (
+  select row_number() over(partition by a, b) as rn,
+      first_value(a) over(partition by b, a) as fv,
+      * from t1
+  )
+where rn = 1;
+reset qrw_inlist2join_optmode;
+
 set enable_hashagg = off;
 --force hash agg, if used sort agg will report error.
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
