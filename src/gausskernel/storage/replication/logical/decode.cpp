@@ -1194,6 +1194,10 @@ static void DecodeInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r)))
         return;
 
+    /* if the insert belongs to partition-split, no need to decode */
+    if (xlrec->flags & XLH_INSERT_SPLIT_PARTITION)
+        return;
+
     ReorderBufferChange *change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_INSERT;
     change->origin_id = XLogRecGetOrigin(r);
