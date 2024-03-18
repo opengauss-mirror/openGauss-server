@@ -1348,6 +1348,8 @@ static char *RelationGetColumnOnUpdate(Node *update_expr, List *dpcontext, List 
             appendStringInfo(&buf, "CURRENT_TIMESTAMP");
         } else if (!pg_strcasecmp(strVal(funcname), "sysdate")) {
             appendStringInfo(&buf, "SYSDATE");
+        } else if (u_sess->attr.attr_sql.dolphin) {
+            appendStringInfo(&buf, "%s", n->colname);
         }
     } else if (IsA(update_expr, TypeCast)) {
         TypeCast *n = (TypeCast*)update_expr;
