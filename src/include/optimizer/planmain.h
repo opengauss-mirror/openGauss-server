@@ -108,12 +108,14 @@ extern Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOff
 extern Plan* make_stream_sort(PlannerInfo* root, Plan* lefttree);
 extern SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* distinctList,
     AttrNumber flagColIdx, int firstFlag, long numGroups, double outputRows, OpMemInfo* memInfo);
+#ifdef ENABLE_MULTIPLE_NODES
 extern Plan* create_direct_scan(
     PlannerInfo* root, List* tlist, RangeTblEntry* realResultRTE, Index src_idx, Index scanrelid);
 extern Plan* create_direct_righttree(
     PlannerInfo* root, Plan* subplan, List* distinctList, List* uniq_exprs, ExecNodes* target_exec_nodes);
 extern HashJoin* create_direct_hashjoin(
     PlannerInfo* root, Plan* outerPlan, Plan* innerPlan, List* tlist, List* joinClauses, JoinType joinType);
+#endif /* ENABLE_MULTIPLE_NODES */
 extern BaseResult* make_result(PlannerInfo* root, List* tlist, Node* resconstantqual, Plan* subplan, List* qual = NIL);
 extern Material* make_material(Plan* lefttree, bool materialize_all = false);
 extern int find_node_in_targetlist(Node* node, List* targetlist);

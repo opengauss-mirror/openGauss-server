@@ -6614,6 +6614,7 @@ static void estimate_directHashjoin_Cost(
     join_plan->join.plan.plan_width = outer_width;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 HashJoin* create_direct_hashjoin(
     PlannerInfo* root, Plan* outerPlan, Plan* innerPlan, List* tlist, List* joinClauses, JoinType joinType)
 {
@@ -6710,6 +6711,7 @@ HashJoin* create_direct_hashjoin(
 
     return join_plan;
 }
+#endif /* ENABLE_MULTIPLE_NODES */
 
 typedef struct replace_scan_clause_context {
     Index dest_idx;
@@ -6752,6 +6754,7 @@ static List* replace_scan_clause(List* scan_clauses, Index idx)
     return context.scan_clauses;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 Plan* create_direct_scan(PlannerInfo* root, List* tlist, RangeTblEntry* realResultRTE, Index src_idx, Index dest_idx)
 {
     Plan* result = NULL;
@@ -6895,6 +6898,7 @@ Plan* create_direct_righttree(
 
     return righttree;
 }
+#endif /* ENABLE_MULTIPLE_NODES */
 
 static HashJoin* make_hashjoin(List* tlist, List* joinclauses, List* otherclauses, List* hashclauses, Plan* lefttree,
     Plan* righttree, JoinType jointype, bool inner_unique)
