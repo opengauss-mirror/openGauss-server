@@ -5192,8 +5192,10 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                 ereport(ERROR,
                         (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("can not accept connection in standby mode.")));
             }
-#else
-            if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
+#else       
+            /* All node in SS_DISASTER_STANDBY_CLUSTER can not accept connection when hot_standby=off */
+            if (((hashmdata->current_mode == STANDBY_MODE || SS_DISASTER_STANDBY_CLUSTER)
+                 && !g_instance.attr.attr_storage.EnableHotStandby)) {
                 ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection if hot standby off")));
             }
