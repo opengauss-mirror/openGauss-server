@@ -551,8 +551,14 @@ bool SSBackendNeedExitScenario()
         return true;
     }
 
+    if (g_instance.attr.attr_sql.enableRemoteExcute) {
+        ereport(LOG, (errmsg("remote execute is enabled, all backends need exit to ensure complete transaction!")));
+        return true;
+    }
+
     if (SSPerformingStandbyScenario() || SSPrimaryRestartScenario()) {
         return false;
     }
+
     return true;
 }
