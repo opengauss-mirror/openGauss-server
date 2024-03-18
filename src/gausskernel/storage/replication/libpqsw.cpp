@@ -1034,7 +1034,7 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
 }
 
 /* process Q type msg, true if need in redirect mode*/
-bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string)
+bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string, bool is_multistmt, bool is_last)
 {
     if (IsAbortedTransactionBlockState()) {
         return false;
@@ -1048,6 +1048,10 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
         appendStringInfoString(curMsg, query_string);
         appendStringInfoChar(curMsg, 0);
         RedirectType type = RT_NORMAL;
+        // If the SQL statement is mixed and the current SQL statement is not the last statement in the mixed statement, the status is set to RT_MULTI*/
+        if (is_multistmt && !is_last) {
+            type = RT_MULTI;
+        }   
         if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
             type = RT_TXN_STATUS;
         }
