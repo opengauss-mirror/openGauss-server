@@ -4349,6 +4349,12 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("access method \"%s\" does not support column store", stmt->accessMethod)));
         }
+
+        if (u_sess->attr.attr_storage.enable_segment &&
+            pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE) == 0) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                            errmsg("Hash index does not support when segment = on.")));    
+        }
     }
 
     /* no to join list, yes to namespaces */
