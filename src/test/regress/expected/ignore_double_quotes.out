@@ -164,11 +164,115 @@ select * from t2_compfoo;
 CREATE SEQUENCE s1 START 101 CACHE 20;
 CREATE SEQUENCE "S1" START 801 CACHE 90;
 drop sequence "S1";
+set enable_ignore_case_in_dquotes=on;
+WARNING:  if tables with the same name but different case already
+exists in the database, this will result in only being able to
+manipulate tables with table names that are entirely lowercase.
+CREATE SEQUENCE "SEQ11" START 101 CACHE 20;
+SELECT nextval('"SEQ11"');
+ nextval 
+---------
+     101
+(1 row)
+
+select currval('"SEQ11"'); 
+ currval 
+---------
+     101
+(1 row)
+
+select setval('"SEQ11"', 1);
+ setval 
+--------
+      1
+(1 row)
+
+CREATE TYPE "cOMP" AS (f3 text, f4 int);
+create function "BB"(b int, a "cOMP") returns int
+as $$
+begin
+    b=b+1;
+	  return b;
+end;
+$$language plpgsql;
+select regoperatorin('=(int,"inT")');
+ERROR:  type "int" does not exist
+CONTEXT:  referenced column: regoperatorin
+select regdictionaryin('"dutch_steM"');
+ regdictionaryin 
+-----------------
+ dutch_stem
+(1 row)
+
+select regconfigin('"Simple"');
+ regconfigin 
+-------------
+ simple
+(1 row)
+
+select regprocin('"BB"');
+ regprocin 
+-----------
+ bb
+(1 row)
+
+select '"chAr"'::regtype;
+ regtype 
+---------
+ "char"
+(1 row)
+
+select regprocedure('"BB"(integer, "Comp")');
+   regprocedure   
+------------------
+ bb(integer,comp)
+(1 row)
+
+set enable_ignore_case_in_dquotes=off;
+SELECT nextval('"SEQ11"');
+ERROR:  relation "SEQ11" does not exist
+LINE 1: SELECT nextval('"SEQ11"');
+                       ^
+CONTEXT:  referenced column: nextval
+select currval('"SEQ11"'); 
+ERROR:  relation "SEQ11" does not exist
+LINE 1: select currval('"SEQ11"');
+                       ^
+CONTEXT:  referenced column: currval
+select setval('"SEQ11"', 1);
+ERROR:  relation "SEQ11" does not exist
+LINE 1: select setval('"SEQ11"', 1);
+                      ^
+CONTEXT:  referenced column: setval
+select regoperatorin('=(int,"inT")');
+ERROR:  type "inT" does not exist
+CONTEXT:  referenced column: regoperatorin
+select regdictionaryin('"dutch_steM"');
+ERROR:  text search dictionary "dutch_steM" does not exist
+CONTEXT:  referenced column: regdictionaryin
+select regconfigin('"Simple"');
+ERROR:  text search configuration "Simple" does not exist
+CONTEXT:  referenced column: regconfigin
+select regprocin('"BB"');
+ERROR:  function ""BB"" does not exist
+CONTEXT:  referenced column: regprocin
+select '"chAr"'::regtype;
+ERROR:  type "chAr" does not exist
+LINE 1: select '"chAr"'::regtype;
+               ^
+CONTEXT:  referenced column: regtype
+select regprocedure('"BB"(integer, "Comp")');
+ERROR:  type "Comp" does not exist
+LINE 1: select regprocedure('"BB"(integer, "Comp")');
+                            ^
+CONTEXT:  referenced column: regprocedure
 -- test enable_ignore_case_in_dquotes=on
 set enable_ignore_case_in_dquotes=on;
 WARNING:  if tables with the same name but different case already
 exists in the database, this will result in only being able to
 manipulate tables with table names that are entirely lowercase.
+drop function "BB";
+drop TYPE "cOMP";
 create table test1 ("A" int, 'a' int);-- error
 ERROR:  syntax error at or near "'a'"
 LINE 1: create table test1 ("A" int, 'a' int);
@@ -329,6 +433,7 @@ insert into ￥(￥,"$") values(7,8);
 insert into "啊啊"("，",",") values(10,11);
 -- clean
 drop table TAB_quote;
+drop sequence "SEQ11";
 set enable_ignore_case_in_dquotes=off;
 drop materialized view m_test_view;
 drop materialized view "M_teSt_view";

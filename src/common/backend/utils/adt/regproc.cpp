@@ -137,6 +137,12 @@ Datum regprocin(PG_FUNCTION_ARGS)
         return regprocin_booststrap(pro_name_or_oid);
     }
 
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(pro_name_or_oid);
+        if(length > 0 && pro_name_or_oid[0] == '\"' && pro_name_or_oid[length-1] == '\"')
+            pro_name_or_oid = pg_strtolower(pro_name_or_oid);
+    }
+
     /*
      * Normal case: parse the name into components and see if it matches any
      * pg_proc entries in the current search path.
@@ -257,6 +263,19 @@ Datum regprocedurein(PG_FUNCTION_ARGS)
         strspn(pro_name_or_oid, "0123456789") == strlen(pro_name_or_oid)) {
         result = DatumGetObjectId(DirectFunctionCall1(oidin, CStringGetDatum(pro_name_or_oid)));
         PG_RETURN_OID(result);
+    }
+
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(pro_name_or_oid);
+        int count = 0;
+        if (length > 0) {
+            for(int i = 0; i< length; i++) {
+                if(pro_name_or_oid[i] == '\"')
+                    count++;
+            }
+            if(count % 2 == 0)
+                pro_name_or_oid = pg_strtolower(pro_name_or_oid);
+        }    
     }
 
     /*
@@ -662,6 +681,20 @@ Datum regoperatorin(PG_FUNCTION_ARGS)
         PG_RETURN_OID(result);
     }
 
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(opr_name_or_oid);
+        int count = 0;
+        if (length > 0) {
+            for(int i = 0; i< length; i++) {
+                if(opr_name_or_oid[i] == '\"')
+                    count++;
+            }
+            if(count % 2 == 0)
+                opr_name_or_oid = pg_strtolower(opr_name_or_oid);
+        }    
+    }
+
+
     /*
      * Else it's a name and arguments.  Parse the name and arguments, look up
      * potential matches in the current namespace search list, and scan to see
@@ -883,6 +916,12 @@ Datum regclassin(PG_FUNCTION_ARGS)
         PG_RETURN_OID(result);
     }
 
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(class_name_or_oid);
+        if(length > 0 && class_name_or_oid[0] == '\"' && class_name_or_oid[length-1] == '\"')
+            class_name_or_oid = pg_strtolower(class_name_or_oid);
+    }
+
     /*
      * Normal case: parse the name into components and see if it matches any
      * pg_class entries in the current search path.
@@ -995,6 +1034,12 @@ Datum regtypein(PG_FUNCTION_ARGS)
         strspn(typ_name_or_oid, "0123456789") == strlen(typ_name_or_oid)) {
         result = DatumGetObjectId(DirectFunctionCall1(oidin, CStringGetDatum(typ_name_or_oid)));
         PG_RETURN_OID(result);
+    }
+
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(typ_name_or_oid);
+        if(length > 0 && typ_name_or_oid[0] == '\"' && typ_name_or_oid[length-1] == '\"')
+            typ_name_or_oid = pg_strtolower(typ_name_or_oid);
     }
 
     /* Else it's a type name, possibly schema-qualified or decorated */
@@ -1126,6 +1171,12 @@ Datum regconfigin(PG_FUNCTION_ARGS)
         PG_RETURN_OID(result);
     }
 
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(cfg_name_or_oid);
+        if(length > 0 && cfg_name_or_oid[0] == '\"' && cfg_name_or_oid[length-1] == '\"')
+            cfg_name_or_oid = pg_strtolower(cfg_name_or_oid);
+    }
+
     /*
      * Normal case: parse the name into components and see if it matches any
      * pg_ts_config entries in the current search path.
@@ -1224,6 +1275,12 @@ Datum regdictionaryin(PG_FUNCTION_ARGS)
         strspn(dict_name_or_oid, "0123456789") == strlen(dict_name_or_oid)) {
         result = DatumGetObjectId(DirectFunctionCall1(oidin, CStringGetDatum(dict_name_or_oid)));
         PG_RETURN_OID(result);
+    }
+
+    if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes) {
+        int length = strlen(dict_name_or_oid);
+        if(length > 0 && dict_name_or_oid[0] == '\"' && dict_name_or_oid[length-1] == '\"')
+            dict_name_or_oid = pg_strtolower(dict_name_or_oid);
     }
 
     /*
