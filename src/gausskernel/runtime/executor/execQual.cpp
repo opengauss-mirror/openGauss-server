@@ -1095,9 +1095,14 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
 
         /* if not found, return a null const */
         if (found) {
-            if (entry->isParse) {
-                con = (Const *)uservar->value;
-                entry->isParse = false;
+            Oid target_type = InvalidOid;
+            if (IsA(uservar->value, CoerceViaIO)) {
+                target_type = ((CoerceViaIO *)uservar->value)->resulttype;
+            } else {
+                target_type = ((Const *)uservar->value)->consttype;
+            }
+            if (target_type == UNKNOWNOID && ((Const *)uservar->value)->constisnull) {
+                con = entry->value;
             } else {
                 Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
                     -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
@@ -1316,21 +1321,14 @@ static Datum ExecEvalUserSetElm(ExprState* exprstate, ExprContext* econtext, boo
             UserVar *uservar = (UserVar*)linitial(elem->name);
             entry = (GucUserParamsEntry*)hash_search(u_sess->utils_cxt.set_user_params_htab,
                 uservar->name, HASH_FIND, &found);
-            if (found) {
-                Const* expr = entry->value;
-                bool if_use = false;
-                if (expr->consttype != (usestate->xprstate).resultType && is_in_table) {
-                    find_uservar_in_expr(usestate->instate, uservar->name, &if_use);
-                    if (if_use) {  
-                        ereport(ERROR, 
-                            (errcode(ERRCODE_DATATYPE_MISMATCH),
-                                 errmsg("Can not change type of user defined variable when use relations.")));
-                    }
-                }
-            }
         }
 
-        Oid atttypid = exprType((Node*)elem->val);
+        Oid atttypid = InvalidOid;
+        if (!found) {
+            atttypid = exprType((Node *)usestate->instate->expr);
+        } else {
+            atttypid = exprType((Node *)elem->val);
+        }
 
         value = CStringFromDatum(atttypid, result);
         con = processResToConst(value, atttypid, collid);
