@@ -246,6 +246,7 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
     COMPARE_LOCATION_FIELD(location);
     COMPARE_NODE_FIELD(aggargtypes);
     COMPARE_SCALAR_FIELD(aggsplit);
+    COMPARE_NODE_FIELD(aggfilter);
 
     return true;
 }
@@ -1073,6 +1074,7 @@ static bool _equalSelectStmt(const SelectStmt* a, const SelectStmt* b)
     COMPARE_NODE_FIELD(intoClause);
     COMPARE_NODE_FIELD(targetList);
     COMPARE_NODE_FIELD(fromClause);
+    COMPARE_NODE_FIELD(unrotateInfo);
     COMPARE_NODE_FIELD(startWithClause);
     COMPARE_NODE_FIELD(whereClause);
     COMPARE_NODE_FIELD(groupClause);
@@ -2584,6 +2586,7 @@ static bool _equalFuncCall(const FuncCall* a, const FuncCall* b)
     COMPARE_STRING_FIELD(colname);
     COMPARE_NODE_FIELD(args);
     COMPARE_NODE_FIELD(agg_order);
+    COMPARE_NODE_FIELD(agg_filter);
     COMPARE_SCALAR_FIELD(agg_within_group);
     COMPARE_SCALAR_FIELD(agg_star);
     COMPARE_SCALAR_FIELD(agg_distinct);
@@ -2733,11 +2736,47 @@ static bool _equalWindowDef(const WindowDef* a, const WindowDef* b)
     return true;
 }
 
+static bool _equalRotateInfo(const RotateClause* a, const RotateClause* b)
+{
+    COMPARE_NODE_FIELD(forColName);
+    COMPARE_NODE_FIELD(inExprList);
+    COMPARE_NODE_FIELD(aggregateFuncCallList);
+
+    return true;
+}
+
+static bool _equalUnrotateInfo(const UnrotateClause* a, const UnrotateClause* b) 
+{
+    COMPARE_SCALAR_FIELD(includeNull);
+    COMPARE_NODE_FIELD(colNameList);
+    COMPARE_NODE_FIELD(forColName);
+    COMPARE_NODE_FIELD(inExprList);
+
+    return true;
+}
+
+static bool _equalRotateInCell(const RotateInCell *a, const RotateInCell *b)
+{
+    COMPARE_STRING_FIELD(aliasname);
+    COMPARE_NODE_FIELD(rotateInExpr);
+
+    return true;
+}
+
+static bool _equalUnrotateInCell(const UnrotateInCell *a, const UnrotateInCell *b)
+{
+    COMPARE_NODE_FIELD(aliaList);
+    COMPARE_NODE_FIELD(unrotateInExpr);
+
+    return true;
+}
+
 static bool _equalRangeSubselect(const RangeSubselect* a, const RangeSubselect* b)
 {
     COMPARE_SCALAR_FIELD(lateral);
     COMPARE_NODE_FIELD(subquery);
     COMPARE_NODE_FIELD(alias);
+    COMPARE_NODE_FIELD(rotate);
 
     return true;
 }
@@ -4453,6 +4492,18 @@ bool equal(const void* a, const void* b)
             break;
         case T_StartWithClause:
             retval = _equalStartWithClause((StartWithClause*) a, (StartWithClause*) b);
+            break;
+        case T_RotateClause:
+            retval = _equalRotateInfo((RotateClause*)a, (RotateClause*)b);
+            break;
+        case T_UnrotateClause:
+            retval = _equalUnrotateInfo((UnrotateClause*)a, (UnrotateClause*)b);
+            break;
+        case T_RotateInCell:
+            retval = _equalRotateInCell((RotateInCell*)a, (RotateInCell*)b);
+            break;
+        case T_UnrotateInCell:
+            retval = _equalUnrotateInCell((UnrotateInCell*)a, (UnrotateInCell*)b);
             break;
         case T_UpsertClause:
             retval = _equalUpsertClause((UpsertClause*)a, (UpsertClause*)b);

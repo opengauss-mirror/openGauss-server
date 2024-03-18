@@ -342,6 +342,8 @@ static bool find_minmax_aggs_walker(Node* node, List** context)
             "when scaning the Aggref nodes in an expression tree recursively to find a MIN/MAX aggregate.");
         if (list_length(aggref->args) != 1 || aggref->aggorder != NIL)
             return true; /* it couldn't be MIN/MAX */
+        if (aggref->aggfilter != NULL)
+            return true;
         /* note: we do not care if DISTINCT is mentioned ... */
         curTarget = (TargetEntry*)linitial(aggref->args);
 

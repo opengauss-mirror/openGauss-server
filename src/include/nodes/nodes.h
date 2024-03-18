@@ -585,6 +585,8 @@ typedef enum NodeTag {
     T_CursorExpression,
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)
+     * note: TAGS FOR PARSE TREE NODES (parsenodes.h) can no longer place new tags, 
+     * please go to the location marked 6000 to continue to place new tags.
      */
     T_A_Expr = 900,
     T_ColumnRef,
@@ -897,7 +899,14 @@ typedef enum NodeTag {
     T_MinMaxAggPath,
     T_GatherPath,
     T_ForeignKeyCacheInfo,
-    T_Gather
+    T_Gather,
+    /*
+     * TAGS FOR PARSE TREE NODES (parsenodes.h), the area above where such information is placed is full.
+     */
+    T_RotateClause = 6000,
+    T_UnrotateClause,
+    T_RotateInCell,
+    T_UnrotateInCell
 
 } NodeTag;
 

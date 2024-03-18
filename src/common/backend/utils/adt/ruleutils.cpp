@@ -10883,6 +10883,10 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
                 get_rule_orderby(aggref->aggorder, aggref->args, false, context);
             }
         }
+        if (aggref->aggfilter != NULL) {
+            appendStringInfoString(buf, ") FILTER (WHERE ");
+            get_rule_expr((Node *)aggref->aggfilter, context, false);
+        }
 
         if (isGroupCatAggFunc) {
             appendStringInfoString(buf, " SEPARATOR ");

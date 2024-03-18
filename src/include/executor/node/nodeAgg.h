@@ -193,6 +193,7 @@ typedef struct AggStatePerAggData {
     /* XXX: use for vector engine now, better remove later*/
     TupleDesc	evaldesc;		/* descriptor of input tuples */
     ProjectionInfo *evalproj;	/* projection machinery */
+    ProjectionInfo *combinedproj; /* projection machinery */
     TupleTableSlot *evalslot;	/* current input tuple */
 } AggStatePerAggData;
 

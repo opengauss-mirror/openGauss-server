@@ -661,6 +661,13 @@ static void advance_aggregates(AggState* aggstate, AggStatePerGroup pergroup)
         int i;
         int inputoff = peraggstate->inputoff;
 
+        if (peraggstate->aggrefstate->aggfilter) {
+            bool eisnull = false;
+            Datum exprValue =
+                ExecEvalExpr(peraggstate->aggrefstate->aggfilter, aggstate->evalproj->pi_exprContext, &eisnull, NULL);
+            if (eisnull || !DatumGetBool(exprValue))
+                continue;
+        }
         if (peraggstate->numSortCols > 0) {
             /* DISTINCT and/or ORDER BY case */
             Assert(slot->tts_nvalid >= (peraggstate->numInputs + inputoff));

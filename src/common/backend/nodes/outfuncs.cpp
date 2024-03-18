@@ -2565,6 +2565,9 @@ static void _outAggref(StringInfo str, Aggref* node)
         WRITE_INT_FIELD(aggsplit);
         WRITE_OID_FIELD(aggtranstype);
     }
+    if (t_thrd.proc->workingVersionNum >= ROTATE_UNROTATE_VERSION_NUM) {
+        WRITE_NODE_FIELD(aggfilter);
+    }
 }
 
 static void _outGroupingFunc(StringInfo str, const GroupingFunc* node)
@@ -4193,6 +4196,9 @@ static void _outSelectStmt(StringInfo str, SelectStmt* node)
     WRITE_NODE_FIELD(intoClause);
     WRITE_NODE_FIELD(targetList);
     WRITE_NODE_FIELD(fromClause);
+    if (t_thrd.proc->workingVersionNum >= ROTATE_UNROTATE_VERSION_NUM) {
+        WRITE_NODE_FIELD(unrotateInfo);
+    }
     if (t_thrd.proc->workingVersionNum >= SWCB_VERSION_NUM) {
         WRITE_NODE_FIELD(startWithClause);
     }
@@ -4222,6 +4228,9 @@ static void _outFuncCall(StringInfo str, FuncCall* node)
     WRITE_STRING_FIELD(colname);
     WRITE_NODE_FIELD(args);
     WRITE_NODE_FIELD(agg_order);
+    if (t_thrd.proc->workingVersionNum >= ROTATE_UNROTATE_VERSION_NUM) {
+        WRITE_NODE_FIELD(agg_filter);
+    }
     WRITE_BOOL_FIELD(agg_within_group);
     WRITE_BOOL_FIELD(agg_star);
     WRITE_BOOL_FIELD(agg_distinct);
@@ -5526,6 +5535,40 @@ static void _outWindowDef(StringInfo str, WindowDef* node)
     WRITE_LOCATION_FIELD(location);
 }
 
+static void _outRotateInfo(StringInfo str, RotateClause* node) 
+{
+    WRITE_NODE_TYPE("ROTATEINFO");
+
+    WRITE_NODE_FIELD(forColName);
+    WRITE_NODE_FIELD(inExprList);
+    WRITE_NODE_FIELD(aggregateFuncCallList);
+}
+
+static void _outUnrotateInfo(StringInfo str, UnrotateClause* node)
+{
+    WRITE_NODE_TYPE("UNROTATEINFO");
+
+    WRITE_BOOL_FIELD(includeNull);
+    WRITE_NODE_FIELD(colNameList);
+    WRITE_NODE_FIELD(forColName);
+    WRITE_NODE_FIELD(inExprList);
+}
+
+static void _outRotateInCell(StringInfo str, RotateInCell *node)
+{
+    WRITE_NODE_TYPE("ROTATEINCELL");
+
+    WRITE_STRING_FIELD(aliasname);
+    WRITE_NODE_FIELD(rotateInExpr);
+}
+static void _outUnrotateInCell(StringInfo str, UnrotateInCell *node)
+{
+    WRITE_NODE_TYPE("UNROTATEINCELL");
+
+    WRITE_NODE_FIELD(aliaList);
+    WRITE_NODE_FIELD(unrotateInExpr);
+}
+
 static void _outRangeSubselect(StringInfo str, RangeSubselect* node)
 {
     WRITE_NODE_TYPE("RANGESUBSELECT");
@@ -5533,6 +5576,9 @@ static void _outRangeSubselect(StringInfo str, RangeSubselect* node)
     WRITE_BOOL_FIELD(lateral);
     WRITE_NODE_FIELD(subquery);
     WRITE_NODE_FIELD(alias);
+    if (t_thrd.proc->workingVersionNum >= ROTATE_UNROTATE_VERSION_NUM) {
+        WRITE_NODE_FIELD(rotate);
+    }
 }
 
 static void _outRangeFunction(StringInfo str, RangeFunction* node)
@@ -6997,6 +7043,18 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
 
 #endif
+            case T_RotateClause:
+                _outRotateInfo(str, (RotateClause*)obj);
+                break;
+            case T_UnrotateClause:
+                _outUnrotateInfo(str, (UnrotateClause*)obj);
+                break;
+            case T_RotateInCell:
+                _outRotateInCell(str, (RotateInCell*)obj);
+                break;
+            case T_UnrotateInCell:
+                _outUnrotateInCell(str, (UnrotateInCell*)obj);
+                break;
             case T_PruningResult:
                 _outPruningResult(str, (PruningResult *)obj);
                 break;

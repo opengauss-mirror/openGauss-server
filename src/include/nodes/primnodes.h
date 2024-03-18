@@ -304,6 +304,7 @@ typedef struct Aggref {
     List* aggargtypes;     /* type Oids of direct and aggregated args */
     int aggsplit;          /* expected agg-splitting mode of parent Agg */
     Oid aggtranstype;      /* type Oid of aggregate's transition value */
+    Expr *aggfilter;       /* FILTER expression, if any */
 } Aggref;
 
 /*

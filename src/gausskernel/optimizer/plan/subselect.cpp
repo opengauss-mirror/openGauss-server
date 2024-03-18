@@ -2987,6 +2987,7 @@ static bool finalize_agg_primnode(Node* node, finalize_primnode_context* context
 
         /* we should not consider the direct arguments, if any */
         (void)finalize_primnode((Node*)agg->args, context);
+        (void)finalize_primnode((Node*)agg->aggfilter, context);
         return false; /* there can't be any Aggrefs below here */
     }
 

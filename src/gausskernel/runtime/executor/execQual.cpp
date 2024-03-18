@@ -5846,6 +5846,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
                astate->aggdirectargs = (List*)ExecInitExprByRecursion((Expr*)aggref->aggdirectargs, parent);
 
                astate->args = (List*)ExecInitExprByRecursion((Expr*)aggref->args, parent);
+               astate->aggfilter = ExecInitExprByRecursion((Expr *)aggref->aggfilter, parent);
 
                /*
                 * Complain if the aggregate's arguments contain any

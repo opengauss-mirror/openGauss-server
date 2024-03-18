@@ -1312,6 +1312,7 @@ static Node* tryTransformFunc(ParseState* pstate, List* fields, int location)
     fn->funcname = fields;
     fn->args = NIL;
     fn->agg_order = NIL;
+    fn->agg_filter = NULL;
     fn->agg_star = FALSE;
     fn->agg_distinct = FALSE;
     fn->func_variadic = FALSE;
@@ -2894,6 +2895,7 @@ static Node* transformPredictByFunction(ParseState* pstate, PredictByFunction* p
     }
 
     n->agg_order        = NULL;
+    n->agg_filter       = NULL;
     n->agg_star         = FALSE;
     n->agg_distinct     = FALSE;
     n->func_variadic    = FALSE;

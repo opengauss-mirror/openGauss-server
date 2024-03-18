@@ -2495,6 +2495,7 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 naggs = ++aggstate->numaggs;
 
                 astate->args = (List*)ExecInitVecExpr((Expr*)aggref->args, parent);
+                astate->aggfilter = ExecInitVecExpr((Expr *)aggref->aggfilter, parent);
 
                 /*
                  * Complain if the aggregate's arguments contain any

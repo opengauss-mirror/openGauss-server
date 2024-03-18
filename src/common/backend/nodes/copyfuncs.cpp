@@ -2675,6 +2675,7 @@ static Aggref* _copyAggref(const Aggref* from)
     COPY_NODE_FIELD(aggargtypes);
     COPY_SCALAR_FIELD(aggsplit);
     COPY_SCALAR_FIELD(aggtranstype);
+    COPY_NODE_FIELD(aggfilter);
 
     return newnode;
 }
@@ -4068,6 +4069,7 @@ static FuncCall* _copyFuncCall(const FuncCall* from)
     COPY_STRING_FIELD(colname);
     COPY_NODE_FIELD(args);
     COPY_NODE_FIELD(agg_order);
+    COPY_NODE_FIELD(agg_filter);
     COPY_SCALAR_FIELD(agg_star);
     COPY_SCALAR_FIELD(agg_distinct);
     COPY_SCALAR_FIELD(func_variadic);
@@ -4176,6 +4178,47 @@ static WindowDef* _copyWindowDef(const WindowDef* from)
 
     return newnode;
 }
+static RotateClause* _copyRotateInfo(const RotateClause* from)
+{
+    RotateClause *newnode = makeNode(RotateClause);
+
+    COPY_NODE_FIELD(forColName);
+    COPY_NODE_FIELD(inExprList);
+    COPY_NODE_FIELD(aggregateFuncCallList);
+
+    return newnode;
+}
+    
+static UnrotateClause* _copyUnrotateInfo(const UnrotateClause* from)
+{
+    UnrotateClause *newnode = makeNode(UnrotateClause);
+
+    COPY_SCALAR_FIELD(includeNull);
+    COPY_NODE_FIELD(colNameList);
+    COPY_NODE_FIELD(forColName);
+    COPY_NODE_FIELD(inExprList);
+
+    return newnode;
+}
+
+static RotateInCell *_copyRotateInCell(const RotateInCell *from)
+{
+    RotateInCell *newnode = makeNode(RotateInCell);
+
+    COPY_STRING_FIELD(aliasname);
+    COPY_NODE_FIELD(rotateInExpr);
+
+    return newnode;
+}
+static UnrotateInCell *_copyUnrotateInCell(const UnrotateInCell *from)
+{
+    UnrotateInCell *newnode = makeNode(UnrotateInCell);
+
+    COPY_NODE_FIELD(aliaList);
+    COPY_NODE_FIELD(unrotateInExpr);
+
+    return newnode;
+}
 
 static RangeSubselect* _copyRangeSubselect(const RangeSubselect* from)
 {
@@ -4184,6 +4227,7 @@ static RangeSubselect* _copyRangeSubselect(const RangeSubselect* from)
     COPY_SCALAR_FIELD(lateral);
     COPY_NODE_FIELD(subquery);
     COPY_NODE_FIELD(alias);
+    COPY_NODE_FIELD(rotate);
 
     return newnode;
 }
@@ -5040,6 +5084,7 @@ static SelectStmt* _copySelectStmt(const SelectStmt* from)
     COPY_NODE_FIELD(intoClause);
     COPY_NODE_FIELD(targetList);
     COPY_NODE_FIELD(fromClause);
+    COPY_NODE_FIELD(unrotateInfo);
     COPY_NODE_FIELD(startWithClause);
     COPY_NODE_FIELD(whereClause);
     COPY_NODE_FIELD(groupClause);
@@ -8862,6 +8907,18 @@ void* copyObject(const void* from)
             break;
         case T_WindowDef:
             retval = _copyWindowDef((WindowDef*)from);
+            break;
+        case T_RotateClause:
+            retval = _copyRotateInfo((RotateClause*)from);
+            break;
+        case T_UnrotateClause:
+            retval = _copyUnrotateInfo((UnrotateClause*)from);
+            break;
+        case T_RotateInCell:
+            retval = _copyRotateInCell((RotateInCell*)from);
+            break;
+        case T_UnrotateInCell:
+            retval = _copyUnrotateInCell((UnrotateInCell*)from);
             break;
         case T_RangeSubselect:
             retval = _copyRangeSubselect((RangeSubselect*)from);

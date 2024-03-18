@@ -471,6 +471,7 @@ void UniqueSql::JumbleExpr(pgssJumbleState* jstate, Node* node)
             UniqueSql::JumbleExpr(jstate, (Node*)expr->args);
             UniqueSql::JumbleExpr(jstate, (Node*)expr->aggorder);
             UniqueSql::JumbleExpr(jstate, (Node*)expr->aggdistinct);
+            UniqueSql::JumbleExpr(jstate, (Node*)expr->aggfilter);
 
             break;
         }

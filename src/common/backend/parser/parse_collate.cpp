@@ -672,6 +672,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                             /* support ordered set agg at 91269 kernel version */
                             assign_aggregate_collations((Aggref*)node, &loccontext);
                     }
+                    assign_expr_collations(context->pstate, (Node *)((Aggref *)node)->aggfilter);
                 } break;
                 case T_CaseExpr: {
                     /*

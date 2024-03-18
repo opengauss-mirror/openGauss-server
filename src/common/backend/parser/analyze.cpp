@@ -114,6 +114,7 @@ static void transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt);
 static Query* transformVariableMutiSetStmt(ParseState* pstate, VariableMultiSetStmt* muti_stmt);
 static Query* transformSelectStmt(
     ParseState* pstate, SelectStmt* stmt, bool isFirstNode = true, bool isCreateView = false);
+static Query *transformUnrotateStmt(ParseState *pstate, SelectStmt *stmt);
 static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt);
 static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt);
 static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, bool isTopLevel, List** targetlist);
@@ -2902,6 +2903,11 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     Node* qual = NULL;
     ListCell* l = NULL;
 
+    /* support unrotate grammar */
+    if (stmt->unrotateInfo != NULL) {
+        return transformUnrotateStmt(pstate, stmt);
+    }
+
     qry->commandType = CMD_SELECT;
 
     if (stmt->startWithClause != NULL) {
@@ -3087,6 +3093,243 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     }
 
     return qry;
+}
+
+static List* removeTargetListByNameList(List* targetList, List* nameList)
+{
+    ListCell * cell, *targetCell, *next, *prev;
+    bool isfind = false;
+    prev = NULL;
+    for (targetCell = list_head(targetList); targetCell; targetCell = next) {
+        ResTarget *resTarget = (ResTarget *)lfirst(targetCell);
+        next = lnext(targetCell);
+        if (IsA(resTarget->val, ColumnRef)) {
+            isfind = false;
+            char *colName = strVal(linitial(((ColumnRef *)resTarget->val)->fields));
+            foreach (cell, nameList) {
+                if (strcmp(strVal((Value *)lfirst(cell)), colName) == 0) {
+                    targetList = list_delete_cell(targetList, targetCell, prev);
+                    isfind = true;
+                    break;
+                }
+            }
+            if (!isfind)
+                prev = targetCell;
+        }
+    }
+    return targetList;
+}
+
+static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
+{
+    List *parsetree_list;
+    ListCell *cell, *cell1, *targetCell, *next, *prev;
+    ListCell *inexprCell, *colCell, *forCell, *aliasCell;
+    StringInfoData union_all_sql;
+    StringInfoData from_clause_sql;
+    int counter = 0;
+    int in_counter = 0;
+    List *targetList = NIL;
+    List *aStarList = NIL;
+    ParseState *pstate1 = make_parsestate(NULL);
+    pstate1->p_sourcetext = pstrdup(pstate->p_sourcetext);
+
+    transformFromClause(pstate1, stmt->fromClause);
+    initStringInfo(&from_clause_sql);
+    RangeTblEntry *rte = (RangeTblEntry *)linitial(pstate1->p_rtable);
+    if (RTE_RELATION == rte->rtekind)
+        appendStringInfo(&from_clause_sql, " FROM %s ", quote_identifier(rte->relname));
+    else if (RTE_SUBQUERY == rte->rtekind) {
+        StringInfo select_sql = makeStringInfo();
+        deparse_query(rte->subquery, select_sql, NIL, false, false);
+        appendStringInfo(&from_clause_sql, " FROM (%s) ", select_sql->data);
+        DestroyStringInfo(select_sql);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in from clause error")));
+    }
+    if (rte->alias)
+        appendStringInfo(&from_clause_sql, "AS %s ", rte->alias->aliasname);
+    List *stmt_targetList = list_copy(stmt->targetList);
+    /* remove target in colNameList */
+    stmt_targetList = removeTargetListByNameList(stmt_targetList, stmt->unrotateInfo->colNameList);
+    /* remove target in forColName */
+    stmt_targetList = removeTargetListByNameList(stmt_targetList, stmt->unrotateInfo->forColName);
+
+    foreach(targetCell, stmt_targetList) {
+        ResTarget *resTarget1 = (ResTarget *)lfirst(targetCell);
+        ColumnRef *cref = (ColumnRef *)resTarget1->val;
+        Node *field = (Node *)linitial(cref->fields);
+        if (IsA(field, A_Star)) {
+            if (!targetList) {
+                aStarList = list_make1(lfirst(targetCell));
+                targetList = transformTargetList(pstate1, aStarList, EXPR_KIND_SELECT_TARGET);
+                free_parsestate(pstate1);
+                break;
+            }
+        }
+    }
+
+    /* remove target in unrotateInExpr */
+    foreach (inexprCell, stmt->unrotateInfo->inExprList) {
+        UnrotateInCell *unrotateinCell = (UnrotateInCell *)lfirst(inexprCell);
+        foreach (cell, unrotateinCell->unrotateInExpr) {
+            ResTarget *resTarget = (ResTarget *)lfirst(cell);
+            if (IsA(resTarget->val, ColumnRef)) {
+                const char *colName = strVal((Value *)linitial(((ColumnRef *)resTarget->val)->fields));
+                prev = NULL;
+                for (targetCell = list_head(targetList); targetCell; targetCell = next) {
+                    TargetEntry *te = (TargetEntry *)lfirst(targetCell);
+                    next = lnext(targetCell);
+                    if (strcmp(te->resname, colName) == 0)
+                        targetList = list_delete_cell(targetList, targetCell, prev);
+                    else
+                        prev = targetCell;
+                }
+                for (targetCell = list_head(stmt_targetList); targetCell; targetCell = next) {
+                    ResTarget *rt = (ResTarget *)lfirst(targetCell);
+                    char *colName1 = strVal((Value *)linitial(((ColumnRef *)rt->val)->fields));
+                    next = lnext(targetCell);
+                    if (strcmp(colName1, colName) == 0)
+                        stmt_targetList = list_delete_cell(stmt_targetList, targetCell, prev);
+                    else
+                        prev = targetCell;
+                }
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in clause error"),
+                                parser_errposition(pstate, exprLocation((Node *)resTarget->val))));
+            }
+        }
+    }
+
+    initStringInfo(&union_all_sql);
+    foreach (inexprCell, stmt->unrotateInfo->inExprList) {
+        UnrotateInCell *unrotateinCell = (UnrotateInCell *)lfirst(inexprCell);
+
+        if (counter > 0)
+            appendStringInfo(&union_all_sql, "UNION ALL ");
+
+        appendStringInfo(&union_all_sql, "SELECT ");
+        if (list_length(stmt->unrotateInfo->colNameList) != list_length(unrotateinCell->unrotateInExpr)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR), 
+                    errmsg("the number of elements in NOT ROTATE IN CLAUSE doesn't agree with the number of columns NOT ROTATE specified")));
+        }
+
+        foreach (targetCell, stmt_targetList) {
+            ResTarget *resTarget1 = (ResTarget *)lfirst(targetCell);
+            ColumnRef *cref = (ColumnRef *)resTarget1->val;
+            Node *field = (Node *)linitial(cref->fields);
+            if (IsA(field, A_Star)) {
+                foreach (cell1, targetList) {
+                    TargetEntry *te = (TargetEntry *)lfirst(cell1);
+                    appendStringInfo(&union_all_sql, "%s, ", te->resname);
+                }
+            } else
+                appendStringInfo(&union_all_sql, "%s, ", strVal((Value *)field));
+        }
+
+        if (!unrotateinCell->aliaList) {
+            foreach(forCell,stmt->unrotateInfo->forColName) {
+                in_counter = 0;
+                appendStringInfo(&union_all_sql, "\'");
+                foreach(cell, unrotateinCell->unrotateInExpr) {
+                    if (in_counter > 0) {
+                        appendStringInfo(&union_all_sql, "_");
+                    }
+                    ResTarget *resTarget = (ResTarget *)lfirst(cell);
+                    if (IsA(resTarget->val, ColumnRef)) {
+                        if (NULL != resTarget->name) {
+                            appendStringInfo(&union_all_sql, "%s", resTarget->name);
+                        }
+                        else {
+                            appendStringInfo(&union_all_sql, "%s", strVal((Value *) linitial(((ColumnRef*) resTarget->val)->fields)));
+                        }
+                    }
+                    else {
+                         ereport(ERROR,
+                             (errcode(ERRCODE_SYNTAX_ERROR),
+                                 errmsg("NOT ROTATE in clause error"),
+                                    parser_errposition(pstate, exprLocation((Node*)resTarget->val))));
+                    }
+                    in_counter++;
+                }
+                appendStringInfo(&union_all_sql, "\' AS %s,", strVal((Value *)lfirst(forCell)));
+            }
+        } 
+        else {
+            if (list_length(stmt->unrotateInfo->forColName) != list_length(unrotateinCell->aliaList)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("the number of elements in alias clause doesn't agree with the number of columns NOT ROTATE_FOR specified")));
+            }
+            forboth(forCell, stmt->unrotateInfo->forColName, aliasCell, unrotateinCell->aliaList) {
+                if (!IsA(lfirst(aliasCell), A_Const)) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE alias clause error")));
+                }
+                appendStringInfo(&union_all_sql, "\'%s\' AS %s,", strVal(&((A_Const *)lfirst(aliasCell))->val), strVal((Value *)lfirst(forCell)));
+            }
+        }
+        int counter1 = 0;
+        forboth(colCell, stmt->unrotateInfo->colNameList, cell, unrotateinCell->unrotateInExpr) {
+            ResTarget *resTarget = (ResTarget *)lfirst(cell);
+            if (IsA(resTarget->val, ColumnRef))
+            {
+                if (counter1 > 0)
+                    appendStringInfo(&union_all_sql, ",");
+                appendStringInfo(&union_all_sql, " %s AS %s", strVal((Value *)linitial(((ColumnRef *)resTarget->val)->fields)), strVal((Value *)lfirst(colCell)));
+                counter1++;
+            }
+            else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in clause error"),
+                            parser_errposition(pstate, exprLocation((Node *)resTarget->val))));
+            }
+        }
+
+        appendStringInfo(&union_all_sql, "%s", from_clause_sql.data);
+        in_counter = 0;
+        if (stmt->unrotateInfo->includeNull == false) {
+            appendStringInfo(&union_all_sql, "where ");
+            foreach(cell, unrotateinCell->unrotateInExpr) {
+                if (in_counter > 0)
+                    appendStringInfo(&union_all_sql, "or ");
+                ResTarget *resTarget = (ResTarget *)lfirst(cell);
+                if (IsA(resTarget->val, ColumnRef)) {
+                    appendStringInfo(&union_all_sql, "%s is not null ",
+                        strVal((Value *) linitial(((ColumnRef*) resTarget->val)->fields)));
+                }
+                else {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("NOT ROTATE in clause error"),
+                            parser_errposition(pstate, exprLocation((Node*)resTarget->val))));
+                }
+                in_counter++;
+            }
+        }
+        counter++;
+    }
+    appendStringInfo(&union_all_sql, ";");
+    pfree_ext(from_clause_sql.data);
+    list_free_ext(stmt_targetList);
+    list_free_ext(aStarList);
+    list_free_ext(targetList);
+
+    parsetree_list = pg_parse_query(union_all_sql.data);
+
+    /* rewrite unrotate clause as a subquery */
+    RangeSubselect *subselect = makeNode(RangeSubselect);
+    Alias *sub_alias = makeAlias("unrotate_rewrite", NIL);
+    subselect->subquery = (Node *)linitial(parsetree_list);
+    subselect->alias = sub_alias;
+
+    list_free_ext(stmt->fromClause);
+    stmt->fromClause = list_make1((Node *)subselect);
+
+    list_free_ext(stmt->unrotateInfo->colNameList);
+    list_free_ext(stmt->unrotateInfo->forColName);
+    list_free_ext(stmt->unrotateInfo->inExprList);
+    pfree_ext(stmt->unrotateInfo);
+
+    return transformStmt(pstate, (Node *)stmt);
 }
 
 /*

@@ -675,6 +675,20 @@ typedef struct StartWithClause {
     bool  opt;
 } StartWithClause;
 
+typedef struct UnrotateClause {
+    NodeTag type;
+    bool includeNull;
+    List *colNameList;
+    List *forColName;
+    List *inExprList;
+} UnrotateClause;
+
+typedef struct UnrotateInCell {
+    NodeTag type;
+    List *aliaList;
+    List *unrotateInExpr;
+} UnrotateInCell;
+
 typedef struct SelectStmt {
     NodeTag type;
 
@@ -686,6 +700,7 @@ typedef struct SelectStmt {
     IntoClause *intoClause; /* target for SELECT INTO */
     List *targetList;       /* the target list (of ResTarget) */
     List *fromClause;       /* the FROM clause */
+    UnrotateClause *unrotateInfo;
     Node *startWithClause;  /* START WITH...CONNECT BY clause */
     Node *whereClause;      /* WHERE qualification */
     List *groupClause;      /* GROUP BY clauses */
@@ -1684,6 +1699,7 @@ typedef struct FuncCall {
     char *colname;   /* column name for the function */
     List *args;      /* the arguments (list of exprs) */
     List *agg_order; /* ORDER BY (list of SortBy) */
+    Node *agg_filter;
     bool agg_within_group;
     bool agg_star;          /* argument was really '*' */
     bool agg_distinct;      /* arguments were labeled DISTINCT */
@@ -1814,6 +1830,19 @@ typedef struct RangeFunction {
                          * of function returning RECORD */
 } RangeFunction;
 
+typedef struct RotateClause {
+    NodeTag type;
+    List *forColName;
+    List *inExprList;
+    List *aggregateFuncCallList;
+} RotateClause;
+
+typedef struct RotateInCell {
+    NodeTag type;
+    char *aliasname;
+    List *rotateInExpr;
+} RotateInCell;
+
 /*
  * RangeSubselect - subquery appearing in a FROM clause
  */
@@ -1822,6 +1851,7 @@ typedef struct RangeSubselect {
     bool lateral;   /* does it have LATERAL prefix? */
     Node *subquery; /* the untransformed sub-select clause */
     Alias *alias;   /* table alias & optional column aliases */
+    RotateClause *rotate;
 } RangeSubselect;
 
 /*

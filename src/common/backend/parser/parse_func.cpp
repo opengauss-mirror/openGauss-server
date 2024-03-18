@@ -71,6 +71,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
 {
     bool is_column = (fn == NULL);
     List* agg_order = (fn ? fn->agg_order : NIL);
+    Expr *agg_filter = NULL;
     bool agg_within_group = (fn ? fn->agg_within_group : false);
     bool agg_star = (fn ? fn->agg_star : false);
     bool agg_distinct = (fn ? fn->agg_distinct : false);
@@ -96,6 +97,11 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
     char aggkind = 'n';
     char* name_string = NULL;
     Oid refSynOid = InvalidOid;
+    /*
+     * If there's an aggregate filter, transform it using transformWhereClause
+     */
+    if (fn && fn->agg_filter != NULL)
+        agg_filter = (Expr *)transformWhereClause(pstate, fn->agg_filter, EXPR_KIND_FILTER, "FILTER");
     /*
      * Most of the rest of the parser just assumes that functions do not have
      * more than FUNC_MAX_ARGS parameters.	We have to test here to protect
@@ -180,6 +186,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
      * wasn't any aggregate or variadic decoration, nor an argument name.
      */
     if (nargs == 1 && agg_order == NIL && !agg_star && !agg_distinct && over == NULL && !func_variadic &&
+        agg_filter == NULL &&
         argnames == NIL && list_length(funcname) == 1) {
         Oid argtype = actual_arg_types[0];
 
@@ -266,6 +273,10 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("ORDER BY specified, but %s is not an aggregate function", name_string),
                     parser_errposition(pstate, location)));
+        if (agg_filter)
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("FILTER specified, but %s is not an aggregate function", NameListToString(funcname)),
+                            parser_errposition(pstate, location)));
         if (over != NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -530,6 +541,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, Node* l
         aggref->aggtype = rettype;
         /* aggcollid and inputcollid will be set by parse_collate.c */
         /* args, aggorder, aggdistinct will be set by transformAggregateCall */
+        aggref->aggfilter = agg_filter;
         aggref->aggstar = agg_star;
         aggref->aggvariadic = func_variadic;
         aggref->aggkind = aggkind;

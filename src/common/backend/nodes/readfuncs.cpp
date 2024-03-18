@@ -2295,6 +2295,10 @@ static Aggref* _readAggref(void)
     {
         READ_OID_FIELD(aggtranstype);
     }
+    IF_EXIST(aggfilter)
+    {
+        READ_NODE_FIELD(aggfilter);
+    }
     READ_DONE();
 }
 
@@ -6421,6 +6425,47 @@ static DependenciesType* _readDependenciesType()
     READ_DONE();
 }
 
+static RotateClause* _readRotateClause()
+{
+    READ_LOCALS(RotateClause);
+
+    READ_NODE_FIELD(forColName);
+    READ_NODE_FIELD(inExprList);
+    READ_NODE_FIELD(aggregateFuncCallList);
+
+    READ_DONE();
+}
+
+static UnrotateClause* _readUnrotateClause()
+{
+    READ_LOCALS(UnrotateClause);
+
+    READ_BOOL_FIELD(includeNull);
+    READ_NODE_FIELD(colNameList);
+    READ_NODE_FIELD(forColName);
+    READ_NODE_FIELD(inExprList);
+
+    READ_DONE();
+}
+
+static RotateInCell *_readRotateCell()
+{
+    READ_LOCALS(RotateInCell);
+    READ_STRING_FIELD(aliasname);
+    READ_NODE_FIELD(rotateInExpr);
+
+    READ_DONE();
+}
+
+static UnrotateInCell *_readUnrotateCell()
+{
+    READ_LOCALS(UnrotateInCell);
+    READ_NODE_FIELD(aliaList);
+    READ_NODE_FIELD(unrotateInExpr);
+
+    READ_DONE();
+}
+
 /*
  * parseNodeString
  *
@@ -6930,6 +6975,10 @@ Node* parseNodeString(void)
         return_value = _readDependenciesProchead();
     }  else if (MATCH("DependenciesType", 16)) {
         return_value = _readDependenciesType();
+    } else if (MATCH("ROTATEINFO", 10)) {
+        return_value = _readRotateClause();
+    } else if (MATCH("UNROTATEINFO", 12)) {
+        return_value = _readUnrotateClause();
     }  else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

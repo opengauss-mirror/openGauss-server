@@ -89,6 +89,7 @@ static Node* transformGroupingSet(List** flatresult, ParseState* pstate, Groupin
 static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, ParseState* pstate, Node* gexpr,
     List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel);
 static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate);
+static bool ColNameInFuncParasList(char *colName, List *funcParaList);
 
 /*
  * @Description: append from clause item to the left tree
@@ -607,7 +608,7 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
      * unlabeled subselect.  (This is just elog, not ereport, because the
      * grammar should have enforced it already.)
      */
-    if (r->alias == NULL) {
+    if (r->alias == NULL && r->rotate == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("subquery in FROM must have an alias")));
     }
     /*
@@ -618,10 +619,163 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
     Assert(!pstate->p_lateral_active);
     pstate->p_lateral_active = r->lateral;
 
+    if (r->rotate) {
+        ListCell *exprCell, *targetCell, *aggCell, *prev, *next, *colCell, *inexprCell, *filtercell;
+        SelectStmt *subQueryStmt;
+        ColumnRef *cref;
+        ResTarget *resT;
+        List *exprlist, *filterlist;
+        subQueryStmt = (SelectStmt *)r->subquery;
+        prev = NULL;
+        if (1 == list_length(subQueryStmt->targetList)) {
+            List *wholeTarget = NIL;
+            ParseState *pstate1 = make_parsestate(NULL);
+            pstate1->p_sourcetext = pstate->p_sourcetext;
+
+            transformFromClause(pstate1, subQueryStmt->fromClause);
+            ResTarget *resTarget = (ResTarget *)lfirst(list_head(subQueryStmt->targetList));
+            if (IsA(resTarget->val, ColumnRef)) {
+                Node *field = (Node *)lfirst(list_head(((ColumnRef *)resTarget->val)->fields));
+                if (IsA(field, A_Star)) {
+                    wholeTarget = transformTargetList(pstate1, subQueryStmt->targetList, EXPR_KIND_SELECT_TARGET);
+                    subQueryStmt->targetList =
+                        list_delete_cell(subQueryStmt->targetList, list_head(subQueryStmt->targetList), prev);
+                }
+            }
+            free_parsestate(pstate1);
+
+            foreach (targetCell, wholeTarget) {
+                TargetEntry *te = (TargetEntry *)lfirst(targetCell);
+                ColumnRef *col = makeNode(ColumnRef);
+                col->fields = list_make1(makeString(te->resname));
+                col->indnum = 0;
+                ResTarget *res = makeNode(ResTarget);
+                res->name = NULL;
+                res->indirection = NIL;
+                res->val = (Node *)col;
+                subQueryStmt->targetList = lappend(subQueryStmt->targetList, res);
+            }
+        }
+
+        /* remove target */
+        for (targetCell = list_head(subQueryStmt->targetList); targetCell; targetCell = next) {
+            ResTarget *resTarget = (ResTarget *)lfirst(targetCell);
+            next = lnext(targetCell);
+            if (IsA(resTarget->val, ColumnRef)) {
+                char *colName = strVal(lfirst(list_head(((ColumnRef *)resTarget->val)->fields)));
+                if (list_member(r->rotate->forColName, lfirst(list_head(((ColumnRef *)resTarget->val)->fields))) ||
+                    ColNameInFuncParasList(colName, r->rotate->aggregateFuncCallList))
+                    subQueryStmt->targetList = list_delete_cell(subQueryStmt->targetList, targetCell, prev);
+                else
+                    prev = targetCell;
+            } else
+                prev = targetCell;
+        }
+
+        /* add group by to query */
+        foreach (targetCell, subQueryStmt->targetList) {
+            ResTarget *resTarget = (ResTarget *)lfirst(targetCell);
+            if (IsA(resTarget->val, ColumnRef)) {
+                cref = (ColumnRef *)copyObject(resTarget->val);
+                if (subQueryStmt->groupClause == NIL)
+                    subQueryStmt->groupClause = list_make1(cref);
+                else
+                    subQueryStmt->groupClause = lappend(subQueryStmt->groupClause, cref);
+            }
+        }
+
+        /* add target */
+        foreach (inexprCell, r->rotate->inExprList) {
+            RotateInCell *rotateinCell = (RotateInCell *)lfirst(inexprCell);
+            foreach (aggCell, r->rotate->aggregateFuncCallList) {
+                ResTarget *resTarget = NULL;
+                FuncCall *aggregateFuncCall = (FuncCall *)lfirst(aggCell);
+                FuncCall *funcCall;
+                funcCall = (FuncCall *)copyObject(aggregateFuncCall);
+                filterlist = NIL;
+                bool check_multivalue = false;
+                errno_t rc;
+                char new_col_name[NAMEDATALEN];
+                rc = memset_s(new_col_name, NAMEDATALEN, 0, NAMEDATALEN);
+                securec_check_c(rc, "\0", "\0");
+                if (NULL != rotateinCell->aliasname) {
+                    rc = strncat_s(new_col_name, NAMEDATALEN, rotateinCell->aliasname, strlen(rotateinCell->aliasname));
+                    securec_check_c(rc, "\0", "\0");
+                }
+
+                if (list_length(r->rotate->forColName) != list_length(rotateinCell->rotateInExpr)) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("the number of elements in ROTATE IN CLAUSE doesn't agree with the number of columns specified in ROTATE FOR CLAUSE")));
+                }
+                forboth(colCell, r->rotate->forColName, exprCell, rotateinCell->rotateInExpr) {
+                    resTarget = (ResTarget *)lfirst(exprCell);
+                    char *colName = strVal(lfirst(colCell));
+                    cref = makeNode(ColumnRef);
+                    cref->fields = list_make1(makeString(colName));
+                    cref->location = -1;
+                    filterlist = lappend(filterlist, (Node *)makeSimpleA_Expr(AEXPR_OP, "=", (Node *)cref, resTarget->val, -1));
+                    if (NULL == rotateinCell->aliasname) {
+                        if (check_multivalue) {
+                            rc = strncat_s(new_col_name, NAMEDATALEN, "_", 1);
+                            securec_check_c(rc, "\0", "\0");
+                        }
+                        if (NULL != resTarget->name) {
+                            rc = strncat_s(new_col_name, NAMEDATALEN, resTarget->name, strlen(resTarget->name));
+                            securec_check_c(rc, "\0", "\0");
+                        } else if (IsA(resTarget->val, A_Const)) {
+                            Value *val = &((A_Const *)resTarget->val)->val;
+                            if (val->type == T_String){
+                                rc = strncat_s(new_col_name, NAMEDATALEN, strVal(val), strlen(strVal(val)));
+                                securec_check_c(rc, "\0", "\0");
+                            } else if (val->type == T_Float) {
+                                rc = snprintf_s(new_col_name + strlen(new_col_name), NAMEDATALEN - strlen(new_col_name),
+                                               NAMEDATALEN - strlen(new_col_name) - 1, "%f", floatVal(val));
+                                securec_check_ss(rc, "\0", "\0");
+                            } else {
+                                rc = snprintf_s(new_col_name + strlen(new_col_name), NAMEDATALEN - strlen(new_col_name),
+                                               NAMEDATALEN - strlen(new_col_name) - 1, "%ld", intVal(val));
+                                securec_check_ss(rc, "\0", "\0");
+                            }
+                        }
+                        else{
+                            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), +errmsg("ROTATE in clause error"),
+                                parser_errposition(pstate, exprLocation((Node *)resTarget->val))));
+                        }
+                    }
+                    check_multivalue = true;
+                }
+                if (NULL != aggregateFuncCall->colname) {
+                    rc = strncat_s(new_col_name, NAMEDATALEN, "_", 1);
+                    securec_check_c(rc, "\0", "\0");
+                    rc = strncat_s(new_col_name, NAMEDATALEN, aggregateFuncCall->colname,
+                                   strlen(aggregateFuncCall->colname));
+                    securec_check_c(rc, "\0", "\0");
+                }
+                Node* and_expr = NULL;
+                foreach (filtercell, filterlist) {
+                    Node *filter = (Node*)lfirst(filtercell);
+                    if (and_expr == NULL)
+                        and_expr = filter;
+                    else
+                        and_expr = (Node*)makeA_Expr(AEXPR_AND, NIL, and_expr, filter, -1);
+                }
+                funcCall->agg_filter = and_expr;
+                resT = makeNode(ResTarget);
+                resT->name = pstrdup(new_col_name);
+                resT->indirection = NIL;
+                resT->val = (Node *)funcCall;
+                resT->location = 1;
+
+                subQueryStmt->targetList = lappend(subQueryStmt->targetList, resT);
+            }
+        }
+    }
+
     /*
      * Analyze and transform the subquery.
      */
-    query = parse_sub_analyze(r->subquery, pstate, NULL, isLockedRefname(pstate, r->alias->aliasname), true);
+    query = parse_sub_analyze(r->subquery, pstate, NULL, isLockedRefname(pstate, r->alias ? r->alias->aliasname : NULL),
+                              true);
 
     pstate->p_lateral_active = false;
 
@@ -640,6 +794,21 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
     rte = addRangeTableEntryForSubquery(pstate, query, r->alias, r->lateral, true);
 
     return rte;
+}
+
+static bool ColNameInFuncParasList(char *colName, List *funcParaList)
+{
+    ListCell *cell;
+    ListCell *paracell;
+    foreach (cell, funcParaList) {
+        FuncCall *aggregateFuncCall = (FuncCall *)lfirst(cell);
+        foreach (paracell, aggregateFuncCall->args) {
+            ColumnRef *cr = (ColumnRef *)lfirst(paracell);
+            if (strcmp(colName, strVal(lfirst(list_head(cr->fields)))) == 0)
+                return true;
+        }
+    }
+    return false;
 }
 
 /*

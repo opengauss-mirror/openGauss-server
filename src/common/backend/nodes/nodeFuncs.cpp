@@ -1765,6 +1765,9 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (expression_tree_walker((Node*)expr->aggdistinct, walker, context)) {
                 return true;
             }
+            if (expression_tree_walker((Node*)expr->aggfilter, walker, context)) {
+                return true;
+            }
         } break;
         case T_GroupingFunc: {
             GroupingFunc* grouping = (GroupingFunc*)node;
@@ -2375,6 +2378,7 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->args, aggref->args, List*);
             MUTATE(newnode->aggorder, aggref->aggorder, List*);
             MUTATE(newnode->aggdistinct, aggref->aggdistinct, List*);
+            MUTATE(newnode->aggfilter, aggref->aggfilter, Expr*);
             return (Node*)newnode;
         } break;
         case T_WindowFunc: {
@@ -3275,6 +3279,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->fromClause, context)) {
                 return true;
             }
+            if (p2walker(stmt->unrotateInfo, context)) {
+                return true;
+            }
             if (p2walker(stmt->whereClause, context)) {
                 return true;
             }
@@ -3333,6 +3340,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(fcall->agg_order, context)) {
+                return true;
+            }
+            if (p2walker(fcall->agg_filter, context)) {
                 return true;
             }
             if (p2walker(fcall->over, context)) {
@@ -3413,6 +3423,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(rs->alias, context)) {
                 return true;
             }
+            if (p2walker(rs->rotate, context)) {
+                return true;
+            }
         } break;
         case T_RangeFunction: {
             RangeFunction* rf = (RangeFunction*)node;
@@ -3488,6 +3501,38 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_WithClause:
             return p2walker(((WithClause*)node)->ctes, context);
+        case T_RotateClause:  {
+            RotateClause *stmt = (RotateClause*)node;
+
+            if (p2walker(stmt->forColName, context))
+                return true;
+            if (p2walker(stmt->inExprList, context))
+                return true;
+            if (p2walker(stmt->aggregateFuncCallList, context))
+                return true;
+        } break;
+        case T_UnrotateClause: {
+            UnrotateClause *stmt = (UnrotateClause*)node;
+
+            if (p2walker(stmt->forColName, context))
+                return true;
+            if (p2walker(stmt->inExprList, context))
+                return true;
+        } break;
+        case T_RotateInCell: {
+            RotateInCell *stmt = (RotateInCell*)node;
+
+            if (p2walker(stmt->rotateInExpr, context))
+                return true;
+        } break;
+        case T_UnrotateInCell: {
+            UnrotateInCell *stmt = (UnrotateInCell*)node;
+
+            if (p2walker(stmt->aliaList, context))
+                return true;
+            if (p2walker(stmt->unrotateInExpr, context))
+                return true;
+        } break;
         case T_UpsertClause:
             return p2walker(((UpsertClause*)node)->targetList, context);
         case T_CommonTableExpr:

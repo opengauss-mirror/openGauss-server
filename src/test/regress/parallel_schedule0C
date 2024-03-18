@@ -189,3 +189,7 @@ test: user_host_test
 
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
+
+# test for rotate and unrotate function
+test: gb_ora_rotate_unrotate
+

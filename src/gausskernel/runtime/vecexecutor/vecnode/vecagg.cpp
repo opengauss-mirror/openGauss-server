@@ -1214,6 +1214,23 @@ void BaseAggRunner::BatchAggregation(VectorBatch* batch)
 
         p_vector->m_rows = Min(p_vector->m_rows, nrows);
 
+        if (per_agg_state->aggrefstate->aggfilter) {
+            ScalarVector vector;
+            bool selection = false;
+            int j = 0;
+            vector.init(CurrentMemoryContext, p_vector->m_desc);
+            vector.copy(p_vector);
+            ScalarVector *exprValue = VectorExprEngine(per_agg_state->aggrefstate->aggfilter, per_agg_state->evalproj->pi_exprContext,
+                                 &selection, &vector, NULL);
+            if (selection || exprValue == NULL)
+                continue;
+            for (j = 0; j < vector.m_rows; j++) {
+                if (vector.m_vals[j]) {
+                    vector.m_vals[j] = p_vector->m_vals[j];
+                }
+            } 
+            AggregationOnScalar(&m_runtime->aggInfo[i], &vector, m_aggIdx[i], &m_Loc[0]);
+        } else
         AggregationOnScalar(&m_runtime->aggInfo[i], p_vector, m_aggIdx[i], &m_Loc[0]);
 
         if (econtext != NULL)

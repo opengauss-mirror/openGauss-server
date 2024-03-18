@@ -229,6 +229,7 @@ static long long get_pid(const char *strsid);
 static Node *MakeAnonyBlockFuncStmt(int flag, const char * str);
 static CharsetCollateOptions* MakeCharsetCollateOptions(CharsetCollateOptions *options, CharsetCollateOptions *option);
 static Node *checkNullNode(Node *n);
+static Node *make_AStar_subquery(RangeVar *rangeVar);
 #define  TYPE_LEN     4 /* strlen("TYPE") */
 #define  DATE_LEN     4 /* strlen("DATE") */
 #define  DECLARE_LEN     9 /* strlen(" DECLARE ") */
@@ -354,6 +355,8 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 	CharsetCollateOptions *charsetcollateopt;
 	OnDuplicateAction onduplicate;
 	struct CondInfo*	condinfo;
+	RotateClause         *rotateinfo;
+	UnrotateClause       *unrotateinfo;
 }
 
 %type <node>	stmt schema_stmt
@@ -615,6 +618,12 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 /* INSERT */
 %type <istmt>	insert_rest
+%type <list>    rotate_for_clause rotate_in_clause unrotate_in_clause func_application_list unrotate_name_list rotatein_list_single rotatein_list_multi
+%type <list>    unrotatein_list_single unrotatein_list_multi in_expr_list unrotatein_alias_clause unrotatein_alias
+%type <rotateinfo> rotate_clause
+%type <unrotateinfo> unrotate_clause
+%type <boolean> include_exclude_null_clause
+%type <node>    filter_clause
 %type <node>	upsert_clause
 
 %type <mergewhen>	merge_insert merge_update
@@ -942,7 +951,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
-	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
+	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE
 	ROTATION ROW ROW_COUNT ROWNUM ROWS ROWTYPE_P RULE
 
 	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
@@ -1021,6 +1030,9 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %left		POSTFIXOP		/* dummy for postfix Op rules */
 %nonassoc   lower_than_index
 %nonassoc   INDEX
+%nonassoc   ROTATE
+%nonassoc   higher_than_rotate
+%left       ','
 /*
  * To support target_el without AS, we must give IDENT an explicit priority
  * between POSTFIXOP and Op.  We can safely assign the same priority to
@@ -23792,7 +23804,7 @@ select_clause:
  */
 simple_select:
 			SELECT hint_string opt_distinct target_list
-			opt_into_clause from_clause where_clause start_with_clause
+			opt_into_clause from_clause unrotate_clause where_clause start_with_clause
 			group_clause having_clause window_clause
 				{
 					SelectStmt *n = makeNode(SelectStmt);
@@ -23800,11 +23812,12 @@ simple_select:
 					n->targetList = $4;
 					n->intoClause = $5;
 					n->fromClause = $6;
-					n->whereClause = $7;
-					n->startWithClause = $8;
-					n->groupClause = $9;
-					n->havingClause = $10;
-					n->windowClause = $11;
+					n->unrotateInfo = $7;
+					n->whereClause = $8;
+					n->startWithClause = $9;
+					n->groupClause = $10;
+					n->havingClause = $11;
+					n->windowClause = $12;
 					n->hintState = create_hintstate($2);
 					n->hasPlus = getOperatorPlusFlag();
 					$$ = (Node *)n;
@@ -24925,6 +24938,36 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					n->alias = $2;
 					$$ = (Node *) n;
 				}
+			| select_with_parens opt_alias_clause rotate_clause
+				{
+					RangeSubselect *n = makeNode(RangeSubselect);
+					n->lateral = false;
+					n->subquery = $1;
+					if ( $2 != NULL )
+						n->alias = $2;
+					else
+					{
+						n->alias = makeNode(Alias);
+						n->alias->aliasname = pstrdup("rotate_as_internal_t");
+					}
+					n->rotate = $3;
+					$$ = (Node *) n;
+				}
+			| relation_expr opt_alias_clause rotate_clause
+				{
+					RangeSubselect *n = makeNode(RangeSubselect);
+					n->lateral = false;
+					n->subquery = make_AStar_subquery($1);
+					if($2 != NULL)
+						n->alias = $2;
+					else
+					{
+						n->alias = makeNode(Alias);
+						n->alias->aliasname = pstrdup("rotate_as_internal_t");
+					}
+					n->rotate = $3;
+					$$ = (Node *) n;
+				}
 			| joined_table
 				{
 					$$ = (Node *) $1;
@@ -25049,8 +25092,211 @@ alias_clause:
 		;
 
 opt_alias_clause: alias_clause		{ $$ = $1; }
-			| /*EMPTY*/	{ $$ = NULL; }
+			| /*EMPTY*/	{ $$ = NULL; } %prec higher_than_rotate
 		;
+
+rotate_clause:
+			ROTATE '(' func_application_list rotate_for_clause rotate_in_clause ')' %prec ROTATE
+				{
+					if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+						ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("rotate clause is supported only in A_FORMAT database.")));
+					RotateClause *n = makeNode(RotateClause);
+					n->aggregateFuncCallList = $3;
+					n->forColName = $4;
+					n->inExprList = $5;
+					$$ = n;
+				}
+		;
+
+func_application_list:
+			func_application opt_alias_clause
+				{
+					if (NULL != $2)
+						((FuncCall*)$1)->colname = ((Alias*)$2)->aliasname;
+					$$ = list_make1($1);
+				}
+			| func_application_list ',' func_application opt_alias_clause
+				{
+					if (NULL != $4)
+						((FuncCall*)$3)->colname = ((Alias*)$4)->aliasname;
+					$$ = lappend ($1, $3);
+				}
+		;
+unrotate_clause:
+			NOT ROTATE include_exclude_null_clause '(' unrotate_name_list rotate_for_clause unrotate_in_clause ')' %prec ROTATE
+				{
+					if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+						ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("not rotate clause is supported only in A_FORMAT database.")));
+					UnrotateClause *n = makeNode(UnrotateClause);
+					n->includeNull = $3;
+					n->colNameList = $5;
+					n->forColName = $6;
+					n->inExprList = $7;
+					$$ = n;
+				}
+			| { $$ = NULL; }
+		;
+
+include_exclude_null_clause:
+			INCLUDE NULLS_P { $$ = true; }
+			| EXCLUDE NULLS_P { $$ = false; }
+			| /*EMPTY*/		{ $$ = false; }
+		;
+unrotate_name_list:
+			ColId				{ $$ = list_make1(makeString($1)); }
+			| '(' name_list ')' { $$ = $2; }
+		;
+rotate_for_clause:
+			FOR ColId
+				{
+					$$ = list_make1(makeString($2));
+				}
+			| FOR '(' name_list ')'
+				{
+					$$ = $3;
+				}
+		;
+rotate_in_clause:
+			IN_P '(' rotatein_list_single ')'
+				{
+					$$ = $3;
+				}
+			| IN_P '(' rotatein_list_multi ')'
+				{
+					$$ = $3;
+				}
+		;
+unrotate_in_clause:
+			IN_P '(' unrotatein_list_single ')'
+				{
+					$$ = $3;
+				}
+			| IN_P '(' unrotatein_list_multi ')'
+				{
+					$$ = $3;
+				}
+		;
+rotatein_list_single:
+			target_el
+				{
+					RotateInCell *incell = makeNode(RotateInCell);
+					List *l = list_make1($1);
+					incell->rotateInExpr = l;
+					incell->aliasname = NULL;
+					$$ = list_make1(incell);
+				}
+			| rotatein_list_single ',' target_el
+				{
+					RotateInCell *incell = makeNode(RotateInCell);
+					List *l = list_make1($3);
+					incell->rotateInExpr = l;
+					incell->aliasname = NULL;
+					$$ = lappend($1, incell);
+				}
+		;
+rotatein_list_multi:
+			'(' in_expr_list ')' opt_alias_clause
+				{
+					RotateInCell *incell = makeNode(RotateInCell);
+					incell->rotateInExpr = $2;
+					if (NULL != $4){
+						incell->aliasname = ((Alias*)$4)->aliasname;
+						if (((Alias*)$4)->colnames)
+							ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("multiple values cannot be specified in alias clause of ROTATE"),
+									 parser_errposition(@4)));
+					}
+					$$ = list_make1(incell);
+				}
+			| rotatein_list_multi ',' '(' in_expr_list ')' opt_alias_clause
+				{
+					RotateInCell *incell = makeNode(RotateInCell);
+					incell->rotateInExpr = $4;
+					if (NULL != $6){
+						incell->aliasname = ((Alias*)$6)->aliasname;
+						if (((Alias*)$6)->colnames)
+							ereport(errstate,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("multiple values cannot be specified in alias clause of ROTATE"),
+									 parser_errposition(@6)));
+					}
+					$$ = lappend($1, incell); 
+				}
+		;
+unrotatein_list_single:
+			target_el
+				{
+					UnrotateInCell *incell = makeNode(UnrotateInCell);
+					List *l = list_make1($1);
+					incell->unrotateInExpr = l;
+					incell->aliaList = NULL;
+					$$ = list_make1(incell);
+				}
+			| unrotatein_list_single ',' target_el
+				{
+					UnrotateInCell *incell = makeNode(UnrotateInCell);
+					List *l = list_make1($3);
+					incell->unrotateInExpr = l;
+					incell->aliaList = NULL;
+					$$ = lappend($1, incell);
+				}
+		;
+unrotatein_list_multi:
+			'(' in_expr_list ')' unrotatein_alias_clause
+				{
+					UnrotateInCell *incell = makeNode(UnrotateInCell);
+					incell->unrotateInExpr = $2;
+					incell->aliaList = $4;
+					$$ = list_make1(incell);
+				}
+			| unrotatein_list_multi ',' '(' in_expr_list ')' unrotatein_alias_clause
+				{
+					UnrotateInCell *incell = makeNode(UnrotateInCell);
+					incell->unrotateInExpr = $4;
+					incell->aliaList = $6;
+					$$ = lappend($1, incell);
+				}
+		;
+in_expr_list:
+			a_expr %prec ROTATE
+				{
+					ResTarget *rt = makeNode(ResTarget);
+					rt->name = NULL;
+					rt->indirection = NIL;
+					rt->val = (Node *)$1;
+					rt->location = -1;
+					$$ = list_make1(rt);
+				}
+			| a_expr ',' in_expr_list
+				{
+					ResTarget *rt = makeNode(ResTarget);
+					rt->name = NULL;
+					rt->indirection = NIL;
+					rt->val = (Node *)$1;
+					rt->location = -1;
+					$$ = lcons(rt, $3);
+				}
+		;
+unrotatein_alias_clause:
+			unrotatein_alias		{ $$ = $1; }
+			| /*EMPTY*/			{ $$ = NULL; }
+		;
+unrotatein_alias:
+			AS AexprConst
+				{
+					$$ = list_make1($2);
+				}
+			| AS '(' expr_list ')' %prec ROTATE
+				{
+					$$ = $3;
+				}
+		;
+
 
 join_type:	FULL join_outer							{ $$ = JOIN_FULL; }
 			| LEFT join_outer						{ $$ = JOIN_LEFT; }
@@ -27212,7 +27458,7 @@ c_expr_noparen:		columnref								{ $$ = $1; }
  * (Note that many of the special SQL functions wouldn't actually make any
  * sense as functional index entries, but we ignore that consideration here.)
  */
-func_expr:	func_application within_group_clause over_clause
+func_expr:	func_application within_group_clause filter_clause over_clause
 				{
 					FuncCall *n = (FuncCall *) $1;
 
@@ -27263,7 +27509,7 @@ func_expr:	func_application within_group_clause over_clause
 						}
 						n->agg_order = $2;
 						
-						WindowDef *wd = (WindowDef*) $3;
+						WindowDef *wd = (WindowDef*) $4;
 						if (wd != NULL)
 							wd->frameOptions = FRAMEOPTION_NONDEFAULT | FRAMEOPTION_ROWS | 
 												FRAMEOPTION_START_UNBOUNDED_PRECEDING |
@@ -27299,12 +27545,14 @@ func_expr:	func_application within_group_clause over_clause
 						}
 						n->agg_order = $2;
 						n->agg_within_group = TRUE;
-						n->over = $3;
+						n->agg_filter = $3;
+						n->over = $4;
 						$$ = (Node *) n;
 					}
 					else
 					{
-						n->over = $3;
+						n->agg_filter = $3;
+						n->over = $4;
 					}
 					if (pg_strcasecmp(strVal(linitial(n->funcname)), "group_concat") == 0)
 					{
@@ -27315,7 +27563,7 @@ func_expr:	func_application within_group_clause over_clause
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								errmsg("group_concat is not yet supported in distributed database.")));
 #endif
-						WindowDef *wd = (WindowDef*) $3;
+						WindowDef *wd = (WindowDef*) $4;
 						if (wd != NULL) {
 							ereport(errstate,
 									(errcode(ERRCODE_SYNTAX_ERROR),
@@ -28169,6 +28417,11 @@ within_group_clause:
 			| /*EMPTY*/								{ $$ = NIL; }
 		;
 
+filter_clause:
+			FILTER '(' WHERE a_expr ')'				{ $$ = $4; }
+			| /*EMPTY*/								{ $$ = NULL; }
+		;
+
 /*
  * Window Definitions
  */
@@ -28497,7 +28750,7 @@ subquery_Op:
  */
 			;
 
-expr_list:	a_expr
+expr_list:	a_expr %prec higher_than_rotate
 				{
 					$$ = list_make1($1);
 				}
@@ -28907,6 +29160,14 @@ target_list:
 		;
 
 target_el:	a_expr AS ColLabel
+				{
+					$$ = makeNode(ResTarget);
+					$$->name = $3;
+					$$->indirection = NIL;
+					$$->val = (Node *)$1;
+					$$->location = @1;
+				}
+			| a_expr AS Sconst
 				{
 					$$ = makeNode(ResTarget);
 					$$->name = $3;
@@ -29397,6 +29658,7 @@ ColLabel:	IDENT
 				{
 					$$ = IdentResolveToChar($1, yyscanner);
 				}
+			| '\''IDENT'\''							{ $$ = $2; }
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
@@ -29847,6 +30109,7 @@ unreserved_keyword:
 			| ROLES
 			| ROLLBACK
 			| ROLLUP
+			| ROTATE
 			| ROTATION
 			| ROW_COUNT
 			| ROWS
@@ -31398,6 +31661,21 @@ MakeAnonyBlockFuncStmt(int flag, const char *str)
 	n->args = list_make1(makeDefElem("language", (Node *)makeString("plpgsql")));
 	n->args = lappend( n->args, body);
 
+	return (Node*)n;
+}
+
+static Node *make_AStar_subquery(RangeVar *rangeVar)
+{
+	SelectStmt *n = makeNode(SelectStmt);
+	ColumnRef *col = makeNode (ColumnRef);
+	col->fields = list_make1(makeNode(A_Star));
+	col->indnum = 0;
+	ResTarget *res = makeNode(ResTarget);
+	res->name = NULL;
+	res->indirection = NIL;
+	res->val = (Node *)col;
+	n->targetList = list_make1(res);
+	n->fromClause = list_make1(rangeVar);
 	return (Node*)n;
 }
 
