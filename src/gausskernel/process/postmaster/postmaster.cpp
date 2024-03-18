@@ -296,6 +296,8 @@ static bool isNeedGetLCName = true;
 #include "ssl/gs_openssl_client.h"
 
 #define MAXLISTEN 64
+#define MAX_P_READ_BUF 1024
+#define MAX_COMMAND_LEN 4096
 
 #define PM_BUSY_ALARM_USED_US 30000000L
 #define PM_BUSY_ALARM_US 1000000L
@@ -382,6 +384,7 @@ static void CloseServerPorts(int status, Datum arg);
 static void getInstallationPaths(const char* argv0);
 static void checkDataDir(void);
 static void CheckGUCConflicts(void);
+static void CheckPgLogDisk(void);
 static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd, int idx);
 static void reset_shared(int port);
@@ -2310,6 +2313,11 @@ int PostmasterMain(int argc, char* argv[])
     /* Verify that t_thrd.proc_cxt.DataDir looks reasonable */
     checkDataDir();
 
+    /* Verify disk space of u_sess->attr.attr_common.Log_directory */
+    if (u_sess->attr.attr_common.Log_directory != NULL) {
+        CheckPgLogDisk();
+    }
+
     /* And switch working directory into it */
     ChangeToDataDir();
     
@@ -3632,6 +3640,42 @@ static void CheckGUCConflicts(void)
 #if ((defined(USE_SSL)) && (defined(USE_TASSL))) 
     CheckSSLConflict();
 #endif
+}
+
+static void CheckPgLogDisk(void)
+{
+    FILE* cmd_fp = NULL;
+    char disk_cmd[MAX_COMMAND_LEN] = {0};
+    char buf[MAX_P_READ_BUF] = {0};
+    char free_disk[MAX_P_READ_BUF] = {0};
+    int rc = 0;
+
+    rc = snprintf_s(disk_cmd, MAX_COMMAND_LEN, MAX_COMMAND_LEN - 1,
+                    "df -BM %s | tail -n 1 | awk '{print $4}'", u_sess->attr.attr_common.Log_directory);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    cmd_fp = popen(disk_cmd, "r");
+    if (NULL == cmd_fp) {
+        write_stderr("could not open disk free space command.\n");
+        return;
+    }
+
+    while(fgets(buf, sizeof(buf), cmd_fp) != NULL) {
+        errno_t ret = strcat_s(free_disk, MAX_P_READ_BUF, buf);
+        securec_check_c(ret, "\0", "\0");
+        if (strlen(free_disk) > MAX_P_READ_BUF) {
+            break;
+        }
+    }
+    char* pEnd = NULL;
+    if (free_disk == NULL) {
+        write_stderr("could not get disk free space.\n");
+    } else if (strtol(free_disk, &pEnd, 10) == 0) {
+        write_stderr("No free space on pg_log disk.\n");
+    }
+
+    pclose(cmd_fp);
+    return;
 }
 
 static bool save_backend_variables_for_callback_thread()
