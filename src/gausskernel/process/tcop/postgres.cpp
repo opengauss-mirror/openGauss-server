@@ -973,6 +973,14 @@ bool IsFileExisted(const char *filename)
     return file_exists(fullname);
 }
 
+#define APACEH_AGE "age"
+void InitAGESqlPluginHookIfNeeded()
+{
+    if (get_extension_oid(APACEH_AGE, true) != InvalidOid && IsFileExisted(APACEH_AGE)) {
+        load_file(APACEH_AGE, !superuser());
+    }
+}
+
 #define INIT_PLUGIN_OBJECT "init_plugin_object"
 #define WHALE "whale"
 #define DOLPHIN "dolphin"
@@ -7739,6 +7747,11 @@ void LoadSqlPlugin()
         t_thrd.utils_cxt.CurrentResourceOwner = save;
     } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
         InitASqlPluginHookIfNeeded();
+    }
+
+     /* load age if the age extension been created and the age.o file exists */
+    if(u_sess->proc_cxt.MyDatabaseId != InvalidOid ){
+        InitAGESqlPluginHookIfNeeded();
     }
 }
 #endif
