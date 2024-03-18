@@ -55,5 +55,6 @@ extern ParseNamespaceItem *makeNamespaceItem(RangeTblEntry *rte, bool lateral_on
  */
 extern void transformStartWith(ParseState *pstate, SelectStmt *stmt, Query *qry);
 extern void AddStartWithCTEPseudoReturnColumns(CommonTableExpr *cte, RangeTblEntry *rte, Index rte_index);
+extern void pretransformAggWithUserSet(ParseState* pstate, List** targetList, Node* groupClause, ParseExprKind exprKind);
 
 #endif /* PARSE_CLAUSE_H */

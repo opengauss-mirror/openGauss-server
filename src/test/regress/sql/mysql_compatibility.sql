@@ -581,6 +581,16 @@ END;
 /
 call load_tbtest_WITH_REPLACE(3);
 
+
+--bugfix @var := expr in group by 
+drop table if exists tt_bug1 ;
+create  table tt_bug1(a int );
+insert into tt_bug1 values(1),(11),(111);
+SELECT a, @a, a as xx FROM tt_bug1 GROUP BY @a:= 999,a order by a ;
+SELECT a, @a, count(a) as xx FROM tt_bug1 GROUP BY @a:= a+11 ,a order by a ;
+SELECT @a, avg(a) as xx FROM tt_bug1 GROUP BY @a:= 11;
+
+
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;
 

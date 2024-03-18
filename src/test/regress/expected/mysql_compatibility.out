@@ -1725,6 +1725,33 @@ INFO:  id+ is 4
  
 (1 row)
 
+--bugfix @var := expr in group by 
+drop table if exists tt_bug1 ;
+NOTICE:  table "tt_bug1" does not exist, skipping
+create  table tt_bug1(a int );
+insert into tt_bug1 values(1),(11),(111);
+SELECT a, @a, a as xx FROM tt_bug1 GROUP BY @a:= 999,a order by a ;
+  a  | @a  | xx  
+-----+-----+-----
+   1 | 999 |   1
+  11 | 999 |  11
+ 111 | 999 | 111
+(3 rows)
+
+SELECT a, @a, count(a) as xx FROM tt_bug1 GROUP BY @a:= a+11 ,a order by a ;
+  a  | @a  | xx 
+-----+-----+----
+   1 |  12 |  1
+  11 |  22 |  1
+ 111 | 122 |  1
+(3 rows)
+
+SELECT @a, avg(a) as xx FROM tt_bug1 GROUP BY @a:= 11;
+ @a |         xx          
+----+---------------------
+ 11 | 41.0000000000000000
+(1 row)
+
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;
 ERROR:  syntax error at or near ":="
