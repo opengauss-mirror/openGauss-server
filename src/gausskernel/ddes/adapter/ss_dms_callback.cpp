@@ -749,6 +749,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     uint64 buf_state;
     int ret = DMS_SUCCESS;
     bool get_lock;
+    bool buftag_equal = true;
     hash = BufTableHashCode(tag);
     buf_id = BufTableLookup(tag, hash);
     if (buf_id < 0) {
@@ -781,7 +782,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                     buf_ctrl->seg_fileno = EXTENT_INVALID;
                     buf_ctrl->seg_blockno = InvalidBlockNumber;
-                    ret =DMS_SUCCESS;
+                    ret = DMS_SUCCESS;
                     break;
                 }
 
@@ -813,6 +814,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 
             if (!BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
                 DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
+                buftag_equal = false;
                 break;
             }
 
@@ -873,7 +875,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     }
     PG_END_TRY();
 
-    if (ret == DMS_SUCCESS) {
+    if (ret == DMS_SUCCESS && buftag_equal) {
         Assert(buf_ctrl->lock_mode == DMS_LOCK_NULL);
     }
 
