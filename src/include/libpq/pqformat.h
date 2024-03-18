@@ -94,6 +94,9 @@ static inline uint128 pg_bswap128(uint128 x)
 #define pg_ntoh128(x) pg_bswap128(x)
 #endif /* WORDS_BIGENDIAN */
 
+#define INT128_HIGH_NBYTES 64
+#define INT128_HALF_HIGH_NBYTES 32
+
 /*
  * Append a [u]int8 to a StringInfo buffer, which already has enough space
  * preallocated.
@@ -243,10 +246,13 @@ static inline void pq_sendint64(StringInfo buf, uint64 i)
 }
 
 /* append a binary [u]int128 to a StringInfo buffer */
-static inline void pq_sendint128(StringInfo buf, uint64 i)
+static inline void pq_sendint128(StringInfo buf, uint128 i)
 {
     enlargeStringInfo(buf, sizeof(uint128));
-    pq_writeint128(buf, i);
+    /* high 64 bit */
+    pq_writeint64(buf, (i>>INT128_HIGH_NBYTES));
+    /* low 64 bit */
+    pq_writeint64(buf, i);
 }
 
 /* append a binary byte to a StringInfo buffer */

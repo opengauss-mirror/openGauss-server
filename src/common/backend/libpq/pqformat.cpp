@@ -505,13 +505,33 @@ int64 pq_getmsgint64(StringInfo msg)
  */
 int128 pq_getmsgint128(StringInfo msg)
 {
-    uint128 n128;
-
+    uint128 result;
     const int int128bytes = 4;
 
-    pq_copymsgbytes(msg, (char*)&n128, int128bytes);
+    /* [hh h l ll] -> int128 */
+    uint32 hh32;
+    uint32 h32;
+    uint32 l32;
+    uint32 ll32;
+    
+    pq_copymsgbytes(msg, (char*)&hh32, int128bytes);
+    pq_copymsgbytes(msg, (char*)&h32, int128bytes);
+    pq_copymsgbytes(msg, (char*)&l32, int128bytes);
+    pq_copymsgbytes(msg, (char*)&ll32, int128bytes);
+    hh32 = ntohl(hh32);
+    h32 = ntohl(h32);
+    l32 = ntohl(l32);
+    ll32 = ntohl(ll32);
 
-    return (int128)pg_ntoh128(n128);
+    result = hh32;
+    result <<= INT128_HALF_HIGH_NBYTES;
+    result |= h32;
+    result <<= INT128_HALF_HIGH_NBYTES;
+    result |= l32;
+    result <<= INT128_HALF_HIGH_NBYTES;
+    result |= ll32;
+
+    return (int128)result;
 }
 
 /* --------------------------------
