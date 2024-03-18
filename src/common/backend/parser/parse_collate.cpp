@@ -143,7 +143,7 @@ FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& st
             collation = (context.derivation == DERIVATION_SYSCONST) ?
                 UTF8_GENERAL_CI_COLLATION_OID : GetCollationConnection();
             strength = COLLATE_IMPLICIT;
-            location = exprCollation(node);
+            location = exprLocation(node);
             derivation = (context.derivation == DERIVATION_IGNORABLE) ? DERIVATION_COERCIBLE : context.derivation;
         } else {
             /*
@@ -154,7 +154,7 @@ FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& st
              */
             collation = typcollation;
             strength = COLLATE_IMPLICIT;
-            location = exprCollation(node);
+            location = exprLocation(node);
             derivation = context.derivation;
         }
     } else {
