@@ -1445,7 +1445,14 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
             LockStmt* locktablestmt = (LockStmt*)(parsetree);
             ListCell* arg = NULL;
             foreach (arg, locktablestmt->relations) {
-                RangeVar* rv = (RangeVar*)lfirst(arg);
+                RangeVar* rv = NULL;
+                List* rv_lockmode = NULL;
+                if (u_sess->attr.attr_sql.dolphin && locktablestmt->mode == NoLock){
+                    rv_lockmode = (List*)lfirst(arg);
+                    rv = (RangeVar*)linitial(rv_lockmode);
+                } else {
+                    rv = (RangeVar*)lfirst(arg);
+                }
                 pgaudit_ddl_table(rv->relname, queryString);
             }
         } break;
