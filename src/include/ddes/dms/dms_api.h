@@ -33,7 +33,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           133
+#define DMS_LOCAL_VERSION           135
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -437,6 +437,7 @@ typedef struct st_dms_buf_ctrl {
     unsigned long long  pblk_lsn;
     unsigned char seg_fileno;
     unsigned int seg_blockno;
+    void* ctrl_lock;
 #endif
 } dms_buf_ctrl_t;
 
@@ -1115,6 +1116,7 @@ typedef struct st_dms_profile {
     char gsdb_home[DMS_LOG_PATH_LEN];
     unsigned char enable_mes_task_threadpool;
     unsigned int mes_task_worker_max_cnt;
+    unsigned int max_alive_time_for_abnormal_status;
 } dms_profile_t;
 
 typedef struct st_logger_param {
