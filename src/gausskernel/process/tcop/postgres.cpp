@@ -2733,7 +2733,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
 
         if (libpqsw_get_redirect()) {
-            if (libpqsw_process_query_message(commandTag, NULL, querystringForLibpqsw)) {
+            if (libpqsw_process_query_message(commandTag, NULL, querystringForLibpqsw, is_multistmt, lnext(parsetree_item) == NULL)) {
                 libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
                 if (snapshot_set) {
                     PopActiveSnapshot();
@@ -2854,7 +2854,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             break;
         }
 
-        if (libpqsw_process_query_message(commandTag, querytree_list, querystringForLibpqsw)) {
+        // Mixed statement judgments
+        if (libpqsw_process_query_message(commandTag, querytree_list, querystringForLibpqsw, is_multistmt, lnext(parsetree_item) == NULL)) {
             libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
             if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
                 libpqsw_trace("libpq send sql at my side as well:%s", commandTag);
