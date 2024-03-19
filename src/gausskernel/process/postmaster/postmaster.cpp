@@ -2314,7 +2314,7 @@ int PostmasterMain(int argc, char* argv[])
     checkDataDir();
 
     /* Verify disk space of u_sess->attr.attr_common.Log_directory */
-    if (u_sess->attr.attr_common.Log_directory != NULL) {
+    if (u_sess->attr.attr_common.Log_directory != NULL && is_absolute_path(u_sess->attr.attr_common.Log_directory)) {
         CheckPgLogDisk();
     }
 
