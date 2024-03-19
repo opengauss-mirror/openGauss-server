@@ -119,6 +119,36 @@ select regprocin('"BB"');
 select '"chAr"'::regtype;
 select regprocedure('"BB"(integer, "Comp")');
 
+select col1 as "AS_COL1","Col2" AS_COL2 from "t_ignore_case_in_dquotes_use_case0001" where "COL1"=2;
+select col1 as "AS_COL1","Col2" "AS_COL2" from "t_ignore_case_in_dquotes_use_case0001" where "COL1"=2;
+select col1 as "AS_COL1" from "t_ignore_case_in_dquotes_use_case0001" aa where "COL1"=2;
+select col1 as "AS_COL1" from "T_ignore_case_in_dquotes_use_case0001" aa where "COL1"=2;
+
+create table t_ignore_case_in_dquotes_use_case0002_1(product_id integer,product_name varchar2(60),category varchar2(60));
+insert into t_ignore_case_in_dquotes_use_case0002_1 values (1501, 'vivitar 35mm', 'electrncs');
+insert into t_ignore_case_in_dquotes_use_case0002_1 values (1502, 'olympus is50', 'electrncs');
+insert into t_ignore_case_in_dquotes_use_case0002_1 values (1600, 'play gym', 'toys');
+insert into t_ignore_case_in_dquotes_use_case0002_1 values (1601, 'lamaze', 'toys');
+insert into t_ignore_case_in_dquotes_use_case0002_1 values (1666, 'harry potter', 'dvd');
+
+create table t_ignore_case_in_dquotes_use_case0002_2(product_id integer,product_name varchar2(60),category varchar2(60));
+
+insert into t_ignore_case_in_dquotes_use_case0002_2 values (1502, 'olympus camera', 'electrncs');
+insert into t_ignore_case_in_dquotes_use_case0002_2 values (1601, 'lamaze', 'toys');
+insert into t_ignore_case_in_dquotes_use_case0002_2 values (1666, 'harry potter', 'toys');
+insert into t_ignore_case_in_dquotes_use_case0002_2 values (1700, 'wait interface', 'books');
+
+merge into "T_IGNORE_CASE_IN_DQUOTES_USE_CASE0002_1" P   
+using "T_IGNORE_CASE_IN_DQUOTES_USE_CASE0002_2" NP   
+on (P."PRODUCT_ID" = NP."PRODUCT_ID")   
+when matched then  
+  update set P."PRODUCT_NAME" = NP."PRODUCT_NAME", P."CATEGORY" = NP."CATEGORY" where P."PRODUCT_NAME" != 'play gym'  
+WHEN NOT MATCHED THEN  
+  insert values (NP."PRODUCT_ID", NP."PRODUCT_NAME", NP."CATEGORY") where NP."CATEGORY" = 'books';
+
+drop table t_ignore_case_in_dquotes_use_case0002_1;
+drop table t_ignore_case_in_dquotes_use_case0002_2;
+
 set enable_ignore_case_in_dquotes=off;
 SELECT nextval('"SEQ11"');
 select currval('"SEQ11"'); 
