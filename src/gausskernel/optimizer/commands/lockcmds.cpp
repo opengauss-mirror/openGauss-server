@@ -57,7 +57,18 @@ void LockTableCommand(LockStmt* lockstmt)
      * Iterate over the list and process the named relations one at a time
      */
     foreach (p, lockstmt->relations) {
-        RangeVar* rv = (RangeVar*)lfirst(p);
+        RangeVar* rv = NULL;
+        List* rv_lockmode = NULL;
+        if (u_sess->attr.attr_sql.dolphin && lockstmt->mode == NoLock){
+            // here p is a [releation,lock_mode] list
+            rv_lockmode = (List*)lfirst(p);
+            rv = (RangeVar*)linitial(rv_lockmode);
+            int *mode = (int*)lsecond(rv_lockmode);
+            lockstmt->mode = *mode;
+        } else {
+            rv = (RangeVar*)lfirst(p);
+        }
+        
         bool recurse = interpretInhOption(rv->inhOpt);
         Oid reloid;
 
