@@ -3431,6 +3431,13 @@ static void CheckExtremeRtoGUCConflicts(void)
                     errhint("Either turn on ss_enable_dms, or turn off ss_enable_ondemand_recovery.")));
         }
 
+        if (SS_DISASTER_CLUSTER) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("ondemand extreme rto not support in shared storage double cluster mode."),
+                    errhint("Either turn off ss_stream_cluster/ss_enable_dorado, or turn off ss_enable_ondemand_recovery.")));
+        }
+
         if (g_instance.attr.attr_storage.recovery_parse_workers <= 1) {
             ereport(ERROR,
                 (errcode(ERRCODE_SYSTEM_ERROR),
