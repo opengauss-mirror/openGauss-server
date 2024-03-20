@@ -1398,7 +1398,9 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
             }
 
             /* Step to next physical page */
-            so->currPos.buf = _bt_walk_left(rel, so->currPos.buf);
+			Buffer temp = so->currPos.buf;
+			so->currPos.buf = InvalidBuffer;
+            so->currPos.buf = _bt_walk_left(rel, temp);
 
             /* if we're physically at end of index, return failure */
             if (so->currPos.buf == InvalidBuffer)
