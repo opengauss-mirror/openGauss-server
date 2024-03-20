@@ -10751,6 +10751,15 @@ void StartupXLOG(void)
     Insert->PrevByteSize = XLogRecPtrToBytePos(EndOfLog) - XLogRecPtrToBytePos(t_thrd.xlog_cxt.LastRec);
     Insert->CurrLRC = 0;
 
+    if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_STANDBY_FAILOVER) {
+        errorno = memset_s(t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks,
+            sizeof(XLogRecPtr) * g_instance.attr.attr_storage.XLOGbuffers, 0,
+                sizeof(XLogRecPtr) * g_instance.attr.attr_storage.XLOGbuffers);
+        securec_check(errorno, "", "");
+        ereport(LOG, (errmsg("[SS failover]: Successfully reset xlblocks by role :%d when enable REALTIME BUILD.",
+            (int)t_thrd.role)));
+    }
+
     /*
      * Tricky point here: readBuf contains the *last* block that the LastRec
      * record spans, not the one it starts in.  The last block is indeed the
