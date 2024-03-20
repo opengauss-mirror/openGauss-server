@@ -6127,8 +6127,8 @@ static void pmdie(SIGNAL_ARGS)
         case SIGTERM:
         case SIGINT:
 
-            if (STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode && !dummyStandbyMode &&
-                SIGTERM == postgres_signal_arg) {
+            if (!SS_DISASTER_MAIN_STANDBY_NODE && STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode &&
+                !dummyStandbyMode && SIGTERM == postgres_signal_arg) {
                 /*
                  * Smart g_instance.status:
                  *
