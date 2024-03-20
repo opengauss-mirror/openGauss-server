@@ -29106,8 +29106,7 @@ SignedIconst: Iconst								{ $$ = $1; }
  */
 ColId:		IDENT
 				{ 
-					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes 
-					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes)
 					{
 						$$ = pg_strtolower(pstrdup($1));
 					}
