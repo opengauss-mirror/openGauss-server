@@ -1566,6 +1566,15 @@ static bool _equalAlterFunctionStmt(const AlterFunctionStmt* a, const AlterFunct
     return true;
 }
 
+static bool _equalCompileStmt(const CompileStmt* a, const CompileStmt* b)
+{
+    COMPARE_NODE_FIELD(objName);
+    COMPARE_NODE_FIELD(funcArgs);
+    COMPARE_SCALAR_FIELD(compileItem);
+
+    return true;
+}
+
 static bool _equalDoStmt(const DoStmt* a, const DoStmt* b)
 {
     COMPARE_NODE_FIELD(args);
@@ -3949,6 +3958,16 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterFunctionStmt:
             retval = _equalAlterFunctionStmt((AlterFunctionStmt*)a, (AlterFunctionStmt*)b);
+            break;
+        case T_CompileStmt:
+            u_sess->plsql_cxt.during_compile = true;
+            if (!enable_plpgsql_gsdependency_guc()) {
+                u_sess->plsql_cxt.during_compile = false;
+                retval = 0;
+                ereport(ERROR, (errmsg("This operation is not supported.")));
+                break;
+            }
+            retval = _equalCompileStmt((CompileStmt*)a, (CompileStmt*)b);
             break;
         case T_DoStmt:
             retval = _equalDoStmt((DoStmt*)a, (DoStmt*)b);

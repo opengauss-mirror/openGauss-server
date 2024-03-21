@@ -116,4 +116,14 @@ extern bool ConditionalLockCStoreFreeSpace(Relation relation);
 extern void UnlockCStoreFreeSpace(Relation relation);
 extern const char* GetLockNameFromTagType(uint16 locktag_type);
 
+extern void LockProcedureIdForSession(Oid procId, Oid dbId, LOCKMODE lockmode);
+extern void UnlockProcedureIdForSession(Oid procId, Oid dbId, LOCKMODE lockmode);
+extern void LockPackageIdForSession(Oid packageId, Oid dbId, LOCKMODE lockmode);
+extern void UnlockPackageIdForSession(Oid packageId, Oid dbId, LOCKMODE lockmode);
+
+extern void LockProcedureIdForXact(Oid procId, Oid dbId, LOCKMODE lockmode);
+extern void UnlockProcedureIdForXact(Oid procId, Oid dbId, LOCKMODE lockmode);
+extern void LockPackageIdForXact(Oid packageId, Oid dbId, LOCKMODE lockmode);
+extern void UnlockPackageIdForXact(Oid packageId, Oid dbId, LOCKMODE lockmode);
+
 #endif /* LMGR_H */

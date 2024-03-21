@@ -1314,17 +1314,6 @@ va pck1.r1;
 procedure p1;
 end pck1;
 /
-ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
-LINE 4: va pck1.r1;
-                  ^
-DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
-QUERY:   PACKAGE  DECLARE 
-type t1 is table of int index by int;
-type r1 is record (a t1, b int);
-va pck1.r1;
-procedure p1;
-end 
-CONTEXT:  compilation of PL/pgSQL package near line 4
 create or replace package pck1 as
 type t1 is table of int index by int;
 type r1 is record (a t1, b int);
@@ -1339,14 +1328,6 @@ null;
 end;
 end pck1;
 /
-ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
-LINE 1:  DECLARE vb pck1.r1;
-                           ^
-DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
-QUERY:   DECLARE vb pck1.r1;
-begin
-null;
-end
 drop package pck1;
 NOTICE:  drop cascades to function plpgsql_packagetype1.p1()
 -- b, another ref
@@ -1361,17 +1342,8 @@ begin
 null;
 end;
 /
-ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
-LINE 1:  DECLARE va pck1.r1;
-                           ^
-DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
-QUERY:   DECLARE va pck1.r1;
-begin
-null;
-end
 drop package pck1;
 drop procedure p1;
-ERROR:  function p1 does not exist
 -- test pck1.va%type ref table of
 -- a. var ref
 create or replace package pck2 as

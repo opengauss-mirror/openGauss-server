@@ -1726,6 +1726,7 @@ typedef struct knl_u_plpgsql_context {
     MemoryContext depend_mem_cxt; /* temp context for build_gs_depend*/
     int compile_check_node_level;
     int real_func_num;
+    HTAB* plpgsql_lock_objects;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -3159,6 +3160,7 @@ extern void set_function_style_none();
 extern void set_function_style_a();
 extern void set_function_style_pg();
 extern bool set_is_create_plsql_type();
+extern void set_is_create_pkg_function(bool is_create_pkg_function);
 
 extern THR_LOCAL knl_session_context* u_sess;
 

@@ -8301,6 +8301,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         /* Since not using PG_TRY, must reset error stack by hand */
         u_sess->plsql_cxt.cur_exception_cxt = NULL;
+        u_sess->plsql_cxt.is_exec_autonomous = false;
         t_thrd.log_cxt.error_context_stack = NULL;
         t_thrd.log_cxt.call_stack = NULL;
         /* reset buffer strategy flag */
@@ -8393,8 +8394,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.msg);
             }
         }
+        gsplsql_unlock_func_pkg_dependency_all();
         u_sess->plsql_cxt.pragma_autonomous = false;
         u_sess->plsql_cxt.curr_compile_context = NULL;
+        u_sess->plsql_cxt.isCreateFunction = false;
+        u_sess->plsql_cxt.isCreatePkg = false;
+        u_sess->plsql_cxt.is_alter_compile_stmt = false;
+        u_sess->plsql_cxt.during_compile = false;
         u_sess->pcache_cxt.gpc_in_batch = false;
         u_sess->pcache_cxt.gpc_in_try_store = false;
         u_sess->plsql_cxt.have_error = false;
@@ -8455,6 +8461,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         LWLockReleaseAll();
         AbortBufferIO();
 
+#ifndef ENABLE_MULTIPLE_NODES
+        gsplsql_unlock_func_pkg_dependency_all();
+#endif
+
         /* We should syncQuit after LWLockRelease to avoid dead lock of LWLocks. */
         RESUME_INTERRUPTS();
         StreamNodeGroup::syncQuit(STREAM_ERROR);
@@ -8467,6 +8477,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         clean_up_debug_server(debug_server, false, true);
         u_sess->plsql_cxt.cur_debug_server = NULL;
 #endif
+        u_sess->plsql_cxt.during_compile = false;
 #ifdef ENABLE_MULTIPLE_NODES
         /* reset send role flag */
         if (InSendingLocalUserIdChange()) {
@@ -8632,11 +8643,19 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* reset plpgsql compile flag */
         u_sess->plsql_cxt.compile_context_list = NULL;
         u_sess->plsql_cxt.curr_compile_context = NULL;
+
         u_sess->plsql_cxt.compile_status = NONE_STATUS;
         u_sess->plsql_cxt.func_tableof_index = NULL;
         u_sess->plsql_cxt.portal_depth = 0;
+        u_sess->plsql_cxt.isCreateFunction = false;
+        u_sess->plsql_cxt.isCreatePkg = false;
+        u_sess->plsql_cxt.is_alter_compile_stmt = false;
+        u_sess->plsql_cxt.during_compile = false;
         t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
-
+        if (u_sess->plsql_cxt.depend_mem_cxt != NULL) {
+            MemoryContextDelete(u_sess->plsql_cxt.depend_mem_cxt);
+            u_sess->plsql_cxt.depend_mem_cxt = NULL;
+        }
         u_sess->statement_cxt.executer_run_level = 0;
 
         initStringInfo(&input_message);

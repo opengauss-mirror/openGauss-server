@@ -3,6 +3,7 @@ NOTICE:  schema "plpgsql_pkg_dependency" does not exist, skipping
 create schema plpgsql_pkg_dependency;
 set current_schema = plpgsql_pkg_dependency;
 set behavior_compat_options = 'plpgsql_dependency';
+-- test 1
 create or replace package test_package_depend2_pkg is
 type t is record (col1 int, col2 text);
 procedure p1(param test_package_depend3_pkg.t);
@@ -30,7 +31,7 @@ type t is record (col1 int, col2 text, col3 varchar);
 procedure p1(param test_package_depend2_pkg.t);
 end test_package_depend3_pkg;
 /
---?WARNING:  Package ?.* is invalid.
+--?.*
 WARNING:  Package created with compilation erors.
 create  or replace  package body test_package_depend3_pkg is
 procedure p1(param test_package_depend2_pkg.t) is
@@ -39,7 +40,7 @@ procedure p1(param test_package_depend2_pkg.t) is
     end;
 end test_package_depend3_pkg;
 /
---?WARNING:  Package ?.* is invalid.
+--?.*
 WARNING:  Package Body created with compilation erors.
 call test_package_depend2_pkg.p1((1,'a','2023'));
 INFO:  call param: (1,a,2023)
@@ -59,6 +60,66 @@ drop package if exists test_package_depend2_pkg;
 --?.*
 drop package if exists test_package_depend3_pkg;
 NOTICE:  drop cascades to function plpgsql_pkg_dependency.p1(undefined)
+-- test 2
+create or replace package pkg1 is
+type x is record(tt int);
+procedure a(zz pkg2.x);
+end pkg1;
+/
+WARNING:  Type x does not exist.
+WARNING:  The header information of function a is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+create or replace package body pkg1 is
+procedure a(zz pkg2.x) is
+begin
+null;
+end;
+end pkg1;
+/
+WARNING:  Type x does not exist.
+WARNING:  The header information of function a is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  The header information of function a is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package Body created with compilation erors.
+create or replace package pkg2 is
+type x is record(tt int);
+procedure a(zz pkg1.x);
+end pkg2;
+/
+--?.*
+WARNING:  Package created with compilation erors.
+create or replace package body pkg2 is
+procedure a( zz pkg1.x) is
+begin
+null;
+end;
+end pkg2;
+/
+--?.*
+WARNING:  Package Body created with compilation erors.
+\parallel on 2
+begin
+perform pkg1.a(row(1));
+perform pg_sleep(1.5);
+perform pkg2.a(row(1));
+perform pg_sleep(2.5);
+end;
+/
+begin
+perform pg_sleep(0.5);
+perform pkg2.a(row(1));
+perform pg_sleep(2.5);
+perform pkg1.a(row(1));
+perform pg_sleep(2.5);
+end;
+/
+\parallel off
+drop package if exists pkg1;
+--?.*
+drop package if exists pkg2;
+NOTICE:  drop cascades to function plpgsql_pkg_dependency.a(undefined)
 -- clean
 drop schema plpgsql_pkg_dependency cascade;
 reset behavior_compat_options;

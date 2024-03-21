@@ -34,6 +34,7 @@
 
 #define TABLEOFINDEXBUCKETNUM 128
 #define MAX_INT32_LEN 11
+#define GSPLSQL_LOCKED_HTAB_SIZE 128
 
 /*
  * Compile status mark
@@ -1145,6 +1146,7 @@ typedef struct FuncInvalItem {
     NodeTag type;
     int cacheId;      /* a syscache ID, see utils/syscache.h */
     Oid objId;
+    Oid dbId;
 } FuncInvalItem;
 
 typedef struct PLpgSQL_function { /* Complete compiled function	  */
@@ -2114,4 +2116,26 @@ extern void compute_return_type(
 extern CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerlines);
 void plpgsql_free_override_stack(int depth);
 
+/* gsplsql lock/unlock api */
+typedef struct GSPLSQLLockedObjKey {
+    uint32 isPkg; /* 1 is pkg, 0 is func */
+    Oid objId;
+    Oid dbId;
+} GSPLSQLLockedObj;
+
+typedef struct GSPLSQLLockedObjEntry {
+    GSPLSQLLockedObj key;
+    bool has_locked;
+} GSPLSQLLockedObjEntry;
+
+typedef enum {
+    PLSQL_UNKNOW_OBJ,
+    PLSQL_FUNCTION_OBJ,
+    PLSQL_PACKAGE_OBJ,
+} GSPLSQLObjectType;
+
+extern void init_lock_hash_table();
+extern void gsplsql_lock_func_pkg_dependency_all(Oid obj_oid, GSPLSQLObjectType type);
+extern void gsplsql_unlock_func_pkg_dependency_all();
+extern void gsplsql_lock_depend_pkg_on_session(PLpgSQL_function* func);
 #endif /* PLPGSQL_H */

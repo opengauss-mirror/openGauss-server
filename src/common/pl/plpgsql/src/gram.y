@@ -1983,22 +1983,28 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                 |   K_FUNCTION {u_sess->parser_cxt.is_procedure=false;} spec_proc
                     {
                         DefElem *def = $3;
+                        bool oldisCreateFunction = u_sess->plsql_cxt.isCreateFunction;
                         u_sess->plsql_cxt.procedure_start_line = GetLineNumber(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, @1);
                         u_sess->plsql_cxt.plpgsql_yylloc = @1;
                         u_sess->plsql_cxt.isCreateFunction = true;
+                        set_is_create_pkg_function(true);
                         raw_parse_package_function(def->defname, def->location, def->begin_location);
-                        u_sess->plsql_cxt.isCreateFunction = false;
+                        set_is_create_pkg_function(false);
+                        u_sess->plsql_cxt.isCreateFunction = oldisCreateFunction;
                         u_sess->plsql_cxt.procedure_start_line = 0;
                         u_sess->plsql_cxt.plpgsql_yylloc = 0;
                     }
                 |   K_PROCEDURE {u_sess->parser_cxt.is_procedure=true;} spec_proc
                     {
                         DefElem *def = $3;
+                        bool oldisCreateFunction = u_sess->plsql_cxt.isCreateFunction;
                         u_sess->plsql_cxt.procedure_start_line = GetLineNumber(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, @1);
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
                         u_sess->plsql_cxt.isCreateFunction = true;
+                        set_is_create_pkg_function(true);
                         raw_parse_package_function(def->defname, def->location, def->begin_location);
-                        u_sess->plsql_cxt.isCreateFunction = false;
+                        set_is_create_pkg_function(false);
+                        u_sess->plsql_cxt.isCreateFunction = oldisCreateFunction;
                         u_sess->plsql_cxt.procedure_start_line = 0;
                         u_sess->plsql_cxt.plpgsql_yylloc = 0;
                     }
@@ -9738,13 +9744,6 @@ read_datatype(int tok)
                 result = plpgsql_parse_cwordrowtype(dtnames);
                 if (result)
                     return result;
-            }
-        } else {
-            if (tok == ';') {
-                PLpgSQL_datum* datum = GetPackageDatum(dtnames);
-                if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_RECORD_TYPE) {
-                    check_record_type((PLpgSQL_rec_type*)datum, yylloc, false);
-                }
             }
         }
     }
