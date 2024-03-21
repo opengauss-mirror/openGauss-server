@@ -7917,7 +7917,7 @@ static bool IsDefaultSlice(StringInfo buf, RangePartitionDefState* sliceDef)
     }
 }
 
-static char* EscapeQuotes(const char* src)
+char* EscapeQuotes(const char* src)
 {
     int len = strlen(src), i, j;
     char* result = (char*)palloc(len * 2 + 1);
