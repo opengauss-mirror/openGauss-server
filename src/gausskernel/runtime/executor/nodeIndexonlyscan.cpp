@@ -42,6 +42,7 @@
 #include "utils/rel_gs.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/pruning.h"
+#include "access/multi_redo_api.h"
 
 
 static TupleTableSlot* ExecIndexOnlyScan(PlanState* state);
@@ -187,8 +188,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
                     continue; /* the visible version not match the IndexTuple */
                 }
             }
-        } else if (isVersionScan ||
-            !visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
+        } else if (isVersionScan || is_index_only_disabled_in_astore() ||
+                   !visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
             /* IMPORTANT: We ALWAYS visit the heap to check visibility in VERSION SCAN. */
             /*
              * Rats, we have to visit the heap to check visibility.

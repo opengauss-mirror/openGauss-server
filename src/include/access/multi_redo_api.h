@@ -114,6 +114,13 @@ static inline bool IsMultiThreadRedo()
     return (get_real_recovery_parallelism() > 1);
 }
 
+inline bool is_index_only_disabled_in_astore()
+{
+    return (RecoveryInProgress() &&
+            (IsParallelRedo() ||
+            (IsExtremeRedo() && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)));
+}
+
 uint32 GetRedoWorkerCount();
 bool IsMultiThreadRedoRunning();
 void DispatchRedoRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
