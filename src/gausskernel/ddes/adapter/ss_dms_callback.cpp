@@ -362,7 +362,7 @@ static void SSHandleReformFailDuringDemote(DemoteMode demote_mode)
      * Therefore we flush as many dirty pages as we can, then trigger a DMS normal reform.
      */
     if (CheckpointInProgress() || pmState >= PM_SHUTDOWN) {
-        ereport(ERROR,
+        ereport(WARNING,
             (errmodule(MOD_DMS),
                 errmsg("[SS switchover DFX] reform failed after shutdown ckpt has started, exit now")));
         _exit(0);
