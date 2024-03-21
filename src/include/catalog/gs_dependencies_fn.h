@@ -103,6 +103,7 @@ extern bool gsplsql_build_ref_type_dependency(Oid typ_oid);
 extern List* gsplsql_prepare_recompile_func(Oid func_oid, Oid schema_oid, Oid pkg_oid, bool is_recompile);
 extern void gsplsql_complete_recompile_func(List* list);
 extern Oid gsplsql_parse_pkg_var_obj4(GsDependObjDesc* obj, List* var_name);
+extern void gsplsql_do_autonomous_compile(Oid objoid, bool is_pkg);
 /*
  * internal interface
  */

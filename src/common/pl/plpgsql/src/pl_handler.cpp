@@ -816,6 +816,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 
     bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
     u_sess->plsql_cxt.need_create_depend = false;
+    if (u_sess->SPI_cxt._connected == -1) {
+        plpgsql_hashtable_clear_invalid_obj();
+    }
 
     _PG_init();
     /*
@@ -864,7 +867,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 #endif
     int connect = SPI_connectid();
     Oid firstLevelPkgOid = InvalidOid;
-    bool save_curr_status  = GetCurrCompilePgObjStatus();
+    bool save_curr_status = GetCurrCompilePgObjStatus();
+    bool save_is_exec_autonomous = u_sess->plsql_cxt.is_exec_autonomous;
     PG_TRY();
     {
         PGSTAT_START_PLSQL_TIME_RECORD();
@@ -1093,6 +1097,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     {
         u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
         SetCurrCompilePgObjStatus(save_curr_status);
+        u_sess->plsql_cxt.is_exec_autonomous = save_is_exec_autonomous;
         /* clean stp save pointer if the outermost function is end. */
         if (u_sess->SPI_cxt._connected == 0) {
             t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
@@ -1101,6 +1106,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         SetSendCommandId(saveSetSendCommandId);
 #else
         dopControl.ResetSmp();
+        gsplsql_unlock_func_pkg_dependency_all();
 #endif
         /* ErrorData could be allocted in SPI's MemoryContext, copy it. */
         oldContext = MemoryContextSwitchTo(oldContext);
@@ -1127,6 +1133,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     SetSendCommandId(saveSetSendCommandId);
 #else
     dopControl.ResetSmp();
+    gsplsql_unlock_func_pkg_dependency_all();
 #endif
 
     /*
@@ -1170,11 +1177,22 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     int rc;
     PGSTAT_INIT_TIME_RECORD();
     bool needRecord = false;
+    Oid package_oid = InvalidOid;
 
+    if (u_sess->SPI_cxt._connected == -1) {
+        plpgsql_hashtable_clear_invalid_obj();
+    }
     _PG_init();
 
     AssertEreport(IsA(codeblock, InlineCodeBlock), MOD_PLSQL, "Inline code block is required.");
 
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+        package_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+#ifndef ENABLE_MULTIPLE_NODES
+        gsplsql_lock_func_pkg_dependency_all(package_oid, PLSQL_PACKAGE_OBJ);
+#endif
+    }
     /*
      * Connect to SPI manager
      */
@@ -1208,6 +1226,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 
     /* Compile the anonymous code block */
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    int save_compile_status = getCompileStatus();
     PG_TRY();
     {
         func = plpgsql_compile_inline(codeblock->source_text);
@@ -1219,9 +1238,11 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
 #ifndef ENABLE_MULTIPLE_NODES
+        gsplsql_unlock_func_pkg_dependency_all();
         dopControl.ResetSmp();
 #endif
         popToOldCompileContext(save_compile_context);
+        CompileStatusSwtichTo(save_compile_status);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1233,6 +1254,9 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     /* Mark the function as busy, just pro forma */
     func->use_count++;
 
+#ifndef ENABLE_MULTIPLE_NODES
+        gsplsql_lock_depend_pkg_on_session(func);
+#endif
     /*
      * Set up a fake fcinfo with just enough info to satisfy
      * plpgsql_exec_function().  In particular note that this sets things up
@@ -1250,7 +1274,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     /* save flag for nest plpgsql compile */
     save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
-    int save_compile_status = u_sess->plsql_cxt.compile_status;
+    save_compile_status = u_sess->plsql_cxt.compile_status;
     DebugInfo* save_debug_info = func->debug;
     NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
@@ -1270,6 +1294,9 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
             t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
         }
         t_thrd.log_cxt.call_stack = saveplcallstack;
+#ifndef ENABLE_MULTIPLE_NODES
+        gsplsql_unlock_func_pkg_dependency_all();
+#endif
         /* Decrement package use-count */
         DecreasePackageUseCount(func);
 
@@ -1302,6 +1329,9 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
         SetSendCommandId(saveSetSendCommandId);
 #endif
 
+        if (u_sess->SPI_cxt._connected == 0) {
+            plpgsql_hashtable_clear_invalid_obj();
+        }
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1329,6 +1359,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 #ifdef ENABLE_MULTIPLE_NODES
     SetSendCommandId(saveSetSendCommandId);
 #else
+    gsplsql_unlock_func_pkg_dependency_all();
     dopControl.ResetSmp();
 #endif
 
@@ -1356,6 +1387,9 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
         plpgsql_free_function_memory(func);
     } else {
         plpgsql_free_function_memory(func);
+    }
+    if (u_sess->SPI_cxt._connected == 0) {
+        plpgsql_hashtable_clear_invalid_obj();
     }
 
     /*
@@ -1901,6 +1935,7 @@ void record_pkg_function_dependency(PLpgSQL_package* pkg, List** invalItems, Oid
             inval_item->cacheId = PACKAGEOID;
             inval_item->objId = pkgid;
         }
+        inval_item->dbId = u_sess->proc_cxt.MyDatabaseId;
         *invalItems = lappend(*invalItems, inval_item);
     }
 }

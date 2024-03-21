@@ -5563,6 +5563,17 @@ static AlterFunctionStmt* _copyAlterFunctionStmt(const AlterFunctionStmt* from)
     return newnode;
 }
 
+static CompileStmt* _copyCompileStmt(const CompileStmt* from)
+{
+    CompileStmt* newnode = makeNode(CompileStmt);
+
+    COPY_NODE_FIELD(objName);
+    COPY_NODE_FIELD(funcArgs);
+    COPY_SCALAR_FIELD(compileItem);
+
+    return newnode;
+}
+
 static DoStmt* _copyDoStmt(const DoStmt* from)
 {
     DoStmt* newnode = makeNode(DoStmt);
@@ -8398,6 +8409,16 @@ void* copyObject(const void* from)
             break;
         case T_AlterFunctionStmt:
             retval = _copyAlterFunctionStmt((AlterFunctionStmt*)from);
+            break;
+        case T_CompileStmt:
+            u_sess->plsql_cxt.during_compile = true;
+            if (!enable_plpgsql_gsdependency_guc()) {
+                u_sess->plsql_cxt.during_compile = false;
+                retval = 0;
+                ereport(ERROR, (errmsg("This operation is not supported.")));
+                break;
+            }
+            retval = _copyCompileStmt((CompileStmt*)from);
             break;
         case T_DoStmt:
             retval = _copyDoStmt((const DoStmt*)from);

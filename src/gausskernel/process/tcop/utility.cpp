@@ -3440,9 +3440,11 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
 
         case T_DoStmt:
+            u_sess->plsql_cxt.need_create_depend = false;
             /* This change is from PG11 commit/rollback patch */
             ExecuteDoStmt((DoStmt*) parse_tree, 
                 (!u_sess->SPI_cxt.is_allow_commit_rollback));
+            u_sess->plsql_cxt.need_create_depend = true;
             break;
 
         case T_CreatedbStmt:

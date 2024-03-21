@@ -52,6 +52,8 @@
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_type_fn.h"
+#include "storage/lmgr.h"
+#include "access/hash.h"
 
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
@@ -170,7 +172,17 @@ PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, b
         if (!func_valid) {
             fcinfo->flinfo->fn_extra = NULL;
         }
+        if (!func_valid && !u_sess->plsql_cxt.need_create_depend && !isRecompile) {
+            if (!OidIsValid(packageOid)) {
+            gsplsql_do_autonomous_compile(func_oid, false);
+            }
+        }
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Locking is performed before compilation. */
+    gsplsql_lock_func_pkg_dependency_all(func_oid, PLSQL_FUNCTION_OBJ);
+#endif
  
 recheck:
     if (func == NULL) {
@@ -5285,4 +5297,177 @@ Node* plpgsql_check_match_var(Node* node, ParseState* pstate, ColumnRef* cref)
         }
     }
     return ans;
+}
+
+static uint32 gsplsql_lock_obj_hash_code(const void* key, Size size)
+{
+    const GSPLSQLLockedObjKey* k = (const GSPLSQLLockedObjKey*)key;
+    return hash_uint32((uint32)k->objId) ^ hash_uint32((uint32)k->dbId) ^ hash_uint32((uint32)k->isPkg);
+}
+
+static int gsplsql_lock_obj_compare(const void* a, const void* b, Size keysize)
+{
+    const GSPLSQLLockedObjKey* left = (const GSPLSQLLockedObjKey*)a;
+    const GSPLSQLLockedObjKey* right = (const GSPLSQLLockedObjKey*)b;
+    if (left->isPkg == right->isPkg && left->objId == right->objId &&
+        left->dbId == right->dbId) {
+        return 0;
+    }
+    return 1;
+}
+
+void init_lock_hash_table()
+{
+    if (u_sess->plsql_cxt.plpgsql_lock_objects != NULL) {
+        return;
+    }
+    HASHCTL ctl;
+    errno_t rc = EOK;
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = sizeof(GSPLSQLLockedObjKey);
+    ctl.entrysize = sizeof(GSPLSQLLockedObjEntry);
+    ctl.hash = gsplsql_lock_obj_hash_code;
+    ctl.match = gsplsql_lock_obj_compare;
+    ctl.hcxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER);
+    u_sess->plsql_cxt.plpgsql_lock_objects = hash_create(
+        "GSPLSQL locked object", GSPLSQL_LOCKED_HTAB_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+
+/* In-depth traversal: Add a read lock to the object on which the package depends */
+void gsplsql_lock_func_pkg_dependency_all(Oid obj_oid, GSPLSQLObjectType type)
+{
+    if (u_sess->plsql_cxt.isCreateFunction || u_sess->plsql_cxt.isCreatePkg ||
+        u_sess->plsql_cxt.is_alter_compile_stmt || u_sess->plsql_cxt.during_compile) {
+            return;
+    }
+    /* Only lock valid Oid and non-builtin function*/
+    if (!OidIsValid(obj_oid) || obj_oid < (Oid)FirstBootstrapObjectId) {
+        return;
+    }
+    MemoryContext oldcxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+    if (unlikely(u_sess->plsql_cxt.plpgsql_lock_objects == NULL)) {
+        init_lock_hash_table();
+    }
+    bool found = false;
+    GSPLSQLLockedObjKey key;
+    if (type == PLSQL_FUNCTION_OBJ) {
+        key = {0, obj_oid, u_sess->proc_cxt.MyDatabaseId};
+    } else {
+        key = {1, obj_oid, u_sess->proc_cxt.MyDatabaseId};
+    }
+    GSPLSQLLockedObjEntry* entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects,
+                                                                       &key, HASH_ENTER, &found);
+    if (!found || !entry->has_locked) {
+        entry->has_locked = false;
+        if (type == PLSQL_FUNCTION_OBJ) {
+            LockProcedureIdForSession(obj_oid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+        } else {
+            LockPackageIdForSession(obj_oid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+        }
+        entry->has_locked = true;
+    }
+    /* Lock the dependent object of pkg */
+    if (type != PLSQL_PACKAGE_OBJ) {
+        (void)MemoryContextSwitchTo(oldcxt);
+        return;
+    }
+    PLpgSQL_pkg_hashkey hashkey;
+    ListCell* lc = NULL;
+    hashkey.pkgOid = obj_oid;
+    PLpgSQL_package* pkg = plpgsql_pkg_HashTableLookup(&hashkey);
+    if (pkg == NULL) {
+        (void)MemoryContextSwitchTo(oldcxt);
+        return;
+    }
+    foreach(lc, pkg->invalItems) {
+        FuncInvalItem* item = (FuncInvalItem*)lfirst(lc);
+        if (unlikely((item->cacheId != PACKAGEOID))) {
+            continue;
+        }
+        key = {1, item->objId, item->dbId};
+        entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects,
+                                                    &key, HASH_ENTER, &found);
+        if (!found || !entry->has_locked) {
+            entry->has_locked = false;
+            LockPackageIdForSession(item->objId, item->dbId, AccessShareLock);
+            entry->has_locked = true;
+        }
+    }
+    (void)MemoryContextSwitchTo(oldcxt);
+}
+
+void gsplsql_unlock_func_pkg_dependency_all()
+{
+    if (u_sess->SPI_cxt._connected > 0 || u_sess->plsql_cxt.plpgsql_lock_objects == NULL ||
+        hash_get_num_entries(u_sess->plsql_cxt.plpgsql_lock_objects) == 0) {
+        return;
+    }
+    HASH_SEQ_STATUS status;
+    GSPLSQLLockedObjEntry *hentry = NULL;
+    hash_seq_init(&status, u_sess->plsql_cxt.plpgsql_lock_objects);
+    while ((hentry = (GSPLSQLLockedObjEntry *) hash_seq_search(&status)) != NULL) {
+        if (hentry->has_locked) {
+            if (hentry->key.isPkg == 1) {
+                UnlockPackageIdForSession(hentry->key.objId, hentry->key.dbId, AccessShareLock);
+            } else {
+                UnlockProcedureIdForSession(hentry->key.objId, hentry->key.dbId, AccessShareLock);
+            }
+        }
+        hash_search(u_sess->plsql_cxt.plpgsql_lock_objects, &hentry->key, HASH_REMOVE, NULL);
+    }
+}
+
+void gsplsql_lock_depend_pkg_on_session(PLpgSQL_function* func)
+{
+    if (func == NULL) {
+        return;
+    }
+    /* Only lock valid Oid and non-builtin function*/
+    if (!OidIsValid(func->fn_oid) || func->fn_oid < (Oid)FirstBootstrapObjectId) {
+        return;
+    }
+    MemoryContext oldcxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+    if (unlikely(u_sess->plsql_cxt.plpgsql_lock_objects == NULL)) {
+        init_lock_hash_table();
+    }
+    bool found = false;
+    GSPLSQLLockedObjKey key;
+    GSPLSQLLockedObjEntry* entry = NULL;
+    key = {0, func->fn_oid, u_sess->proc_cxt.MyDatabaseId};
+    entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects,
+                                                                       &key, HASH_ENTER, &found);
+    if (!found || !entry->has_locked) {
+        entry->has_locked = false;
+        LockProcedureIdForSession(func->fn_oid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+        entry->has_locked = true;
+    }
+    if (OidIsValid(func->pkg_oid)) {
+        found = false;
+        key = {1, func->pkg_oid, u_sess->proc_cxt.MyDatabaseId};
+        entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects,
+                                                                           &key, HASH_ENTER, &found);
+        if (!found || !entry->has_locked) {
+            entry->has_locked = false;
+            LockPackageIdForSession(func->fn_oid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+            entry->has_locked = true;
+        }
+    }
+    List* invalItems = func->invalItems;
+    ListCell* lc = NULL;
+    foreach(lc, invalItems) {
+        FuncInvalItem* item = (FuncInvalItem*)lfirst(lc);
+        if (unlikely((item->cacheId != PACKAGEOID))) {
+            continue;
+        }
+        key = {1, item->objId, item->dbId};
+        entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects,
+                                                    &key, HASH_ENTER, &found);
+        if (!found || !entry->has_locked) {
+            entry->has_locked = false;
+            LockPackageIdForSession(item->objId, item->dbId, AccessShareLock);
+            entry->has_locked = true;
+        }
+    }
+    (void)MemoryContextSwitchTo(oldcxt);
 }

@@ -43,6 +43,7 @@
 #include "catalog/pg_proc_fn.h"
 #include "parser/parse_type.h"
 #include "utils/lsyscache.h"
+#include "storage/lock/lock.h"
 
 static void complete_process_variables(PLpgSQL_package* pkg, bool isCreate, bool isRecompile);
 static bool datumIsVariable(PLpgSQL_datum* datum);
@@ -75,6 +76,142 @@ static inline Oid gsplsql_parse_pkg_var_obj2(GsDependObjDesc* obj, ListCell* var
 static bool gsplsql_exist_func_object_in_dependencies_obj(char* nsp_name, char* pkg_name,
     const char* old_func_head_name, const char* old_func_name);
 static bool gsplsql_exist_func_object_in_dependencies(char* nsp_name, char* pkg_name, const char* old_func_head_name);
+
+void gsplsql_do_autonomous_compile(Oid objoid, bool is_pkg)
+{
+    if (u_sess->plsql_cxt.during_compile) {
+        return;
+    }
+    if (u_sess->plsql_cxt.is_exec_autonomous || u_sess->is_autonomous_session) {
+        return;
+    }
+    if (unlikely(g_instance.attr.attr_storage.max_concurrent_autonomous_transactions <= 0)) {
+        ereport(WARNING, (errcode(ERRCODE_PLPGSQL_ERROR),
+                          errmsg("The %s cannot be %s.", "compile function/package operator", "called in autonomous transaction"),
+                          errdetail("The value of max_concurrent_autonomous_transactions must be greater than 0."),
+                          errcause("%s depends on autonomous transaction.", "compile invalid function/package in dml"),
+                          erraction("set max_concurrent_autonomous_transactions to a large value.")));
+        return;
+    }
+    bool pushed = SPI_push_conditional();
+    MemoryContext tmp_context = AllocSetContextCreate(u_sess->temp_mem_cxt,
+                                                      "autonomous compile tmp context",
+                                                      ALLOCSET_DEFAULT_MINSIZE,
+                                                      ALLOCSET_DEFAULT_INITSIZE,
+                                                      ALLOCSET_DEFAULT_MAXSIZE);
+    MemoryContext old_cxt = MemoryContextSwitchTo(tmp_context);
+    ResourceOwner old_owner = t_thrd.utils_cxt.CurrentResourceOwner;
+
+    /* release lock for compiled object */
+    bool found = false;
+    GSPLSQLLockedObjKey key;
+    if (is_pkg) {
+        key = {1, objoid, u_sess->proc_cxt.MyDatabaseId};
+    } else {
+        key = {0, objoid, u_sess->proc_cxt.MyDatabaseId};
+    }
+    GSPLSQLLockedObjEntry* entry = NULL;
+    if (u_sess->plsql_cxt.plpgsql_lock_objects) {
+        entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects, &key, HASH_FIND, &found);
+        if (found && entry->has_locked) {
+            if (!is_pkg) {
+                UnlockProcedureIdForSession(objoid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+            } else {
+                UnlockPackageIdForSession(objoid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+            }
+            entry->has_locked = false;
+        }
+    }
+
+    StringInfoData str;
+    char* pkg_name = NULL;
+    char* proc_name = NULL;
+    char* obj_type = NULL;
+    char* schema_name = NULL;
+    initStringInfo(&str);
+    appendStringInfoString(&str,
+        "declare\n"
+        "PRAGMA AUTONOMOUS_TRANSACTION;\n"
+        "begin\n");
+    /* check guc value*/
+    appendStringInfo(&str, "set %s=%s;\n", "behavior_compat_options", "\'plpgsql_dependency\'");
+    
+    if (is_pkg) {
+        schema_name = GetPackageSchemaName(objoid);
+        obj_type = "package";
+        pkg_name = GetPackageName(objoid);
+        appendStringInfo(&str, "alter %s %s.%s ", obj_type, schema_name, quote_identifier(pkg_name));
+    } else {
+        char res = get_func_prokind(objoid);
+        if (PROC_IS_PRO(res)) {
+            obj_type = "procedure";
+        } else if (PROC_IS_FUNC(res)) {
+            obj_type = "function";
+        } else {
+            ereport(WARNING, (errcode(ERRCODE_PLPGSQL_ERROR),
+                               errmsg("get wrong func type by func oid %u", objoid)));
+        }
+        schema_name = get_namespace_name(get_func_namespace(objoid));
+        proc_name = format_procedure_no_visible(objoid);
+        appendStringInfo(&str, "alter %s %s.%s ", obj_type, schema_name, proc_name);
+    }
+    appendStringInfoString(&str, "compile;\n");
+    appendStringInfoString(&str, "end;");
+
+    int save_compile_status = getCompileStatus();
+    List* save_compile_list = u_sess->plsql_cxt.compile_context_list;
+    PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    u_sess->plsql_cxt.during_compile = true;
+    PG_TRY();
+    {
+        List* raw_parse_list = raw_parser(str.data, NULL);
+        DoStmt* stmt = (DoStmt*)linitial(raw_parse_list);
+        (void)CompileStatusSwtichTo(NONE_STATUS);
+        u_sess->plsql_cxt.curr_compile_context = NULL;
+        u_sess->plsql_cxt.compile_context_list = NULL;
+        ExecuteDoStmt(stmt, true);
+        t_thrd.utils_cxt.CurrentResourceOwner = old_owner;
+    }
+    PG_CATCH();
+    {
+        (void)CompileStatusSwtichTo(save_compile_status);
+        u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        u_sess->plsql_cxt.compile_context_list = save_compile_list;
+        u_sess->plsql_cxt.during_compile = false;
+        MemoryContextSwitchTo(old_cxt);
+        t_thrd.utils_cxt.CurrentResourceOwner = old_owner;
+
+        ErrorData* errdata = CopyErrorData();
+        FlushErrorState();
+        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
+                        errmsg("Executed %s %s is invalid, and do compile ddl %s.", obj_type,
+                               is_pkg ? pkg_name : proc_name, str.data),
+                        errdetail("COMPLIE fail reason: (%s,%d) %s.", errdata->funcname,
+                                  errdata->lineno, errdata->message),
+                        erraction("Please call ALTER PACKAGE/FUNCTION COMPILE to validate %s %s.",
+                                  obj_type, is_pkg ? pkg_name : proc_name)));
+    }
+    PG_END_TRY();
+    (void)CompileStatusSwtichTo(save_compile_status);
+    u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+    u_sess->plsql_cxt.compile_context_list = save_compile_list;
+    u_sess->plsql_cxt.during_compile = false;
+    MemoryContextSwitchTo(old_cxt);
+    MemoryContextDelete(tmp_context);
+    SPI_pop_conditional(pushed);
+    /* hold lock again */
+    if (u_sess->plsql_cxt.plpgsql_lock_objects) {
+        entry = (GSPLSQLLockedObjEntry*)hash_search(u_sess->plsql_cxt.plpgsql_lock_objects, &key, HASH_FIND, &found);
+        if (found && !entry->has_locked) {
+            if (!is_pkg) {
+                LockProcedureIdForSession(objoid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+            } else {
+                LockPackageIdForSession(objoid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+            }
+            entry->has_locked = true;
+        }
+    }
+}
 
 bool gsplsql_exists_func_obj(Oid nsp_oid, Oid pkg_oid, const char* old_func_head_name, const char* old_func_name)
 {

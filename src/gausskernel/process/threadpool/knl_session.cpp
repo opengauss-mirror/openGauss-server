@@ -1858,11 +1858,16 @@ void set_function_style_pg()
     u_sess->plsql_cxt.functionStyleType = FUNCTION_STYLE_TYPE_PG;
 }
 
+void set_is_create_pkg_function(bool is_create_pkg_function)
+{
+    u_sess->plsql_cxt.isCreatePkgFunction = is_create_pkg_function;
+}
+
 bool set_is_create_plsql_type()
 {
     if (enable_plpgsql_gsdependency_guc()) {
         if (u_sess->plsql_cxt.isCreatePkgFunction == true &&
-            u_sess->plsql_cxt.isCreatePkgFunction == false) {
+            u_sess->plsql_cxt.isCreatePkg == false) {
             return false;
         }
         if (u_sess->plsql_cxt.functionStyleType == FUNCTION_STYLE_TYPE_REFRESH_HEAD) {

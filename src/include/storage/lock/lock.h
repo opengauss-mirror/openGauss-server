@@ -335,6 +335,26 @@ typedef struct LOCKTAG {
         (locktag).locktag_type = LOCKTAG_CSTORE_FREESPACE, \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
 
+#define PackageRelationId  7815
+#define SET_LOCKTAG_PKG_OBJECT(locktag, dboid, objoid)      \
+    ((locktag).locktag_field1 = (dboid),                    \
+        (locktag).locktag_field2 = (PackageRelationId),     \
+        (locktag).locktag_field3 = (objoid),                \
+        (locktag).locktag_field4 = 0,                       \
+        (locktag).locktag_field5 = 0,                       \
+        (locktag).locktag_type = LOCKTAG_OBJECT,            \
+        (locktag).locktag_lockmethodid = USER_LOCKMETHOD)
+
+#define ProcedureRelationId  1255
+#define SET_LOCKTAG_PROC_OBJECT(locktag, dboid, objoid)    \
+    ((locktag).locktag_field1 = (dboid),                   \
+        (locktag).locktag_field2 = (ProcedureRelationId),  \
+        (locktag).locktag_field3 = objoid,                 \
+        (locktag).locktag_field4 = 0,                      \
+        (locktag).locktag_field5 = 0,                      \
+        (locktag).locktag_type = LOCKTAG_OBJECT,           \
+        (locktag).locktag_lockmethodid = USER_LOCKMETHOD)
+
 /*
  * Per-locked-object lock information:
  *
