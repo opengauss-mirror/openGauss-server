@@ -4582,7 +4582,7 @@ static int XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli, int source, 
     }
 
     fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
-retry:
+
     if (fd >= 0) {
         /* Success! */
         t_thrd.xlog_cxt.curFileTLI = tli;
@@ -11074,6 +11074,9 @@ void StartupXLOG(void)
             (void)LWLockRelease(state->recovery_queue_lock);
         }
         g_instance.dms_cxt.SSRecoveryInfo.in_ondemand_recovery = false;
+
+        // clear redo done state of all buffer
+        SSOndemandClearRedoDoneState();
     }
 
     if (SS_PRIMARY_MODE) {
