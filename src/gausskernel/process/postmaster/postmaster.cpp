@@ -10518,7 +10518,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
         /* avoid panics caused by concurreny between startup processes and recovery */
-        if (g_instance.pid_cxt.StartupPID != 0) {
+        if ((!SS_DISASTER_MAIN_STANDBY_NODE) && g_instance.pid_cxt.StartupPID != 0) {
             ereport(LOG, (errmsg("[SS Reform] request startup proc exit")));
             signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
         }
