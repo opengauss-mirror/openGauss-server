@@ -504,19 +504,21 @@ void gs_memprot_failed(int64 sz, MemType type)
     /* request 50 chunks (> 50M) for processing error */
     t_thrd.utils_cxt.beyondChunk += 50;
 
+    uint64 debug_query_id = (u_sess == NULL) ? 0 : u_sess->debug_query_id;
+
     if (flag) {
         if (type == MEM_THRD)
             write_stderr(
                 "----debug_query_id=%lu, memory allocation failed due to reaching the database memory limitation."
                 " Current thread is consuming about %u MB, allocating %ld bytes.\n",
-                u_sess->debug_query_id,
+                debug_query_id,
                 (uint32)t_thrd.utils_cxt.trackedMemChunks << (chunkSizeInBits - BITS_IN_MB),
                 sz);
         else
             write_stderr(
                 "----debug_query_id=%lu, memory allocation failed due to reaching the database memory limitation."
                 " Current session is consuming about %u MB, allocating %ld bytes.\n",
-                u_sess->debug_query_id,
+                debug_query_id,
                 (uint32)u_sess->stat_cxt.trackedMemChunks << (chunkSizeInBits - BITS_IN_MB),
                 sz);
     } else {
@@ -524,19 +526,19 @@ void gs_memprot_failed(int64 sz, MemType type)
             write_stderr(
                 "----debug_query_id=%lu, FATAL: memory allocation failed due to reaching the OS memory limitation."
                 " Current thread is consuming about %u MB, allocating %ld bytes.\n",
-                u_sess->debug_query_id,
+                debug_query_id,
                 (uint32)t_thrd.utils_cxt.trackedMemChunks << (chunkSizeInBits - BITS_IN_MB),
                 sz);
         else
             write_stderr(
                 "----debug_query_id=%lu, FATAL: memory allocation failed due to reaching the OS memory limitation."
                 " Current session is consuming about %u MB, allocating %ld bytes.\n",
-                u_sess->debug_query_id,
+                debug_query_id,
                 (uint32)u_sess->stat_cxt.trackedMemChunks << (chunkSizeInBits - BITS_IN_MB),
                 sz);
         write_stderr("----debug_query_id=%lu, Please check the sysctl configuration and GUC variable "
                      "g_instance.attr.attr_memory.max_process_memory.\n",
-            u_sess->debug_query_id);
+            debug_query_id);
     }
 }
 
