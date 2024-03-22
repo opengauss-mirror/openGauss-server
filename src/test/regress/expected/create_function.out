@@ -126,3 +126,15 @@ select test_create_function_ex_3('111.222');
 drop function test_create_function_ex_1;
 drop function test_create_function_ex_2;
 drop function test_create_function_ex_3;
+create or replace procedure "p_'''_1"() is
+begin
+null;
+end;
+/
+drop procedure "p_'''_1";
+create or replace function "p_'''_1"() return void
+as
+begin
+null;
+end;
+drop function "p_'''_1";

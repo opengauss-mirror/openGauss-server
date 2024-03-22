@@ -43,5 +43,6 @@ extern char** get_next_snippet(
     char** query_string_single, const char* query_string, List* query_string_locationlist, int* stmt_num);
 
 extern void fixResTargetNameWithAlias(List* clause_list, const char* aliasname);
+extern char* EscapeQuotes(const char* src);
 
 #endif /* PARSER_H */
