@@ -1086,3 +1086,71 @@ select testfunc_exception_assert('c');
 drop function testfunc_exception_assert;
 drop table tab_1141480;
 drop table tt_1141480;
+
+-- nested function call, expected no core: case 1
+create table t1_1189601 (a int ,b date,c varchar2(10)) ;
+insert into t1_1189601 values(1,null, 'a');
+analyze t1_1189601;
+
+CREATE OR REPLACE PACKAGE pkg_1189601 IS
+function fun1_1189601(n1 int)return setof text;
+function  pro1_1189601(n2 int) return int;
+id2 int;
+END pkg_1189601;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg_1189601 IS
+function fun1_1189601(n1 int)return setof text
+as
+begin
+id2:=pkg_1189601.pro1_1189601(n1);
+return query explain (costs off) select count(*) from t1_1189601 where c=('A' || n1);
+end;
+function  pro1_1189601(n2 int) return int
+as
+a1 int;
+begin
+select count(*) from t1_1189601 into a1 where c<('A' || n2);
+id2:=a1;
+rollback;
+return a1;
+end;
+end pkg_1189601;
+/
+
+select pkg_1189601.fun1_1189601(100);
+
+-- nested function call, expected no core: case 2
+CREATE OR REPLACE PACKAGE pkg_1189602 IS
+function fun1_1189601(n1 int) return setof text;
+function  pro1_1189601(n2 int) return int;
+id2 int;
+END pkg_1189602;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg_1189602 IS
+function fun1_1189601(n1 int) return setof text
+as
+begin
+id2:=pkg_1189602.pro1_1189601(n1);
+insert into t1_1189601 values(id2);
+return query explain (costs off) select count(*) from t1_1189601;
+end;
+function  pro1_1189601(n2 int) return int
+as
+a1 int;
+begin
+select count(*) from t1_1189601 into a1;
+id2:=a1;
+rollback;
+insert into t1_1189601 values(id2 + 1);
+return a1;
+end;
+end pkg_1189602;
+/
+
+select pkg_1189602.fun1_1189601(100);
+
+drop package pkg_1189602;
+drop package pkg_1189601;
+drop table t1_1189601;
