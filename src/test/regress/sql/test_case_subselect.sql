@@ -78,3 +78,22 @@ WHEN NOT MATCHED THEN
 SELECT c1, c2, to_char(c3, 'YYYY/MM/DD'), c4 FROM target_table ORDER BY c1;
 
 DROP TABLE IF EXISTS target_table, source_table, test_tbl1, test_tbl2;
+
+-- test optimize subselect with materialize 
+create table mat_subselect_1(c1 int, c2 int);
+insert into mat_subselect_1 values (generate_series(1, 1000), 666);
+
+create table mat_subselect_2(d1 int, d2 int);
+insert into mat_subselect_2 values(generate_series(300, 500), 222);
+insert into mat_subselect_2 values (generate_series(1000, 20000), 1);
+
+set enable_seqscan to off;
+explain(costs off) select * from mat_subselect_1 
+    where c1 in (
+      select d1 from mat_subselect_2 where d1 < 340 and d1 > 330
+      ) and c2 != 0;
+select * from mat_subselect_1 where c1 in (
+    select d1 from mat_subselect_2 where d1 < 340 and d1 > 330
+  ) and c2 != 0;
+reset enable_seqscan;
+drop table mat_subselect_1, mat_subselect_2;
