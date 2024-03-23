@@ -3394,13 +3394,28 @@ retry_new_buffer:
         bool hasUnpinned = false;
         while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
             if (!hasUnpinned) {
-                 UnpinBuffer(buf, true);
-                 hasUnpinned = true;
+                UnpinBuffer(buf, true);
+                hasUnpinned = true;
             }
             pg_usleep(TEN_MICROSECOND);
         }
+
+        /* Pin buffer again after getlock, and check if buffer has been eliminated. */
         if (hasUnpinned) {
             PinBuffer(buf, strategy);
+            INIT_BUFFERTAG(new_tag, rel_file_node, fork_num, block_num);
+            if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &new_tag)) {
+                UnpinBuffer(buf, true);
+                LWLock *xlog_partition_lock = ondemand_extreme_rto::OndemandGetXLogPartitionLock(buf, fork_num, block_num);
+                if (LWLockHeldByMe(xlog_partition_lock)) {
+                    LWLockRelease(xlog_partition_lock);
+                }
+                ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                    errmsg("buffer has been eliminated, goto retry: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                        buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, buf->tag.rnode.bucketNode,
+                            buf->tag.forkNum, buf->tag.blockNum)));
+                goto retry;
+            }
         }
     }
 

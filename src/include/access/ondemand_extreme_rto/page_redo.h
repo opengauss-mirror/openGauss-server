@@ -271,6 +271,7 @@ void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
     XLogRecPtr old_lsn, XLogPhyBlock pblk);
 const char *RedoWokerRole2Str(RedoRole role);
+LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock);
