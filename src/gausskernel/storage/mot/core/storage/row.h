@@ -449,7 +449,6 @@ public:
 
     /**
      * @brief Sets surrogate key.
-     * @param key The surrogate key value.
      */
     void SetSurrogateKey()
     {
