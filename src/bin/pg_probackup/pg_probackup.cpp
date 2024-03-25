@@ -24,6 +24,9 @@
 #include "common/fe_memutils.h"
 #include "storage/file/fio_device.h"
 #include "storage/dss/dss_adaptor.h"
+#include <sys/resource.h>
+
+#define MIN_ULIMIT_STACK_SIZE 8388608     // 1024 * 1024 * 8
 
 const char  *PROGRAM_NAME = NULL;        /* PROGRAM_NAME_FULL without .exe suffix
                                          * if any */
@@ -154,6 +157,7 @@ static void opt_show_format(ConfigOption *opt, const char *arg);
 static void compress_init(void);
 static void dss_init(void);
 static int ss_get_primary_id(void);
+static void check_unlimit_stack_size(void);
 
 /*
  * Short name should be non-printable ASCII character.
@@ -675,6 +679,22 @@ static void check_restore_option(char *command_name)
     }
 }
 
+static void check_unlimit_stack_size(void)
+{
+    bool DssFlags = IsDssMode();
+    if (DssFlags == false || (DssFlags == true && backup_subcmd != RESTORE_CMD))
+        return;
+
+    struct rlimit lim;
+    if (getrlimit(RLIMIT_STACK, &lim) != 0) {
+        elog(ERROR, "getrlimit RLIMIT_STACK failed.");
+    }
+    if ((int)lim.rlim_cur < MIN_ULIMIT_STACK_SIZE) {
+        elog(ERROR, "current ulimit stack size is %d,"
+            " please run the ulimit -s size(size >= 8192) command to change it.", lim.rlim_cur);
+    }
+}
+
 static void check_backid_option(char *command_name)
 {
     if (backup_id_string != NULL)
@@ -845,6 +865,8 @@ int main(int argc, char *argv[])
     check_dss_input();
 
     dss_init();
+
+    check_unlimit_stack_size();
 
     initDataPathStruct(IsDssMode());
 
