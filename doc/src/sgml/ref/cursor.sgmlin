@@ -11,7 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 CURSOR cursor_name
-    [ BINARY ] [ INSENSITIVE ] [ [ NO ] SCROLL ]
+    [ BINARY ]  [ NO SCROLL ]  [ { WITH | WITHOUT } HOLD ]
     FOR query ;
 </synopsis>
 </refsynopsisdiv>

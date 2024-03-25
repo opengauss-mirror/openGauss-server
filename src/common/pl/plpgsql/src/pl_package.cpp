@@ -1477,6 +1477,7 @@ void InsertError(Oid objId)
         ReleaseSysCache(tuple);
     }
     StringInfoData ds;  
+    char* tmp = EscapeQuotes(name);
     initStringInfo(&ds);
     appendStringInfoString(&ds,
         "declare\n"
@@ -1487,7 +1488,7 @@ void InsertError(Oid objId)
         "begin\n ");
     appendStringInfo(&ds,
         "select count(*) from dbe_pldeveloper.gs_source into allNum where "
-        "nspid=%u and name=\'%s\' and type=\'%s\';", nspid, name, type);
+        "nspid=%u and name=\'%s\' and type=\'%s\';", nspid, tmp, type);
     appendStringInfo(&ds,
         "if allNum > 0 then "
         "select id from dbe_pldeveloper.gs_source into oldId where "
@@ -1495,10 +1496,10 @@ void InsertError(Oid objId)
         "objId := oldId; "
         "else "
         "objId := %u;"
-        "end if;", nspid, name, type, objId);
+        "end if;", nspid, tmp, type, objId);
     appendStringInfo(&ds, 
         "delete from DBE_PLDEVELOPER.gs_errors where nspid=%u and name=\'%s\' and type = \'%s\';\n",
-        nspid, name, type);
+        nspid, tmp, type);
     char* errmsg = NULL;
     int line = 0;
     if (rc != PLPGSQL_COMPILE_NULL) {
@@ -1509,7 +1510,7 @@ void InsertError(Oid objId)
             line = item->line;
             appendStringInfoString(&ds, "insert into DBE_PLDEVELOPER.gs_errors ");
             appendStringInfo(&ds, "values(objId,%u,%u,\'%s\',\'%s\',%d,$gserrors$%s$gserrors$);\n",
-                userId, nspid, name, type, line, errmsg);
+                userId, nspid, tmp, type, line, errmsg);
         }
     }
     appendStringInfo(&ds, "end;");
@@ -1550,6 +1551,7 @@ void InsertError(Oid objId)
         MemoryContextSwitchTo(temp);
     }
     u_sess->plsql_cxt.insertError = false;
+    pfree_ext(tmp);
     pfree_ext(ds.data);
     list_free_deep(u_sess->plsql_cxt.errorList);
     u_sess->plsql_cxt.errorList = NULL;
@@ -1616,28 +1618,29 @@ void DropErrorByOid(int objtype, Oid objoid)
         ReleaseSysCache(tuple);
     }
     StringInfoData      ds;  
+    char* tmp = EscapeQuotes(name);
     initStringInfo(&ds);
     appendStringInfoString(&ds, " declare begin ");
     if (objtype == PLPGSQL_PACKAGE_BODY) {
         appendStringInfo(&ds, "  delete from DBE_PLDEVELOPER.gs_errors "
                         "where nspid=%u and name = \'%s\' and type = \'%s\';",
-                        nspid, name, type);
+                        nspid, tmp, type);
         appendStringInfo(&ds, "  delete from DBE_PLDEVELOPER.gs_source where "
                         "nspid=%u and name = \'%s\' and type = \'%s\';",
-                        nspid, name, type);
+                        nspid, tmp, type);
     } else {
         appendStringInfo(&ds, "  delete from DBE_PLDEVELOPER.gs_errors "
                         "where nspid=%u and name = \'%s\' and type = \'%s\';",
-                        nspid, name, type);
+                        nspid, tmp, type);
         appendStringInfo(&ds, "  delete from DBE_PLDEVELOPER.gs_errors "
                         "where nspid=%u and name = \'%s\' and type = \'package body\';",
-                        nspid, name);    
+                        nspid, tmp);    
         appendStringInfo(&ds, "  delete from DBE_PLDEVELOPER.gs_source where "
                         "nspid=%u and name = \'%s\' and type = \'%s\';",
-                        nspid, name, type);
+                        nspid, tmp, type);
         appendStringInfo(&ds, "  delete from DBE_PLDEVELOPER.gs_source where "
                         "nspid=%u and name = \'%s\' and type = \'package body\';",
-                        nspid, name);    
+                        nspid, tmp);    
     }
     appendStringInfo(&ds, " EXCEPTION WHEN OTHERS THEN NULL; \n");
     appendStringInfo(&ds, " END; ");
@@ -1672,6 +1675,7 @@ void DropErrorByOid(int objtype, Oid objoid)
     if (temp != NULL) {
         MemoryContextSwitchTo(temp);
     }
+    pfree_ext(tmp);
     pfree_ext(ds.data);
 #endif
 }

@@ -178,6 +178,7 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
     }
     /* Execute autonomous transaction call for logging purpose */
     StringInfoData str;
+    char* tmp = EscapeQuotes(name);
     initStringInfo(&str);
     appendStringInfoString(&str,
         "declare\n"
@@ -188,7 +189,7 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
         "begin\n ");
     appendStringInfo(&str,
         "select count(*) from dbe_pldeveloper.gs_source into allNum where "
-		"nspid=%u and name=\'%s\' and type=\'%s\';", nspid, name, type);
+		"nspid=%u and name=\'%s\' and type=\'%s\';", nspid, tmp, type);
     appendStringInfo(&str,
         "if allNum > 0 then "
         "select id from dbe_pldeveloper.gs_source into oldId where "
@@ -196,38 +197,39 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
         "objId := oldId; "
         "else "
         "objId := %u;"
-        "end if;", nspid, name, type, objId);
+        "end if;", nspid, tmp, type, objId);
     appendStringInfo(&str,
         "delete from DBE_PLDEVELOPER.gs_source where nspid=%u and name=\'%s\' and type = \'%s\';\n",
-        nspid, name, type);
+        nspid, tmp, type);
     appendStringInfo(&str,
         "delete from DBE_PLDEVELOPER.gs_source where nspid=%u and name=\'%s\' and type = \'%s\';\n",
-        nspid, name, type);
+        nspid, tmp, type);
     if (!u_sess->attr.attr_common.plsql_show_all_error || status)  {
         appendStringInfo(&str,
             "delete from DBE_PLDEVELOPER.gs_errors where " 
             "nspid=%u and name=\'%s\' and type = \'%s\';\n",
-            nspid, name, type);
+            nspid, tmp, type);
         if (!strcmp(type, "package")) {
             appendStringInfo(&str,
                 "delete from DBE_PLDEVELOPER.gs_errors where " 
                 "nspid=%u and name=\'%s\' and type = \'package body\';\n",
-                nspid, name);
+                nspid, tmp);
         }
     }
     if (status && !strcmp(type, "package")) {
         appendStringInfo(&str,
             "delete from DBE_PLDEVELOPER.gs_source where " 
             "nspid=%u and name=\'%s\' and type = \'package body\';\n",
-            nspid, name);
+            nspid, tmp);
     }
     appendStringInfo(&str,
         "insert into DBE_PLDEVELOPER.gs_source values(objId, %u, %u,\'%s\', \'%s\', \'%c\', $gssource$%s$gssource$);\n",
-        userId, nspid, name, type, statusChr, source);
+        userId, nspid, tmp, type, statusChr, source);
     appendStringInfoString(&str,
         "EXCEPTION WHEN OTHERS THEN NULL; \n");
     appendStringInfoString(&str, "end;");
     List* rawParseList = raw_parser(str.data);
+    pfree_ext(tmp);
     pfree_ext(str.data);
     DoStmt* stmt = (DoStmt *)linitial(rawParseList);
     int save_compile_status = getCompileStatus();

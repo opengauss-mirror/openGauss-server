@@ -290,6 +290,7 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
     mat_state->ss.ps.plan = (Plan*)node;
     mat_state->ss.ps.state = estate;
     mat_state->ss.ps.ExecProcNode = ExecMaterial;
+    mat_state->materalAll = node->materialize_all;
 
     int64 operator_mem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop);
     AllocSetContext* set = (AllocSetContext*)(estate->es_query_cxt);

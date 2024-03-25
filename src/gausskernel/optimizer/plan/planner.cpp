@@ -142,7 +142,7 @@ extern List* reassign_nodelist(RangeTblEntry* rte, List* ori_node_list);
 
 extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 static Plan* inheritance_planner(PlannerInfo* root);
-static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction);
+extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 static void preprocess_rowmarks(PlannerInfo* root);
 static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* offset_est, int64* count_est);
 static void process_sort(Query* parse, PlannerInfo* root, PlannerTargets* plannerTargets, Plan** resultPlan, 
@@ -1925,7 +1925,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         plan = inheritance_planner(root);
         plan->isinherit = true;
     } else {
-        plan = internal_grouping_planner(root, tuple_fraction);
+        plan = grouping_planner(root, tuple_fraction);
         /*
         * Make sure the topmost plan node's targetlist exposes the original
         * column names and other decorative info.  Targetlists generated within
@@ -2411,7 +2411,7 @@ static Plan* inheritance_planner(PlannerInfo* root)
         subroot.hasInheritedTarget = true;
 
         /* Generate plan */
-        subplan = internal_grouping_planner(&subroot, 0.0 /* retrieve all tuples */);
+        subplan = grouping_planner(&subroot, 0.0 /* retrieve all tuples */);
         AssertEreport(subplan != NULL, MOD_OPT, "subplan is NULL when generating a plan.");
 
         /*
@@ -2830,7 +2830,7 @@ static void process_rowMarks(Query* parse, Plan** resultPlan, PlannerInfo* root,
 }
 
 /* --------------------
- * internal_grouping_planner
+ * grouping_planner
  *	  Perform planning steps related to grouping, aggregation, etc.
  *	  This primarily means adding top-level processing to the basic
  *	  query plan produced by query_planner.
@@ -2848,7 +2848,7 @@ static void process_rowMarks(Query* parse, Plan** resultPlan, PlannerInfo* root,
  * actual output ordering of the plan (in pathkey format).
  * --------------------
  */
-static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
+extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 {
     if(u_sess->hook_cxt.groupingplannerHook != NULL) {
         return ((grouping_plannerFunc)(u_sess->hook_cxt.groupingplannerHook))(root, tuple_fraction);

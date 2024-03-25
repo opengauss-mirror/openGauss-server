@@ -46,6 +46,10 @@ namespace ondemand_extreme_rto {
 #define ONDEMAND_HASHTAB_SWITCH_LIMIT 100000
 #define SEG_PROC_PIPELINE_SLOT 0
 
+#define ONDEMAND_HASHMAP_ENTRY_REDO_DONE 0
+#define ONDEMAND_HASHMAP_ENTRY_REDOING 1
+#define ONDEMAND_HASHMAP_ENTRY_NEED_REDO 2
+
 static const uint32 PAGE_WORK_QUEUE_SIZE = 65536;
 static const uint32 REALTIME_BUILD_RECORD_QUEUE_SIZE = 4194304;
 
@@ -267,6 +271,7 @@ void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
     XLogRecPtr old_lsn, XLogPhyBlock pblk);
 const char *RedoWokerRole2Str(RedoRole role);
+int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock);
 void RedoWorkerQueueCallBack();

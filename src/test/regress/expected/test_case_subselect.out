@@ -140,3 +140,43 @@ SELECT c1, c2, to_char(c3, 'YYYY/MM/DD'), c4 FROM target_table ORDER BY c1;
 (16 rows)
 
 DROP TABLE IF EXISTS target_table, source_table, test_tbl1, test_tbl2;
+-- test optimize subselect with materialize 
+create table mat_subselect_1(c1 int, c2 int);
+insert into mat_subselect_1 values (generate_series(1, 1000), 666);
+create table mat_subselect_2(d1 int, d2 int);
+insert into mat_subselect_2 values(generate_series(300, 500), 222);
+insert into mat_subselect_2 values (generate_series(1000, 20000), 1);
+set enable_seqscan to off;
+explain(costs off) select * from mat_subselect_1 
+    where c1 in (
+      select d1 from mat_subselect_2 where d1 < 340 and d1 > 330
+      ) and c2 != 0;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop Semi Join
+   Join Filter: (mat_subselect_1.c1 = mat_subselect_2.d1)
+   ->  Seq Scan on mat_subselect_1
+         Filter: ((c2 <> 0) AND (c1 < 340) AND (c1 > 330))
+   ->  Materialize
+         ->  Seq Scan on mat_subselect_2
+               Filter: ((d1 < 340) AND (d1 > 330))
+(7 rows)
+
+select * from mat_subselect_1 where c1 in (
+    select d1 from mat_subselect_2 where d1 < 340 and d1 > 330
+  ) and c2 != 0;
+ c1  | c2  
+-----+-----
+ 331 | 666
+ 332 | 666
+ 333 | 666
+ 334 | 666
+ 335 | 666
+ 336 | 666
+ 337 | 666
+ 338 | 666
+ 339 | 666
+(9 rows)
+
+reset enable_seqscan;
+drop table mat_subselect_1, mat_subselect_2;

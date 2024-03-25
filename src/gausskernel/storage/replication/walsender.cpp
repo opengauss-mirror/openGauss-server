@@ -4929,18 +4929,24 @@ retry:
                  * asked for a too old WAL segment that has already been
                  * removed or recycled.
                  */
-                if (FILE_POSSIBLY_DELETED(errno) && !SS_STREAM_CLUSTER) {
-                    /* we suppose wal segments removed happend when we can't open the xlog file. */
-                    WalSegmemtRemovedhappened = true;
-                    ereport(ERROR,
-                            (errcode_for_file_access(),
-                             errmsg("requested WAL segment %s has already been removed",
-                                    XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
+                if (!SS_STREAM_CLUSTER) {
+                    if (FILE_POSSIBLY_DELETED(errno)) {
+                        /* we suppose wal segments removed happend when we can't open the xlog file. */
+                        WalSegmemtRemovedhappened = true;
+                        ereport(ERROR,
+                                (errcode_for_file_access(),
+                                errmsg("requested WAL segment %s has already been removed",
+                                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
+                    } else {
+                        ereport(ERROR,
+                                (errcode_for_file_access(),
+                                errmsg("could not open file \"%s\" (log segment %s): %m", path,
+                                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
+                    }
                 } else {
-                    ereport(ERROR,
-                            (errcode_for_file_access(),
-                             errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                    XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
+                    ereport(ERROR, (errmsg("requested WAL segment %s has already been removed in ss stream cluster,"
+                                            "we will try again in another xlog path",
+                                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
                 }
             }
             t_thrd.walsender_cxt.sendOff = 0;
@@ -5353,7 +5359,9 @@ static void XLogSendPhysical(char* xlogPath)
     errno_t errorno = EOK;
 
     t_thrd.walsender_cxt.catchup_threshold = 0;
-
+    if (SS_STREAM_CLUSTER && xlogPath != NULL) {
+        ereport(LOG, (errmsg("ss stream cluster primary node will send xlog in %s", xlogPath)));
+    }
     /*
      * Attempt to send all data that's already been written out and fsync'd to
      * disk.  We cannot go further than what's been written out given the

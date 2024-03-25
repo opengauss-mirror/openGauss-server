@@ -3957,9 +3957,9 @@ static int ServerLoop(void)
         if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_DISABLED &&
             SS_NORMAL_STANDBY && SS_CLUSTER_ONDEMAND_NORMAL && pmState == PM_RUN) {
             if (g_instance.pid_cxt.StartupPID == 0) {
+                g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = READY_TO_BUILD;
                 g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
                 Assert(g_instance.pid_cxt.StartupPID != 0);
-                g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = READY_TO_BUILD;
                 ereport(LOG, (errmsg("[On-demand] Node:%d ondemand realtime build start, set status to READY_TO_BUILD.", SS_MY_INST_ID)));
             }
         }
@@ -6127,8 +6127,8 @@ static void pmdie(SIGNAL_ARGS)
         case SIGTERM:
         case SIGINT:
 
-            if (STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode && !dummyStandbyMode &&
-                SIGTERM == postgres_signal_arg) {
+            if (!SS_DISASTER_MAIN_STANDBY_NODE && STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode &&
+                !dummyStandbyMode && SIGTERM == postgres_signal_arg) {
                 /*
                  * Smart g_instance.status:
                  *
