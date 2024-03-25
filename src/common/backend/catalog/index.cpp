@@ -5431,23 +5431,23 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
      */
     TransferPredicateLocksToHeapRelation(iRel);
 
+        /* Fetch info needed for index_build */
+        indexInfo = BuildIndexInfo(iRel);
+
+    /* If requested, skip checking uniqueness/exclusion constraints */
+    if (skip_constraint_checks) {
+        if (indexInfo->ii_Unique || indexInfo->ii_ExclusionOps != NULL)
+            skipped_constraint = true;
+        indexInfo->ii_Unique = false;
+        indexInfo->ii_ExclusionOps = NULL;
+        indexInfo->ii_ExclusionProcs = NULL;
+        indexInfo->ii_ExclusionStrats = NULL;
+    }
+
     PG_TRY();
     {
         /* Suppress use of the target index while rebuilding it */
         SetReindexProcessing(heapId, indexId);
-
-        /* Fetch info needed for index_build */
-        indexInfo = BuildIndexInfo(iRel);
-
-        /* If requested, skip checking uniqueness/exclusion constraints */
-        if (skip_constraint_checks) {
-            if (indexInfo->ii_Unique || indexInfo->ii_ExclusionOps != NULL)
-                skipped_constraint = true;
-            indexInfo->ii_Unique = false;
-            indexInfo->ii_ExclusionOps = NULL;
-            indexInfo->ii_ExclusionProcs = NULL;
-            indexInfo->ii_ExclusionStrats = NULL;
-        }
 
         /* workload client manager */
         if (IS_PGXC_COORDINATOR && ENABLE_WORKLOAD_CONTROL) {
@@ -5723,7 +5723,6 @@ bool ReindexRelation(Oid relid, int flags, int reindexType, void *baseDesc, Adap
 
     PG_TRY();
     {
-        List* doneIndexes = NIL;
         ListCell* indexId = NULL;
 
         if (((uint32)flags) & REINDEX_REL_SUPPRESS_INDEX_USE) {
@@ -5738,14 +5737,9 @@ bool ReindexRelation(Oid relid, int flags, int reindexType, void *baseDesc, Adap
         }
 
         /* Reindex all the indexes. */
-        doneIndexes = NIL;
         foreach (indexId, indexIds) {
             Oid indexOid = lfirst_oid(indexId);
             Relation indexRel = index_open(indexOid, AccessShareLock);
-
-            if (is_pg_class) {
-                RelationSetIndexList(rel, doneIndexes, InvalidOid);
-            }
 
             if ((((uint32)reindexType) & REINDEX_ALL_INDEX) ||
                 ((((uint32)reindexType) & REINDEX_BTREE_INDEX) && (indexRel->rd_rel->relam == BTREE_AM_OID)) ||
@@ -5770,10 +5764,6 @@ bool ReindexRelation(Oid relid, int flags, int reindexType, void *baseDesc, Adap
 
             /* Index should no longer be in the pending list */
             Assert(!ReindexIsProcessingIndex(indexOid));
-
-            if (is_pg_class) {
-                doneIndexes = lappend_oid(doneIndexes, indexOid);
-            }
         }
     }
     PG_CATCH();
@@ -5784,10 +5774,6 @@ bool ReindexRelation(Oid relid, int flags, int reindexType, void *baseDesc, Adap
     }
     PG_END_TRY();
     ResetReindexPending();
-
-    if (is_pg_class) {
-        RelationSetIndexList(rel, indexIds, ClassOidIndexId);
-    }
 
     // reset all local indexes on partition usable if needed
     if (RELATION_IS_PARTITIONED(rel)) { /* for partitioned table */
