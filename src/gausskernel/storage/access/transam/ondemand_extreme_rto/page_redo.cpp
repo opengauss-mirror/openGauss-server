@@ -2126,6 +2126,24 @@ void RedoPageWorkerRedoBcmBlock(XLogRecParseState *procState)
     }
 }
 
+LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum) {
+    LWLock *xlog_partition_lock = NULL;
+    ondemand_extreme_rto::RedoItemTag redoItemTag;
+    INIT_REDO_ITEM_TAG(redoItemTag, bufHdr->tag.rnode, forkNum, blockNum);
+    uint32 slotId = GetSlotId(redoItemTag.rNode, 0, 0, GetBatchCount());
+    HTAB *hashMap = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[slotId]->hTab;
+    if (hashMap == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("redo item hash table corrupted, there has invalid hashtable.")));
+    }
+
+    /* get partition lock by redoItemTag */
+    unsigned int partitionLockHash = XlogTrackTableHashCode(&redoItemTag);
+    xlog_partition_lock = XlogTrackMappingPartitionLock(partitionLockHash);
+
+    return xlog_partition_lock;
+}
+
 /**
  * Check the block if need to redo and try hashmap lock. 
  * There are three kinds of result as follow:
