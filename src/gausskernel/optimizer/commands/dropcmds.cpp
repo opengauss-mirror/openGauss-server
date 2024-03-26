@@ -79,7 +79,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "postgis",
         "packages",
         "ndpplugin",
-        "vector",
+        "datavec",
 #ifndef ENABLE_MULTIPLE_NODES
         "mysql_fdw",
         "oracle_fdw",
