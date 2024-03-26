@@ -295,5 +295,86 @@ END;
 CALL TEST_CRS_RPT_EMPTYSOR(0);
 CALL TEST_CRS_RPT_EMPTYSOR(1);
 
+--test strong cursor
+create table tb1(a int);
+create table tb2(a int, b text);
+insert into tb1 values(1);
+insert into tb2 values(1,'one'),(2,'two');
+
+declare
+  type cur1 is ref cursor return record;
+  var cur1;
+begin
+  open var for select * from tb1;
+end;
+/
+
+declare
+  type cur1 is ref cursor return;
+begin
+  null;
+end;
+/
+
+declare
+  type cur1 is ref cursor return int[];
+begin
+  null;
+end;
+/
+
+create type typ1_rec as (a int, b text);
+declare
+  type cur1 is ref cursor return typ1_rec;
+begin
+  null;
+end;
+/
+drop type typ1_rec;
+
+--use in function
+create or replace function func1() return int as
+declare
+  type cur1 is ref cursor return tb1%rowtype;
+  var cur1;
+  res int;
+begin
+  open var for select * from tb1;
+  fetch var into res;
+  return res;
+end;
+/
+call func1();
+drop function func1;
+
+--use in package
+create or replace package pkg1 as
+  type typ1 is record(a int, b text);
+  type cur1 is ref cursor return typ1;
+  procedure proc1(a inout cur1);
+end pkg1;
+/
+
+create or replace package body pkg1 as
+  procedure proc1(a inout cur1) is 
+  declare 
+    var cur1;
+	res record;
+  begin
+    open var for select * from tb2;
+	fetch var into res;
+	raise info 'res = %',res;
+  end;
+end pkg1;
+/
+
+declare
+  var pkg1.cur1;
+begin
+  pkg1.proc1(var);
+end;
+/
+drop package pkg1;
+
 DROP schema hw_cursor_part4 CASCADE;
 

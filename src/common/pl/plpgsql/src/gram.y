@@ -354,7 +354,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <list> decl_varname_list
 %type <boolean>	decl_const decl_notnull exit_type
 %type <expr>	decl_defval decl_rec_defval decl_cursor_query
-%type <dtype>	decl_datatype
+%type <dtype>	decl_datatype opt_cursor_returntype
 %type <oid>		decl_collate
 %type <datum>	decl_cursor_args
 %type <list>	decl_cursor_arglist assign_list
@@ -1355,7 +1355,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         pfree_ext($2->name);
 						pfree($2);
                     }
-                |	K_TYPE decl_varname as_is K_REF K_CURSOR ';'
+                |	K_TYPE decl_varname as_is K_REF K_CURSOR opt_cursor_returntype ';'
                     {
                         IsInPublicNamespace($2->name);
                         /* add name of cursor type to PLPGSQL_NSTYPE_REFCURSOR */
@@ -2346,6 +2346,31 @@ cursor_in_out_option :  K_IN	|
             K_OUT	|
             /* empty */
         ;
+
+opt_cursor_returntype:  /* empty */
+                        {
+                            $$ = NULL;
+                        }
+                    | K_RETURN decl_datatype
+                        {
+                            if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                                const char* message = "cursor return type is only supposed in A compatibility";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(errstate,
+                                        (errcode(ERRCODE_SYNTAX_ERROR),
+                                         errmsg("cursor return type is only supposed in A compatibility")));
+                            }
+                            if ($2->dtype != PLPGSQL_DTYPE_RECORD_TYPE && $2->typinput.fn_oid != F_RECORD_IN) {
+                                const char* message = "invalid cursor return type";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(errstate,
+                                        (errcode(ERRCODE_SYNTAX_ERROR),
+                                         errmsg("invalid cursor return type; %s must be a record type", $2->typname)));
+                            }
+                            $$ = $2;
+                        }
+                    ;
+
 
 decl_is_for		:	K_IS |		/* A db */
                     K_FOR;		/* SQL standard */
