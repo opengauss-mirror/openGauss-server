@@ -73,6 +73,7 @@
 
 #include "replication/slot.h"
 #include "replication/walreceiver.h"
+#include "replication/ddlmessage.h"
 #include "gssignal/gs_signal.h"
 #include "utils/atomic.h"
 #include "pgstat.h"
@@ -163,6 +164,7 @@ static bool DispatchUHeap2Record(XLogReaderState* record, List* expectedTLIs, Ti
 static bool DispatchUHeapUndoRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
 static bool DispatchUndoActionRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
 static bool DispatchRollbackFinishRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
+static bool DispatchLogicalDDLMsgRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static inline uint32 GetUndoSpaceWorkerId(int zid);
 
 static XLogReaderState *GetXlogReader(XLogReaderState *readerState);
@@ -218,6 +220,8 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchRepOriginRecord, RmgrRecordInfoValid, RM_REPLORIGIN_ID, XLOG_REPLORIGIN_SET, XLOG_REPLORIGIN_DROP },
     { DispatchCompresseShrinkRecord, RmgrRecordInfoValid, RM_COMPRESSION_REL_ID, XLOG_CFS_SHRINK_OPERATION,
         XLOG_CFS_SHRINK_OPERATION },
+    { DispatchLogicalDDLMsgRecord, RmgrRecordInfoValid, RM_LOGICALDDLMSG_ID, XLOG_LOGICAL_DDL_MESSAGE,
+        XLOG_LOGICAL_DDL_MESSAGE },
 };
 
 const int REDO_WAIT_SLEEP_TIME = 5000; /* 5ms */
@@ -1312,6 +1316,12 @@ static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, Time
 
 /* for cfs row-compression. */
 static bool DispatchCompresseShrinkRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchTxnRecord(record, expectedTLIs);
+    return true;
+}
+
+static bool DispatchLogicalDDLMsgRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs);
     return true;
