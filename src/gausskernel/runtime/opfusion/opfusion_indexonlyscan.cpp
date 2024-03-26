@@ -29,6 +29,7 @@
 #include "access/visibilitymap.h"
 #include "opfusion/opfusion_util.h"
 #include "utils/knl_partcache.h"
+#include "access/multi_redo_api.h"
 
 
 IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* planstmt, ParamListInfo params)
@@ -272,7 +273,8 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
             }
             
             /* UStore don't have visibility map */
-            if (isUStore || !visibilitymap_test(indexdesc->heapRelation, ItemPointerGetBlockNumber(tid), &m_VMBuffer)) {
+            if (isUStore || is_index_only_disabled_in_astore() ||
+                !visibilitymap_test(indexdesc->heapRelation, ItemPointerGetBlockNumber(tid), &m_VMBuffer)) {
                 tuple = (HeapTuple)IndexFetchTuple(indexdesc);
                 if (tuple == NULL) {
                     continue; /* no visible tuple, try next index entry */
