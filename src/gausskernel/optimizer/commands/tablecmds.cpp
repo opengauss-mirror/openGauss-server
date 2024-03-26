@@ -19618,8 +19618,8 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
 	    /* We should not remove the data to the limited tablespace under segment mode. */
 	    if (u_sess->cmd_cxt.l_isLimit) {
 	        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_SEGMENT_PAGE),
-	            errmsg("Dont support relation movement to limited tablespace segment-page storage!"),
-	            errdetail("Segment-page storage doest not support limited tablespace \"%s\"", get_tablespace_name(newFileNode.spcNode)),
+	            errmsg("Don't support moving relation to limited tablespace in segment-page storage!"),
+	            errdetail("Segment-page storage does not support limited tablespace \"%s\"", get_tablespace_name(newFileNode.spcNode)),
 	            errhint("use default or unlimited user defined tablespace before using segment-page storage.")));
 	    }
     } else {
