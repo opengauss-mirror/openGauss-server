@@ -33,6 +33,7 @@
 #include "storage/sinvaladt.h"
 #include "replication/libpqsw.h"
 #include "replication/walsender.h"
+#include "replication/ss_disaster_cluster.h"
 
 static inline void txnstatusNetworkStats(uint64 timeDiff);
 static inline void txnstatusHashStats(uint64 timeDiff);
@@ -968,6 +969,17 @@ void SSStandbyUpdateRedirectInfo()
 
 bool SSCanFetchLocalSnapshotTxnRelatedInfo()
 {
+    if (SS_DISASTER_STANDBY_CLUSTER) {
+        /* Main standby always recovery, when dispatcher thread recovery standby xlog type
+         * in parallel recovery. Standby xlog type need get local snapshot, so return true.
+         */
+        if (SS_NORMAL_PRIMARY || (SS_REFORM_REFORMER && SS_DISASTER_MAIN_STANDBY_NODE)) {
+            return true;
+        }
+
+        return false;
+    }
+
     if (SS_NORMAL_PRIMARY) {
         return true;
     } else if (SS_PERFORMING_SWITCHOVER) {
