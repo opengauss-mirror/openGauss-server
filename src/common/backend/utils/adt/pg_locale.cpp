@@ -202,6 +202,7 @@ bool check_locale(int category, const char* locale, char** canonname)
     localeLock.lock();
     save = gs_setlocale_r(category, NULL);
     if (save == NULL) {
+        localeLock.unLock();
         return false; /* won't happen, we hope */
     }
 
@@ -1020,6 +1021,7 @@ bool lc_collate_is_c(Oid collation)
         localeLock.lock();
         localeptr = gs_setlocale_r(LC_COLLATE, NULL);
         if (localeptr == NULL) {
+            localeLock.unLock();
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid LC_COLLATE setting")));
         }
 
@@ -1072,6 +1074,7 @@ bool lc_ctype_is_c(Oid collation)
         localeLock.lock();
         localeptr = gs_setlocale_r(LC_CTYPE, NULL);
         if (localeptr == NULL) {
+            localeLock.unLock();
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid LC_CTYPE setting")));
         }
 
