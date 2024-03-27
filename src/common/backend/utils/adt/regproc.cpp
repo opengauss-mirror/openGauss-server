@@ -364,7 +364,7 @@ char * format_procedure_no_visible(Oid procedure_oid)
 {
     char* result = NULL;
     HeapTuple proctup;
-    proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procedure_oid));
+    proctup = SearchSysCacheCopy1(PROCOID, ObjectIdGetDatum(procedure_oid));
     if (HeapTupleIsValid(proctup)) {
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
         char* proname = NameStr(procform->proname);
@@ -383,7 +383,7 @@ char * format_procedure_no_visible(Oid procedure_oid)
         }
         appendStringInfoChar(&buf, ')');
         result = buf.data;
-        ReleaseSysCache(proctup);
+        heap_freetuple(proctup);
     } else {
         /* If OID doesn't match any pg_proc entry, return it numerically */
         result = (char*)palloc(NAMEDATALEN);
