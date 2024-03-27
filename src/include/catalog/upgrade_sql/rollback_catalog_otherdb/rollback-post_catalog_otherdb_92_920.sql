@@ -1,6 +1,6 @@
 do $$DECLARE ans boolean;
 BEGIN
-    for ans in select case when count(*) = 1 then true else false end as ans from (select relname from pg_class where relname = 'pg_publication_tables' and relkind = 'v')
+    for ans in select case when count(*) = 1 then true else false end as ans from (select relname from pg_class where relname = 'pg_publication_tables' and relkind = 'v' and relnamespace = 11)
     LOOP
         if ans = true then -- base version is after 92-507, create older view
             DROP VIEW IF EXISTS pg_catalog.pg_publication_tables;

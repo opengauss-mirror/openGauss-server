@@ -1,3 +1,6 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92780 then
 --------------------------------------------------------------
 -- delete pg_amop
 --------------------------------------------------------------
@@ -23,7 +26,6 @@ delete from pg_catalog.pg_opfamily where oid = 8646;
 --------------------------------------------------------------
 -- delete pg_cast
 --------------------------------------------------------------
-DO $$
 DECLARE
 cnt int;
 BEGIN
@@ -50,13 +52,12 @@ BEGIN
         DROP CAST IF EXISTS (anyset AS nvarchar2) CASCADE;
         DROP CAST IF EXISTS (nvarchar2 AS anyset) CASCADE;
     end if;
-END$$;
+END;
 
 --------------------------------------------------------------
 -- delete pg_operator
 --------------------------------------------------------------
 
-DO $$
 DECLARE
 cnt int;
 BEGIN
@@ -117,13 +118,12 @@ BEGIN
         DROP OPERATOR IF EXISTS pg_catalog.<=(text, anyset) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.>=(text, anyset) CASCADE;
     end if;
-END$$;
+END;
 
 
 --------------------------------------------------------------
 -- delete builtin funcs
 --------------------------------------------------------------
-DO $$
 DECLARE
 cnt int;
 BEGIN
@@ -222,12 +222,11 @@ BEGIN
         DROP FUNCTION IF EXISTS pg_catalog.anyset_in(cstring) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.anyset_out(anyset) CASCADE;
     end if;
-END$$;
+END;
 --------------------------------------------------------------
 -- delete all set types
 --------------------------------------------------------------
 
-DO $$
 DECLARE
   stmt text;
   cursor r is select typname from pg_type where typcategory = 'H';
@@ -237,7 +236,7 @@ BEGIN
     stmt := 'DROP TYPE IF EXISTS pg_catalog.' || tname.typname || ' CASCADE';
     execute immediate stmt;
   end loop;
-END$$;
+END;
 
 DROP TYPE IF EXISTS pg_catalog.anyset CASCADE;
 
@@ -249,3 +248,6 @@ DROP INDEX IF EXISTS pg_catalog.pg_set_typid_label_index;
 DROP INDEX IF EXISTS pg_catalog.pg_set_oid_index;
 DROP TYPE IF EXISTS pg_catalog.pg_set;
 DROP TABLE IF EXISTS pg_catalog.pg_set;
+
+END IF;
+END $upgrade$;
