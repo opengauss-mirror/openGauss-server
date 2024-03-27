@@ -483,6 +483,37 @@ static void mdcleanrepairfile(char *segpath)
     pfree(temppath);
 }
 
+/*
+ * Truncate a file to release disk space.
+ */
+static int
+do_truncate(char *path)
+{
+    int save_errno;
+    int ret;
+    int fd;
+
+    /* truncate(2) would be easier here, but Windows hasn't got it */
+    fd = BasicOpenFile(path, O_RDWR | PG_BINARY, 0);
+    if (fd >= 0) {
+        ret = ftruncate(fd, 0);
+        save_errno = errno;
+        (void)close(fd);
+        errno = save_errno;
+    } else
+        ret = -1;
+
+    /* Log a warning here to avoid repetition in callers. */
+    if (ret < 0 && !FILE_POSSIBLY_DELETED(errno)) {
+        save_errno = errno;
+        ereport(WARNING,
+                (errcode_for_file_access(),
+                 errmsg("could not truncate file \"%s\": %m", path)));
+        errno = save_errno;
+    }
+
+    return ret;
+}
 
 static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bool isRedo)
 {
@@ -504,12 +535,15 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
     Assert(IsHeapFileNode(rnode.node));
     if (isRedo || u_sess->attr.attr_common.IsInplaceUpgrade || forkNum != MAIN_FORKNUM ||
         RelFileNodeBackendIsTemp(rnode) || ENABLE_DMS) {
-        /* First, forget any pending sync requests for the first segment */
         if (!RelFileNodeBackendIsTemp(rnode)) {
+            /* Prevent other backends' fds from holding on to the disk space */
+            (void)do_truncate(openFilePath);
+
+            /* Forget any pending sync requests for the first segment */
             md_register_forget_request(rnode.node, forkNum, 0 /* first segment */);
         }
 
-        /* Next unlink the file */
+        /* Next unlink the file, unless it was already found to be missing */
         ret = unlink(openFilePath);
         if (ret < 0 && !FILE_POSSIBLY_DELETED(errno)) {
             ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove file \"%s\": ", openFilePath)));
@@ -518,22 +552,8 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
             mdcleanrepairfile(openFilePath);
         }
     } else {
-        /* truncate(2) would be easier here, but Windows hasn't got it */
-        int fd;
-
-        fd = BasicOpenFile(openFilePath, O_RDWR | PG_BINARY, 0);
-        if (fd >= 0) {
-            int save_errno;
-            ret = ftruncate(fd, 0);
-            save_errno = errno;
-            (void)close(fd);
-            errno = save_errno;
-        } else {
-            ret = -1;
-        }
-        if (ret < 0 && !FILE_POSSIBLY_DELETED(errno)) {
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not truncate file \"%s\": %m", openFilePath)));
-        }
+        /* Prevent other backends' fds from holding on to the disk space */
+        ret = do_truncate(openFilePath);
 
         /* Register request to unlink first segment later */
         register_unlink_segment(rnode, forkNum, 0);
@@ -571,6 +591,17 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
                 break;
             }
             if (!RelFileNodeBackendIsTemp(rnode)) {
+                /*
+                 * Prevent other backends' fds from holding on to the disk
+                 * space.
+                 */
+                if (do_truncate(segpath) < 0 && errno == ENOENT)
+                    break;
+                
+                /*
+                 * Forget any pending sync requests for this segment before we
+                 * try to unlink.
+                 */
                 md_register_forget_request(rnode.node, forkNum, segno);
             }
         }
