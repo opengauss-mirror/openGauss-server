@@ -2623,9 +2623,6 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLoc
     if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->extra->lsn_on_disk, PageGetLSN(tmpBlock)) &&
         !(*oldFlags & BM_DIRTY) && RecoveryInProgress()) {
         int mode = DEBUG1;
-#ifdef USE_ASSERT_CHECKING
-        mode = PANIC;
-#endif
         const uint32 shiftSize = 32;
         ereport(mode, (errmodule(MOD_INCRE_BG),
                 errmsg("check lsn is not matched on disk:%X/%X on page %X/%X, relnode info:%u/%u/%u %u %u",
