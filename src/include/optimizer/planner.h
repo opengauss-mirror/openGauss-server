@@ -52,6 +52,7 @@ typedef struct {
 extern ExecNodes* getExecNodesByGroupName(const char* gname);
 extern PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 extern PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
+extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 
 typedef PlannedStmt* (*planner_hook_type) (Query* parse, int cursorOptions, ParamListInfo boundParams);
 typedef List* (*for_tsdb_hook_type) (PlannerInfo *root,RelOptInfo *rel,
@@ -67,6 +68,8 @@ extern THR_LOCAL PGDLLIMPORT ndp_pushdown_hook_type ndp_pushdown_hook;
 typedef PlannedStmt *(*spq_planner_hook_type) (Query* parse, int cursorOptions, ParamListInfo boundParams);
 extern THR_LOCAL PGDLLIMPORT spq_planner_hook_type spq_planner_hook;
 #endif
+
+typedef Plan* (*grouping_plannerFunc)(PlannerInfo* root, double tuple_fraction);
 
 extern Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_root, bool hasRecursion,
     double tuple_fraction, PlannerInfo** subroot, int options = SUBQUERY_NORMAL, ItstDisKey* diskeys = NULL,

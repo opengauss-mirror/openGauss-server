@@ -142,7 +142,7 @@ extern List* reassign_nodelist(RangeTblEntry* rte, List* ori_node_list);
 
 extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 static Plan* inheritance_planner(PlannerInfo* root);
-static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
+extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 static void preprocess_rowmarks(PlannerInfo* root);
 static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* offset_est, int64* count_est);
 static void process_sort(Query* parse, PlannerInfo* root, PlannerTargets* plannerTargets, Plan** resultPlan, 
@@ -2848,8 +2848,12 @@ static void process_rowMarks(Query* parse, Plan** resultPlan, PlannerInfo* root,
  * actual output ordering of the plan (in pathkey format).
  * --------------------
  */
-static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
+extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 {
+    if(u_sess->hook_cxt.groupingplannerHook != NULL) {
+        return ((grouping_plannerFunc)(u_sess->hook_cxt.groupingplannerHook))(root, tuple_fraction);
+    }
+
     Query* parse = root->parse;
     List* tlist = parse->targetList;
     int64 offset_est = 0;
