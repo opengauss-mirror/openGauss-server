@@ -237,6 +237,22 @@ partition p_default values less than (maxvalue)
         echo "$failed_keyword when check if not sync insert-data during splitting partition"
         exit 1
     fi
+
+    # BUG7: fix redo ddl logical message core when recovery_max_workers > 1
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE testTab1 cascade"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE testTab1 cascade"
+
+    restart_guc "pub_datanode1" "recovery_max_workers = 4"
+    restart_guc "pub_datanode2" "recovery_max_workers = 4"
+
+    echo "create publication."
+    exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub FOR ALL TABLES with(publish='insert,update,delete',ddl='all')"
+    exec_sql $case_db $pub_node1_port "create table t1 (a int);"
+
+    poll_query_until $case_db $pub_node2_port "SELECT count(*) FROM t1" "0" "Timed out while waiting for pub_node2 to sync"
+
+    restart_guc "pub_datanode1" "recovery_max_workers = 1"
+    restart_guc "pub_datanode2" "recovery_max_workers = 1"
 }
 
 function tear_down() {
