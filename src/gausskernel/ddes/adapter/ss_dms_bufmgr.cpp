@@ -47,7 +47,6 @@ void InitDmsBufCtrl(void)
             dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(i);
             buf_ctrl->buf_id = i;
             buf_ctrl->state = 0;
-            buf_ctrl->is_remote_dirty = 0;
             buf_ctrl->lock_mode = (uint8)DMS_LOCK_NULL;
             buf_ctrl->is_edp = 0;
             buf_ctrl->force_request = 0;

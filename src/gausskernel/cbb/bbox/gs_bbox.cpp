@@ -33,6 +33,7 @@
 #include "utils/elog.h"
 #include "utils/guc.h"
 #include "utils/fatal_err.h"
+#include "ddes/dms/ss_dms.h"
 
 #define BBOX_PATH_SIZE 512
 #define DEFAULT_BLACKLIST_MASK (0xFFFFFFFFFFFFFFFF)
@@ -101,6 +102,9 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
  */
 static void bbox_handler(int sig, siginfo_t *si, void *uc)
 {
+    if (ENABLE_DMS) {
+        dms_fsync_logfile();
+    }
     if (do_ffic(sig, si, uc)) {
 #ifndef ENABLE_MEMORY_CHECK
         sigset_t intMask;

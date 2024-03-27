@@ -2773,7 +2773,6 @@ typedef struct {
 
 typedef struct {
     int bufferid;
-    uint8 is_remote_dirty;
     uint8 lock_mode;
     uint8 is_edp;
     uint8 force_request;

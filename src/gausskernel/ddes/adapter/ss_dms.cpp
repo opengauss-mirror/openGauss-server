@@ -135,6 +135,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_buf_res));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_get_cmd_stat));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_req_opengauss_immediate_ckpt));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fsync_logfile));
 
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
@@ -187,6 +188,13 @@ void dms_refresh_logger(char *log_field, unsigned long long *value)
 {
     if (g_ss_dms_func.inited) {
         g_ss_dms_func.dms_refresh_logger(log_field, value);
+    }
+}
+
+void dms_fsync_logfile(void)
+{
+    if (g_ss_dms_func.inited) {
+        g_ss_dms_func.dms_fsync_logfile();
     }
 }
 

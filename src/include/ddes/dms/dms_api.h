@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           148
+#define DMS_LOCAL_VERSION           151
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -129,7 +129,7 @@ typedef enum en_dms_persistent_id {
 
 // for smon deadlock check
 #define DMS_SMON_DLOCK_MSG_MAX_LEN  24
-#define DMS_SMON_TLOCK_MSG_MAX_LEN  56
+#define DMS_SMON_TLOCK_MSG_MAX_LEN  64
 #define DMS_SMON_MAX_SQL_LEN    10240  // The maximum size of a message to be transferred in the MES is 32 KB.
 #define MAX_TABLE_LOCK_NUM 512
 #define DMS_MAX_W_MARKS_NUM (16320 * 64)
@@ -190,6 +190,7 @@ typedef enum en_drc_res_type {
     DRC_RES_LOCAL_TXN_TYPE,
     DRC_RES_LOCK_ITEM_TYPE,
     DRC_RES_GLOBAL_XA_TYPE,
+    DRC_RES_TYPE_MAX_COUNT,
 } drc_res_type_e;
 
 typedef enum en_dms_session {
@@ -325,6 +326,7 @@ typedef struct st_dms_context {
     dms_session_e sess_type;  // request page: recovery session flag
     unsigned char is_try;
     unsigned char type;
+    unsigned char is_upgrade;
     unsigned short len;
     unsigned long long ctx_ruid; /* this ruid indicates one message ack is pending recv */
     union {
@@ -429,7 +431,6 @@ typedef struct st_dms_broadcast_context {
 } dms_broadcast_context_t;
 
 typedef struct st_dms_buf_ctrl {
-    volatile unsigned char is_remote_dirty;
     volatile unsigned char lock_mode;       // used only in DMS, 0: Null, 1: Shared lock, 2: Exclusive lock
     // used only in DMS, 0: no, 1: yes, this page is old version,
     // can be discard only after latest version in other instance is cleaned
@@ -438,8 +439,8 @@ typedef struct st_dms_buf_ctrl {
     volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
     volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
     volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
-    unsigned char release_conflict : 1;
-    unsigned char unused : 7;
+    unsigned short release_conflict : 1;
+    unsigned short unused : 15;
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
@@ -719,6 +720,11 @@ typedef enum en_broadcast_scope {
     DMS_BROADCAST_TYPE_COUNT,
 } dms_broadcast_scope_e;
 
+typedef enum en_dms_buf_stats_type {
+    DMS_BUF_STATS_NULL = 0,
+    DMS_BUF_STATS_LOAD = 1,
+    DMS_BUF_STATS_EXPIRE = 2,
+} dms_buf_stats_type_e;
 /*
 * used by openGauss server to get DRC information
 */
@@ -771,6 +777,26 @@ typedef struct st_dms_broadcast_info {
     unsigned char check_session_kill; 
 } dms_broadcast_info_t;
 
+typedef enum st_dms_stat_cmd {
+    DMS_STAT_ASK_MASTER,
+    DMS_STAT_ASK_OWNER,
+    DMS_STAT_ASK_CR_PAGE,
+    DMS_STAT_ASK_MASTER_CR_PAGE,
+    DMS_STAT_ASK_OWNER_CR_PAGE,
+    DMS_STAT_CMD_COUNT,
+} dms_stat_cmd_e;
+
+typedef struct st_dms_stat_by_cmd {
+    unsigned long long ask_lock_succ_cnt;
+    unsigned long long ask_lock_fail_cnt;
+    unsigned long long ask_page_succ_cnt;
+    unsigned long long ask_page_fail_cnt;
+} dms_stat_by_cmd_t;
+
+typedef struct st_dms_msg_stats {
+    dms_stat_by_cmd_t stat_cmd[DMS_STAT_CMD_COUNT];
+} dms_msg_stats_t;
+
 typedef struct dms_fi_entry dms_fi_entry;
 typedef int(*dms_fi_callback_func)(const dms_fi_entry *entry, va_list args);
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
@@ -808,6 +834,7 @@ typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE])
 typedef unsigned int(*dms_inc_and_get_srsn)(unsigned int sess_id);
 typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *buf_ctrl);
 typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
+typedef int(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *buf_ctrl, dms_buf_stats_type_e stats_type);
 typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
 typedef void(*dms_update_global_scn)(void *db_handle, unsigned long long lamport_scn);
@@ -951,6 +978,9 @@ typedef void (*dms_get_db_role)(void *db_handle, unsigned int *role);
 typedef void (*dms_check_lrpl_takeover)(void *db_handle, unsigned int *need_takeover);
 typedef void (*dms_reset_link)(void *db_handle);
 typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list);
+typedef int (*dms_standby_update_remove_node_ctrl)(void *db_handle, unsigned long long online_list);
+typedef int (*dms_standby_stop_thread)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
+typedef int (*dms_standby_reload_node_ctrl)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
@@ -967,6 +997,7 @@ typedef int (*dms_az_failover_promote_phase1)(void *db_handle);
 typedef int (*dms_az_failover_promote_resetlog)(void *db_handle);
 typedef int (*dms_az_failover_promote_phase2)(void *db_handle);
 typedef int (*dms_check_shutdown_consistency)(void *db_handle, instance_list_t *old_remove);
+typedef int (*dms_check_db_readwrite)(void *db_handle);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1054,6 +1085,7 @@ typedef struct st_dms_callback {
     dms_read_page read_page;
     dms_leave_page leave_page;
     dms_verify_page verify_page;
+    dms_stats_buf stats_buf;
 
     /* memory manager callback functions provided by DB */
     dms_mem_alloc mem_alloc;
@@ -1142,6 +1174,9 @@ typedef struct st_dms_callback {
     dms_check_lrpl_takeover check_lrpl_takeover;
     dms_reset_link reset_link;
     dms_set_online_list set_online_list;
+    dms_standby_update_remove_node_ctrl standby_update_remove_node_ctrl;
+    dms_standby_stop_thread standby_stop_thread;
+    dms_standby_reload_node_ctrl standby_reload_node_ctrl;
     dms_start_lrpl start_lrpl;
     dms_stop_lrpl stop_lrpl;
 
@@ -1157,6 +1192,7 @@ typedef struct st_dms_callback {
     dms_dyn_log dyn_log;
     dms_get_alock_wait_info get_alock_wait_info;
     dms_check_shutdown_consistency check_shutdown_consistency;
+    dms_check_db_readwrite check_db_readwrite;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1328,6 +1364,12 @@ typedef struct thread_set {
     thread_info_t threads[MAX_DMS_THREAD_NUM];
     int thread_count;
 } thread_set_t;
+
+typedef struct st_driver_ping_info {
+    unsigned long long rw_bitmap;
+    unsigned long long major_version;
+    unsigned long long minor_version;
+} driver_ping_info_t;
 
 #ifdef __cplusplus
 }

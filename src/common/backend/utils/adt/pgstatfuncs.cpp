@@ -8844,7 +8844,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
     }
 }
 
-#define NUM_SS_BUFFER_CTRL_ELEM 13
+#define NUM_SS_BUFFER_CTRL_ELEM 12
 Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
 {
     FuncCallContext* funcctx = NULL;
@@ -8875,18 +8875,17 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
         /* Construct a tuple descriptor for the result rows. */
         tupledesc = CreateTemplateTupleDesc(NUM_SS_BUFFER_CTRL_ELEM, false);
         TupleDescInitEntry(tupledesc, (AttrNumber)1, "bufferid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)2, "is_remote_dirty", INT1OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)3, "lock_mode", INT1OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)4, "is_edp", INT1OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)5, "force_request", INT1OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)6, "need_flush", INT1OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)7, "buf_id", INT4OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)8, "state", OIDOID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)9, "pblk_relno", OIDOID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)10, "pblk_blkno", OIDOID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)11, "pblk_lsn", INT8OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)12, "seg_fileno", INT1OID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)13, "seg_blockno", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)2, "lock_mode", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)3, "is_edp", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)4, "force_request", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)5, "need_flush", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)6, "buf_id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)7, "state", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)8, "pblk_relno", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)9, "pblk_blkno", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)10, "pblk_lsn", INT8OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)11, "seg_fileno", INT1OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)12, "seg_blockno", OIDOID, -1, 0);
         fctx->tupdesc = BlessTupleDesc(tupledesc);
 
         fctx->record =
@@ -8911,7 +8910,6 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
             bufHdr = GetBufferDescriptor(i);
             buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
             fctx->record[i].bufferid = i + 1;
-            fctx->record[i].is_remote_dirty = buf_ctrl->is_remote_dirty;
             fctx->record[i].lock_mode = buf_ctrl->lock_mode;
             fctx->record[i].is_edp = buf_ctrl->is_edp;
             fctx->record[i].force_request = buf_ctrl->force_request;
@@ -8940,18 +8938,17 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
         bool nulls[NUM_SS_BUFFER_CTRL_ELEM] = {false};
 
         values[0] = Int32GetDatum(fctx->record[i].bufferid);
-        values[1] = UInt8GetDatum(fctx->record[i].is_remote_dirty);
-        values[2] = UInt8GetDatum(fctx->record[i].lock_mode);
-        values[3] = UInt8GetDatum(fctx->record[i].is_edp);
-        values[4] = UInt8GetDatum(fctx->record[i].force_request);
-        values[5] = UInt8GetDatum(fctx->record[i].need_flush);
-        values[6] = Int32GetDatum(fctx->record[i].buf_id);
-        values[7] = UInt32GetDatum(fctx->record[i].state);
-        values[8] = UInt32GetDatum(fctx->record[i].pblk_relno);
-        values[9] = UInt32GetDatum(fctx->record[i].pblk_blkno);
-        values[10] = UInt64GetDatum(fctx->record[i].pblk_lsn);
-        values[11] = UInt8GetDatum(fctx->record[i].seg_fileno);
-        values[12] = UInt32GetDatum(fctx->record[i].seg_blockno);
+        values[1] = UInt8GetDatum(fctx->record[i].lock_mode);
+        values[2] = UInt8GetDatum(fctx->record[i].is_edp);
+        values[3] = UInt8GetDatum(fctx->record[i].force_request);
+        values[4] = UInt8GetDatum(fctx->record[i].need_flush);
+        values[5] = Int32GetDatum(fctx->record[i].buf_id);
+        values[6] = UInt32GetDatum(fctx->record[i].state);
+        values[7] = UInt32GetDatum(fctx->record[i].pblk_relno);
+        values[8] = UInt32GetDatum(fctx->record[i].pblk_blkno);
+        values[9] = UInt64GetDatum(fctx->record[i].pblk_lsn);
+        values[10] = UInt8GetDatum(fctx->record[i].seg_fileno);
+        values[11] = UInt32GetDatum(fctx->record[i].seg_blockno);
         
         /* Build and return the tuple. */
         tuple = heap_form_tuple(fctx->tupdesc, values, nulls);
