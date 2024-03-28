@@ -28,6 +28,8 @@ create table tab_segment(a int);
 create table tab_segment_off(a int) with(segment=off);
 ERROR:  Only support segment storage type while parameter enable_segment is ON.
 create table tab_segment_on(a int) with(segment=on);
+create table tab_segment_compress(a int) with(compresstype=2,compress_chunk_size=512,compress_level=1);
+ERROR:  compresstype can not be used in segment table.
 \d+ tab_segment;
                      Table "public.tab_segment"
  Column |  Type   | Modifiers | Storage | Stats target | Description 
@@ -49,6 +51,8 @@ drop table tab_segment;
 drop table if exists tab_segment_off;
 NOTICE:  table "tab_segment_off" does not exist, skipping
 drop table if exists tab_segment_on;
+drop table if exists tab_segment_compress;
+NOTICE:  table "tab_segment_compress" does not exist, skipping
 select pg_sleep(1);
  pg_sleep 
 ----------

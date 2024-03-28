@@ -2979,6 +2979,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("Only support segment storage type while parameter enable_segment is ON.")));
     }
+    CheckSegmentCompressOption(stmt->options, relkind, storage_type, storeChar);
 
     /*
      * Create the relation.  Inherited defaults and constraints are passed in
