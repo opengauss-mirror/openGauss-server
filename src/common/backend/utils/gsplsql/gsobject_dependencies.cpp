@@ -300,7 +300,7 @@ Oid gsplsql_get_proc_oid(const char* schemaName, const char* packageName, const 
     }
     ReleaseSysCacheList(catlist);
     FreeStringInfo(&procNameStr);
-    ereport(ERROR,  (errmodule(MOD_PLSQL), errmsg("function %s does not exist", name)));
+    ereport(WARNING, (errmodule(MOD_PLSQL), errmsg("function %s does not exist", name)));
     return InvalidOid;
 }
 
@@ -347,7 +347,7 @@ Oid gsplsql_get_proc_oid(const char* schemaName, const char* packageName, const 
         }
     }
     ReleaseSysCacheList(catlist);
-    ereport(ERROR,  (errmodule(MOD_PLSQL), errmsg("function %s does not exist", name)));
+    ereport(WARNING, (errmodule(MOD_PLSQL), errmsg("function %s does not exist", name)));
     return InvalidOid;
 }
 
