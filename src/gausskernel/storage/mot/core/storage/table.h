@@ -290,12 +290,6 @@ public:
     bool IsTableEmpty(uint32_t tid);
 
     /**
-     * @brief Truncates the table.
-     * @param txn The txn manager object.
-     */
-    void Truncate(TxnManager* txn);
-
-    /**
      * @brief Performs a compact operation on the table.
      * @param txn The txn manager object.
      */
