@@ -1,3 +1,6 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92780 then
 --sha
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 558;
 CREATE OR REPLACE FUNCTION pg_catalog.sha(text)
@@ -28,3 +31,5 @@ AS $function$sha2$function$;
 comment on function PG_CATALOG.sha2(text,bigint) is 'use the sha2 algorithm to hash';
  
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
+END IF;
+END $upgrade$;
