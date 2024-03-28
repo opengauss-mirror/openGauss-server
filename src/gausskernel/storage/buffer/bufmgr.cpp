@@ -2190,14 +2190,6 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
         }
     }
 
-    if (ENABLE_DMS) {
-        Buffer buf = BlockGetBuffer((char *)bufBlock);
-        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
-        if (buf_ctrl->lock_mode == DMS_LOCK_NULL) {
-            ereport(PANIC, (errmsg("It seemd read buffer not across DMS!")));
-        }
-    }
-
     return needputtodirty;
 }
 
