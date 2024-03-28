@@ -2659,9 +2659,33 @@ char* getObjectDescription(const ObjectAddress* object)
             break;
 
         case OCLASS_PROC:
-            signature = format_procedure(object->objectId);
-            appendStringInfo(&buffer, _("function %s"), signature);
-            pfree_ext(signature);
+            if (enable_plpgsql_gsdependency()) {
+                MemoryContext save_context = CurrentMemoryContext;
+                PG_TRY();
+                {
+                    signature = format_procedure(object->objectId);
+                    appendStringInfo(&buffer, _("function %s"), signature);
+                    pfree_ext(signature);
+                }
+                PG_CATCH();
+                {
+                    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+                    if (edata->sqlerrcode == ERRCODE_CACHE_LOOKUP_FAILED) {
+                        MemoryContextSwitchTo(save_context);
+                        signature = get_func_name(object->objectId);
+                        appendStringInfo(&buffer, _("function %s"), signature);
+                        pfree_ext(signature);
+                        FlushErrorState();
+                    } else {
+                        PG_RE_THROW();
+                    }
+                }
+                PG_END_TRY();
+            } else {
+                signature = format_procedure(object->objectId);
+                appendStringInfo(&buffer, _("function %s"), signature);
+                pfree_ext(signature);
+            }
             break;
 
         case OCLASS_PACKAGE:

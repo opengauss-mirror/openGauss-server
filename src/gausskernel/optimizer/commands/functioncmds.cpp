@@ -1632,7 +1632,7 @@ void RemoveFunctionById(Oid funcOid)
 
 #ifndef ENABLE_MULTIPLE_NODES
     GsDependObjDesc func_head_obj;
-    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+    if (enable_plpgsql_gsdependency_guc()) {
         Oid pro_namespace = procedureStruct->pronamespace;
         bool is_null;
         Datum pro_package_id_datum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &is_null);
@@ -1681,7 +1681,7 @@ void RemoveFunctionById(Oid funcOid)
     pfree_ext(funcName);
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+    if (enable_plpgsql_gsdependency_guc()) {
         CommandCounterIncrement();
         func_head_obj.type = GSDEPEND_OBJECT_TYPE_PROCHEAD;
         gsplsql_remove_dependencies_object(&func_head_obj);
