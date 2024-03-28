@@ -1231,6 +1231,12 @@ void gsplsql_prepare_gs_depend_for_pkg_compile(PLpgSQL_package* pkg, bool isCrea
         GSDEPEND_OBJECT_TYPE_INVALID,
         isCreate ? GSDEPEND_REFOBJ_POS_IN_PKGALL_OBJ : GSDEPEND_REFOBJ_POS_IN_PKGRECOMPILE_OBJ
     };
+    NameData schema_name_data;
+    NameData pkg_name_data;
+    StringInfoData object_name_data;
+    gsplsql_construct_non_empty_obj(&obj_desc, &schema_name_data, &pkg_name_data, &object_name_data);
+    uint32 hash_value = string_hash(object_name_data.data, object_name_data.len);
+    LockDatabaseObject(DependenciesRelationId, hash_value, 0, AccessExclusiveLock);
     pkg->preRefObjectOidList = gsplsql_delete_objs(relation, &obj_desc);
     heap_close(relation, RowExclusiveLock);
     pkg->preSelfObjectList = gsplsql_get_depend_obj_list_by_specified_pkg(schema_name, pkg->pkg_signature,
