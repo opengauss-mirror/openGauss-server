@@ -61,7 +61,7 @@ insert into old_dump values(2,2);
 ERROR:  permission denied for relation tab_dump
 DETAIL:  N/A
 CONTEXT:  SQL statement "insert into tab_dump values(new.id,new.c1)"
-PL/pgSQL function tri_dump_old_dump_inlinefunc() line 2 at SQL statement
+PL/pgSQL function tri_dump_old_dump_inlinefunc_1() line 2 at SQL statement
 \c test2_dump
 --insert
 insert into old_dump values(2,2);
@@ -84,7 +84,7 @@ insert into old_dump values(2,2);
 ERROR:  permission denied for relation tab_dump
 DETAIL:  N/A
 CONTEXT:  SQL statement "insert into tab_dump values(new.id,new.c1)"
-PL/pgSQL function tri_dump_old_dump_inlinefunc() line 2 at SQL statement
+PL/pgSQL function tri_dump_old_dump_inlinefunc_1() line 2 at SQL statement
 \c regression
 drop database test_dump;
 drop database test1_dump;
