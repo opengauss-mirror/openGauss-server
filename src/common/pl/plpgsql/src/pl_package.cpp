@@ -1136,8 +1136,17 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
             } else {
                 pkg_body_valid = GetPgObjectValid(pkgOid, OBJECT_TYPE_PKGBODY);
             }
+            if ((!pkg_body_valid || !pkg_spec_valid) && !u_sess->plsql_cxt.need_create_depend && !isRecompile) {
+                gsplsql_do_autonomous_compile(pkgOid, true);
+            }
         }
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Locking is performed before compilation. */
+    if (u_sess->SPI_cxt._connected >= 0) {
+        gsplsql_lock_func_pkg_dependency_all(pkgOid, PLSQL_PACKAGE_OBJ);
+    }
+#endif
     pkg = plpgsql_pkg_HashTableLookup(&hashkey);
     if ((!pkg_body_valid || !pkg_spec_valid) && pkg != NULL &&
          !u_sess->plsql_cxt.need_create_depend && u_sess->SPI_cxt._connected >= 0 &&

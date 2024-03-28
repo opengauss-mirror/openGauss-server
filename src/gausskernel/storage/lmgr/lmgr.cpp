@@ -331,6 +331,84 @@ void UnlockRelationIdForSession(LockRelId *relid, LOCKMODE lockmode)
 }
 
 /*
+ * Unlock and Lock Package/Procedure Id For Session
+ */
+void LockProcedureIdForSession(Oid procId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PROC_OBJECT(tag, dbId, procId);
+
+    (void)LockAcquire(&tag, lockmode, true, false);
+}
+
+void UnlockProcedureIdForSession(Oid procId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PROC_OBJECT(tag, dbId, procId);
+
+    (void)LockRelease(&tag, lockmode, true);
+}
+
+void LockPackageIdForSession(Oid packageId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PKG_OBJECT(tag, dbId, packageId);
+
+    (void)LockAcquire(&tag, lockmode, true, false);
+}
+
+void UnlockPackageIdForSession(Oid packageId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PKG_OBJECT(tag, dbId, packageId);
+
+    (void)LockRelease(&tag, lockmode, true);
+}
+
+/*
+ * Unlock and Lock Package/Procedure Id For Transaction
+ */
+void LockProcedureIdForXact(Oid procId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PROC_OBJECT(tag, dbId, procId);
+
+    (void)LockAcquire(&tag, lockmode, false, false);
+}
+
+void UnlockProcedureIdForXact(Oid procId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PROC_OBJECT(tag, dbId, procId);
+
+    (void)LockRelease(&tag, lockmode, false);
+}
+
+void LockPackageIdForXact(Oid packageId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PKG_OBJECT(tag, dbId, packageId);
+
+    (void)LockAcquire(&tag, lockmode, false, false);
+}
+
+void UnlockPackageIdForXact(Oid packageId, Oid dbId, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_PKG_OBJECT(tag, dbId, packageId);
+
+    (void)LockRelease(&tag, lockmode, false);
+}
+
+/*
  *		LockRelationForExtension
  *
  * This lock tag is used to interlock addition of pages to relations.
