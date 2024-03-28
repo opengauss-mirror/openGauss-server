@@ -69,7 +69,6 @@ void CatalogCloseIndexes(CatalogIndexState indstate)
  */
 void CatalogIndexInsert(CatalogIndexState indstate, HeapTuple heapTuple)
 {
-    int i;
     int numIndexes;
     RelationPtr relationDescs;
     Relation heapRelation;
@@ -77,11 +76,10 @@ void CatalogIndexInsert(CatalogIndexState indstate, HeapTuple heapTuple)
     IndexInfo** indexInfoArray;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
-
-    /* HOT update does not require index inserts */
+#ifndef USE_ASSERT_CHECKING
     if (HeapTupleIsHeapOnly(heapTuple))
         return;
-
+#endif
     /*
      * Get information from the state structure.  Fall out if nothing to do.
      */
@@ -99,10 +97,12 @@ void CatalogIndexInsert(CatalogIndexState indstate, HeapTuple heapTuple)
     /*
      * for each index, form and insert the index tuple
      */
-    for (i = 0; i < numIndexes; i++) {
+    for (int i = 0; i < numIndexes; i++) {
         IndexInfo* indexInfo = NULL;
+        Relation index;
 
         indexInfo = indexInfoArray[i];
+        index = relationDescs[i];
 
         /* If the index is marked as read-only, ignore it */
         if (!indexInfo->ii_ReadyForInserts)
@@ -115,8 +115,15 @@ void CatalogIndexInsert(CatalogIndexState indstate, HeapTuple heapTuple)
         Assert(indexInfo->ii_Expressions == NIL);
         Assert(indexInfo->ii_Predicate == NIL);
         Assert(indexInfo->ii_ExclusionOps == NULL);
-        Assert(relationDescs[i]->rd_index->indimmediate);
+        Assert(index->rd_index->indimmediate);
         Assert(indexInfo->ii_NumIndexKeyAttrs != 0);
+
+#ifdef USE_ASSERT_CHECKING
+        if (HeapTupleIsHeapOnly(heapTuple)) {
+            Assert(!ReindexIsProcessingIndex(RelationGetRelid(index)));
+            continue;
+        }
+#endif /* USE_ASSERT_CHECKING */
 
         /*
          * FormIndexDatum fills in its values and isnull parameters with the
