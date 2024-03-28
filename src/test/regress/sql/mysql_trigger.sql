@@ -567,6 +567,52 @@ end;
 alter trigger testscm.animals_trigger2 on animals_scm rename to animals_trigger2_1;
 drop trigger testscm.animals_trigger2_1 on animals_scm;
 set search_path to public;
+
+--bugfix for name long
+drop table if exists T_ignore_case_in_dquotes_use_case0007;
+drop table if exists T_ignore_case_in_dquotes_use_case0007_1;
+create table T_ignore_case_in_dquotes_use_case0007(col1 int,col2 varchar(20));
+create table T_ignore_case_in_dquotes_use_case0007_1(col1 int,col2 varchar(20));
+
+create trigger Tri_ignore_case_in_dquotes_use_case0007
+after insert on T_ignore_case_in_dquotes_use_case0007
+for each row
+begin
+insert into T_ignore_case_in_dquotes_use_case0007_1 values (1,'INSERT');
+end;
+/
+
+create trigger Tri_ignore_case_in_dquotes_use_case0008
+after insert on T_ignore_case_in_dquotes_use_case0007
+for each row
+begin
+insert into T_ignore_case_in_dquotes_use_case0007_1 values (1,'INSERT');
+end;
+/
+
+create trigger Tri_ignore_case_in_dquotes_use_case0009
+after insert on T_ignore_case_in_dquotes_use_case0007
+for each row
+begin
+insert into T_ignore_case_in_dquotes_use_case0007_1 values (1,'INSERT');
+end;
+/
+
+
+create trigger Tri_ignore_case_in_dquotes_use_case0011
+after insert on T_ignore_case_in_dquotes_use_case0007
+for each row
+begin
+insert into T_ignore_case_in_dquotes_use_case0007_1 values (1,'INSERT');
+end;
+/
+
+insert into T_ignore_case_in_dquotes_use_case0007 values(11,'test');
+
+select * from T_ignore_case_in_dquotes_use_case0007;
+
+select * from T_ignore_case_in_dquotes_use_case0007_1;
+
 -- 1.5 cleanup
 \c regression
 drop database testdb_m;
@@ -620,6 +666,7 @@ for each row
 execute procedure food_insert_func();
 alter trigger testscm_no.animals_trigger2 on testscm.animals_scm rename to animals_trigger2_1;
 drop trigger testscm_no.animals_trigger2;
+
 -- 2.2 cleanup
 \c regression
 drop database testdb;
