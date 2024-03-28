@@ -85,6 +85,11 @@
     (bms_union(exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->updatedCols, \
         exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->extraUpdatedCols))
 
+#define B_TRIGGER_INLINE_STR "inlinefunc"
+#define B_TRIGGER_INLINE_LENGTH 10
+#define B_TRIGGER_ID_LENGTH 8 /* for 65535 max = 5 chars, 3 '_' length total 8 */
+#define B_TRIGGER_ID_MAX 65530 /* max id search time we will report error */
+
 /* Local function prototypes */
 static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
 static void SetTriggerFlags(TriggerDesc* trigdesc, const Trigger* trigger);
@@ -96,6 +101,7 @@ static HeapTuple ExecCallTriggerFunc(
 static void AfterTriggerSaveEvent(EState* estate, ResultRelInfo* relinfo, uint32 event, bool row_trigger,
     Oid oldPartitionOid, Oid newPartitionOid, int2 bucketid, HeapTuple oldtup, HeapTuple newtup, List* recheckIndexes,
     Bitmapset* modifiedCols);
+static char* rebuild_funcname_for_b_trigger(char* trigname, char* relname);
 #ifdef PGXC
 static bool pgxc_should_exec_triggers(
     Relation rel, uint16 tgtype_event, int16 tgtype_level, int16 tgtype_timing, EState* estate = NULL);
@@ -537,10 +543,10 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         n->isPrivate = false;
         n->replace = false;
         n->definer = stmt->definer;
-        size_t funcNameLen = strlen(stmt->trigname) + strlen(stmt->relation->relname) + strlen("__inlinefunc") + 1;
-        char* funcNameTmp = (char*)palloc(funcNameLen);
-        ret = snprintf_s(funcNameTmp,funcNameLen, funcNameLen-1, "%s_%s_inlinefunc",stmt->trigname,stmt->relation->relname);
-        securec_check_ss(ret, "\0", "\0");
+        char* trigname = pstrdup(stmt->trigname);
+        char* relname = pstrdup(stmt->relation->relname);
+        /* means we need to rebuild the function name */
+        char* funcNameTmp = rebuild_funcname_for_b_trigger(trigname, relname);
         n->funcname = list_make1(makeString(funcNameTmp));
         n->parameters = NULL;
         n->returnType = makeTypeName("trigger");
@@ -6318,4 +6324,55 @@ void ResetTrigShipFlag()
         u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
     }
 
+}
+/* build a function name for b format trigger */
+static char* rebuild_funcname_for_b_trigger(char* trigname, char* relname)
+{
+    uint16 uid = 0;
+    char* funcname = NULL;
+    int ret = 0;
+    size_t funcNameLen = strlen(trigname) + strlen(relname) + B_TRIGGER_INLINE_LENGTH + B_TRIGGER_ID_LENGTH + 1;
+    size_t halfPos = (NAMEDATALEN - B_TRIGGER_INLINE_LENGTH - B_TRIGGER_ID_LENGTH) / 2 - 1;
+    /* reset overflow length */
+    if (funcNameLen >= NAMEDATALEN) {
+        /* we have to reduce name string for oversize */
+        if (strlen(trigname) > halfPos) {
+            trigname[halfPos - 1] = '\0';
+        }
+
+        if (strlen(relname) > halfPos) {
+            relname[halfPos - 1] = '\0';
+        }
+        funcNameLen = strlen(trigname) + strlen(relname) + B_TRIGGER_INLINE_LENGTH + B_TRIGGER_ID_LENGTH + 1;
+    }
+    funcname = (char*)palloc0(sizeof(char) * funcNameLen);
+    CatCList* catlist = NULL;
+    do {
+        if (uid++ > B_TRIGGER_ID_MAX) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), 
+                    errmsg("You cannot create the trigger function because there are too many name conflicts."),
+                        errdetail("We need to build a function internal, please rename the trigger.")));
+        }
+        ret = snprintf_s(funcname, funcNameLen, funcNameLen - 1, "%s_%s_%s_%hu", trigname, relname, B_TRIGGER_INLINE_STR, uid);
+        securec_check_ss(ret, "\0", "\0");
+        if (t_thrd.proc->workingVersionNum < 92470) {
+            catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+        } else {
+            catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+        }
+        if (catlist != NULL) {
+            if (catlist->n_members > 0) 
+                ReleaseSysCacheList(catlist);
+            else {
+                ReleaseSysCacheList(catlist);
+                break;
+            }
+        } else {
+            break;
+        }
+
+    } while (true);
+
+    return funcname;
 }
