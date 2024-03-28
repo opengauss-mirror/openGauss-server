@@ -3036,6 +3036,11 @@ static void CommitTransaction(bool STP_commit)
 #endif
 
     AtEOXact_SysDBCache(true);
+
+    if (!STP_commit) {
+        gsplsql_unlock_func_pkg_dependency_all();
+    }
+
     ResourceOwnerRelease(t_thrd.utils_cxt.TopTransactionResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
 
     /* Check we've released all buffer pins */
@@ -3945,6 +3950,10 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
      * RecordTransactionAbort.
      */
     ProcArrayEndTransaction(t_thrd.proc, latestXid, false);
+
+    if (!STP_rollback) {
+        gsplsql_unlock_func_pkg_dependency_all();
+    }
 
     /*
      * Post-abort cleanup.	See notes in CommitTransaction() concerning
