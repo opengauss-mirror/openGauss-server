@@ -256,6 +256,32 @@ drop type r1;
 drop table stu;
 drop procedure test_proc;
 
+-- test 7
+set behavior_compat_options = 'plpgsql_dependency';
+create or replace package pkg1 is
+type tttt is record (col1 int, col2 text);
+procedure p1(param pkg2.tqqq);
+end pkg1;
+/
+create or replace package pkg2 is
+type tqqq is record (col1 int, col2 text, col3 varchar);
+procedure p1(param pkg1.tttt);
+end pkg2;
+/
+create or replace package body pkg2 is
+procedure p1(param pkg1.tttt) is
+begin
+RAISE INFO 'call param: %', param;
+end;
+end pkg2;
+/
+
+call pkg2.p1((1,'a'));
+set behavior_compat_options ='';
+drop package pkg1;
+set behavior_compat_options = 'plpgsql_dependency';
+drop package pkg2;
+
 -- clean
 drop schema plpgsql_recompile_new cascade;
 drop schema plpgsql_recompile cascade;

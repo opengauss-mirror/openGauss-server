@@ -649,7 +649,7 @@ void RemoveTypeById(Oid typeOid)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     GsDependObjDesc ref_obj;
-    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM) {
+    if (enable_plpgsql_gsdependency_guc()) {
         gsplsql_init_gs_depend_obj_desc(&ref_obj);
         char relkind = get_rel_relkind(typeOid);
         if (relkind == RELKIND_COMPOSITE_TYPE || relkind == '\0') {
@@ -700,29 +700,26 @@ void RemoveTypeById(Oid typeOid)
 
     heap_close(relation, RowExclusiveLock);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum >= SUPPORT_GS_DEPENDENCY_VERSION_NUM && NULL != ref_obj.name) {
+    if (enable_plpgsql_gsdependency_guc() && NULL != ref_obj.name) {
         CommandCounterIncrement();
+        (void)gsplsql_remove_ref_dependency(&ref_obj);
         ref_obj.refPosType = GSDEPEND_REFOBJ_POS_IN_TYPE;
-        gsplsql_remove_type_gs_dependency(&ref_obj);
-        if (enable_plpgsql_gsdependency_guc()) {
-            ref_obj.type = GSDEPEND_OBJECT_TYPE_TYPE;
-            (void)gsplsql_remove_ref_dependency(&ref_obj);
-            Oid pkg_oid = GetTypePackageOid(typeOid);
-            if (OidIsValid(pkg_oid)) {
-                bool invalid_pkg = true;
-                if (NULL != u_sess->plsql_cxt.curr_compile_context &&
-                    NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
-                    invalid_pkg = pkg_oid ==
-                        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+        (void)gsplsql_remove_gs_dependency(&ref_obj);
+        Oid pkg_oid = GetTypePackageOid(typeOid);
+        if (OidIsValid(pkg_oid)) {
+            bool invalid_pkg = true;
+            if (NULL != u_sess->plsql_cxt.curr_compile_context &&
+                NULL != u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+                invalid_pkg = pkg_oid ==
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+            }
+            if (invalid_pkg) {
+                bool is_spec = ref_obj.name[0] != '$';
+                SetPgObjectValid(pkg_oid, is_spec ? OBJECT_TYPE_PKGSPEC : OBJECT_TYPE_PKGBODY, false);
+                if (is_spec) {
+                    SetPgObjectValid(pkg_oid, OBJECT_TYPE_PKGBODY, false);
                 }
-                if (invalid_pkg) {
-                    bool is_spec = ref_obj.name[0] != '$';
-                    SetPgObjectValid(pkg_oid, is_spec ? OBJECT_TYPE_PKGSPEC : OBJECT_TYPE_PKGBODY, false);
-                    if (is_spec) {
-                        SetPgObjectValid(pkg_oid, OBJECT_TYPE_PKGBODY, false);
-                    }
-                    gsplsql_set_pkg_func_status(GetPackageNamespace(pkg_oid), pkg_oid, false);
-                }
+                gsplsql_set_pkg_func_status(GetPackageNamespace(pkg_oid), pkg_oid, false);
             }
         }
         pfree_ext(ref_obj.schemaName);

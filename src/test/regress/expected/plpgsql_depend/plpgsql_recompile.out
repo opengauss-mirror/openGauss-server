@@ -466,6 +466,51 @@ INFO:  call p_in: (1,"(1,zhang,M,1)")
 drop type r1;
 drop table stu;
 drop procedure test_proc;
+-- test 7
+set behavior_compat_options = 'plpgsql_dependency';
+create or replace package pkg1 is
+type tttt is record (col1 int, col2 text);
+procedure p1(param pkg2.tqqq);
+end pkg1;
+/
+WARNING:  Type tqqq does not exist.
+WARNING:  The header information of function p1 is not defined.
+CONTEXT:  compilation of PL/pgSQL package near line 1
+WARNING:  Package created with compilation erors.
+create or replace package pkg2 is
+type tqqq is record (col1 int, col2 text, col3 varchar);
+procedure p1(param pkg1.tttt);
+end pkg2;
+/
+--?.*
+WARNING:  Package created with compilation erors.
+create or replace package body pkg2 is
+procedure p1(param pkg1.tttt) is
+begin
+RAISE INFO 'call param: %', param;
+end;
+end pkg2;
+/
+--?.*
+WARNING:  Package Body created with compilation erors.
+call pkg2.p1((1,'a'));
+INFO:  call param: (1,a)
+ p1 
+----
+ 
+(1 row)
+
+set behavior_compat_options ='';
+drop package pkg1;
+--?.*
+set behavior_compat_options = 'plpgsql_dependency';
+drop package pkg2;
+NOTICE:  drop cascades to function p1
+WARNING:  The oid of the input parameter type of function p1 does not exist.
+WARNING:  function p1 does not exist
+WARNING:  function p1(plpgsql_recompile.pkg2.tqqq) does not exist
+WARNING:  function p1 does not exist
+WARNING:  function p1(plpgsql_recompile.pkg2.tqqq) does not exist
 -- clean
 drop schema plpgsql_recompile_new cascade;
 drop schema plpgsql_recompile cascade;
