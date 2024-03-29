@@ -1721,7 +1721,12 @@ static void ReformCleanBackends()
 
     int ticks = 0;
     while (true) {
-        if (g_instance.pid_cxt.StartupPID != 0) {
+        /*
+         * This code ensure that startup thread must exit. Postmaster process will exit when ticks exceeds
+         * REFORM_START_CLEAN_TICKS.
+         * In standby staring scenario, startup thread not exit for SS_DISASTER_MAIN_STANDBY_NODE. 
+         */
+        if ((!SS_DISASTER_MAIN_STANDBY_NODE) && g_instance.pid_cxt.StartupPID != 0) {
             if (ticks++ > REFORM_START_CLEAN_TICKS) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS reform] StartupXLOG debris sigterm timeout 10s, exit now")));
@@ -1730,7 +1735,6 @@ static void ReformCleanBackends()
             pg_usleep(REFORM_WAIT_LONG);
             continue;
         }
-        
         if (dms_reform_failed()) {
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform]reform failed during caneling backends")));
             return;

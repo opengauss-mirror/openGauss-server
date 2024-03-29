@@ -10965,9 +10965,14 @@ void StartupXLOG(void)
      * If we do checkpoint, nextxid record as a part of runningxacts, and
      * we may try to access according clog page during recovery.
      * Just extend it here to avoid this situation.
+     * 
+     * Standby node of standby cluster can not extend page in SS_DORADO_CLUSTER, 
+     * because a xlog record will be inserted for extending clog page.
      */
-    ExtendCLOG(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
-    ExtendCSNLOG(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+    if (!SS_DORADO_STANDBY_CLUSTER_STANDBY_NODE) {
+        ExtendCLOG(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        ExtendCSNLOG(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+    }
 
     /*
      * All done.  Allow backends to write WAL.	(Although the bool flag is
