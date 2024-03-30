@@ -61,7 +61,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
     if (SRF_IS_FIRSTCALL()) {
         int i;
         BufferDescPadded *bufHdrPadded = NULL;
-        uint32 buf_state;
+        uint64 buf_state;
 
         funcctx = SRF_FIRSTCALL_INIT();
 

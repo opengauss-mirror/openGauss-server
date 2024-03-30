@@ -100,18 +100,21 @@
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 #endif
 
-#define LW_FLAG_HAS_WAITERS ((uint32)1 << 30)
-#define LW_FLAG_RELEASE_OK ((uint32)1 << 29)
-#define LW_FLAG_LOCKED ((uint32)1 << 28)
+#define LW_FLAG_HAS_WAITERS ((uint64)1LU << 30 << 32)
+#define LW_FLAG_RELEASE_OK ((uint64)1LU << 29 << 32)
+#define LW_FLAG_LOCKED ((uint64)1LU << 28 << 32)
 
-#define LW_VAL_EXCLUSIVE ((uint32)1 << 24)
+#define LW_VAL_EXCLUSIVE (((uint64)1LU << 24 << 32) + (1LU << 47) + (1LU << 39) + (1LU << 31) + (1LU << 23) + (1LU << 15) + (1LU << 7))
 #define LW_VAL_SHARED 1
 
-#define LW_LOCK_MASK ((uint32)((1 << 25) - 1))
+#define LW_LOCK_MASK ((uint64)((1LU << 25 << 32) - 1))
 #ifdef LOCK_DEBUG
     /* Must be greater than MAX_BACKENDS - which is 2^23-1, so we're fine. */
-    #define LW_SHARED_MASK ((uint32)(1 << 23))
+    #define LW_SHARED_MASK ((uint64)(1LU << 23 << 32))
 #endif
+
+#define LOCK_THREADID_MASK ((((uintptr_t)&t_thrd) >> 20) % 6)
+#define LOCK_REFCOUNT_ONE_BY_THREADID (1LU << (8 * LOCK_THREADID_MASK))
 
 #define LWLOCK_TRANCHE_SIZE 128
 
@@ -230,9 +233,9 @@ inline static void PRINT_LWDEBUG(const char *where, LWLock *lock, LWLockMode mod
 {
     /* hide statement & context here, otherwise the log is just too verbose */
     if (Trace_lwlocks) {
-        uint32 state = pg_atomic_read_u32(&lock->state);
+        uint64 state = pg_atomic_read_u64(&lock->state);
         ereport(LOG, (errhidestmt(true), errhidecontext(true),
-                      errmsg("%d: %s(%s): excl %u shared %u haswaiters %u waiters %u rOK %d",
+                      errmsg("%d: %s(%s): excl %lu shared %lu haswaiters %lu waiters %u rOK %ld",
                              t_thrd.proc_cxt.MyProcPid, where, T_NAME(lock), !!(state & LW_VAL_EXCLUSIVE),
                              state & LW_SHARED_MASK, !!(state & LW_FLAG_HAS_WAITERS),
                              pg_atomic_read_u32(&lock->nwaiters), !!(state & LW_FLAG_RELEASE_OK))));
@@ -798,7 +801,7 @@ LWLock *LWLockAssign(int trancheId)
  */
 void LWLockInitialize(LWLock *lock, int tranche_id)
 {
-    pg_atomic_init_u32(&lock->state, LW_FLAG_RELEASE_OK);
+    pg_atomic_init_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
     /* ENABLE_THREAD_CHECK only, Register RWLock in Tsan */
     TsAnnotateRWLockCreate(&lock->rwlock);
@@ -820,7 +823,7 @@ static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMo
     Assert(false); /* for debug */
 
     /* allow LWLockRelease to release waiters again. */
-    pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_RELEASE_OK);
+    pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
     /* Fix the process wait semaphore's count for any absorbed wakeups. */
     while (extraWaits-- > 0) {
@@ -840,7 +843,7 @@ static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMo
  */
 static bool LWLockAttemptLock(LWLock *lock, LWLockMode mode)
 {
-    uint32 old_state;
+    uint64 old_state;
 
     AssertArg(mode == LW_EXCLUSIVE || mode == LW_SHARED);
 
@@ -848,59 +851,50 @@ static bool LWLockAttemptLock(LWLock *lock, LWLockMode mode)
      * Read once outside the loop, later iterations will get the newer value
      * via compare & exchange.
      */
-    old_state = pg_atomic_read_u32(&lock->state);
 
     /* loop until we've determined whether we could acquire the lock or not */
-    while (true) {
-        uint32 desired_state;
-        bool lock_free = false;
+    uint64 desired_state = 0;
 
-        desired_state = old_state;
-
-        if (mode == LW_EXCLUSIVE) {
-            lock_free = ((old_state & LW_LOCK_MASK) == 0);
-            if (lock_free) {
-                desired_state += LW_VAL_EXCLUSIVE;
+    if (mode == LW_SHARED) {
+        uint32 maskId = LOCK_THREADID_MASK;
+        uint64 refoneByThread = LOCK_REFCOUNT_ONE_BY_THREADID;
+        old_state = pg_atomic_read_u64((volatile uint64 *)&lock->state);
+        do {
+            if ((old_state & (LW_VAL_EXCLUSIVE)) != 0) {
+                return true;
             }
-        } else {
-            lock_free = ((old_state & LW_VAL_EXCLUSIVE) == 0);
-            if (lock_free) {
-                desired_state += LW_VAL_SHARED;
-            }
-        }
 
-        /*
-         * Attempt to swap in the state we are expecting. If we didn't see
-         * lock to be free, that's just the old value. If we saw it as free,
-         * we'll attempt to mark it acquired. The reason that we always swap
-         * in the value is that this doubles as a memory barrier. We could try
-         * to be smarter and only swap in values if we saw the lock as free,
-         * but benchmark haven't shown it as beneficial so far.
-         *
-         * Retry if the value changed since we last looked at it.
-         */
-        if (pg_atomic_compare_exchange_u32(&lock->state, &old_state, desired_state)) {
-            if (lock_free) {
-                /* ENABLE_THREAD_CHECK only, Must acquire vector clock info from other
-                 * thread after got the lock */
-                if (desired_state & LW_VAL_EXCLUSIVE) {
-                    TsAnnotateRWLockAcquired(&lock->rwlock, 1);
-                } else {
-                    TsAnnotateRWLockAcquired(&lock->rwlock, 0);
-                }
-
-                /* Great! Got the lock. */
-#ifdef LOCK_DEBUG
-                if (mode == LW_EXCLUSIVE) {
-                    lock->owner = t_thrd.proc;
-                }
-#endif
-                return false;
-            } else {
-                return true; /* someobdy else has the lock */
+            desired_state = old_state + refoneByThread;
+            if ((desired_state & (LW_VAL_EXCLUSIVE)) != 0) {
+                return true;
             }
-        }
+        } while (!pg_atomic_compare_exchange_u8((((volatile uint8*)&lock->state) + maskId), ((uint8*)&old_state) + maskId, (desired_state >> (8 * maskId))));
+    } else if (mode == LW_EXCLUSIVE) {
+        old_state = pg_atomic_read_u64(&lock->state);
+        do {
+            if ((old_state & LW_LOCK_MASK) != 0) {
+                return true;
+            }
+
+            desired_state = old_state + LW_VAL_EXCLUSIVE;
+        } while (!pg_atomic_compare_exchange_u64(&lock->state, &old_state, desired_state));
     }
+
+    /* ENABLE_THREAD_CHECK only, Must acquire vector clock info from other
+     * thread after got the lock */
+    if (desired_state & LW_VAL_EXCLUSIVE) {
+        TsAnnotateRWLockAcquired(&lock->rwlock, 1);
+    } else {
+        TsAnnotateRWLockAcquired(&lock->rwlock, 0);
+    }
+
+    /* Great! Got the lock. */
+#ifdef LOCK_DEBUG
+    if (mode == LW_EXCLUSIVE) {
+        lock->owner = t_thrd.proc;
+    }
+#endif
+    return false;
 }
 
 /*
@@ -913,7 +907,7 @@ static bool LWLockAttemptLock(LWLock *lock, LWLockMode mode)
  */
 static void LWLockWaitListLock(LWLock *lock)
 {
-    uint32 old_state;
+    uint64 old_state;
 #ifdef LWLOCK_STATS
     lwlock_stats *lwstats = NULL;
     uint32 delays = 0;
@@ -923,7 +917,7 @@ static void LWLockWaitListLock(LWLock *lock)
 
     while (true) {
         /* always try once to acquire lock directly */
-        old_state = pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_LOCKED);
+        old_state = pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_LOCKED);
         if (!(old_state & LW_FLAG_LOCKED)) {
             break; /* got lock */
         }
@@ -938,7 +932,7 @@ static void LWLockWaitListLock(LWLock *lock)
 #ifndef ENABLE_THREAD_CHECK
                 perform_spin_delay(&delayStatus);
 #endif
-                old_state = pg_atomic_read_u32(&lock->state);
+                old_state = pg_atomic_read_u64(&lock->state);
             }
 #ifdef LWLOCK_STATS
             delays += delayStatus.delays;
@@ -971,13 +965,13 @@ static void LWLockWaitListLock(LWLock *lock)
  */
 static void LWLockWaitListUnlock(LWLock *lock)
 {
-    uint32 old_state PG_USED_FOR_ASSERTS_ONLY;
+    uint64 old_state PG_USED_FOR_ASSERTS_ONLY;
 
     /* ENABLE_THREAD_CHECK only, Must release vector clock info to other
      * threads before unlock */
     TsAnnotateRWLockReleased(&lock->listlock, 1);
 
-    old_state = pg_atomic_fetch_and_u32(&lock->state, ~LW_FLAG_LOCKED);
+    old_state = pg_atomic_fetch_and_u64(&lock->state, ~LW_FLAG_LOCKED);
     Assert(old_state & LW_FLAG_LOCKED);
 }
 
@@ -1024,18 +1018,18 @@ static void LWLockWakeup(LWLock *lock)
         }
     }
 
-    Assert(dlist_is_empty(&wakeup) || (pg_atomic_read_u32(&lock->state) & LW_FLAG_HAS_WAITERS));
+    Assert(dlist_is_empty(&wakeup) || (pg_atomic_read_u64(&lock->state) & LW_FLAG_HAS_WAITERS));
 
     /* unset required flags, and release lock, in one fell swoop */
     {
-        uint32 old_state;
-        uint32 desired_state;
+        uint64 old_state;
+        uint64 desired_state;
 
         /* ENABLE_THREAD_CHECK only, Must release vector clock info to other
          * threads before unlock */
         TsAnnotateRWLockReleased(&lock->listlock, 1);
 
-        old_state = pg_atomic_read_u32(&lock->state);
+        old_state = pg_atomic_read_u64(&lock->state);
         while (true) {
             desired_state = old_state;
 
@@ -1051,7 +1045,7 @@ static void LWLockWakeup(LWLock *lock)
             }
 
             desired_state &= ~LW_FLAG_LOCKED;  // release lock
-            if (pg_atomic_compare_exchange_u32(&lock->state, &old_state, desired_state)) {
+            if (pg_atomic_compare_exchange_u64(&lock->state, &old_state, desired_state)) {
                 break;
             }
         }
@@ -1107,7 +1101,7 @@ static void LWLockQueueSelf(LWLock *lock, LWLockMode mode)
     LWLockWaitListLock(lock);
 
     /* setting the flag is protected by the spinlock */
-    pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_HAS_WAITERS);
+    pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_HAS_WAITERS);
 
     t_thrd.proc->lwWaiting = true;
     t_thrd.proc->lwWaitMode = mode;
@@ -1164,8 +1158,8 @@ static void LWLockDequeueSelf(LWLock *lock, LWLockMode mode)
         }
     }
 
-    if (dlist_is_empty(&lock->waiters) && (pg_atomic_read_u32(&lock->state) & LW_FLAG_HAS_WAITERS) != 0) {
-        pg_atomic_fetch_and_u32(&lock->state, ~LW_FLAG_HAS_WAITERS);
+    if (dlist_is_empty(&lock->waiters) && (pg_atomic_read_u64(&lock->state) & LW_FLAG_HAS_WAITERS) != 0) {
+        pg_atomic_fetch_and_u64(&lock->state, ~LW_FLAG_HAS_WAITERS);
     }
 
     /* XXX: combine with fetch_and above? */
@@ -1183,7 +1177,7 @@ static void LWLockDequeueSelf(LWLock *lock, LWLockMode mode)
          *
          * Reset releaseOk if somebody woke us before we removed ourselves -
          * they'll have set it to false. */
-        pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_RELEASE_OK);
+        pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
         /*
          * Now wait for the scheduled wakeup, otherwise our ->lwWaiting would
@@ -1237,7 +1231,7 @@ static bool LWLockConflictsWithVar(LWLock *lock, uint64 *valptr, uint64 oldval, 
      * barrier here as far as the current usage is concerned.  But that might
      * not be safe in general.
      */
-    mustwait = (pg_atomic_read_u32(&lock->state) & LW_VAL_EXCLUSIVE) != 0;
+    mustwait = (pg_atomic_read_u64(&lock->state) & LW_VAL_EXCLUSIVE) != 0;
     if (!mustwait) {
         *result = true;
         return false;
@@ -1404,14 +1398,14 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
                     break;
                 }
                 /* allow LWLockRelease to release waiters again. */
-                pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_RELEASE_OK);
+                pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_RELEASE_OK);
                 LWThreadSuicide(proc, extraWaits, lock, mode);
             }
             extraWaits++;
         }
 
         /* Retrying, allow LWLockRelease to release waiters again. */
-        pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_RELEASE_OK);
+        pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
 #ifdef LOCK_DEBUG
         {
@@ -1673,7 +1667,7 @@ bool LWLockWaitForVar(LWLock *lock, uint64 *valptr, uint64 oldval, uint64 *newva
          * Set RELEASE_OK flag, to make sure we get woken up as soon as the
          * lock is released.
          */
-        pg_atomic_fetch_or_u32(&lock->state, LW_FLAG_RELEASE_OK);
+        pg_atomic_fetch_or_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
         /*
          * We're now guaranteed to be woken up if necessary. Recheck the lock
@@ -1771,7 +1765,7 @@ void LWLockUpdateVar(LWLock *lock, uint64 *valptr, uint64 val)
 
     LWLockWaitListLock(lock);
 
-    Assert(pg_atomic_read_u32(&lock->state) & LW_VAL_EXCLUSIVE);
+    Assert(pg_atomic_read_u64(&lock->state) & LW_VAL_EXCLUSIVE);
 
     /* Update the lock's value */
     *valptr = val;
@@ -1812,7 +1806,7 @@ void LWLockUpdateVar(LWLock *lock, uint64 *valptr, uint64 val)
 void LWLockRelease(LWLock *lock)
 {
     LWLockMode mode = LW_EXCLUSIVE;
-    uint32 oldstate;
+    uint64 oldstate;
     bool check_waiters = false;
     int i;
 
@@ -1841,12 +1835,12 @@ void LWLockRelease(LWLock *lock)
         /* ENABLE_THREAD_CHECK only, Must release vector clock info to other
          * threads before unlock */
         TsAnnotateRWLockReleased(&lock->rwlock, 1);
-        oldstate = pg_atomic_sub_fetch_u32(&lock->state, LW_VAL_EXCLUSIVE);
+        oldstate = pg_atomic_sub_fetch_u64(&lock->state, LW_VAL_EXCLUSIVE);
     } else {
         /* ENABLE_THREAD_CHECK only, Must release vector clock info to other
          * threads before unlock */
         TsAnnotateRWLockReleased(&lock->rwlock, 0);
-        oldstate = pg_atomic_sub_fetch_u32(&lock->state, LW_VAL_SHARED);
+        oldstate = __sync_sub_and_fetch(&lock->state, LOCK_REFCOUNT_ONE_BY_THREADID);
     }
 
     /* nobody else can have that kind of lock */
@@ -1949,7 +1943,7 @@ bool LWLockHeldByMeInMode(LWLock *lock, LWLockMode mode)
 /* reset a lwlock */
 void LWLockReset(LWLock *lock)
 {
-    pg_atomic_init_u32(&lock->state, LW_FLAG_RELEASE_OK);
+    pg_atomic_init_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
     /* ENABLE_THREAD_CHECK only */
     TsAnnotateRWLockDestroy(&lock->listlock);
@@ -1973,7 +1967,7 @@ void LWLockReset(LWLock *lock)
  */
 void LWLockOwn(LWLock *lock)
 {
-    uint32 expected_state;
+    uint64 expected_state;
 
     /* Ensure we will have room to remember the lock */
     if (t_thrd.storage_cxt.num_held_lwlocks >= MAX_SIMUL_LWLOCKS) {
@@ -1981,7 +1975,7 @@ void LWLockOwn(LWLock *lock)
     }
 
     /* Ensure that lock is held */
-    expected_state = pg_atomic_read_u32(&lock->state);
+    expected_state = pg_atomic_read_u64(&lock->state);
     if (!((expected_state & LW_LOCK_MASK) > 0 || (expected_state & LW_VAL_EXCLUSIVE) > 0)) {
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
@@ -2004,11 +1998,11 @@ void LWLockOwn(LWLock *lock)
  */
 void LWLockDisown(LWLock *lock)
 {
-    uint32 expected_state;
+    uint64 expected_state;
     int i;
 
     /* Ensure that lock is held */
-    expected_state = pg_atomic_read_u32(&lock->state);
+    expected_state = pg_atomic_read_u64(&lock->state);
     if (!((expected_state & LW_LOCK_MASK) > 0 || (expected_state & LW_VAL_EXCLUSIVE) > 0)) {
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
@@ -2094,8 +2088,8 @@ void wakeup_victim(LWLock *lock, ThreadId victim_tid)
     }
 
     /* update flag LW_FLAG_HAS_WAITERS before waking up victim */
-    if (dlist_is_empty(&lock->waiters) && (pg_atomic_read_u32(&lock->state) & LW_FLAG_HAS_WAITERS) != 0) {
-        pg_atomic_fetch_and_u32(&lock->state, ~LW_FLAG_HAS_WAITERS);
+    if (dlist_is_empty(&lock->waiters) && (pg_atomic_read_u64(&lock->state) & LW_FLAG_HAS_WAITERS) != 0) {
+        pg_atomic_fetch_and_u64(&lock->state, ~LW_FLAG_HAS_WAITERS);
     }
 
     LWLockWaitListUnlock(lock);

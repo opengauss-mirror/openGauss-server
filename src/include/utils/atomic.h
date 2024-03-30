@@ -240,6 +240,16 @@ static inline bool pg_atomic_compare_exchange_u32(volatile uint32* ptr, uint32* 
     return ret;
 }
 
+static inline bool pg_atomic_compare_exchange_u8(volatile uint8* ptr, uint8* expected, uint8 newval)
+{
+    bool ret = false;
+    uint8  current;
+    current = __sync_val_compare_and_swap(ptr, *expected, newval);
+    ret = current == *expected;
+    *expected = current;
+    return ret;
+}
+
 /*
  * @Description: Atomic write in a 32-bit address.
  * @IN ptr: int32 pointer
