@@ -787,6 +787,14 @@ static int get_current_char_sorted_value(const unsigned char* cur_str, const uns
                                          GS_UINT32* next_word, const GS_UNICASE_INFO *uni_plane)
 {
     int word_bytes = mb_wc_utf8mb4(cur_str, str_end, next_word);
+    if (word_bytes <= 0) {
+        if (word_bytes == GS_ERR_TOOSMALL) {
+            return 0;
+        }
+        word_bytes = 1;
+        *next_word = *cur_str;
+        return word_bytes;
+    }
     sort_by_unicode(uni_plane->sort_page, next_word);
     return word_bytes;
 }
