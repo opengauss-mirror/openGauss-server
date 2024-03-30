@@ -656,6 +656,14 @@ select count(*) from test_utf8mb4_bin group by c2, c3;
 select distinct c2 from test_utf8mb4_bin;
 select distinct c3 from test_utf8mb4_bin;
 
+set group_concat_max_len = 2;
+drop table if exists t1;
+create table t1(a char(32) character set 'utf8' collate utf8_general_ci) character set 'utf8' collate 'utf8_general_ci';
+insert into t1 values('律师事务部中心(中文汉字匹配)');
+select * from (select group_concat(a) ab from t1) where ab like '%中文%';
+set group_concat_max_len = default;
+select * from (select group_concat(a) ab from t1) where ab like '%中文%';
+
 -- test alter table convert to
 SET b_format_behavior_compat_options = 'enable_multi_charset';
 drop table if exists test_convert_to;

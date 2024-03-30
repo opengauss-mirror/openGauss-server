@@ -6437,16 +6437,28 @@ Datum group_concat_transfn(PG_FUNCTION_ARGS)
  */
 Datum group_concat_finalfn(PG_FUNCTION_ARGS)
 {
-    StringInfo state;
-
     /* cannot be called directly because of internal-type argument */
     Assert(AggCheckCallContext(fcinfo, NULL));
 
     if (!PG_ARGISNULL(0)) { /* result not null */
-        state = (StringInfo)PG_GETARG_POINTER(0);
+        StringInfo state = (StringInfo)PG_GETARG_POINTER(0);
+        int cur_charset = get_valid_charset_by_collation(PG_GET_COLLATION());
+        int encoding_max_length = pg_wchar_table[cur_charset].maxmblen;
+        int real_len = state->len - encoding_max_length;
+        char* real_data = state->data + real_len;
+        while (real_data != NULL) {
+            int cur_len = pg_wchar_table[cur_charset].mblen((const unsigned char*)real_data);
+            real_len += cur_len;
+            if (real_len > state->len) {
+                state->len = (real_len - cur_len);
+                break;
+            }
+            real_data += cur_len;
+        }
         PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
-    } else
+    } else {
         PG_RETURN_NULL();
+    }
 }
 
 /*
