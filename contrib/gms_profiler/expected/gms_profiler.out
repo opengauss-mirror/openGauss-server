@@ -1,0 +1,266 @@
+SET client_min_messages = WARNING;
+\set VERBOSITY terse
+\set ECHO all
+drop procedure if exists do_something;
+drop procedure if exists do_wrapper;
+drop procedure if exists test_profiler_start;
+drop procedure if exists test_profiler_flush;
+drop procedure if exists test_profiler_version;
+drop procedure if exists test_profiler_pause;
+drop procedure if exists test_profiler_resume;
+drop procedure if exists test_profiler_resume2;
+drop procedure if exists test_profiler_version_check;
+drop procedure if exists test_profiler_start_ext;
+create extension gms_profiler;
+create or replace procedure do_something (p_times in number) as
+      l_dummy number;
+begin
+for i in 1 .. p_times loop
+select l_dummy +1
+into l_dummy;
+end loop;
+end;
+/
+create or replace procedure do_wrapper (p_times in number) as
+begin
+for i in 1 .. p_times loop
+        do_something(p_times);
+end loop;
+end;
+/
+create or replace procedure test_profiler_start () as
+declare
+l_result binary_integer;
+begin
+    l_result := gms_profiler.start_profiler('test_profiler', 'simple');
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.stop_profiler();
+end;
+/
+create or replace procedure test_profiler_flush () as
+declare
+l_result binary_integer;
+begin
+    l_result := gms_profiler.start_profiler('test_profiler_flush', 'flush');
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.flush_data();
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.stop_profiler();
+end;
+/
+create or replace procedure test_profiler_version () as
+declare
+major_v binary_integer;
+   minor_v binary_integer;
+begin
+select major, minor into major_v, minor_v from gms_profiler.get_version();
+end;
+/
+create or replace procedure test_profiler_pause () as
+declare
+l_result binary_integer;
+begin
+    l_result := gms_profiler.start_profiler('test_profiler_pause', 'pause');
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.pause_profiler();
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.stop_profiler();
+end;
+/
+create or replace procedure test_profiler_resume () as
+declare
+l_result binary_integer;
+begin
+    l_result := gms_profiler.start_profiler('test_profiler_resume', 'resume1');
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.pause_profiler();
+    l_result := gms_profiler.resume_profiler();
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.stop_profiler();
+end;
+/
+create or replace procedure test_profiler_resume2 () as
+declare
+l_result binary_integer;
+begin
+    l_result := gms_profiler.resume_profiler();
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.start_profiler('test_profiler_resume2', 'resume2');
+    l_result := gms_profiler.pause_profiler();
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.pause_profiler();
+    l_result := gms_profiler.resume_profiler();
+    do_wrapper(p_times => 2);
+    l_result := gms_profiler.stop_profiler();
+end;
+/
+create or replace procedure test_profiler_version_check () as
+declare
+l_result binary_integer;
+begin
+    l_result := gms_profiler.internal_version_check();
+end;
+/
+create or replace procedure test_profiler_start_ext () as
+declare
+l_result binary_integer;
+   runid binary_integer;
+begin
+select run_number, run_result into runid, l_result from gms_profiler.start_profiler_ext('start_profiler_ext');
+do_wrapper(p_times => 2);
+    l_result := gms_profiler.stop_profiler();
+end;
+/
+call test_profiler_start();
+ test_profiler_start 
+---------------------
+ 
+(1 row)
+
+call test_profiler_flush();
+ test_profiler_flush 
+---------------------
+ 
+(1 row)
+
+call test_profiler_version();
+ test_profiler_version 
+-----------------------
+ 
+(1 row)
+
+call test_profiler_pause();
+ test_profiler_pause 
+---------------------
+ 
+(1 row)
+
+call test_profiler_resume();
+ test_profiler_resume 
+----------------------
+ 
+(1 row)
+
+call test_profiler_resume2();
+ test_profiler_resume2 
+-----------------------
+ 
+(1 row)
+
+call test_profiler_version_check();
+ test_profiler_version_check 
+-----------------------------
+ 
+(1 row)
+
+call test_profiler_start_ext();
+ test_profiler_start_ext 
+-------------------------
+ 
+(1 row)
+
+select runid, run_comment, run_comment1 from gms_profiler.plsql_profiler_runs order by runid;
+ runid |      run_comment      | run_comment1 
+-------+-----------------------+--------------
+     1 | test_profiler         | simple
+     2 | test_profiler_flush   | flush
+     3 | test_profiler_pause   | pause
+     4 | test_profiler_resume  | resume1
+     5 | test_profiler_resume2 | resume2
+     6 | start_profiler_ext    | 
+(6 rows)
+
+select runid, unit_number, unit_type, unit_name from gms_profiler.plsql_profiler_units order by runid, unit_number;
+ runid | unit_number |    unit_type    |  unit_name   
+-------+-------------+-----------------+--------------
+     1 |           1 | ANONYMOUS BLOCK | <anonymous>
+     1 |           2 | PROCEDURE       | do_wrapper
+     1 |           3 | PROCEDURE       | do_something
+     2 |           1 | ANONYMOUS BLOCK | <anonymous>
+     2 |           2 | PROCEDURE       | do_wrapper
+     2 |           3 | PROCEDURE       | do_something
+     3 |           1 | ANONYMOUS BLOCK | <anonymous>
+     3 |           2 | PROCEDURE       | do_wrapper
+     3 |           3 | PROCEDURE       | do_something
+     4 |           1 | ANONYMOUS BLOCK | <anonymous>
+     4 |           2 | PROCEDURE       | do_wrapper
+     4 |           3 | PROCEDURE       | do_something
+     5 |           1 | ANONYMOUS BLOCK | <anonymous>
+     5 |           2 | PROCEDURE       | do_wrapper
+     5 |           3 | PROCEDURE       | do_something
+     6 |           1 | ANONYMOUS BLOCK | <anonymous>
+     6 |           2 | PROCEDURE       | do_wrapper
+     6 |           3 | PROCEDURE       | do_something
+(18 rows)
+
+select runid, unit_number, line#, total_occur from gms_profiler.plsql_profiler_data order by runid, unit_number, line#;
+ runid | unit_number | line# | total_occur 
+-------+-------------+-------+-------------
+     1 |           1 |     5 |           1
+     1 |           1 |     6 |           1
+     1 |           2 |     0 |           1
+     1 |           2 |     2 |           2
+     1 |           2 |     3 |           2
+     1 |           3 |     0 |           2
+     1 |           3 |     3 |           4
+     1 |           3 |     4 |           4
+     2 |           1 |     5 |           1
+     2 |           1 |     6 |           1
+     2 |           1 |     7 |           1
+     2 |           1 |     8 |           1
+     2 |           2 |     0 |           2
+     2 |           2 |     2 |           4
+     2 |           2 |     3 |           4
+     2 |           3 |     0 |           4
+     2 |           3 |     3 |           8
+     2 |           3 |     4 |           8
+     3 |           1 |     5 |           1
+     3 |           1 |     6 |           1
+     3 |           2 |     0 |           1
+     3 |           2 |     2 |           2
+     3 |           2 |     3 |           2
+     3 |           3 |     0 |           2
+     3 |           3 |     3 |           4
+     3 |           3 |     4 |           4
+     4 |           1 |     5 |           1
+     4 |           1 |     6 |           1
+     4 |           1 |     7 |           1
+     4 |           1 |     8 |           1
+     4 |           1 |     9 |           1
+     4 |           2 |     0 |           2
+     4 |           2 |     2 |           4
+     4 |           2 |     3 |           4
+     4 |           3 |     0 |           4
+     4 |           3 |     3 |           8
+     4 |           3 |     4 |           8
+     5 |           1 |     7 |           1
+     5 |           1 |    10 |           1
+     5 |           1 |    11 |           1
+     5 |           1 |    12 |           1
+     5 |           2 |     0 |           1
+     5 |           2 |     2 |           2
+     5 |           2 |     3 |           2
+     5 |           3 |     0 |           2
+     5 |           3 |     3 |           4
+     5 |           3 |     4 |           4
+     6 |           1 |     6 |           1
+     6 |           1 |     7 |           1
+     6 |           2 |     0 |           1
+     6 |           2 |     2 |           2
+     6 |           2 |     3 |           2
+     6 |           3 |     0 |           2
+     6 |           3 |     3 |           4
+     6 |           3 |     4 |           4
+(55 rows)
+
+drop procedure if exists do_something;
+drop procedure if exists do_wrapper;
+drop procedure if exists test_profiler_start;
+drop procedure if exists test_profiler_flush;
+drop procedure if exists test_profiler_version;
+drop procedure if exists test_profiler_pause;
+drop procedure if exists test_profiler_resume;
+drop procedure if exists test_profiler_resume2;
+drop procedure if exists test_profiler_version_check;
+drop procedure if exists test_profiler_start_ext;
+reset client_min_messages;

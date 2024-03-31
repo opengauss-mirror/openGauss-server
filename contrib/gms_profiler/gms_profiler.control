@@ -1,0 +1,5 @@
+# gms_profiler extension
+comment = 'collection of profiler data for PL/SQL applications'
+default_version = '1.0'
+module_pathname = '$libdir/gms_profiler'
+relocatable = true

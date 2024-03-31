@@ -4996,6 +4996,10 @@ static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, bo
 static int exec_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt, bool resignal_in_handler, int* coverage)
 {
     for (;;) {
+        /* Let the plugin know that we are about to execute this statement */
+        if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->stmt_once) {
+            ((*u_sess->plsql_cxt.plugin_ptr)->stmt_once)(stmt->lineno);
+        }
         int rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
         switch (rc) {
@@ -5070,6 +5074,10 @@ static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt, 
             break;
         }
 
+        /* Let the plugin know that we are about to execute this statement */
+        if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->stmt_once) {
+            ((*u_sess->plsql_cxt.plugin_ptr)->stmt_once)(stmt->lineno);
+        }
         rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
         switch (rc) {
@@ -5293,6 +5301,10 @@ static int exec_stmt_fori(PLpgSQL_execstate* estate, PLpgSQL_stmt_fori* stmt, bo
             if (loop_value > end_value) {
                 break;
             }
+        }
+        /* Let the plugin know that we are about to execute this statement */
+        if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->stmt_once) {
+            ((*u_sess->plsql_cxt.plugin_ptr)->stmt_once)(stmt->lineno);
         }
 
         found = true; /* looped at least once */
@@ -5798,6 +5810,10 @@ static int exec_stmt_foreach_a(PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a
         /*
          * Execute the statements
          */
+        /* Let the plugin know that we are about to execute this statement */
+        if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->stmt_once) {
+            ((*u_sess->plsql_cxt.plugin_ptr)->stmt_once)(stmt->lineno);
+        }
         rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
         /* Handle the return code */
@@ -11366,6 +11382,10 @@ static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Po
             /*
              * Execute the statements
              */
+            /* Let the plugin know that we are about to execute this statement */
+            if (*u_sess->plsql_cxt.plugin_ptr && (*u_sess->plsql_cxt.plugin_ptr)->stmt_once) {
+                ((*u_sess->plsql_cxt.plugin_ptr)->stmt_once)(stmt->lineno);
+            }
             rc = exec_stmts(estate, stmt->body, resignal_in_handler, coverage);
 
             if (rc != PLPGSQL_RC_OK) {
