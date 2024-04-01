@@ -1149,6 +1149,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
                 xlmeta.level = metad->btm_level;
                 xlmeta.fastroot = metad->btm_fastroot;
                 xlmeta.fastlevel = metad->btm_fastlevel;
+                xlmeta.allequalimage = metad->btm_allequalimage;
 
                 int xl_size;
                 if (t_thrd.proc->workingVersionNum < NBTREE_INSERT_OPTIMIZATION_VERSION_NUM) {
