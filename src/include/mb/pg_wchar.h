@@ -525,7 +525,7 @@ extern void mic2latin_with_table(
 extern bool pg_utf8_islegal(const unsigned char* source, int length);
 extern bool pg_gbk_islegal(const unsigned char* source, int length);
 
-extern char* gs_setlocale_r(int category, const char* locale);
+extern char* gs_perm_setlocale_r(int category, const char* locale);
 #ifndef WIN32
 extern char* gs_nl_langinfo_r(nl_item item);
 #else

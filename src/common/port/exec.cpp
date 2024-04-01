@@ -574,7 +574,7 @@ void set_pglocale_pgservice(const char* argv0, const char* app)
 
     /* don't set LC_ALL in the backend */
     if (strcmp(app, PG_TEXTDOMAIN("gaussdb")) != 0) {
-        (void)gs_setlocale_r(LC_ALL, "");
+        (void)setlocale(LC_ALL, "");
     }
 
     if (find_my_exec(argv0, my_exec_path) < 0) {

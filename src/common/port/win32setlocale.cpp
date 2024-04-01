@@ -69,7 +69,7 @@ char* pgwin32_setlocale(int category, const char* locale)
     errno_t rc;
 
     if (locale == NULL) {
-        return gs_setlocale_r(category, locale);
+        return gs_perm_setlocale_r(category, locale);
     }
 
     /* Check if the locale name matches any of the problematic ones. */
@@ -124,11 +124,11 @@ char* pgwin32_setlocale(int category, const char* locale)
 
     /* Call the real setlocale() function */
     if (alias != NULL) {
-        result = gs_setlocale_r(category, alias);
+        result = gs_perm_setlocale_r(category, alias);
         free(alias);
         alias = NULL;
     } else {
-        result = gs_setlocale_r(category, locale);
+        result = gs_perm_setlocale_r(category, locale);
     }
 
     return result;

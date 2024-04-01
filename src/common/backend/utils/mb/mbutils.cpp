@@ -1148,6 +1148,39 @@ void SetDatabaseEncoding(int encoding)
     Assert(u_sess->mb_cxt.DatabaseEncoding->encoding == encoding);
 }
 
+#if defined(ENABLE_NLS)
+/*
+ * Make one bind_textdomain_codeset() call, translating a pg_enc to a gettext
+ * codeset.  Fails for MULE_INTERNAL, an encoding unknown to gettext; can also
+ * fail for gettext-internal causes like out-of-memory.
+ */
+static bool
+raw_pg_bind_textdomain_codeset(const char *domainname, int encoding)
+{
+    bool		elog_ok = (CurrentMemoryContext != NULL);
+    int			i;
+
+    for (i = 0; pg_enc2gettext_tbl[i].name != NULL; i++)
+    {
+        if (pg_enc2gettext_tbl[i].encoding == encoding)
+        {
+            if (bind_textdomain_codeset(domainname,
+                                        pg_enc2gettext_tbl[i].name) != NULL)
+                return true;
+
+            if (elog_ok)
+                elog(LOG, "bind_textdomain_codeset failed");
+            else
+                write_stderr("bind_textdomain_codeset failed");
+
+            break;
+        }
+    }
+
+    return false;
+}
+#endif
+
 /*
  * Bind gettext to the codeset equivalent with the database encoding.
  */
@@ -1168,27 +1201,17 @@ void pg_bind_textdomain_codeset(const char* domain_name)
      * it.
      */
 #ifndef WIN32
-    /* setlocale is thread-unsafe */
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
-    const char* ctype = gs_setlocale_r(LC_CTYPE, NULL);
+    const char* ctype = gs_perm_setlocale_r(LC_CTYPE, NULL);
 
-    if (pg_strcasecmp(ctype, "C") != 0 && pg_strcasecmp(ctype, "POSIX") != 0) {
-        localeLock.unLock();
-        return;
-    }
-
-    localeLock.unLock();
+    /*
+     * XXX: If LC_CTYPE is C/POSIX, and database's encoding is not PG_SQL_ASCII,
+     * bind_textdomain_codeset() modify the server's codeset, which is not right.
+     * However, we can't handle this situation under multi-threading architecture.
+     */
+    if (ctype && (pg_strcasecmp(ctype, "C") == 0 || pg_strcasecmp(ctype, "POSIX") == 0))
 #endif
-
-    for (i = 0; pg_enc2gettext_tbl[i].name != NULL; i++) {
-        if (pg_enc2gettext_tbl[i].encoding == encoding) {
-            if (bind_textdomain_codeset(domain_name, pg_enc2gettext_tbl[i].name) == NULL) {
-                ereport(LOG, (errmsg("bind_textdomain_codeset failed")));
-            }
-            break;
-        }
-    }
+        if (encoding != PG_SQL_ASCII)
+            raw_pg_bind_textdomain_codeset(domain, encoding);
 #endif
 }
 
@@ -1241,11 +1264,8 @@ int GetPlatformEncoding(void)
     if (u_sess->mb_cxt.PlatformEncoding == NULL) {
         int encoding;
 
-        AutoMutexLock localeLock(&gLocaleMutex);
-        localeLock.lock();
         /* try to determine encoding of server's environment locale */
         encoding = pg_get_encoding_from_locale("", true);
-        localeLock.unLock();
 
         if (encoding < 0) {
             encoding = PG_SQL_ASCII;

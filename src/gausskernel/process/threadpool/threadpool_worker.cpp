@@ -318,7 +318,7 @@ void ThreadPoolWorker::RestoreLocaleInfo()
         return;
     }
 
-    if (pg_perm_setlocale(LC_COLLATE, NameStr(m_currentSession->mb_cxt.datcollate)) == NULL) {
+    if (gs_perm_setlocale_r(LC_COLLATE, NameStr(m_currentSession->mb_cxt.datcollate)) == NULL) {
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("database locale is incompatible with operating system"),
@@ -328,7 +328,7 @@ void ThreadPoolWorker::RestoreLocaleInfo()
                 errhint("Recreate the database with another locale or install the missing locale.")));
     }
 
-    if (pg_perm_setlocale(LC_CTYPE, NameStr(m_currentSession->mb_cxt.datctype)) == NULL) {
+    if (gs_perm_setlocale_r(LC_CTYPE, NameStr(m_currentSession->mb_cxt.datctype)) == NULL) {
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("database locale is incompatible with operating system"),
@@ -348,10 +348,11 @@ void ThreadPoolWorker::RestoreLocaleInfo()
         NAMEDATALEN);
     securec_check(rc, "\0", "\0");
 
-    /* Use the right encoding in translated messages */
-#ifdef ENABLE_NLS
-    pg_bind_textdomain_codeset(textdomain(NULL));
-#endif
+    /*
+     * GNU gettext selects a default encoding for the messages it emits in a
+     * platform-specific manner; it uses the Windows ANSI code page on Windows
+     * and follows LC_CTYPE on other platforms.
+     */
 }
 
 void ThreadPoolWorker::RestoreSessionVariable()

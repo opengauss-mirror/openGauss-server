@@ -275,7 +275,7 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
             return PG_SQL_ASCII;
         }
 
-        save = gs_setlocale_r(LC_CTYPE, NULL);
+        save = gs_perm_setlocale_r(LC_CTYPE, NULL);
         if (save == NULL) {
             return -1; /* setlocale() broken, must copy result, or it might change after setlocale */
         }
@@ -288,7 +288,7 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
             return -1; /* out of memory; unlikely */
         }
 
-        name = gs_setlocale_r(LC_CTYPE, ctype);
+        name = gs_perm_setlocale_r(LC_CTYPE, ctype);
         if (name == NULL) {
 #ifdef FRONTEND
             free(save);
@@ -310,7 +310,7 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
         sys = win32_langinfo(name);
 #endif
 
-        (void)gs_setlocale_r(LC_CTYPE, save);
+        (void)gs_perm_setlocale_r(LC_CTYPE, save);
 #ifdef FRONTEND
         free(save);
 #else
@@ -318,7 +318,7 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
 #endif
     } else {
         /* much easier... */
-        ctype = gs_setlocale_r(LC_CTYPE, NULL);
+        ctype = gs_perm_setlocale_r(LC_CTYPE, NULL);
         if (ctype == NULL) {
             return -1; /* setlocale() broken? */
         }
@@ -404,49 +404,35 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
 }
 
 #ifndef WIN32
-char* gs_setlocale_r(int category, const char* locale)
+char* gs_perm_setlocale_r(int category, const char* locale)
 {
     char* result = NULL;
 
 #ifdef FRONTEND
     result = setlocale(category, locale);
 #else
+    if (locale) {
+        locale_t old_locale;
+        int category_mask = 0;
 
-    if (!IsUnderPostmaster) {
-        // query locale not modify
-        result = setlocale(category, locale);
-    } else {
-        if (locale == NULL) {
-            if (t_thrd.port_cxt.save_locale_r != (locale_t)0) {
-                // get locale directly
-                result = gs_nl_langinfo_r(NL_LOCALE_NAME((unsigned int)category));
-            } else {
-                // query locale not modify
-                result = setlocale(category, NULL);
-            }
-        } else {
-            int category_mask = 0;
+        if (category == LC_ALL)
+            category_mask = LC_ALL_MASK;
+        else
+            category_mask = (1 << (unsigned int)category);
 
-            if (category == LC_ALL) {
-                category_mask = LC_ALL_MASK;
-            } else {
-                category_mask = (1 << (unsigned int)category);
-            }
-
-            t_thrd.port_cxt.save_locale_r = newlocale(category_mask, locale, t_thrd.port_cxt.save_locale_r);
-            if (t_thrd.port_cxt.save_locale_r == (locale_t)0) {
-                return NULL;
-            }
-
-            locale_t last_locale = uselocale(t_thrd.port_cxt.save_locale_r);
-
-            if (last_locale == (locale_t)0) {
-                return NULL;
-            }
-
-            result = (char*)locale;
-        }
+        t_thrd.port_cxt.save_locale_r = newlocale(category_mask, locale, t_thrd.port_cxt.save_locale_r);
+        if (t_thrd.port_cxt.save_locale_r == (locale_t)0)
+            return NULL;
+        old_locale = uselocale(t_thrd.port_cxt.save_locale_r);
+        if (old_locale == (locale_t)0)
+            return NULL;
+#ifdef ENABLE_NLS
+        /* Use the right encoding in translated messages. */
+        if (LC_CTYPE == category)
+            pg_bind_textdomain_codeset(textdomain(NULL));
+#endif
     }
+    result = gs_nl_langinfo_r(NL_LOCALE_NAME((unsigned int)category));
 #endif
 
     return result;
@@ -466,7 +452,7 @@ char* gs_nl_langinfo_r(nl_item item)
 }
 
 #else
-char* gs_setlocale_r(int category, const char* locale)
+char* gs_perm_setlocale_r(int category, const char* locale)
 {
     return setlocale(category, locale);
 }

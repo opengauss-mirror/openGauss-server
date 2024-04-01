@@ -89,9 +89,6 @@
 #include "executor/node/nodeShareInputScan.h"
 #endif
 
-/* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
-pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
-
 extern void SetShmemCxt(void);
 #ifdef ENABLE_MULTIPLE_NODES
 extern void InitDisasterCache();

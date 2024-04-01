@@ -403,7 +403,7 @@ static void SetEncordingInfo(Form_pg_database dbform, char* collate, char* ctype
         collate = NameStr(dbform->datcollate);
         ctype = NameStr(dbform->datctype);
 
-        if (pg_perm_setlocale(LC_COLLATE, collate) == NULL) {
+        if (gs_perm_setlocale_r(LC_COLLATE, collate) == NULL) {
             ereport(FATAL,
                 (errmsg("database locale is incompatible with operating system"),
                     errdetail("The database was initialized with LC_COLLATE \"%s\", "
@@ -412,7 +412,7 @@ static void SetEncordingInfo(Form_pg_database dbform, char* collate, char* ctype
                     errhint("Recreate the database with another locale or install the missing locale.")));
         }
 
-        if (pg_perm_setlocale(LC_CTYPE, ctype) == NULL) {
+        if (gs_perm_setlocale_r(LC_CTYPE, ctype) == NULL) {
             ereport(FATAL,
                 (errmsg("database locale is incompatible with operating system"),
                     errdetail("The database was initialized with LC_CTYPE \"%s\", "
@@ -425,10 +425,11 @@ static void SetEncordingInfo(Form_pg_database dbform, char* collate, char* ctype
         SetConfigOption("lc_collate", collate, PGC_INTERNAL, PGC_S_OVERRIDE);
         SetConfigOption("lc_ctype", ctype, PGC_INTERNAL, PGC_S_OVERRIDE);
 
-        /* Use the right encoding in translated messages */
-#ifdef ENABLE_NLS
-        pg_bind_textdomain_codeset(textdomain(NULL));
-#endif
+        /*
+         * GNU gettext selects a default encoding for the messages it emits in a
+         * platform-specific manner; it uses the Windows ANSI code page on Windows
+         * and follows LC_CTYPE on other platforms.
+         */
     }
 
     if (IS_THREAD_POOL_WORKER) {

@@ -810,11 +810,8 @@ void check_encoding_locale_matches(int encoding, const char* collate, const char
     int ctype_encoding;
     int collate_encoding;
 
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
     ctype_encoding = pg_get_encoding_from_locale(ctype, true);
     collate_encoding = pg_get_encoding_from_locale(collate, true);
-    localeLock.unLock();
 
     if (!(ctype_encoding == encoding || ctype_encoding == PG_SQL_ASCII || ctype_encoding == -1 ||
 #ifdef WIN32

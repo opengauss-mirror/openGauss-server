@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
         SHARED_CONTEXT);
-		
+        
     g_instance.comm_cxt.comm_global_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
         "CommunnicatorGlobalMemoryContext",
         ALLOCSET_DEFAULT_MINSIZE,
@@ -131,71 +131,6 @@ int main(int argc, char* argv[])
      * anywhere but stderr until GUC settings get loaded.
      */
     MemoryContextInit();
-
-    PmTopMemoryContext = t_thrd.top_mem_cxt;
-
-    knl_thread_init(MASTER_THREAD);
-
-    t_thrd.fake_session = create_session_context(t_thrd.top_mem_cxt, 0);
-    t_thrd.fake_session->status = KNL_SESS_FAKE;
-
-    u_sess = t_thrd.fake_session;
-
-    SelfMemoryContext = THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT);
-
-    MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
-
-    progname = get_progname(argv[0]);
-
-#ifdef PROFILE_PID_DIR
-{
-    char* gmon_env = NULL;
-    gmon_env = gs_getenv_r("GMON_OUT_PREFIX");
-    if(gmon_env == NULL){
-        if (gs_putenv_r("GMON_OUT_PREFIX=gmon.out") == -1) {
-            ereport(WARNING,
-                (errmsg("Failed to set ENV, cannot output gmon.out under multi-progress: EnvName=%s,"
-                        " Errno=%d, Errmessage=%s.",
-                    "GMON_OUT_PREFIX",
-                    errno,
-                    gs_strerror(errno))));
-        }
-    }
-}
-#endif
-
-    /*
-     * Platform-specific startup hacks
-     */
-    startup_hacks(progname);
-
-    /* if gaussdb's name is gs_encrypt, so run in encrypte_main() */
-    if (!strcmp(progname, "gs_encrypt")) {
-        return encrypte_main(argc, argv);
-    }
-
-    init_plog_global_mem();
-
-    /*
-     * Remember the physical location of the initially given argv[] array for
-     * possible use by ps display.	On some platforms, the argv[] storage must
-     * be overwritten in order to set the process title for ps. In such cases
-     * save_ps_display_args makes and returns a new copy of the argv[] array.
-     *
-     * save_ps_display_args may also move the environment strings to make
-     * extra room. Therefore this should be done as early as possible during
-     * startup, to avoid entanglements with code that might save a getenv()
-     * result pointer.
-     */
-    argv = save_ps_display_args(argc, argv);
-
-    /*
-     * If supported on the current platform, set up a handler to be called if
-     * the backend/postmaster crashes with a fatal signal or exception.
-     */
-#if defined(WIN32) && defined(HAVE_MINIDUMP_TYPE)
-    pgwin32_install_crashdump_handler();
-#endif
 
     /*
      * Set up locale information from environment.	Note that LC_CTYPE and
@@ -257,6 +192,91 @@ int main(int argc, char* argv[])
      * variables installed by pg_perm_setlocale have force.
      */
     (void)unsetenv("LC_ALL");
+
+    /*
+     * The code after this point prohibits the call to pg_perm_setlocale,
+     * because it is only used to set process's locale information, and
+     * if you want to modify thread's locale information, instead call
+     * gs_perm_setlocale_r.
+     * NB: This must be done before calling knl_thread_init() so that
+     * duplocale() can inherit the process's locale information.
+     */
+
+    PmTopMemoryContext = t_thrd.top_mem_cxt;
+
+    knl_thread_init(MASTER_THREAD);
+
+    t_thrd.fake_session = create_session_context(t_thrd.top_mem_cxt, 0);
+    t_thrd.fake_session->status = KNL_SESS_FAKE;
+
+    u_sess = t_thrd.fake_session;
+
+    SelfMemoryContext = THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT);
+
+    MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+
+    progname = get_progname(argv[0]);
+
+    /*
+     * Use the right encoding in translated messages.  Under ENABLE_NLS, let
+     * pg_bind_textdomain_codeset() figure it out.  Under !ENABLE_NLS, message
+     * format strings are ASCII, but database-encoding strings may enter the
+     * message via %s.  This makes the overall message encoding equal to the
+     * database encoding.
+     */
+#ifdef ENABLE_NLS
+    pg_bind_textdomain_codeset(textdomain(NULL));
+#endif
+
+#ifdef PROFILE_PID_DIR
+{
+    char* gmon_env = NULL;
+    gmon_env = gs_getenv_r("GMON_OUT_PREFIX");
+    if(gmon_env == NULL){
+        if (gs_putenv_r("GMON_OUT_PREFIX=gmon.out") == -1) {
+            ereport(WARNING,
+                (errmsg("Failed to set ENV, cannot output gmon.out under multi-progress: EnvName=%s,"
+                        " Errno=%d, Errmessage=%s.",
+                    "GMON_OUT_PREFIX",
+                    errno,
+                    gs_strerror(errno))));
+        }
+    }
+}
+#endif
+
+    /*
+     * Platform-specific startup hacks
+     */
+    startup_hacks(progname);
+
+    /* if gaussdb's name is gs_encrypt, so run in encrypte_main() */
+    if (!strcmp(progname, "gs_encrypt")) {
+        return encrypte_main(argc, argv);
+    }
+
+    init_plog_global_mem();
+
+    /*
+     * Remember the physical location of the initially given argv[] array for
+     * possible use by ps display.	On some platforms, the argv[] storage must
+     * be overwritten in order to set the process title for ps. In such cases
+     * save_ps_display_args makes and returns a new copy of the argv[] array.
+     *
+     * save_ps_display_args may also move the environment strings to make
+     * extra room. Therefore this should be done as early as possible during
+     * startup, to avoid entanglements with code that might save a getenv()
+     * result pointer.
+     */
+    argv = save_ps_display_args(argc, argv);
+
+    /*
+     * If supported on the current platform, set up a handler to be called if
+     * the backend/postmaster crashes with a fatal signal or exception.
+     */
+#if defined(WIN32) && defined(HAVE_MINIDUMP_TYPE)
+    pgwin32_install_crashdump_handler();
+#endif
 
     /*
      * Catch standard options before doing much else

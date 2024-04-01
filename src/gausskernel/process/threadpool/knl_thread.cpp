@@ -1456,7 +1456,13 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
 static void knl_t_port_init(knl_t_port_context* port_cxt)
 {
     port_cxt->thread_is_exiting = false;
-    port_cxt->save_locale_r = (locale_t)0;
+    /*
+     * We can only call setlocale() to modify the process's locale information
+     * at server startup, so as to avoid the need to acquire locks when thread
+     * sets its own LC_COLLATE and LC_CTYPE.
+     * NB: The memory pointed by save_locale_r needs to be freed.
+     */
+    port_cxt->save_locale_r = duplocale(LC_GLOBAL_LOCALE);
     port_cxt->cur_datcollate.data[0] = '\0';
     port_cxt->cur_datctype.data[0] = '\0';
     port_cxt->cur_monetary.data[0] = '\0';

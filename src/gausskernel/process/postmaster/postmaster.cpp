@@ -13974,25 +13974,6 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     MemoryContextInit();
     knl_thread_init(thread_role);
 
-    /*
-     * Set LC_CTYPE for auxiliary threads same as main
-     * 1.When thread called knl_t_port_init and the pg_perm_setlocale(LC_MESSAGES, "") 
-     *   in InitializeGUCOptions, LC_CTYPE will be changed to "C".
-     *   if now LC_MESSAGES is zh_CN.UTF-8, function gettext will return "????".
-     * 2.Worker thread will call SetEncordingInfo, 
-     *   and LC_CTYPE will be overwritten to the encoding of database.
-     */
-#ifdef ENABLE_NLS
-    (void) pg_perm_setlocale(LC_CTYPE, "");
-    if (thread_role == THREADPOOL_WORKER) {
-        errno_t rc;
-        const char* curctype = pg_perm_setlocale(LC_CTYPE, NULL);
-        /* if cur_datctype is diff from database encoding, LC_CTYPE will be overwritten */
-        rc = strncpy_s(NameStr(t_thrd.port_cxt.cur_datctype), NAMEDATALEN, curctype, strlen(curctype));
-        securec_check(rc, "\0", "\0");
-    }
-#endif
-
 #ifdef USE_SPQ
     if (arg->spq_role == ROLE_QUERY_EXECUTOR) {
         t_thrd.spq_ctx.spq_role = ROLE_QUERY_EXECUTOR;

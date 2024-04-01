@@ -91,24 +91,19 @@ static char* IsoLocaleName(const char*); /* MSVC specific */
  * ensure that, but that has to be done elsewhere after all the individual
  * LC_XXX variables have been set correctly.  (Thank you Perl for making this
  * kluge necessary.)
+ * NB: Do not call this function to modify thread's locale information.
  */
 char* pg_perm_setlocale(int category, const char* locale)
 {
     char* result = NULL;
     const char* envvar = NULL;
-    char* envbuf = NULL;
 
 #ifndef WIN32
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
-
-    result = gs_setlocale_r(category, locale);
-
-    if (IsUnderPostmaster) {
-        localeLock.unLock();
-        return result;
-    }
-    localeLock.unLock();
+    /*
+     * We only call this function during server startup, so we can set locale
+     * information without synchronization.
+     */
+    result = setlocale(category, locale);
 #else
 
     /*
@@ -134,11 +129,9 @@ char* pg_perm_setlocale(int category, const char* locale)
     switch (category) {
         case LC_COLLATE:
             envvar = "LC_COLLATE";
-            envbuf = t_thrd.lc_cxt.lc_collate_envbuf;
             break;
         case LC_CTYPE:
             envvar = "LC_CTYPE";
-            envbuf = t_thrd.lc_cxt.lc_ctype_envbuf;
             break;
 #ifdef WIN32
             result = IsoLocaleName(locale);
@@ -147,33 +140,22 @@ char* pg_perm_setlocale(int category, const char* locale)
 #endif /* WIN32 */
         case LC_MONETARY:
             envvar = "LC_MONETARY";
-            envbuf = t_thrd.lc_cxt.lc_monetary_envbuf;
             break;
         case LC_NUMERIC:
             envvar = "LC_NUMERIC";
-            envbuf = t_thrd.lc_cxt.lc_numeric_envbuf;
             break;
         case LC_TIME:
             envvar = "LC_TIME";
-            envbuf = t_thrd.lc_cxt.lc_time_envbuf;
             break;
         case LC_MESSAGES:
             envvar = "LC_MESSAGES";
-            envbuf = t_thrd.lc_cxt.lc_messages_envbuf;
             break;
         default:
             ereport(FATAL, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized LC category: %d", category)));
-            envvar = NULL; /* keep compiler quiet */
-            envbuf = NULL;
-            return NULL;
+            return NULL; /* keep compiler quiet */
     }
 
-    errno_t ss_rc = snprintf_s(envbuf, LC_ENV_BUFSIZE, LC_ENV_BUFSIZE - 1, "%s=%s", envvar, result);
-    if (ss_rc > LC_ENV_BUFSIZE - 1)
-        return NULL;
-    securec_check_ss(ss_rc, "\0", "\0");
-
-    if (gs_putenv_r(envbuf))
+    if (setenv(envvar, result, 1) != 0)
         return NULL;
 
     return result;
@@ -198,11 +180,8 @@ bool check_locale(int category, const char* locale, char** canonname)
         *canonname = NULL; /* in case of failure */
     }
 
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
-    save = gs_setlocale_r(category, NULL);
+    save = gs_perm_setlocale_r(category, NULL);
     if (save == NULL) {
-        localeLock.unLock();
         return false; /* won't happen, we hope */
     }
 
@@ -210,18 +189,17 @@ bool check_locale(int category, const char* locale, char** canonname)
     save = pstrdup(save);
 
     /* set the locale with setlocale, to see if it accepts it. */
-    res = gs_setlocale_r(category, locale);
+    res = gs_perm_setlocale_r(category, locale);
 
     /* save canonical name if requested. */
     if ((res != NULL) && (canonname != NULL))
         *canonname = pstrdup(res);
 
     /* restore old value. */
-    if (!gs_setlocale_r(category, save))
+    if (!gs_perm_setlocale_r(category, save))
         elog(WARNING, "failed to restore old locale \"%s\"", save);
 
     pfree_ext(save);
-    localeLock.unLock();
 
     return (res != NULL);
 }
@@ -319,7 +297,7 @@ void assign_locale_messages(const char* newval, void* extra)
      * We ignore failure, as per comment above.
      */
 #if defined(ENABLE_NLS) && defined(LC_MESSAGES)
-    (void) pg_perm_setlocale(LC_MESSAGES, newval);
+    (void) gs_perm_setlocale_r(LC_MESSAGES, newval);
 #endif
 }
 
@@ -431,15 +409,12 @@ struct lconv* PGLC_localeconv(void)
 
     free_struct_lconv(curlconv);
 
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
-
     /* Save user's values of monetary and numeric locales */
-    save_lc_monetary = gs_setlocale_r(LC_MONETARY, NULL);
+    save_lc_monetary = gs_perm_setlocale_r(LC_MONETARY, NULL);
     if (save_lc_monetary != NULL)
         save_lc_monetary = pstrdup(save_lc_monetary);
 
-    save_lc_numeric = gs_setlocale_r(LC_NUMERIC, NULL);
+    save_lc_numeric = gs_perm_setlocale_r(LC_NUMERIC, NULL);
     if (save_lc_numeric != NULL)
         save_lc_numeric = pstrdup(save_lc_numeric);
 
@@ -476,7 +451,7 @@ struct lconv* PGLC_localeconv(void)
 #endif
 
     /* Get formatting information for numeric */
-    gs_setlocale_r(LC_NUMERIC, u_sess->attr.attr_common.locale_numeric);
+    gs_perm_setlocale_r(LC_NUMERIC, u_sess->attr.attr_common.locale_numeric);
     extlconv = localeconv();
 
     /*
@@ -505,7 +480,7 @@ struct lconv* PGLC_localeconv(void)
 #endif
 
         /* Get formatting information for monetary */
-        gs_setlocale_r(LC_MONETARY, u_sess->attr.attr_common.locale_monetary);
+        gs_perm_setlocale_r(LC_MONETARY, u_sess->attr.attr_common.locale_monetary);
         extlconv = localeconv();
         encoding = pg_get_encoding_from_locale(u_sess->attr.attr_common.locale_monetary, true);
 
@@ -540,14 +515,14 @@ struct lconv* PGLC_localeconv(void)
     {
         /* Try to restore internal settings */
         if (save_lc_monetary != NULL) {
-            if (!gs_setlocale_r(LC_MONETARY, save_lc_monetary)) {
+            if (!gs_perm_setlocale_r(LC_MONETARY, save_lc_monetary)) {
                 elog(WARNING, "failed to restore old locale");
             }
             pfree_ext(save_lc_monetary);
         }
 
         if (save_lc_numeric != NULL) {
-            if (!gs_setlocale_r(LC_NUMERIC, save_lc_numeric)) {
+            if (!gs_perm_setlocale_r(LC_NUMERIC, save_lc_numeric)) {
                 elog(WARNING, "failed to restore old locale");
             }
             pfree_ext(save_lc_numeric);
@@ -556,7 +531,7 @@ struct lconv* PGLC_localeconv(void)
 #ifdef WIN32
         /* Try to restore internal ctype settings */
         if (save_lc_ctype != NULL) {
-            if (!gs_setlocale_r(LC_CTYPE, save_lc_ctype)) {
+            if (!gs_perm_setlocale_r(LC_CTYPE, save_lc_ctype)) {
                 elog(WARNING, "failed to restore old locale");
             }
             pfree_ext(save_lc_ctype);
@@ -567,22 +542,20 @@ struct lconv* PGLC_localeconv(void)
 
         MemoryContextSwitchTo(old_context);
 
-        localeLock.unLock();
-
         PG_RE_THROW();
     }
     PG_END_TRY();
 
     /* Try to restore internal settings */
     if (save_lc_monetary != NULL) {
-        if (!gs_setlocale_r(LC_MONETARY, save_lc_monetary)) {
+        if (!gs_perm_setlocale_r(LC_MONETARY, save_lc_monetary)) {
             elog(WARNING, "failed to restore old locale");
         }
         pfree_ext(save_lc_monetary);
     }
 
     if (save_lc_numeric != NULL) {
-        if (!gs_setlocale_r(LC_NUMERIC, save_lc_numeric)) {
+        if (!gs_perm_setlocale_r(LC_NUMERIC, save_lc_numeric)) {
             elog(WARNING, "failed to restore old locale");
         }
         pfree_ext(save_lc_numeric);
@@ -597,8 +570,6 @@ struct lconv* PGLC_localeconv(void)
         pfree_ext(save_lc_ctype);
     }
 #endif
-
-    localeLock.unLock();
 
     /* reload LC_MONETARY and LC_NUMERIC from session context to thread context */
     rc = strncpy_s(
@@ -737,11 +708,8 @@ void cache_locale_time(void)
 
     elog(DEBUG3, "cache_locale_time() executed; locale: \"%s\"", u_sess->attr.attr_common.locale_time);
 
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
-
     /* save user's value of time locale */
-    save_lc_time = gs_setlocale_r(LC_TIME, NULL);
+    save_lc_time = gs_perm_setlocale_r(LC_TIME, NULL);
     if (save_lc_time != NULL)
         save_lc_time = pstrdup(save_lc_time);
 
@@ -765,7 +733,7 @@ void cache_locale_time(void)
     setlocale(LC_CTYPE, u_sess->attr.attr_common.locale_time);
 #endif
 
-    gs_setlocale_r(LC_TIME, u_sess->attr.attr_common.locale_time);
+    gs_perm_setlocale_r(LC_TIME, u_sess->attr.attr_common.locale_time);
 
     timenow = time(NULL);
     localtime_r(&timenow, &timeinfo);
@@ -787,7 +755,7 @@ void cache_locale_time(void)
 
     /* try to restore internal settings */
     if (save_lc_time != NULL) {
-        if (!gs_setlocale_r(LC_TIME, save_lc_time))
+        if (!gs_perm_setlocale_r(LC_TIME, save_lc_time))
             elog(WARNING, "failed to restore old locale");
         pfree_ext(save_lc_time);
     }
@@ -801,7 +769,6 @@ void cache_locale_time(void)
     }
 #endif
 
-    localeLock.unLock();
     u_sess->lc_cxt.cur_lc_time_valid = true;
 }
 
@@ -1017,11 +984,8 @@ bool lc_collate_is_c(Oid collation)
         if (u_sess->lc_cxt.lc_collate_result >= 0)
             return (bool)u_sess->lc_cxt.lc_collate_result;
 
-        AutoMutexLock localeLock(&gLocaleMutex);
-        localeLock.lock();
-        localeptr = gs_setlocale_r(LC_COLLATE, NULL);
+        localeptr = gs_perm_setlocale_r(LC_COLLATE, NULL);
         if (localeptr == NULL) {
-            localeLock.unLock();
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid LC_COLLATE setting")));
         }
 
@@ -1032,7 +996,6 @@ bool lc_collate_is_c(Oid collation)
         else
             u_sess->lc_cxt.lc_collate_result = false;
 
-        localeLock.unLock();
         return (bool)u_sess->lc_cxt.lc_collate_result;
     }
 
@@ -1070,11 +1033,8 @@ bool lc_ctype_is_c(Oid collation)
         if (u_sess->lc_cxt.lc_ctype_result >= 0)
             return (bool)u_sess->lc_cxt.lc_ctype_result;
 
-        AutoMutexLock localeLock(&gLocaleMutex);
-        localeLock.lock();
-        localeptr = gs_setlocale_r(LC_CTYPE, NULL);
+        localeptr = gs_perm_setlocale_r(LC_CTYPE, NULL);
         if (localeptr == NULL) {
-            localeLock.unLock();
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid LC_CTYPE setting")));
         }
 
@@ -1085,7 +1045,6 @@ bool lc_ctype_is_c(Oid collation)
         else
             u_sess->lc_cxt.lc_ctype_result = false;
 
-        localeLock.unLock();
         return (bool)u_sess->lc_cxt.lc_ctype_result;
     }
 
