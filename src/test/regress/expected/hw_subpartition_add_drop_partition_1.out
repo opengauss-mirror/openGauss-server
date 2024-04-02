@@ -162,6 +162,7 @@ Options: orientation=row, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition channel2
 ALTER TABLE list_hash_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, not support drop hash
 ALTER TABLE list_hash_sales DROP SUBPARTITION channel1_product1;
 ERROR:  Un-support feature
@@ -172,6 +173,7 @@ ERROR:  Un-support feature
 DETAIL:  The syntax is unsupported for hash subpartition
 --success, drop partition channel3
 ALTER TABLE list_hash_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE list_hash_sales DROP PARTITION FOR ('6', '2010-01-01');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -414,8 +416,10 @@ ALTER TABLE hash_range_sales DROP PARTITION product2;
 ERROR:  Droping hash partition is unsupported.
 --success, drop subpartition product1_customer1
 ALTER TABLE hash_range_sales DROP SUBPARTITION product1_customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop subpartition product4_customer1
 ALTER TABLE hash_range_sales DROP SUBPARTITION product4_customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in product4
 ALTER TABLE hash_range_sales DROP SUBPARTITION product4_customer2;
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -435,6 +439,7 @@ ALTER TABLE hash_range_sales DROP SUBPARTITION FOR('2010-01-01', 100);
 ERROR:  invalid input syntax for integer: "2010-01-01"
 --success, drop subpartition product1_customer2, but not suggest to do this operation
 ALTER TABLE hash_range_sales DROP SUBPARTITION FOR(0, 100);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, no subpartition find
 ALTER TABLE hash_range_sales DROP SUBPARTITION FOR(0, 2300);
 ERROR:  The subpartition number is invalid or out-of-range
@@ -668,8 +673,10 @@ ALTER TABLE hash_list_sales DROP PARTITION product2;
 ERROR:  Droping hash partition is unsupported.
 --success, drop subpartition product1_channel1
 ALTER TABLE hash_list_sales DROP SUBPARTITION product1_channel1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop subpartition product4_channel1
 ALTER TABLE hash_list_sales DROP SUBPARTITION product4_channel1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in product4
 ALTER TABLE hash_list_sales DROP SUBPARTITION product4_channel2;
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -689,6 +696,7 @@ ALTER TABLE hash_list_sales DROP SUBPARTITION FOR('2010-01-01', '4');
 ERROR:  invalid input syntax for integer: "2010-01-01"
 --success, drop subpartition product1_channel2, but not suggest to do this operation
 ALTER TABLE hash_list_sales DROP SUBPARTITION FOR(0, '4');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, no subpartition find
 ALTER TABLE hash_list_sales DROP SUBPARTITION FOR(0, 'Z');
 ERROR:  The subpartition number is invalid or out-of-range

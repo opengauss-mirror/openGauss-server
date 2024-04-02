@@ -578,6 +578,7 @@ SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
 
 --test split partition
 ALTER TABLE ledgernsp.partition_table SPLIT PARTITION P4 AT (450) into (PARTITION P5, PARTITION P6);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 INSERT INTO ledgernsp.partition_table VALUES(700, '700');
 UPDATE ledgernsp.partition_table SET c = '700c' WHERE a = 700;
 DELETE ledgernsp.partition_table WHERE a = 700;
@@ -589,6 +590,7 @@ SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
 
 --test add partition
 ALTER TABLE ledgernsp.partition_table SPLIT PARTITION P6 AT (2000) into (PARTITION P7, PARTITION P8);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ALTER TABLE ledgernsp.partition_table DROP PARTITION P8;
 ERROR:  Unsupport to ALTER the structure of blockchain related table [partition_table].
 ALTER TABLE ledgernsp.partition_table ADD PARTITION P9 VALUES LESS THAN (MAXVALUE);
@@ -603,6 +605,7 @@ SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
 
 --test merge partition
 ALTER TABLE ledgernsp.partition_table MERGE PARTITIONS P5,P7 INTO PARTITION P6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
                 selecthist                 
 -------------------------------------------

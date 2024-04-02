@@ -2239,6 +2239,7 @@ explain delete from t_multi_parts_order partition(p4, p1) limit 10;
 (5 rows)
 
 ALTER TABLE t_multi_parts_order MERGE PARTITIONS p1,p2  INTO PARTITION p0;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 begin;
 delete from t_multi_parts_order partition(p3, p0, p4) limit 20;
 select count(*) from t_multi_parts_order partition (p0);
@@ -2271,6 +2272,7 @@ explain delete from t_multi_parts_order partition(p3, p0, p4) limit 20;
 (5 rows)
 
 ALTER TABLE t_multi_parts_order SPLIT PARTITION p0 AT ( 10 ) INTO ( PARTITION p1 , PARTITION p2);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 begin;
 delete from t_multi_parts_order partition(p3, p2, p4) limit 10;
 select count(*) from t_multi_parts_order partition (p2);
@@ -2303,6 +2305,7 @@ explain delete from t_multi_parts_order partition(p3, p2, p4) limit 10;
 (5 rows)
 
 ALTER TABLE t_multi_parts_order drop partition p4;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ALTER TABLE t_multi_parts_order add partition p5 values less than(50);
 ALTER TABLE t_multi_parts_order add partition p6 values less than(60);
 ALTER TABLE t_multi_parts_order add partition pmax values less than(maxvalue);

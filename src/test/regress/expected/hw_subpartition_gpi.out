@@ -454,6 +454,7 @@ select * from range_list where user_no = '1' order by 1, 2, 3, 4;
 (3 rows)
 
 alter table range_list truncate subpartition p_201901_b;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
@@ -721,6 +722,7 @@ alter table range_list split subpartition p_201902_b values ('3') into
 	subpartition p_201902_b,
 	subpartition p_201902_c
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
@@ -995,6 +997,7 @@ alter table range_range split subpartition p_201902_b at ('3') into
 	subpartition p_201902_c,
 	subpartition p_201903_d
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 explain(costs off, verbose on) select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------

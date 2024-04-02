@@ -178,6 +178,7 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b  where 
 (1 row)
 
 alter table gpi_test_invalid_part drop partition p9;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --p9 not exists
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b  where a.parttype = 'p' and a.relname = 'p9' and a.reloptions[3] like '%wait_clean_gpi=y%' and b.relname = 'gpi_test_invalid_part' order by 1,2,3;
  relname | parttype | reloptions 
@@ -268,6 +269,7 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 (1 row)
 
 alter table gpi_test_invalid_part drop partition p9;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --p9 not exists
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parttype = 'p' and a.relname = 'p9' and a.reloptions[3] like '%wait_clean_gpi=y%' and b.relname = 'gpi_test_invalid_part' order by 1,2,3;
  relname | parttype | reloptions 

@@ -25223,6 +25223,8 @@ static void ATUnusableGlobalIndex(Relation rel)
         CacheInvalidateRelcache(rel);
         CommandCounterIncrement();
     }
+    
+    ereport(NOTICE, (errmsg("Command without UPDATE GLOBAL INDEX will disable global index")));
 }
 
 /*

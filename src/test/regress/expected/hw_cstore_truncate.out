@@ -7,8 +7,10 @@ partition create_columnar_table_partition_p5 values less than(4121),
 partition create_columnar_table_partition_p6 values less than(maxvalue)) ;
 create index create_columnar_index_1_106 on create_columnar_table_106(c_integer,c_numeric,c_text,c_timestamp_with_timezone) local;
 alter table create_columnar_table_106 truncate partition create_columnar_table_partition_p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 insert into create_columnar_table_106 values(32431);
 alter table create_columnar_table_106 truncate partition create_columnar_table_partition_p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 insert into create_columnar_table_106 values(32431);
 select * from create_columnar_table_106;
  c_smallint | c_double_precision | c_time_without_time_zone | c_time_with_time_zone | c_integer | c_bigint  | c_decimal | c_real | c_numeric | c_varchar | c_char | c_timestamp_with_timezone | c_char2 | c_text | c_varchar2 | c_timestamp_without_timezone | c_date | c_varchar22 | c_numeric2 
