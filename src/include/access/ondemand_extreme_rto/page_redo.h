@@ -191,7 +191,7 @@ struct PageRedoWorker {
     PosixSemaphore phaseMarker;
     MemoryContext oldCtx;
 
-    ondemand_htab_ctrl_t *redoItemHashCtrl;
+    ondemand_htab_ctrl_t *redoItemHashCtrl; // The tail of redoItem hashmap, while is actually in use.
     TimeLineID recoveryTargetTLI;
     bool ArchiveRecoveryRequested;
     bool StandbyModeRequested;

@@ -601,6 +601,7 @@ static void StartPageRedoWorkers(uint32 totalThrdNum, bool inRealtimeBuild)
         RedoRoleInit(&(g_dispatcher->pageLines[i].batchThd), tmpWorkers[workerCnt++], REDO_BATCH, i, isUndoSpaceWorker);
         RedoRoleInit(&(g_dispatcher->pageLines[i].managerThd), tmpWorkers[workerCnt++], REDO_PAGE_MNG, i,
             isUndoSpaceWorker);
+        g_dispatcher->pageLines[i].managerThd->redoItemHashCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[i];
         RedoRoleInit(&(g_dispatcher->pageLines[i].htabThd), tmpWorkers[workerCnt++], REDO_HTAB_MNG, i,
             isUndoSpaceWorker);
         g_dispatcher->pageLines[i].redoThd = (PageRedoWorker **)palloc(sizeof(PageRedoWorker *) * batchWorkerPerMng);

@@ -267,6 +267,7 @@ PageRedoWorker *CreateWorker(uint32 id, bool inRealtimeBuild)
     worker->DataDir = t_thrd.proc_cxt.DataDir;
     worker->RecentXmin = u_sess->utils_cxt.RecentXmin;
     worker->xlogInvalidPages = NULL;
+    worker->redoItemHashCtrl = NULL;
     PosixSemaphoreInit(&worker->phaseMarker, 0);
     worker->oldCtx = NULL;
     worker->fullSyncFlag = 0;
@@ -1669,7 +1670,6 @@ void RedoPageManagerMain()
     uint32 eleNum;
 
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
-    g_redoWorker->redoItemHashCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
 
     GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
     while (SPSCBlockingQueueGetAll(g_redoWorker->queue, &eleArry, &eleNum)) {
@@ -3354,6 +3354,10 @@ void HashMapManagerMain()
 {
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
 
+    /**
+     * Each pipelint has a redoItem HashMap linked list. When the size of tail hashmap is up to limit, pageRedoManager
+     * will init a new redoItem hashMap and put it to the tail of linked List, hashmap manager is used to clean hashmap entry.
+     */
     do {
         bool pruneMax = false;
         bool updateStat = true;
@@ -3386,9 +3390,16 @@ void HashMapManagerMain()
             SPSCBlockingQueuePop(g_dispatcher->segQueue);
         }
 
-        // step2: prune idle hashmap
+        /**
+         * step2: prune idle hashmap
+         *
+         * If one redoItem hashmap's maxRedoItem < checkkpoint redo point, all entrys
+         * are no logger useful, so we can free this hashmap.
+         */
         CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_1], t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_2]);
+        // the head of redoItem hashmap linked list
         ondemand_htab_ctrl_t *nextHtabCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
+        // the tail of redoItem hashmap linked list
         ondemand_htab_ctrl_t *targetHtabCtrl = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl;
         while (nextHtabCtrl != targetHtabCtrl) {
             ondemand_htab_ctrl_t *procHtabCtrl = nextHtabCtrl;
