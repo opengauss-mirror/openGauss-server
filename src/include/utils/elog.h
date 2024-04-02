@@ -271,6 +271,8 @@ extern void save_error_message(void);
 extern int handle_in_client(bool handle);
 extern int ignore_interrupt(bool ignore);
 
+extern int onlyfrontmsg(bool onlyfront);
+
 /* ----------
  * Old-style error reporting API: to be used in this way:
  *		elog(ERROR, "portal \"%s\" not found", stmt->portalname);
@@ -548,6 +550,7 @@ typedef struct ErrorData {
     char* mysql_errno;     /* mysql_errno for signal/resignal */
     bool is_warnings_throw;
     int is_signal;
+    bool onlyfrontmsg;     /* outputflag, 1-output err level, 0 (default) - don't output err level */
 } ErrorData;
 
 /* The error data from remote */

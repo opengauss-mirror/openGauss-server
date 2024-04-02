@@ -101,6 +101,7 @@ install:
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec $@; fi
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
+	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi
 	+@echo "openGauss installation complete."
 endif
 endif

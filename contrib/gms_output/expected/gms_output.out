@@ -1,0 +1,1658 @@
+create extension gms_output;
+create schema gms_output_test;
+set search_path=gms_output_test;
+-- test gms_output.disable
+select gms_output.DISABLE;
+ disable 
+---------
+ 
+(1 row)
+
+select gms_output.DISABLE(null);
+ERROR:  function gms_output.disable(unknown) does not exist
+LINE 1: select gms_output.DISABLE(null);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: disable
+select gms_output.DISABLE();
+ disable 
+---------
+ 
+(1 row)
+
+select gms_output.DISABLE('');
+ERROR:  function gms_output.disable(unknown) does not exist
+LINE 1: select gms_output.DISABLE('');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: disable
+select gms_output.DISABLE(0);
+ERROR:  function gms_output.disable(integer) does not exist
+LINE 1: select gms_output.DISABLE(0);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: disable
+select gms_output.DISABLE("""");
+ERROR:  column """ does not exist
+LINE 1: select gms_output.DISABLE("""");
+                                  ^
+CONTEXT:  referenced column: disable
+select gms_output.DISABLE(@);
+ERROR:  syntax error at or near ")"
+LINE 1: select gms_output.DISABLE(@);
+                                   ^
+select gms_output.DISABLE(あ);
+ERROR:  column "あ" does not exist
+LINE 1: select gms_output.DISABLE(あ);
+                                  ^
+CONTEXT:  referenced column: disable
+select gms_output.DISABLE(%);
+ERROR:  syntax error at or near "%"
+LINE 1: select gms_output.DISABLE(%);
+                                  ^
+select gms_output.DISABLE('qqqq');
+ERROR:  function gms_output.disable(unknown) does not exist
+LINE 1: select gms_output.DISABLE('qqqq');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: disable
+select gms_output.DISABLE;
+ disable 
+---------
+ 
+(1 row)
+
+select gms_output.PUT_LINE('adsfds');
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.GET_LINE(0,1);
+ get_line 
+----------
+ (,1)
+(1 row)
+
+-- test gms_output.enable
+select gms_output.enable(1000000);
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(20000);
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(1000001);
+WARNING:  Limit decreased to 1000000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(19999);
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(30000);
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(power(2,31));
+ERROR:  integer out of range
+CONTEXT:  referenced column: enable
+select gms_output.enable(-555.55);
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(0.555.55);
+ERROR:  syntax error at or near "0.555.55"
+LINE 1: select gms_output.enable(0.555.55);
+                                 ^
+select gms_output.enable(000.555);
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(ssss);
+ERROR:  column "ssss" does not exist
+LINE 1: select gms_output.enable(ssss);
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable('ssss');
+ERROR:  invalid input syntax for integer: "ssss"
+LINE 1: select gms_output.enable('ssss');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable(-power(2,32));
+ERROR:  integer out of range
+CONTEXT:  referenced column: enable
+select gms_output.enable(-power(2,21));
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(a);
+ERROR:  column "a" does not exist
+LINE 1: select gms_output.enable(a);
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable('a');
+ERROR:  invalid input syntax for integer: "a"
+LINE 1: select gms_output.enable('a');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable(' ');
+ERROR:  invalid input syntax for integer: " "
+LINE 1: select gms_output.enable(' ');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable(null);
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(0);
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+select gms_output.enable(あ);
+ERROR:  column "あ" does not exist
+LINE 1: select gms_output.enable(あ);
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable('あ');
+ERROR:  invalid input syntax for integer: "あ"
+LINE 1: select gms_output.enable('あ');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable('@');
+ERROR:  invalid input syntax for integer: "@"
+LINE 1: select gms_output.enable('@');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable(1000,1000);
+ERROR:  function gms_output.enable(integer, integer) does not exist
+LINE 1: select gms_output.enable(1000,1000);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: enable
+select gms_output.enable(1000,null);
+ERROR:  function gms_output.enable(integer, unknown) does not exist
+LINE 1: select gms_output.enable(1000,null);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: enable
+select gms_output.enable('null');
+ERROR:  invalid input syntax for integer: "null"
+LINE 1: select gms_output.enable('null');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable('山东东海偶然打赏');
+ERROR:  invalid input syntax for integer: "山东东海偶然打赏"
+LINE 1: select gms_output.enable('山东东海偶然打赏');
+                                 ^
+CONTEXT:  referenced column: enable
+select gms_output.enable(0);
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  referenced column: enable
+ enable 
+--------
+ 
+(1 row)
+
+create table t(a int, b int, c int);
+insert into t values(111111,222222,333333);
+insert into t values(444444,555555,666666);
+insert into t values(777777,888888,999999);
+create table tt(aa int,bb varchar2(100));
+declare
+msg varchar2(120);
+cursor t_cur is select * from t order by a;
+v_line varchar2(100);
+ v_status integer := 0;
+begin
+ gms_output.enable;
+for i in t_cur loop
+ msg := i.a || ',' || i.b || ',' || i.c;
+ gms_output.put_line(msg);
+end loop;
+
+ gms_output.get_line(v_line, v_status);
+ while v_status = 0 loop
+ insert into tt values(v_status, v_line);
+ gms_output.get_line(v_line, v_status);
+end loop;
+end;
+/
+111111,222222,333333
+444444,555555,666666
+777777,888888,999999
+--查看结果
+select * from tt;
+ aa |          bb          
+----+----------------------
+  0 | 111111,222222,333333
+  0 | 444444,555555,666666
+  0 | 777777,888888,999999
+(3 rows)
+
+--清理资源
+drop table t;
+drop table tt;
+-- test gms_output.get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('This '); 
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+This 
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put();  
+end;
+/
+ERROR:  function gms_output.put has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put(null); 
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put(null); 
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put(-999888,pppp); 
+end;
+/
+ERROR:  when invoking function gms_output.put, expected ")", maybe input something superfluous.
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put(123213123); 
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+123213123
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('未来更快更高更强,hsdufdsnjfs,shfusdfjfjs,12313213');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+未来更快更高更强,hsdufdsnjfs,shfusdfjfjs,12313213
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('未来更快更高更强');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+未来更快更高更强
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('@#￥#@@#！@#！#￥@%%');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+@#￥#@@#！@#！#￥@%%
+select gms_output.GET_LINE(); 
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('2017-09-23'); 
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+2017-09-23
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+ 
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('2017-09-23 12:23:29,2000/07/99'); 
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+2017-09-23 12:23:29,2000/07/99
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('Time Started: ' || TO_CHAR('2001-09-28 01:00:00'::timestamp, 'DD-MON-YYYY HH24:MI:SS'));
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+Time Started: 28-SEP-2001 01:00:00
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('Time Started: ' || TO_CHAR('2001-09-28 01:00:00'::timestamp, 'DD-MON-YYYY HH24:MI:SS'));
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+Time Started: 28-SEP-2001 01:00:00
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('This '); 
+  gms_output.put('is ');
+  gms_output.new_line();  
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+This 
+is 
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('This '); 
+  gms_output.put('is ');
+  gms_output.put('函数测试历史的反思的');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+This 
+is 
+函数测试历史的反思的
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE(power(2,32));
+ERROR:  function gms_output.get_line(double precision) does not exist
+LINE 1: select gms_output.GET_LINE(power(2,32));
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select  gms_output.GET_LINE(power(2,9999));
+ERROR:  function gms_output.get_line(double precision) does not exist
+LINE 1: select  gms_output.GET_LINE(power(2,9999));
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select  gms_output.GET_LINE(あ@ 、iohgfvcs大富大贵);
+ERROR:  column "あ" does not exist
+LINE 1: select  gms_output.GET_LINE(あ@ 、iohgfvcs大富大贵);
+                                    ^
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE('');
+ERROR:  function gms_output.get_line(unknown) does not exist
+LINE 1: select gms_output.GET_LINE('');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE(null);
+ERROR:  function gms_output.get_line(unknown) does not exist
+LINE 1: select gms_output.GET_LINE(null);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE('aaaa');
+ERROR:  function gms_output.get_line(unknown) does not exist
+LINE 1: select gms_output.GET_LINE('aaaa');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE('和士大夫大师傅即使对方');
+ERROR:  function gms_output.get_line(unknown) does not exist
+LINE 1: select gms_output.GET_LINE('和士大夫大师傅即使对方');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE(111);
+ERROR:  function gms_output.get_line(integer) does not exist
+LINE 1: select gms_output.GET_LINE(111);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+select gms_output.GET_LINE(0);
+ERROR:  function gms_output.get_line(integer) does not exist
+LINE 1: select gms_output.GET_LINE(0);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+SET search_path to gms_output;
+create table t(a int, b int, c int);
+create table tt(aa int,bb varchar2(100));
+insert into t values(111111,222222,333333);
+insert into t values(444444,555555,666666);
+insert into t values(777777,888888,999999);
+declare
+msg varchar2(120);
+cursor t_cur is select * from t order by a;
+v_line varchar2(100);
+v_status integer := 0;
+begin
+gms_output.disable();
+gms_output.enable;
+for i in t_cur loop
+msg := i.a || ',' || i.b || ',' || i.c;
+raise notice 'msg=%',msg;
+gms_output.put_line(msg);
+end loop;
+
+gms_output.get_line(v_line, v_status);
+while v_status = 0 loop
+raise notice 'v_line=%,v_status=%',v_line,v_status;
+insert into tt values(v_status, v_line);
+gms_output.get_line(v_line, v_status);
+end loop;
+end;
+/
+NOTICE:  msg=111111,222222,333333
+111111,222222,333333
+NOTICE:  msg=444444,555555,666666
+444444,555555,666666
+NOTICE:  msg=777777,888888,999999
+777777,888888,999999
+NOTICE:  v_line=111111,222222,333333,v_status=0
+NOTICE:  v_line=444444,555555,666666,v_status=0
+NOTICE:  v_line=777777,888888,999999,v_status=0
+select * from tt;
+ aa |          bb          
+----+----------------------
+  0 | 111111,222222,333333
+  0 | 444444,555555,666666
+  0 | 777777,888888,999999
+(3 rows)
+
+delete from t;
+delete from tt;
+declare
+v_line varchar2(100);
+v_status integer := 0;
+begin
+gms_output.enable;
+gms_output.put('This ');
+gms_output.new_line;
+gms_output.put('end ');
+
+gms_output.get_line(v_line, v_status);
+while v_status = 0 loop
+raise notice 'v_line=%,v_status=%',v_line,v_status;
+insert into tt values(v_status, v_line);
+gms_output.get_line(v_line, v_status);
+end loop;
+end;
+/
+This 
+end 
+NOTICE:  v_line=This ,v_status=0
+NOTICE:  v_line=end ,v_status=0
+select * from tt;
+ aa |  bb   
+----+-------
+  0 | This 
+  0 | end 
+(2 rows)
+
+-- test gms_output.get_lines
+begin
+ gms_output.enable(100);
+ gms_output.PUT_LINE('{131231321312313},{dhsfsdjfsdf}');
+ gms_output.PUT_LINE('{好还是打发士大夫},{dhsfsdjfsdf}');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+{131231321312313},{dhsfsdjfsdf}
+{好还是打发士大夫},{dhsfsdjfsdf}
+select  gms_output.get_lines('{lines}',3);
+                                    get_lines                                     
+----------------------------------------------------------------------------------
+ ("{""{131231321312313},{dhsfsdjfsdf}"",""{好还是打发士大夫},{dhsfsdjfsdf}""}",2)
+(1 row)
+
+begin
+ gms_output.enable(100);
+ gms_output.PUT_LINE('{131231321312313,wrewerwr,werwerw},{dhsfsdjfsdf}');
+ gms_output.PUT_LINE('88无任何为维护差旅费{dhsfsdjfsdf}');
+ gms_output.PUT_LINE('u威力五二年初的v下');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+{131231321312313,wrewerwr,werwerw},{dhsfsdjfsdf}
+88无任何为维护差旅费{dhsfsdjfsdf}
+u威力五二年初的v下
+select  gms_output.get_lines('{lines}',3);
+                                                       get_lines                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ ("{""{131231321312313,wrewerwr,werwerw},{dhsfsdjfsdf}"",""88无任何为维护差旅费{dhsfsdjfsdf}"",u威力五二年初的v下}",3)
+(1 row)
+
+begin
+ gms_output.enable(100);
+ gms_output.PUT_LINE('[131231321312313,wrewerwr,werwerw},{dhsfsdjfsdf]');
+ gms_output.PUT_LINE('∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+[131231321312313,wrewerwr,werwerw},{dhsfsdjfsdf]
+∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻
+select  gms_output.get_lines('{lines}',3);
+                                                                                                                                                                                                                                                                                                                         get_lines                                                                                                                                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ("{""[131231321312313,wrewerwr,werwerw},{dhsfsdjfsdf]"",""∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻""}",2)
+(1 row)
+
+begin
+ gms_output.enable(100);
+ gms_output.PUT_LINE('{[131231321312313,wrewerwr,werwerw]},{dhsfsdjfsdf]},{美丽泸沽湖}');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+{[131231321312313,wrewerwr,werwerw]},{dhsfsdjfsdf]},{美丽泸沽湖}
+select  gms_output.get_lines('{lines}',3);
+                                  get_lines                                   
+------------------------------------------------------------------------------
+ ("{""{[131231321312313,wrewerwr,werwerw]},{dhsfsdjfsdf]},{美丽泸沽湖}""}",1)
+(1 row)
+
+--设置v_data为int形式
+declare
+v_data text[];
+  v_numlines number;
+begin
+  gms_output.enable(100);
+  gms_output.put_line('好好学习');
+  gms_output.put_line('天天向上');
+  gms_output.put_line('oh ye');
+  v_numlines:=3;
+  gms_output.get_lines(v_data,v_numlines);
+for v_counter in 1..v_numlines loop
+  gms_output.put_line(v_data(v_counter));
+end loop;
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 4 at PERFORM
+好好学习
+天天向上
+oh ye
+好好学习
+天天向上
+oh ye
+select  gms_output.get_lines('{lines}',3);
+              get_lines              
+-------------------------------------
+ ("{好好学习,天天向上,""oh ye""}",3)
+(1 row)
+
+select  gms_output.get_lines(3);
+ERROR:  function gms_output.get_lines(integer) does not exist
+LINE 1: select  gms_output.get_lines(3);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines('aaaa');
+ERROR:  function gms_output.get_lines(unknown) does not exist
+LINE 1: select  gms_output.get_lines('aaaa');
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines();
+ERROR:  function gms_output.get_lines() does not exist
+LINE 1: select  gms_output.get_lines();
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(0);
+ERROR:  function gms_output.get_lines(integer) does not exist
+LINE 1: select  gms_output.get_lines(0);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(-1);
+ERROR:  function gms_output.get_lines(integer) does not exist
+LINE 1: select  gms_output.get_lines(-1);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(-1.666);
+ERROR:  function gms_output.get_lines(numeric) does not exist
+LINE 1: select  gms_output.get_lines(-1.666);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines('-1.666');
+ERROR:  function gms_output.get_lines(unknown) does not exist
+LINE 1: select  gms_output.get_lines('-1.666');
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(null);
+ERROR:  function gms_output.get_lines(unknown) does not exist
+LINE 1: select  gms_output.get_lines(null);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines({123432});
+ERROR:  syntax error at or near "{"
+LINE 1: select  gms_output.get_lines({123432});
+                                     ^
+select  gms_output.get_lines('{123432}');
+ERROR:  function gms_output.get_lines(unknown) does not exist
+LINE 1: select  gms_output.get_lines('{123432}');
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(3);
+ERROR:  function gms_output.get_lines(integer) does not exist
+LINE 1: select  gms_output.get_lines(3);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines('a');
+ERROR:  function gms_output.get_lines(unknown) does not exist
+LINE 1: select  gms_output.get_lines('a');
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(null);
+ERROR:  function gms_output.get_lines(unknown) does not exist
+LINE 1: select  gms_output.get_lines(null);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(power(2,31));
+ERROR:  function gms_output.get_lines(double precision) does not exist
+LINE 1: select  gms_output.get_lines(power(2,31));
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines(3,99);
+ERROR:  function gms_output.get_lines(integer, integer) does not exist
+LINE 1: select  gms_output.get_lines(3,99);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines();
+ERROR:  function gms_output.get_lines() does not exist
+LINE 1: select  gms_output.get_lines();
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select gms_output.GET_LINES('{hhh}',1);
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines('{123432}',3);
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines('{123432}','{12312312}');
+ERROR:  invalid input syntax for integer: "{12312312}"
+LINE 1: select  gms_output.get_lines('{123432}','{12312312}');
+                                                ^
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines('{入户为了未来}',1);
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines('{入户为了未来}','1');
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines('{入户为了未来}','hhh');
+ERROR:  invalid input syntax for integer: "hhh"
+LINE 1: select  gms_output.get_lines('{入户为了未来}','hhh');
+                                                      ^
+CONTEXT:  referenced column: get_lines
+select  gms_output.get_lines('{}','');
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines(null,null);
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines('','');
+ get_lines 
+-----------
+ ({},0)
+(1 row)
+
+select  gms_output.get_lines(0,0);
+ERROR:  function gms_output.get_lines(integer, integer) does not exist
+LINE 1: select  gms_output.get_lines(0,0);
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+--#61857668 [Oracle - gms_output.get_lines] Not support gms_output.chararr type
+SET search_path to gms_output;
+create table tt(aa int,bb varchar2(100));
+ERROR:  relation "tt" already exists in schema "gms_output"
+DETAIL:  creating new table with existing name in the same schema
+declare
+lines gms_output.chararr;
+   v_numlines number;
+begin
+  gms_output.put_line('line one');
+  gms_output.put_line('line two');
+  gms_output.new_line();
+  gms_output.put_line('line three');
+  v_numlines := 4;
+  gms_output.get_lines(lines, v_numlines);
+for v_counter in 1..v_numlines loop
+       insert into tt values(v_counter, lines(v_counter));
+       gms_output.put_line(lines(v_counter));
+end loop;
+end;
+/
+line one
+line two
+line three
+line one
+line two
+line three
+--查看结果
+select * from tt;
+ aa |     bb     
+----+------------
+  0 | This 
+  0 | end 
+  1 | line one
+  2 | line two
+  3 | 
+  4 | line three
+(6 rows)
+
+DECLARE
+lines GMSOUTPUT_LINESARRAY;
+   v_numlines number;
+begin
+  --gms_output.put('This ');
+  --gms_output.put('is ');
+  gms_output.put_line('line one');
+  gms_output.put_line('line two');
+  gms_output.new_line();
+  --gms_output.put('end.');
+  gms_output.put_line('line three');
+  v_numlines := 4;
+  gms_output.get_lines(lines, v_numlines);
+for v_counter in 1..v_numlines loop
+       insert into tt values(v_counter, lines(v_counter));
+       gms_output.put_line(lines(v_counter));
+end loop;
+end;
+/
+ERROR:  type "gmsoutput_linesarray" does not exist
+LINE 1: DECLARE lines GMSOUTPUT_LINESARRAY;
+                      ^
+QUERY:  DECLARE lines GMSOUTPUT_LINESARRAY;
+   v_numlines number;
+begin
+  --gms_output.put('This ');
+  --gms_output.put('is ');
+  gms_output.put_line('line one');
+  gms_output.put_line('line two');
+  gms_output.new_line();
+  --gms_output.put('end.');
+  gms_output.put_line('line three');
+  v_numlines := 4;
+  gms_output.get_lines(lines, v_numlines);
+for v_counter in 1..v_numlines loop
+       insert into tt values(v_counter, lines(v_counter));
+       gms_output.put_line(lines(v_counter));
+end loop;
+end
+--查看结果
+select * from tt;
+ aa |     bb     
+----+------------
+  0 | This 
+  0 | end 
+  1 | line one
+  2 | line two
+  3 | 
+  4 | line three
+(6 rows)
+
+--#61857707 [Oracle - gms_output.get_lines] Accept with only one parameter
+select gms_output.put_line('line one');
+line one
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.put_line('line two');
+line two
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.new_line();
+ new_line 
+----------
+ 
+(1 row)
+
+select gms_output.put_line('line three');
+line three
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.get_lines(4);
+ERROR:  function gms_output.get_lines(integer) does not exist
+LINE 1: select gms_output.get_lines(4);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_lines
+select gms_output.get_lines('{0}',4);
+                       get_lines                       
+-------------------------------------------------------
+ ("{""line one"",""line two"","""",""line three""}",4)
+(1 row)
+
+--执行存储过程
+declare
+lines varchar[];
+  v_numlines number;
+begin
+  --gms_output.put('This ');
+  --gms_output.put('is ');
+    gms_output.put_line('line one');
+    gms_output.put_line('line two');
+    gms_output.new_line();
+  --gms_output.put('end.');
+    gms_output.put_line('line three');
+    v_numlines := 4;
+    gms_output.get_lines(4);
+for v_counter in 1..v_numlines loop
+    insert into tt values(v_counter, lines(v_counter));
+    gms_output.put_line(lines(v_counter));
+end loop;
+end;
+/
+ERROR:  function gms_output.get_lines has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 11
+--查看结果
+select * from tt;
+ aa |     bb     
+----+------------
+  0 | This 
+  0 | end 
+  1 | line one
+  2 | line two
+  3 | 
+  4 | line three
+(6 rows)
+
+--清理资源
+drop table tt;
+-- test gms_output.new_line
+select gms_output.put('This '); 
+This 
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.new_line;  
+ new_line 
+----------
+ 
+(1 row)
+
+select gms_output.new_line();
+ new_line 
+----------
+ 
+(1 row)
+
+select gms_output.new_line(null);  
+ERROR:  function gms_output.new_line(unknown) does not exist
+LINE 1: select gms_output.new_line(null);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_line
+select gms_output.new_line('');  
+ERROR:  function gms_output.new_line(unknown) does not exist
+LINE 1: select gms_output.new_line('');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_line
+select gms_output.new_line('hhh');
+ERROR:  function gms_output.new_line(unknown) does not exist
+LINE 1: select gms_output.new_line('hhh');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_line
+select gms_output.new_line('""where,where"". :???????');
+ERROR:  function gms_output.new_line(unknown) does not exist
+LINE 1: select gms_output.new_line('""where,where"". :???????');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_line
+select gms_output.new_line(systime);
+ERROR:  column "systime" does not exist
+LINE 1: select gms_output.new_line(systime);
+                                   ^
+CONTEXT:  referenced column: new_line
+select gms_output.new_line(8888);
+ERROR:  function gms_output.new_line(integer) does not exist
+LINE 1: select gms_output.new_line(8888);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_line
+select gms_output.new_line('Time Started: ' || TO_CHAR('2001-09-28 01:00:00'::timestamp, 'DD-MON-YYYY HH24:MI:SS'));
+ERROR:  function gms_output.new_line(text) does not exist
+LINE 1: select gms_output.new_line('Time Started: ' || TO_CHAR('2001...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: new_line
+select gms_output.new_line（88889）;
+ERROR:  missing FROM-clause entry for table "gms_output"
+LINE 1: select gms_output.new_line（88889）;
+               ^
+CONTEXT:  referenced column: new_line（88889）
+begin
+  gms_output.ENABLE(100);
+  gms_output.put('This '); 
+  gms_output.put('is ');
+  gms_output.new_line();  
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+This 
+is 
+select gms_output.GET_LINE();
+ERROR:  function gms_output.get_line() does not exist
+LINE 1: select gms_output.GET_LINE();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: get_line
+-- test gms_output.put
+select gms_output.put('This '); 
+This 
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(); 
+ERROR:  function gms_output.put() does not exist
+LINE 1: select gms_output.put();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: put
+select gms_output.put(null); 
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(''); 
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(-999888,pppp); 
+ERROR:  column "pppp" does not exist
+LINE 1: select gms_output.put(-999888,pppp);
+                                      ^
+CONTEXT:  referenced column: put
+select gms_output.put(1,21);
+ERROR:  function gms_output.put(integer, integer) does not exist
+LINE 1: select gms_output.put(1,21);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: put
+select gms_output.put(123213123); 
+123213123
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put('未来更快更高更强','hsdufdsnjfs','shfusdfjfjs',12313213);
+ERROR:  function gms_output.put(unknown, unknown, unknown, integer) does not exist
+LINE 1: select gms_output.put('未来更快更高更强','hsdufdsnjfs','shfu...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: put
+select gms_output.put('@#￥#@@#！@#！#￥@%%'); 
+@#￥#@@#！@#！#￥@%%
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(2017-09-23); 
+1985
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(2017-09-23 12:23:29); 
+ERROR:  syntax error at or near "12"
+LINE 1: select gms_output.put(2017-09-23 12:23:29);
+                                         ^
+select gms_output.put(89%);
+ERROR:  syntax error at or near ")"
+LINE 1: select gms_output.put(89%);
+                                 ^
+select gms_output.put(’あ@ ‘);
+ERROR:  column "’あ" does not exist
+LINE 1: select gms_output.put(’あ@ ‘);
+                              ^
+CONTEXT:  referenced column: put
+select gms_output.put(2000/07/99);
+2.88600288600289
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(power(2,32));
+4294967296
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(power(2,9999));
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: put
+select gms_output.put('Time Started: ' || TO_CHAR('2001-09-28 01:00:00'::timestamp, 'DD-MON-YYYY HH24:MI:SS'));
+Time Started: 28-SEP-2001 01:00:00
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put(あ@ 、iohgfvcs大富大贵);
+ERROR:  column "あ" does not exist
+LINE 1: select gms_output.put(あ@ 、iohgfvcs大富大贵);
+                              ^
+CONTEXT:  referenced column: put
+select gms_output.put('、。·ˉˇ¨〃々—～‖…〔〕〈〉《》「」『』〖〗【】±＋－×÷∧∨∑∏∪∩∈√⊥∥∠⌒⊙∫∮≡≌≈∽∝≠≮≯≤≥∞∶ ∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ！＃￥％＆（）＊＋，－．／０１２３４５６７８９：；＜＝＞？＠ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ［＼］＾＿｀ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ｛｜｝ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻');
+、。·ˉˇ¨〃々—～‖…〔〕〈〉《》「」『』〖〗【】±＋－×÷∧∨∑∏∪∩∈√⊥∥∠⌒⊙∫∮≡≌≈∽∝≠≮≯≤≥∞∶ ∵∴∷♂♀°℃＄¤￠￡‰§№☆*〇○*◎** 回□*△▽⊿▲▼▁▂▃▄▆**▉▊▋▌▍▎▏※→←↑↓↖↗↘↙** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ！＃￥％＆（）＊＋，－．／０１２３４５６７８９：；＜＝＞？＠ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ［＼］＾＿｀ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ｛｜｝ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻
+ put 
+-----
+ 
+(1 row)
+
+select gms_output.put('123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+');
+ERROR:  buffer overflow
+DETAIL:  Buffer overflow, limit of 2000 bytes
+HINT:  Increase buffer size in gms_output.enable() next time
+CONTEXT:  referenced column: put
+select gms_output.put('** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ！＃￥％＆（）＊＋，－．／０１２３４５６７８９：；＜＝＞？＠ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ［＼］＾＿｀ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ｛｜｝ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻');
+** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ！＃￥％＆（）＊＋，－．／０１２３４５６７８９：；＜＝＞？＠ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ［＼］＾＿｀ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ｛｜｝ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻
+ put 
+-----
+ 
+(1 row)
+
+create table tt(aa int,bb varchar2(100));
+declare
+   v_line varchar2(100);
+   v_status integer := 0;
+begin
+  gms_output.enable(100);
+  gms_output.put('This ');
+  gms_output.put('is ');
+  gms_output.new_line;
+  gms_output.put('end.');
+  gms_output.get_line(v_line, v_status);
+  while v_status = 0 loop
+       insert into tt values(v_status, v_line);
+       gms_output.get_line(v_line, v_status);
+   end loop;
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 4 at PERFORM
+This 
+is 
+end.
+ERROR:  value too long for type character varying(100)
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at SQL statement
+--清理资源
+drop table tt;
+-- test gms_output.put_line
+select gms_output.PUT_LINE('......');
+......
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(null);
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(131231321312313);
+131231321312313
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE('akfdskfsf??Oooo&&&^%**(');
+akfdskfsf??Oooo&&&^%**(
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE('');
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(89239432094%%&&*&&**&^);
+ERROR:  operator does not exist: bigint %%&&*&&**&^
+LINE 1: select gms_output.PUT_LINE(89239432094%%&&*&&**&^);
+                                              ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+CONTEXT:  referenced column: put_line
+select gms_output.PUT_LINE(-0.99923332);
+-.99923332
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(power(2,31));
+2147483648
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(max(2,3));
+ERROR:  function max(integer, integer) does not exist
+LINE 1: select gms_output.PUT_LINE(max(2,3));
+                                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: put_line
+select gms_output.PUT_LINE('2001-09-28 01:00:00'::timestamp);
+Fri Sep 28 01:00:00 2001
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(0);
+0
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE('adsfds');
+adsfds
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE(adsfds);
+ERROR:  column "adsfds" does not exist
+LINE 1: select gms_output.PUT_LINE(adsfds);
+                                   ^
+CONTEXT:  referenced column: put_line
+select gms_output.PUT_LINE(power(2,9999));
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: put_line
+select gms_output.PUT_LINE（power(2,9999)）;
+ERROR:  function gms_output.put_line（power(integer, integer) does not exist
+LINE 1: select gms_output.PUT_LINE（power(2,9999)）;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: ）
+select gms_output.PUT_LINE(131231321312313,24232432);
+ERROR:  function gms_output.put_line(bigint, integer) does not exist
+LINE 1: select gms_output.PUT_LINE(131231321312313,24232432);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: put_line
+select gms_output.PUT_LINE('疫情早日过去，国泰民安，风调雨顺，平安健康常在');
+疫情早日过去，国泰民安，风调雨顺，平安健康常在
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE('123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+');
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+ put_line 
+----------
+ 
+(1 row)
+
+select gms_output.PUT_LINE('** ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ①②③④⑤⑥⑦⑧⑨⑩⒈⒉⒊⒋ ⒌⒍⒎⒏⒐⒑⒒⒓⒔⒕⒖⒗⒘⒙⒚⒛⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇㈠㈡㈢㈣㈤㈥㈦㈧㈨㈩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ！＃￥％＆（）＊＋，－．／０１２３４５６７８９：；＜＝＞？＠ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ［＼］＾＿｀ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ｛｜｝ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθ ικλμνξοπρστυφχψ ω︵︶︹︺︿﹀︽︾﹁﹂﹃﹄︻');
+ERROR:  buffer overflow
+DETAIL:  Buffer overflow, limit of 2000 bytes
+HINT:  Increase buffer size in gms_output.enable() next time
+CONTEXT:  referenced column: put_line
+drop database if exists testdb_utf8;
+NOTICE:  database "testdb_utf8" does not exist, skipping
+create database testdb_utf8;
+\c testdb_utf8;
+create extension gms_output;
+declare
+    a int := 10;
+    b varchar2(100) := 'abcdef';
+    c text := '测试用例，，，,,,.. ..。。。。';
+begin
+    gms_output.enable(4000);
+    gms_output.put_line('test case');
+    gms_output.put_line('test case' || a);
+    gms_output.put_line('test case' || b);
+    gms_output.put_line('test case' || c);
+    gms_output.put_line('测试用例');
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。');
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。' || a);
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。' || b);
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。' || c);
+end;
+/
+test case
+test case10
+test caseabcdef
+test case测试用例，，，,,,.. ..。。。。
+测试用例
+测试用例，，，,ABCD,,....。。。。
+测试用例，，，,ABCD,,....。。。。10
+测试用例，，，,ABCD,,....。。。。abcdef
+测试用例，，，,ABCD,,....。。。。测试用例，，，,,,.. ..。。。。
+\c contrib_regression
+drop database testdb_utf8;
+drop database if exists testdb_gbk;
+NOTICE:  database "testdb_gbk" does not exist, skipping
+create database testdb_gbk encoding='GBK' LC_COLLATE='C' LC_CTYPE='C';
+\c testdb_gbk
+create extension gms_output;
+set client_encoding to 'UTF8';
+declare
+    a int := 10;
+    b varchar2(100) := 'abcdef';
+    c text := '测试用例，，，,,,.. ..。。。。';
+begin
+    gms_output.enable(4000);
+    gms_output.put_line('test case');
+    gms_output.put_line('test case' || a);
+    gms_output.put_line('test case' || b);
+    gms_output.put_line('test case' || c);
+    gms_output.put_line('测试用例');
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。');
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。' || a);
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。' || b);
+    gms_output.put_line('测试用例，，，,ABCD,,....。。。。' || c);
+end;
+/
+test case
+test case10
+test caseabcdef
+test case测试用例，，，,,,.. ..。。。。
+测试用例
+测试用例，，，,ABCD,,....。。。。
+测试用例，，，,ABCD,,....。。。。10
+测试用例，，，,ABCD,,....。。。。abcdef
+测试用例，，，,ABCD,,....。。。。测试用例，，，,,,.. ..。。。。
+reset client_encoding;
+\c contrib_regression
+drop database testdb_gbk;
+-- test gms_output.serveroutput
+set search_path=gms_output_test;
+begin
+gms_output.put('123');
+gms_output.put_line('abc');
+end;
+/
+begin
+gms_output.enable(4000);
+gms_output.put('123');
+gms_output.new_line();
+gms_output.put_line('abc');
+end;
+/
+123
+abc
+begin
+gms_output.put('222');
+gms_output.new_line();
+end;
+/
+222
+begin
+gms_output.enable(4000);
+gms_output.put_line('abc');
+end;
+/
+abc
+begin
+gms_output.disable();
+gms_output.enable(4000);
+gms_output.put('456');
+gms_output.put('7');
+gms_output.new_line();
+gms_output.put('89');
+gms_output.put_line('abc');
+end;
+/
+456
+7
+89
+abc
+begin
+gms_output.disable();
+gms_output.enable(4000);
+gms_output.new_line();
+gms_output.put('456');
+gms_output.put('7');
+gms_output.put('89');
+gms_output.put_line('abc');
+gms_output.put_line('fff');
+gms_output.put_line('ggg');
+end;
+/
+456
+7
+89
+abc
+fff
+ggg
+begin
+gms_output.enable();
+gms_output.put_l ine('abc');
+end;
+/
+ERROR:  syntax error at or near "ine"
+LINE 3: gms_output.put_l ine('abc');
+                         ^
+QUERY:  DECLARE 
+BEGIN gms_output.enable();
+gms_output.put_l ine('abc');
+end
+begin
+gms_output.put('123');
+gms_output.new_line();
+end;
+/
+123
+begin
+gms_output.put('123');
+end;
+/
+123
+begin
+gms_output.new_line();
+end;
+/
+set gms_output.serveroutput to off;
+show gms_output.serveroutput;
+ gms_output.serveroutput 
+-------------------------
+ off
+(1 row)
+
+begin
+gms_output.put_line('2');
+end;
+/
+2
+begin
+gms_output.enable(4000);
+gms_output.put_line('abc');
+end;
+/
+abc
+set gms_output.serveroutput to on;
+begin
+gms_output.enable(4000);
+gms_output.put('123');
+gms_output.put_line('YYY');
+end;
+/
+123
+YYY
+begin
+gms_output.disable();
+gms_output.enable(4000);
+gms_output.put('33');
+end;
+/
+33
+begin
+gms_output.put('44');
+gms_output.new_line();
+end;
+/
+44
+create table gms_output_tt3(aa int,bb varchar2(100));
+declare
+v_line varchar2(100);
+v_status integer := 0;
+begin
+gms_output.put_line('55');
+gms_output.get_line(v_line, v_status);
+insert into gms_output_tt3 values(v_status, v_line);
+end;
+/
+55
+select * from gms_output_tt3;
+ aa |  bb  
+----+------
+  0 | 3344
+(1 row)
+
+begin
+  gms_output.ENABLE;
+  gms_output.put_line('This ');
+end;
+/
+This 
+select gms_output.GET_LINE(0,1);
+  get_line   
+-------------
+ ("This ",0)
+(1 row)
+
+begin
+ gms_output.enable(100);
+ gms_output.PUT_LINE('{131231321312313},{dhsfsdjfsdf}');
+ gms_output.PUT_LINE('{好还是打发士大夫},{dhsfsdjfsdf}');
+end;
+/
+WARNING:  Limit increased to 2000 bytes.
+CONTEXT:  SQL statement "CALL gms_output.enable(100)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+{131231321312313},{dhsfsdjfsdf}
+{好还是打发士大夫},{dhsfsdjfsdf}
+select  gms_output.get_lines('{lines}',3);
+                                    get_lines                                     
+----------------------------------------------------------------------------------
+ ("{""{131231321312313},{dhsfsdjfsdf}"",""{好还是打发士大夫},{dhsfsdjfsdf}""}",2)
+(1 row)
+
+reset search_path;
+drop schema gms_output_test cascade;
+NOTICE:  drop cascades to table gms_output_test.gms_output_tt3

@@ -1816,6 +1816,23 @@ int ignore_interrupt(bool ignore)
 }
 
 /*
+ * onlyfrontmsg
+ * outputflag, false -- output err level
+ *             true  -- don' output err level
+ */
+int onlyfrontmsg(bool onlyfront)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    edata->onlyfrontmsg = onlyfront;
+
+    return 0; /* return value does not matter */
+}
+
+/*
  * elog_start --- startup for old-style API
  *
  * All that we do here is stash the hidden filename/lineno/funcname
@@ -3992,8 +4009,10 @@ void send_message_to_frontend(ErrorData* edata)
         char vbuf[256] = {0};
         errno_t rc = 0;
 
-        pq_sendbyte(&msgbuf, PG_DIAG_SEVERITY);
-        err_sendstring(&msgbuf, error_severity(edata->elevel));
+        if (!edata->onlyfrontmsg) {
+            pq_sendbyte(&msgbuf, PG_DIAG_SEVERITY);
+            err_sendstring(&msgbuf, error_severity(edata->elevel));
+        }
 
         /* get mpp internal errcode */
         if (edata->elevel >= ERROR) {
@@ -4081,9 +4100,11 @@ void send_message_to_frontend(ErrorData* edata)
             err_sendstring(&msgbuf, edata->hint);
         }
 
-        if (edata->context) {
-            pq_sendbyte(&msgbuf, PG_DIAG_CONTEXT);
-            err_sendstring(&msgbuf, edata->context);
+        if (!edata->onlyfrontmsg) {
+            if (edata->context) {
+                pq_sendbyte(&msgbuf, PG_DIAG_CONTEXT);
+                err_sendstring(&msgbuf, edata->context);
+            }
         }
 
         if (edata->cursorpos > 0) {
@@ -4146,7 +4167,8 @@ void send_message_to_frontend(ErrorData* edata)
 
         initStringInfo(&buf);
 
-        appendStringInfo(&buf, "%s:  ", error_severity(edata->elevel));
+        if (!edata->onlyfrontmsg)
+            appendStringInfo(&buf, "%s:  ", error_severity(edata->elevel));
 
         if (edata->show_funcname && edata->funcname)
             appendStringInfo(&buf, "%s: ", edata->funcname);

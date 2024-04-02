@@ -15,6 +15,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/spi
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_upgrade_support
     ${CMAKE_CURRENT_SOURCE_DIR}/postgres_fdw
+    ${CMAKE_CURRENT_SOURCE_DIR}/gms_output
     ${CMAKE_CURRENT_SOURCE_DIR}/security_plugin
     ${CMAKE_CURRENT_SOURCE_DIR}/dummy_seclabel
     ${CMAKE_CURRENT_SOURCE_DIR}/pagehack
@@ -37,6 +38,7 @@ if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL
     add_subdirectory(pg_upgrade_support)
 endif()
 add_subdirectory(postgres_fdw)
+add_subdirectory(gms_output)
 add_subdirectory(security_plugin)
 add_subdirectory(dummy_seclabel)
 add_subdirectory(pagehack)

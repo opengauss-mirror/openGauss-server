@@ -1,0 +1,5 @@
+# gms_output extension
+comment = 'collection of output data for PL/SQL applications'
+default_version = '1.0'
+module_pathname = '$libdir/gms_output'
+relocatable = true
