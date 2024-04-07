@@ -98,7 +98,7 @@ test: event_dump_audit
 test: single_node_sha
 
 #test b format collation
-test: test_b_format_collate charset_b_format
+test: test_b_format_collate charset_b_format test_b_format_collate2
 
 # test subpartition
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size

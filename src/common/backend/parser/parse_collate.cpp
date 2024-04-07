@@ -136,7 +136,7 @@ FORCE_INLINE static void get_valid_collation(Oid& collation, CollateStrength& st
             strength = context.strength;
             location = context.location;
             derivation = context.derivation;
-        } else if (ENABLE_MULTI_CHARSET &&
+        } else if (!DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET &&
             context.strength == COLLATE_NONE &&
             (OidIsValid(GetCollationConnection()) || context.derivation == DERIVATION_SYSCONST)) {
             /* collation of version() is UTF8_GENERAL_CI */
