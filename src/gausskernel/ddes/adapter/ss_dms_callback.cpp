@@ -1719,8 +1719,8 @@ static void ReformCleanBackends()
         SendPostmasterSignal(PMSIGNAL_DMS_REFORM);
     }
 
+    int ticks = 0;
     while (true) {
-        int ticks = 0;
         if (g_instance.pid_cxt.StartupPID != 0) {
             if (ticks++ > REFORM_START_CLEAN_TICKS) {
                 ereport(WARNING, (errmodule(MOD_DMS),
