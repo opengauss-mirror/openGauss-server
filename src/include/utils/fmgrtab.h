@@ -53,7 +53,7 @@ typedef struct {
     float4 procost;       /* [10] estimated execution cost */
     float4 prorows;       /* [11] estimated # of rows out (if proretset) */
     Oid provariadic;      /* [12] element type of variadic array, or 0 */
-    regproc protransform; /* [13] transforms calls to it during planning */
+    regproc protransform; /* [13] planner support function for this function */
     bool proisagg;        /* [14] is it an aggregate? */
     bool proiswindow;     /* [15] is it a window function? */
     bool prosecdef;       /* [16] security definer */

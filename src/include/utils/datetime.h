@@ -294,7 +294,7 @@ extern int DecodeUnits(int field, const char* lowtoken, int* val);
 
 extern int j2day(int jd);
 
-extern Node* TemporalTransform(int32 max_precis, Node* node);
+extern Node *TemporalSimplify(int32 max_precis, Node *node);
 
 extern bool CheckDateTokenTables(void);
 

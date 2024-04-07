@@ -46,7 +46,7 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     float4      procost;         /* estimated execution cost */
     float4      prorows;         /* estimated # of rows out (if proretset) */
     Oid         provariadic;     /* element type of variadic array, or 0 */
-    regproc     protransform;    /* transforms calls to it during planning */
+    regproc		protransform;      /* planner support function for this function, or 0 if none */
 	bool		proisagg;		/* is it an aggregate? */
 	bool		proiswindow;	/* is it a window function? */
     bool        prosecdef;       /* security definer */

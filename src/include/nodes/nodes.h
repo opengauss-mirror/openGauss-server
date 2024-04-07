@@ -685,6 +685,7 @@ typedef enum NodeTag {
     T_TIDBitmap,         /* in nodes/tidbitmap.h */
     T_InlineCodeBlock,   /* in nodes/parsenodes.h */
     T_FdwRoutine,        /* in foreign/fdwapi.h */
+    T_SupportRequestSimplify,	/* in nodes/supportnodes.h */
 
     T_DistFdwDataNodeTask, /* in bulkload/dist_fdw.h */
     T_DistFdwFileSegment,  /* in bulkload/dist_fdw.h */

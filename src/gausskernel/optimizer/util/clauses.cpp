@@ -33,6 +33,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/supportnodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/planmain.h"
@@ -3761,23 +3762,34 @@ Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid re
 
     if (newexpr == NULL && allow_non_const && OidIsValid(func_form->protransform)) {
         /*
-         * Build a dummy FuncExpr node containing the simplified arg list.	We
-         * use this approach to present a uniform interface to the transform
-         * function regardless of how the function is actually being invoked.
+         * Build a SupportRequestSimplify node to pass to the support
+         * function, pointing to a dummy FuncExpr node containing the
+         * simplified arg list.  We use this approach to present a uniform
+         * interface to the support function regardless of how the target
+         * function is actually being invoked.
          */
+        SupportRequestSimplify req;
         FuncExpr fexpr;
 
         fexpr.xpr.type = T_FuncExpr;
         fexpr.funcid = funcid;
         fexpr.funcresulttype = result_type;
         fexpr.funcretset = func_form->proretset;
+        fexpr.funcvariadic = false;
         fexpr.funcformat = COERCE_DONTCARE;
         fexpr.funccollid = result_collid;
         fexpr.inputcollid = input_collid;
         fexpr.args = args;
         fexpr.location = -1;
 
-        newexpr = (Expr*)DatumGetPointer(OidFunctionCall1(func_form->protransform, PointerGetDatum(&fexpr)));
+        req.type = T_SupportRequestSimplify;
+        req.root = context->root;
+        req.fcall = &fexpr;
+
+        newexpr = (Expr*)DatumGetPointer(OidFunctionCall1(func_form->protransform, PointerGetDatum(&req)));
+
+        /* catch a possible API misunderstanding */
+        Assert(newexpr != (Expr *) &fexpr);
     }
 
     if (newexpr == NULL && allow_non_const)

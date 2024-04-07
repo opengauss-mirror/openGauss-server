@@ -992,7 +992,7 @@ extern Datum varcharrecv(PG_FUNCTION_ARGS);
 extern Datum varcharsend(PG_FUNCTION_ARGS);
 extern Datum varchartypmodin(PG_FUNCTION_ARGS);
 extern Datum varchartypmodout(PG_FUNCTION_ARGS);
-extern Datum varchar_transform(PG_FUNCTION_ARGS);
+extern Datum varchar_support(PG_FUNCTION_ARGS);
 extern Datum varchar(PG_FUNCTION_ARGS);
 extern Datum opfusion_varchar(Datum arg1, Datum arg2, Datum arg3);
 
@@ -1317,7 +1317,7 @@ extern Datum numeric_recv(PG_FUNCTION_ARGS);
 extern Datum numeric_send(PG_FUNCTION_ARGS);
 extern Datum numerictypmodin(PG_FUNCTION_ARGS);
 extern Datum numerictypmodout(PG_FUNCTION_ARGS);
-extern Datum numeric_transform(PG_FUNCTION_ARGS);
+extern Datum numeric_support(PG_FUNCTION_ARGS);
 extern Datum numeric(PG_FUNCTION_ARGS);
 extern Datum numeric_abs(PG_FUNCTION_ARGS);
 extern Datum numeric_uminus(PG_FUNCTION_ARGS);
