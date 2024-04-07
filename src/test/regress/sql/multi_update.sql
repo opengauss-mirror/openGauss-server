@@ -695,5 +695,22 @@ drop table t1;
 drop view v1;
 drop table t2;
 
+-- except no core
+set query_dop = 6;
+drop table if exists t_t_mutil_t1;
+drop table if exists t_t_mutil_t2;
+drop table if exists t_t_mutil_t3;
+create table t_t_mutil_t1(col1 int,col2 int);
+create table t_t_mutil_t2(col1 int,col2 int);
+create table t_t_mutil_t3(col1 int,col2 int);
+insert into t_t_mutil_t1 values(generate_series(1,1000000),generate_series(1,1000000));
+insert into t_t_mutil_t2 values(generate_series(1,1000000),generate_series(1,1000000));
+insert into t_t_mutil_t3 values(generate_series(1,1000000),generate_series(1,1000000));
+explain(costs off, verbose) update/*+nestloop(a b)*/ t_t_mutil_t1 a,t_t_mutil_t2 b set b.col1=5,a.col2=4 where a.col1=b.col1;
+drop table if exists t_t_mutil_t1;
+drop table if exists t_t_mutil_t2;
+drop table if exists t_t_mutil_t3;
+reset query_dop;
+
 \c regression
 drop database multiupdate;

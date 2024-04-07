@@ -445,6 +445,11 @@ static void stream_walker_query(Query* query, shipping_context *cxt)
     /* mark shippable flag based on rte shippbility */
     stream_walker_finalize_cxt(query, cxt);
 
+    if (list_length(query->resultRelations) > 1) {
+        /* turn off push for multiple modify */
+        cxt->current_shippable = false;
+    }
+
     /* Mark query's can_push and global_shippable flag. */
     query->can_push = cxt->current_shippable;
     cxt->global_shippable = cxt->global_shippable && cxt->current_shippable;
