@@ -4845,6 +4845,13 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     }
     const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null);
 
+    if (IsA(exprstate, FuncExprState)) {
+        FunctionCallInfo fcinfo = &((FuncExprState*)exprstate)->fcinfo_data;
+        if (fcinfo->context && IsA(fcinfo->context, FunctionScanState)) {
+            pfree_ext(fcinfo->context);
+        }
+    }
+
     /* Get info needed about result datatype */
     get_typlenbyval(result_type, &resultTypLen, &resultTypByVal);
 
