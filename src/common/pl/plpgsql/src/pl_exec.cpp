@@ -9080,6 +9080,8 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             bool* nulls = NULL;
             bool* replaces = NULL;
             bool attisnull = false;
+            MemoryContext temp = NULL;
+            MemoryContext target_cxt = NULL;
             Oid atttype;
             int32 atttypmod;
             errno_t rc = EOK;
@@ -9141,8 +9143,10 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
              * Now call heap_modify_tuple() to create a new tuple that
              * replaces the old one in the record.
              */
+            target_cxt = rec->ispkg ? rec->pkg->pkg_cxt : CurrentMemoryContext;
+            temp = MemoryContextSwitchTo(target_cxt);
             newtup = heap_modify_tuple(rec->tup, rec->tupdesc, values, nulls, replaces);
-
+            temp = MemoryContextSwitchTo(temp);
             if (rec->freetup) {
                 heap_freetuple_ext(rec->tup);
             }

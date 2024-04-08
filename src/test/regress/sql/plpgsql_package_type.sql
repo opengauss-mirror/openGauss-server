@@ -1122,6 +1122,40 @@ procedure p1;
 end pak1 ;
 /
 
+set behavior_compat_options='allow_procedure_compile_check';
+create table int_4(a NUMBER, b VARCHAR2(5));
+insert into int_4(a, b) values(3,'johan');
+create or replace package pck3_1 is
+var1 RECORD;
+procedure ppp1;
+procedure ppp2(a int);
+end pck3_1;
+/
+
+create or replace package body pck3_1 is
+procedure ppp1() is
+query_str text;
+begin
+ppp2(9);
+raise info '(ppp1)var1: %', var1.a;
+end;
+
+procedure ppp2(a int) is
+query_str text;
+begin
+    query_str := 'select a,b from int_4';
+    FOR var1 IN EXECUTE(query_str) LOOP          
+        raise info '[ppp2]var1: %', var1.a;
+    END LOOP;
+    var1.a:=8+var1.a;
+    raise info '[ppp2]var1: %', var1.a;
+end;
+end pck3_1;
+/
+call pck3_1.ppp1();
+drop table int_4 cascade;
+set behavior_compat_options='';
+
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
@@ -1129,7 +1163,7 @@ drop package pak1;
 drop package p_test2;
 drop package plpgsql_packagetype1.p_test2;
 drop package plpgsql_packagetype1.p_test1;
-
+drop package pck3_1;
 -- clean up --
 drop schema if exists plpgsql_packagetype2 cascade;
 drop schema if exists plpgsql_packagetype1 cascade;
