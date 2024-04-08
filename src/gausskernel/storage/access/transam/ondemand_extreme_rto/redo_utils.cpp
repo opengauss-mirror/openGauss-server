@@ -578,14 +578,3 @@ XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record)
     }
     return checkPoint.redo;
 }
-
-void WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr()
-{
-    while (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
-        pg_usleep(100000L);   /* 100 ms */
-    }
-    RedoInterruptCallBack();
-    Assert(SS_ONDEMAND_REALTIME_BUILD_FAILOVER);
-    ondemand_extreme_rto::g_redoWorker->nextPrunePtr =
-        pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
-}

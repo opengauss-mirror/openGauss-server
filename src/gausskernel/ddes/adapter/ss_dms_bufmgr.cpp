@@ -1190,45 +1190,6 @@ void DmsReleaseBuffer(int buffer, bool is_seg)
     }
 }
 
-bool SSRequestPageInOndemandRealtimeBuild(BufferTag *bufferTag, XLogRecPtr recordLsn, XLogRecPtr *pageLsn)
-{
-    Buffer buffer = SSReadBuffer(bufferTag, RBM_FOR_ONDEMAND_REALTIME_BUILD);
-    if (BufferIsInvalid(buffer)) {
-        WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
-        ereport(DEBUG1, (errmodule(MOD_DMS),
-            errmsg("[On-demand] standby node request page failed in ondemand realtime build, step readbuffer, "
-            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, ondemand realtime build status %d",
-            bufferTag->rnode.spcNode, bufferTag->rnode.dbNode, bufferTag->rnode.relNode, bufferTag->rnode.bucketNode,
-            bufferTag->forkNum, bufferTag->blockNum, g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status)));
-        return false;
-    }
-
-    LockBuffer(buffer, BUFFER_LOCK_SHARE);
-
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
-    if (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD) {
-        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
-        buf_ctrl->state |= BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED;
-
-        if (pageLsn != NULL) {
-            *pageLsn = PageGetLSN(BufferGetPage(buffer));
-        }
-    } else {
-        DmsReleaseBuffer(buffer, IsSegmentPhysicalRelNode(bufferTag->rnode));
-        WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
-        ereport(DEBUG1, (errmodule(MOD_DMS),
-            errmsg("[On-demand] standby node request page failed in ondemand realtime build, step lockbuffer, "
-            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, ondemand realtime build status %d",
-            bufferTag->rnode.spcNode, bufferTag->rnode.dbNode, bufferTag->rnode.relNode, bufferTag->rnode.bucketNode,
-            bufferTag->forkNum, bufferTag->blockNum, g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status)));
-        return false;
-    }
-
-    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-    DmsReleaseBuffer(buffer, IsSegmentPhysicalRelNode(bufferTag->rnode));
-    return true;
-}
-
 bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
 {
     if (AmDmsReformProcProcess() && dms_reform_failed()) {

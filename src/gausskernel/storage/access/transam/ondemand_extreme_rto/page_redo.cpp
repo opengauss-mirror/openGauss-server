@@ -140,8 +140,8 @@ void RecordBlockCheck(void *rec, XLogRecPtr curPageLsn, uint32 blockId, bool rep
 #endif
 void AddRecordReadBlocks(void *rec, uint32 readblocks);
 
-static void AddTrxnHashmap(void *item);
-static void AddSegHashmap(void *item);
+static void AddTrxnHashMap(void *item);
+static void AddSegHashMap(void *item);
 static bool checkBlockRedoDoneFromHashMap(LWLock *lock, HTAB *hashMap, RedoItemTag redoItemTag, bool *getSharedLock);
 static bool tryLockHashMap(LWLock *lock, HTAB *hashMap, RedoItemTag redoItemTag, bool *noNeedRedo);
 static void PageManagerPruneIfRealtimeBuildFailover();
@@ -1238,36 +1238,6 @@ void OnDemandPageManagerProcSegFullSyncState(XLogRecParseState *parsestate)
     XLogBlockParseStateRelease(parsestate);
 }
 
-static void SSProcSegPageRedoInSegPageRedoChildState(XLogRecParseState *redoblockstate)
-{
-    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
-        BufferTag bufferTag;
-        XLogRecPtr pageLsn = InvalidXLogRecPtr;
-        XLogBlockHeadGetBufferTag(&redoblockstate->blockparse.blockhead, &bufferTag);
-        if (SSRequestPageInOndemandRealtimeBuild(&bufferTag, redoblockstate->blockparse.blockhead.end_ptr, &pageLsn) ||
-            !SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(redoblockstate)) {
-#ifdef USE_ASSERT_CHECKING
-            bool willinit = (XLogBlockDataGetBlockFlags((XLogBlockDataParse *)&redoblockstate->blockparse.extra_rec) &
-                            BKPBLOCK_WILL_INIT);
-            DoRecordCheck(redoblockstate, pageLsn, !willinit);
-#endif
-            ereport(DEBUG1, (errmsg("[On-demand] standby node request page success during ondemand realtime build, "
-                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, recordlsn: %X/%X, pagelsn: %X/%X",
-                bufferTag.rnode.spcNode, bufferTag.rnode.dbNode, bufferTag.rnode.relNode, bufferTag.rnode.bucketNode,
-                bufferTag.forkNum, bufferTag.blockNum, (uint32)(redoblockstate->blockparse.blockhead.end_ptr >> 32),
-                (uint32)redoblockstate->blockparse.blockhead.end_ptr, (uint32)(pageLsn >> 32), (uint32)pageLsn)));
-            XLogBlockParseStateRelease(redoblockstate);
-            return;
-        }
-        ereport(DEBUG1, (errmsg("[On-demand] standby node request page failed during ondemand realtime build, "
-            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, recordlsn: %X/%X, pagelsn: %X/%X",
-            bufferTag.rnode.spcNode, bufferTag.rnode.dbNode, bufferTag.rnode.relNode, bufferTag.rnode.bucketNode,
-            bufferTag.forkNum, bufferTag.blockNum, (uint32)(redoblockstate->blockparse.blockhead.end_ptr >> 32),
-            (uint32)redoblockstate->blockparse.blockhead.end_ptr, (uint32)(pageLsn >> 32), (uint32)pageLsn)));
-    }
-    SegPageRedoChildState(redoblockstate);
-}
-
 // for less ondmeand recovery memory consume
 static void SSReleaseRefRecordWithoutReplay(XLogRecParseState *redoblockstate)
 {
@@ -1277,28 +1247,6 @@ static void SSReleaseRefRecordWithoutReplay(XLogRecParseState *redoblockstate)
 #endif
     DereferenceRedoItem(item);
     redoblockstate->refrecord = NULL;
-}
-
-static void SSProcPageRedoInSegPageRedoChildState(XLogRecParseState *redoblockstate)
-{
-    AddSegHashmap(redoblockstate);
-}
-
-static void SSSegPageRedoChildState(XLogRecParseState *childStateList)
-{
-    BufferTag bufferTag;
-    XLogRecParseState *procState = childStateList;
-    while (procState != NULL) {
-        XLogRecParseState *redoblockstate = procState;
-        procState = (XLogRecParseState *)procState->nextrecord;
-        redoblockstate->nextrecord = NULL;
-        XLogBlockHeadGetBufferTag(&redoblockstate->blockparse.blockhead, &bufferTag);
-        if (IsSegmentPhysicalRelNode(bufferTag.rnode)) {
-            SSProcSegPageRedoInSegPageRedoChildState(redoblockstate);
-        } else {
-            SSProcPageRedoInSegPageRedoChildState(redoblockstate);
-        }
-    }
 }
 
 static void SSProcSegPageCommonRedo(XLogRecParseState *parseState)
@@ -1314,7 +1262,7 @@ static void SSProcSegPageCommonRedo(XLogRecParseState *parseState)
             {
                 XLogRecParseState *child =
                     (XLogRecParseState *)parseState->blockparse.extra_rec.blocksegfullsyncrec.childState;
-                SSSegPageRedoChildState(child);
+                AddSegHashMap(child);
                 break;
             }
         case XLOG_SEG_CREATE_EXTENT_GROUP:
@@ -1763,7 +1711,7 @@ static void TrxnManagerAddTrxnRecord(RedoItem *item, bool syncRecord)
             TrxnManagerProcHashMapPrune();
             DereferenceRedoItem(item);
         } else {
-            AddTrxnHashmap(item);
+            AddTrxnHashMap(item);
         }
     } else {
         AddPageRedoItem(g_dispatcher->trxnLine.redoThd, item);
@@ -2023,17 +1971,9 @@ void RedoPageWorkerCheckPoint(const XLogRecParseState *redoblockstate)
 
 static void SegWorkerRedoAllSegBlockRecord()
 {
-    RedoTimeCost timeCost1;
-    RedoTimeCost timeCost2;
-
     while (!SPSCBlockingQueueIsEmpty(g_dispatcher->segQueue)) {
         XLogRecParseState *segRecord = (XLogRecParseState *)SPSCBlockingQueueTop(g_dispatcher->segQueue);
-        RedoBufferInfo bufferinfo = {0};
-        (void)XLogBlockRedoForExtremeRTO(segRecord, &bufferinfo, false, timeCost1, timeCost2);
-        if (bufferinfo.pageinfo.page != NULL) {
-            MarkSegPageRedoChildPageDirty(&bufferinfo);
-        }
-        XLogBlockParseStateRelease(segRecord);
+        SegPageRedoChildState(segRecord);
         SPSCBlockingQueuePop(g_dispatcher->segQueue);
     }
 }
@@ -3384,7 +3324,12 @@ void HashMapManagerMain()
                 break;
             }
 #ifdef USE_ASSERT_CHECKING
-            DoRecordCheck(segRecord, InvalidXLogRecPtr, false);
+            XLogRecParseState *procState = segRecord;
+            while (procState != NULL) {
+                XLogRecParseState *redoblockstate = procState;
+                procState = (XLogRecParseState *)procState->nextrecord;
+                DoRecordCheck(redoblockstate, InvalidXLogRecPtr, false);
+            }
 #endif
             XLogBlockParseStateRelease(segRecord);
             SPSCBlockingQueuePop(g_dispatcher->segQueue);
@@ -3893,12 +3838,12 @@ void AddPageRedoItem(PageRedoWorker *worker, void *item)
     SPSCBlockingQueuePut(worker->queue, item);
 }
 
-static void AddTrxnHashmap(void *item)
+static void AddTrxnHashMap(void *item)
 {
     SPSCBlockingQueuePut(g_dispatcher->trxnQueue, item);
 }
 
-static void AddSegHashmap(void *item)
+static void AddSegHashMap(void *item)
 {
     SPSCBlockingQueuePut(g_dispatcher->segQueue, item);
 }

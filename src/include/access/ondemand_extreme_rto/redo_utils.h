@@ -52,6 +52,5 @@ void OnDemandBackupControlFile(ControlFileData* controlFile);
 XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record);
 void OnDemandUpdateRealtimeBuildPrunePtr();
 XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState);
-void WaitUntilRealtimeBuildStatusToFailoverAndUpdatePrunePtr();
 
 #endif /* ONDEMAND_EXTREME_RTO_REDO_UTILS_H */
