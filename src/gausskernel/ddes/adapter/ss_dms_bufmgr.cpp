@@ -668,7 +668,7 @@ void BufValidateDrc(BufferDesc *buf_desc)
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     unsigned long long lsn = (unsigned long long)BufferGetLSN(buf_desc);
-    bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
+    bool is_dirty = SSBufferIsDirty(buf_desc);
     dms_validate_drc(&dms_ctx, buf_ctrl, lsn, (unsigned char)is_dirty);
 }
 
