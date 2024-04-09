@@ -95,7 +95,7 @@ NOTICE:  drop cascades to function test_grant1.a()
 drop package pck3;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function test_grant1.p1()
-drop cascades to function test_grant1.p2(integer,_s_type[],integer,_s_type[])
+--?.*
 drop type s_type;
 reset session AUTHORIZATION;
 drop user test_grant1;

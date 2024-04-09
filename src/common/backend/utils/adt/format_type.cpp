@@ -151,7 +151,7 @@ static char* format_type_internal(
     array_base_type = typeform->typelem;
 
     if (array_base_type != InvalidOid && typeform->typstorage != 'p' && type_oid != OIDVECTOREXTENDOID &&
-        type_oid != INT2VECTOREXTENDOID) {
+        type_oid != INT2VECTOREXTENDOID && typeform->typtype != TYPTYPE_TABLEOF) {
         /* Switch our attention to the array element type */
         ReleaseSysCache(tuple);
         tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_base_type));

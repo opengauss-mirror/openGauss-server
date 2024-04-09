@@ -769,6 +769,20 @@ end;
 /
 call func2();
 
+-- test pg_get_function_result and pg_get_function_arguments
+create type ty_test is(col1 int,col2 char(10),col3 varchar2(10));
+create type tyt_test is table of ty_test;
+CREATE OR REPLACE PROCEDURE sp_tyt(i_tyt in tyt_test, o_tyt out tyt_test)
+AS DECLARE
+begin
+o_tyt := i_tyt;
+end;
+/
+\df plpgsql_table_opengauss.sp_tyt
+drop procedure sp_tyt;
+drop type tyt_test;
+drop type ty_test;
+
 drop type typeA;
 drop type typeB;
 drop type s_type cascade;

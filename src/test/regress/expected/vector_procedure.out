@@ -45,5 +45,5 @@ drop schema force_vector_engine cascade;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to type pro_tblof_ty_015
 drop cascades to table pro_tblof_tbl_015
-drop cascades to type _pro_tblof_ty_015[]
+drop cascades to type pro_tblof_015
 drop cascades to function pro_tblof_pro_015(integer,integer)

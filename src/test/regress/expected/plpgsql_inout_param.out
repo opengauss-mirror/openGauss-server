@@ -1810,7 +1810,7 @@ PL/pgSQL function inline_code_block line 5 at assignment
 INFO:  res:10
 INFO:  z:<NULL>
 drop package pck1;
-NOTICE:  drop cascades to function plpgsql_inout.f1(integer,_int4[])
+--?.*
 -- test custom type as in param
 create type myint;
 create function myintin(cstring) returns myint strict immutable language
@@ -1920,7 +1920,7 @@ drop cascades to function proc17()
 drop cascades to type t
 drop cascades to function proc3()
 drop cascades to function proc1()
-drop cascades to type _int4[]
+drop cascades to type t1
 drop cascades to function p1(integer)
 drop cascades to function p2()
 drop cascades to function fun1()

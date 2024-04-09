@@ -89,15 +89,15 @@ begin
 end;
 /
 create or replace type typ1 as table of varchar;
-NOTICE:  proc1(_varchar[]) depends on this type
+NOTICE:  proc1(typ1) depends on this type
 --    case 2.3 原类型为其他类型
 create type enum1 AS ENUM ('one', 'two', 'three');
 create or replace type enum1 AS table of varchar;
 ERROR:  type already exists but not a table of type
 drop schema test_type_replace cascade;
 NOTICE:  drop cascades to 5 other objects
-DETAIL:  drop cascades to type _varchar[]
-drop cascades to type _varchar[]
-drop cascades to type _varchar[]
-drop cascades to function proc1(_varchar[])
+DETAIL:  drop cascades to type typ1
+drop cascades to type shell1
+drop cascades to type _typ1
+drop cascades to function proc1(typ1)
 drop cascades to type enum1
