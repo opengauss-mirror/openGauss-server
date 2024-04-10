@@ -381,6 +381,23 @@ insert into t values (null,1);
 -- The null value is expected to be inserted into the last partition.
 select count(*) from t partition (p_2017);
 select count(*) from t partition (p_others);
+
+-- test exprkey across partitions
+create table test_exprkey_move_part(
+    a int,
+    b int
+)
+partition by range(a+100)
+(
+    partition p0 values less than(1000),
+    partition p1 values less than(2000)
+);
+insert into test_exprkey_move_part values(888, 1);
+update test_exprkey_move_part set a=1000 where a=888;
+select * from test_exprkey_move_part;
+update test_exprkey_move_part set a=1001 where a=1000;
+select * from test_exprkey_move_part;
+
 \c regression
 
 drop database if exists part_expr_key_db;

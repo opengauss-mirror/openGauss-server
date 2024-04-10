@@ -2488,18 +2488,15 @@ lreplace:
                 bool need_create_file = false;
                 int seqNum = -1;
                 bool can_ignore = estate->es_plannedstmt->hasIgnore;
-                PartKeyExprResult *partKeyExprResult = NULL;
-                if (partExprKeyStr) {
-                    PartKeyExprResult exprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot,
-                                                                          NULL, partExprKeyStr);
-                    partKeyExprResult = &exprTuple;
-                }
+
                 if (!cross_partition) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
                     if (partExprKeyStr) {
-                        partitionRoutingForTuple(result_relation_desc, (void *) partKeyExprResult,
+                        PartKeyExprResult partKeyExprResult = ComputePartKeyExprTuple(result_relation_desc, estate,
+                                                                                      slot, NULL, partExprKeyStr);
+                        partitionRoutingForTuple(result_relation_desc, (void*)&partKeyExprResult,
                                                  u_sess->exec_cxt.route, can_ignore, false);
                     } else {
                         partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route, can_ignore, true);
@@ -2513,7 +2510,6 @@ lreplace:
                                 partitionno, RowExclusiveLock);
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
                             char* subpartExprKeyStr = NULL;
-                            Datum newsubval = 0;
                             bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, &subpartExprKeyStr);
                             if (!subpartExprKeyIsNull) {
                                 PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc,
