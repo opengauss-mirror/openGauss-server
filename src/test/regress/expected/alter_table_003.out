@@ -8815,12 +8815,12 @@ Indexes:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt') order by c.relname;
  nspname |  relname   
 ---------+------------
  test1   | test
- test1   | test_pkey
  test1   | test_b_idx
+ test1   | test_pkey
 (3 rows)
 
 SELECT * FROM test1.test;
@@ -8850,12 +8850,12 @@ Indexes:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt');
+SELECT n.nspname, c.relname from pg_class c, pg_namespace n where n.oid = c.relnamespace and c.relname in ('test', 'test_pkey', 'test_b_idx', 'tttt') order by c.relname;
  nspname |  relname   
 ---------+------------
- test2   | tttt
- test2   | test_pkey
  test2   | test_b_idx
+ test2   | test_pkey
+ test2   | tttt
 (3 rows)
 
 INSERT INTO test2.tttt VALUES (2, 2);
@@ -9084,5 +9084,288 @@ ALTER TABLE test1.name1 RENAME TO test2.name2;
 ERROR:  relation "name2" already exists in schema "test2"
 ALTER TABLE test2.name1 RENAME TO test2.name2;
 ERROR:  relation "name2" already exists in schema "test2"
+CREATE TABLE t_after_first ( c4 INT , c5 INT ) ;
+INSERT INTO t_after_first VALUES ( 1 , 2 ) , ( 3 , 4 ) ;
+ALTER TABLE t_after_first ADD COLUMN c11 VARCHAR ( 2 ) , ADD COLUMN c22 VARCHAR ( 2 ) AFTER c11 , ADD COLUMN c57 INT FIRST;
+select * from t_after_first;
+ c57 | c4 | c5 | c11 | c22 
+-----+----+----+-----+-----
+     |  1 |  2 |     | 
+     |  3 |  4 |     | 
+(2 rows)
+
+drop table if exists test_dts;
+NOTICE:  table "test_dts" does not exist, skipping
+create table test_dts(
+        f1 int primary key,
+        f2 varchar(8),
+        f3 timestamp
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dts_pkey" for table "test_dts"
+insert into test_dts(f1, f2, f3) values(1, 'data1', '2023-07-31 12:34:56'), (2, 'date2', '2023-07-31 13:45:30'),
+(3, 'data3', '2023-07-31 14:56:15'), (4, 'data1', '2023-07-31 12:34:56'), (5, 'date2', '2023-07-31 13:45:30'),
+(6, 'data3', '2023-07-31 14:56:15');
+analyze test_dts;
+analyze test_dts((f1, f3));
+INFO:  Please set default_statistics_target to a negative value to collect extended statistics.
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         1 | {1,2,3,4,5,6}
+         2 | {data1,data3,date2}
+         3 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts add column f4 int default 0 after f1;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         1 | {1,2,3,4,5,6}
+         3 | {data1,data3,date2}
+         4 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts add column f5 varchar(20) default 'f5' first;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         2 | {1,2,3,4,5,6}
+         4 | {data1,data3,date2}
+         5 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts modify f5 varchar(20) after f4;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         1 | {1,2,3,4,5,6}
+         4 | {data1,data3,date2}
+         5 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+alter table test_dts modify f1 int first;
+select staattnum, stavalues1 from pg_statistic where starelid = 'test_dts'::regclass order by staattnum;
+ staattnum |                                     stavalues1                                     
+-----------+------------------------------------------------------------------------------------
+         4 | {data1,data3,date2}
+         5 | {"Mon Jul 31 12:34:56 2023","Mon Jul 31 13:45:30 2023","Mon Jul 31 14:56:15 2023"}
+(2 rows)
+
+select stakey from pg_statistic_ext where starelid = 'test_dts'::regclass;
+ stakey 
+--------
+(0 rows)
+
+drop table if exists test_dts;
+drop table if exists t_after_first;
+create table t_after_first(c4 int, c5 int);
+insert into t_after_first values(1, 2), (3, 4);
+alter table t_after_first add column c11 varchar(2), add column c22 varchar(2) after c11, add column c57 int first;
+select * from t_after_first;
+ c57 | c4 | c5 | c11 | c22 
+-----+----+----+-----+-----
+     |  1 |  2 |     | 
+     |  3 |  4 |     | 
+(2 rows)
+
+drop table if exists t_after_first;
+-- test for modify type
+drop table if exists fat0;
+NOTICE:  table "fat0" does not exist, skipping
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify column c17 int first, modify column c41 text, add column c4 int after c17, add column c61 int after c41, add constraint cc0 unique fai0(c17);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "fai0" for table "fat0"
+insert into fat0 values(-51, 2, -20, default), (-34, 81, -24, default);
+select * from fat0;
+ c17 | c4 | c41 | c61 
+-----+----+-----+-----
+ -49 |    | 1   |    
+ -28 |    | 64  |    
+ -51 |  2 | -20 |    
+ -34 | 81 | -24 |    
+(4 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 text);
+insert into fat0 values(-104 not in(58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify column c41 int, add column c4 int after c17;
+select * from fat0;
+ c17 | c4 | c41 
+-----+----+-----
+ -49 |    |   1
+ -28 |    |  64
+(2 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 int, c21 int);
+insert into fat0 values(-104 not in(58, -123, -109), -49, -12),(64, -28, 20);
+alter table fat0 modify column c17 text, modify column c41 text, add column c21 int after c41;
+ERROR:  column "c21" of relation "fat0" already exists
+insert into fat0 values(-51, 2, -20), (-34, 81, -24);
+select * from fat0;
+ c41 | c17 | c21 
+-----+-----+-----
+   1 | -49 | -12
+  64 | -28 |  20
+ -51 |   2 | -20
+ -34 |  81 | -24
+(4 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 int, c21 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49, -12), (64, -28, 20);
+alter table fat0 modify column c17 text first, modify column c41 text, add column c21 int after c41;
+ERROR:  column "c21" of relation "fat0" already exists
+insert into fat0 values(-51, 2, -20), (-34, 81, -24);
+select * from fat0;
+ c41 | c17 | c21 
+-----+-----+-----
+   1 | -49 | -12
+  64 | -28 |  20
+ -51 |   2 | -20
+ -34 |  81 | -24
+(4 rows)
+
+drop table if exists fat0;
+-- test for modify type not has column
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in(58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify c41 text, add c4 int after c17, add c61 int after c41, add constraint cc0 unique fai0(c17);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "fai0" for table "fat0"
+select * from fat0;
+ c17 | c4 | c41 | c61 
+-----+----+-----+-----
+ -49 |    | 1   |    
+ -28 |    | 64  |    
+(2 rows)
+
+drop table if exists fat0;
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify column c17 int first, modify column c41 text;
+drop table if exists fat0;
+create table fat0(c41 int, c17 int);
+insert into fat0 values(-104 not in (58, -123, -109), -49), (64, -28);
+alter table fat0 modify c17 int first, modify c41 text;
+drop table if exists fat0;
+drop table if exists t0;
+NOTICE:  table "t0" does not exist, skipping
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values (55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify column c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify column c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+alter table t0 change column c6 c int first, add x int default 11 first, modify column c text;
+select * from t0;
+ x  |  c  | c59  
+----+-----+------
+ 11 | -34 |   55
+ 11 | -49 | -123
+(2 rows)
+
+drop table if exists t0;
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+alter table t0 add x int default 11 first, change column c6 c int first, modify c text;
+select * from t0;
+ x  |  c  | c59  
+----+-----+------
+ 11 | -34 |   55
+ 11 | -49 | -123
+(2 rows)
+
+drop table if exists t0;
+drop table if exists t0;
+NOTICE:  table "t0" does not exist, skipping
+create table t0(c32 int, c6 text default (substring(-108, true) is null));
+insert into t0 values(55, -34), (-123, -49);
+alter table t0 change column c32 c59 int after c6, modify c59 bigint;
+select * from t0;
+ c6  | c59  
+-----+------
+ -34 |   55
+ -49 | -123
+(2 rows)
+
+alter table t0 change column c6 c int first, add x int default 11 first, modify c text;
+select * from t0;
+ x  |  c  | c59  
+----+-----+------
+ 11 | -34 |   55
+ 11 | -49 | -123
+(2 rows)
+
+drop table if exists t0;
+drop table if exists t0;
+NOTICE:  table "t0" does not exist, skipping
+create table t0(c32 int, c6 text default (substring (-108, true) is null));
+insert into t0 change column c32 c59 int after c6, modify c59 bigint;
+ERROR:  syntax error at or near "change"
+LINE 1: insert into t0 change column c32 c59 int after c6, modify c5...
+                       ^
+select * from t0;
+ c32 | c6 
+-----+----
+(0 rows)
+
+alter table t0 add x int default 11 first;
+select * from t0;
+ x | c32 | c6 
+---+-----+----
+(0 rows)
+
+alter table t0 change column c6 c int first, modify c text after x, change column c59 c32 bigint first, modify column c32 text after c;
+ERROR:  column "c59" does not exist
+select * from t0;
+ x | c32 | c6 
+---+-----+----
+(0 rows)
+
+drop table if exists t0;
 \c postgres
 drop database test_first_after_B;

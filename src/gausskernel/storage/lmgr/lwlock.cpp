@@ -865,7 +865,6 @@ static bool LWLockAttemptLock(LWLock *lock, LWLockMode mode)
             }
 
             desired_state = old_state + refoneByThread;
-
             if ((desired_state & (LW_VAL_EXCLUSIVE)) != 0) {
                 return true;
             }
