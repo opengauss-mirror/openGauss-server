@@ -3871,7 +3871,6 @@ static void do_help(void)
     printf(_("  -C, connector    CN/DN connect to specified CN/DN for build\n"));
 #ifndef ENABLE_LITE_MODE
     printf(_("  --enable-dss    enable dss function\n"));
-    printf(_("  --instance-id=instance_id      id number of instance when dss and dms are enabled\n"));
     printf(_("  --vgname         vg name in dss  when dss is enabled\n"));
     printf(_("  --socketpath=socketpath  \n"));
 #endif
