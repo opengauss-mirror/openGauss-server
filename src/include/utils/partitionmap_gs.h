@@ -164,9 +164,8 @@ typedef struct HashPartitionMap {
                 values[i] =                                                                                           \
                     transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);   \
             } else {                                                                                                  \
-                column_raw = Datum(tuple);                                                                            \
                 values[i] =                                                                                           \
-                    transformDatum2ConstForPartKeyExpr((rel)->partMap, column_raw, isnull, &consts[i]);               \
+                    transformDatum2ConstForPartKeyExpr((rel)->partMap, (PartKeyExprResult*)tuple, &consts[i]);        \
             }                                                                                                         \
         }                                                                                                             \
         if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                       \

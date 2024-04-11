@@ -1372,7 +1372,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (partExprKeyStr) {
                             PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate,
                                                                                          slot, NULL, partExprKeyStr);
-                            partition_id = heapTupleGetPartitionOid(result_relation_desc, (void *) (&partKeyExprTuple),
+                            partition_id = heapTupleGetPartitionId(result_relation_desc, (void *) (&partKeyExprTuple),
                                                                     &partitionno,
                                                                     false, estate->es_plannedstmt->hasIgnore, false);
                         } else {
@@ -1440,7 +1440,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (partExprKeyStr) {
                             PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate,
                                                                                          slot, NULL, partExprKeyStr);
-                            partitionId = heapTupleGetPartitionOid(result_relation_desc, (void *) (&partKeyExprTuple),
+                            partitionId = heapTupleGetPartitionId(result_relation_desc, (void *) (&partKeyExprTuple),
                                                                    &partitionno,
                                                                    false, estate->es_plannedstmt->hasIgnore, false);
                         } else {
@@ -1468,7 +1468,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, NULL, &subpartExprKeyStr);
                         if (!subpartExprKeyIsNull) {
                             PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
-                            subPartitionId = heapTupleGetPartitionOid(partRel, (void *)(&partKeyExprTuple), &subpartitionno, false,
+                            subPartitionId = heapTupleGetPartitionId(partRel, (void *)(&partKeyExprTuple), &subpartitionno, false,
                                 estate->es_plannedstmt->hasIgnore, false);
                         } else {
                             subPartitionId = heapTupleGetPartitionId(partRel, tuple, &subpartitionno, false,

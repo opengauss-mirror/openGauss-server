@@ -7508,7 +7508,7 @@ Oid getPartitionIdFromTuple(Relation rel, void *tuple, EState* estate, TupleTabl
         targetOid = heapTupleGetPartitionId(rel, tuple, partitionno, isDDL, canIgnore);
     } else {
         PartKeyExprResult partKeyExprResult = ComputePartKeyExprTuple(rel, estate, slot, NULL, partExprKeyStr);
-        targetOid = heapTupleGetPartitionOid(rel, (void*)(&partKeyExprResult), partitionno, isDDL, canIgnore, false);
+        targetOid = heapTupleGetPartitionId(rel, (void*)(&partKeyExprResult), partitionno, isDDL, canIgnore, false);
     }
     pfree_ext(partExprKeyStr);
     return targetOid;
