@@ -482,7 +482,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 derivation,
                 typcollation,
                 (typcollation == DEFAULT_COLLATION_OID) ? true : false,
-                exprLocation(node),
+                node,
                 loccontext);
 
             /*
@@ -710,7 +710,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                 derivation,
                 typcollation,
                 (loccontext.strength > COLLATE_NONE) ? true : false,
-                exprLocation(node),
+                node,
                 loccontext);
             /*
              * Save the result collation into the expression node. If the
