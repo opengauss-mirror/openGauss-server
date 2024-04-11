@@ -102,10 +102,7 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin.control
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.2.sql
-        DESTINATION share/postgresql/extension/
-    )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.0.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--1.3.sql
         DESTINATION share/postgresql/extension/
     )
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--1.0--1.2.sql
@@ -114,10 +111,22 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--1.2--1.0.sql
         DESTINATION share/postgresql/extension/
     )
-	install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--1.2--2.0.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--1.2--1.3.sql
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--2.0--1.2.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--1.3--1.2.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--1.3--2.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--2.0--1.3.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/upgrade_script/dolphin--2.0--3.0.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/rollback_script/dolphin--3.0--2.0.sql
         DESTINATION share/postgresql/extension/
     )
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/openGauss_expr_dolphin.ir
