@@ -19,6 +19,8 @@ create table testrangepart(a int, b int) partition by range(a,b*2) (partition p0
 ERROR:  The multi partition expr keys are not supported.
 create table testrangepart(a int, b int) partition by range(a*2,b) (partition p0 values less than(100,1000),partition p1 values less than(200,2000));
 ERROR:  The multi partition expr keys are not supported.
+CREATE TABLE test_error_table0 ( column62 INT ) PARTITION BY HASH ( NOT TRUE ) ;
+ERROR:  The expr is not supported for Partition Expr
 CREATE TABLE testrangepart(a date) PARTITION BY RANGE (a*2) INTERVAL ('1 month')
 (
 	PARTITION p0 VALUES LESS THAN ('2020-03-01'),
@@ -1232,6 +1234,51 @@ partition p3 values less than(400)
 CREATE INDEX t1_c2_idx ON t1 USING btree (c2) LOCAL(PARTITION p1_c2_idx, PARTITION p2_c2_idx, PARTITION p3_c2_idx);
 ALTER TABLE t1 ADD CONSTRAINT t3_pkey PRIMARY KEY USING btree  (c1) INCLUDE (tableoid);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t3_pkey" for table "t1"
+create table t(id int, c int default null)
+partition by range(abs(id))
+(PARTITION p_2017 VALUES LESS THAN (2017),
+ PARTITION p_2018 VALUES LESS THAN (2018),
+ PARTITION p_2019 VALUES LESS THAN (2019),
+PARTITION p_others VALUES LESS THAN (MAXVALUE));
+insert into t values (null,1);
+-- The null value is expected to be inserted into the last partition.
+select count(*) from t partition (p_2017);
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from t partition (p_others);
+ count 
+-------
+     1
+(1 row)
+
+-- test exprkey across partitions
+create table test_exprkey_move_part(
+    a int,
+    b int
+)
+partition by range(a+100)
+(
+    partition p0 values less than(1000),
+    partition p1 values less than(2000)
+);
+insert into test_exprkey_move_part values(888, 1);
+update test_exprkey_move_part set a=1000 where a=888;
+select * from test_exprkey_move_part;
+  a   | b 
+------+---
+ 1000 | 1
+(1 row)
+
+update test_exprkey_move_part set a=1001 where a=1000;
+select * from test_exprkey_move_part;
+  a   | b 
+------+---
+ 1001 | 1
+(1 row)
+
 \c regression
 drop database if exists part_expr_key_db;
 drop database if exists part_expr_key_db1;

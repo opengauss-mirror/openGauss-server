@@ -511,6 +511,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     attnum = bms_next_member(updatedCols, temp_id);
     updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
     temp_id = attnum;
+    tableam_tslot_getallattrs(slot);
     for (int32 i = 0; i < (int32)natts; i++) {
         if (updated_colnum_resno  == (uint32)(i + 1)) {
             if (slot->tts_isnull[i] && oldnulls[i]) {
@@ -1039,7 +1040,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     return newid;
 }
 
-extern Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr);
+extern PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel, char* partExprKeyStr);
 /* ----------------------------------------------------------------
  *		ExecInsert
  *
@@ -1369,9 +1370,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         /* get partititon oid for insert the record */
                         int partitionno = INVALID_PARTITION_NO;
                         if (partExprKeyStr) {
-                            Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
-                            partition_id = heapTupleGetPartitionId(result_relation_desc, (void *)newval, &partitionno,
-                                false, estate->es_plannedstmt->hasIgnore, false);
+                            PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate,
+                                                                                         slot, NULL, partExprKeyStr);
+                            partition_id = heapTupleGetPartitionId(result_relation_desc, (void *) (&partKeyExprTuple),
+                                                                    &partitionno,
+                                                                    false, estate->es_plannedstmt->hasIgnore, false);
                         } else {
                             partition_id = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno, false,
                                 estate->es_plannedstmt->hasIgnore, true);
@@ -1433,11 +1436,13 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         Relation subPartRel = NULL;
                         Partition subPart = NULL;
 
-                        /* get partititon oid for insert the record */
+                        /* get partition oid for insert the record */
                         if (partExprKeyStr) {
-                            Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
-                            partitionId = heapTupleGetPartitionId(result_relation_desc, (void *)newval, &partitionno,
-                                false, estate->es_plannedstmt->hasIgnore, false);
+                            PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate,
+                                                                                         slot, NULL, partExprKeyStr);
+                            partitionId = heapTupleGetPartitionId(result_relation_desc, (void *) (&partKeyExprTuple),
+                                                                   &partitionno,
+                                                                   false, estate->es_plannedstmt->hasIgnore, false);
                         } else {
                             partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, &partitionno, false,
                                 estate->es_plannedstmt->hasIgnore, true);
@@ -1462,8 +1467,8 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         char* subpartExprKeyStr = NULL;
                         bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, NULL, &subpartExprKeyStr);
                         if (!subpartExprKeyIsNull) {
-                            Datum newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
-                            subPartitionId = heapTupleGetPartitionId(partRel, (void *)newsubval, &subpartitionno, false,
+                            PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
+                            subPartitionId = heapTupleGetPartitionId(partRel, (void *)(&partKeyExprTuple), &subpartitionno, false,
                                 estate->es_plannedstmt->hasIgnore, false);
                         } else {
                             subPartitionId = heapTupleGetPartitionId(partRel, tuple, &subpartitionno, false,
@@ -2275,6 +2280,17 @@ lreplace:
             slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
         } else {
 #endif
+            /* restore auto_increment value for multi-rows upsert-update */
+            if (node->mt_upsert != NULL && node->mt_upsert->us_action != UPSERT_NONE &&
+                RelHasAutoInc(result_relation_desc) &&
+                estate->cur_insert_autoinc > 0) {
+                RestoreAutoIncrement(result_relation_desc, estate, tuple);
+                /* avoid set last_insert_id */
+                if (estate->first_autoinc == estate->cur_insert_autoinc) {
+                    estate->first_autoinc = 0;
+                }
+            }
+
             /*
              * replace the heap tuple
              *
@@ -2481,16 +2497,20 @@ lreplace:
                 bool need_create_file = false;
                 int seqNum = -1;
                 bool can_ignore = estate->es_plannedstmt->hasIgnore;
-                Datum newval = 0;
+                PartKeyExprResult *partKeyExprResult = NULL;
+                PartKeyExprResult exprTuple;
                 if (partExprKeyStr) {
-                    newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
+                    exprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot,
+                                                                          NULL, partExprKeyStr);
+                    partKeyExprResult = &exprTuple;
                 }
                 if (!partExprKeyStr && !partKeyUpdate) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
                     if (partExprKeyStr) {
-                        partitionRoutingForTuple(result_relation_desc, (void*)newval, u_sess->exec_cxt.route, can_ignore, false);
+                        partitionRoutingForTuple(result_relation_desc, (void *) partKeyExprResult,
+                                                 u_sess->exec_cxt.route, can_ignore, false);
                     } else {
                         partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route, can_ignore, true);
                     }
@@ -2506,8 +2526,11 @@ lreplace:
                             Datum newsubval = 0;
                             bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, NULL, &subpartExprKeyStr);
                             if (!subpartExprKeyIsNull) {
-                                newsubval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
-                                partitionRoutingForTuple(partRel, (void*)newsubval, u_sess->exec_cxt.route, can_ignore, false);
+                                PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc,
+                                                                                             estate, slot, partRel,
+                                                                                             subpartExprKeyStr);
+                                partitionRoutingForTuple(partRel, (void *) (&partKeyExprTuple), u_sess->exec_cxt.route,
+                                                         can_ignore, false);
                             } else {
                                 partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route, can_ignore, true);
                             }

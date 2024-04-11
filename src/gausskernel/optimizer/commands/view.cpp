@@ -626,6 +626,11 @@ ObjectAddress DefineView(ViewStmt* stmt, const char* queryString, bool send_remo
     } else {
         viewParse = (Query *)stmt->query;
     }
+    if (viewParse->has_uservar && IsA(stmt->query, SelectStmt)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("View's SELECT contains a variable or parameter")));
+    }
 
     /*
      * The grammar should ensure that the result is a single SELECT Query.

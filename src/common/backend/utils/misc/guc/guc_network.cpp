@@ -366,6 +366,17 @@ static void InitNetworkConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"dolphin_hot_standby",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SECURITY,
+            gettext_noop("Enables connectivity of the standby dolphin protocol"),
+            NULL},
+            &g_instance.attr.attr_network.dolphin_hot_standby,
+            true,
+            NULL,
+            NULL,
+            NULL},
         
         /* End-of-list marker */
         {{NULL,

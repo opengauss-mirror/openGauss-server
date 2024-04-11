@@ -256,6 +256,7 @@ typedef struct Param {
     Oid tableOfIndexType; /* type Oid of table of (wait to discard) */
     Oid recordVarTypOid; /* package record var's composite type oid */
     List* tableOfIndexTypeList; /* type Oid list of table of, max size 6 */
+    bool is_bind_param;
 } Param;
 
 /*
@@ -405,7 +406,9 @@ typedef struct ArrayRef {
 typedef enum CoercionContext {
     COERCION_IMPLICIT,   /* coercion in context of expression */
     COERCION_ASSIGNMENT, /* coercion in context of assignment */
-    COERCION_EXPLICIT    /* explicit cast operation */
+    COERCION_EXPLICIT,    /* explicit cast operation */
+    
+    COERCION_UNKNOWN = 0xFFFFFFFE      /* unknown */
 } CoercionContext;
 
 /*

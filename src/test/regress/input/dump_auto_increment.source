@@ -6,6 +6,18 @@ create database restore_autoinc_db with dbcompatibility = 'B';
 
 \c dump_autoinc_db
 
+-- test rename schema
+create schema gs_dump_test_tmp;
+set search_path to gs_dump_test_tmp;
+create table test(test int auto_increment primary key, id int );
+create table test2(test int auto_increment primary key, id int );
+create table test3(test int auto_increment primary key, id int );
+vacuum full test;
+alter schema gs_dump_test_tmp rename to gs_dump_test;
+set search_path to gs_dump_test;
+vacuum full test2;
+reset search_path;
+
 -- create auto_increment table
 CREATE TABLE test_dump_autoinc_pk(col1 int auto_increment PRIMARY KEY, col2 int) AUTO_INCREMENT = 1;
 INSERT INTO test_dump_autoinc_pk VALUES(0,0);
@@ -73,6 +85,21 @@ INSERT INTO test_dump_autoinc_range_list VALUES(0,6,'6');
 
 CREATE TABLE "TEST_DUMP_autoinc_word"("Col1" int auto_increment UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
 
+create table "t_dump001"("c1 colmun" int not null primary key auto_increment comment '主键'); 
+create table "t_dump002"("c1 \ colmun" int not null primary key auto_increment);
+create table "t_dump003"("c1 ? colmun" int not null primary key auto_increment);
+create table "t_dump004"("c1 \? colmun" int not null primary key auto_increment);
+create table "t_dump005"("c1 \ \ colmun" int not null primary key auto_increment);
+create table "t_dump006"("c1 \\\ colmun" int not null primary key auto_increment);
+create table "t_dump007"("c1 &*^@~!%#$+-=/.><[{}]() colmun" int not null primary key auto_increment);
+\d+ t_dump001
+\d+ t_dump002
+\d+ t_dump003
+\d+ t_dump004
+\d+ t_dump005
+\d+ t_dump006
+\d+ t_dump007
+
 \! @abs_bindir@/gs_dump dump_autoinc_db -p @portstring@ -f @abs_bindir@/dump_autoinc_test.tar -F t >/dev/null 2>&1; echo $?
 \! @abs_bindir@/gs_restore -d restore_autoinc_db -p @portstring@ @abs_bindir@/dump_autoinc_test.tar >/dev/null 2>&1; echo $?
 
@@ -102,6 +129,14 @@ select col1,col2 from test_dump_autoinc_unlog order by 1,2;
 \d+ test_dump_autoinc_range_list
 INSERT INTO test_dump_autoinc_range_list VALUES(0,16,'16');
 select col_1,col_2,col_3,col_4 from test_dump_autoinc_range_list order by 1,2,3,4;
+
+\d+ t_dump001
+\d+ t_dump002
+\d+ t_dump003
+\d+ t_dump004
+\d+ t_dump005
+\d+ t_dump006
+\d+ t_dump007
 
 \c regression
 drop database if exists restore_autoinc_db;

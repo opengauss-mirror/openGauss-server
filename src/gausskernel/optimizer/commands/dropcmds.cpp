@@ -351,6 +351,7 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
     char* msg = NULL;
     char* name = NULL;
     char* args = NULL;
+    List* relname = NIL;
     StringInfo message = makeStringInfo();
 
     switch (objtype) {
@@ -441,12 +442,13 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
         case OBJECT_TRIGGER:
             if (list_length(objname) == 1) {
                 msg = gettext_noop("trigger \"%s\" does not exist");
-                name = NameListToString(objname);
+                name = NameListToString(list_make1(lfirst(list_tail((List*)lfirst(list_tail(objname))))));
                 break;
             } else {
                 msg = gettext_noop("trigger \"%s\" for table \"%s\" does not exist");
-                name = NameListToString(objname);
-                args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
+                relname = list_truncate(list_copy(objname), list_length(objname) - 1);
+                args = NameListToString(relname);
+                name = NameListToString(lappend(relname, lfirst(list_tail((List*)lfirst(list_tail(objname))))));
                 break;
             }
         case OBJECT_EVENT_TRIGGER:

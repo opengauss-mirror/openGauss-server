@@ -77,6 +77,7 @@ NOTICE: [into_option] is only available in CENTRALIZED mode and B-format databas
 NOTICE: [index_hints] is only available in CENTRALIZED mode and B-format database.
 NOTICE: '[ [ START WITH condition ] CONNECT BY condition [ ORDER SIBLINGS BY expression ] ]' is only avaliable in CENTRALIZED mode!
 NOTICE: 'SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}' is only avaliable in CENTRALIZED mode!
+NOTICE: expression can be @uservar := expression in CENTRALIZED mode and B-format database.
 </synopsis>
 </refsynopsisdiv>
 </refentry>

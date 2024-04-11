@@ -164,9 +164,8 @@ typedef struct HashPartitionMap {
                 values[i] =                                                                                           \
                     transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);   \
             } else {                                                                                                  \
-                column_raw = Datum(tuple);                                                                            \
                 values[i] =                                                                                           \
-                    transformDatum2ConstForPartKeyExpr((rel)->partMap, column_raw, isnull, &consts[i]);               \
+                    transformDatum2ConstForPartKeyExpr((rel)->partMap, (PartKeyExprResult*)tuple, &consts[i]);        \
             }                                                                                                         \
         }                                                                                                             \
         if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                       \
@@ -508,7 +507,7 @@ extern bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* p
 
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq);
 
-extern int comparePartitionKey(RangePartitionMap* partMap, Const** values1, Const** values2, int partKeyNum);
+extern int comparePartitionKey(RangePartitionMap* partMap, Const** partkey_value, Const** partkey_bound, int partKeyNum);
 
 extern int lookupHBucketid(oidvector *buckets, int low, int2 bucket_id);
 

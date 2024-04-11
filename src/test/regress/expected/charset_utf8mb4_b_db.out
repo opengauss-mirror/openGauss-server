@@ -371,6 +371,63 @@ SELECT '高斯' COLLATE "binary"; -- ERROR
 ERROR:  COLLATION "binary" is not valid for CHARACTER SET "UTF8"
 LINE 1: SELECT '高斯' COLLATE "binary";
                       ^
+-- test CollateExpr
+CREATE TABLE t_collate_expr(
+    ftext text collate utf8mb4_bin,
+    fbytea bytea,
+    fvbit varbit(8),
+    fint int
+);
+-- -- test INSERT
+INSERT INTO t_collate_expr(ftext) VALUES('01100001' collate "binary"); -- ERROR
+ERROR:  COLLATION "binary" is not valid for CHARACTER SET "UTF8"
+LINE 1: ...SERT INTO t_collate_expr(ftext) VALUES('01100001' collate "b...
+                                                             ^
+CONTEXT:  referenced column: ftext
+INSERT INTO t_collate_expr(ftext) VALUES('01100001' collate gbk_bin); -- ERROR
+ERROR:  COLLATION "gbk_bin" is not valid for CHARACTER SET "UTF8"
+LINE 1: ...SERT INTO t_collate_expr(ftext) VALUES('01100001' collate gb...
+                                                             ^
+CONTEXT:  referenced column: ftext
+INSERT INTO t_collate_expr(ftext) VALUES('01100001' collate utf8mb4_unicode_ci);
+INSERT INTO t_collate_expr(ftext) VALUES('01100001' collate gbk_bin collate utf8mb4_unicode_ci); -- only reserve top collate
+INSERT INTO t_collate_expr(fbytea) VALUES('01100001' collate "binary"); -- do not check collate
+INSERT INTO t_collate_expr(fbytea) VALUES('01100001' collate gbk_bin); -- do not check collate
+INSERT INTO t_collate_expr(fbytea) VALUES('01100001' collate utf8mb4_unicode_ci);
+INSERT INTO t_collate_expr(fvbit) VALUES('01100001' collate "binary"); -- do not check collate
+INSERT INTO t_collate_expr(fvbit) VALUES('01100001' collate gbk_bin); -- do not check collate
+INSERT INTO t_collate_expr(fvbit) VALUES('01100001' collate utf8mb4_unicode_ci);
+INSERT INTO t_collate_expr(fint) VALUES('01100001' collate "binary"); -- do not check collate
+INSERT INTO t_collate_expr(fint) VALUES('01100001' collate gbk_bin); -- do not check collate
+INSERT INTO t_collate_expr(fint) VALUES('01100001' collate utf8mb4_unicode_ci);
+INSERT INTO t_collate_expr(fbytea) VALUES('01100001' collate gbk_bin collate utf8mb4_unicode_ci); -- do not check collate
+INSERT INTO t_collate_expr(fbytea) VALUES('01100001' collate utf8mb4_general_ci collate gbk_bin); -- do not check collate
+INSERT INTO t_collate_expr(fvbit) VALUES('01100001' collate gbk_bin collate utf8mb4_unicode_ci); -- do not check collate
+INSERT INTO t_collate_expr(fvbit) VALUES('01100001' collate utf8mb4_general_ci collate gbk_bin); -- do not check collate
+INSERT INTO t_collate_expr(fint) VALUES('01100001' collate gbk_bin collate utf8mb4_unicode_ci); -- do not check collate
+INSERT INTO t_collate_expr(fint) VALUES('01100001' collate utf8mb4_general_ci collate gbk_bin); -- do not check collate
+-- -- test limit
+select 1 from t_collate_expr limit(to_hex('11') collate "binary");
+ ?column? 
+----------
+(0 rows)
+
+select 1 from t_collate_expr limit(to_hex('11') collate gbk_bin);
+ ?column? 
+----------
+(0 rows)
+
+select 1 from t_collate_expr limit(to_hex('11') collate utf8mb4_unicode_ci);
+ ?column? 
+----------
+(0 rows)
+
+select 1 from t_collate_expr limit(to_hex('11') collate gbk_bin collate utf8mb4_unicode_ci);  -- do not check collate
+ ?column? 
+----------
+(0 rows)
+
+DROP TABLE t_collate_expr;
 -- 中文 const charset
 SELECT CAST('高斯' AS bytea);
      bytea      
@@ -1311,13 +1368,13 @@ SELECT CONCAT(_utf8mb4'楂樻柉DB楂樻柉DB' COLLATE utf8mb4_bin, CONCAT(_gbk'
 SELECT CONCAT('高斯DB', opengauss_version()) result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 高斯DB5.1.0 | utf8_general_ci
+ 高斯DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), '高斯DB') result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 5.1.0高斯DB | utf8_general_ci
+ 5.1.1高斯DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT('高斯DB', 123) result, collation for(result);
@@ -1360,13 +1417,13 @@ SELECT CONCAT(NULL, '高斯DB') result, collation for(result);
 SELECT CONCAT(_gbk'高斯DB', opengauss_version()) result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 楂樻柉DB5.1.0 | utf8_general_ci
+ 楂樻柉DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), _gbk'高斯DB') result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 5.1.0楂樻柉DB | utf8_general_ci
+ 5.1.1楂樻柉DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(_gbk'高斯DB', 123) result, collation for(result);
@@ -1410,13 +1467,13 @@ SELECT CONCAT(NULL, _gbk'高斯DB') result, collation for(result);
 SELECT CONCAT(CONCAT('高斯DB'), opengauss_version()) result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 高斯DB5.1.0 | utf8_general_ci
+ 高斯DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), CONCAT('高斯DB')) result, collation for(result);
    result    | pg_collation_for 
 -------------+------------------
- 5.1.0高斯DB | utf8_general_ci
+ 5.1.1高斯DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(CONCAT('高斯DB'), 123) result, collation for(result);
@@ -1459,13 +1516,13 @@ SELECT CONCAT(NULL, CONCAT('高斯DB')) result, collation for(result);
 SELECT CONCAT(CONCAT(_gbk'高斯DB'), opengauss_version()) result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 楂樻柉DB5.1.0 | utf8_general_ci
+ 楂樻柉DB5.1.1 | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), CONCAT(_gbk'高斯DB')) result, collation for(result);
     result     | pg_collation_for 
 ---------------+------------------
- 5.1.0楂樻柉DB | utf8_general_ci
+ 5.1.1楂樻柉DB | utf8_general_ci
 (1 row)
 
 SELECT CONCAT(CONCAT(_gbk'高斯DB'), 123) result, collation for(result);
@@ -2256,63 +2313,94 @@ SELECT CONCAT(@var_binary, fgbk_bin) result, collation for(result) FROM t_diff_c
 (1 row)
 
 -- -- concat column and bind parameter
+-- -- bind parameter collation is fixed as collation_connection, collation level is same as a const
 -- -- -- -- PBE with implicit collation
 PREPARE test_merge_collation(text) AS
 SELECT CONCAT(futf8_uni, $1) result, collation for(result) FROM t_diff_charset_columns;
-EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- $1 use collation_connection, conflict
-    result    | pg_collation_for 
---------------+------------------
- 高斯db高斯DB | 
-(1 row)
-
-EXECUTE test_merge_collation(_utf8mb4'高斯DB' collate utf8mb4_unicode_ci); -- explicit noneffective, conflict
-    result    | pg_collation_for 
---------------+------------------
- 高斯db高斯DB | 
-(1 row)
-
-EXECUTE test_merge_collation(_gbk'高斯DB'); -- _gbk noneffective, conflict
-    result    | pg_collation_for 
---------------+------------------
- 高斯db高斯DB | 
-(1 row)
-
-DEALLOCATE test_merge_collation;
--- -- -- -- PBE with implicit collation
-PREPARE test_merge_collation(text) AS
-SELECT CONCAT($1, fgbk_bin) result, collation for(result) FROM t_diff_charset_columns;
-EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- $1 use collation_connection, utf8_gen
+-- -- -- -- -- _utf8mb4
+SET @pbe_param1 = _utf8mb4'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1); -- futf8_uni collation has priority
     result    |  pg_collation_for  
 --------------+--------------------
- 高斯DB高斯DB | utf8mb4_general_ci
+ 高斯db高斯DB | utf8mb4_unicode_ci
 (1 row)
 
-EXECUTE test_merge_collation(_utf8mb4'高斯DB' collate gbk_chinese_ci); -- explicit noneffective, utf8_gen
+EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- same as above
     result    |  pg_collation_for  
 --------------+--------------------
- 高斯DB高斯DB | utf8mb4_general_ci
+ 高斯db高斯DB | utf8mb4_unicode_ci
 (1 row)
 
-EXECUTE test_merge_collation(_gbk'高斯DB'); -- _gbk noneffective, utf8_gen
+SELECT CONCAT(futf8_uni, _utf8mb4'高斯DB') result, collation for(result) FROM t_diff_charset_columns; -- same as above
     result    |  pg_collation_for  
 --------------+--------------------
- 高斯DB高斯DB | utf8mb4_general_ci
+ 高斯db高斯DB | utf8mb4_unicode_ci
+(1 row)
+
+-- -- -- -- -- _gbk
+SET @pbe_param1 = _gbk'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1); -- _gbk noneffective, futf8_uni collation has priority,  _gbk'高斯DB' will not convert to utf8mb4
+     result     |  pg_collation_for  
+----------------+--------------------
+ 高斯db楂樻柉DB | utf8mb4_unicode_ci
+(1 row)
+
+EXECUTE test_merge_collation(_gbk'高斯DB'); -- same as above
+     result     |  pg_collation_for  
+----------------+--------------------
+ 高斯db楂樻柉DB | utf8mb4_unicode_ci
+(1 row)
+
+SELECT CONCAT(futf8_uni, _gbk'高斯DB') result, collation for(result) FROM t_diff_charset_columns; -- same as above
+     result     |  pg_collation_for  
+----------------+--------------------
+ 高斯db楂樻柉DB | utf8mb4_unicode_ci
+(1 row)
+
+-- -- -- -- -- _utf8mb4 utf8mb4_unicode_ci
+SET @pbe_param1 = _utf8mb4'高斯DB' collate utf8mb4_bin;
+EXECUTE test_merge_collation(@pbe_param1); -- explicit noneffective, futf8_uni collation has priority
+    result    |  pg_collation_for  
+--------------+--------------------
+ 高斯db高斯DB | utf8mb4_unicode_ci
+(1 row)
+
+EXECUTE test_merge_collation(_utf8mb4'高斯DB' collate utf8mb4_unicode_ci); -- explicit noneffective, futf8_uni collation has priority
+    result    |  pg_collation_for  
+--------------+--------------------
+ 高斯db高斯DB | utf8mb4_unicode_ci
 (1 row)
 
 DEALLOCATE test_merge_collation;
 -- -- -- -- PBE with explicit collation,
 PREPARE test_merge_collation(text) AS
 SELECT CONCAT($1 collate utf8mb4_unicode_ci, futf8_bin) result, collation for(result) FROM t_diff_charset_columns;
+-- -- -- -- -- _utf8mb4
+SET @pbe_param1 = _utf8mb4'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1);
+    result    |  pg_collation_for  
+--------------+--------------------
+ 高斯DB高斯DB | utf8mb4_unicode_ci
+(1 row)
+
 EXECUTE test_merge_collation(_utf8mb4'高斯DB'); -- utf8mb4_unicode_ci
     result    |  pg_collation_for  
 --------------+--------------------
  高斯DB高斯DB | utf8mb4_unicode_ci
 (1 row)
 
+-- -- -- -- -- _gbk
+SET @pbe_param1 = _gbk'高斯DB';
+EXECUTE test_merge_collation(@pbe_param1);
+     result     |  pg_collation_for  
+----------------+--------------------
+ 楂樻柉DB高斯DB | utf8mb4_unicode_ci
+(1 row)
+
 EXECUTE test_merge_collation(_gbk'高斯DB'); -- utf8mb4_unicode_ci
-    result    |  pg_collation_for  
---------------+--------------------
- 高斯DB高斯DB | utf8mb4_unicode_ci
+     result     |  pg_collation_for  
+----------------+--------------------
+ 楂樻柉DB高斯DB | utf8mb4_unicode_ci
 (1 row)
 
 DEALLOCATE test_merge_collation;
@@ -2322,8 +2410,58 @@ SELECT CONCAT($1 collate gbk_chinese_ci, futf8_bin) result, collation for(result
 ERROR:  COLLATION "gbk_chinese_ci" is not valid for CHARACTER SET "UTF8"
 LINE 2: SELECT CONCAT($1 collate gbk_chinese_ci, futf8_bin) result, ...
                          ^
-DEALLOCATE test_merge_collation;
-ERROR:  prepared statement "test_merge_collation" does not exist
+-- -- -- -- test revalidate
+SELECT fgbk_chi result FROM t_diff_charset_columns WHERE fgbk_chi=_utf8mb4'高斯db'; -- 1 rows
+ result 
+--------
+ 高斯db
+(1 row)
+
+PREPARE test_revalidate(text) AS
+SELECT fgbk_chi result FROM t_diff_charset_columns WHERE fgbk_chi=$1;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ result 
+--------
+ 高斯db
+(1 row)
+
+ALTER INDEX idx_prefixkey_futf8_bin UNUSABLE;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ result 
+--------
+ 高斯db
+(1 row)
+
+SET NAMES utf8mb4 COLLATE utf8mb4_bin;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ result 
+--------
+ 高斯db
+(1 row)
+
+ALTER INDEX idx_prefixkey_futf8_bin REBUILD;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ result 
+--------
+ 高斯db
+(1 row)
+
+SET NAMES gbk COLLATE gbk_bin;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ result 
+--------
+ ��˹db
+(1 row)
+
+ALTER INDEX idx_prefixkey_futf8_bin REBUILD;
+EXECUTE test_revalidate(_utf8mb4'高斯db'); -- fgbk_chi collation has priority, 1 rows
+ result 
+--------
+ ��˹db
+(1 row)
+
+DEALLOCATE test_revalidate;
+SET NAMES utf8mb4;
 -- -- concat column and PROCEDURE parameter with CURSOR
 -- -- -- implicit collation && string
 create or replace procedure merge_collation_func(p1 text, p2 text)
@@ -2814,13 +2952,13 @@ SELECT CONCAT(futf8_uni, CONCAT(futf8_gen)) result, collation for(result) FROM t
 SELECT CONCAT(futf8_uni, opengauss_version()) result, collation for(result) FROM t_diff_charset_columns;
    result    |  pg_collation_for  
 -------------+--------------------
- 高斯db5.1.0 | utf8mb4_unicode_ci
+ 高斯db5.1.1 | utf8mb4_unicode_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), futf8_uni) result, collation for(result) FROM t_diff_charset_columns;
    result    |  pg_collation_for  
 -------------+--------------------
- 5.1.0高斯db | utf8mb4_unicode_ci
+ 5.1.1高斯db | utf8mb4_unicode_ci
 (1 row)
 
 SELECT CONCAT(futf8_uni, '高斯DB') result, collation for(result) FROM t_diff_charset_columns;
@@ -2927,13 +3065,13 @@ LINE 1: ...) result, collation for(result) FROM t_diff_charset_columns;
 SELECT CONCAT(fgbk_chi, opengauss_version()) result, collation for(result) FROM t_diff_charset_columns;
    result    | pg_collation_for 
 -------------+------------------
- 高斯db5.1.0 | gbk_chinese_ci
+ 高斯db5.1.1 | gbk_chinese_ci
 (1 row)
 
 SELECT CONCAT(opengauss_version(), fgbk_bin) result, collation for(result) FROM t_diff_charset_columns;
    result    | pg_collation_for 
 -------------+------------------
- 5.1.0高斯DB | gbk_bin
+ 5.1.1高斯DB | gbk_bin
 (1 row)
 
 SELECT CONCAT(fgbk_chi, '高斯DB') result, collation for(result) FROM t_diff_charset_columns;
@@ -4025,8 +4163,140 @@ CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_c
         partition p3 values less than(MAXVALUE)
 ); -- ERROR
 ERROR:  partition bound of partition "p2" is too low
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY RANGE(part) (
+        partition p1 values less than('楂樻柉DB'),
+        partition p2 values less than(_gbk'高斯db'),
+        partition p3 values less than(MAXVALUE)
+); -- ERROR
+ERROR:  partition bound of partition "p2" is too low
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY LIST(part) (
+        partition p1 values('高斯DB'),
+        partition p2 values('高斯db')
+); -- ERROR
+ERROR:  list partition p1 and p2 has overlapped value
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY RANGE(part) (
+        PARTITION pass START('高斯DB') END('高斯db'),
+        PARTITION excellent START('高斯db') END(MAXVALUE)
+); -- unsupported
+ERROR:  datatype of column "part" is unsupported for partition key in start/end clause.
+HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
 -- -- -- utf8mb4
-CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_bin, a int)
+CREATE TABLE t_multi_charset_partkey (part text collate utf8mb4_bin, a int)
+    PARTITION BY HASH(part) (
+        partition p1,
+        partition p2,
+        partition p3,
+        partition p4
+);
+-- -- -- insert
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB', 1);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯db', 2);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯DB1', 3);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯db1', 4);
+-- -- -- select
+SELECT * FROM t_multi_charset_partkey PARTITION(p1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
+  part   | a 
+---------+---
+ 高斯db1 | 4
+(1 row)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p3) order by 1,2;
+ part | a 
+------+---
+(0 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯db') order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯DB1') order by 1,2;
+  part   | a 
+---------+---
+ 高斯DB1 | 3
+(1 row)
+
+-- -- -- partition pruning
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: a
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: (part = '楂樻柉DB'::text COLLATE utf8mb4_bin)
+         Selected Partitions:  1
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+(1 row)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db1' order by 1,2;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: a
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: (part = '高斯db1'::text)
+         Selected Partitions:  2
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db1' order by 1,2;
+  part   | a 
+---------+---
+ 高斯db1 | 4
+(1 row)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: part COLLATE utf8mb4_bin, a
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on t_multi_charset_partkey
+               Filter: ((part)::text = '楂樻柉DB'::text)
+               Selected Partitions:  1..4
+(7 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey SPLIT PARTITION p1 AT ( '高斯DB' ) INTO ( PARTITION p1, PARTITION p4); -- not support
+ERROR:  can not split LIST/HASH partition table
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯db') TO newp1;
+SELECT * FROM t_multi_charset_partkey PARTITION(newp1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+ 楂樻柉db | 2
+(2 rows)
+
+DROP TABLE t_multi_charset_partkey;
+-- -- -- utf8mb4
+CREATE TABLE t_multi_charset_partkey (part text collate utf8mb4_bin, a int)
     PARTITION BY RANGE(part) (
         partition p1 values less than('楂樻柉DB'),
         partition p2 values less than('楂樻柉db'),
@@ -4069,15 +4339,27 @@ SELECT * FROM t_multi_charset_partkey PARTITION(p5) order by 1,2;
  高斯db | 4
 (1 row)
 
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯db') order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉db | 2
+(1 row)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯DB') order by 1,2;
+  part  | a 
+--------+---
+ 高斯DB | 3
+(1 row)
+
 -- -- -- partition pruning
 EXPLAIN (costs off)
 SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Sort
    Sort Key: a
    ->  Partitioned Seq Scan on t_multi_charset_partkey
-         Filter: ((part)::text = '楂樻柉DB'::text COLLATE utf8mb4_bin)
+         Filter: (part = '楂樻柉DB'::text COLLATE utf8mb4_bin)
          Selected Partitions:  2
 (5 rows)
 
@@ -4094,7 +4376,7 @@ SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2
  Sort
    Sort Key: a
    ->  Partitioned Seq Scan on t_multi_charset_partkey
-         Filter: ((part)::text = '高斯db'::text)
+         Filter: (part = '高斯db'::text)
          Selected Partitions:  5
 (5 rows)
 
@@ -4122,6 +4404,135 @@ SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chin
 ----------+---
  楂樻柉DB | 1
  楂樻柉db | 2
+(2 rows)
+
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey SPLIT PARTITION FOR(_gbk'高斯DB') AT (_gbk'高斯DB1 ') INTO (PARTITION p2_1, PARTITION p2_2);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB1', 1);
+SELECT * FROM t_multi_charset_partkey PARTITION(p2_1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉DB | 1
+(1 row)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p2_2) order by 1,2;
+   part    | a 
+-----------+---
+ 楂樻柉DB1 | 1
+(1 row)
+
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯db') TO p3_1;
+SELECT * FROM t_multi_charset_partkey PARTITION(p3_1) order by 1,2;
+   part   | a 
+----------+---
+ 楂樻柉db | 2
+(1 row)
+
+DROP TABLE t_multi_charset_partkey;
+-- -- -- utf8mb4
+CREATE TABLE t_multi_charset_partkey (part varchar(32) collate utf8mb4_unicode_ci, part2 varchar(32) collate utf8mb4_general_ci, a int)
+    PARTITION BY LIST COLUMNS(part, part2) (
+        partition p1 values in(('楂樻柉DB', '楂樻柉db')),
+        partition p2 values in(('高斯db', '高斯DB'))
+);
+-- -- -- insert
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯DB', _gbk'高斯DB', 1);
+INSERT INTO t_multi_charset_partkey VALUES(_gbk'高斯db', _gbk'高斯db', 2);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯DB', _utf8mb4'高斯DB', 3);
+INSERT INTO t_multi_charset_partkey VALUES(_utf8mb4'高斯db', _utf8mb4'高斯db', 4);
+-- -- -- select
+SELECT * FROM t_multi_charset_partkey PARTITION(p1) order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION(p2) order by 1,2;
+  part  | part2  | a 
+--------+--------+---
+ 高斯DB | 高斯DB | 3
+ 高斯db | 高斯db | 4
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_gbk'高斯DB', _gbk'高斯db') order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+SELECT * FROM t_multi_charset_partkey PARTITION FOR(_utf8mb4'高斯db', _utf8mb4'高斯db') order by 1,2;
+  part  | part2  | a 
+--------+--------+---
+ 高斯DB | 高斯DB | 3
+ 高斯db | 高斯db | 4
+(2 rows)
+
+-- -- -- partition pruning
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Sort
+   Sort Key: part2 COLLATE utf8mb4_general_ci
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: ((part)::text = '楂樻柉DB'::text COLLATE utf8mb4_unicode_ci)
+         Selected Partitions:  1
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: part2 COLLATE utf8mb4_general_ci
+   ->  Partitioned Seq Scan on t_multi_charset_partkey
+         Filter: ((part)::text = '高斯db'::text)
+         Selected Partitions:  2
+(5 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_utf8mb4'高斯db' order by 1,2;
+  part  | part2  | a 
+--------+--------+---
+ 高斯DB | 高斯DB | 3
+ 高斯db | 高斯db | 4
+(2 rows)
+
+EXPLAIN (costs off)
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2; -- ALL PARTS
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Sort Key: part COLLATE utf8mb4_unicode_ci, part2 COLLATE utf8mb4_general_ci
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Seq Scan on t_multi_charset_partkey
+               Filter: ((part)::text = '楂樻柉DB'::text)
+               Selected Partitions:  1..2
+(7 rows)
+
+SELECT * FROM t_multi_charset_partkey WHERE part=_gbk'高斯DB' collate gbk_chinese_ci order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
+(2 rows)
+
+-- -- -- partiton ddl
+ALTER TABLE t_multi_charset_partkey RENAME PARTITION FOR(_gbk'高斯DB', _gbk'高斯db') TO p1_1;
+SELECT * FROM t_multi_charset_partkey PARTITION(p1_1) order by 1,2;
+   part   |  part2   | a 
+----------+----------+---
+ 楂樻柉DB | 楂樻柉DB | 1
+ 楂樻柉db | 楂樻柉db | 2
 (2 rows)
 
 DROP TABLE t_multi_charset_partkey;

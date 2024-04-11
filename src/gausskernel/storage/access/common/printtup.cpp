@@ -394,7 +394,7 @@ DestReceiver *printtup_create_DR(CommandDest dest)
 {
     DR_printtup *self = (DR_printtup *)palloc0(sizeof(DR_printtup));
 
-    if (StreamTopConsumerAmI() == true)
+    if (StreamTopConsumerAmI())
         self->pub.receiveSlot = printtupStream;
     else
         self->pub.receiveSlot = printtup; /* might get changed later */
@@ -570,7 +570,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
         /* Do we have a non-resjunk tlist item? */
         while (tlist_item &&
 #ifdef STREAMPLAN
-               StreamTopConsumerAmI() == false && StreamThreadAmI() == false &&
+               !StreamTopConsumerAmI() && !StreamThreadAmI() &&
 #endif
                ((TargetEntry *)lfirst(tlist_item))->resjunk)
             tlist_item = lnext(tlist_item);
@@ -599,7 +599,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
         if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
-            char *typenameVar = "";
+            char *typenameVar;
             typenameVar = get_typename_with_namespace(atttypid);
             pq_writestring(buf, typenameVar);
         }

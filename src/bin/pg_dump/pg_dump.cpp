@@ -501,9 +501,9 @@ static void get_role_password();
 static void get_encrypt_key();
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
-static bool IsPlainFormat();
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
+static bool IsPlainFormat();
 static bool needIgnoreSequence(TableInfo* tbinfo);
 inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
@@ -1732,7 +1732,9 @@ void validatedumpoptions()
  */
 void validatedumpformats()
 {
-    if (*format == 'c' || *format == 'd' || *format == 't') {
+    if ((pg_strcasecmp(format, "custom") == 0 || pg_strcasecmp(format, "c") == 0) ||
+        (pg_strcasecmp(format, "directory") == 0 || pg_strcasecmp(format, "d") == 0) ||
+        (pg_strcasecmp(format, "tar") == 0 || pg_strcasecmp(format, "t") == 0)) {
         if (check_filepath == false) {
             write_stderr(_("options -F/--format argument '%c' must be used with -f/--file together\n"), *format);
             write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
@@ -5266,7 +5268,22 @@ TypeInfo* getTypes(Archive* fout, int* numTypes)
 
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, "pg_catalog");
-    if (fout->remoteVersion >= 90200) {
+    if (GetVersionNum(fout) >= 92838 && findDBCompatibility(fout, PQdb(GetConnection(fout))) &&
+        hasSpecificExtension(fout, "dolphin")) {
+        appendPQExpBuffer(query,
+            "SELECT tableoid, oid, typname, "
+            "typnamespace, typacl, "
+            "(%s typowner) AS rolname, "
+            "typinput::oid AS typinput, "
+            "typoutput::oid AS typoutput, typelem, typrelid, "
+            "CASE WHEN typrelid = 0 THEN ' '::`char` "
+            "ELSE (SELECT relkind FROM pg_class WHERE oid = typrelid) END AS typrelkind, "
+            "typtype, typisdefined, "
+            "typname[0] = '_' AND typelem != 0 AND "
+            "(SELECT typarray FROM pg_type te WHERE oid = pg_type.typelem) = oid AS isarray "
+            "FROM pg_type",
+            username_subquery);
+    } else if (fout->remoteVersion >= 90200) {
         appendPQExpBuffer(query,
             "SELECT tableoid, oid, typname, "
             "typnamespace, typacl, "
@@ -9329,8 +9346,14 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 "a.attstattarget, a.attstorage, t.typstorage, "
                 "a.attnotnull, a.atthasdef, a.attisdropped, "
                 "a.attlen, a.attalign, a.attislocal, a.attkvtype, t.oid AS typid, "
-                "CASE WHEN t.typtype = 's' THEN 'set(' || (select pg_catalog.string_agg(''''||setlabel||'''', ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid) || ')' "
-                "WHEN t.typtype = 'e' THEN 'enum(' || (select pg_catalog.string_agg(''''||enumlabel||'''', ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid) || ')' ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
+                "CASE ");
+            if (TabExists(fout, "pg_catalog", "pg_set")) {
+                appendPQExpBuffer(q,
+                    "WHEN t.typtype = 's' THEN concat('set(', (select pg_catalog.string_agg(concat('''', setlabel, ''''), ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid), ')') ");
+
+            }
+            appendPQExpBuffer(q,
+                "WHEN t.typtype = 'e' THEN concat('enum(', (select pg_catalog.string_agg(concat('''', enumlabel, ''''), ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid), ')') ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
                 "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
                 "CASE WHEN a.attcollation <> t.typcollation "
@@ -13435,7 +13458,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             exit_horribly(NULL, "unrecognized provolatile value for function \"%s\"\n", finfo->dobj.name);
     }
 
-    if (isHasProshippable) {
+    if (isHasProshippable && (isProcedure || !addDelimiter)) {
         if (proshippable[0] == 't') {
             appendPQExpBuffer(q, " SHIPPABLE");
         } else {
@@ -13509,25 +13532,29 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if (!fout->encryptfile && (pg_strcasecmp(format, "plain") == 0 || 
         pg_strcasecmp(format, "p") == 0 || pg_strcasecmp(format, "a") == 0
         || pg_strcasecmp(format, "append") == 0)) {
-        if (addDelimiter) {
+        if (addDelimiter && IsPlainFormat()) {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
         } else {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "/\n" : "");
         }
     } else {
-         if (addDelimiter) {
+         if (addDelimiter && IsPlainFormat()) {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
         } else {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "\n" : "");
         }
     }
 
-    appendPQExpBuffer(labelq, "%s %s\n", funcKind, funcsig);
+    /*
+     * since COMMENT ON PROCEDURE and ALTER EXTENSION ADD PROCEDURE are not valid in grammar
+     * COMMENT ON/ALTER EXTENSION ADD, we should use FUNCTION instead.
+     */
+    appendPQExpBuffer(labelq, "%s %s\n", "FUNCTION", funcsig);
 
     if (binary_upgrade)
         binary_upgrade_extension_member(q, &finfo->dobj, labelq->data);
 
-    if (addDelimiter) {
+    if (addDelimiter && IsPlainFormat()) {
         appendPQExpBuffer(q, "delimiter ;\n");
     }
 
@@ -18343,12 +18370,19 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 newStrategy);
             for (i = 1; i <= partkeynum; i++) {
-                if (i == partkeynum)
-                    appendPQExpBuffer(
-                        partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-                else
-                    appendPQExpBuffer(
-                        partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                if (partkeyexprIsNull) {
+                    if (i == partkeynum)
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                    else
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                } else {
+                    if (i == partkeynum)
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d], ", i);
+                }
             }
         } else {
             appendPQExpBuffer(partitionq,
@@ -18624,7 +18658,7 @@ static void dumpViewSchema(
      * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
      * So when use include_depend_objs and -p, we should also add the function.
      */
-    if (include_depend_objs && !outputClean && (*format == 'p')) {
+    if (include_depend_objs && !outputClean && IsPlainFormat()) {
         appendPQExpBuffer(q, "DROP VIEW IF EXISTS %s.", fmtId(tbinfo->dobj.nmspace->dobj.name));
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
@@ -19178,7 +19212,7 @@ static void DumpMatviewSchema(
      * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
      * So when use include_depend_objs and -p, we should also add the function.
      */
-    if (include_depend_objs && !outputClean && (*format == 'p')) {
+    if (include_depend_objs && !outputClean && IsPlainFormat()) {
         appendPQExpBuffer(q, "DROP MATERIALIZED VIEW IF EXISTS %s.", fmtId(tbinfo->dobj.nmspace->dobj.name));
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
@@ -19366,7 +19400,7 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
          * So when use include_depend_objs and -p, we should also add the function.
          */
-        if (include_depend_objs && !outputClean && (*format == 'p')) {
+        if (include_depend_objs && !outputClean && IsPlainFormat()) {
             appendPQExpBuffer(q, "DROP %s IF EXISTS %s.", reltypename, fmtId(tbinfo->dobj.nmspace->dobj.name));
             appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
         }
@@ -19543,6 +19577,8 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                 if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
                     appendPQExpBuffer(q, "WITH OPTIONS");
                 } else if (fout->remoteVersion >= 70100) {
+                    if (isBcompatibility && hasSpecificExtension(fout, "dolphin") && strcmp(tbinfo->atttypnames[j], "numeric") == 0)
+                        tbinfo->atttypnames[j] = "number";
                     appendPQExpBuffer(q, "%s", tbinfo->atttypnames[j]);
                     if (has_encrypted_column) {
                         char *encryption_type = NULL;
@@ -21412,7 +21448,7 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
      * The DROP statement is automatically backed up when the backup format is -c/-t/-d.
      * So when use include_depend_objs and -p, we should also add the function.
      */
-    if (include_depend_objs && !outputClean && (*format == 'p')) {
+    if (include_depend_objs && !outputClean && IsPlainFormat()) {
         appendPQExpBuffer(query, "DROP %s SEQUENCE IF EXISTS %s.", optLarge, fmtId(tbinfo->dobj.nmspace->dobj.name));
         appendPQExpBuffer(query, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
@@ -21706,24 +21742,21 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     if (NULL != tginfo->tgdef) {
         if (tginfo->tgdb) {
             appendPQExpBuffer(query, "DROP FUNCTION %s ;\n", tginfo->tgfname);
-            if (tginfo->tgbodybstyle)
+            if (tginfo->tgbodybstyle && IsPlainFormat())
                 appendPQExpBuffer(query, "delimiter //\n");
             appendPQExpBuffer(query, "%s", tginfo->tgdef);
-            if (*format == 'p') {
+            if (IsPlainFormat()) {
                 if (tginfo->tgbodybstyle)
                     appendPQExpBuffer(query, "\n//\n");
                 else
                     appendPQExpBuffer(query, "\n/\n");
             } else {
-                if (tginfo->tgbodybstyle)
-                    appendPQExpBuffer(query, "\n//\n");
-                else
-                    appendPQExpBuffer(query, ";\n");
+                appendPQExpBuffer(query, ";\n");
             }
         } else {
             appendPQExpBuffer(query, "%s;\n", tginfo->tgdef);
         }
-        if (tginfo->tgbodybstyle)
+        if (tginfo->tgbodybstyle && IsPlainFormat())
             appendPQExpBuffer(query, "delimiter ;\n");
     } else {
         if (tginfo->tgisconstraint) {
@@ -23395,7 +23428,6 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
     destroyPQExpBuffer(query);
     return evtinfo;
 }
- 
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 {
     PQExpBuffer query;
@@ -23477,7 +23509,7 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 
             char idxopt[posoffset + 1] = {0};
             /* Write the storage mode in the condef. */
-            errno_t rc = memcpy_s(idxopt, posoffset + 1, usingpos, posoffset + 1);
+            errno_t rc = memcpy_s(idxopt, posoffset + 1, usingpos, posoffset);
             securec_check_c(rc, "\0", "\0");
             appendPQExpBuffer(buf, "USING %s", idxopt);
         }
@@ -23507,11 +23539,13 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, tbinfo->dobj.nmspace->dobj.name);
     /* Obtain the sequence name of the auto_increment column from the pg_attrdef. */
-    appendPQExpBuffer(query,
-        "SELECT pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqNameSpace ', 2), ' ', 1) as seqnamespace, "
-        "pg_catalog.split_part(pg_catalog.split_part(adbin, ':seqName ', 2), ' ', 1) as seqname "
-        "from pg_catalog.pg_attrdef where adrelid = %u and adnum = %d",
-        tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum);
+    appendPQExpBuffer(query, "select nspname, relname from "
+                             "pg_class c left join pg_namespace n on c.relnamespace = n.oid "
+                             "left join  pg_depend d on c.oid = d.objid "
+                             "where classid = %u and deptype = '%c' and refobjid = %u and refobjsubid = %u "
+                             "and c.relkind in ('%c', '%c')"
+                      ,RelationRelationId, DEPENDENCY_AUTO, tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum
+                      ,RELKIND_SEQUENCE, RELKIND_LARGE_SEQUENCE);
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     if (PQntuples(res) != 1) {
@@ -23552,6 +23586,11 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
 
     PQclear(res);
     destroyPQExpBuffer(query);
+}
+
+static bool IsPlainFormat()
+{
+	return pg_strcasecmp(format, "plain") == 0 || pg_strcasecmp(format, "p") == 0;
 }
 
 static bool needIgnoreSequence(TableInfo* tbinfo)
@@ -23599,7 +23638,14 @@ static bool hasSpecificExtension(Archive* fout, const char* extensionName)
     return ntups != 0;
 }
 
-static bool IsPlainFormat()
+bool TabExists(Archive* fout, const char* schemaName, const char* tabName)
 {
-	return pg_strcasecmp(format, "plain") == 0 || pg_strcasecmp(format, "p") == 0;
+    char query[300];
+    bool exist = false;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+
+    sprintf(query, "SELECT * FROM pg_tables  WHERE schemaname='%s' and tablename='%s'", schemaName, tabName);
+    
+    exist = isExistsSQLResult(AH->connection, query);
+    return exist;
 }

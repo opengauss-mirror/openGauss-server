@@ -29,6 +29,7 @@ select 'aa' = 'AA';
 
 -- expect error cases
 SET NAMES utf8mb4 COLLATE utf8mb4_general_ci;
+SET NAMES utf8 collate = 'utf8_bin';
 
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='all'" >/dev/null 2>&1
 select pg_sleep(1);
@@ -75,6 +76,35 @@ show client_encoding;
 show character_set_connection;
 show collation_connection;
 select '高斯aa' = '高斯AA';
+
+-- test default
+set names gbk;
+set names utf8 collate default;
+show character_set_connection;
+show collation_connection;
+
+set names gbk;
+set names utf8 collate 'default';
+show character_set_connection;
+show collation_connection;
+
+set names gbk;
+set collation_connection = default;
+show character_set_connection;
+show collation_connection;
+
+-- test charset = -1
+set collation_connection = 'C';
+show character_set_connection;
+show collation_connection;
+
+set collation_connection = 'default';
+show character_set_connection;
+show collation_connection;
+
+set collation_connection = 'POSIX';
+show character_set_connection;
+show collation_connection;
 
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
 select pg_sleep(1);

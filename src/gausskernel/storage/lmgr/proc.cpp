@@ -1499,6 +1499,12 @@ static void ProcKill(int code, Datum arg)
 #endif
 
     ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B]) {
+        pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+        t_thrd.utils_cxt.holdLoadPluginLock[DB_CMPT_B] = false;
+    }
+#endif
 
     /*
      * This process is no longer present in shared memory in any meaningful

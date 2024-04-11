@@ -660,6 +660,8 @@ typedef struct EState {
     bool have_current_xact_date; /* Check whether dirty reads exist in the cursor rollback scenario. */
     int128 first_autoinc; /* autoinc has increased during this execution */
 	int result_rel_index;    /* which result_rel_info to be excuted when multiple-relation modified. */
+    int128 cur_insert_autoinc;
+    int128 next_autoinc;
 } EState;
 
 /*

@@ -274,6 +274,14 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         if (!systemDBA_arg(curuser) && proownerid != curuser)
             ereport (ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), 
                     errmsg("only system administrator can user definer other user ,others user definer self")));
+
+        if (stmt->schemaname != NULL) {
+            Oid relNamespaceId = RelationGetNamespace(rel);
+            if (relNamespaceId != get_namespace_oid(stmt->schemaname, false)) {
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", stmt->schemaname, stmt->trigname)));
+            }
+        }
     }
     /* permission checks */
     if (!isInternal) {
@@ -539,10 +547,11 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
         n->parameters = NULL;
         n->returnType = makeTypeName("trigger");
         const char* inlineProcessDesc = " return NEW;end";
-        size_t bodySrcTempSize = strlen(stmt->funcSource->bodySrc) + strlen(inlineProcessDesc);
+        size_t originBodyLen = strlen(stmt->funcSource->bodySrc);
+        size_t bodySrcTempSize = originBodyLen + strlen(inlineProcessDesc) + 1;
         char* bodySrcTemp = (char*)palloc(bodySrcTempSize);
         int last_end = -1;
-        for (int i = bodySrcTempSize - 3; i > 0; i--) {
+        for (int i = originBodyLen - 3; i > 0; i--) {
             if (pg_strncasecmp(stmt->funcSource->bodySrc + i, "end", strlen("end")) == 0) {
                 last_end = i;
                 break;
@@ -553,10 +562,10 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
                     errmsg("trigger function body has syntax error")));
         }
         ret = memcpy_s(bodySrcTemp, bodySrcTempSize, stmt->funcSource->bodySrc, last_end);
-        securec_check_c(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         bodySrcTemp[last_end] = '\0';
         ret = strcat_s(bodySrcTemp, bodySrcTempSize, inlineProcessDesc);
-        securec_check_c(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         n->options = lappend(n->options, makeDefElem("as", (Node*)list_make1(makeString(bodySrcTemp))));
         n->options = lappend(n->options, makeDefElem("language", (Node*)makeString("plpgsql")));
         n->withClause = NIL;
@@ -1445,6 +1454,17 @@ ObjectAddress renametrig(RenameStmt* stmt)
 
     /* Have lock already, so just need to build relcache entry. */
     targetrel = relation_open(relid, NoLock);
+
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        RangeVar* trigname = (RangeVar*)lfirst(list_head(stmt->renameTargetList));
+        if (trigname->schemaname != NULL) {
+            Oid relNamespaceId = RelationGetNamespace(targetrel);
+            if (relNamespaceId != get_namespace_oid(trigname->schemaname, false)) {
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("trigger in wrong schema: \"%s\".\"%s\"", trigname->schemaname, stmt->subname)));
+            }
+        }
+    }
 
     /*
      * Scan pg_trigger twice for existing triggers on relation.  We do this in

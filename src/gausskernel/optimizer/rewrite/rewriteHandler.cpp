@@ -35,11 +35,13 @@
 #include "parser/parsetree.h"
 #include "parser/parse_merge.h"
 #include "parser/parse_hint.h"
+#include "parser/parse_type.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
 #include "utils/builtins.h"
+#include "utils/bytea.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -307,6 +309,15 @@ static bool viewSecurityPassDown(Node* node, void* context)
         /* Do what we came for */
         if (rte->rtekind == RTE_RELATION) {
             rte->checkAsUser = *asUser;
+            /* Check namespace permissions. */
+            AclResult aclresult;
+            /* No lock here ,cause relation already opend */
+            Relation rel = heap_open(rte->relid, NoLock);
+            Oid namespaceId = RelationGetNamespace(rel);
+            aclresult = pg_namespace_aclcheck(namespaceId, *asUser, ACL_USAGE);
+            if (aclresult != ACLCHECK_OK)
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            heap_close(rel, NoLock);
         }
         /* allow rangetable entry continue */
         return false;
@@ -3816,7 +3827,7 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
         bool rewriteView = false;
         List* rewriteRelations = NIL;
 
-        result_relation = linitial_int(parsetree->resultRelations);
+        result_relation = linitial2_int(parsetree->resultRelations);
 
         if (result_relation == 0)
             return rewritten;
@@ -4505,6 +4516,21 @@ static bool findAttrByName(const char* attributeName, List* tableElts, int maxle
     }
     return false;
 }
+/*
+ * for create table as in B foramt, add type's oid and typemod in tableElts
+ */
+static void addInitAttrType(List* tableElts)
+{
+    ListCell* lc = NULL;
+
+    foreach (lc, tableElts) {
+        Node* node = (Node*)lfirst(lc);
+        if (IsA(node, ColumnDef)) {
+            ColumnDef* def = (ColumnDef*)node;
+            typenameTypeIdAndMod(NULL, def->typname, &def->typname->typeOid, &def->typname->typemod);
+        }
+    }
+}
 
 char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 {
@@ -4515,8 +4541,10 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     IntoClause* into = stmt->into;
     List* tableElts = NIL;
 
-    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         tableElts = stmt->into->tableElts;
+        addInitAttrType(tableElts);
+    }
     int initlen = list_length(tableElts);
 
     /* Obtain the target list of new table */
@@ -4672,8 +4700,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
 
     StringInfo cquery = makeStringInfo();
 
-    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || initlen <= 0)
-        deparse_query(parsetree, cquery, NIL, false, false);
+    deparse_query(parsetree, cquery, NIL, false, false);
 
     return cquery->data;
 }
@@ -5147,10 +5174,16 @@ List* QueryRewritePrepareStmt(Query* parsetree)
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("userdefined variable in prepare statement must be text type.")));
     }
+    if (value->constvalue == (Datum)0) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
+    }
 
     sqlstr = TextDatumGetCString(value->constvalue);
 
     raw_parsetree_list = pg_parse_query(sqlstr);
+    if (raw_parsetree_list == NIL) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Query was empty")));
+    }
 
     if (raw_parsetree_list->length != 1) {
         ereport(ERROR,
@@ -5210,7 +5243,24 @@ Node* QueryRewriteNonConstant(Node *node)
     /* deparse the SQL statement from the subquery. */
     deparse_query(cparsetree, select_sql, NIL, false, false);
 
-    StmtResult *result = execute_stmt(select_sql->data, true);
+    StmtResult *result = NULL;
+    if (u_sess->attr.attr_sql.dolphin) {
+        int origin = u_sess->attr.attr_common.bytea_output;
+        u_sess->attr.attr_common.bytea_output = BYTEA_OUTPUT_HEX;
+        PG_TRY();
+        {
+            result = execute_stmt(select_sql->data, true);
+        }
+        PG_CATCH();
+        {
+            u_sess->attr.attr_common.bytea_output = origin;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+        u_sess->attr.attr_common.bytea_output = origin;
+    } else {
+        result = execute_stmt(select_sql->data, true);
+    }
 
     DestroyStringInfo(select_sql);
 

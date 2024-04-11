@@ -292,6 +292,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->hasSubQuery = false;
     plansource->gpc_lockid = -1;
     plansource->hasSubQuery = false;
+    plansource->param_collation = GetCollationConnection();
 
 
 #ifdef ENABLE_MOT
@@ -378,6 +379,7 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
     plansource->total_custom_cost = 0;
     plansource->num_custom_plans = 0;
     plansource->spi_signature = {(uint32)-1, 0, (uint32)-1, -1};
+    plansource->param_collation = GetCollationConnection();
 
 #ifdef ENABLE_MOT
     plansource->storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -883,8 +885,11 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
      * If the query rewrite phase had a possible RLS dependency, we must redo
      * it if either the role setting has changed.
      */
-    if (plansource->is_valid && plansource->dependsOnRole && (plansource->rewriteRoleId != GetUserId()))
+    if (plansource->is_valid && 
+        ((plansource->dependsOnRole && (plansource->rewriteRoleId != GetUserId())) ||
+            plansource->param_collation != GetCollationConnection())) {
         plansource->is_valid = false;
+    }
 
     /*
      * If the query is currently valid, acquire locks on the referenced
@@ -1115,6 +1120,7 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
 
     plansource->query_context = querytree_context;
     plansource->query_list = qlist;
+    plansource->param_collation = GetCollationConnection();
 
     /* Update ExecNodes for Light CN */
     if (need_reset_singlenode || has_lp) {
@@ -1214,7 +1220,9 @@ bool CheckCachedPlan(CachedPlanSource* plansource, CachedPlan *plan)
     Assert(!plan->is_oneshot);
 
     /* If plan isn't valid for current role, we can't use it. */
-    if (plan->is_valid && plan->dependsOnRole && plan->planRoleId != GetUserId())
+    if (plan->is_valid &&
+        ((plan->dependsOnRole && plan->planRoleId != GetUserId()) ||
+            plan->param_collation != GetCollationConnection()))
         plan->is_valid = false;
 
     /*
@@ -1479,6 +1487,7 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
      */
     plan->planRoleId = GetUserId();
     plan->dependsOnRole = plansource->dependsOnRole;
+    plan->param_collation = GetCollationConnection();
 
     foreach (lc, plist) {
         PlannedStmt* plannedstmt = (PlannedStmt*)lfirst(lc);
@@ -2662,6 +2671,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
     newsource->spi_signature = plansource->spi_signature;
     newsource->gplan_is_fqs = plansource->gplan_is_fqs;
     newsource->nextval_default_expr_type = plansource->nextval_default_expr_type;
+    newsource->param_collation = plansource->param_collation;
 
 #ifdef ENABLE_MOT
     newsource->storageEngineType = SE_TYPE_UNSPECIFIED;

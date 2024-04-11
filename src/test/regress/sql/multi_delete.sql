@@ -505,5 +505,11 @@ select * from t_t_mutil_t2;
 drop view multiview1;
 drop view multiview2;
 drop view multiview3;
+
+-- issue
+WITH with_t1 AS ( SELECT TRUE AS c23 , -9213573085711696683 AS c49 ) DELETE with_t1 FROM with_t1;
+DELETE subq_t1 FROM (SELECT 100 AS A) subq_t1;
+DELETE func_t1 FROM generate_series(1, 10) func_t1;
+
 \c regression
 drop database multidelete;

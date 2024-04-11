@@ -472,6 +472,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_collation
 
 %type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
+				qualified_trigger_name
 
 %type <str>		all_Op MathOp
 
@@ -569,7 +570,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <list>	extract_list timestamp_arg_list overlay_list position_list
 %type <list>	substr_list trim_list
-%type <list>	opt_interval interval_second
+%type <list>	opt_interval interval_second event_interval_unit opt_evtime_unit
 %type <node>	overlay_placing substr_from substr_for
 
 %type <boolean> opt_instead opt_incremental
@@ -661,7 +662,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 %type <keyword> character_set
 %type <ival>	charset opt_charset convert_charset default_charset
-%type <str>		collate opt_collate default_collate
+%type <str>		collate opt_collate default_collate set_names_collate
 %type <charsetcollateopt> CharsetCollate charset_collate optCharsetCollate
 
 %type <boolean> opt_varying opt_timezone opt_no_inherit
@@ -863,7 +864,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
 	SHRINK USE_P
 
-	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
+	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DAY_HOUR_P DAY_MINUTE_P DAY_SECOND_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
 /* PGXC_BEGIN */
 	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
@@ -880,7 +881,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 	GENERATED GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
-	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
+	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
 	IDENTIFIED IDENTITY_P IF_P IGNORE IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
 	INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
@@ -895,7 +896,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF LINES
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
-	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
+	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
 	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
@@ -941,7 +942,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
 
-	YEAR_P YES_P
+	YEAR_P YEAR_MONTH_P YES_P
 
 	ZONE
 
@@ -2454,7 +2455,7 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| NAMES opt_encoding opt_collate
+			| NAMES opt_encoding set_names_collate
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_VALUE;
@@ -11664,7 +11665,7 @@ DropDataSourceStmt: DROP DATA_P SOURCE_P name opt_drop_behavior
  *****************************************************************************/
 
 CreateTrigStmt:
-			CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
@@ -11683,7 +11684,8 @@ CreateTrigStmt:
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
 					n->if_not_exists = false;
-					n->trigname = $5;
+					n->schemaname = $5->schemaname;
+					n->trigname = $5->relname;					
 					n->relation = $9;
 					n->funcname = $14;
 					n->args = $16;
@@ -11701,13 +11703,14 @@ CreateTrigStmt:
 					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE CONSTRAINT TRIGGER name AFTER TriggerEvents ON
+			| CREATE CONSTRAINT TRIGGER qualified_trigger_name AFTER TriggerEvents ON
 			qualified_name OptConstrFromTable ConstraintAttributeSpec
 			FOR EACH ROW TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
-					n->trigname = $4;
+					n->schemaname = $4->schemaname;
+					n->trigname = $4->relname;
 					n->definer = NULL;
 					n->if_not_exists  = false;
 					n->relation = $8;
@@ -11728,7 +11731,7 @@ CreateTrigStmt:
 					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			| CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			trigger_order
 			{
@@ -11754,7 +11757,8 @@ CreateTrigStmt:
 					
 					n->definer = $3;
 					n->if_not_exists = false;
-					n->trigname = $5;
+					n->schemaname = $5->schemaname;
+					n->trigname = $5->relname;
 					n->timing = $6;
 					n->events = intVal(linitial($7));
 					n->columns = (List *) lsecond($7);
@@ -11771,7 +11775,7 @@ CreateTrigStmt:
 					n->constrrel = NULL;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS name TriggerActionTime TriggerEvents ON
+			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			trigger_order
 			{
@@ -11797,7 +11801,8 @@ CreateTrigStmt:
 					
 					n->definer = $3;
 					n->if_not_exists = true;
-					n->trigname = $8;
+					n->schemaname = $8->schemaname;
+					n->trigname = $8->relname;
 					n->timing = $9;
 					n->events = intVal(linitial($10));
 					n->columns = (List *) lsecond($10);
@@ -12059,30 +12064,66 @@ enable_trigger:
 			| DISABLE_P                 { $$ = TRIGGER_DISABLED; }
 		;
 
+qualified_trigger_name:
+			name
+				{
+					$$ = makeRangeVar(NULL, $1, @1);
+				}
+			| ColId indirection
+				{
+					check_qualified_name($2, yyscanner);
+					$$ = makeRangeVar(NULL, NULL, @1);
+					const char* message = "improper qualified name (too many dotted names): %s";
+					switch (list_length($2))
+					{
+						case 1:
+							if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+							{
+								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+								ereport(errstate,
+										(errcode(ERRCODE_SYNTAX_ERROR),
+										 errmsg("only support trigger in schema in B compatibility database"),
+									 	 parser_errposition(@1)));
+							}
+							$$->schemaname = $1;
+							$$->relname = strVal(linitial($2));
+							break;
+						default:
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("improper qualified name (too many dotted names): %s",
+											NameListToString(lcons(makeString($1), $2))),
+									 parser_errposition(@1)));
+							break;
+					}
+				}
+		;
+
 DropTrigStmt:
-			DROP TRIGGER name ON any_name opt_drop_behavior
+			DROP TRIGGER qualified_trigger_name ON any_name opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(lappend($5, makeString($3)));
+					n->objects = list_make1(lappend($5, list_make2(makeString($3->schemaname), makeString($3->relname))));
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->missing_ok = false;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER IF_P EXISTS name ON any_name opt_drop_behavior
+			| DROP TRIGGER IF_P EXISTS qualified_trigger_name ON any_name opt_drop_behavior
 				{
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(lappend($7, makeString($5)));
+					n->objects = list_make1(lappend($7, list_make2(makeString($5->schemaname), makeString($5->relname))));
 					n->arguments = NIL;
 					n->behavior = $8;
 					n->missing_ok = true;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER name opt_drop_behavior
+			| DROP TRIGGER qualified_trigger_name opt_drop_behavior
 				{
 #ifdef	ENABLE_MULTIPLE_NODES
 					const char* message = "drop trigger name is not yet supported in distributed database.";
@@ -12098,14 +12139,14 @@ DropTrigStmt:
 					}
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(list_make1(makeString($3)));
+					n->objects = list_make1(list_make1(list_make2(makeString($3->schemaname), makeString($3->relname))));
 					n->arguments = NIL;
 					n->behavior = $4;
 					n->missing_ok = false;
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
-			| DROP TRIGGER IF_P EXISTS name opt_drop_behavior
+			| DROP TRIGGER IF_P EXISTS qualified_trigger_name opt_drop_behavior
 				{
 #ifdef	ENABLE_MULTIPLE_NODES
 					const char* message = "drop trigger if exists name is not yet supported in distributed database.";
@@ -12121,7 +12162,7 @@ DropTrigStmt:
 					}
 					DropStmt *n = makeNode(DropStmt);
 					n->removeType = OBJECT_TRIGGER;
-					n->objects = list_make1(list_make1(makeString($5)));
+					n->objects = list_make1(list_make1(list_make2(makeString($5->schemaname), makeString($5->relname))));
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->missing_ok = true;
@@ -14674,6 +14715,11 @@ collate:
 			}
 		;
 
+set_names_collate:    COLLATE charset_collate_name		{ $$ = $2; }
+					| COLLATE DEFAULT					{ $$ = NULL; }
+					| /*EMPTY*/							{ $$ = NULL; }
+			;
+
 opt_collate:
 				collate								{ $$ = $1; }
 				| /*EMPTY*/							{ $$ = NULL; }
@@ -15070,8 +15116,12 @@ user:
 		ColId                                                                   { $$ = $1; }
 	;
 
+event_interval_unit: opt_interval			{$$ = $1;}
+					| opt_evtime_unit		{$$ = $1;}
+				;
+
 every_interval:
-                Iconst opt_interval			
+                Iconst event_interval_unit			
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15079,7 +15129,7 @@ every_interval:
 					Node *num = makeIntConst($1, @1);
 		            $$ = makeTypeCast(num, t, -1);	
 				}
-				| Sconst opt_interval
+				| Sconst event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -15087,7 +15137,7 @@ every_interval:
 					Node *num = makeStringConst($1, @1);
 					$$ = makeTypeCast(num, t, -1);
 				}
-				| FCONST opt_interval
+				| FCONST event_interval_unit
 				{
 					TypeName *t;
 					t = SystemTypeName("interval");
@@ -17842,14 +17892,15 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-			| ALTER TRIGGER name ON qualified_name RENAME TO name
+			| ALTER TRIGGER qualified_trigger_name ON qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_TRIGGER;
 					n->relation = $5;
-					n->subname = $3;
+					n->subname = $3->relname;
 					n->newname = $8;
 					n->missing_ok = false;
+					n->renameTargetList = list_make1($3);
 					$$ = (Node *)n;
 				}
 			| ALTER ROLE RoleId RENAME TO RoleId
@@ -25283,6 +25334,47 @@ opt_timezone:
 			| /*EMPTY*/								{ $$ = FALSE; }
 		;
 
+opt_evtime_unit:
+			DAY_HOUR_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR), @1));
+			}
+			| DAY_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| DAY_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(DAY) |
+												 INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| HOUR_MINUTE_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE), @1));
+			}
+			| HOUR_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(HOUR) |
+												 INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| MINUTE_SECOND_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(MINUTE) |
+												 INTERVAL_MASK(SECOND), @1));
+			}
+			| YEAR_MONTH_P
+			{
+				$$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR) |
+												 INTERVAL_MASK(MONTH), @1));
+			}
+
 opt_interval:
 			YEAR_P
 				{ $$ = list_make1(makeIntConst(INTERVAL_MASK(YEAR), @1)); }
@@ -28658,7 +28750,10 @@ unreserved_keyword:
 			| DATANODES
 			| DATATYPE_CL
 			| DATE_FORMAT_P
+			| DAY_HOUR_P
+			| DAY_MINUTE_P
 			| DAY_P
+			| DAY_SECOND_P
 			| DBCOMPATIBILITY_P
 			| DEALLOCATE
 			| DECLARE
@@ -28739,7 +28834,9 @@ unreserved_keyword:
 			| HANDLER
 			| HEADER_P
 			| HOLD
+			| HOUR_MINUTE_P
 			| HOUR_P
+			| HOUR_SECOND_P
 			| IDENTIFIED
 			| IDENTITY_P
 			| IF_P
@@ -28809,6 +28906,7 @@ unreserved_keyword:
 			| MERGE
 			| MINEXTENTS
 			| MINUTE_P
+			| MINUTE_SECOND_P
 			| MINVALUE
 			| MODE
 			| MODEL      // DB4AI
@@ -29037,6 +29135,7 @@ unreserved_keyword:
 			| WRAPPER
 			| WRITE
 			| XML_P
+			| YEAR_MONTH_P
 			| YEAR_P
 			| YES_P
 			| ZONE
@@ -31445,11 +31544,15 @@ static void CheckPartitionExpr(Node* expr, int* colCount)
 	if (expr == NULL)
 		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The expr can't be NULL")));
 	if (expr->type == T_A_Expr) {
-		char* name = strVal(linitial(((A_Expr*)expr)->name));
+		A_Expr* a_expr = (A_Expr*)expr;
+		if (a_expr->name == NULL) {
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The expr is not supported for Partition Expr")));
+		}
+		char* name = strVal(linitial(a_expr->name));
 		if (strcmp(name, "+") != 0 && strcmp(name, "-") != 0 && strcmp(name, "*") != 0)
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s operator is not supported for Partition Expr", name)));
-		CheckPartitionExpr(((A_Expr*)expr)->lexpr, colCount);
-		CheckPartitionExpr(((A_Expr*)expr)->rexpr, colCount);
+		CheckPartitionExpr(a_expr->lexpr, colCount);
+		CheckPartitionExpr(a_expr->rexpr, colCount);
 	} else if (expr->type == T_FuncCall) {
 		char* validFuncName[MAX_SUPPORTED_FUNC_FOR_PART_EXPR] = {"abs","ceiling","datediff","day","dayofmonth","dayofweek","dayofyear","extract","floor","hour",
 		"microsecond","minute","mod","month","quarter","second","time_to_sec","to_days","to_seconds","unix_timestamp","weekday","year","yearweek","date_part","div"};

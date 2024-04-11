@@ -355,6 +355,14 @@ int MainLoop(FILE* source, char* querystring)
         exit(EXIT_FAILURE);
     }
 
+    /* Initialize current database compatibility */
+    PGresult* res = PQexec(pset.db, "show sql_compatibility");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        is_b_format = strcmp (PQgetvalue(res, 0, 0), "B") == 0;
+    }
+    PQclear(res);
+    res = NULL;
+
     /* main loop to get queries and execute them */
     while (successResult == EXIT_SUCCESS) {
         /*

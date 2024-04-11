@@ -1820,6 +1820,9 @@ typedef struct knl_t_utils_context {
     /* flag to indicate g_instance.baselock is help by current thread */
     bool holdProcBaseLock;
     bool SortColumnOptimize;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool holdLoadPluginLock[DB_CMPT_MAX];
+#endif
 
 #ifndef WIN32
     timer_t sigTimerId;

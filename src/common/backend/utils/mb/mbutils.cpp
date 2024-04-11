@@ -619,6 +619,43 @@ char* pg_client_to_server(const char* s, int len)
     return pg_any_to_server(s, len, u_sess->mb_cxt.ClientEncoding->encoding);
 }
 
+char* verify_string_for_ascii(const char* s, int len, int encoding, bool bulkload_illegal_chars_conversion)
+{
+    /*
+    * No conversion is possible, but we must still validate the data,
+    * because the client-side code might have done string escaping using
+    * the selected client_encoding.  If the client encoding is ASCII-safe
+    * then we just do a straight validation under that encoding.  For an
+    * ASCII-unsafe encoding we have a problem: we dare not pass such data
+    * to the parser but we have no way to convert it.	We compromise by
+    * rejecting the data if it contains any non-ASCII characters.
+    */
+    if (PG_VALID_BE_ENCODING(encoding)) {
+        (void)pg_verify_mbstr(encoding, s, len, false);
+        return (char*)s;
+    }
+
+    int i;
+    for (i = 0; i < len; i++) {
+        if (s[i] == '\0' || IS_HIGHBIT_SET(s[i])) {
+            if (!bulkload_illegal_chars_conversion) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CHARACTER_NOT_IN_REPERTOIRE),
+                        errmsg("invalid byte value for encoding \"%s\": 0x%02x",
+                            pg_enc2name_tbl[PG_SQL_ASCII].name,
+                            (unsigned char)s[i])));
+            }
+
+            if (s[i] == '\0') {
+                *((char*)&s[i]) = ' ';
+            } else {
+                *((char*)&s[i]) = '?';
+            }
+        }
+    }
+    return (char*)s;
+}
+
 /*
  * convert any encoding to server encoding.
  */
@@ -645,38 +682,7 @@ char* pg_any_to_server(const char* s, int len, int encoding)
     }
 
     if (u_sess->mb_cxt.DatabaseEncoding->encoding == PG_SQL_ASCII) {
-        /*
-         * No conversion is possible, but we must still validate the data,
-         * because the client-side code might have done string escaping using
-         * the selected client_encoding.  If the client encoding is ASCII-safe
-         * then we just do a straight validation under that encoding.  For an
-         * ASCII-unsafe encoding we have a problem: we dare not pass such data
-         * to the parser but we have no way to convert it.	We compromise by
-         * rejecting the data if it contains any non-ASCII characters.
-         */
-        if (PG_VALID_BE_ENCODING(encoding)) {
-            (void)pg_verify_mbstr(encoding, s, len, false);
-        } else {
-            int i;
-            for (i = 0; i < len; i++) {
-                if (s[i] == '\0' || IS_HIGHBIT_SET(s[i])) {
-                    if (bulkload_illegal_chars_conversion) {
-                        if (s[i] == '\0') {
-                            *((char*)&s[i]) = ' ';
-                        } else {
-                            *((char*)&s[i]) = '?';
-                        }
-                    } else {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_CHARACTER_NOT_IN_REPERTOIRE),
-                                errmsg("invalid byte value for encoding \"%s\": 0x%02x",
-                                    pg_enc2name_tbl[PG_SQL_ASCII].name,
-                                    (unsigned char)s[i])));
-                    }
-                }
-            }
-        }
-        return (char*)s;
+        return verify_string_for_ascii(s, len, encoding, bulkload_illegal_chars_conversion);
     }
 
     if (u_sess->mb_cxt.ClientEncoding->encoding == encoding) {
@@ -697,11 +703,18 @@ char* pg_any_to_client(const char* s, int len, int encoding, void* convert_finfo
     if (len <= 0) {
         return (char*)s;
     }
+    int client_encoding = u_sess->mb_cxt.ClientEncoding->encoding;
 
-    if (encoding == u_sess->mb_cxt.ClientEncoding->encoding || encoding == PG_SQL_ASCII) {
+    if (encoding == client_encoding || client_encoding == PG_SQL_ASCII) {
         /*
          * No conversion is needed, but we must still validate the data.
          */
+        return (char*)s;
+    }
+
+    if (encoding == PG_SQL_ASCII) {
+        /* No conversion is possible, but we must validate the result */
+        (void) pg_verify_mbstr(client_encoding, s, len, false);
         return (char*)s;
     }
 
@@ -709,10 +722,48 @@ char* pg_any_to_client(const char* s, int len, int encoding, void* convert_finfo
         return perform_default_encoding_conversion(s, len, false);
     } else if (convert_finfo != NULL) {
         return try_fast_encoding_conversion(
-            (char*)s, len, encoding, u_sess->mb_cxt.ClientEncoding->encoding, convert_finfo);
+            (char*)s, len, encoding, client_encoding, convert_finfo);
     } else {
         return (char*)pg_do_encoding_conversion(
-            (unsigned char*)s, len, encoding, u_sess->mb_cxt.ClientEncoding->encoding);
+            (unsigned char*)s, len, encoding, client_encoding);
+    }
+}
+
+/*
+ * convert client encoding to encoding.
+ */
+char* pg_client_to_any(const char* s, int len, int dst_encoding, void* convert_finfo)
+{
+    bool bulkload_illegal_chars_conversion = false;
+
+    Assert(u_sess->mb_cxt.ClientEncoding);
+
+    if (len <= 0) {
+        return (char*)s;
+    }
+    if (u_sess->cmd_cxt.bulkload_compatible_illegal_chars) {
+        bulkload_illegal_chars_conversion = true;
+    }
+
+    int client_encoding = u_sess->mb_cxt.ClientEncoding->encoding;
+    if (client_encoding == dst_encoding || client_encoding == PG_SQL_ASCII) {
+        /*
+         * No conversion is needed, but we must still validate the data.
+         */
+        (void)pg_verify_mbstr(dst_encoding, s, len, false);
+        return (char*)s;
+    }
+
+    if (dst_encoding == PG_SQL_ASCII) {
+        return verify_string_for_ascii(s, len, client_encoding, bulkload_illegal_chars_conversion);
+    }
+
+    if (u_sess->mb_cxt.DatabaseEncoding->encoding == dst_encoding) {
+        return perform_default_encoding_conversion(s, len, true);
+    } else if (convert_finfo != NULL) {
+        return try_fast_encoding_conversion( (char*)s, len, client_encoding, dst_encoding, convert_finfo);
+    } else {
+        return (char*)pg_do_encoding_conversion((unsigned char*)s, len, client_encoding, dst_encoding);
     }
 }
 

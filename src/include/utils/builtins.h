@@ -279,6 +279,7 @@ extern Datum int4setle(PG_FUNCTION_ARGS);
 extern Datum int4setge(PG_FUNCTION_ARGS);
 extern Datum findinset(PG_FUNCTION_ARGS);
 extern Datum btint8sortsupport(PG_FUNCTION_ARGS);
+extern void check_duplicate_value_by_collation(List* vals, Oid collation, char type);
 
 /* int.c */
 extern Datum int2in(PG_FUNCTION_ARGS);
@@ -913,6 +914,8 @@ extern char* deparse_alter_sequence(Node* stmt, bool owned_by_none = false);
 extern void get_hint_string(HintState* hstate, StringInfo buf);
 extern void deparse_query(Query* query, StringInfo buf, List* parentnamespace, bool finalise_aggs, bool sortgroup_colno,
     void* parserArg = NULL, bool qrw_phase = false, bool is_fqs = false);
+typedef void (*deparse_query_func)(Query* query, StringInfo buf, List* parentnamespace, bool finalise_aggs,
+    bool sortgroup_colno, void* parserArg, bool qrw_phase, bool is_fqs);
 extern void deparse_targetlist(Query* query, List* targetList, StringInfo buf);
 #endif
 extern List* deparse_context_for(const char* aliasname, Oid relid);

@@ -47,6 +47,7 @@ extern Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype,
     CoercionContext ccontext, CoercionForm cformat, int location);
 extern bool can_coerce_type(int nargs, Oid* input_typeids, Oid* target_typeids, CoercionContext ccontext);
 extern Node *type_transfer(Node *node, Oid atttypid, bool isSelect);
+typedef Node* (*typeTransfer)(Node *node, Oid atttypid, bool isSelect);
 extern Node *const_expression_to_const(Node *node);
 extern Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTypeId, int32 targetTypeMod,
     CoercionContext ccontext, CoercionForm cformat, int location);
@@ -75,8 +76,8 @@ extern CoercionPathType find_coercion_pathway(
 extern CoercionPathType find_typmod_coercion_function(Oid typeId, Oid* funcid);
 
 extern void expression_error_callback(void* arg);
-extern Node* coerce_to_target_charset(
-    Node* expr, int target_charset, Oid target_type, int32 target_typmod, Oid target_collation);
+extern Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, int32 target_typmod, Oid target_collation,
+    bool eval_const = true);
 
 extern Node *transferConstToAconst(Node *node);
 

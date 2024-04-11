@@ -19,6 +19,8 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_attrdef.h"
+#include "catalog/pg_collation.h"
+#include "securec.h"
 #include "common.h"
 #include "describe.h"
 #include "dumputils.h"
@@ -71,6 +73,8 @@ static bool* generateTranslateColumns(int n, int truesz, int* trues);
 
 const char* ORIENTATION_TIMESERIES = "timeseries";
 const char* TS_PSEUDO_DIST_COLUMN = "ts_pseudo_distcol";
+
+extern int dolphin_lower_case_table_names;
 
 /* ----------------
  * Handlers for various slash commands displaying some sort of list
@@ -1132,6 +1136,15 @@ bool describeTableDetails(const char* pattern, bool verbose, bool showSystem)
     PGresult* res = NULL;
     int i;
 
+    PGresult* res_lower_case_table_names = NULL;
+    res_lower_case_table_names = PSQLexec("select setting from pg_settings where name = 'dolphin.lower_case_table_names';", false);
+    if (PQntuples(res_lower_case_table_names) == 1){
+        dolphin_lower_case_table_names = atoi(PQgetvalue(res_lower_case_table_names, 0, 0));
+    } else {
+        dolphin_lower_case_table_names = -1;
+    }
+    PQclear(res_lower_case_table_names);
+
     initPQExpBuffer(&buf);
 
     printfPQExpBuffer(&buf,
@@ -1870,13 +1883,41 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             if (!PQgetisnull(res, i, 6)) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
-                appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 6));
+                char* collate = PQgetvalue(res, i, 6);
+                PQExpBufferData charsetbuf;
+                initPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("select oid,collencoding from pg_collation where collname = '%s';"), collate);
+                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
+                int collid = atoi(PQgetvalue(charset_res, 0, 0));
+                if (COLLATION_IN_B_FORMAT(collid)) {
+                    int charset = atoi(PQgetvalue(charset_res, 0, 1));
+                    const char* encoding = pg_encoding_to_char(charset);
+                    appendPQExpBuffer(&tmpbuf, _("character set %s collate %s"), encoding, collate);
+                } else {
+                    appendPQExpBuffer(&tmpbuf, _("collate %s"), collate);
+                }
+                termPQExpBuffer(&charsetbuf);
+                PQclear(charset_res);
             }
         } else {
             if (!PQgetisnull(res, i, 5)) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
-                appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 5));
+                char* collate = PQgetvalue(res, i, 5);
+                PQExpBufferData charsetbuf;
+                initPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("select oid,collencoding from pg_collation where collname = '%s';"), collate);
+                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
+                int collid = atoi(PQgetvalue(charset_res, 0, 0));
+                if (COLLATION_IN_B_FORMAT(collid)) {
+                    int charset = atoi(PQgetvalue(charset_res, 0, 1));
+                    const char* encoding = pg_encoding_to_char(charset);
+                    appendPQExpBuffer(&tmpbuf, _("character set %s collate %s"), encoding, collate);
+                } else {
+                    appendPQExpBuffer(&tmpbuf, _("collate %s"), collate);
+                }
+                termPQExpBuffer(&charsetbuf);
+                PQclear(charset_res);
             }
         }
 
@@ -3114,6 +3155,31 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         printfPQExpBuffer(&buf, "%s: %s", t, tableinfo.reloptions);
         printTableAddFooter(&cont, buf.data);
+
+        char* p = strstr(tableinfo.reloptions, "collate=");
+        if (p != NULL) {
+            char coll_str[B_FORMAT_COLLATION_STR_LEN + 1] = {0};
+            errno_t rc = memcpy_s(coll_str, sizeof(coll_str), p + strlen("collate="), B_FORMAT_COLLATION_STR_LEN);
+            securec_check_c(rc, "\0", "\0");
+            int collid = atoi(coll_str);
+            if (COLLATION_IN_B_FORMAT(collid)) {
+                PQExpBufferData charsetbuf;
+                initPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("select collname,collencoding from pg_collation where oid = %s;"), coll_str);
+                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
+
+                char* collname = PQgetvalue(charset_res, 0, 0);
+                int charset = atoi(PQgetvalue(charset_res, 0, 1));
+                const char* encoding = pg_encoding_to_char(charset);
+
+                resetPQExpBuffer(&charsetbuf);
+                appendPQExpBuffer(&charsetbuf, _("Character Set: %s\nCollate: %s"), encoding, collname);
+                printTableAddFooter(&cont, charsetbuf.data);
+
+                termPQExpBuffer(&charsetbuf);
+                PQclear(charset_res);
+            }
+        }
     }
 
     /* if rel in blockchain schema */

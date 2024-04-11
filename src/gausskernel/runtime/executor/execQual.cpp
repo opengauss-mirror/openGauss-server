@@ -634,7 +634,7 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
     RightRefState* refState = econtext->rightRefState;
     int index = attnum - 1;
     if (refState && refState->values &&
-        (IS_ENABLE_INSERT_RIGHT_REF(refState) ||
+        ((slot == nullptr && IS_ENABLE_INSERT_RIGHT_REF(refState)) ||
          (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
         *isNull = refState->isNulls[index];
         return refState->values[index];
@@ -1096,6 +1096,7 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
         if (found) {
             if (entry->isParse) {
                 con = (Const *)uservar->value;
+                entry->isParse = false;
             } else {
                 Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
                     -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
@@ -2994,6 +2995,12 @@ static bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo)
         fcinfo->refcursor_data.return_number = 1;
     } else if (return_refcursor) {
         fcinfo->refcursor_data.return_number = out_count;
+    }
+
+    /* func_has_out_param means whether a func with out param and with GUC proc_outparam_override. */
+    bool func_has_out_param = (fcinfo->flinfo) && is_function_with_plpgsql_language_and_outparam((fcinfo->flinfo)->fn_oid);
+    if (func_has_out_param && (return_refcursor || procStruct->prorettype == REFCURSOROID)) {
+        fcinfo->refcursor_data.return_number = out_count + 1;
     }
 
     ReleaseSysCache(proctup);
@@ -6752,8 +6759,8 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
 
     SortTargetListAsArray(refState, targetlist, targetArr);
 
-    InitOutputValues(refState, targetArr, values, isnull, targetCount, hasExecs);
-    
+    InitOutputValues(refState, values, isnull, hasExecs);
+
     /*
      * evaluate all the expressions in the target list
      */

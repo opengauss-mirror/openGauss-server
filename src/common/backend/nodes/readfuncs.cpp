@@ -1648,6 +1648,10 @@ static Query* _readQuery(void)
     IF_EXIST(indexhintList) {
         READ_NODE_FIELD(indexhintList);
     }
+    IF_EXIST(has_uservar)
+    {
+        READ_BOOL_FIELD(has_uservar);
+    }
 
     READ_DONE();
 }
@@ -2131,6 +2135,10 @@ static Param* _readParam(void)
     IF_EXIST(tableOfIndexTypeList)
     {
         READ_NODE_FIELD(tableOfIndexTypeList);
+    }
+    IF_EXIST(is_bind_param)
+    {
+        READ_BOOL_FIELD(is_bind_param);
     }
     READ_DONE();
 }

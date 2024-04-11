@@ -53,7 +53,8 @@ ValueInTuple create_value(Datum data, Oid type, bool isnull)
 {
     uint32_t hashvalue = 0;
     if (!isnull) {
-        hashvalue = DatumGetUInt32(compute_hash(type, data, LOCATOR_TYPE_HASH));
+        /* As before, used invalid collation. B format collation is not supported yet. */
+        hashvalue = DatumGetUInt32(compute_hash(type, data, LOCATOR_TYPE_HASH, InvalidOid));
     }
     ValueInTuple val = {data, type, isnull, hashvalue};
     return val;

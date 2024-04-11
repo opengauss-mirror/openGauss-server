@@ -2484,6 +2484,7 @@ static Param* _copyParam(const Param* from)
     COPY_SCALAR_FIELD(tableOfIndexType);
     COPY_SCALAR_FIELD(recordVarTypOid);
     COPY_NODE_FIELD(tableOfIndexTypeList);
+    COPY_SCALAR_FIELD(is_bind_param);
 
     return newnode;
 }
@@ -4752,6 +4753,9 @@ static Query* _copyQuery(const Query* from)
         COPY_SCALAR_FIELD(isReplace);
     }
     COPY_NODE_FIELD(indexhintList);
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
+        COPY_SCALAR_FIELD(has_uservar);
+    }
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 
@@ -6271,6 +6275,8 @@ static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
     COPY_SCALAR_FIELD(if_not_exists);
     COPY_STRING_FIELD(trgordername);
     COPY_SCALAR_FIELD(is_follows);
+    COPY_STRING_FIELD(schemaname);
+
     return newnode;
 }
 
@@ -8701,6 +8707,7 @@ void* copyObject(const void* from)
             break;
         case T_ShowEventStmt:
             retval =node_copy_show_event_info((ShowEventStmt *)from);
+            break;
         case T_IndexHintRelationData:
             retval = _copyIndexHintRelationData((IndexHintRelationData *)from);
             break;

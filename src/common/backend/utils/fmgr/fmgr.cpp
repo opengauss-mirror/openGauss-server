@@ -48,6 +48,14 @@ THR_LOCAL PGDLLIMPORT needs_fmgr_hook_type needs_fmgr_hook = NULL;
 THR_LOCAL PGDLLIMPORT fmgr_hook_type fmgr_hook = NULL;
 extern void InitFuncCallUDFInfo(FunctionCallInfoData* fcinfo, int argN, bool setFuncPtr);
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+/* for dolphin and whale plugin */
+int a_fmgr_nbuiltins = -1;
+int b_fmgr_nbuiltins = -1;
+FmgrBuiltin *a_fmgr_builtins = NULL;
+FmgrBuiltin *b_fmgr_builtins = NULL;
+#endif
+
 /*
  * Declaration for old-style function pointer type.  This is now used only
  * in fmgr_oldstyle() and is no longer exported.
@@ -191,14 +199,27 @@ const FmgrBuiltin* fmgr_isbuiltin(Oid id)
  */
 static const FmgrBuiltin* fmgr_lookupByName(const char* name)
 {
+    int nbuiltins = fmgr_nbuiltins;
+    const FmgrBuiltin *builtinfunc = fmgr_builtins;
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    if (CUR_THR_IS_WORKER() && IsNormalProcessingMode()) {
+        if (a_fmgr_nbuiltins > 0 && DB_IS_CMPT(A_FORMAT)) {
+            nbuiltins = a_fmgr_nbuiltins;
+            builtinfunc = a_fmgr_builtins;
+        } else if (b_fmgr_nbuiltins > 0 && DB_IS_CMPT(B_FORMAT)) {
+            nbuiltins = b_fmgr_nbuiltins;
+            builtinfunc = b_fmgr_builtins;
+        }
+    }
+#endif
     int low = 0;
-    int high = fmgr_nbuiltins - 1;
+    int high = nbuiltins - 1;
     int ret;
     while (low <= high) {
         int i = (high + low) / 2;
-        ret = strcmp(name, fmgr_builtins[i].funcName);
+        ret = strcmp(name, builtinfunc[i].funcName);
         if (ret == 0) {
-            return fmgr_builtins + i;
+            return builtinfunc + i;
         } else if (ret > 0) {
             low = i + 1;
         } else {
@@ -1262,7 +1283,7 @@ Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1, bool c
     return result;
 }
 
-Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2)
+Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1273,7 +1294,8 @@ Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     fcinfo.arg[1] = arg2;
     fcinfo.argnull[0] = false;
     fcinfo.argnull[1] = false;
-
+    fcinfo.can_ignore = can_ignore;
+	
     result = (*func)(&fcinfo);
 
     /* Check for null result, since caller is clearly not expecting one */
@@ -1285,7 +1307,7 @@ Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     return result;
 }
 
-Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3)
+Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1298,6 +1320,7 @@ Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     fcinfo.argnull[0] = false;
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 
@@ -1310,7 +1333,8 @@ Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     return result;
 }
 
-Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4)
+Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
+    bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1325,6 +1349,7 @@ Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
     fcinfo.argnull[3] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 
@@ -1338,7 +1363,8 @@ Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 }
 
 Datum DirectFunctionCall5Coll(
-    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5)
+    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5,
+    bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1355,6 +1381,7 @@ Datum DirectFunctionCall5Coll(
     fcinfo.argnull[2] = false;
     fcinfo.argnull[3] = false;
     fcinfo.argnull[4] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 
@@ -1368,7 +1395,8 @@ Datum DirectFunctionCall5Coll(
 }
 
 Datum DirectFunctionCall6Coll(
-    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6)
+    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6,
+    bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1387,6 +1415,7 @@ Datum DirectFunctionCall6Coll(
     fcinfo.argnull[3] = false;
     fcinfo.argnull[4] = false;
     fcinfo.argnull[5] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 
@@ -1400,7 +1429,8 @@ Datum DirectFunctionCall6Coll(
 }
 
 Datum DirectFunctionCall7Coll(
-    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6, Datum arg7)
+    PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4, Datum arg5, Datum arg6, Datum arg7,
+    bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1421,6 +1451,7 @@ Datum DirectFunctionCall7Coll(
     fcinfo.argnull[4] = false;
     fcinfo.argnull[5] = false;
     fcinfo.argnull[6] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 
@@ -1434,7 +1465,7 @@ Datum DirectFunctionCall7Coll(
 }
 
 Datum DirectFunctionCall8Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
-    Datum arg5, Datum arg6, Datum arg7, Datum arg8)
+    Datum arg5, Datum arg6, Datum arg7, Datum arg8, bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1457,6 +1488,7 @@ Datum DirectFunctionCall8Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     fcinfo.argnull[5] = false;
     fcinfo.argnull[6] = false;
     fcinfo.argnull[7] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 
@@ -1470,7 +1502,7 @@ Datum DirectFunctionCall8Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 }
 
 Datum DirectFunctionCall9Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4,
-    Datum arg5, Datum arg6, Datum arg7, Datum arg8, Datum arg9)
+    Datum arg5, Datum arg6, Datum arg7, Datum arg8, Datum arg9, bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1495,6 +1527,7 @@ Datum DirectFunctionCall9Coll(PGFunction func, Oid collation, Datum arg1, Datum 
     fcinfo.argnull[6] = false;
     fcinfo.argnull[7] = false;
     fcinfo.argnull[8] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 

@@ -35,6 +35,11 @@
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 
+typedef struct {
+    Datum value;
+    bool isNull;
+} PartKeyExprResult;
+
 typedef enum PartitionType {
     PART_TYPE_NONE = 0,
     PART_TYPE_RANGE,
@@ -119,7 +124,7 @@ extern int getNumberOfListPartitions(Relation rel);
 extern int getNumberOfHashPartitions(Relation rel);
 extern int getNumberOfPartitions(Relation rel);
 extern Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue, bool isnull, Const* cnst);
-Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, Datum datumValue, bool isnull, Const* cnst);
+Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, PartKeyExprResult* result, Const* cnst);
 
 extern int2vector* getPartitionKeyAttrNo(
     Oid** typeOids, HeapTuple pg_part_tup, TupleDesc tupledsc, TupleDesc rel_tupledsc);
@@ -136,11 +141,11 @@ extern int GetSubPartitionNumber(Relation rel);
 
 extern bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid);
 
-extern int constCompare_constType(Const* value1, Const* value2);
+extern int constCompare_constType(Const* value1, Const* value2, Oid collation);
 
 extern bool partitionHasToast(Oid partOid);
 
-extern void constCompare(Const* value1, Const* value2, int& compare);
+extern void constCompare(Const* value1, Const* value2, Oid collation, int& compare);
 
 extern struct ListPartElement* CopyListElements(ListPartElement* src, int elementNum);
 extern struct HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum);

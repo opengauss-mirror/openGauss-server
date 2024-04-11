@@ -209,6 +209,7 @@ static bool _equalParam(const Param* a, const Param* b)
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(tableOfIndexType);
     COMPARE_SCALAR_FIELD(recordVarTypOid);
+    COMPARE_SCALAR_FIELD(is_bind_param);
 
     return true;
 }
@@ -977,6 +978,10 @@ static bool _equalQuery(const Query* a, const Query* b)
     }
     
     COMPARE_NODE_FIELD(indexhintList);
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
+        COMPARE_SCALAR_FIELD(has_uservar);
+    }
+    
     return true;
 }
 
@@ -2280,6 +2285,7 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     COMPARE_SCALAR_FIELD(if_not_exists);
     COMPARE_STRING_FIELD(trgordername);
     COMPARE_SCALAR_FIELD(is_follows);
+    COMPARE_STRING_FIELD(schemaname);
 
     return true;
 }
@@ -4451,6 +4457,7 @@ bool equal(const void* a, const void* b)
             break;
         case T_ShowEventStmt:
             retval = node_equal_show_event_info((const ShowEventStmt *)a, (const ShowEventStmt *)b);
+            break;
         case T_IndexHintDefinition:
             retval = _equalIndexHintDefinition((IndexHintDefinition *)a, (IndexHintDefinition *)b);
             break;

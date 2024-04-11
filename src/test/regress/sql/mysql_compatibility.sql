@@ -216,6 +216,12 @@ select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3;
 
 drop table if exists test1;
 create table test1 (f1 int,f2 int,f3 text);
+
+-- prepare with empty var or not exist var
+set @v_empty := '';
+prepare stmt_empty as @v_empty;
+prepare stmt_empty as @does_not_exist;
+
 -- insertStmt
 set @v2 := 'insert into test1 values(1, 2, 123)';
 prepare stmt2 as @v2;
@@ -316,6 +322,13 @@ create table t2(b int);
 insert into t2 select @num + 10 from t1;
 select * from t2;
 select @num;
+
+-- test insert right ref
+drop table if exists ins_sel_t0;
+CREATE TABLE ins_sel_t0 ( c3 INT , c10 INT ) ;
+INSERT INTO ins_sel_t0 VALUES ( -66 , 54 ) ,
+    ( EXISTS ( SELECT 76 AS c42 WHERE c3 = 12 IS NOT FALSE ) NOT IN ( 75 >= -80 ) , -99 ) ; -- should error
+drop table ins_sel_t0;
 
 --test as function parameter
 set @num := 1;
@@ -533,7 +546,21 @@ select @a_1131028:=cast('x' as text);
 select @a_1131028:=cast(2 as int);
 select @a_1131028:=cast(2 as number);
 
-
+DROP PROCEDURE IF EXISTS load_tbtest_WITH_REPLACE;
+CREATE PROCEDURE load_tbtest_WITH_REPLACE(id_count IN INT) AS
+BEGIN
+    SET @id = 1;
+    WHILE @id <= id_count LOOP
+        raise info 'id is %',@id;
+        IF @id % 10 = 0 THEN
+            SET @lsql = '';
+        END IF;
+        SET @id = @id + 1;
+        raise info 'id+ is %',@id;
+    END LOOP;
+END;
+/
+call load_tbtest_WITH_REPLACE(3);
 
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;

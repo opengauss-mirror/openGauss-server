@@ -159,20 +159,22 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
         (cformat != COERCE_IMPLICIT_CAST),
         (result != expr && !IsA(result, Const)));
 
+    if (expr != origexpr && (
 #ifdef PGXC
-    /* Do not need to do that on local Coordinator */
-    if (IsConnFromCoord())
+        /* Do not need to do that on local Coordinator */
+        IsConnFromCoord() ||
 #endif
-        if (expr != origexpr) {
-            /* Reinstall top CollateExpr */
-            CollateExpr* coll = (CollateExpr*)origexpr;
-            CollateExpr* newcoll = makeNode(CollateExpr);
+        type_is_collatable(targettype))) {
 
-            newcoll->arg = (Expr*)result;
-            newcoll->collOid = coll->collOid;
-            newcoll->location = coll->location;
-            result = (Node*)newcoll;
-        }
+        /* Reinstall top CollateExpr */
+        CollateExpr* coll = (CollateExpr*)origexpr;
+        CollateExpr* newcoll = makeNode(CollateExpr);
+
+        newcoll->arg = (Expr*)result;
+        newcoll->collOid = coll->collOid;
+        newcoll->location = coll->location;
+        result = (Node*)newcoll;
+    }
 
     return result;
 }
@@ -186,7 +188,8 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
  * target_charset - desired result character set
  * target_type - desired result type
  */
-Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, int32 target_typmod, Oid target_collation)
+Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, int32 target_typmod,
+    Oid target_collation, bool eval_const)
 {
     FuncExpr* fexpr = NULL;
     Node* result = NULL;
@@ -238,7 +241,7 @@ Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, 
 
     /* set collation after coerce_to_target_type */
     exprSetCollation(result, target_collation);
-    if (IsA(expr, Const) || IsA(expr, RelabelType)) {
+    if (eval_const && (IsA(expr, Const) || IsA(expr, RelabelType))) {
         result = eval_const_expression_value(NULL, result, NULL);
     }
     return result;
@@ -252,6 +255,9 @@ Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target_type, 
  */
 Node *type_transfer(Node *node, Oid atttypid, bool isSelect)
 {
+    if (u_sess->hook_cxt.typeTransfer != NULL) {
+        return ((typeTransfer)(u_sess->hook_cxt.typeTransfer))(node, atttypid, isSelect);
+    }
     Node *result = NULL;
     Const *con = (Const *)node;
     if (con->constisnull) {
@@ -3078,7 +3084,7 @@ Const* setValueToConstExpr(SetVariableExpr* set)
         case PGC_BOOL:
             {
                 bool variable_bool = false;
-                if (strcmp(variable_str,"true") || strcmp(variable_str,"on")) {
+                if (strcmp(variable_str, "true") == 0 || strcmp(variable_str,"on") == 0) {
                     variable_bool = true;
                 }
                 val = BoolGetDatum(variable_bool);
