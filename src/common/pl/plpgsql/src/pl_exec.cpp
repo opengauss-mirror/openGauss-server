@@ -1419,7 +1419,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
                 errmodule(MOD_PLSQL),
                 errmsg("Mismatch between function parameter number [%d:%d].", func->fn_nargs, fcinfo->nargs)));
     }
-    bool is_plpgsql_function_with_outparam = is_function_with_plpgsql_language_and_outparam(func->fn_oid);
+    bool is_plpgsql_function_with_outparam = func->is_plpgsql_func_with_outparam;
     if (func->fn_nargs != fcinfo->nargs && is_plpgsql_function_with_outparam) {
         procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->fn_oid));
         proArgModes = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proargmodes, &isNULL);
@@ -5948,8 +5948,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
         return PLPGSQL_RC_RETURN;
     }
 
-    bool needParamSeperation = estate->func->is_plpgsql_func_with_outparam &&
-                               ((estate->func->guc_stat & OPT_PROC_OUTPARAM_OVERRIDE) != 0);
+    bool needParamSeperation = estate->func->is_plpgsql_func_with_outparam;
     if (needParamSeperation && stmt->expr == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PLSQL),
                         errmsg("Value assignment for the out parameter in plpgsql language functions, Unsupported "

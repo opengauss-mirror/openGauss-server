@@ -2190,8 +2190,7 @@ void set_result_for_plpgsql_language_function_with_outparam(FuncExprState *fcach
     if (!IsA(fcache->xprstate.expr, FuncExpr)) {
         return;
     }
-    FuncExpr *func = (FuncExpr *)fcache->xprstate.expr;
-    if (!is_function_with_plpgsql_language_and_outparam(func->funcid)) {
+    if (!fcache->is_plpgsql_func_with_outparam) {
         return;
     }
     HeapTupleHeader td = DatumGetHeapTupleHeader(*result);
@@ -5895,6 +5894,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
 
            fstate->args = (List*)ExecInitExprByRecursion((Expr*)funcexpr->args, parent);
            fstate->func.fn_oid = InvalidOid; /* not initialized */
+           fstate->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(funcexpr->funcid);
            fstate->funcReturnsSet = false;
            state = (ExprState*)fstate;
        } break;

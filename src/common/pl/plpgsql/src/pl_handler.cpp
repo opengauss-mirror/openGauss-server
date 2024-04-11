@@ -903,7 +903,13 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         if (func->fn_readonly) {
             stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_IMMUTABLE);
         }
-        func->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(func->fn_oid);
+        
+        bool guc_changed = ((u_sess->utils_cxt.behavior_compat_flags & OPT_PROC_OUTPARAM_OVERRIDE) !=
+                           (func->guc_stat & OPT_PROC_OUTPARAM_OVERRIDE));
+        if (guc_changed) {
+            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmodule(MOD_PLSQL),
+                           errmsg("Cannot change the PROC_OUTPARAM_OVERRIDE guc status while in the same session.")));
+        }
 
         restoreCallFromPkgOid(firstLevelPkgOid);
 

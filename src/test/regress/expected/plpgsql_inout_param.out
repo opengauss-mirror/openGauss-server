@@ -1884,10 +1884,8 @@ select test_inout_func2();
 
 set behavior_compat_options="proc_outparam_override";
 select test_inout_func2();
-ERROR:  tuple is null
-DETAIL:  it may be because change guc behavior_compat_options in one session
-CONTEXT:  PL/pgSQL function test_inout_func2() line 4 at RETURN
-referenced column: test_inout_func2
+ERROR:  Cannot change the PROC_OUTPARAM_OVERRIDE guc status while in the same session.
+CONTEXT:  referenced column: test_inout_func2
 drop function test_inout_func2();
 drop function test_inout_func();
 drop type test_inout_type;

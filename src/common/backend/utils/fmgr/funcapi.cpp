@@ -207,11 +207,28 @@ bool is_function_with_plpgsql_language_and_outparam(Oid funcid)
         ReleaseSysCache(tp);
         return false;
     }
-    isNull = false;
-    (void)SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_proallargtypes, &isNull);
+    
+    Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tp, Anum_pg_proc_proargmodes, &isNull);
     if (!isNull) {
-        existOutParam = true;
+        ArrayType* arr = DatumGetArrayTypeP(proargmodes);
+        if (arr != NULL) {
+            int modelen = ARR_DIMS(arr)[0];
+            char *argmodes = (char*)ARR_DATA_PTR(arr);
+            for (int i = 0; i < modelen; i++) {
+                if (argmodes[i] == PROARGMODE_OUT || argmodes[i] == PROARGMODE_INOUT ||
+                    argmodes[i] == PROARGMODE_TABLE) {
+                    existOutParam = true;
+                    break;
+                }
+            }
+        }
     }
+    Form_pg_proc procstruct = (Form_pg_proc)GETSTRUCT(tp);
+    if (existOutParam && procstruct->proretset) {
+        ReleaseSysCache(tp);
+        return false;
+    }
+    
     ReleaseSysCache(tp);
     return existOutParam;
 }

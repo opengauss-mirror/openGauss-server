@@ -922,6 +922,16 @@ select pck1.f1(10,(1,'a',2));
 select *from pck1.f1(10,(1,'a',2));
 call pck1.f1(10,(1,'a',2));
 
+-- test expect no core
+drop function if exists v_func1;
+create FUNCTION v_func1(c4 variadic integer[]) RETURN int is
+BEGIN
+raise notice 'c4 = %', c4;
+return 1;
+END;
+/
+select v_func1(1, 2, 3);
+drop function v_func1;
 
 --clean
 reset behavior_compat_options;

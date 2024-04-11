@@ -983,10 +983,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
              * directly to it.	If there's more than one, build a row that
              * holds all of them.
              */
-            if (num_out_args == 1 && !is_function_with_plpgsql_language_and_outparam(func->fn_oid)) {
+            func->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(func->fn_oid);
+            if (num_out_args == 1 && !func->is_plpgsql_func_with_outparam) {
                 func->out_param_varno = out_arg_variables[0]->dno;
             } else if (num_out_args > 1 || (num_out_args == 1 &&
-                is_function_with_plpgsql_language_and_outparam(func->fn_oid))) {
+                       func->is_plpgsql_func_with_outparam)) {
                 PLpgSQL_row* row = build_row_from_vars(out_arg_variables, num_out_args);
                 row->isImplicit = true;
 
@@ -5449,7 +5450,7 @@ void gsplsql_lock_depend_pkg_on_session(PLpgSQL_function* func)
                                                                            &key, HASH_ENTER, &found);
         if (!found || !entry->has_locked) {
             entry->has_locked = false;
-            LockPackageIdForSession(func->fn_oid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
+            LockPackageIdForSession(func->pkg_oid, u_sess->proc_cxt.MyDatabaseId, AccessShareLock);
             entry->has_locked = true;
         }
     }
