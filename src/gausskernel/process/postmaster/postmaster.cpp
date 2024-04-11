@@ -942,9 +942,10 @@ bool SetDBStateFileState(DbState state, bool optional)
         len = read(fd, &s, sizeof(GaussState));
         /* sizeof(int) is for current_connect_idx of GaussState */
         if ((len != sizeof(GaussState)) && (len != sizeof(GaussState) - sizeof(int))) {
-            write_stderr("Failed to read gaussdb.state: %d", errno);
+            write_stderr("Failed to read gaussdb.state: %d, len: %d", errno, len);
             (void)close(fd);
-            return false;
+            (void)unlink(gaussdb_state_file);
+            return true;
         }
 
         if (close(fd) != 0) {
@@ -3813,12 +3814,12 @@ static int ServerLoop(void)
 
 #ifdef HAVE_POLL
 
-                if (ufds[i].revents & POLLIN) {
-                    ufds[i].revents = 0;
+                if (ufds[i].revents & POLLIN)
 #else
 
-                if (FD_ISSET(g_instance.listen_cxt.ListenSocket[i], &rmask)) {
+                if (FD_ISSET(g_instance.listen_cxt.ListenSocket[i], &rmask))
 #endif
+                {
                     Port* port = NULL;
 
                     ufds[i].revents = 0;

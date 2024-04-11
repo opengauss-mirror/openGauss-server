@@ -1317,6 +1317,8 @@ static OpClassCacheEnt* LookupOpclassInfo(Relation relation, Oid operatorClassOi
 static void RelationCacheInitFileRemoveInDir(const char* tblspcpath);
 static void unlink_initfile(const char* initfilename);
 static void meta_rel_init_index_amroutine(Relation relation);
+static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool buildkey);
+static void RelationReloadIndexInfoExtended(Relation relation);
 
 /*
  *		ScanPgRelation
@@ -2186,6 +2188,46 @@ void SetBackendId(Relation relation)
  */
 Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
 {
+    int offset = 0;
+    Relation relation = NULL;
+
+    /* Register to catch invalidation messages */
+    offset = PushInvalMsgProcList(targetRelId);
+
+    while (true) {
+        relation = RelationBuildDescExtended(targetRelId, insertIt, buildkey);
+
+        /*
+         * If an invalidation arrived mid-build, start over.  Between here and the
+         * end of this function, don't add code that does or reasonably could read
+         * system catalogs.  That range must be free from invalidation processing
+         * for the !insertIt case.  For the insertIt case, RelationCacheInsert()
+         * will enroll this relation in ordinary relcache invalidation processing,
+         */
+        if (relation && t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            RelationDestroyRelation(relation, false);
+            relation = NULL;
+            ResetInvalMsgProcListInval(offset);
+            continue;
+        }
+
+        break;
+    }
+
+    PopInvalMsgProcList(offset);
+
+    /*
+     * Insert newly created relation into relcache hash table, if requested.
+     */
+    if (relation && insertIt) {
+        RelationIdCacheInsertIntoLocal(relation);
+    }
+
+    return relation;
+}
+
+static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool buildkey)
+{
     Relation relation;
     HeapTuple pg_class_tuple;
     Form_pg_class relp;
@@ -2405,12 +2447,6 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
 
     /* It's fully valid */
     relation->rd_isvalid = true;
-    /*
-     * Insert newly created relation into relcache hash table, if requested.
-     */
-    if (insertIt) {
-        RelationIdCacheInsertIntoLocal(relation);
-    }
 
     return relation;
 }
@@ -3395,6 +3431,38 @@ void RelationClose(Relation relation)
  */
 void RelationReloadIndexInfo(Relation relation)
 {
+    int offset = 0;
+
+    /* Register to catch invalidation messages */
+    offset = PushInvalMsgProcList(RelationGetRelid(relation));
+
+    while (true) {
+        Assert(relation->rd_isvalid == false);
+        RelationReloadIndexInfoExtended(relation);
+
+        /*
+         * If an invalidation arrived mid-build, start over.  Between here and the
+         * end of this function, don't add code that does or reasonably could read
+         * system catalogs.  That range must be free from invalidation processing
+         * for the !insertIt case.  For the insertIt case, RelationCacheInsert()
+         * will enroll this relation in ordinary relcache invalidation processing,
+         */
+        if (t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            relation->rd_isvalid = false;
+            ResetInvalMsgProcListInval(offset);
+            continue;
+        }
+
+        break;
+    }
+
+    PopInvalMsgProcList(offset);
+
+    return;
+}
+
+static void RelationReloadIndexInfoExtended(Relation relation)
+{
     bool indexOK = false;
     HeapTuple pg_class_tuple;
     Form_pg_class relp;
@@ -3767,6 +3835,18 @@ void RelationClearRelation(Relation relation, bool rebuild)
         if (!RelationIsValid(newrel)) {
             newrel = RelationBuildDesc(save_relid, false, buildkey);
         }
+
+        /*
+         * Between here and the end of the swap, don't add code that does or
+         * reasonably could read system catalogs.  That range must be free
+         * from invalidation processing.  See RelationBuildDesc() manipulation
+         * of in_progress_list.
+         * 
+         * To avoid adding code to reset b_can_not_process when return
+         * in the newrel==NULL branch.
+         */
+        t_thrd.inval_msg_cxt.b_can_not_process = (newrel != NULL);
+
         if (newrel == NULL) {
             /*
              * We can validly get here, if we're using a historic snapshot in
@@ -3884,6 +3964,9 @@ void RelationClearRelation(Relation relation, bool rebuild)
         SWAPFIELD(LocalRelationEntry*, entry);
 #undef SWAPFIELD
 
+        /* swap ended, allow invalidation processing */
+        t_thrd.inval_msg_cxt.b_can_not_process = false;
+
         /* And now we can throw away the temporary entry */
         RelationDestroyRelation(newrel, !keep_tupdesc);
     }
@@ -3965,6 +4048,18 @@ void RelationCacheInvalidateEntry(Oid relationId)
     }
     Relation relation;
 
+    /*
+     * The cache already exists, and there may also be nested rebuild realtions. 
+     * The Relation of the outermost rebuild may be outdated, so it is still necessary
+     * to set invalidated=true to allow the outermost rebuild build to occur.
+     * 
+     * TOD
+     * When the *relationId* is being build and an invalid message is received,
+     * if it is a regular table, it is not necessary to rebuild, try again at the outermost layer
+     * to avoid nested call stacks being too deep.
+     */
+    SetInvalMsgProcListInval(relationId);
+
     RelationIdCacheLookupOnlyLocal(relationId, relation);
 
     if (PointerIsValid(relation)) {
@@ -3979,10 +4074,11 @@ void RelationCacheInvalidateEntry(Oid relationId)
  *	 and rebuild those with positive reference counts.	Also reset the smgr
  *	 relation cache and re-read relation mapping data.
  *
- *	 This is currently used only to recover from SI message buffer overflow,
- *	 so we do not touch new-in-transaction relations; they cannot be targets
- *	 of cross-backend SI updates (and our own updates now go through a
- *	 separate linked list that isn't limited by the SI message buffer size).
+ *	 Apart from debug_discard_caches, this is currently used only to recover
+ *	 from SI message buffer overflow, so we do not touch relations having
+ *	 new-in-transaction relfilenodes; they cannot be targets of cross-backend
+ *	 SI updates (and our own updates now go through a separate linked list
+ *	 that isn't limited by the SI message buffer size).
  *	 Likewise, we need not discard new-relfilenode-in-transaction hints,
  *	 since any invalidation of those would be a local event.
  *
@@ -4002,6 +4098,11 @@ void RelationCacheInvalidateEntry(Oid relationId)
  *	 second pass processes nailed-in-cache items before other nondeletable
  *	 items.  This should ensure that system catalogs are up to date before
  *	 we attempt to use them to reload information about other open relations.
+ *
+ *	 After those two phases of work having immediate effects, we normally
+ *	 signal any RelationBuildDesc() on the stack to start over.  However, we
+ *	 don't do this if called as part of debug_discard_caches.  Otherwise,
+ *	 RelationBuildDesc() would become an infinite loop.
  */
 
 void RelationCacheInvalidate(void)
@@ -4092,6 +4193,9 @@ void RelationCacheInvalidate(void)
         RelationClearRelation(relation, true);
     }
     list_free_ext(rebuildList);
+
+    /* Any RelationBuildDesc() on the stack must start over. */
+    SetInvalMsgProcListInvalAll();
 }
 
 /*
@@ -4310,6 +4414,14 @@ void AtEOXact_FreeTupleDesc()
  */
 void AtEOXact_RelationCache(bool isCommit)
 {
+    /*
+     * Forget in_progress_list.  This is relevant when we're aborting due to
+     * an error during RelationBuildDesc().
+     */
+    Assert(t_thrd.inval_msg_cxt.in_progress_list_len == 0 || !isCommit);
+    t_thrd.inval_msg_cxt.in_progress_list_len = 0;
+    t_thrd.inval_msg_cxt.b_can_not_process = false;
+
     if (EnableLocalSysCache()) {
         t_thrd.lsc_cxt.lsc->tabdefcache.AtEOXact_RelationCache(isCommit);
         return;
@@ -4434,6 +4546,14 @@ void AtEOXact_RelationCache(bool isCommit)
  */
 void AtEOSubXact_RelationCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid)
 {
+    /*
+     * Forget in_progress_list.  This is relevant when we're aborting due to
+     * an error during RelationBuildDesc().
+     */
+    Assert(t_thrd.inval_msg_cxt.in_progress_list_len == 0 || !isCommit);
+    t_thrd.inval_msg_cxt.in_progress_list_len = 0;
+    t_thrd.inval_msg_cxt.b_can_not_process = false;
+
     if (EnableLocalSysCache()) {
         t_thrd.lsc_cxt.lsc->tabdefcache.AtEOSubXact_RelationCache(isCommit, mySubid, parentSubid);
         return;

@@ -1139,3 +1139,106 @@ SELECT 1
 
 drop table t1;
 drop table rt1;
+--test inner unique + smp
+set query_dop=32;
+set enable_inner_unique_opt=true;
+set enable_material=off;
+create table test_a(a int, b int);
+create table test_b(c int, d int);
+insert into test_a values(1,2),(1,3),(1,4);
+insert into test_b values(1,2),(1,2),(1,3),(1,3),(1,4),(1,4);
+create unique index test_inner_idx on test_a(b);
+--merge join
+explain (verbose ,costs off)
+select /*+ mergejoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Merge Join
+   Output: test_a.a, test_a.b, test_b.c, test_b.d
+   Inner Unique: true
+   Merge Cond: (test_b.d = test_a.b)
+   ->  Sort
+         Output: test_b.c, test_b.d
+         Sort Key: test_b.d
+         ->  Seq Scan on public.test_b
+               Output: test_b.c, test_b.d
+   ->  Index Scan using test_inner_idx on public.test_a
+         Output: test_a.a, test_a.b
+(11 rows)
+
+select /*+ mergejoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d;
+ a | b | c | d 
+---+---+---+---
+ 1 | 2 | 1 | 2
+ 1 | 2 | 1 | 2
+ 1 | 3 | 1 | 3
+ 1 | 3 | 1 | 3
+ 1 | 4 | 1 | 4
+ 1 | 4 | 1 | 4
+(6 rows)
+
+--hash join
+explain (verbose ,costs off)
+select /*+ hashjoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Sort
+   Output: test_a.a, test_a.b, test_b.c, test_b.d
+   Sort Key: test_a.a, test_a.b
+   ->  Hash Join
+         Output: test_a.a, test_a.b, test_b.c, test_b.d
+         Inner Unique: true
+         Hash Cond: (test_b.d = test_a.b)
+         ->  Seq Scan on public.test_b
+               Output: test_b.c, test_b.d
+         ->  Hash
+               Output: test_a.a, test_a.b
+               ->  Index Scan using test_inner_idx on public.test_a
+                     Output: test_a.a, test_a.b
+(13 rows)
+
+select /*+ hashjoin(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+ a | b | c | d 
+---+---+---+---
+ 1 | 2 | 1 | 2
+ 1 | 2 | 1 | 2
+ 1 | 3 | 1 | 3
+ 1 | 3 | 1 | 3
+ 1 | 4 | 1 | 4
+ 1 | 4 | 1 | 4
+(6 rows)
+
+--nestloop
+explain (verbose ,costs off)
+select /*+ nestloop(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Sort
+   Output: test_a.a, test_a.b, test_b.c, test_b.d
+   Sort Key: test_a.a, test_a.b
+   ->  Nested Loop
+         Output: test_a.a, test_a.b, test_b.c, test_b.d
+         Inner Unique: true
+         ->  Seq Scan on public.test_b
+               Output: test_b.c, test_b.d
+         ->  Index Scan using test_inner_idx on public.test_a
+               Output: test_a.a, test_a.b
+               Index Cond: (test_a.b = test_b.d)
+(11 rows)
+
+select /*+ nestloop(test_a test_b) leading((test_b test_a)) indexscan(test_a test_inner_idx)*/ * from test_a,test_b where b=d order by a,b;
+ a | b | c | d 
+---+---+---+---
+ 1 | 2 | 1 | 2
+ 1 | 2 | 1 | 2
+ 1 | 3 | 1 | 3
+ 1 | 3 | 1 | 3
+ 1 | 4 | 1 | 4
+ 1 | 4 | 1 | 4
+(6 rows)
+
+drop table test_a;
+drop table test_b;
+reset query_dop;
+reset enable_inner_unique_opt;
+reset enable_material;

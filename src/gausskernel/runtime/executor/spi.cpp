@@ -31,6 +31,7 @@
 #include "miscadmin.h"
 #include "parser/parser.h"
 #include "pgxc/pgxc.h"
+#include "tcop/autonomoustransaction.h"
 #include "tcop/pquery.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
@@ -162,7 +163,8 @@ int SPI_connect_ext(CommandDest dest, void (*spiCallbackfn)(void *), void *clien
     u_sess->SPI_cxt._current->internal_xact = false;
 
     if (u_sess->SPI_cxt._connected == 0) {
-        u_sess->SPI_cxt.autonomous_session = NULL;
+        /* may leak by last time, better clean it */
+        DestoryAutonomousSession(true);
     }
 
     /*

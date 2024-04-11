@@ -1303,10 +1303,10 @@ void BitmapHeapPrefetchNext(
         Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
         int2 oldBktId = cbi_get_current_bucketid(node->cbi_scan);
         Relation oldheap = NULL;
+        Relation prefetchRel = scan->rs_rd;
         
         while (node->prefetch_pages < node->prefetch_target) {
             TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
-            Relation prefetchRel = scan->rs_rd;
             hpscan = (tbm_is_crossbucket(node->tbm) ? (HBktTblScanDesc)node->ss.ss_currentScanDesc : NULL);
 
             if (tbmpre == NULL) {

@@ -2505,6 +2505,15 @@ static teReqs _tocEntryRequired(TocEntry* te, teSection curSection, RestoreOptio
     if (strcmp(te->desc, "ENCODING") == 0 || strcmp(te->desc, "STDSTRINGS") == 0)
         return REQ_SPECIAL;
 
+    /*
+     * DATABASE and DATABASE PROPERTIES also have a special rule: they are
+     * restored in createDB mode, and not restored otherwise, independently of
+     * all else.
+     */
+    if (strcmp(te->desc, "DATABASE") == 0 || strcmp(te->desc, "DATABASE PROPERTIES") == 0) {
+        return ropt->createDB ? REQ_SCHEMA : (teReqs)0;
+    }
+
     /* If it's an ACL, maybe ignore it */
     if (ropt->aclsSkip && _tocEntryIsACL(te))
         return (teReqs)0;

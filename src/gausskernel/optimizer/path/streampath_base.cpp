@@ -1116,6 +1116,7 @@ Path* HashJoinPathGen::createHashJoinPath()
     pathnode->jpath.path.pathkeys = NIL;
     pathnode->jpath.path.dop = m_dop;
     pathnode->jpath.jointype = m_jointype;
+    pathnode->jpath.inner_unique = m_extra->inner_unique;
     pathnode->jpath.outerjoinpath = m_outerStreamPath;
     pathnode->jpath.innerjoinpath = m_innerStreamPath;
     pathnode->jpath.joinrestrictinfo = m_joinRestrictinfo;
@@ -1365,6 +1366,7 @@ Path* NestLoopPathGen::createNestloopPath()
     }
     pathnode->path.dop = m_dop;
     pathnode->jointype = m_jointype;
+    pathnode->inner_unique = m_extra->inner_unique;
     pathnode->outerjoinpath = m_outerStreamPath;
     pathnode->innerjoinpath = m_innerStreamPath;
     pathnode->joinrestrictinfo = m_joinClauses;
@@ -1552,6 +1554,7 @@ Path* MergeJoinPathGen::createMergejoinPath()
         m_root, m_rel, m_outerStreamPath, m_innerStreamPath, m_extra->sjinfo, m_requiredOuter, &m_joinRestrictinfo);
     pathnode->jpath.path.pathkeys = m_pathkeys;
     pathnode->jpath.jointype = m_jointype;
+    pathnode->jpath.inner_unique = m_extra->inner_unique;
     pathnode->jpath.outerjoinpath = m_outerStreamPath;
     pathnode->jpath.innerjoinpath = m_innerStreamPath;
     pathnode->jpath.joinrestrictinfo = m_joinRestrictinfo;

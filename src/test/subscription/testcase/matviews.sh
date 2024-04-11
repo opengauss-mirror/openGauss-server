@@ -35,6 +35,22 @@ function test_1() {
 	# not replicated, so this does not hang.
 
 	echo "materialized view data not replicated";
+
+	# create a MV on the subscriber
+	exec_sql $case_db $sub_node1_port "CREATE MATERIALIZED VIEW testmv1 AS SELECT * FROM test1;"
+	exec_sql $case_db $pub_node1_port "INSERT INTO test1 (a, b) VALUES (3, 'three')"
+	wait_for_catchup $case_db $pub_node1_port "mysub"
+
+	exec_sql $case_db $sub_node1_port "REFRESH MATERIALIZED VIEW testmv1"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM testmv1")" = "1|one
+2|two
+3|three" ]; then
+		echo "check if refresh materialized view success"
+	else
+		echo "$failed_keyword when check if refresh materialized view"
+		exit 1
+	fi
 }
 
 function tear_down() {

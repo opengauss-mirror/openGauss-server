@@ -5811,10 +5811,12 @@ void WalSndSetState(WalSndState state)
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->state = state;
-    if (state == WALSNDSTATE_CATCHUP)
+    if (state == WALSNDSTATE_CATCHUP) {
         walsnd->catchupTime[0] = GetCurrentTimestamp();
-    else if (state == WALSNDSTATE_STREAMING)
+        pg_atomic_exchange_u32(&g_instance.noNeedWaitForCatchup, 0);
+    } else if (state == WALSNDSTATE_STREAMING) {
         walsnd->catchupTime[1] = GetCurrentTimestamp();
+    }
     SpinLockRelease(&walsnd->mutex);
 }
 

@@ -870,7 +870,7 @@ static bool DispatchMultiXactRecord(XLogReaderState *record, List *expectedTLIs,
     /* page worker will not use multixact */
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
 
-    return false;
+    return true;
 }
 
 /* Run from the dispatcher thread. */

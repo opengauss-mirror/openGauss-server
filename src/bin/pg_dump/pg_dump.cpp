@@ -711,7 +711,15 @@ int main(int argc, char** argv)
     } else if (archiveFormat == archNull) {
         exit_horribly(NULL, "Compress mode is not supported for plain text.\n");
     }
-
+    
+    /*
+	 * If emitting an archive format, we always want to emit a DATABASE item,
+	 * in case --create is specified at pg_restore time.
+     */
+    if (!plainText) {
+        outputCreateDB = 1;
+    }
+    
     // Overwrite  the file if file already exists and overwrite option is specified
     if ((NULL != filename) && (archDirectory != archiveFormat) && (true == dont_overwritefile) &&
         (true == fileExists(filename))) {
@@ -2844,7 +2852,7 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
         /* Dump/restore using COPY */
         dumpFn = dumpTableData_copy;
         /* must use 2 steps here 'cause fmtId is nonreentrant */
-        appendPQExpBuffer(copyBuf, "COPY %s ", fmtId(tbinfo->dobj.name));
+        appendPQExpBuffer(copyBuf, "COPY %s.%s ", tbinfo->dobj.nmspace->dobj.name, fmtId(tbinfo->dobj.name));
         appendPQExpBuffer(copyBuf,
             "%s %sFROM stdin;\n",
             fmtCopyColumnList(tbinfo),
@@ -19450,8 +19458,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * Attach to type, if reloftype; except in case of a binary upgrade,
          * we dump the table normally and attach it to the type afterward.
          */
-        if ((tbinfo->reloftype != NULL) && !binary_upgrade)
-            appendPQExpBuffer(q, " OF %s", tbinfo->reloftype);
+        if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
+            Oid typeOid = atooid(tbinfo->reloftype);
+            appendPQExpBuffer(q, " OF %s", getFormattedTypeName(fout, typeOid, zeroAsNone));
+        }
         /*
          * No matter row table or colunm table, We can make suere that attrNums >= 1.
          */

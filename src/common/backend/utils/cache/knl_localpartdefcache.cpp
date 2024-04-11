@@ -243,6 +243,7 @@ void LocalPartDefCache::InvalidateGlobalPartition(Oid db_id, Oid part_oid, bool 
 void LocalPartDefCache::InvalidateAll(void)
 {
     if (unlikely(!m_is_inited)) {
+        SetInvalMsgProcListInvalAll();
         return;
     }
     List *rebuildList = NIL;
@@ -286,6 +287,8 @@ void LocalPartDefCache::InvalidateAll(void)
         PartitionClearPartition(part, true);
     }
     list_free_ext(rebuildList);
+
+    SetInvalMsgProcListInvalAll();
 }
 
 void LocalPartDefCache::AtEOXact_PartitionCache(bool isCommit)
@@ -449,7 +452,7 @@ Partition LocalPartDefCache::PartitionIdGetPartition(Oid part_oid, StorageType s
         oid_lock = m_global_partdefcache->GetHashValueLock(hash_value);
         AcquireGSCTableReadLock(&has_concurrent_lock, oid_lock);
     }
-    pd = PartitionBuildDesc(part_oid, storage_type, true);
+    pd = PartitionBuildDesc(part_oid, storage_type, true, false);
     if (PartitionIsValid(pd) && is_oid_store_in_global && has_concurrent_lock) {
         InsertPartitionIntoGlobal(pd, hash_value);
     }

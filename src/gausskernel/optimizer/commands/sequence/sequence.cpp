@@ -834,7 +834,11 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
         namespaceOid = get_namespace_oid(seq->sequence->schemaname, true);
     }
     /* temp sequence and single_node do not need gtm, they use information on local node */
+#ifdef ENABLE_MUTIPLE_NODES
     isUseLocalSeq = IS_SINGLE_NODE || isTempNamespace(namespaceOid);
+#else
+    isUseLocalSeq = true;
+#endif
 
     bool notSupportTmpSeq = false;
     if (seq->sequence->relpersistence == RELPERSISTENCE_TEMP ||

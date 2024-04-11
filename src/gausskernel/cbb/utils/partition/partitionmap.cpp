@@ -61,6 +61,8 @@
 #include "utils/datum.h"
 #include "utils/knl_relcache.h"
 
+static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartition);
+
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
 #define overFlowCheck(arg)                                                                \
     do {                                                                                  \
@@ -770,6 +772,35 @@ char GetSubPartitionStrategy(List* partition_list, Form_pg_partition partitioned
  *			: partitioned_form->intervalnum + partitioned_form->rangenum !=  partition_list->length
  */
 void RelationInitPartitionMap(Relation relation, bool isSubPartition)
+{
+    int offset = 0;
+
+    /* Register to catch invalidation messages */
+    offset = PushInvalMsgProcList(RelationGetRelid(relation));
+
+    while (true) {
+        Assert(relation->partMap == NULL);
+        RelationInitPartitionMapExtended(relation, isSubPartition);
+
+        /* Annotations can be found in RelationBuildDesc() */
+        if (t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            if (relation->partMap) {
+                DestroyPartitionMap(relation->partMap);
+            }
+            relation->partMap = NULL;
+            ResetInvalMsgProcListInval(offset);
+            continue;
+        }
+
+        break;
+    }
+
+    PopInvalMsgProcList(offset);
+
+    return;
+}
+
+static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartition)
 {
     List* partition_list = NIL;
     Relation pg_partition = NULL;

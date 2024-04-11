@@ -1011,6 +1011,7 @@ void knl_instance_init()
     g_instance.needCheckConflictSubIds = NIL;
     pthread_mutex_init(&g_instance.subIdsLock, NULL);
 #endif
+    g_instance.noNeedWaitForCatchup = 0;
 
     knl_g_datadir_init(&g_instance.datadir_cxt);
     knl_g_listen_sock_init(&g_instance.listen_cxt);

@@ -61,3 +61,55 @@ raise info 'var:%',var;
 end;
 /
 
+create or replace function test_create_function_ex_1()
+returns text
+language plpgsql
+as $function$
+declare
+xx varchar(10) default null;
+pp varchar(10) default null;
+begin
+     select into xx (case when pp IS NULL or pp = 'A' then 'A' else NULL end);
+     return xx;
+end;
+$function$
+;
+
+select test_create_function_ex_1();
+
+create or replace function test_create_function_ex_2()
+returns text
+language plpgsql
+as $function$
+declare
+xx varchar(10) default null;
+pp varchar(10) default null;
+begin
+     select into xx,xx (case when pp IS NULL or pp = 'A' then 'A' else NULL end), 1;
+     return xx;
+end;
+$function$
+;
+
+select test_create_function_ex_2();
+
+create or replace function test_create_function_ex_3(idname text)
+returns text as
+$body$
+declare
+t text[];
+pgver text;
+begin
+     select into t array_agg(quote_ident(term)) from 
+     (select unnest(string_to_array(idname, '.', '')) as term) as foo;
+     return array_to_string(t, '.');
+end;
+$body$
+language plpgsql immutable
+;
+
+select test_create_function_ex_3('111.222');
+
+drop function test_create_function_ex_1;
+drop function test_create_function_ex_2;
+drop function test_create_function_ex_3;

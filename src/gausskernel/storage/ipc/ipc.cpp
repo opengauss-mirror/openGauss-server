@@ -51,6 +51,7 @@
 #include "utils/plog.h"
 #include "threadpool/threadpool.h"
 #include "instruments/instr_user.h"
+#include "instruments/instr_statement.h"
 #include "utils/postinit.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
@@ -165,6 +166,15 @@ void proc_exit(int code)
             // if some threads call DmsCallbackThreadShmemInit, wait until they finish
             pg_usleep(WAIT_DMS_INIT_TIMEOUT);
         }
+    }
+
+    /* Wait for all statements that have not been flushed to complete flushing.
+     * The flush usleep wait interval is 100,000 microseconds,
+     * therefore we set it here to 300,000 microseconds for a safe margin.
+     */
+    if (u_sess->statement_cxt.suspend_count != 0) {
+        int flushWaitInterval = 3 * FLUSH_USLEEP_INTERVAL;
+        pg_usleep(flushWaitInterval);
     }
 
     if (t_thrd.utils_cxt.backend_reserved) {
@@ -484,13 +494,6 @@ void sess_exit_prepare(int code)
     t_thrd.proc_cxt.sess_exit_inprogress = true;
     old_sigset = gs_signal_block_sigusr2();
 
-    /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
-    for (int i = 0; i < MAX_TYPE_FDW; i++) {
-        if (u_sess->ext_fdw_ctx[i].fdwExitFunc != NULL) {
-            (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
-        }
-    }
-
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++) {
         if (EnableLocalSysCache() && on_sess_exit_list[u_sess->on_sess_exit_index] == AtProcExit_Files) {
             // we close this only on proc exit
@@ -498,7 +501,14 @@ void sess_exit_prepare(int code)
         }
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
     }
-    
+
+    /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
+    for (int i = 0; i < MAX_TYPE_FDW; i++) {
+        if (u_sess->ext_fdw_ctx[i].fdwExitFunc != NULL) {
+            (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
+        }
+    }
+
     t_thrd.storage_cxt.on_proc_exit_index = 0;
     RESUME_INTERRUPTS();
     gs_signal_recover_mask(old_sigset);

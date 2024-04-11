@@ -197,6 +197,7 @@ extern int optreset; /* might not be declared by system headers */
 #include "replication/libpqsw.h"
 #include "replication/walreceiver.h"
 #include "libpq/libpq-int.h"
+#include "tcop/autonomoustransaction.h"
 
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
@@ -2175,10 +2176,11 @@ static void attach_info_to_plantree_list(List* plantree_list, AttachInfoContext*
             }
 #ifdef ENABLE_MOT
             case T_CreateStmt:  /* fall through */
-            case T_CreateForeignTableStmt: {
+            case T_CreateForeignTableStmt:
 #else
-            case T_CreateStmt: {
+            case T_CreateStmt:
 #endif
+            {
                 Node* l = (Node*)stringToNode(info_query_string);
                 CreateStmt* cstmt = (CreateStmt*)stmt;
 
@@ -8334,6 +8336,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         StreamNodeGroup::MarkRecursiveVfdInvalid();
 
         BgworkerListSyncQuit();
+        
+        /* clean autonomous session */
+        DestoryAutonomousSession(true);
         /*
          * Abort the current transaction in order to recover.
          */

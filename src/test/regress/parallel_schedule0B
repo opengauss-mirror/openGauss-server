@@ -273,7 +273,7 @@ test: plpgsql_assign_value_to_array_attribute
 test: plpgsql_array_of_record 
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
-test: plpgsql_inout_param
+test: function_default_test plpgsql_inout_param
 test: plpgsql_cursor_rowtype
 test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param

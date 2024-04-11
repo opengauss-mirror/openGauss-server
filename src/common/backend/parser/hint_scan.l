@@ -59,6 +59,7 @@ static char * litbufdup(yyscan_t yyscanner);
 static void addlit(const char *ytext, int yleng, yyscan_t yyscanner);
 static void addlitchar(unsigned char ychar, yyscan_t yyscanner);
 extern void hint_scanner_yyerror(const char *msg, yyscan_t yyscanner);
+static void hint_scanner_yyerror_emit(const char *msg, yyscan_t yyscanner);
 static char *litbuf_udeescape(unsigned char escape, yyscan_t yyscanner);
 static unsigned int hexval(unsigned char c, yyscan_t yyscanner);
 static unsigned char unescape_single_char(unsigned char c, yyscan_t yyscanner);
@@ -69,6 +70,7 @@ static void addunicode(pg_wchar c, yyscan_t yyscanner);
 static void check_string_escape_warning(unsigned char ychar, yyscan_t yyscanner);
 static void check_escape_warning(yyscan_t yyscanner);
 static void check_unicode_value(pg_wchar c, char *loc, yyscan_t yyscanner);
+extern void output_hint_warning(List* warning, int lev);
 
 %}
 
@@ -274,7 +276,7 @@ xufailed		[uU]&
 <xb>{quotecontinue}	{
 					/* ignore */
 				}
-<xb><<EOF>>		{ hint_scanner_yyerror("unterminated bit string literal", yyscanner); return 0;}
+<xb><<EOF>>		{ hint_scanner_yyerror_emit("unterminated bit string literal", yyscanner); return 0;}
 
 {xhstart}		{
 					/* Hexadecimal bit type.
@@ -295,7 +297,7 @@ xufailed		[uU]&
 					yyextra->is_hint_str = true;
 					return XCONST;
 				}
-<xh><<EOF>>		{ hint_scanner_yyerror("unterminated hexadecimal string literal", yyscanner); return 0;}
+<xh><<EOF>>		{ hint_scanner_yyerror_emit("unterminated hexadecimal string literal", yyscanner); return 0;}
 
 {xnstart}		{
 					/* National character.
@@ -452,7 +454,7 @@ xufailed		[uU]&
 					/* This is only needed for \ just before EOF */
 					addlitchar(yytext[0], yyscanner);
 				}
-<xq,xe,xus><<EOF>>		{ hint_scanner_yyerror("unterminated quoted string", yyscanner); return 0; }
+<xq,xe,xus><<EOF>>		{ hint_scanner_yyerror_emit("unterminated quoted string", yyscanner); return 0; }
 
 {dolqdelim}		{
 					yyextra->dolqstart = pstrdup(yytext);
@@ -497,7 +499,7 @@ xufailed		[uU]&
 					/* This is only needed for $ inside the quoted text */
 					addlitchar(yytext[0], yyscanner);
 				}
-<xdolq><<EOF>>	{ hint_scanner_yyerror("unterminated dollar-quoted string", yyscanner); return 0; }
+<xdolq><<EOF>>	{ hint_scanner_yyerror_emit("unterminated dollar-quoted string", yyscanner); return 0; }
 
 {xdstart}		{
 					BEGIN(xd);
@@ -561,7 +563,7 @@ xufailed		[uU]&
 <xd,xui>{xdinside}	{
 					addlit(yytext, yyleng, yyscanner);
 				}
-<xd,xui><<EOF>>		{ hint_scanner_yyerror("unterminated quoted identifier", yyscanner); return 0; }
+<xd,xui><<EOF>>		{ hint_scanner_yyerror_emit("unterminated quoted identifier", yyscanner); return 0; }
 
 {xufailed}	{
 					char		   *ident;
@@ -726,6 +728,15 @@ hint_scanner_yyerror(const char *msg, yyscan_t yyscanner)
 	u_sess->parser_cxt.hint_warning = lappend(u_sess->parser_cxt.hint_warning, makeString(buf.data));
 
 	return;
+}
+
+static void
+hint_scanner_yyerror_emit(const char* msg, yyscan_t yyscanner)
+{
+	output_hint_warning(u_sess->parser_cxt.hint_warning, WARNING);
+	ereport(ERROR,
+		(errcode(ERRCODE_SYNTAX_ERROR),
+			errmsg("LINE %d: %s at '%s'", yyget_lineno(yyscanner), msg, yyget_text(yyscanner))));
 }
 
 static int
