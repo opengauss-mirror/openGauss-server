@@ -392,7 +392,7 @@ static void spgRedoPickSplit(XLogReaderState *record)
 
         if (redoaction == BLK_NEEDS_REDO) {
             spgRedoPickSplitOperatorSrcPage(&srcBuffer, (void *)xldata, (void *)toDelete, blknoInner,
-                                            (void *)leafPageSelect, (void *)toInsert);
+                                            (void *)leafPageSelect, (void *)toInsert, (void *)ptr);
         }
     }
 
@@ -411,7 +411,7 @@ static void spgRedoPickSplit(XLogReaderState *record)
         }
 
         if (redoaction == BLK_NEEDS_REDO) {
-            spgRedoPickSplitOperatorDestPage(&destBuffer, (void *)xldata, (void *)leafPageSelect, (void *)toInsert);
+            spgRedoPickSplitOperatorDestPage(&destBuffer, (void *)xldata, (void *)leafPageSelect, (void *)toInsert, (void *)ptr);
         }
 
         /* don't update LSN etc till we're done with it */

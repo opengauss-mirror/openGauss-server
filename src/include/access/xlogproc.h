@@ -1242,11 +1242,11 @@ extern void spgRedoAddNodeOperatorParentPage(RedoBufferInfo* buffer, void* recor
 extern void spgRedoSplitTupleOperatorDestPage(RedoBufferInfo* buffer, void* recorddata, void* tuple);
 extern void spgRedoSplitTupleOperatorSrcPage(RedoBufferInfo* buffer, void* recorddata, void* pretuple, void* posttuple);
 extern void spgRedoPickSplitRestoreLeafTuples(
-    RedoBufferInfo* buffer, void* recorddata, bool destflag, void* pageselect, void* insertdata);
+    RedoBufferInfo* buffer, void* recorddata, bool destflag, void* pageselect, void* insertdata, void* tuple);
 extern void spgRedoPickSplitOperatorSrcPage(RedoBufferInfo* srcBuffer, void* recorddata, void* deleteoffset,
-    BlockNumber blknoInner, void* pageselect, void* insertdata);
+    BlockNumber blknoInner, void* pageselect, void* insertdata, void* tuple);
 extern void spgRedoPickSplitOperatorDestPage(
-    RedoBufferInfo* destBuffer, void* recorddata, void* pageselect, void* insertdata);
+    RedoBufferInfo* destBuffer, void* recorddata, void* pageselect, void* insertdata, void* tuple);
 extern void spgRedoPickSplitOperatorInnerPage(
     RedoBufferInfo* innerBuffer, void* recorddata, void* tuple, void* tupleheader, BlockNumber blknoInner);
 extern void spgRedoPickSplitOperatorParentPage(RedoBufferInfo* parentBuffer, void* recorddata, BlockNumber blknoInner);

@@ -375,20 +375,21 @@ void spgRedoSplitTupleOperatorSrcPage(RedoBufferInfo *buffer, void *recorddata, 
 
 /* restore leaf tuples to src and/or dest page */
 void spgRedoPickSplitRestoreLeafTuples(RedoBufferInfo *buffer, void *recorddata, bool destflag, void *pageselect,
-                                       void *insertdata)
+                                       void *insertdata, void *tuple)
 {
     char *ptr = (char *)recorddata;
     spgxlogPickSplit *xldata = (spgxlogPickSplit *)ptr;
     Page page = buffer->pageinfo.page;
     uint8 *leafPageSelect = (uint8 *)pageselect;
     OffsetNumber *toInsert = (OffsetNumber *)insertdata;
+    char *ptrlt = (char *)tuple;
 
     int i;
     /* restore leaf tuples to src and/or dest page */
     for (i = 0; i < xldata->nInsert; i++) {
-        SpGistLeafTuple lt = (SpGistLeafTuple)ptr;
+        SpGistLeafTuple lt = (SpGistLeafTuple)ptrlt;
 
-        ptr += lt->size;
+        ptrlt += lt->size;
 
         if ((destflag && leafPageSelect[i]) || ((!destflag) && (!leafPageSelect[i]))) {
             addOrReplaceTuple(page, (Item)lt, lt->size, toInsert[i]);
@@ -397,7 +398,7 @@ void spgRedoPickSplitRestoreLeafTuples(RedoBufferInfo *buffer, void *recorddata,
 }
 
 void spgRedoPickSplitOperatorSrcPage(RedoBufferInfo *srcBuffer, void *recorddata, void *deleteoffset,
-                                     BlockNumber blknoInner, void *pageselect, void *insertdata)
+                                     BlockNumber blknoInner, void *pageselect, void *insertdata, void *tuple)
 {
     char *ptr = (char *)recorddata;
     spgxlogPickSplit *xldata = (spgxlogPickSplit *)ptr;
@@ -423,14 +424,14 @@ void spgRedoPickSplitOperatorSrcPage(RedoBufferInfo *srcBuffer, void *recorddata
                                     InvalidBlockNumber, InvalidOffsetNumber);
     }
 
-    spgRedoPickSplitRestoreLeafTuples(srcBuffer, recorddata, false, pageselect, insertdata);
+    spgRedoPickSplitRestoreLeafTuples(srcBuffer, recorddata, false, pageselect, insertdata, tuple);
 
     /* don't update LSN etc till we're done with it */
     /* modify for batchlsn, don't markdirty */
     PageSetLSN(srcPage, srcBuffer->lsn);
 }
 
-void spgRedoPickSplitOperatorDestPage(RedoBufferInfo *destBuffer, void *recorddata, void *pageselect, void *insertdata)
+void spgRedoPickSplitOperatorDestPage(RedoBufferInfo *destBuffer, void *recorddata, void *pageselect, void *insertdata, void *tuple)
 {
     char *ptr = (char *)recorddata;
     spgxlogPickSplit *xldata = (spgxlogPickSplit *)ptr;
@@ -441,7 +442,7 @@ void spgRedoPickSplitOperatorDestPage(RedoBufferInfo *destBuffer, void *recordda
         SpGistInitPage(destPage, SPGIST_LEAF | (xldata->storesNulls ? SPGIST_NULLS : 0));
     }
 
-    spgRedoPickSplitRestoreLeafTuples(destBuffer, recorddata, true, pageselect, insertdata);
+    spgRedoPickSplitRestoreLeafTuples(destBuffer, recorddata, true, pageselect, insertdata, tuple);
     PageSetLSN(destPage, destBuffer->lsn);
 }
 
