@@ -4307,6 +4307,9 @@ static UpsertClause* _readUpsertClause(void)
     READ_LOCALS(UpsertClause);
 
     READ_NODE_FIELD(targetList);
+    IF_EXIST(aliasName) {
+        READ_NODE_FIELD(aliasName);
+    }
     READ_INT_FIELD(location);
     IF_EXIST(whereClause) {
         READ_NODE_FIELD(whereClause);

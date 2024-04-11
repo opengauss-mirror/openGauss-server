@@ -451,6 +451,7 @@ typedef struct HintState {
 typedef struct UpsertClause {
     NodeTag type;
     List *targetList;
+    Alias *aliasName;
     Node *whereClause;
     int location;
 } UpsertClause;

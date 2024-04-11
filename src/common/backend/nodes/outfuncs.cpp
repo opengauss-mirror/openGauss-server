@@ -870,6 +870,9 @@ static void _outUpsertClause(StringInfo str, const UpsertClause* node)
     WRITE_NODE_TYPE("UPSERTCLAUSE");
 
     WRITE_NODE_FIELD(targetList);
+    if (t_thrd.proc->workingVersionNum >= UPSERT_ALIAS_VERSION_NUM) {
+        WRITE_NODE_FIELD(aliasName);
+    }
     WRITE_INT_FIELD(location);
     if (t_thrd.proc->workingVersionNum >= UPSERT_WHERE_VERSION_NUM) {
         WRITE_NODE_FIELD(whereClause);
