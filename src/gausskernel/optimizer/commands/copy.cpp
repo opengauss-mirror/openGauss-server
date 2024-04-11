@@ -1251,8 +1251,7 @@ void VerifyEncoding(int encoding)
 {
     Oid proc;
 
-    if (encoding == GetDatabaseEncoding() || encoding == PG_SQL_ASCII || GetDatabaseEncoding() == PG_SQL_ASCII ||
-        (GetDatabaseEncoding() == PG_GB18030_2022 && encoding == PG_GB18030))
+    if (encoding == GetDatabaseEncoding() || encoding == PG_SQL_ASCII || GetDatabaseEncoding() == PG_SQL_ASCII)
         return;
 
     proc = FindDefaultConversionProc(encoding, GetDatabaseEncoding());
