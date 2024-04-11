@@ -1254,6 +1254,31 @@ select count(*) from t partition (p_others);
      1
 (1 row)
 
+-- test exprkey across partitions
+create table test_exprkey_move_part(
+    a int,
+    b int
+)
+partition by range(a+100)
+(
+    partition p0 values less than(1000),
+    partition p1 values less than(2000)
+);
+insert into test_exprkey_move_part values(888, 1);
+update test_exprkey_move_part set a=1000 where a=888;
+select * from test_exprkey_move_part;
+  a   | b 
+------+---
+ 1000 | 1
+(1 row)
+
+update test_exprkey_move_part set a=1001 where a=1000;
+select * from test_exprkey_move_part;
+  a   | b 
+------+---
+ 1001 | 1
+(1 row)
+
 \c regression
 drop database if exists part_expr_key_db;
 drop database if exists part_expr_key_db1;

@@ -2498,8 +2498,9 @@ lreplace:
                 int seqNum = -1;
                 bool can_ignore = estate->es_plannedstmt->hasIgnore;
                 PartKeyExprResult *partKeyExprResult = NULL;
+                PartKeyExprResult exprTuple;
                 if (partExprKeyStr) {
-                    PartKeyExprResult exprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot,
+                    exprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot,
                                                                           NULL, partExprKeyStr);
                     partKeyExprResult = &exprTuple;
                 }
