@@ -501,7 +501,6 @@ static void get_role_password();
 static void get_encrypt_key();
 static void dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo);
 static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxInfo* indxinfo, bool isBcompatibility);
-static bool IsPlainFormat();
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool IsPlainFormat();
@@ -23639,7 +23638,14 @@ static bool hasSpecificExtension(Archive* fout, const char* extensionName)
     return ntups != 0;
 }
 
-static bool IsPlainFormat()
+bool TabExists(Archive* fout, const char* schemaName, const char* tabName)
 {
-	return pg_strcasecmp(format, "plain") == 0 || pg_strcasecmp(format, "p") == 0;
+    char query[300];
+    bool exist = false;
+    ArchiveHandle* AH = (ArchiveHandle*)fout;
+
+    sprintf(query, "SELECT * FROM pg_tables  WHERE schemaname='%s' and tablename='%s'", schemaName, tabName);
+    
+    exist = isExistsSQLResult(AH->connection, query);
+    return exist;
 }

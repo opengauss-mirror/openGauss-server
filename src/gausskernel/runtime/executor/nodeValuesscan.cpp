@@ -132,7 +132,7 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
         foreach (lc, expr_state_list) {
             ExprState* exprState = (ExprState*)lfirst(lc);
 
-            values[resind] = ExecEvalExpr(exprState, econtext, &is_null[resind]);
+            values[resind] = ExecEvalExpr(exprState, econtext, &is_null[resind], NULL);
             if (unlikely(IS_ENABLE_INSERT_RIGHT_REF(refState) && resind < refState->explicitAttrLen)) {
                 int idx = refState->explicitAttrNos[resind] - 1;
                 hasExecs[idx] = true;

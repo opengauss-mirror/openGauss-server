@@ -424,15 +424,6 @@ static PGFunction load_plpgsql_function(char* funcname)
         sizeof(b_plpgsql_function_table) / sizeof(b_plpgsql_function_table[0]),
         sizeof(RegExternFunc),
         ExternFuncComp);
-<<<<<<< HEAD
-=======
-    } else if (u_sess->attr.attr_sql.whale) {
-        search_result = (RegExternFunc*)bsearch(&tmp_key,
-        a_plpgsql_function_table,
-        sizeof(a_plpgsql_function_table) / sizeof(a_plpgsql_function_table[0]),
-        sizeof(RegExternFunc),
-        ExternFuncComp);
->>>>>>> 440afce16... Fix builtin func bug in plugin.
     }
     if (search_result == NULL) {
         search_result = (RegExternFunc*)bsearch(&tmp_key,
