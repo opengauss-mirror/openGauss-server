@@ -767,9 +767,14 @@ static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int 
         if (format == 0) {
             getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
             fmgr_info(thisState->typoutput, &thisState->finfo);
+            thisState->encoding = get_valid_charset_by_collation(typeinfo->attrs[i].attcollation);
+            construct_conversion_fmgr_info(
+                thisState->encoding, u_sess->mb_cxt.ClientEncoding->encoding, (void*)&thisState->convert_finfo);
         } else if (format == 1) {
             getTypeBinaryOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typsend, &thisState->typisvarlena);
             fmgr_info(thisState->typsend, &thisState->finfo);
+            thisState->encoding = PG_INVALID_ENCODING; // just initialize, should not be used
+            thisState->convert_finfo.fn_oid = InvalidOid;
         } else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", format)));
         }
@@ -804,6 +809,9 @@ static void printtup_prepare_info_for_stream(DR_printtup *myState, TupleDesc typ
         thisState->format = 0;
         getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
         fmgr_info(thisState->typoutput, &thisState->finfo);
+        thisState->encoding = get_valid_charset_by_collation(typeinfo->attrs[i].attcollation);
+        construct_conversion_fmgr_info(
+            thisState->encoding, u_sess->mb_cxt.ClientEncoding->encoding, (void*)&thisState->convert_finfo);
     }
 }
 
@@ -1101,7 +1109,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
              * attr had been converted to CSTRING type previously by using anyarray_out.
              * just send over the DataRow message as we received it.
              */
-            pq_sendcountedtext_printtup(buf, (char *)attr, strlen((char *)attr));
+            pq_sendcountedtext_printtup(buf, (char *)attr, strlen((char *)attr), thisState->encoding, (void*)&thisState->convert_finfo);
         } else {
             if (thisState->format == 0) {
                 /* Text output */
@@ -1175,7 +1183,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 #ifndef ENABLE_MULTIPLE_NODES
                 t_thrd.xact_cxt.callPrint = false;
 #endif
-                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr));
+                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr), thisState->encoding, (void*)&thisState->convert_finfo);
                 if (need_free) {
                     pfree(outputstr);
                 }

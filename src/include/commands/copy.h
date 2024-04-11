@@ -213,11 +213,13 @@ typedef struct CopyStateData {
      * Working state for COPY TO/FROM
      */
     MemoryContext copycontext; /* per-copy execution context */
+    int* attr_encodings;    /* for B compatibility multi charsets */
 
     /*
      * Working state for COPY TO
      */
     FmgrInfo* out_functions;  /* lookup info for output functions */
+    FmgrInfo* out_convert_funcs;  /* lookup info for encoding conversion */
     MemoryContext rowcontext; /* per-row evaluation context */
 
     /*
@@ -244,6 +246,7 @@ typedef struct CopyStateData {
     FmgrInfo* err_out_functions; /* lookup info for output functions of copy_error_log*/
     AssignTypmod *as_typemods;   /* array of typmod for each transformed column */
     ExprState** transexprs;     /* array of expr for each transformed column */
+    FmgrInfo* in_convert_funcs;  /* lookup info for encoding conversion */
 
     Relation summary_table; /* opened copy_summary table */
     int64 skiprows;

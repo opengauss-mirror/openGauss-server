@@ -24,4 +24,6 @@ extern void assign_expr_collations(ParseState* pstate, Node* expr);
 
 extern Oid select_common_collation(ParseState* pstate, List* exprs, bool none_ok);
 
+extern Node *convert_arg_charset(Node *arg_expr, int target_charset, Oid target_collation);
+
 #endif /* PARSE_COLLATE_H */

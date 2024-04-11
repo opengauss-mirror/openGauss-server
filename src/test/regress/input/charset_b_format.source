@@ -19,8 +19,7 @@ create schema s_charset_2  charset = utf8mb4 collate = utf8mb4_unicode_ci;
 create schema s_charset_3  charset = utf8mb4 collate = utf8mb4_general_ci;
 create schema s_charset_4  charset = utf8mb4;
 create schema s_charset_5  charset = utf8;
-create schema s_charset_6  charset = gbk; -- error
-create schema s_charset_6;
+create schema s_charset_6  charset = gbk;
 create schema s_charset_7  default charset = utf8mb4 default collate = utf8mb4_unicode_ci;
 create schema s_charset_8  charset = "binary";
 create schema s_charset_9  character set = utf8mb4;
@@ -45,7 +44,7 @@ create schema s_charset_15 charset = gbk collate = "zh_CN.gbk"; -- error
 alter schema s_charset_1 charset utf8mb4 collate utf8mb4_general_ci;
 alter schema s_charset_2 charset = utf8mb4 collate = utf8mb4_general_ci;
 alter schema s_charset_3 collate = utf8mb4_unicode_ci;
-alter schema s_charset_5 charset = gbk; -- error
+alter schema s_charset_5 charset = gbk;
 alter schema s_charset_5 charset = gbk collate = "zh_CN.gbk"; -- error
 alter schema s_charset_9 character set = utf8 collate = utf8mb4_unicode_ci;
 select * from pg_namespace where nspname like 's_charset_%' order by 1;
@@ -56,8 +55,7 @@ create table t_charset_2 (c1 varchar(20)) charset = utf8mb4 collate = utf8mb4_un
 create table t_charset_3 (c1 varchar(20)) charset = utf8mb4 collate = utf8mb4_general_ci;
 create table t_charset_4 (c1 varchar(20)) charset = utf8mb4;
 create table t_charset_5 (c1 varchar(20)) charset = utf8;
-create table t_charset_6 (c1 varchar(20)) charset = gbk; -- error
-create table t_charset_6 (c1 varchar(20));
+create table t_charset_6 (c1 varchar(20)) charset = gbk;
 create table t_charset_7 (c1 varchar(20)) default charset = utf8mb4 default collate = utf8mb4_unicode_ci;
 create table t_charset_8 (c1 varchar(20)) charset = binary; -- error
 create table t_charset_8 (c1 text) charset = binary;
@@ -147,7 +145,7 @@ alter table a_charset_2 add a24 varchar(20) collate "zh_CN.gbk"; -- error;
 select pg_get_tabledef('a_charset_2');
 alter table a_charset_2 add a8 varchar(20) charset utf8mb4 charset utf8mb4; -- error
 alter table a_charset_2 modify a1 int;
-alter table a_charset_2 modify a9 varchar(20) character set gbk; -- error
+alter table a_charset_2 modify a9 varchar(20) character set gbk;
 alter table a_charset_2 modify a10 varchar(20);
 alter table a_charset_2 modify a11 varchar(20) collate utf8mb4_unicode_ci;
 alter table a_charset_2 modify a12 varchar(20) charset utf8mb4;
@@ -212,6 +210,19 @@ alter table tem_charset_1 convert to character set utf8mb4;
 alter table tem_charset_1 collate utf8mb4_unicode_ci;
 insert into tem_charset_1 values('a中国a');
 select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a where r.oid=a.attrelid and r.relname='tem_charset_1';
+
+-- cstore not supported
+SET b_format_behavior_compat_options = 'default_collation, enable_multi_charset';
+create schema s_charset_multi  charset = gbk;
+create table s_charset_multi.cstore_charset_1(c1 varchar(20),c2 varchar(20),c3 int) with (ORIENTATION=column); -- ERROR
+DROP schema s_charset_multi;
+create table cstore_charset_1(c1 varchar(20),c2 varchar(20),c3 int) character set = gbk with (ORIENTATION=column); -- ERROR
+create table cstore_charset_1(c1 varchar(20),c2 varchar(20) character set gbk,c3 int) with (ORIENTATION=column); -- ERROR
+create table cstore_charset_1(c1 varchar(20),c2 varchar(20),c3 int) with (ORIENTATION=column);
+ALTER TABLE cstore_charset_1 ADD COLUMN c4 varchar(20) character set gbk; -- ERROR
+ALTER TABLE cstore_charset_1 MODIFY COLUMN c1 varchar(20) character set gbk; -- ERROR
+drop table cstore_charset_1;
+
 
 \! @abs_bindir@/gs_dump d_charset -p @portstring@ -f @abs_bindir@/d_charset.tar -F t >/dev/null 2>&1; echo $?
 \! @abs_bindir@/gs_restore -d d_charset_bak -p @portstring@ @abs_bindir@/d_charset.tar >/dev/null 2>&1; echo $?

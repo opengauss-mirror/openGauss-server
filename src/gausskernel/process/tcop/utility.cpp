@@ -10693,7 +10693,9 @@ static void drop_stmt_pre_treatment(
 }
 #endif
 
-char* VariableBlackList[] = {"client_encoding"};
+char* VariableBlackList[] = {
+    "client_encoding"
+};
 
 bool IsVariableinBlackList(const char* name)
 {

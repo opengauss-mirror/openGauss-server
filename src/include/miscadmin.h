@@ -37,6 +37,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 MULTI_CHARSET_VERSION_NUM;
 extern const uint32 SRF_FUSION_VERSION_NUM;
 extern const uint32 INNER_UNIQUE_VERSION_NUM;
 extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
@@ -140,7 +141,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define B_FORMAT_OPT_ENABLE_MODIFY_COLUMN 4
 #define B_FORMAT_OPT_DEFAULT_COLLATION 8
 #define B_FORMAT_OPT_FETCH 16
-#define B_FORMAT_OPT_MAX 5
+#define B_FORMAT_OPT_ENABLE_MULTI_CHARSET 32
+#define B_FORMAT_OPT_MAX 6
 
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
     ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
@@ -152,6 +154,9 @@ extern bool contain_backend_version(uint32 version_number);
         ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MODIFY_COLUMN) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 #define B_FETCH ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_FETCH) && \
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+#define ENABLE_MULTI_CHARSET \
+        ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MULTI_CHARSET) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO 1

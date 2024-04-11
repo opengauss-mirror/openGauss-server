@@ -112,6 +112,8 @@ typedef struct knl_session_attr_common {
     int64 group_concat_max_len;
     double ConnectionAlarmRate;
     char* client_encoding_string;
+    char* character_set_connection;
+    char* collation_connection;
     char* Log_line_prefix;
     char* safe_data_path;
     char* log_timezone_string;

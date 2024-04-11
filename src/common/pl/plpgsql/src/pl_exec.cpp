@@ -37,6 +37,7 @@
 #include "nodes/primnodes.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_expr.h"
+#include "parser/parse_type.h"
 #include "parser/scansup.h"
 #include "pgaudit.h"
 #include "pgstat.h"
@@ -270,7 +271,10 @@ static List* invalid_depend_func_and_packgae(Oid pkgOid);
 static void ReportCompileConcurrentError(const char* objName, bool isPackage);
 static Datum CopyFcinfoArgValue(Oid typOid, Datum value, bool isNull);
 static bool InOutParaIsSup(char prokind, Oid funcOid);
-
+static bool plsql_convert_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
+    Oid val_collation,  PLpgSQL_datum* target);
+static bool plsql_convert_expr_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
+    PLpgSQL_expr* val_expr, PLpgSQL_datum* target);
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
  * validating a given linenumber
@@ -3373,7 +3377,11 @@ static int expand_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt, 
         }
 
         /* now we can assign to the variable */
-        exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, t_oid, &isnull, NULL, NULL);
+        if (plsql_convert_expr_value_charset(estate, &t_val, isnull, t_oid, stmt->t_expr, (PLpgSQL_datum*)t_var)) {
+            exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, CSTRINGOID, &isnull, NULL, NULL);
+        } else {
+            exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, t_oid, &isnull, NULL, NULL);
+        }
 
         exec_eval_cleanup(estate);
     }
@@ -4228,7 +4236,11 @@ static int exec_stmt_case(PLpgSQL_execstate* estate, PLpgSQL_stmt_case* stmt)
         }
 
         /* now we can assign to the variable */
-        exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, t_oid, &isnull);
+        if (plsql_convert_expr_value_charset(estate, &t_val, isnull, t_oid, stmt->t_expr, (PLpgSQL_datum*)t_var)) {
+            exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, CSTRINGOID, &isnull);
+        } else {
+            exec_assign_value(estate, (PLpgSQL_datum*)t_var, t_val, t_oid, &isnull);
+        }
 
         exec_eval_cleanup(estate);
     }
@@ -7848,7 +7860,11 @@ void exec_assign_expr(PLpgSQL_execstate* estate, PLpgSQL_datum* target, PLpgSQL_
             ExecCopyDataToDatum(estate->datums, target_dno, estate->cursor_return_data);
         }
     }
-    exec_assign_value(estate, target, value, valtype, &isnull, tableOfIndex, &TableOfIndexInfo);
+    if (plsql_convert_expr_value_charset(estate, &value, isnull, valtype, expr, target)) {
+        exec_assign_value(estate, target, value, CSTRINGOID, &isnull, tableOfIndex, &TableOfIndexInfo);
+    } else {
+        exec_assign_value(estate, target, value, valtype, &isnull, tableOfIndex, &TableOfIndexInfo);
+    }
     if (saved_cursor_data != estate->cursor_return_data) {
         pfree_ext(estate->cursor_return_data);
         estate->cursor_return_data = saved_cursor_data;
@@ -11526,6 +11542,7 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                     Datum value;
                     bool isnull = false;
                     Oid valtype;
+                    Oid val_collation;
 
                     if (row->varnos[fnum] < 0) {
                         continue; /* skip dropped column in row struct */
@@ -11552,6 +11569,7 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                             isnull = true;
                         }
                         valtype = SPI_gettypeid(tupdesc, anum + 1);
+                        val_collation = SPI_getcollation(tupdesc, anum + 1);
                         anum++;
                     } else {
                         value = (Datum)0;
@@ -11562,6 +11580,7 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                          * about the type of a source NULL
                          */
                         valtype = InvalidOid;
+                        val_collation = InvalidOid;
                     }
 
                     /* accept function's return value for cursor */
@@ -11580,7 +11599,12 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                             }
                         }
                     }
-                    exec_assign_value(estate, (PLpgSQL_datum*)var, value, valtype, &isnull, tableOfIndex);
+
+                    if (plsql_convert_value_charset(estate, &value, isnull, valtype, val_collation, (PLpgSQL_datum*)var)) {
+                        exec_assign_value(estate, (PLpgSQL_datum*)var, value, CSTRINGOID, &isnull, tableOfIndex);
+                    } else {
+                        exec_assign_value(estate, (PLpgSQL_datum*)var, value, valtype, &isnull, tableOfIndex);
+                    }
                 }
                 if (fromExecSql) {
                     free_func_tableof_index();
@@ -11594,6 +11618,7 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                 Datum value;
                 bool isnull = false;
                 Oid valtype;
+                Oid val_collation;
 
                 var = (PLpgSQL_var*)(row->intodatums[fnum]);
 
@@ -11609,6 +11634,7 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                         isnull = true;
                     }
                     valtype = SPI_gettypeid(tupdesc, anum + 1);
+                    val_collation = SPI_getcollation(tupdesc, anum + 1);
                     anum++;
                 } else {
                     value = (Datum)0;
@@ -11619,9 +11645,14 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                      * about the type of a source NULL
                      */
                     valtype = InvalidOid;
+                    val_collation = InvalidOid;
                 }
 
-                exec_assign_value(estate, (PLpgSQL_datum*)var, value, valtype, &isnull);
+                if (plsql_convert_value_charset(estate, &value, isnull, valtype, val_collation, (PLpgSQL_datum*)var)) {
+                    exec_assign_value(estate, (PLpgSQL_datum*)var, value, CSTRINGOID, &isnull);
+                } else {
+                    exec_assign_value(estate, (PLpgSQL_datum*)var, value, valtype, &isnull);
+                }
             }
         }
 
@@ -14358,4 +14389,68 @@ static void CheckAssignTarget(PLpgSQL_execstate* estate, int dno) {
     CheckAutoRefCursor(estate, dno);
     CheckNestedTableofVar(estate, dno);
 }
+
+static bool plsql_convert_value_charset_internal(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
+    Oid val_collation, Oid target_collation)
+{
+    check_type_supports_multi_charset(val_type, false);
+    if (val_type != UNKNOWNOID && !OidIsValid(get_typcollation(val_type))) {
+        return false;
+    }
+
+    int val_charset = get_valid_charset_by_collation(val_collation);
+    int target_charset = get_valid_charset_by_collation(target_collation);
+    if (target_charset == val_charset) {
+        return false;
+    }
+
+    Datum value = *val;
+    Datum str_datum = exec_simple_cast_value(estate, value, val_type, CSTRINGOID, -1, false);
+    char* src_str = DatumGetCString(str_datum);
+    MemoryContext oldcontext = MemoryContextSwitchTo(estate->eval_econtext->ecxt_per_tuple_memory);
+    char* dest_str = (char*)pg_do_encoding_conversion((unsigned char*)src_str, strlen(src_str), val_charset, target_charset);
+    MemoryContextSwitchTo(oldcontext);
+
+    if (dest_str != src_str && str_datum != value) {
+        pfree_ext(src_str);
+    }
+
+    *val = CStringGetDatum(dest_str);
+    return true;
+}
+
+static bool plsql_convert_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
+    Oid val_collation,  PLpgSQL_datum* target)
+{
+    if (!ENABLE_MODIFY_COLUMN || isnull || target->dtype != PLPGSQL_DTYPE_VAR) {
+        return false;
+    }
+
+    PLpgSQL_var* target_var = (PLpgSQL_var*)target;
+    Oid target_collation = target_var->datatype->collation;
+    if (!OidIsValid(target_collation) || val_collation == target_collation) {
+        return false;
+    }
+
+    return plsql_convert_value_charset_internal(estate, val, isnull, val_type, val_collation, target_collation);
+}
+
+static bool plsql_convert_expr_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
+    PLpgSQL_expr* val_expr, PLpgSQL_datum* target)
+{
+    if (!ENABLE_MODIFY_COLUMN || isnull || target->dtype != PLPGSQL_DTYPE_VAR ||
+        val_expr == NULL || val_expr->expr_simple_expr == NULL) {
+        return false;
+    }
+
+    PLpgSQL_var* target_var = (PLpgSQL_var*)target;
+    Oid target_collation = target_var->datatype->collation;
+    Oid val_collation = exprCollation((Node*)val_expr->expr_simple_expr);
+    if (!OidIsValid(target_collation) || val_collation == target_collation) {
+        return false;
+    }
+
+    return plsql_convert_value_charset_internal(estate, val, isnull, val_type, val_collation, target_collation);
+}
+
 #endif

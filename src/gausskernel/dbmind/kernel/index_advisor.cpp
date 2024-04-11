@@ -746,6 +746,9 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
     if (result->isnulls == NULL) {
         result->isnulls = (bool *)pg_malloc(natts * sizeof(bool));
     }
+    if (result->collids == NULL) {
+        result->collids = (Oid *)pg_malloc(natts * sizeof(Oid));
+    }
     if (result->atttypids == NULL) {
         result->atttypids = (Oid *)pg_malloc(natts * sizeof(Oid));
     }
@@ -756,6 +759,7 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
         origattr = tableam_tslot_getattr(slot, i + 1, &isnull);
         if (isnull) {
             result->isnulls[i] = true;
+            result->collids[i] = typeinfo->attrs[i].attcollation;
             continue;
         }
         
@@ -771,6 +775,7 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
         value = OidOutputFunctionCall(typoutput, attr);
         values = lappend(values, value);
         result->atttypids[i] = typeinfo->attrs[i].atttypid;
+        result->collids[i] = typeinfo->attrs[i].attcollation;
 
         /* Clean up detoasted copy, if any */
         if (DatumGetPointer(attr) != DatumGetPointer(origattr)) {
@@ -803,6 +808,7 @@ void destroy(DestReceiver *self)
     list_free(tuples);
 
     pfree_ext(result->isnulls);
+    pfree_ext(result->collids);
     pfree_ext(result->atttypids);
     pfree_ext(self);
 }

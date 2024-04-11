@@ -1417,6 +1417,22 @@ Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber)
     }
 }
 
+Oid SPI_getcollation(TupleDesc tupdesc, int fnumber)
+{
+    SPI_result = 0;
+
+    if (fnumber > tupdesc->natts || fnumber == 0 || fnumber <= FirstLowInvalidHeapAttributeNumber) {
+        SPI_result = SPI_ERROR_NOATTRIBUTE;
+        return InvalidOid;
+    }
+
+    if (fnumber > 0) {
+        return tupdesc->attrs[fnumber - 1].attcollation;
+    } else {
+        return (SystemAttributeDefinition(fnumber, true, false, false))->attcollation;
+    }
+}
+
 char *SPI_getrelname(Relation rel)
 {
     return pstrdup(RelationGetRelationName(rel));

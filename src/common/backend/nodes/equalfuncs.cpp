@@ -3475,6 +3475,14 @@ static bool _equalCharsetcollateOptions(const CharsetCollateOptions* a, const Ch
     return true;
 }
 
+static bool _equalCharsetClause(const CharsetClause* a, const CharsetClause* b)
+{
+    COMPARE_NODE_FIELD(arg);
+    COMPARE_SCALAR_FIELD(charset);
+    COMPARE_SCALAR_FIELD(is_binary);
+    COMPARE_LOCATION_FIELD(location);
+}
+
 static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
 {
     COMPARE_NODE_FIELD(arg);
@@ -4423,6 +4431,9 @@ bool equal(const void* a, const void* b)
         case T_CharsetCollateOptions:
             retval = _equalCharsetcollateOptions((const CharsetCollateOptions *)a,
                                                  (const CharsetCollateOptions *)b);
+            break;
+        case T_CharsetClause:
+            retval = _equalCharsetClause((const CharsetClause*) a, (const CharsetClause*) b);
             break;
         case T_PrefixKey:
             retval = _equalPrefixKey((PrefixKey *)a, (PrefixKey *)b);

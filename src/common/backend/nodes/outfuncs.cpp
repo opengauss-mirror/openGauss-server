@@ -6001,6 +6001,15 @@ static void _outCharsetcollateOptions(StringInfo str, CharsetCollateOptions* nod
     WRITE_STRING_FIELD(collate);
 }
 
+static void _outCharsetClause(StringInfo str, CharsetClause* node)
+{
+    WRITE_NODE_TYPE("CHARSET");
+    WRITE_NODE_FIELD(arg);
+    WRITE_INT_FIELD(charset);
+    WRITE_BOOL_FIELD(is_binary);
+    WRITE_LOCATION_FIELD(location);
+}
+
 static void _outPrefixKey(StringInfo str, PrefixKey* node)
 {
     WRITE_NODE_TYPE("PREFIXKEY");
@@ -6911,6 +6920,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CharsetCollateOptions:
                 _outCharsetcollateOptions(str, (CharsetCollateOptions*)obj);
+                break;
+            case T_CharsetClause:
+                _outCharsetClause(str, (CharsetClause*)obj);
                 break;
             case T_AutoIncrement:
                 _outAutoIncrement(str, (AutoIncrement*)obj);

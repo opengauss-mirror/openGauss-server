@@ -34,6 +34,8 @@ extern char* TypeNameListToString(List* typenames);
 extern Oid LookupCollation(ParseState* pstate, List* collnames, int location);
 extern Oid GetColumnDefCollation(ParseState* pstate, ColumnDef* coldef, Oid typeOid,
     Oid rel_coll_oid = InvalidOid);
+extern Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
+    bool is_bin_type = false, Oid rel_coll_oid = InvalidOid);
 
 extern Type typeidType(Oid id);
 
@@ -57,7 +59,7 @@ extern void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p);
 extern bool IsTypeTableInInstallationGroup(const Type type_tup);
 extern HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32* typmod_p);
 extern char* CastPackageTypeName(const char* typName, Oid  pkgOid, bool isPackage, bool isPublic = true);
-#define ISCOMPLEX(typeid) (typeidTypeRelid(typeid) != InvalidOid)
 extern bool IsBinaryType(Oid typid);
-
+#define ISCOMPLEX(typeid) (typeidTypeRelid(typeid) != InvalidOid)
+extern void check_type_supports_multi_charset(Oid typid, bool allow_array);
 #endif /* PARSE_TYPE_H */

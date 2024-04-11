@@ -5733,7 +5733,7 @@ static Pattern_Prefix_Status like_fixed_prefix(
         *prefix_const = string_to_const(match, typeId);
     else
         *prefix_const = string_to_bytea_const(match, match_pos);
-
+    (*prefix_const)->constcollid = patt_const->constcollid;
     if (rest_selec != NULL)
         *rest_selec = like_selectivity(&patt[pos], pattlen - pos, case_insensitive);
 
@@ -5784,6 +5784,7 @@ static Pattern_Prefix_Status regex_fixed_prefix(
     }
 
     *prefix_const = string_to_const(prefix, typeId);
+    (*prefix_const)->constcollid = patt_const->constcollid;
 
     if (rest_selec != NULL) {
         if (exact) {
@@ -5805,6 +5806,38 @@ static Pattern_Prefix_Status regex_fixed_prefix(
         return Pattern_Prefix_Partial;
 }
 
+static Pattern_Prefix_Status like_fixed_prefix_with_encoding(
+    Const* patt_const, bool case_insensitive, Oid collation, Const** prefix_const, Selectivity* rest_selec)
+{
+    Pattern_Prefix_Status result;
+    int tmp_encoding = get_valid_charset_by_collation(patt_const->constcollid);
+    int db_encoding = GetDatabaseEncoding();
+    if (db_encoding == tmp_encoding) {
+        return like_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    }
+
+    DB_ENCODING_SWITCH_TO(tmp_encoding);
+    result = like_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
+}
+
+static Pattern_Prefix_Status regex_fixed_prefix_with_encoding(
+    Const* patt_const, bool case_insensitive, Oid collation, Const** prefix_const, Selectivity* rest_selec)
+{
+    Pattern_Prefix_Status result;
+    int tmp_encoding = get_valid_charset_by_collation(patt_const->constcollid);
+    int db_encoding = GetDatabaseEncoding();
+    if (db_encoding == tmp_encoding) {
+        return regex_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    }
+
+    DB_ENCODING_SWITCH_TO(tmp_encoding);
+    result = regex_fixed_prefix(patt_const, case_insensitive, collation, prefix_const, rest_selec);
+    DB_ENCODING_SWITCH_BACK(db_encoding);
+    return result;
+}
+
 Pattern_Prefix_Status pattern_fixed_prefix(
     Const* patt, Pattern_Type ptype, Oid collation, Const** prefix, Selectivity* rest_selec)
 {
@@ -5812,16 +5845,16 @@ Pattern_Prefix_Status pattern_fixed_prefix(
 
     switch (ptype) {
         case Pattern_Type_Like:
-            result = like_fixed_prefix(patt, false, collation, prefix, rest_selec);
+            result = like_fixed_prefix_with_encoding(patt, false, collation, prefix, rest_selec);
             break;
         case Pattern_Type_Like_IC:
-            result = like_fixed_prefix(patt, true, collation, prefix, rest_selec);
+            result = like_fixed_prefix_with_encoding(patt, true, collation, prefix, rest_selec);
             break;
         case Pattern_Type_Regex:
-            result = regex_fixed_prefix(patt, false, collation, prefix, rest_selec);
+            result = regex_fixed_prefix_with_encoding(patt, false, collation, prefix, rest_selec);
             break;
         case Pattern_Type_Regex_IC:
-            result = regex_fixed_prefix(patt, true, collation, prefix, rest_selec);
+            result = regex_fixed_prefix_with_encoding(patt, true, collation, prefix, rest_selec);
             break;
         default:
             ereport(ERROR,
@@ -5830,6 +5863,7 @@ Pattern_Prefix_Status pattern_fixed_prefix(
             result = Pattern_Prefix_None; /* keep compiler quiet */
             break;
     }
+
     return result;
 }
 

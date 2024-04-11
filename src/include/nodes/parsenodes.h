@@ -2335,6 +2335,7 @@ typedef struct DropDirectoryStmt {
 typedef struct CreateSetStmt {
     NodeTag type;
     TypeName *typname;  /* type of column */
+    Oid set_collation;
 } CreateSetStmt;
 
 extern inline NodeTag transform_node_tag(Node* raw_parse_tree)

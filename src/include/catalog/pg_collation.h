@@ -88,7 +88,15 @@ DESCR("standard POSIX collation");
 DATA(insert OID = 1026 (binary	PGNSP PGUID 0 "binary" "binary" "NO PAD" t));
 DESCR("binary collation");
 #define BINARY_COLLATION_OID		1026
+
 /* GBK's start with 1280 */
+DATA(insert OID = 1327 (gbk_chinese_ci	PGNSP PGUID 6 "gbk_chinese_ci" "gbk_chinese_ci" "PAD SPACE" t));
+DESCR("gbk_chinese_ci collation");
+#define GBK_CHINESE_CI_COLLATION_OID		1327
+DATA(insert OID = 1328 (gbk_bin	PGNSP PGUID 6 "gbk_bin" "gbk_bin" "PAD SPACE" _null_));
+DESCR("gbk_bin collation");
+#define GBK_BIN_COLLATION_OID				1328
+
 /* UTF8's start with 1536 */
 DATA(insert OID = 1537 (utf8mb4_general_ci	PGNSP PGUID 7 "utf8mb4_general_ci" "utf8mb4_general_ci" "PAD SPACE" t));
 DESCR("utf8mb4_general_ci collation");
@@ -109,7 +117,14 @@ DESCR("utf8_unicode_ci collation");
 DATA(insert OID = 1553 (utf8_bin	PGNSP PGUID 7 "utf8_bin" "utf8_bin" "PAD SPACE" _null_));
 DESCR("utf8_bin collation");
 #define UTF8_BIN_COLLATION_OID		1553
-/* GB10830's start with 1792 */
+
+/* GB18030's start with 1792 */
+DATA(insert OID = 1800 (gb18030_chinese_ci	PGNSP PGUID 36 "gb18030_chinese_ci" "gb18030_chinese_ci" "PAD SPACE" t));
+DESCR("gb18030_chinese_ci collation");
+#define GB18030_CHINESE_CI_COLLATION_OID		1800
+DATA(insert OID = 1801 (gb18030_bin	PGNSP PGUID 36 "gb18030_bin" "gb18030_bin" "PAD SPACE" _null_));
+DESCR("gb18030_bin collation");
+#define GB18030_BIN_COLLATION_OID				1801
 
 #define B_FORMAT_COLLATION_OID_MAX 10000
 
@@ -118,5 +133,14 @@ DESCR("utf8_bin collation");
 
 #define COLLATION_HAS_INVALID_ENCODING(colloid) \
 	((colloid) < B_FORMAT_COLLATION_OID_MIN)
+
+extern int get_charset_by_collation(Oid colloid);
+extern int get_valid_charset_by_collation(Oid colloid);
+extern Oid get_default_collation_by_charset(int charset, bool report_error = true);
+#define COLLATION_HAS_BIN_SUFFIX(colloid) \
+	((colloid) == UTF8_BIN_COLLATION_OID || \
+	(colloid) == UTF8MB4_BIN_COLLATION_OID || \
+	(colloid) == GBK_BIN_COLLATION_OID || \
+	(colloid) == GB18030_BIN_COLLATION_OID)
 
 #endif   /* PG_COLLATION_H */
