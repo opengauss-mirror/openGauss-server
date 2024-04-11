@@ -1712,6 +1712,7 @@ static bool _equalViewStmt(const ViewStmt* a, const ViewStmt* b)
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_STRING_FIELD(definer);
     COMPARE_SCALAR_FIELD(is_alter);
+    COMPARE_SCALAR_FIELD(viewSecurityOption);
     COMPARE_SCALAR_FIELD(withCheckOption);
 
     return true;

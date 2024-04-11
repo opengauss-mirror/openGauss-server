@@ -520,6 +520,13 @@ static relopt_string stringRelOpts[] = {
         validateWithCheckOption,
         NULL
     },
+    {
+        {"view_sql_security", "View has SQL SECURITY OPTION defined (INVOKER or DEFINER).", RELOPT_KIND_VIEW},
+        0,
+        true,
+        validateViewSecurityOption,
+        NULL
+    },
     /* list terminator */
     {{NULL}}
 };
@@ -1999,6 +2006,7 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "compress_diff_convert", RELOPT_TYPE_BOOL,
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
         { "check_option", RELOPT_TYPE_STRING, offsetof(StdRdOptions, check_option_offset)},
+        { "view_sql_security", RELOPT_TYPE_STRING, offsetof(StdRdOptions, view_security_option_offset)},
         { "collate", RELOPT_TYPE_INT, offsetof(StdRdOptions, collate)}
     };
 

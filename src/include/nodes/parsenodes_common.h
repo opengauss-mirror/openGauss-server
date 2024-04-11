@@ -2127,6 +2127,12 @@ typedef enum ViewCheckOption {
     CASCADED_CHECK_OPTION
 } ViewCheckOption;
 
+typedef enum ViewSecurityOption {
+    VIEW_SQL_SECURITY_NONE,
+    VIEW_SQL_SECURITY_DEFINER,
+    VIEW_SQL_SECURITY_INVOKER
+} ViewSecurityOption;
+
 typedef struct ViewStmt {
     NodeTag type;
     RangeVar *view;      /* the view to be created */
@@ -2141,6 +2147,7 @@ typedef struct ViewStmt {
     char *mv_sql;
     char* definer;
     bool is_alter;
+    ViewSecurityOption viewSecurityOption; /* sql secureity option, b format */
 #ifdef ENABLE_MULTIPLE_NODES
     struct PGXCSubCluster* subcluster; /* subcluster of table */
 #endif
@@ -2476,7 +2483,8 @@ typedef struct AutoIncrement {
 } AutoIncrement;
 
 typedef enum IndexHintType {
-    INDEX_HINT_USE =1,
+    INDEX_HINT_IGNORE = 0,
+    INDEX_HINT_USE = 1,
     INDEX_HINT_FORCE, 
     INDEX_HINT_MIX,
     INDEX_HINT_NOT_EXISTS

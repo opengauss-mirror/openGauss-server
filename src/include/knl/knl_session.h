@@ -446,6 +446,10 @@ typedef struct knl_u_parser_context {
     bool isForbidTruncate;
     bool isPerform;
     void* stmt;
+
+    bool in_userset;
+    bool has_set_uservar;
+    bool has_equal_uservar;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {

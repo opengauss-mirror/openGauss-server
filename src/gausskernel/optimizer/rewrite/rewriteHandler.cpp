@@ -294,6 +294,30 @@ static bool acquireLocksOnSubLinks(Node* node, void* context)
 }
 
 /*
+ * Walker to pass down views' invoker info to RangeTableEnrty or FuncExpr in a Query
+ * B format mode use this feature
+ */
+static bool viewSecurityPassDown(Node* node, void* context)
+{
+    Oid* asUser = (Oid*)context;
+    if (node == NULL)
+        return false;
+    if (IsA(node, RangeTblEntry)) {
+        RangeTblEntry* rte = (RangeTblEntry*)node;
+        /* Do what we came for */
+        if (rte->rtekind == RTE_RELATION) {
+            rte->checkAsUser = *asUser;
+        }
+        /* allow rangetable entry continue */
+        return false;
+    } 
+    /*
+     * Do NOT recurse into Query nodes, because fireRIRrules already processed
+     * subselects of subselects for us.
+     */
+    return expression_tree_walker(node, (bool (*)())viewSecurityPassDown, context);
+}
+/*
  * rewriteRuleAction -
  *	  Rewrite the rule action with appropriate qualifiers (taken from
  *	  the triggering query).
@@ -1866,6 +1890,8 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     RangeTblEntry* subrte = NULL;
     RowMarkClause* rc = NULL;
     bool is_flt_frame = parsetree->is_flt_frame;
+    /* b_format view sql security option use */
+    Oid checkAsUser = InvalidOid;
 
     if (list_length(rule->actions) != 1) {
         ereport(ERROR, (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("expected just one rule action")));
@@ -1974,6 +2000,35 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
 
     /* Pass the is_flt_frame from parsetree to rule_action */
     rule_action->is_flt_frame = is_flt_frame;
+
+    /*
+     * in B format database ,deal with security options 
+     * cause checkAsUser shoule be seted as definers' oid 
+     * we should do some check here ,after expand views' query definition
+     */
+
+    /* get from here, before Recursive call this function, transform outside view first */
+    rte = rt_fetch(rt_index, parsetree->rtable);
+    
+    if (DB_IS_CMPT(B_FORMAT) && rte->relkind == RELKIND_VIEW) {
+        if (RelationHasViewSecurityDefinerOption(relation)) {
+            checkAsUser = RelationGetOwner(relation);
+        } else if (RelationHasViewSecurityInvokerOption(relation)) {
+            /* for invoker ,if checkAsUser is seted as owner id, we shoule use it */
+            checkAsUser = rte->checkAsUser == InvalidOid ? GetUserId() : rte->checkAsUser;
+        } else {
+            /* default is definer in b format database */
+            checkAsUser = RelationGetOwner(relation);
+        }
+        if (checkAsUser != RelationGetOwner(relation)) {
+            /* set all relations' and functions' invoker information */
+            query_tree_walker((Query *)rule_action, (bool (*)())viewSecurityPassDown, (void *)&checkAsUser, QTW_EXAMINE_RTES);
+        }
+    } else if (RelationHasViewSecurityOption(relation)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("SQL Security option should only used in view and B format database")));
+    }
 
     /*
      * Recursively expand any view references inside the view.

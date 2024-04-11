@@ -76,7 +76,7 @@ static TupleTableSlot* ExecResult(PlanState* state)
     /*
      * check constant qualifications like (2 > 1), if not already done
      */
-    if (node->rs_checkqual) {
+    if ((node->rs_checkqual || (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT))) && !u_sess->parser_cxt.has_equal_uservar) {
         bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
 
         node->rs_checkqual = false;
@@ -116,6 +116,21 @@ static TupleTableSlot* ExecResult(PlanState* state)
     if (node->ps.ps_TupFromTlist) {
         result_slot = ExecProject(node->ps.ps_ProjInfo, &is_done);
         if (is_done == ExprMultipleResult) {
+            if (u_sess->parser_cxt.has_equal_uservar) {
+                u_sess->parser_cxt.has_equal_uservar = false;
+                bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
+
+                node->rs_checkqual = false;
+                if (!qualResult) {
+                    node->rs_done = true;
+                    /*
+                    * Mark this constant qualification check failure for future corner cases. Currently only used in GDS
+                    * foreign scan
+                    */
+                    u_sess->exec_cxt.exec_result_checkqual_fail = true;
+                    return NULL;
+                }
+            }
             return result_slot;
         }
         /* Done with that source tuple... */
@@ -159,6 +174,21 @@ static TupleTableSlot* ExecResult(PlanState* state)
             node->rs_done = true;
         }
 
+        if (u_sess->parser_cxt.has_equal_uservar && node->resconstantqual != NULL) {
+            bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
+
+            node->rs_checkqual = false;
+            if (!qualResult) {
+                node->rs_done = true;
+                /*
+                * Mark this constant qualification check failure for future corner cases. Currently only used in GDS
+                * foreign scan
+                */
+                u_sess->exec_cxt.exec_result_checkqual_fail = true;
+                return NULL;
+            }
+        }
+
         /*
          * form the result tuple using ExecProject(), and return it --- unless
          * the projection produces an empty set, in which case we must loop
@@ -166,6 +196,21 @@ static TupleTableSlot* ExecResult(PlanState* state)
          */
         result_slot = ExecProject(node->ps.ps_ProjInfo, &is_done);
 
+        if (u_sess->parser_cxt.has_equal_uservar && node->resconstantqual != NULL) {
+            u_sess->parser_cxt.has_equal_uservar = false;
+            bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
+
+            node->rs_checkqual = false;
+            if (!qualResult) {
+                node->rs_done = true;
+                /*
+                * Mark this constant qualification check failure for future corner cases. Currently only used in GDS
+                * foreign scan
+                */
+                u_sess->exec_cxt.exec_result_checkqual_fail = true;
+                return NULL;
+            }
+        }
         if (is_done != ExprEndResult) {
             node->ps.ps_TupFromTlist = (is_done == ExprMultipleResult);
             return result_slot;

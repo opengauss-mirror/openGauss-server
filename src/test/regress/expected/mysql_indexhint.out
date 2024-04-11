@@ -454,6 +454,416 @@ explain (costs off)select  user_no from list_list subpartition for (100,4) use i
          Selected Subpartitions:  1:1
 (6 rows)
 
+--ignore index test
+create table db_1130449_tb (col1 int ,col2 int,col3 int,col4 varchar(10),primary key(col1));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "db_1130449_tb_pkey" for table "db_1130449_tb"
+insert into db_1130449_tb values(1,1,1,'a');
+insert into db_1130449_tb values(2,2,2,'a');
+insert into db_1130449_tb values(3,3,2,'a');
+insert into db_1130449_tb values(4,4,3,'b');
+insert into db_1130449_tb values(5,5,3,'b');
+insert into db_1130449_tb values(6,6,6,'b');
+insert into db_1130449_tb values(7,7,7,'a');
+insert into db_1130449_tb values(8,8,8,'c');
+insert into db_1130449_tb values(9,9,9,'c');
+insert into db_1130449_tb values(10,null,1,'c');
+create unique index index_1130449 on db_1130449_tb (col2);
+analyze db_1130449_tb;
+select * from db_1130449_tb ignore index (index_1130449) where col2= 3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    3 |    2 | a
+(1 row)
+
+select * from db_1130449_tb ignore index (index_1130449) where col2= 3 and col4 = 'a';
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    3 |    2 | a
+(1 row)
+
+select * from db_1130449_tb IGNORE INDEX (index_1130449) where col2= 3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    3 |    2 | a
+(1 row)
+
+explain (costs off )select * from db_1130449_tb ignore index (index_1130449) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130449_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130449_tb ignore index (index_1130449) where col2= 3 and col4 = 'a';
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Seq Scan on db_1130449_tb
+   Filter: ((col2 = 3) AND ((col4)::text = 'a'::text))
+(2 rows)
+
+explain (costs off) select * from db_1130449_tb IGNORE INDEX (index_1130449) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130449_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off) select * from db_1130449_tb FORCE INDEX (index_1130449) IGNORE INDEX (index_1130449) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130449_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+--multi index ignored gram test
+create table db_1130452_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_1130452_tb values(1,1,1,'a');
+insert into db_1130452_tb values(1,2,2,'a');
+insert into db_1130452_tb values(2,2,2,'a');
+insert into db_1130452_tb values(2,2,3,'b');
+insert into db_1130452_tb values(2,3,3,'b');
+insert into db_1130452_tb values(3,3,4,'b');
+insert into db_1130452_tb values(3,3,4,'a');
+insert into db_1130452_tb values(3,4,5,'c');
+insert into db_1130452_tb values(4,4,5,'c');
+insert into db_1130452_tb values(4,null,1,'c');
+create index index_1130452_1 on db_1130452_tb (col1);
+create index index_1130452_2 on db_1130452_tb (col2);
+create index index_1130452_3 on db_1130452_tb (col3);
+create index index_1130452_4 on db_1130452_tb (col4);
+analyze db_1130452_tb;
+select * from db_1130452_tb ignore index (index_1130452_1) ignore index (index_1130452_2) where col2= 3 order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1130452_tb ignore index (index_1130452_2) ignore index (index_1130452_1) where col2= 3 order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1130452_tb ignore index (index_1130452_2) ignore index (index_1130452_2) where col2= 3 order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1130452_tb ignore index (index_1130452_1) ignore index (index_1130452_2)ignore index (index_1130452_3) ignore index (index_1130452_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b' order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+(1 row)
+
+select * from db_1130452_tb ignore index (index_1130452_1, index_1130452_2) where col2= 3 order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1130452_tb ignore index (index_1130452_2, index_1130452_1) where col2= 3 order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1130452_tb ignore index (index_1130452_2, index_1130452_2) where col2= 3 order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1130452_tb ignore index (index_1130452_1, index_1130452_2, index_1130452_3, index_1130452_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b' order by 1,2,3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+(1 row)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_1) ignore index (index_1130452_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130452_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_2) ignore index (index_1130452_1) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130452_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_2) ignore index (index_1130452_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130452_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_1) ignore index (index_1130452_2)ignore index (index_1130452_3) ignore index (index_1130452_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Seq Scan on db_1130452_tb
+   Filter: ((col2 = 3) AND (col3 = 3) AND (col1 = 2) AND ((col4)::text = 'b'::text))
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_1 ,index_1130452_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130452_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_2 ,index_1130452_1) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130452_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_2, index_1130452_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1130452_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1130452_tb ignore index (index_1130452_1, index_1130452_2, index_1130452_3, index_1130452_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Seq Scan on db_1130452_tb
+   Filter: ((col2 = 3) AND (col3 = 3) AND (col1 = 2) AND ((col4)::text = 'b'::text))
+(2 rows)
+
+--error report
+create table db_1130456_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_1130456_tb values(1,1,1,'a');
+insert into db_1130456_tb values(1,2,2,'a');
+insert into db_1130456_tb values(2,2,2,'a');
+insert into db_1130456_tb values(2,2,3,'b');
+insert into db_1130456_tb values(2,3,3,'b');
+insert into db_1130456_tb values(3,3,4,'b');
+insert into db_1130456_tb values(3,3,4,'a');
+insert into db_1130456_tb values(3,4,5,'c');
+insert into db_1130456_tb values(4,4,5,'c');
+insert into db_1130456_tb values(4,null,1,'c');
+create index index_1130456_1 on db_1130456_tb (col1);
+create index index_1130456_2 on db_1130456_tb (col2);
+create index index_1130456_3 on db_1130456_tb (col3);
+create index index_1130456_4 on db_1130456_tb (col4);
+analyze db_1130456_tb;
+create table db_1130456_tb_1 as select * from db_1130456_tb;
+create index index_1130456_5 on db_1130456_tb_1 (col1);
+select * from db_1130456_tb ignore index (index_1130456_5) where col2= 3;
+ERROR:  index not exists in relation db_1130456_tb
+select * from db_1130456_tb ignore index (index_1130456_6) where col2= 3; 
+ERROR:  index not exists in relation db_1130456_tb
+--in partition table 
+CREATE TABLE db_1130473_tb
+(
+col1 INTEGER NOT NULL,
+col2 INTEGER NOT NULL,
+col3 INTEGER ,
+CA_STREET_NAME VARCHAR(60) ,
+CA_STREET_TYPE CHAR(15) ,
+CA_SUITE_NUMBER CHAR(10) ,
+CA_CITY VARCHAR(60) ,
+CA_COUNTY VARCHAR(30) ,
+CA_STATE CHAR(2) ,
+CA_ZIP CHAR(10) ,
+CA_COUNTRY VARCHAR(20) ,
+CA_GMT_OFFSET DECIMAL(5,2) ,
+CA_LOCATION_TYPE CHAR(20)
+)
+PARTITION BY list(col1)
+(
+partition p1 values (4),
+partition p2 values (5),
+partition p3 values (1),
+partition p4 values (2),
+partition p5 values (3));
+CREATE INDEX ds_db_1130473_tb_index2 ON db_1130473_tb(col1) LOCAL ;
+insert into db_1130473_tb select 1,v,v from generate_series(1,120) as v;
+insert into db_1130473_tb select 2,v,v from generate_series(1,200) as v;
+insert into db_1130473_tb select 3,v,v from generate_series(1,100) as v;
+insert into db_1130473_tb select 4,v,v from generate_series(1,300) as v;
+insert into db_1130473_tb select 5,v,v from generate_series(1,500) as v;
+create index "Index_1130473%%_1" on db_1130473_tb (col1) local;
+create index INDEX_1130473_2 on db_1130473_tb (col2);
+analyze db_1130473_tb;
+select max(col2)+1 from db_1130473_tb ignore index ("Index_1130473%%_1") where col1>= 3 ;
+ ?column? 
+----------
+      501
+(1 row)
+
+select max(col2)+1 from db_1130473_tb ignore index ("Index_1130473%%_1") ignore index (INDEX_1130473_2) where col2>= 3 and col1 >=3 ;
+ ?column? 
+----------
+      501
+(1 row)
+
+explain (costs off) select max(col2)+1 from db_1130473_tb ignore index ("Index_1130473%%_1") where col1>= 3 ;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Result
+   InitPlan 1 (returns $0)
+     ->  Limit
+           ->  Index Scan Backward using index_1130473_2 on db_1130473_tb
+                 Filter: (col1 >= 3)
+(5 rows)
+
+explain (costs off) select max(col2)+1 from db_1130473_tb ignore index ("Index_1130473%%_1") ignore index (INDEX_1130473_2) where col2>= 3 and col1 >=3 ;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 5
+         ->  Partitioned Seq Scan on db_1130473_tb
+               Filter: ((col2 >= 3) AND (col1 >= 3))
+               Selected Partitions:  1..5
+(6 rows)
+
+select max(col2)+1 from db_1130473_tb partition (p1) ignore index ("Index_1130473%%_1") where col1>= 3 ;
+ ?column? 
+----------
+      301
+(1 row)
+
+select max(col2)+1 from db_1130473_tb partition (p1) ignore index ("Index_1130473%%_1") ignore index (INDEX_1130473_2) where col2>= 3 and col1 >=3 ;
+ ?column? 
+----------
+      301
+(1 row)
+
+explain (costs off) select max(col2)+1 from db_1130473_tb partition (p1) ignore index ("Index_1130473%%_1") where col1>= 3 ;
+                 QUERY PLAN                  
+---------------------------------------------
+ Aggregate
+   ->  Partitioned Seq Scan on db_1130473_tb
+         Filter: (col1 >= 3)
+         Selected Partitions:  4
+(4 rows)
+
+explain (costs off) select max(col2)+1 from db_1130473_tb partition (p1) ignore index ("Index_1130473%%_1") ignore index (INDEX_1130473_2) where col2>= 3 and col1 >=3 ;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Aggregate
+   ->  Partitioned Seq Scan on db_1130473_tb
+         Filter: ((col2 >= 3) AND (col1 >= 3))
+         Selected Partitions:  4
+(4 rows)
+
+select max(col2)+1 from db_1130473_tb partition (p1) ignore index (ds_db_1130473_tb_index2) where col1>= 3 ;
+ ?column? 
+----------
+      301
+(1 row)
+
+select max(col2)+1 from db_1130473_tb partition (p1) ignore index (ds_db_1130473_tb_index2) ignore index (INDEX_1130473_2) where col2>= 3 and col1 >=3 ;
+ ?column? 
+----------
+      301
+(1 row)
+
+explain (costs off) select max(col2)+1 from db_1130473_tb partition (p1) ignore index (ds_db_1130473_tb_index2) where col1>= 3 ;
+                 QUERY PLAN                  
+---------------------------------------------
+ Aggregate
+   ->  Partitioned Seq Scan on db_1130473_tb
+         Filter: (col1 >= 3)
+         Selected Partitions:  4
+(4 rows)
+
+explain (costs off) select max(col2)+1 from db_1130473_tb partition (p1) ignore index (ds_db_1130473_tb_index2) ignore index (INDEX_1130473_2) where col2>= 3 and col1 >=3 ;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Aggregate
+   ->  Partitioned Seq Scan on db_1130473_tb
+         Filter: ((col2 >= 3) AND (col1 >= 3))
+         Selected Partitions:  4
+(4 rows)
+
+-- with scan hint 
+create table db_1131004_tb (col1 int ,col2 int,col3 int,col4 varchar(10),primary key(col1));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "db_1131004_tb_pkey" for table "db_1131004_tb"
+insert into db_1131004_tb values(1,1,1,'a');
+insert into db_1131004_tb values(2,2,2,'a');
+insert into db_1131004_tb values(3,3,2,'a');
+insert into db_1131004_tb values(4,4,3,'b');
+insert into db_1131004_tb values(5,5,3,'b');
+insert into db_1131004_tb values(6,6,6,'b');
+insert into db_1131004_tb values(7,7,7,'a');
+insert into db_1131004_tb values(8,8,8,'c');
+insert into db_1131004_tb values(9,9,9,'c');
+insert into db_1131004_tb values(10,null,1,'c');
+create unique index index_1131004 on db_1131004_tb (col2);
+analyze db_1131004_tb;
+select /*+ indexscan(db_1131004_tb ) */* from db_1131004_tb ignore index (index_1131004) where col2= 3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    3 |    2 | a
+(1 row)
+
+explain (costs off) select /*+ indexscan(db_1131004_tb ) */* from db_1131004_tb ignore index (index_1131004) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1131004_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+select /*+ indexonlyscan(db_1131004_tb ) */col2 from db_1131004_tb ignore index (index_1131004) where col2= 3;
+ col2 
+------
+    3
+(1 row)
+
+explain (costs off) select /*+ indexonlyscan(db_1131004_tb ) */col2 from db_1131004_tb ignore index (index_1131004) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1131004_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+select /*+ indexscan(db_1131004_tb index_1131004 ) */* from db_1131004_tb ignore index (index_1131004) where col2= 3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    3 |    2 | a
+(1 row)
+
+explain (costs off) select /*+ indexscan(db_1131004_tb index_1131004) */* from db_1131004_tb ignore index (index_1131004) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1131004_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+select /*+ indexonlyscan(db_1131004_tb index_1131004) */col2 from db_1131004_tb ignore index (index_1131004) where col2= 3;
+ col2 
+------
+    3
+(1 row)
+
+explain (costs off) select /*+ indexonlyscan(db_1131004_tb index_1131004) */col2 from db_1131004_tb ignore index (index_1131004) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1131004_tb
+   Filter: (col2 = 3)
+(2 rows)
+
 \c postgres
 DROP DATABASE IF EXISTS db_1097149;
 DROP DATABASE IF EXISTS db_ID1097168;
