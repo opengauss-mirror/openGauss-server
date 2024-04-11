@@ -1829,6 +1829,7 @@ extern Datum pg_replication_origin_xact_reset(PG_FUNCTION_ARGS);
 extern Datum pg_replication_origin_xact_setup(PG_FUNCTION_ARGS);
 extern Datum pg_show_replication_origin_status(PG_FUNCTION_ARGS);
 
+
 extern Datum text_interval(PG_FUNCTION_ARGS);
 
 /* pg_publication.cpp */
