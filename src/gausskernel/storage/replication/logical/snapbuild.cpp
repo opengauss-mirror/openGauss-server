@@ -1533,6 +1533,9 @@ static void SnapBuildSerialize(SnapBuild *builder, XLogRecPtr lsn)
 
 out:
     ReorderBufferSetRestartPoint(builder->reorder, builder->last_serialized_snapshot);
+
+    if (ondisk)
+        pfree(ondisk);
 }
 
 static void CheckDiskFile(SnapBuildOnDisk* ondisk, char* path, size_t pathLen)
