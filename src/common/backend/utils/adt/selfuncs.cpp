@@ -5662,6 +5662,12 @@ static Pattern_Prefix_Status like_fixed_prefix(
     pg_locale_t locale = 0;
     bool locale_is_c = false;
 
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
+        (typeId == get_typeoid(PG_CATALOG_NAMESPACE, "binary") ||
+            typeId == get_typeoid(PG_CATALOG_NAMESPACE, "varbinary"))) {
+        typeId = BYTEAOID;
+    }
+
     /* the right-hand const is type text or bytea */
     Assert(typeId == BYTEAOID || typeId == TEXTOID);
 
