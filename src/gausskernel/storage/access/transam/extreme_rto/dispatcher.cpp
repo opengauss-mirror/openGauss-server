@@ -51,6 +51,7 @@
 #include "utils/palloc.h"
 #include "utils/guc.h"
 #include "utils/relmapper.h"
+#include "replication/ss_disaster_cluster.h"
 
 #include "portability/instr_time.h"
 
@@ -95,6 +96,7 @@ namespace extreme_rto {
 LogDispatcher *g_dispatcher = NULL;
 
 static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
+#define FILE_MAX_SIZE 1073741824  /* max size of resource pooling page : 1GB */
 
 static const int32 MAX_PENDING = 1;
 static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
@@ -172,6 +174,7 @@ void CopyDataFromOldReader(XLogReaderState *newReaderState, const XLogReaderStat
 void SendSingalToPageWorker(int signal);
 
 #ifdef USE_ASSERT_CHECKING
+void GetLsnCheckInfo(uint64 *curPosition, XLogRecPtr *curLsn);
 bool CheckBufHasSpaceToDispatch(XLogRecPtr endRecPtr);
 #endif
 
@@ -860,6 +863,24 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
 #ifdef USE_ASSERT_CHECKING
         uint64 waitCount = 0;
         while (!CheckBufHasSpaceToDispatch(record->EndRecPtr)) {
+            if(SS_DISASTER_MAIN_STANDBY_NODE) {
+                uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+                uint64 curPosition;
+                XLogRecPtr curLsn;
+                GetLsnCheckInfo(&curPosition, &curLsn);
+
+                XLogRecPtr endPtr = record->EndRecPtr;
+                if (endPtr % XLogSegSize == 0) {
+                    XLByteAdvance(endPtr, SizeOfXLogLongPHD);
+                } else if (endPtr % XLOG_BLCKSZ == 0) {
+                    XLByteAdvance(endPtr, SizeOfXLogShortPHD);
+                }
+
+                uint32 len = (uint32)(endPtr - curLsn);
+                if (info == XLOG_SWITCH && len < FILE_MAX_SIZE) {
+                    break;
+                }
+            }
             RedoInterruptCallBack();
             waitCount++;
             if ((waitCount & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
