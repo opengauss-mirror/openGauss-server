@@ -178,9 +178,9 @@ Datum xid_age(PG_FUNCTION_ARGS)
 
     /* Permanent XIDs are always infinitely old */
     if (!TransactionIdIsNormal(xid))
-        PG_RETURN_INT64(INT64_MAX);
+        PG_RETURN_TRANSACTIONID(UINT64_MAX);
 
-    PG_RETURN_INT64((int64)(now - xid));
+    PG_RETURN_TRANSACTIONID((TransactionId)(now - xid));
 }
 
 /*
