@@ -305,7 +305,13 @@ void OndemandRealtimeBuildHandleFailover()
     Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL);
 
     SSReadControlFile(SSGetPrimaryInstId());
-    ss_failover_dw_init();
+    if (u_sess->storage_cxt.pendingOps == NULL) {
+        InitSync();
+        ss_failover_dw_init();
+        EnableSyncRequestForwarding();
+    } else {
+        ss_failover_dw_init();
+    }
     StartupOndemandRecovery();
     StartupReplicationSlots();
     restoreTwoPhaseData();
