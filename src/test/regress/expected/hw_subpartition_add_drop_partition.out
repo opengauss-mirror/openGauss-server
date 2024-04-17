@@ -187,14 +187,17 @@ Options: orientation=row, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition customer2
 ALTER TABLE range_range_sales DROP PARTITION customer2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE range_range_sales DROP SUBPARTITION customer1_2008;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE range_range_sales DROP SUBPARTITION customer4_all;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition customer3
 ALTER TABLE range_range_sales DROP PARTITION FOR (400);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE range_range_sales DROP PARTITION FOR (400, '2010-01-01');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -210,6 +213,7 @@ ALTER TABLE range_range_sales DROP SUBPARTITION FOR ('2010-01-01', 1400);
 ERROR:  invalid input syntax for integer: "2010-01-01"
 --success, drop subpartition customer5_2010
 ALTER TABLE range_range_sales DROP SUBPARTITION FOR(1400, '2010-01-01');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in customer6
 ALTER TABLE range_range_sales DROP SUBPARTITION FOR(2000, '2009-01-01');
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -475,14 +479,17 @@ Options: orientation=row, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition customer2
 ALTER TABLE range_list_sales DROP PARTITION customer2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE range_list_sales DROP SUBPARTITION customer1_channel1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE range_list_sales DROP SUBPARTITION customer4_channel1;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition customer3
 ALTER TABLE range_list_sales DROP PARTITION FOR (400);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE range_list_sales DROP PARTITION FOR (400, '4');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -498,6 +505,7 @@ ALTER TABLE range_list_sales DROP SUBPARTITION FOR ('abc', 1400);
 ERROR:  invalid input syntax for integer: "abc"
 --success, drop subpartition customer5_channel3
 ALTER TABLE range_list_sales DROP SUBPARTITION FOR(1400, '7');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in customer6
 ALTER TABLE range_list_sales DROP SUBPARTITION FOR(2000, 'X');
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -742,6 +750,7 @@ Options: orientation=row, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition customer2
 ALTER TABLE range_hash_sales DROP PARTITION customer2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, not support drop hash
 ALTER TABLE range_hash_sales DROP SUBPARTITION customer1_product1;
 ERROR:  Un-support feature
@@ -752,6 +761,7 @@ ERROR:  Un-support feature
 DETAIL:  The syntax is unsupported for hash subpartition
 --success, drop partition customer3
 ALTER TABLE range_hash_sales DROP PARTITION FOR (400);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE range_hash_sales DROP PARTITION FOR (400, '2010-01-01');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -1014,14 +1024,17 @@ Options: orientation=row, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition channel2
 ALTER TABLE list_range_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE list_range_sales DROP SUBPARTITION channel1_customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE list_range_sales DROP SUBPARTITION channel4_customer1;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition channel3
 ALTER TABLE list_range_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE list_range_sales DROP PARTITION FOR('X', 700);
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -1037,6 +1050,7 @@ ALTER TABLE list_range_sales DROP SUBPARTITION FOR(700, 'X');
 ERROR:  value too long for type character(1)
 --success, drop subpartition channel5_customer3
 ALTER TABLE list_range_sales DROP SUBPARTITION FOR('X', 700);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in channel6
 ALTER TABLE list_range_sales DROP SUBPARTITION FOR('K', 100);
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -1305,14 +1319,17 @@ Options: orientation=row, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition channel2
 ALTER TABLE list_list_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE list_list_sales DROP SUBPARTITION channel1_type1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE list_list_sales DROP SUBPARTITION channel4_type1;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition channel3
 ALTER TABLE list_list_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE list_list_sales DROP PARTITION FOR('X', 6);
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -1328,6 +1345,7 @@ ALTER TABLE list_list_sales DROP SUBPARTITION FOR(10, 'X');
 ERROR:  value too long for type character(1)
 --success, drop subpartition channel5_type3
 ALTER TABLE list_list_sales DROP SUBPARTITION FOR('X', 6);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in channel6
 ALTER TABLE list_list_sales DROP SUBPARTITION FOR('K', 10);
 ERROR:  Cannot drop the only subpartition of a partitioned table

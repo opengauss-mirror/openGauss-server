@@ -529,6 +529,7 @@ select pg_sleep(4);
 
 insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
 ALTER TABLE PARTITION_TABLE_001 TRUNCATE PARTITION PARTITION_TABLE_001_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from PARTITION_TABLE_001 timecapsule csn findCsn(2);
 ERROR:  The table definition of "partition_table_001" has been changed.
 select pg_sleep(4);
@@ -540,6 +541,7 @@ select pg_sleep(4);
 insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
 ALTER TABLE PARTITION_TABLE_001 MERGE PARTITIONS PARTITION_TABLE_001_1,PARTITION_TABLE_001_2 INTO PARTITION PARTITION_TABLE_001_6;
 --?CONTEXT:  SQL statement "NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pg_tmp.*" for table "pg_temp.*"
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from PARTITION_TABLE_001 timecapsule csn findCsn(3);
 ERROR:  The table definition of "partition_table_001" has been changed.
 select pg_sleep(4);
@@ -553,6 +555,7 @@ alter table PARTITION_TABLE_001 split PARTITION PARTITION_TABLE_001_5 into (
 partition PARTITION_TABLE_001_5_1 values less than (80,80,900,900.2),
 partition PARTITION_TABLE_001_5_2  values less than (100,100,1000,1100.2)
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from PARTITION_TABLE_001 timecapsule csn findCsn(4);
 ERROR:  The table definition of "partition_table_001" has been changed.
 select pg_sleep(4);
@@ -573,6 +576,7 @@ select pg_sleep(4);
 
 insert into t_timecapsule_test_tmp select 6, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
 ALTER TABLE PARTITION_TABLE_001 DROP PARTITION PARTITION_TABLE_001_4;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from PARTITION_TABLE_001 timecapsule csn findCsn(6);
 ERROR:  The table definition of "partition_table_001" has been changed.
 select pg_sleep(4);

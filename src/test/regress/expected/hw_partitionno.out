@@ -67,6 +67,7 @@ EXECUTE partition_get_partitionno('range_sales');
 -- add/drop partition
 ALTER TABLE range_sales ADD PARTITION time_default VALUES LESS THAN (MAXVALUE);
 ALTER TABLE range_sales DROP PARTITION time_2008;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 EXECUTE partition_get_partitionno('range_sales');
    relname    | partitionno | subpartitionno |  boundaries  
 --------------+-------------+----------------+--------------
@@ -79,6 +80,7 @@ EXECUTE partition_get_partitionno('range_sales');
 
 -- merge/split partition
 ALTER TABLE range_sales SPLIT PARTITION time_default AT ('2013-01-01') INTO (PARTITION time_2012, PARTITION time_default_temp);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ALTER TABLE range_sales RENAME PARTITION time_default_temp TO time_default;
 ALTER TABLE range_sales MERGE PARTITIONS time_2009, time_2010 INTO PARTITION time_2010_old UPDATE GLOBAL INDEX;
 EXECUTE partition_get_partitionno('range_sales');
@@ -163,6 +165,7 @@ EXECUTE partition_get_partitionno('interval_sales');
 INSERT INTO interval_sales VALUES (1,1,'2013-01-01','A',1,1,1);
 INSERT INTO interval_sales VALUES (2,2,'2012-01-01','B',2,2,2);
 ALTER TABLE interval_sales DROP PARTITION time_2008;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 EXECUTE partition_get_partitionno('interval_sales');
     relname     | partitionno | subpartitionno |          boundaries          
 ----------------+-------------+----------------+------------------------------
@@ -175,6 +178,7 @@ EXECUTE partition_get_partitionno('interval_sales');
 
 -- merge/split partition
 ALTER TABLE interval_sales SPLIT PARTITION time_2009 AT ('2009-01-01') INTO (PARTITION time_2008, PARTITION time_2009_temp);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ALTER TABLE interval_sales RENAME PARTITION time_2009_temp TO time_2009;
 ALTER TABLE interval_sales MERGE PARTITIONS time_2009, time_2010 INTO PARTITION time_2010_old UPDATE GLOBAL INDEX;
 EXECUTE partition_get_partitionno('interval_sales');
@@ -260,6 +264,7 @@ EXECUTE partition_get_partitionno('list_sales');
 -- add/drop partition
 ALTER TABLE list_sales ADD PARTITION channel_default VALUES (DEFAULT);
 ALTER TABLE list_sales DROP PARTITION channel4;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 EXECUTE partition_get_partitionno('list_sales');
      relname     | partitionno | subpartitionno | boundaries 
 -----------------+-------------+----------------+------------
@@ -362,6 +367,7 @@ EXECUTE subpartition_get_partitionno('list_range_sales');
 
 -- add/drop partition
 ALTER TABLE list_range_sales DROP PARTITION channel3;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ALTER TABLE list_range_sales ADD PARTITION channel3 VALUES ('6', '7')
 (
     SUBPARTITION channel3_customer1 VALUES LESS THAN (200),
@@ -395,6 +401,7 @@ EXECUTE subpartition_get_partitionno('list_range_sales');
 
 -- merge/split partition
 ALTER TABLE list_range_sales SPLIT SUBPARTITION channel2_customer2 AT (800) INTO (SUBPARTITION channel2_customer3, SUBPARTITION channel2_customer4);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 EXECUTE subpartition_get_partitionno('list_range_sales');
          relname          | partitionno | subpartitionno | boundaries 
 --------------------------+-------------+----------------+------------

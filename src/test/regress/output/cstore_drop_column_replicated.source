@@ -222,6 +222,7 @@ select count(*) from cstore_part_table where c3 < 5;
 (1 row)
 
 alter table cstore_part_table truncate partition cstore_part_table_p0;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from cstore_part_table where c3 < 5;
  count 
 -------
@@ -455,6 +456,7 @@ select * from cstore_part_table order by c1,c3;
 (10 rows)
 
 alter table cstore_part_table truncate partition cstore_part_table_p4;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from cstore_part_table partition (cstore_part_table_p4);
  c3 | c1 
 ----+----
@@ -476,6 +478,7 @@ alter table ord_table add column c1 text default 100;
 alter table ord_table drop column c2;
 insert into ord_table(c1,c3) values(generate_series(1,6),generate_series(1,6));
 alter table cstore_part_table exchange partition(cstore_part_table_p4) with table ord_table with validation;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from cstore_part_table partition (cstore_part_table_p4) order by c3;
  c3 | c1 
 ----+----

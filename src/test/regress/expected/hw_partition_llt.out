@@ -19,6 +19,7 @@ partition by range (a)
 create table test_ord (a int);
 insert into test_ord values (11);
 alter table test_exchange_llt exchange partition (test_exchange_llt_p2) with table test_ord with validation;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_llt;
 drop table test_ord;
 -- get_rel_oids
