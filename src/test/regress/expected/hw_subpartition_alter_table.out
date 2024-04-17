@@ -93,6 +93,7 @@ LINE 1: ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WIT...
                                          ^
 -- drop
 alter table range_range drop partition p_201901;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table range_range drop partition p_201901_a;
 ERROR:  partition "p_201901_a" does not exist
 alter table range_range drop subpartition p_201901_a;

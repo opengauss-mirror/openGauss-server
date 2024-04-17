@@ -50,6 +50,7 @@ select * from list_list partition (p_201901);
 (3 rows)
 
 alter table list_list truncate partition p_201901;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list partition (p_201901);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -64,6 +65,7 @@ select * from list_list partition (p_201902);
 (3 rows)
 
 alter table list_list truncate partition p_201902;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list partition (p_201902);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -88,6 +90,7 @@ select * from list_list subpartition (p_201901_a);
 (2 rows)
 
 alter table list_list truncate subpartition p_201901_a;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201901_a);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -100,6 +103,7 @@ select * from list_list subpartition (p_201901_b);
 (1 row)
 
 alter table list_list truncate subpartition p_201901_b;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201901_b);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -112,6 +116,7 @@ select * from list_list subpartition (p_201902_a);
 (1 row)
 
 alter table list_list truncate subpartition p_201902_a;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201902_a);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -125,6 +130,7 @@ select * from list_list subpartition (p_201902_b);
 (2 rows)
 
 alter table list_list truncate subpartition p_201902_b;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201902_b);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------

@@ -95,6 +95,7 @@ select relname, reloptions from pg_partition where parentid in (Select relfileno
 
 create table normal_test.exchange_table(id int) WITH(compresstype=2,compress_chunk_size=1024);
 ALTER TABLE normal_test.tbl_partition EXCHANGE PARTITION FOR(2500) WITH TABLE normal_test.exchange_table;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from normal_test.tbl_partition;
  count 
 -------
@@ -103,6 +104,7 @@ select count(*) from normal_test.tbl_partition;
 
 -- spilit
 ALTER TABLE normal_test.tbl_partition SPLIT PARTITION p1 AT (7500) INTO (PARTITION p10, PARTITION p11);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select relname, reloptions from pg_partition where parentid in (Select relfilenode from pg_class where relname like 'tbl_partition') order by relname;
     relname    |                                 reloptions                                 
 ---------------+----------------------------------------------------------------------------

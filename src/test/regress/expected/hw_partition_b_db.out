@@ -1588,6 +1588,7 @@ DROP TABLE IF EXISTS t_alter_partition_temp;
 ALTER TABLE t_multi_keys_list_default ADD PARTITION p5 VALUES ((2,1));
 ERROR:  list boundary of adding partition MUST NOT overlap with existing partition
 ALTER TABLE t_multi_keys_list_default DROP PARTITION FOR (1,'5');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ALTER TABLE t_multi_keys_list_default DROP PARTITION FOR (2,'1') UPDATE GLOBAL INDEX;
 SELECT * FROM t_multi_keys_list_default PARTITION FOR (1,'5') ORDER BY a,b;
 ERROR:  Cannot find partition by the value

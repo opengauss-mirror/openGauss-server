@@ -366,6 +366,7 @@ ERROR:  index mismatch for tables in ALTER TABLE EXCHANGE PARTITION
 ALTER INDEX idx1_partition_unsable_index_1 REBUILD PARTITION idx1_partition_unsable_index_1_p1;
 ALTER TABLE partition_unsable_index_1 EXCHANGE PARTITION (partition_unsable_index_1_p0)
 	WITH TABLE table_unusable_index_exchange;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- clean table_unusable_index_exchange
 DROP TABLE table_unusable_index_exchange;
 DROP TABLE partition_unsable_index_1;

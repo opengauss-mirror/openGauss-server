@@ -356,6 +356,7 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 (30 rows)
 
 ALTER TABLE alter_table drop partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
     part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
@@ -535,6 +536,7 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 (27 rows)
 
 ALTER TABLE alter_table TRUNCATE partition p2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
     part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
@@ -714,6 +716,7 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 (27 rows)
 
 ALTER TABLE alter_table SPLIT PARTITION p0 AT (2500) INTO (PARTITION p10, PARTITION p11);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
     part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
@@ -899,6 +902,7 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 (30 rows)
 
 ALTER TABLE alter_table MERGE PARTITIONS p10, p11 INTO PARTITION p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
     part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
@@ -1089,6 +1093,7 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 (27 rows)
 
 ALTER TABLE alter_table EXCHANGE PARTITION FOR(2500) WITH TABLE exchange_table;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
     part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid

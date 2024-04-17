@@ -22,6 +22,7 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -30,6 +31,7 @@ select count(*) from list_partition_truncate_table;
 
 --4 rows
 alter table list_partition_truncate_table truncate partition for (2000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -65,6 +67,7 @@ alter table list_partition_truncate_table truncate partition for (6000);
 ERROR:  The partition number is invalid or out-of-range
 --error
 alter table list_partition_truncate_table truncate partition for (5000), truncate partition for (6000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ERROR:  The partition number is invalid or out-of-range
 select count(*) from list_partition_truncate_table;
  count 
@@ -74,6 +77,7 @@ select count(*) from list_partition_truncate_table;
 
 -- 5 rows
 alter table list_partition_truncate_table truncate partition for (5000), truncate partition p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ERROR:  partition "p6" does not exist
 select count(*) from list_partition_truncate_table;
  count 
@@ -83,6 +87,8 @@ select count(*) from list_partition_truncate_table;
 
 -- 5 rows
 alter table list_partition_truncate_table truncate partition for (5000), truncate partition p2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -140,6 +146,7 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -148,6 +155,7 @@ select count(*) from list_partition_truncate_table;
 
 --4 rows
 alter table list_partition_truncate_table truncate partition for (2000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -180,6 +188,7 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -188,6 +197,7 @@ select count(*) from list_partition_truncate_table;
 
 --4 rows
 alter table list_partition_truncate_table truncate partition for (2000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -222,6 +232,7 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -259,6 +270,7 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -300,6 +312,7 @@ select count(*) from list_partition_truncate_table;
 --5 rows
 start transaction ;
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -308,6 +321,7 @@ select count(*) from list_partition_truncate_table;
 
 --4 rows
 alter table list_partition_truncate_table drop partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 rollback;
 select count(*) from list_partition_truncate_table;
  count 
@@ -318,6 +332,7 @@ select count(*) from list_partition_truncate_table;
 --5 rows
 start transaction ;
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -368,6 +383,7 @@ select count(*) from list_partition_truncate_table;
 
 --6 rows
 alter table list_partition_truncate_table truncate partition p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -417,6 +433,7 @@ select count(*) from list_partition_truncate_table;
 
 --6 rows
 alter table list_partition_truncate_table truncate partition p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -456,6 +473,8 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1, truncate partition for(1000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -468,6 +487,8 @@ start transaction;
 alter table list_partition_truncate_table add partition p6 values (6000);
 insert into list_partition_truncate_table values(6000,'0');
 alter table list_partition_truncate_table truncate partition p6, truncate partition for(6000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table partition(p6);
  count 
 -------
@@ -483,6 +504,8 @@ start transaction;
 alter table list_partition_truncate_table add partition p6 values (6000);
 insert into list_partition_truncate_table values(6000,'0');
 alter table list_partition_truncate_table truncate partition p6, truncate partition for(6000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table partition(p6);
  count 
 -------
@@ -834,6 +857,7 @@ select count(*) from list_partition_truncate_table;
 
 --5 rows
 alter table list_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -842,6 +866,7 @@ select count(*) from list_partition_truncate_table;
 
 --4 rows
 alter table list_partition_truncate_table truncate partition for (2000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------
@@ -877,6 +902,7 @@ alter table list_partition_truncate_table truncate partition for (6000);
 ERROR:  The partition number is invalid or out-of-range
 --error
 alter table list_partition_truncate_table truncate partition for (5000), truncate partition for (6000);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ERROR:  The partition number is invalid or out-of-range
 select count(*) from list_partition_truncate_table;
  count 
@@ -886,6 +912,7 @@ select count(*) from list_partition_truncate_table;
 
 -- 5 rows
 alter table list_partition_truncate_table truncate partition for (5000), truncate partition p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ERROR:  partition "p6" does not exist
 select count(*) from list_partition_truncate_table;
  count 
@@ -895,6 +922,8 @@ select count(*) from list_partition_truncate_table;
 
 -- 5 rows
 alter table list_partition_truncate_table truncate partition for (5000), truncate partition p2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from list_partition_truncate_table;
  count 
 -------

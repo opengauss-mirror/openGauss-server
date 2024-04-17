@@ -234,6 +234,7 @@ create table test_exchange_row(id int, value int);
 insert into test_exchange_row values(1, generate_series(10, 19));
 insert into test_exchange_col select * from test_exchange_row;
 alter table test_exchange_partition exchange partition (p2) with table test_exchange_col;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(1) from test_exchange_partition;
  count 
 -------
@@ -248,6 +249,7 @@ insert into test_exchange_col select * from test_exchange_row;
 alter table test_exchange_partition exchange partition (p2) with table test_exchange_col with validation;
 ERROR:  some rows in table do not qualify for specified partition
 alter table test_exchange_partition exchange partition (p2) with table test_exchange_col with validation verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(1) from test_exchange_partition;
  count 
 -------

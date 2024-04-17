@@ -39,12 +39,14 @@ SELECT COUNT(*) FROM range_test1_v3;
 
 -- do DDL on destination partition
 ALTER TABLE range_test1 DROP PARTITION p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- the partition is missing, error
 SELECT COUNT(*) FROM range_test1_v1;
 --?ERROR:  fail to find partition with oid .* for partitioned table .*
 DETAIL:  this partition may have already been dropped by DDL operation
 HINT:  Check if this query contains a view that refrences the target partition. If so, REBUILD this view.
 ALTER TABLE range_test1 TRUNCATE PARTITION p2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- the partition is reserved, success
 SELECT COUNT(*) FROM range_test1_v2;
  count 
@@ -120,12 +122,14 @@ SELECT COUNT(*) FROM range_range_test1_v4;
 
 -- do DDL on destination partition
 ALTER TABLE range_range_test1 DROP SUBPARTITION p1_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- the subpartition p1_1 is missing
 SELECT COUNT(*) FROM range_range_test1_v2;
 --?ERROR:  fail to find subpartition with oid .* for partitioned table .*
 DETAIL:  this subpartition may have already been dropped by DDL operation
 HINT:  Check if this query contains a view that refrences the target subpartition. If so, REBUILD this view.
 ALTER TABLE range_range_test1 DROP PARTITION p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- the partition p1 is missing
 SELECT COUNT(*) FROM range_range_test1_v1;
 --?ERROR:  fail to find partition with oid .* for partitioned table .*

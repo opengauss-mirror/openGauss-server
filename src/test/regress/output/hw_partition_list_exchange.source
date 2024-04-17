@@ -22,6 +22,7 @@ select * from test_exchange_func_lt;
 (1 row)
 
 alter table test_exchange_func_lt exchange partition (p1) with table test_exchange_func_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from test_exchange_func_ord;
  a 
 ---
@@ -87,6 +88,7 @@ select * from test_exchange_func_lt;
 (1 row)
 
 alter table test_exchange_func_lt exchange partition for (1) with table test_exchange_func_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from test_exchange_func_ord;
  a 
 ---
@@ -301,6 +303,7 @@ partition by list(a)
 	PARTITION p2 VALUES (3, 4, 5)
 );
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 --a-2
@@ -338,6 +341,7 @@ partition by list(a)
 	PARTITION p2 VALUES (3, 4, 5)
 );
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 --a-4-2
@@ -362,6 +366,7 @@ partition by list(a)
 	PARTITION p2 VALUES (3, 4, 5)
 );
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 --b-2
@@ -389,6 +394,7 @@ partition by list(a)
 );
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_exchange_constraint_lt_a_key" for table "test_exchange_constraint_lt"
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 --c-2
@@ -417,6 +423,7 @@ partition by list(a)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_exchange_constraint_lt_pkey" for table "test_exchange_constraint_lt"
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 --d-2
@@ -445,6 +452,7 @@ partition by list(a)
 	PARTITION p2 VALUES (3, 4, 5)
 );
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 drop table test_exchange_constraint_ref;
@@ -490,6 +498,7 @@ partition by list(a)
 	PARTITION p2 VALUES (3, 4, 5)
 );
 alter table test_exchange_constraint_lt exchange partition (p1) with table test_exchange_constraint_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_constraint_ord;
 drop table test_exchange_constraint_lt;
 --f-2
@@ -638,6 +647,7 @@ create index test_exchange_index_lt_b on test_exchange_index_lt (b) local;
 create index test_exchange_index_lt_a_1 on test_exchange_index_lt (a) local;
 create index test_exchange_index_lt_a_2 on test_exchange_index_lt (a) local;
 alter table test_exchange_index_lt exchange partition (p1) with table test_exchange_index_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_index_ord;
 drop table test_exchange_index_lt;
 -- 7. validation check
@@ -680,6 +690,7 @@ partition by list(a)
 insert into test_exchange_validation_ord values (1), (10);
 --SUCCESS
 alter table test_exchange_validation_lt exchange partition (p1) with table test_exchange_validation_ord without validation;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 drop table test_exchange_validation_ord;
 drop table test_exchange_validation_lt;
 /*
@@ -795,6 +806,7 @@ select a from test_exchange_index_ord where a=1;
 (0 rows)
 
 alter table test_exchange_index_lt exchange partition (p2) with table test_exchange_index_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 explain(verbose on, costs off) select a from test_exchange_index_ord where a=3;
                       QUERY PLAN                      
 ------------------------------------------------------
@@ -856,6 +868,7 @@ select p.relname, t.spcname from pg_partition p, pg_tablespace t where p.reltabl
 (1 row)
 
 alter table test_exchange_tablespace_lt exchange partition (p1) with table test_exchange_tablespace_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --check tablespace has exchanged
 select c.relname, t.spcname from pg_class c, pg_tablespace t where c.reltablespace=t.oid and c.relname='test_exchange_tablespace_ord';
            relname            |        spcname         
@@ -915,6 +928,7 @@ select p.relname, t.spcname from pg_partition p, pg_tablespace t where p.reltabl
 (1 row)
 
 alter table test_exchange_tablespace_lt exchange partition (p1) with table test_exchange_tablespace_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --check tablespace has exchanged
 select c.relname, t.spcname from pg_class c, pg_tablespace t where c.reltablespace=t.oid and c.relname='test_exchange_tablespace_ord_a';
             relname             |        spcname         
@@ -945,14 +959,18 @@ partition by list(a)
 	PARTITION test_exchange_verbose_lt_p3 VALUES (5, 6)
 );
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord with validation verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --ERROR
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord without validation verbose;
 ERROR:  syntax error at or near "verbose"
 LINE 1: ... table test_exchange_verbose_ord without validation verbose;
                                                                ^
 alter table test_exchange_verbose_lt exchange partition for (5) with table test_exchange_verbose_ord verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table test_exchange_verbose_lt exchange partition for (5) with table test_exchange_verbose_ord with validation verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --ERROR
 alter table test_exchange_verbose_lt exchange partition for (5) with table test_exchange_verbose_ord without validation verbose;
 ERROR:  syntax error at or near "verbose"
@@ -971,6 +989,7 @@ partition by list(a)
 );
 insert into test_exchange_verbose_ord values(generate_series(1, 6));
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from test_exchange_verbose_ord order by 1;
  a 
 ---
@@ -1030,6 +1049,7 @@ create index test_exchange_verbose_ord_index on test_exchange_verbose_ord (b);
 create index test_exchange_verbose_lt_index on test_exchange_verbose_lt (b) local;
 insert into test_exchange_verbose_ord values (-1, generate_series(1, 6));
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 set enable_seqscan=off;
 explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) select b from test_exchange_verbose_lt where b=5;
                               QUERY PLAN                               
@@ -1058,6 +1078,7 @@ update test_exchange_verbose_ord set b=3 where b=4;
 delete from test_exchange_verbose_ord where b=2;
 delete from test_exchange_verbose_ord where b=3;
 alter table test_exchange_verbose_lt exchange partition (test_exchange_verbose_lt_p1) with table test_exchange_verbose_ord verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) select b from test_exchange_verbose_lt where b=1;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
@@ -1498,6 +1519,7 @@ select * from test_exchange_func_lt;
 (1 row)
 
 alter table test_exchange_func_lt exchange partition (p1) with table test_exchange_func_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from test_exchange_func_ord;
  a 
 ---
@@ -1563,6 +1585,7 @@ select * from test_exchange_func_lt;
 (1 row)
 
 alter table test_exchange_func_lt exchange partition for (1) with table test_exchange_func_ord;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from test_exchange_func_ord;
  a 
 ---
