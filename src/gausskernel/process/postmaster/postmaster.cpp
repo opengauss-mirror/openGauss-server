@@ -3655,6 +3655,9 @@ static void CheckPgLogDisk(void)
     char disk_cmd[MAX_COMMAND_LEN] = {0};
     char buf[MAX_P_READ_BUF] = {0};
     char free_disk[MAX_P_READ_BUF] = {0};
+    const int bufSize = 256;
+    char timeBuf[bufSize] = {0};
+    get_time_now(timeBuf, bufSize);
     int rc = 0;
 
     rc = snprintf_s(disk_cmd, MAX_COMMAND_LEN, MAX_COMMAND_LEN - 1,
@@ -3663,7 +3666,7 @@ static void CheckPgLogDisk(void)
 
     cmd_fp = popen(disk_cmd, "r");
     if (NULL == cmd_fp) {
-        write_stderr("could not open disk free space command.\n");
+        write_stderr("%s [postmaster][%lu] ERROR: could not open disk free space command.\n", timeBuf, PostmasterPid);
         return;
     }
 
@@ -3676,9 +3679,10 @@ static void CheckPgLogDisk(void)
     }
     char* pEnd = NULL;
     if (free_disk == NULL) {
-        write_stderr("could not get disk free space.\n");
+        write_stderr("%s [postmaster][%lu] ERROR: could not get disk free space.\n", timeBuf, PostmasterPid);
     } else if (strtol(free_disk, &pEnd, 10) == 0) {
-        write_stderr("No free space on pg_log disk.\n");
+        write_stderr("%s [postmaster][%lu] ERROR: No free space on pg_log disk, the path is: %s.\n",
+            timeBuf, PostmasterPid, u_sess->attr.attr_common.Log_directory);
     }
 
     pclose(cmd_fp);
