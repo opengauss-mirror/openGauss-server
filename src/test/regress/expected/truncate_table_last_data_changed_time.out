@@ -95,9 +95,12 @@ order by relname;
 
 truncate table pg_stat_t1, pg_stat_gtt1;
 alter table pg_stat_p1 truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 truncate table pg_stat_p2;
 alter table pg_stat_range_range_p3 truncate partition customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table pg_stat_range_range_p4 truncate subpartition customer1_2008;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 SELECT pg_sleep(5);
  pg_sleep 
 ----------

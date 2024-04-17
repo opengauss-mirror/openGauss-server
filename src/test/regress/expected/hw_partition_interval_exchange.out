@@ -55,6 +55,7 @@ insert into interval_exchange_test values ('2020-02-26');
 -- The data they have belongs to the same range.
 ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
         WITH TABLE interval_exchange_test;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
          logdate          
 --------------------------
@@ -74,6 +75,7 @@ select * from interval_exchange_test order by logdate;
 -- exchange back
 ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
         WITH TABLE interval_exchange_test;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
          logdate          
 --------------------------
@@ -99,6 +101,7 @@ ERROR:  some rows in table do not qualify for specified partition
 --  WITHOUT VALIDATION and the exchange will be success, but some date will in the wrong range;
 ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
         WITH TABLE interval_exchange_test WITHOUT VALIDATION;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
          logdate          
 --------------------------
@@ -135,6 +138,7 @@ insert into interval_exchange_test values ('2020-5-06');
 -- exchange table
 ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (sys_p1)
         WITH TABLE interval_exchange_test;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from interval_normal_exchange partition (sys_p1)order by logdate;
          logdate          
 --------------------------
@@ -154,6 +158,7 @@ select * from interval_exchange_test order by logdate;
 -- exchange back
 ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (sys_p1)
         WITH TABLE interval_exchange_test;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from interval_normal_exchange partition (sys_p1)order by logdate;
          logdate          
 --------------------------
@@ -178,6 +183,7 @@ ERROR:  some rows in table do not qualify for specified partition
 --  WITHOUT VALIDATION and the exchange will be success, but some date will in the wrong range;
 ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
         WITH TABLE interval_exchange_test WITHOUT VALIDATION;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
          logdate          
 --------------------------
@@ -251,6 +257,7 @@ insert into partition_table_001 values (4,'ddd',4,'2020-05-23',false,'ddd',4.4);
 insert into partition_table_001 values (5,'eee',5,'2020-06-23',true,'eee',5.5);
 insert into partition_table_001 values (6,'fff',6,'2020-07-23',false,'fff',6.6);
 ALTER TABLE partition_table_001 EXCHANGE PARTITION (sys_p1) WITH TABLE table_001;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from table_001 order by 1;
  col_1 | col_2 | col_3 |          col_4           | col_5 | col_6 | col_7 
 -------+-------+-------+--------------------------+-------+-------+-------
@@ -282,6 +289,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition
 (7 rows)
 
 ALTER TABLE partition_table_001 EXCHANGE PARTITION (sys_p1) WITH TABLE table_001;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from table_001 order by 1;
  col_1 | col_2 | col_3 | col_4 | col_5 | col_6 | col_7 
 -------+-------+-------+-------+-------+-------+-------
@@ -300,6 +308,7 @@ select * from partition_table_001 order by 1;
 
 insert into table_001 values (7,'eee',7,'2020-08-23',true,'eee',7.7);
 ALTER TABLE partition_table_001 EXCHANGE PARTITION (sys_p1) WITH TABLE table_001 with validation verbose;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from table_001 order by 1;
  col_1 | col_2 | col_3 |          col_4           | col_5 | col_6 | col_7 
 -------+-------+-------+--------------------------+-------+-------+-------

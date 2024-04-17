@@ -114,8 +114,10 @@ Options: orientation=row, compression=no
 --check for drop partition (for)
 --success, drop partition time_2009
 ALTER TABLE range_sales DROP PARTITION time_2009;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop partition time_2011
 ALTER TABLE range_sales DROP PARTITION FOR ('2011-06-01');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, invalid type
 ALTER TABLE range_sales DROP PARTITION FOR (1);
 ERROR:  partition key value must be const or const-evaluable expression
@@ -128,6 +130,7 @@ ERROR:  Un-support feature
 DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
 --success, drop partition time_2012
 ALTER TABLE range_sales DROP PARTITION FOR ('2011-06-01');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --check for ok after drop
 SELECT count(*) FROM range_sales;
  count 
@@ -295,8 +298,10 @@ Options: orientation=row, compression=no
 --check for drop partition (for)
 --success, drop partition time_2009
 ALTER TABLE range2_sales DROP PARTITION time_2009;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop partition time_2011
 ALTER TABLE range2_sales DROP PARTITION FOR ('2011-06-01', 600);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, invalid type
 ALTER TABLE range2_sales DROP PARTITION FOR (1, 100);
 ERROR:  partition key value must be const or const-evaluable expression
@@ -309,6 +314,7 @@ ERROR:  Un-support feature
 DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
 --success, drop partition time_2012
 ALTER TABLE range2_sales DROP PARTITION FOR ('2011-06-01', 100);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --check for ok after drop
 SELECT count(*) FROM range2_sales;
  count 
@@ -460,8 +466,10 @@ Options: orientation=row, compression=no
 --check for drop partition (for)
 --success, drop partition time_2009
 ALTER TABLE interval_sales DROP PARTITION time_2009;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop partition sys_p1
 ALTER TABLE interval_sales DROP PARTITION FOR ('2011-06-01');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, invalid type
 ALTER TABLE interval_sales DROP PARTITION FOR (1);
 ERROR:  partition key value must be const or const-evaluable expression
@@ -634,8 +642,10 @@ Options: orientation=row, compression=no
 --check for drop partition (for)
 --success, drop partition channel2
 ALTER TABLE list_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop partition channel3
 ALTER TABLE list_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, invalid type
 ALTER TABLE list_sales DROP PARTITION FOR (10);
 ERROR:  value too long for type character(1)
@@ -648,6 +658,7 @@ ERROR:  Un-support feature
 DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
 --success, drop partition channel_default
 ALTER TABLE list_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --check for ok after drop
 SELECT count(*) FROM list_sales;
  count 
