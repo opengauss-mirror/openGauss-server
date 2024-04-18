@@ -2927,6 +2927,7 @@ typedef struct knl_u_hook_context {
     void *forTsdbHook;
     void *pluginPlannerHook;
     void *groupingplannerHook;
+    void *replaceNullOrNotHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

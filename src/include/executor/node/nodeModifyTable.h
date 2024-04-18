@@ -50,7 +50,8 @@ extern TupleTableSlot* ExecUpdate(ItemPointer tupleid, Oid oldPartitionOid, int2
 
 template <bool useHeapMultiInsert>
 extern TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, TupleTableSlot* planSlot,
-    EState* estate, bool canSetTag, int options, List** partitionList, char* partExprKeyStr = NULL);
+    EState* estate, bool canSetTag, int options, List** partitionList, char* partExprKeyStr = NULL,
+    bool replaceNull = false);
 template <bool useHeapMultiInsert>
 extern TupleTableSlot *
 ExecHBucketInsertT(ModifyTableState* state, TupleTableSlot *slot,

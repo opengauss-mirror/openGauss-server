@@ -2576,7 +2576,8 @@ static const char *ExecRelCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *sl
     return NULL;
 }
 
-bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate, bool skipAutoInc)
+bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate, bool skipAutoInc,
+    bool replaceNull)
 {
     Relation rel = resultRelInfo->ri_RelationDesc;
     TupleDesc tupdesc = RelationGetDescr(rel);
@@ -2612,7 +2613,7 @@ bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
                         ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupdesc, modifiedCols, maxfieldlen);
                 }
 
-                bool can_ignore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                bool can_ignore = (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore) || replaceNull;
                 ereport(can_ignore ? WARNING : ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
                     errmsg("null value in column \"%s\" violates not-null constraint",
                     NameStr(tupdesc->attrs[attrChk - 1].attname)),

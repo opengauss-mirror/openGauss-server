@@ -1051,7 +1051,7 @@ extern PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, T
  */
 template <bool useHeapMultiInsert>
 TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, TupleTableSlot* planSlot, EState* estate,
-    bool canSetTag, int options, List** partitionList, char* partExprKeyStr)
+    bool canSetTag, int options, List** partitionList, char* partExprKeyStr, bool replaceNull)
 {
     Tuple tuple = NULL;
     ResultRelInfo* result_rel_info = NULL;
@@ -1160,7 +1160,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
                 TupleTableSlot *tmp_slot = state->mt_insert_constr_slot == NULL ? slot : state->mt_insert_constr_slot;
-                if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
+                if (!ExecConstraints(result_rel_info, tmp_slot, estate, false, replaceNull)) {
                     if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
                         tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
                         /* Double check constraints in case that new val in column with not null constraints
@@ -1204,7 +1204,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         }
         if (result_relation_desc->rd_att->constr) {
             TupleTableSlot *tmp_slot = state->mt_insert_constr_slot == NULL ? slot : state->mt_insert_constr_slot;
-            if (!ExecConstraints(result_rel_info, tmp_slot, estate, true)) {
+            if (!ExecConstraints(result_rel_info, tmp_slot, estate, true, replaceNull)) {
                 if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
                     tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
                     /* Double check constraints in case that new val in column with not null constraints
@@ -2192,7 +2192,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
                 TupleTableSlot *tmp_slot = node->mt_insert_constr_slot == NULL ? slot : node->mt_insert_constr_slot;
-                if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
+                if (!ExecConstraints(result_rel_info, tmp_slot, estate, false, CheckPluginReplaceNull())) {
                     if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
                         tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
                         /* Double check constraints in case that new val in column with not null constraints
@@ -2252,7 +2252,7 @@ lreplace:
 
         if (result_relation_desc->rd_att->constr) {
             TupleTableSlot *tmp_slot = node->mt_update_constr_slot == NULL ? slot : node->mt_update_constr_slot;
-            if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
+            if (!ExecConstraints(result_rel_info, tmp_slot, estate, false, CheckPluginReplaceNull())) {
                 if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
                     tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
                     /* Double check constraints in case that new val in column with not null constraints
@@ -3270,13 +3270,15 @@ uint64 GetDeleteLimitCount(ExprContext* econtext, PlanState* scan, Limit *limitP
     return (uint64)iCount;
 }
 
-static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, TupleTableSlot* slot, TupleTableSlot* plan_slot, int2 bucketid, int hi_options, List* partition_list, char* partExprKeyStr)
+static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, TupleTableSlot* slot,
+    TupleTableSlot* plan_slot, int2 bucketid, int hi_options, List* partition_list, char* partExprKeyStr,
+    bool replaceNull)
 {
     Form_pg_attribute att_tup;
     Oid seqOid = InvalidOid;
     Relation rel = estate->es_result_relation_info->ri_RelationDesc;
     TupleTableSlot* (*ExecInsert)(
-        ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*) = NULL;
+        ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*, bool) = NULL;
 
     ExecInsert = ExecInsertT<false>;
 
@@ -3379,7 +3381,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
                        node, node->canSetTag);
             InstrCountFiltered2(&node->ps, 1);
         } else {
-            slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr);
+            slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr, replaceNull);
         }
     }
     return slot;
@@ -3417,7 +3419,7 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     Oid old_partition_oid = InvalidOid;
     bool part_key_updated = ((ModifyTable*)node->ps.plan)->partKeyUpdated;
     TupleTableSlot* (*ExecInsert)(
-        ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*) = NULL;
+        ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*, bool) = NULL;
     bool use_heap_multi_insert = false;
     int hi_options = 0;
     /* indicates whether it is the first time to insert, delete, update or not. */
@@ -3758,13 +3760,17 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
         estate->es_result_delete_remoterel = delete_remote_rel_state;
 #endif
         switch (operation) {
-            case CMD_INSERT:
+            case CMD_INSERT: {
+                bool replaceNull = CheckPluginReplaceNull() && !IsA(subPlanState, ResultState);
                 if (!node->isReplace) {
-                    slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr);
+                    slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list,
+                        partExprKeyStr, replaceNull);
                 } else {
-                    slot = ExecReplace(estate, node, slot, plan_slot, bucketid, hi_options, partition_list, partExprKeyStr);
+                    slot = ExecReplace(estate, node, slot, plan_slot, bucketid, hi_options, partition_list,
+                        partExprKeyStr, replaceNull);
                 }
                 break;
+            }
             case CMD_UPDATE:
                 if (!IS_SPQ_RUNNING) {
                     slot = ExecUpdate(tuple_id,

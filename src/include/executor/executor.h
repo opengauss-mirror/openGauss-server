@@ -222,7 +222,8 @@ extern void InitResultRelInfo(
     ResultRelInfo* resultRelInfo, Relation resultRelationDesc, Index resultRelationIndex, int instrument_options);
 extern ResultRelInfo* ExecGetTriggerResultRel(EState* estate, Oid relid);
 extern bool ExecContextForcesOids(PlanState* planstate, bool* hasoids);
-extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate, bool skipAutoInc = false);
+extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate,
+    bool skipAutoInc = false, bool replaceNull = false);
 extern void ExecWithCheckOptions(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate);
 extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);
@@ -720,6 +721,14 @@ extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot);
 
 extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 extern int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace);
+
+typedef bool (*replaceNullOrNotFunc)();
+
+extern inline bool CheckPluginReplaceNull()
+{
+    return u_sess->hook_cxt.replaceNullOrNotHook != NULL ?
+           ((replaceNullOrNotFunc)(u_sess->hook_cxt.replaceNullOrNotHook))() : false;
+}
 
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock

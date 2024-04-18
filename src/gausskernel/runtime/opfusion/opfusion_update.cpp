@@ -396,7 +396,7 @@ lreplace:
         }
 
         if (rel->rd_att->constr) {
-            if (!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate)) {
+            if (!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate, CheckPluginReplaceNull())) {
                 if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
                     break;
                 }
