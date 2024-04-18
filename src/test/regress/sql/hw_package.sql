@@ -2303,6 +2303,53 @@ end pck3;
 create user package_user password 'gauss@123';
 alter package pck3 owner to package_user;
 
+-- test methods schema not consistent with object
+create schema multi_schema_001;
+-- failed
+create or replace package public.multi_shema_package is
+var1 int:=1; --公有变量
+var2 int:=2;
+procedure multi_schema_001.testpro1(var3 int); --公有存储过程，可以被外部调用
+end multi_shema_package;
+/
+-- failed
+create or replace package multi_schema_001.multi_shema_package is
+var1 int:=1; --公有变量
+var2 int:=2;
+procedure public.testpro1(var3 int); --公有存储过程，可以被外部调用
+end multi_shema_package;
+/
+-- succeed
+create or replace package multi_schema_001.multi_shema_package is
+var1 int:=1; --公有变量
+var2 int:=2;
+procedure multi_schema_001.testpro1(var3 int); --公有存储过程，可以被外部调用
+end multi_shema_package;
+/
+-- failed
+create or replace package body multi_schema_001.multi_shema_package is
+var3 int:=3;
+var4 int:=4;
+procedure public.testpro1(var3 int)
+is
+begin
+end;
+end multi_shema_package;
+/
+-- succeed
+create or replace package body multi_schema_001.multi_shema_package is
+var3 int:=3;
+var4 int:=4;
+procedure multi_schema_001.testpro1(var3 int)
+is
+begin
+end;
+end multi_shema_package;
+/
+-- clean
+drop package multi_schema_001.multi_shema_package;
+drop schema multi_schema_001;
+
 drop package pck1;
 drop package pck2;
 drop package pck3;

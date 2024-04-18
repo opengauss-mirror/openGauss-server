@@ -1080,6 +1080,13 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         if (HeapTupleIsValid(tuple)) {
             Form_gs_package pkgform = (Form_gs_package)GETSTRUCT(tuple);
             namespaceId = pkgform->pkgnamespace;
+            if (schemaname != NULL) {
+                Oid func_namespaceid = get_namespace_oid(schemaname, true);
+                if (namespaceId != func_namespaceid) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_SCHEMA_NAME),
+                    errmsg("The namespace of functions or procedures within a package needs to be consistent with the package it belongs.")));
+                }
+            }
         } else {
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PACKAGE), errmsg("package not found")));
         }

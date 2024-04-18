@@ -2745,6 +2745,56 @@ end pck3;
 /
 create user package_user password 'gauss@123';
 alter package pck3 owner to package_user;
+-- test methods schema not consistent with object
+create schema multi_schema_001;
+-- failed
+create or replace package public.multi_shema_package is
+var1 int:=1; --公有变量
+var2 int:=2;
+procedure multi_schema_001.testpro1(var3 int); --公有存储过程，可以被外部调用
+end multi_shema_package;
+/
+ERROR:  The namespace of functions or procedures within a package needs to be consistent with the package it belongs.
+-- failed
+create or replace package multi_schema_001.multi_shema_package is
+var1 int:=1; --公有变量
+var2 int:=2;
+procedure public.testpro1(var3 int); --公有存储过程，可以被外部调用
+end multi_shema_package;
+/
+ERROR:  The namespace of functions or procedures within a package needs to be consistent with the package it belongs.
+-- succeed
+create or replace package multi_schema_001.multi_shema_package is
+var1 int:=1; --公有变量
+var2 int:=2;
+procedure multi_schema_001.testpro1(var3 int); --公有存储过程，可以被外部调用
+end multi_shema_package;
+/
+-- failed
+create or replace package body multi_schema_001.multi_shema_package is
+var3 int:=3;
+var4 int:=4;
+procedure public.testpro1(var3 int)
+is
+begin
+end;
+end multi_shema_package;
+/
+ERROR:  The namespace of functions or procedures within a package needs to be consistent with the package it belongs.
+-- succeed
+create or replace package body multi_schema_001.multi_shema_package is
+var3 int:=3;
+var4 int:=4;
+procedure multi_schema_001.testpro1(var3 int)
+is
+begin
+end;
+end multi_shema_package;
+/
+-- clean
+drop package multi_schema_001.multi_shema_package;
+NOTICE:  drop cascades to function multi_schema_001.testpro1(integer)
+drop schema multi_schema_001;
 drop package pck1;
 NOTICE:  drop cascades to function pkgsch059.f1(integer,test_tb)
 drop package pck2;
