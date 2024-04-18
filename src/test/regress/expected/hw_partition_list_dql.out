@@ -59,6 +59,7 @@ alter table test_partition_for_null_list drop partition for (null);
 ERROR:  The partition number is invalid or out-of-range
 -- success
 alter table test_partition_for_null_list drop partition for (0);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- failed
 select * from test_partition_for_null_list partition (test_partition_for_null_list_part1) order by 1, 2, 3, 4;
 ERROR:  partition "test_partition_for_null_list_part1" of relation "test_partition_for_null_list" does not exist

@@ -422,6 +422,7 @@ start transaction;
 alter table test_gpi_more_invalid add partition p5 values less than (4001);
 update test_gpi_more_invalid set a = a + 1000 where a > 1000 or a < 500;
 alter table test_gpi_more_invalid drop partition p5;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 commit;
 -- all global index unusuable 
 select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
@@ -526,6 +527,7 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 (2 rows)
 
 alter table interval_normal_date drop partition sys_p2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 commit;
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
        relname        | parttype |                    reloptions                     

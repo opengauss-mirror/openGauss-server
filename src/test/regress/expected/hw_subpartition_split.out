@@ -74,6 +74,7 @@ alter table list_list split subpartition p_201901_b values (2) into
 	subpartition p_201901_b,
 	subpartition p_201901_c
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201901_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -118,6 +119,7 @@ alter table list_list split subpartition p_201902_b values (2, 3) into
 	subpartition p_201902_b,
 	subpartition p_201902_c
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201902_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -214,6 +216,7 @@ alter table range_range split subpartition p_201901_b at (3) into
 	subpartition p_201901_c,
 	subpartition p_201901_d
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from range_range subpartition (p_201901_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -252,6 +255,7 @@ alter table range_range split subpartition p_201902_b at (3) into
 	subpartition p_201902_c,
 	subpartition p_201902_d
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from range_range subpartition (p_201902_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------

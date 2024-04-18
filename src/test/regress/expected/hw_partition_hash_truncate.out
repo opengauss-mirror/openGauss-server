@@ -19,6 +19,7 @@ select count(*) from hash_partition_truncate_table;
 
 --4 rows
 alter table hash_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -27,7 +28,9 @@ select count(*) from hash_partition_truncate_table;
 
 --2 rows
 alter table hash_partition_truncate_table truncate partition for (1);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table hash_partition_truncate_table truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -57,6 +60,7 @@ partition by hash (c1)
 );
 insert into hash_partition_truncate_table values(1),(2),(3),(4);
 alter table hash_partition_truncate_table truncate partition for (1), truncate partition p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ERROR:  partition "p6" does not exist
 select count(*) from hash_partition_truncate_table;
  count 
@@ -66,6 +70,8 @@ select count(*) from hash_partition_truncate_table;
 
 -- 4 rows
 alter table hash_partition_truncate_table truncate partition for (1), truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -117,6 +123,7 @@ select count(*) from hash_partition_truncate_table;
 
 --4 rows
 alter table hash_partition_truncate_table truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -125,6 +132,7 @@ select count(*) from hash_partition_truncate_table;
 
 --2 rows
 alter table hash_partition_truncate_table truncate partition for (2);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -154,6 +162,7 @@ select count(*) from hash_partition_truncate_table;
 
 --5 rows
 alter table hash_partition_truncate_table truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -162,6 +171,7 @@ select count(*) from hash_partition_truncate_table;
 
 --3 rows
 alter table hash_partition_truncate_table truncate partition for (2);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -193,6 +203,7 @@ select count(*) from hash_partition_truncate_table;
 
 --5 rows
 alter table hash_partition_truncate_table truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -227,6 +238,7 @@ select count(*) from hash_partition_truncate_table;
 
 --5 rows
 alter table hash_partition_truncate_table truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -263,6 +275,8 @@ select count(*) from hash_partition_truncate_table;
 
 --5 rows
 alter table hash_partition_truncate_table truncate partition for (4), truncate partition for(3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -605,6 +619,7 @@ select count(*) from hash_partition_truncate_table;
 
 --4 rows
 alter table hash_partition_truncate_table truncate partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -613,7 +628,9 @@ select count(*) from hash_partition_truncate_table;
 
 --2 rows
 alter table hash_partition_truncate_table truncate partition for (1);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table hash_partition_truncate_table truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------
@@ -643,6 +660,7 @@ partition by hash (c1)
 );
 insert into hash_partition_truncate_table values(1),(2),(3),(4);
 alter table hash_partition_truncate_table truncate partition for (1), truncate partition p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 ERROR:  partition "p6" does not exist
 select count(*) from hash_partition_truncate_table;
  count 
@@ -652,6 +670,8 @@ select count(*) from hash_partition_truncate_table;
 
 -- 4 rows
 alter table hash_partition_truncate_table truncate partition for (1), truncate partition for (3);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select count(*) from hash_partition_truncate_table;
  count 
 -------

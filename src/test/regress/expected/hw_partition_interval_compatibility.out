@@ -66,6 +66,7 @@ explain (costs off, verbose on) select * from interval_tab1 where logdate >= '20
 (7 rows)
 
 alter table interval_tab1 drop partition p1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select relname, parttype, partstrategy, boundaries from pg_partition;
     relname    | parttype | partstrategy |  boundaries  
 ---------------+----------+--------------+--------------
@@ -80,6 +81,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition;
 (8 rows)
 
 alter table interval_tab1 merge partitions sys_p5, sys_p6 into partition sys_p5_p6;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select relname, parttype, partstrategy, boundaries from pg_partition;
     relname    | parttype | partstrategy |  boundaries  
 ---------------+----------+--------------+--------------
@@ -127,6 +129,7 @@ select * from interval_tab1 partition(sys_p1);
 (3 rows)
 
 alter table interval_tab1 split partition sys_p1 at (to_date('2020-03-02', 'YYYY-MM-DD')) into (partition sys_p1_1, partition sys_p1_2);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select relname, parttype, partstrategy, boundaries from pg_partition;
     relname    | parttype | partstrategy |  boundaries  
 ---------------+----------+--------------+--------------
