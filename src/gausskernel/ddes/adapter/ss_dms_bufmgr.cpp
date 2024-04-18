@@ -64,6 +64,7 @@ void InitDmsBufCtrl(void)
 
 void InitDmsContext(dms_context_t *dmsContext)
 {
+    (void)memset_s(dmsContext, sizeof(dms_context_t), 0, sizeof(dms_context_t));
     /* Proc threads id range: [0, TotalProcs - 1]. Non-proc threads id range: [TotalProcs + 1, TotalProcs + 4] */
     uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
     dmsContext->inst_id = (unsigned int)SS_MY_INST_ID;
@@ -87,8 +88,15 @@ void InitDmsBufContext(dms_context_t* dmsBufCxt, BufferTag buftag)
 
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag)
 {
-    DmsInitLatch(&dlatch->drid, locktag.locktag_type, locktag.locktag_field1, locktag.locktag_field2,
-        locktag.locktag_field3, locktag.locktag_field4, locktag.locktag_field5);
+    int32 ret = memset_sp(&dlatch->drid, sizeof(dms_drid_t), 0, sizeof(dms_drid_t));
+    securec_check(ret, "", "");
+
+    dlatch->drid.type = locktag.locktag_type;
+    dlatch->drid.oid = locktag.locktag_field1;
+    dlatch->drid.index = locktag.locktag_field2;
+    dlatch->drid.parent_part = locktag.locktag_field3;
+    dlatch->drid.part = locktag.locktag_field4;
+    dlatch->drid.uid = locktag.locktag_field5;
 }
 
 static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool check_standby)

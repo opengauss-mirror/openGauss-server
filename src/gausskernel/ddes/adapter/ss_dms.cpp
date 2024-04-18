@@ -206,10 +206,9 @@ int dms_request_page(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, dms_lock_mode
     return g_ss_dms_func.dms_request_page(dms_ctx, ctrl, mode);
 }
 
-int dms_broadcast_msg(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
-    unsigned int timeout)
+int dms_broadcast_msg(dms_context_t *dms_ctx, dms_broadcast_info_t *dms_broad_info)
 {
-    return g_ss_dms_func.dms_broadcast_msg(dms_ctx, data, len, handle_recv_msg, timeout);
+    return g_ss_dms_func.dms_broadcast_msg(dms_ctx, dms_broad_info);
 }
 
 int dms_request_opengauss_update_xid(dms_context_t *dms_ctx, unsigned short t_infomask, unsigned short t_infomask2,

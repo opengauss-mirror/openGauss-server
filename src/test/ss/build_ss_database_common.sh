@@ -56,7 +56,6 @@ assign_hatest_parameter()
 {
     for node in $@
     do
-        echo -e "ss_enable_reform = on" >> ${node}/postgresql.conf
         echo -e "log_min_messages = log" >> ${node}/postgresql.conf
         echo -e "logging_module = 'on(ALL)'" >> ${node}/postgresql.conf
         echo -e "ss_log_level = 255" >> ${node}/postgresql.conf

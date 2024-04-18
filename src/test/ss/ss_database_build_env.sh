@@ -66,7 +66,6 @@ assign_dms_parameter()
     for node in $@
     do
         echo -e "\nautovacuum=false" >> ${node}/postgresql.conf
-        echo -e "\nss_enable_reform=on" >> ${node}/postgresql.conf
         echo -e "\nss_enable_ssl = 0" >> ${node}/postgresql.conf
         echo -e "\nlog_min_messages = warning" >> ${node}/postgresql.conf
         echo -e "\nlogging_module ='on(ALL)'" >> ${node}/postgresql.conf

@@ -43,8 +43,7 @@ typedef struct st_ss_dms_func {
     void (*dms_get_error)(int *errcode, const char **errmsg);
     void (*dms_uninit)(void);
     int (*dms_request_page)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, dms_lock_mode_t mode);
-    int (*dms_broadcast_msg)(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
-                             unsigned int timeout);
+    int (*dms_broadcast_msg)(dms_context_t *dms_ctx, dms_broadcast_info_t *dms_broad_info);
     int (*dms_request_opengauss_update_xid)(dms_context_t *dms_ctx,
                                      unsigned short t_infomask, unsigned short t_infomask2, unsigned long long *uxid);
     int (*dms_request_opengauss_xid_csn)(dms_context_t *dms_ctx, dms_opengauss_xid_csn_t *dms_txn_info,
@@ -101,8 +100,7 @@ void dms_refresh_logger(char *log_field, unsigned long long *value);
 void dms_get_error(int *errcode, const char **errmsg);
 void dms_uninit(void);
 int dms_request_page(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, dms_lock_mode_t mode);
-int dms_broadcast_msg(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
-                      unsigned int timeout);
+int dms_broadcast_msg(dms_context_t *dms_ctx, dms_broadcast_info_t *dms_broad_info);
 int dms_request_opengauss_update_xid(dms_context_t *dms_ctx,
                                      unsigned short t_infomask, unsigned short t_infomask2, unsigned long long *uxid);
 int dms_request_opengauss_xid_csn(dms_context_t *dms_ctx, dms_opengauss_xid_csn_t *dms_txn_info,

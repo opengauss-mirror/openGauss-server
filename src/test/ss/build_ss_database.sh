@@ -50,7 +50,6 @@ alter_dms_open()
     for node in $@
     do
         echo -e "\nautovacuum=false" >> ${node}/postgresql.conf
-        echo -e "\nss_enable_reform = off" >> ${node}/postgresql.conf
         echo "${node}:"
         cat ${node}/postgresql.conf | grep ss_enable_dms
     done

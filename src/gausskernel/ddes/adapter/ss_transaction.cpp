@@ -476,9 +476,19 @@ void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, Commi
     latest_snapshot.xmax = xmax;
     latest_snapshot.csn = csn;
     latest_snapshot.type = BCAST_SEND_SNAPSHOT;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&latest_snapshot,
+        .len = sizeof(SSBroadcastSnapshot),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };                                        
     do {
-        ret = dms_broadcast_msg(&dms_ctx, (char *)&latest_snapshot, sizeof(SSBroadcastSnapshot),
-            (unsigned char)false, SS_BROADCAST_WAIT_ONE_SECOND);
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
 
         if (ret == DMS_SUCCESS) {
             return;
@@ -556,9 +566,19 @@ bool SSCheckDbBackendsFromAllStandby(Oid dbid)
     SSBroadcastDbBackends backends_data;
     backends_data.type = BCAST_CHECK_DB_BACKENDS;
     backends_data.dbid = dbid;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&backends_data,
+        .len = sizeof(SSBroadcastDbBackends),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_FIVE_SECONDS,
+        .handle_recv_msg = (unsigned char)true,
+        .check_session_kill = (unsigned char)true
+    };
 
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)&backends_data, sizeof(SSBroadcastDbBackends),
-        (unsigned char)true, SS_BROADCAST_WAIT_FIVE_SECONDS);
+    int ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
     if (ret != DMS_NO_RUNNING_BACKENDS) {
         return true;
     }
@@ -572,9 +592,19 @@ void SSRequestAllStandbyReloadReformCtrlPage()
     int ret;
     SSBroadcastCmdOnly ssmsg;
     ssmsg.type = BCAST_RELOAD_REFORM_CTRL_PAGE;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&ssmsg,
+        .len = sizeof(SSBroadcastCmdOnly),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
     do {
-        ret = dms_broadcast_msg(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastCmdOnly),
-            (unsigned char)false, SS_BROADCAST_WAIT_ONE_SECOND);
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
 
         if (ret == DMS_SUCCESS) {
             return;
@@ -734,8 +764,18 @@ void SSUpdateSegDropTimeline(uint32 seg_drop_timeline)
     ssmsg.seg_drop_timeline = seg_drop_timeline;
     int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-    int ret = dms_broadcast_msg(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastSegDropTL), (unsigned char)false,
-        SS_BROADCAST_WAIT_FIVE_SECONDS);
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&ssmsg,
+        .len = sizeof(SSBroadcastSegDropTL),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_FIVE_SECONDS,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+    int ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
     if (ret != DMS_SUCCESS) {
         ereport(DEBUG1, (errmsg("SS broadcast seg_drop_timeline failed!")));
     }

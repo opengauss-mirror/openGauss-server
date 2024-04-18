@@ -32,16 +32,6 @@
 #define SS_BUF_MAX_WAIT_TIME (1000L * 1000 * 20) // 20s
 #define SS_BUF_WAIT_TIME_IN_ONDEMAND_REALTIME_BUILD (100000L)  // 100ms
 
-#define DmsInitLatch(drid, _type, _oid, _idx, _parent_part, _part, _uid) \
-    do {                                                      \
-        (drid)->type = _type;                                 \
-        (drid)->uid = _uid;                                   \
-        (drid)->oid = _oid;                                   \
-        (drid)->index = _idx;                                 \
-        (drid)->parent_part = _parent_part;                   \
-        (drid)->part = _part;                                 \
-    } while (0)
-
 typedef struct SSBroadcastDDLLock {
     SSBroadcastOp type; // must be first
     LOCKTAG locktag;
