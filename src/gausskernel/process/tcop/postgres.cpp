@@ -7649,13 +7649,7 @@ void LoadSqlPlugin()
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
         /* start_xact_command will change CurrentResourceOwner, so save it here */
         ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
-        if (!u_sess->attr.attr_sql.dolphin &&
-#ifdef ENABLE_LITE_MODE
-            u_sess->attr.attr_common.upgrade_mode == 0
-#else
-            !u_sess->attr.attr_common.IsInplaceUpgrade
-#endif
-            ) {
+        if (!u_sess->attr.attr_sql.dolphin && u_sess->attr.attr_common.upgrade_mode == 0) {
             Oid userId = GetUserId();
             if (userId != INITIAL_USER_ID) {
                 ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),

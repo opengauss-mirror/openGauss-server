@@ -1,3 +1,6 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92780 then
 --------------------------------------------------------------
 -- add pg_set table
 --------------------------------------------------------------
@@ -1088,7 +1091,7 @@ END; $$
 LANGUAGE 'plpgsql';
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 8646;
-select Insert_pg_opfamily_temp(405, 'set_ops', 11, 10);
+PERFORM Insert_pg_opfamily_temp(405, 'set_ops', 11, 10);
 
 DROP FUNCTION Insert_pg_opfamily_temp();
 
@@ -1113,11 +1116,11 @@ BEGIN
 END; $$
 LANGUAGE 'plpgsql';
 
-select Insert_pg_opclass_temp(403, 'setasint_ops', 11, 10, 1976, 3272, true, 0);
-select Insert_pg_opclass_temp(405, 'setasint_ops', 11, 10, 1977, 3272, false, 0);
-select Insert_pg_opclass_temp(405, 'settext_ops', 11, 10, 1995, 3272, false, 0);
-select Insert_pg_opclass_temp(4439, 'setasint_ops', 11, 10, 6976, 3272, true, 0);
-select Insert_pg_opclass_temp(405, 'set_ops', 11, 10, 8646, 3272, true, 0);
+PERFORM Insert_pg_opclass_temp(403, 'setasint_ops', 11, 10, 1976, 3272, true, 0);
+PERFORM Insert_pg_opclass_temp(405, 'setasint_ops', 11, 10, 1977, 3272, false, 0);
+PERFORM Insert_pg_opclass_temp(405, 'settext_ops', 11, 10, 1995, 3272, false, 0);
+PERFORM Insert_pg_opclass_temp(4439, 'setasint_ops', 11, 10, 6976, 3272, true, 0);
+PERFORM Insert_pg_opclass_temp(405, 'set_ops', 11, 10, 8646, 3272, true, 0);
 	   
 DROP FUNCTION Insert_pg_opclass_temp();
 
@@ -1139,25 +1142,25 @@ BEGIN
 END; $$
 LANGUAGE 'plpgsql';
 
-SELECT Insert_pg_amproc_temp(1976, 3272, 3272, 1, 6544);
-SELECT Insert_pg_amproc_temp(1976, 3272, 3272, 2, 6538);
-SELECT Insert_pg_amproc_temp(1976, 3272, 23, 1, 6545);
-SELECT Insert_pg_amproc_temp(1976, 23, 3272, 1, 6543);
-SELECT Insert_pg_amproc_temp(1976, 3272, 20, 1, 6546);
-SELECT Insert_pg_amproc_temp(1976, 20, 3272, 1, 6547);
-SELECT Insert_pg_amproc_temp(1976, 3272, 21, 1, 6549);
-SELECT Insert_pg_amproc_temp(1976, 21, 3272, 1, 6548);
-SELECT Insert_pg_amproc_temp(1977, 3272, 3272, 1, 3294);
-SELECT Insert_pg_amproc_temp(1995, 3272, 3272, 1, 3297);
-SELECT Insert_pg_amproc_temp(8646, 3272, 3272, 1, 3297);
-SELECT Insert_pg_amproc_temp(6976, 3272, 3272, 1, 6544);
-SELECT Insert_pg_amproc_temp(6976, 3272, 3272, 2, 6538);
-SELECT Insert_pg_amproc_temp(6976, 3272, 23, 1, 6545);
-SELECT Insert_pg_amproc_temp(6976, 23, 3272, 1, 6543);
-SELECT Insert_pg_amproc_temp(6976, 3272, 20, 1, 6546);
-SELECT Insert_pg_amproc_temp(6976, 20, 3272, 1, 6547);
-SELECT Insert_pg_amproc_temp(6976, 3272, 21, 1, 6549);
-SELECT Insert_pg_amproc_temp(6976, 21, 3272, 1, 6548);
+PERFORM Insert_pg_amproc_temp(1976, 3272, 3272, 1, 6544);
+PERFORM Insert_pg_amproc_temp(1976, 3272, 3272, 2, 6538);
+PERFORM Insert_pg_amproc_temp(1976, 3272, 23, 1, 6545);
+PERFORM Insert_pg_amproc_temp(1976, 23, 3272, 1, 6543);
+PERFORM Insert_pg_amproc_temp(1976, 3272, 20, 1, 6546);
+PERFORM Insert_pg_amproc_temp(1976, 20, 3272, 1, 6547);
+PERFORM Insert_pg_amproc_temp(1976, 3272, 21, 1, 6549);
+PERFORM Insert_pg_amproc_temp(1976, 21, 3272, 1, 6548);
+PERFORM Insert_pg_amproc_temp(1977, 3272, 3272, 1, 3294);
+PERFORM Insert_pg_amproc_temp(1995, 3272, 3272, 1, 3297);
+PERFORM Insert_pg_amproc_temp(8646, 3272, 3272, 1, 3297);
+PERFORM Insert_pg_amproc_temp(6976, 3272, 3272, 1, 6544);
+PERFORM Insert_pg_amproc_temp(6976, 3272, 3272, 2, 6538);
+PERFORM Insert_pg_amproc_temp(6976, 3272, 23, 1, 6545);
+PERFORM Insert_pg_amproc_temp(6976, 23, 3272, 1, 6543);
+PERFORM Insert_pg_amproc_temp(6976, 3272, 20, 1, 6546);
+PERFORM Insert_pg_amproc_temp(6976, 20, 3272, 1, 6547);
+PERFORM Insert_pg_amproc_temp(6976, 3272, 21, 1, 6549);
+PERFORM Insert_pg_amproc_temp(6976, 21, 3272, 1, 6548);
 
 DROP FUNCTION Insert_pg_amproc_temp();
 
@@ -1188,85 +1191,88 @@ BEGIN
 END; $$
 LANGUAGE 'plpgsql';
 
-SELECT Insert_pg_amop_temp(1995, 3272, 25, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1995, 25, 3272, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1995, 3272, 3272, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 3272, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 3272, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 3272, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 3272, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 3272, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 23, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 23, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 23, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 23, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 23, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 23, 3272, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 23, 3272, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 23, 3272, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 23, 3272, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 23, 3272, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 20, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 20, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 20, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 20, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 20, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 20, 3272, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 20, 3272, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 20, 3272, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 20, 3272, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 20, 3272, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 21, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 21, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 21, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 21, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 3272, 21, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 21, 3272, 1, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 21, 3272, 2, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 21, 3272, 3, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 21, 3272, 4, 's', 403, 0);
-SELECT Insert_pg_amop_temp(1976, 21, 3272, 5, 's', 403, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 3272, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 3272, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 3272, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 3272, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 3272, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 23, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 23, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 23, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 23, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 23, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 23, 3272, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 23, 3272, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 23, 3272, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 23, 3272, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 23, 3272, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 20, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 20, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 20, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 20, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 20, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 20, 3272, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 20, 3272, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 20, 3272, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 20, 3272, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 20, 3272, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 21, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 21, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 21, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 21, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 3272, 21, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 21, 3272, 1, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 21, 3272, 2, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 21, 3272, 3, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 21, 3272, 4, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(6976, 21, 3272, 5, 's', 4439, 0);
-SELECT Insert_pg_amop_temp(1977, 3272, 23, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1977, 23, 3272, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1977, 3272, 20, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1977, 20, 3272, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1977, 3272, 21, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(1977, 21, 3272, 1, 's', 405, 0);
-SELECT Insert_pg_amop_temp(8646, 3272, 3272, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1995, 3272, 25, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1995, 25, 3272, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1995, 3272, 3272, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 3272, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 3272, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 3272, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 3272, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 3272, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 23, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 23, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 23, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 23, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 23, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 23, 3272, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 23, 3272, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 23, 3272, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 23, 3272, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 23, 3272, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 20, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 20, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 20, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 20, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 20, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 20, 3272, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 20, 3272, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 20, 3272, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 20, 3272, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 20, 3272, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 21, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 21, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 21, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 21, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 3272, 21, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 21, 3272, 1, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 21, 3272, 2, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 21, 3272, 3, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 21, 3272, 4, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(1976, 21, 3272, 5, 's', 403, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 3272, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 3272, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 3272, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 3272, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 3272, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 23, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 23, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 23, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 23, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 23, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 23, 3272, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 23, 3272, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 23, 3272, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 23, 3272, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 23, 3272, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 20, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 20, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 20, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 20, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 20, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 20, 3272, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 20, 3272, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 20, 3272, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 20, 3272, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 20, 3272, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 21, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 21, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 21, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 21, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 3272, 21, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 21, 3272, 1, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 21, 3272, 2, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 21, 3272, 3, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 21, 3272, 4, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(6976, 21, 3272, 5, 's', 4439, 0);
+PERFORM Insert_pg_amop_temp(1977, 3272, 23, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1977, 23, 3272, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1977, 3272, 20, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1977, 20, 3272, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1977, 3272, 21, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(1977, 21, 3272, 1, 's', 405, 0);
+PERFORM Insert_pg_amop_temp(8646, 3272, 3272, 1, 's', 405, 0);
 
 DROP FUNCTION Insert_pg_amop_temp();
+
+END IF;
+END $upgrade$;
