@@ -370,6 +370,12 @@ typedef struct Rownum {
     Oid  rownumcollid;  /* OID of collation of result */
     int  location;      /* token location, or -1 if unknown */
 } Rownum;
+
+typedef struct PriorExpr {
+    Expr xpr;
+    Node *node;
+} PriorExpr;
+
 /* ----------------
  *	ArrayRef: describes an array subscripting operation
  *

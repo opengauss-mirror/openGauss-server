@@ -353,6 +353,12 @@ Node *transformExprRecurse(ParseState *pstate, Node *expr)
             if (pstate->shouldCheckOrderbyCol) {
                 pstate->orderbyCols = lappend(pstate->orderbyCols, expr);
             }
+
+            if (((ColumnRef*)expr)->prior && t_thrd.proc->workingVersionNum >= PRIOR_EXPR_VERSION_NUM) {
+                PriorExpr* p_expr = makeNode(PriorExpr);
+                p_expr->node = result;
+                result = (Node*)p_expr;
+            }
             break;
 
         case T_ParamRef:

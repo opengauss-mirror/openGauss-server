@@ -1404,11 +1404,11 @@ select id,pid,prior(level) from test_hcb_ptb where prior(id)>10 start
         with id=141 connect by prior pid=id;
  id  | pid | prior 
 -----+-----+-------
- 141 | 131 |     3
  131 | 121 |     6
  121 | 111 |     9
  111 |  11 |    12
   11 |   1 |    15
+   1 |   0 |    18
 (5 rows)
 
 select prior(1+1);
@@ -1799,7 +1799,12 @@ create table dts_t1(c1 int,c2 int,c3 int);
 insert into dts_t1 values(1,1,1);
 insert into dts_t1 values(2,2,2);
 select c1,prior c2,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
-ERROR:  Not Support prior column in TargetList in case swcb.
+ c1 | c2 | c2 
+----+----+----
+  1 |    |  1
+  2 |  1 |  2
+(2 rows)
+
 select c1,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
  c1 | c2 
 ----+----

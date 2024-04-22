@@ -2617,6 +2617,19 @@ static Param* _copyParam(const Param* from)
 }
 
 /*
+ * _copyPriorExpr
+ */
+static PriorExpr* _copyPriorExpr(const PriorExpr* from)
+{
+    PriorExpr* newnode =(PriorExpr*)makeNode(PriorExpr);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_NODE_FIELD(node);
+
+    return newnode;
+}
+
+/*
  * _copyRownum
  */
 static Rownum* _copyRownum(const Rownum* from)
@@ -8069,6 +8082,9 @@ void* copyObject(const void* from)
             break;
         case T_Const:
             retval = _copyConst((Const*)from);
+            break;
+        case T_PriorExpr:
+            retval = _copyPriorExpr((PriorExpr*)from);
             break;
         case T_Param:
             retval = _copyParam((Param*)from);

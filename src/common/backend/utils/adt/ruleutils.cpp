@@ -10425,6 +10425,12 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
                 appendStringInfoChar(buf, ')');
         } break;
 
+        case T_PriorExpr: {
+            appendContextKeyword(context, "Prior ", 0, 0, 0);
+            PriorExpr* prior_expr = (PriorExpr*)node;
+            get_rule_expr(prior_expr->node, context, showimplicit, no_alias);
+        } break;
+
         case T_NullTest: {
             NullTest* ntest = (NullTest*)node;
 

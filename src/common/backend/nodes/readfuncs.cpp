@@ -2048,6 +2048,17 @@ static Var* _readVar(void)
 }
 
 /*
+ * _readPriorExpr
+ */
+static PriorExpr* _readPriorExpr(void)
+{
+    READ_LOCALS(PriorExpr);
+
+    READ_NODE_FIELD(node);
+    READ_DONE();
+}
+
+/*
  * _readRownum
  */
 static Rownum* _readRownum(void)
@@ -6859,6 +6870,8 @@ Node* parseNodeString(void)
         return_value = _readNoGPCHint();
     } else if (MATCH("ROWNUM", 6)) {
         return_value = _readRownum();
+    } else if (MATCH("PRIOREXPR", 9)) {
+        return_value = _readPriorExpr();
     } else if (MATCH("COPY", 4)) {
         return_value = _readCopyStmt();
     } else if (MATCH("ALTERTABLE", 10)) {

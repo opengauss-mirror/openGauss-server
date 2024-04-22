@@ -1306,6 +1306,9 @@ static bool PullUpConnectByFuncVarsWalker(Node *node, PullUpConnectByFuncVarCont
                 prcType == SWCOL_ISCYCLE || prcType == SWCOL_ROWNUM) {
             MarkPRCNotSkip(context->swplan, prcType);
         }
+    } else if (IsA(node, PriorExpr)) {
+        Var* var = (Var*)((PriorExpr*)node)->node;
+        context->pullupVars = lappend(context->pullupVars, var);
     }
 
     return expression_tree_walker(node,

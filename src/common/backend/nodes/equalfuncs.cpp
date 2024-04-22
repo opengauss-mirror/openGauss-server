@@ -199,6 +199,13 @@ static bool _equalConst(const Const* a, const Const* b)
     return datumIsEqual(a->constvalue, b->constvalue, a->constbyval, a->constlen);
 }
 
+static bool _equalPriorExpr(const PriorExpr* a, const PriorExpr* b)
+{
+    COMPARE_NODE_FIELD(node);
+
+    return true;
+}
+
 static bool _equalParam(const Param* a, const Param* b)
 {
     COMPARE_SCALAR_FIELD(paramkind);
@@ -3637,6 +3644,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_Const:
             retval = _equalConst((Const*)a, (Const*)b);
+            break;
+        case T_PriorExpr:
+            retval = _equalPriorExpr((PriorExpr*)a, (PriorExpr*)b);
             break;
         case T_Param:
             retval = _equalParam((Param*)a, (Param*)b);

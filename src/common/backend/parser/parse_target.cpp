@@ -135,7 +135,7 @@ List* transformTargetList(ParseState* pstate, List* targetlist, ParseExprKind ex
         if (IsA(res->val, ColumnRef)) {
             ColumnRef* cref = (ColumnRef*)res->val;
 
-            if (cref->prior) {
+            if (cref->prior && t_thrd.proc->workingVersionNum < PRIOR_EXPR_VERSION_NUM) {
                 ereport(ERROR,
                         (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
                          errmsg("Not Support prior column in TargetList in case swcb.")));

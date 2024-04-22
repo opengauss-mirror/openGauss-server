@@ -753,7 +753,7 @@ static void HandleSWCBColumnRef(StartWithTransformContext *context, Node *node)
     } else {
         context->relInfoList = list_concat_unique(context->relInfoList, result);
     }
-
+    column->prior = false;
     return;
 }
 

@@ -595,7 +595,17 @@ explain (costs off) select *, sys_connect_by_path(name, '/') from t1 start with 
 ERROR:  SYS_CONNECT_BY_PATH function is not allowed here
 --unsupport case
 select prior id cc from t1 start with id = 1 connect by prior id = pid;
-ERROR:  Not Support prior column in TargetList in case swcb.
+ cc 
+----
+   
+  1
+  2
+  1
+  4
+  7
+  4
+(7 rows)
+
 create INCREMENTAL MATERIALIZED view mv as select * from t1 start with id=141 connect by prior id=pid;
 ERROR:  Feature not supported
 DETAIL:  with or start with clause

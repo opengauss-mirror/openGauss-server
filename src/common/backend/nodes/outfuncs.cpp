@@ -2449,6 +2449,12 @@ static void _outConst(StringInfo str, Const* node)
     WRITE_CURSORDATA_FIELD(cursor_data);
 }
 
+static void _outPriorExpr(StringInfo str, PriorExpr* node)
+{
+    WRITE_NODE_TYPE("PRIOREXPR");
+    WRITE_NODE_FIELD(node);
+}
+
 static void _outParam(StringInfo str, Param* node)
 {
     WRITE_NODE_TYPE("PARAM");
@@ -6488,6 +6494,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Const:
                 _outConst(str, (Const*)obj);
+                break;
+            case T_PriorExpr:
+                _outPriorExpr(str, (PriorExpr*)obj);
                 break;
             case T_Param:
                 _outParam(str, (Param*)obj);

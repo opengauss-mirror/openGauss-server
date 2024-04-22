@@ -1,0 +1,1143 @@
+-- base test
+DROP TABLE IF EXISTS table_name;
+NOTICE:  table "table_name" does not exist, skipping
+CREATE TABLE table_name(node1, node2) AS
+SELECT 'A1', 'B1' UNION ALL
+SELECT 'A1', 'B2' UNION ALL
+SELECT 'A2', 'B1' UNION ALL
+SELECT 'A2', 'B3' UNION ALL
+SELECT 'B1', 'K5' UNION ALL
+SELECT 'B1', 'I2' UNION ALL
+SELECT 'A3', 'G7' UNION ALL
+SELECT 'A3', 'H9' UNION ALL
+SELECT 'B2', 'J1' UNION ALL
+SELECT 'B2', 'K5' UNION ALL
+SELECT 'H9', 'L7' ;
+SELECT
+CASE LEVEL WHEN 2 THEN PRIOR node1 ELSE node1 END AS node0,
+CASE LEVEL WHEN 2 THEN node1 ELSE node2 END AS node1,    
+CASE LEVEL WHEN 2 THEN node2 END AS node2
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ node0 | node1 | node2 
+-------+-------+-------
+ A1    | B1    | K5
+ A1    | B1    | I2
+ A1    | B2    | J1
+ A1    | B2    | K5
+ A2    | B1    | K5
+ A2    | B1    | I2
+ A2    | B3    | 
+ A3    | G7    | 
+ A3    | H9    | L7
+(9 rows)
+
+SELECT
+CASE LEVEL WHEN 2 THEN PRIOR PRIOR node1 ELSE node1 END AS node0,
+CASE LEVEL WHEN 2 THEN node1 ELSE node2 END AS node1,    
+CASE LEVEL WHEN 2 THEN node2 END AS node2
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ERROR:  syntax error at or near "node1"
+LINE 2: CASE LEVEL WHEN 2 THEN PRIOR PRIOR node1 ELSE node1 END AS n...
+                                           ^
+SELECT
+CASE LEVEL WHEN 2 THEN PRIOR(PRIOR node1) ELSE node1 END AS node0,
+CASE LEVEL WHEN 2 THEN node1 ELSE node2 END AS node1,    
+CASE LEVEL WHEN 2 THEN node2 END AS node2
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ERROR:  function prior(text) does not exist
+LINE 1: SELECT
+        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: node0
+SELECT
+PRIOR 1
+FROM   table_name;
+ERROR:  syntax error at or near "1"
+LINE 2: PRIOR 1
+              ^
+SELECT
+PRIOR 1
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ERROR:  syntax error at or near "1"
+LINE 2: PRIOR 1
+              ^
+SELECT
+PRIOR 'test'
+FROM   table_name;
+ERROR:  type "prior" does not exist
+LINE 2: PRIOR 'test'
+        ^
+CONTEXT:  referenced column: prior
+SELECT
+PRIOR 'test'
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ERROR:  type "prior" does not exist
+LINE 2: PRIOR 'test'
+        ^
+CONTEXT:  referenced column: prior
+SELECT
+PRIOR repeat('test')
+FROM   table_name;
+ERROR:  syntax error at or near "("
+LINE 2: PRIOR repeat('test')
+                    ^
+SELECT
+PRIOR repeat('test')
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ERROR:  syntax error at or near "("
+LINE 2: PRIOR repeat('test')
+                    ^
+SELECT
+PRIOR NULL
+FROM   table_name;
+ERROR:  syntax error at or near "NULL"
+LINE 2: PRIOR NULL
+              ^
+SELECT
+PRIOR NULL
+FROM   table_name
+WHERE  LEVEL = 2
+OR     (LEVEL = 1 AND CONNECT_BY_ISLEAF = 1)
+START WITH node1 LIKE 'A%'
+CONNECT BY PRIOR node2 = node1;
+ERROR:  syntax error at or near "NULL"
+LINE 2: PRIOR NULL
+              ^
+-- test about data type
+DROP TABLE IF EXISTS test_type_table;
+NOTICE:  table "test_type_table" does not exist, skipping
+CREATE TABLE test_type_table
+(
+    pid int,
+    id int,
+    name text,
+    "int1" tinyint,
+    "int2" smallint,
+    "int4" integer,
+    "int8" bigint,
+    "float4" float4,
+    "float8" float8,
+    "numeric" decimal(20, 6),
+    "bit5" bit(5),
+    "boolean" boolean,
+    "date" date,
+    "time" time,
+    "timetz" timetz,
+    "timestamp" timestamp,
+    "timestamptz" timestamptz,
+    "char" char(20),
+    "varchar" varchar(100),
+    "blob" blob,
+    "text" text
+);
+INSERT INTO test_type_table VALUES
+(0, 1, 'top_father', 1, 1, 1, 1, 1.1, 1.1, 1.1, b'00001', true, '2024-01-01', '00:00:01', '00:00:01', '2024-01-01 00:00:01', '2024-01-01 00:00:01', 'top_father', 'top_father', '0A', 'top_father'), 
+(1, 2, 'second_father1', 2, 2, 2, 2, 1.2, 1.2, 1.2, b'00010', false, '2024-01-02', '00:00:02', '00:00:02', '2024-01-02 00:00:02', '2024-01-02 00:00:02', 'second_father1', 'second_father1', '0B', 'second_father1'),
+(1, 3, 'second_father2', 3, 3, 3, 3, 1.3, 1.3, 1.3, b'00100', true, '2024-01-03', '00:00:03', '00:00:03', '2024-01-03 00:00:03', '2024-01-03 00:00:03', 'second_father2', 'second_father2', '0C', 'second_father2'),
+(2, 4, 'third_father1', 4, 4, 4, 4, 1.4, 1.4, 1.4, b'01000', false, '2024-01-04', '00:00:04', '00:00:04', '2024-01-04 00:00:04', '2024-01-04 00:00:04', 'third_father1', 'third_father1', '0D', 'third_father1'),
+(3, 5, 'third_father2', 5, 5, 5, 5, 1.5, 1.5, 1.5, b'10000', true, '2024-01-05', '00:00:05', '00:00:05', '2024-01-05 00:00:05', '2024-01-05 00:00:05', 'third_father2', 'third_father2', '0E', 'third_father2');
+SELECT
+PRIOR name AS father_name,
+PRIOR "int1" AS father_int1,
+name AS current_name,
+"int1" AS current_int1
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int1 |  current_name  | current_int1 
+----------------+-------------+----------------+--------------
+                |             | top_father     | 1
+ top_father     | 1           | second_father1 | 2
+ second_father1 | 2           | third_father1  | 4
+ top_father     | 1           | second_father2 | 3
+ second_father2 | 3           | third_father2  | 5
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "int2" AS father_int2,
+name AS current_name,
+"int2" AS current_int2
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int2 |  current_name  | current_int2 
+----------------+-------------+----------------+--------------
+                |             | top_father     |            1
+ top_father     |           1 | second_father1 |            2
+ second_father1 |           2 | third_father1  |            4
+ top_father     |           1 | second_father2 |            3
+ second_father2 |           3 | third_father2  |            5
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "int4" AS father_int4,
+name AS current_name,
+"int4" AS current_int4
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int4 |  current_name  | current_int4 
+----------------+-------------+----------------+--------------
+                |             | top_father     |            1
+ top_father     |           1 | second_father1 |            2
+ second_father1 |           2 | third_father1  |            4
+ top_father     |           1 | second_father2 |            3
+ second_father2 |           3 | third_father2  |            5
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "int8" AS father_int8,
+name AS current_name,
+"int8" AS current_int8
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int8 |  current_name  | current_int8 
+----------------+-------------+----------------+--------------
+                |             | top_father     |            1
+ top_father     |           1 | second_father1 |            2
+ second_father1 |           2 | third_father1  |            4
+ top_father     |           1 | second_father2 |            3
+ second_father2 |           3 | third_father2  |            5
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "float4" AS father_float4,
+name AS current_name,
+"float4" AS current_float4
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_float4 |  current_name  | current_float4 
+----------------+---------------+----------------+----------------
+                |               | top_father     |            1.1
+ top_father     |           1.1 | second_father1 |            1.2
+ second_father1 |           1.2 | third_father1  |            1.4
+ top_father     |           1.1 | second_father2 |            1.3
+ second_father2 |           1.3 | third_father2  |            1.5
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "float8" AS father_float8,
+name AS current_name,
+"float8" AS current_float8
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_float8 |  current_name  | current_float8 
+----------------+---------------+----------------+----------------
+                |               | top_father     |            1.1
+ top_father     |           1.1 | second_father1 |            1.2
+ second_father1 |           1.2 | third_father1  |            1.4
+ top_father     |           1.1 | second_father2 |            1.3
+ second_father2 |           1.3 | third_father2  |            1.5
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "numeric" AS father_numeric,
+name AS current_name,
+"numeric" AS current_numeric
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_numeric |  current_name  | current_numeric 
+----------------+----------------+----------------+-----------------
+                |                | top_father     |        1.100000
+ top_father     |       1.100000 | second_father1 |        1.200000
+ second_father1 |       1.200000 | third_father1  |        1.400000
+ top_father     |       1.100000 | second_father2 |        1.300000
+ second_father2 |       1.300000 | third_father2  |        1.500000
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "bit5" AS father_bit5,
+name AS current_name,
+"bit5" AS current_bit5
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+SELECT
+PRIOR name AS father_name,
+PRIOR "boolean" AS father_boolean,
+name AS current_name,
+"boolean" AS current_boolean
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_boolean |  current_name  | current_boolean 
+----------------+----------------+----------------+-----------------
+                |                | top_father     | t
+ top_father     | t              | second_father1 | f
+ second_father1 | f              | third_father1  | f
+ top_father     | t              | second_father2 | t
+ second_father2 | t              | third_father2  | t
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "date" AS father_date,
+name AS current_name,
+"date" AS current_date
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |       father_date        |  current_name  |       current_date       
+----------------+--------------------------+----------------+--------------------------
+                |                          | top_father     | Mon Jan 01 00:00:00 2024
+ top_father     | Mon Jan 01 00:00:00 2024 | second_father1 | Tue Jan 02 00:00:00 2024
+ second_father1 | Tue Jan 02 00:00:00 2024 | third_father1  | Thu Jan 04 00:00:00 2024
+ top_father     | Mon Jan 01 00:00:00 2024 | second_father2 | Wed Jan 03 00:00:00 2024
+ second_father2 | Wed Jan 03 00:00:00 2024 | third_father2  | Fri Jan 05 00:00:00 2024
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "time" AS father_time,
+name AS current_name,
+"time" AS current_time
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_time |  current_name  | current_time 
+----------------+-------------+----------------+--------------
+                |             | top_father     | 00:00:01
+ top_father     | 00:00:01    | second_father1 | 00:00:02
+ second_father1 | 00:00:02    | third_father1  | 00:00:04
+ top_father     | 00:00:01    | second_father2 | 00:00:03
+ second_father2 | 00:00:03    | third_father2  | 00:00:05
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "timetz" AS father_timetz,
+name AS current_name,
+"timetz" AS current_timetz
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_timetz |  current_name  | current_timetz 
+----------------+---------------+----------------+----------------
+                |               | top_father     | 00:00:01-07
+ top_father     | 00:00:01-07   | second_father1 | 00:00:02-07
+ second_father1 | 00:00:02-07   | third_father1  | 00:00:04-07
+ top_father     | 00:00:01-07   | second_father2 | 00:00:03-07
+ second_father2 | 00:00:03-07   | third_father2  | 00:00:05-07
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "timestamp" AS father_timestamp,
+name AS current_name,
+"timestamp" AS current_timestamp
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |     father_timestamp     |  current_name  |    current_timestamp     
+----------------+--------------------------+----------------+--------------------------
+                |                          | top_father     | Mon Jan 01 00:00:01 2024
+ top_father     | Mon Jan 01 00:00:01 2024 | second_father1 | Tue Jan 02 00:00:02 2024
+ second_father1 | Tue Jan 02 00:00:02 2024 | third_father1  | Thu Jan 04 00:00:04 2024
+ top_father     | Mon Jan 01 00:00:01 2024 | second_father2 | Wed Jan 03 00:00:03 2024
+ second_father2 | Wed Jan 03 00:00:03 2024 | third_father2  | Fri Jan 05 00:00:05 2024
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "timestamptz" AS father_timestamptz,
+name AS current_name,
+"timestamptz" AS current_timestamptz
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |      father_timestamptz      |  current_name  |     current_timestamptz      
+----------------+------------------------------+----------------+------------------------------
+                |                              | top_father     | Mon Jan 01 00:00:01 2024 PST
+ top_father     | Mon Jan 01 00:00:01 2024 PST | second_father1 | Tue Jan 02 00:00:02 2024 PST
+ second_father1 | Tue Jan 02 00:00:02 2024 PST | third_father1  | Thu Jan 04 00:00:04 2024 PST
+ top_father     | Mon Jan 01 00:00:01 2024 PST | second_father2 | Wed Jan 03 00:00:03 2024 PST
+ second_father2 | Wed Jan 03 00:00:03 2024 PST | third_father2  | Fri Jan 05 00:00:05 2024 PST
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "char" AS father_char,
+name AS current_name,
+"char" AS current_char
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |     father_char      |  current_name  |     current_char     
+----------------+----------------------+----------------+----------------------
+                |                      | top_father     | top_father          
+ top_father     | top_father           | second_father1 | second_father1      
+ second_father1 | second_father1       | third_father1  | third_father1       
+ top_father     | top_father           | second_father2 | second_father2      
+ second_father2 | second_father2       | third_father2  | third_father2       
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "varchar" AS father_varchar,
+name AS current_name,
+"varchar" AS current_varchar
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_varchar |  current_name  | current_varchar 
+----------------+----------------+----------------+-----------------
+                |                | top_father     | top_father
+ top_father     | top_father     | second_father1 | second_father1
+ second_father1 | second_father1 | third_father1  | third_father1
+ top_father     | top_father     | second_father2 | second_father2
+ second_father2 | second_father2 | third_father2  | third_father2
+(5 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "blob" AS father_blob,
+name AS current_name,
+"blob" AS current_blob
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+SELECT
+PRIOR name AS father_name,
+PRIOR "text" AS father_text,
+name AS current_name,
+"text" AS current_text
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |  father_text   |  current_name  |  current_text  
+----------------+----------------+----------------+----------------
+                |                | top_father     | top_father
+ top_father     | top_father     | second_father1 | second_father1
+ second_father1 | second_father1 | third_father1  | third_father1
+ top_father     | top_father     | second_father2 | second_father2
+ second_father2 | second_father2 | third_father2  | third_father2
+(5 rows)
+
+-- test about WHERE clause
+SELECT
+PRIOR name AS father_name,
+PRIOR "int1" AS father_int1,
+name AS current_name,
+"int1" AS current_int1
+FROM test_type_table WHERE PRIOR "int1" > 1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int1 | current_name  | current_int1 
+----------------+-------------+---------------+--------------
+ second_father1 | 2           | third_father1 | 4
+ second_father2 | 3           | third_father2 | 5
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "int2" AS father_int2,
+name AS current_name,
+"int2" AS current_int2
+FROM test_type_table WHERE PRIOR "int2" > 1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int2 | current_name  | current_int2 
+----------------+-------------+---------------+--------------
+ second_father1 |           2 | third_father1 |            4
+ second_father2 |           3 | third_father2 |            5
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "int4" AS father_int4,
+name AS current_name,
+"int4" AS current_int4
+FROM test_type_table WHERE PRIOR "int4" > 1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int4 | current_name  | current_int4 
+----------------+-------------+---------------+--------------
+ second_father1 |           2 | third_father1 |            4
+ second_father2 |           3 | third_father2 |            5
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "int8" AS father_int8,
+name AS current_name,
+"int8" AS current_int8
+FROM test_type_table WHERE PRIOR "int8" > 1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_int8 | current_name  | current_int8 
+----------------+-------------+---------------+--------------
+ second_father1 |           2 | third_father1 |            4
+ second_father2 |           3 | third_father2 |            5
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "float4" AS father_float4,
+name AS current_name,
+"float4" AS current_float4
+FROM test_type_table WHERE PRIOR "float4" > 1.1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_float4 |  current_name  | current_float4 
+----------------+---------------+----------------+----------------
+ top_father     |           1.1 | second_father1 |            1.2
+ second_father1 |           1.2 | third_father1  |            1.4
+ top_father     |           1.1 | second_father2 |            1.3
+ second_father2 |           1.3 | third_father2  |            1.5
+(4 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "float8" AS father_float8,
+name AS current_name,
+"float8" AS current_float8
+FROM test_type_table WHERE PRIOR "float8" > 1.1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_float8 | current_name  | current_float8 
+----------------+---------------+---------------+----------------
+ second_father1 |           1.2 | third_father1 |            1.4
+ second_father2 |           1.3 | third_father2 |            1.5
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "numeric" AS father_numeric,
+name AS current_name,
+"numeric" AS current_numeric
+FROM test_type_table WHERE PRIOR "numeric" > 1.1
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_numeric | current_name  | current_numeric 
+----------------+----------------+---------------+-----------------
+ second_father1 |       1.200000 | third_father1 |        1.400000
+ second_father2 |       1.300000 | third_father2 |        1.500000
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "bit5" AS father_bit5,
+name AS current_name,
+"bit5" AS current_bit5
+FROM test_type_table WHERE "bit5" > b'00001'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+SELECT
+PRIOR name AS father_name,
+PRIOR "boolean" AS father_boolean,
+name AS current_name,
+"boolean" AS current_boolean
+FROM test_type_table WHERE PRIOR "boolean"
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_boolean |  current_name  | current_boolean 
+----------------+----------------+----------------+-----------------
+ top_father     | t              | second_father1 | f
+ top_father     | t              | second_father2 | t
+ second_father2 | t              | third_father2  | t
+(3 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "date" AS father_date,
+name AS current_name,
+"date" AS current_date
+FROM test_type_table WHERE PRIOR "date" > '2024-01-01'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |       father_date        | current_name  |       current_date       
+----------------+--------------------------+---------------+--------------------------
+ second_father1 | Tue Jan 02 00:00:00 2024 | third_father1 | Thu Jan 04 00:00:00 2024
+ second_father2 | Wed Jan 03 00:00:00 2024 | third_father2 | Fri Jan 05 00:00:00 2024
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "time" AS father_time,
+name AS current_name,
+"time" AS current_time
+FROM test_type_table WHERE PRIOR "time" > '00:00:01'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_time | current_name  | current_time 
+----------------+-------------+---------------+--------------
+ second_father1 | 00:00:02    | third_father1 | 00:00:04
+ second_father2 | 00:00:03    | third_father2 | 00:00:05
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "timetz" AS father_timetz,
+name AS current_name,
+"timetz" AS current_timetz
+FROM test_type_table WHERE PRIOR "timetz" > '00:00:01'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_timetz | current_name  | current_timetz 
+----------------+---------------+---------------+----------------
+ second_father1 | 00:00:02-07   | third_father1 | 00:00:04-07
+ second_father2 | 00:00:03-07   | third_father2 | 00:00:05-07
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "timestamp" AS father_timestamp,
+name AS current_name,
+"timestamp" AS current_timestamp
+FROM test_type_table WHERE PRIOR "timestamp" > '2024-01-01 00:00:01'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |     father_timestamp     | current_name  |    current_timestamp     
+----------------+--------------------------+---------------+--------------------------
+ second_father1 | Tue Jan 02 00:00:02 2024 | third_father1 | Thu Jan 04 00:00:04 2024
+ second_father2 | Wed Jan 03 00:00:03 2024 | third_father2 | Fri Jan 05 00:00:05 2024
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "timestamptz" AS father_timestamptz,
+name AS current_name,
+"timestamptz" AS current_timestamptz
+FROM test_type_table WHERE PRIOR "timestamptz" > '2024-01-01 00:00:01'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |      father_timestamptz      | current_name  |     current_timestamptz      
+----------------+------------------------------+---------------+------------------------------
+ second_father1 | Tue Jan 02 00:00:02 2024 PST | third_father1 | Thu Jan 04 00:00:04 2024 PST
+ second_father2 | Wed Jan 03 00:00:03 2024 PST | third_father2 | Fri Jan 05 00:00:05 2024 PST
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "char" AS father_char,
+name AS current_name,
+"char" AS current_char
+FROM test_type_table WHERE PRIOR "char" LIKE '%second%'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |     father_char      | current_name  |     current_char     
+----------------+----------------------+---------------+----------------------
+ second_father1 | second_father1       | third_father1 | third_father1       
+ second_father2 | second_father2       | third_father2 | third_father2       
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "varchar" AS father_varchar,
+name AS current_name,
+"varchar" AS current_varchar
+FROM test_type_table WHERE PRIOR "varchar" LIKE '%second%'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   | father_varchar | current_name  | current_varchar 
+----------------+----------------+---------------+-----------------
+ second_father1 | second_father1 | third_father1 | third_father1
+ second_father2 | second_father2 | third_father2 | third_father2
+(2 rows)
+
+SELECT
+PRIOR name AS father_name,
+PRIOR "blob" AS father_blob,
+name AS current_name,
+"blob" AS current_blob
+FROM test_type_table WHERE PRIOR "blob" > '0A'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+SELECT
+PRIOR name AS father_name,
+PRIOR "text" AS father_text,
+name AS current_name,
+"text" AS current_text
+FROM test_type_table WHERE PRIOR "text" LIKE '%second%'
+START WITH id = 1
+CONNECT BY PRIOR id = pid;
+  father_name   |  father_text   | current_name  | current_text  
+----------------+----------------+---------------+---------------
+ second_father1 | second_father1 | third_father1 | third_father1
+ second_father2 | second_father2 | third_father2 | third_father2
+(2 rows)
+
+-- test about GROUP BY clause
+SELECT
+PRIOR "int1",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int1";
+ int1 | count 
+------+-------
+ 1    |     2
+ 3    |     1
+      |     1
+ 2    |     1
+(4 rows)
+
+SELECT
+PRIOR "int2",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int2";
+ int2 | count 
+------+-------
+    1 |     2
+    3 |     1
+      |     1
+    2 |     1
+(4 rows)
+
+SELECT
+PRIOR "int4",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int4";
+ int4 | count 
+------+-------
+    1 |     2
+    3 |     1
+      |     1
+    2 |     1
+(4 rows)
+
+SELECT
+PRIOR "int8",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int8";
+ int8 | count 
+------+-------
+    1 |     2
+    3 |     1
+      |     1
+    2 |     1
+(4 rows)
+
+SELECT
+PRIOR "float4",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "float4";
+ float4 | count 
+--------+-------
+        |     1
+    1.1 |     2
+    1.2 |     1
+    1.3 |     1
+(4 rows)
+
+SELECT
+PRIOR "float8",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "float8";
+ float8 | count 
+--------+-------
+    1.1 |     2
+        |     1
+    1.3 |     1
+    1.2 |     1
+(4 rows)
+
+SELECT
+PRIOR "numeric",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "numeric";
+ numeric  | count 
+----------+-------
+ 1.200000 |     1
+          |     1
+ 1.100000 |     2
+ 1.300000 |     1
+(4 rows)
+
+SELECT
+PRIOR "bit5",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "bit5";
+ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+SELECT
+PRIOR "boolean",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "boolean";
+ boolean | count 
+---------+-------
+ t       |     3
+ f       |     1
+         |     1
+(3 rows)
+
+SELECT
+PRIOR "date",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "date";
+           date           | count 
+--------------------------+-------
+ Wed Jan 03 00:00:00 2024 |     1
+                          |     1
+ Tue Jan 02 00:00:00 2024 |     1
+ Mon Jan 01 00:00:00 2024 |     2
+(4 rows)
+
+SELECT
+PRIOR "time",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "time";
+   time   | count 
+----------+-------
+ 00:00:03 |     1
+ 00:00:02 |     1
+          |     1
+ 00:00:01 |     2
+(4 rows)
+
+SELECT
+PRIOR "timetz",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "timetz";
+   timetz    | count 
+-------------+-------
+ 00:00:01-07 |     2
+             |     1
+ 00:00:02-07 |     1
+ 00:00:03-07 |     1
+(4 rows)
+
+SELECT
+PRIOR "timestamp",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamp";
+        timestamp         | count 
+--------------------------+-------
+                          |     1
+ Tue Jan 02 00:00:02 2024 |     1
+ Wed Jan 03 00:00:03 2024 |     1
+ Mon Jan 01 00:00:01 2024 |     2
+(4 rows)
+
+SELECT
+PRIOR "timestamptz",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamptz";
+         timestamptz          | count 
+------------------------------+-------
+ Tue Jan 02 00:00:02 2024 PST |     1
+ Mon Jan 01 00:00:01 2024 PST |     2
+                              |     1
+ Wed Jan 03 00:00:03 2024 PST |     1
+(4 rows)
+
+SELECT
+PRIOR "char",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "char";
+         char         | count 
+----------------------+-------
+ second_father2       |     1
+                      |     1
+ top_father           |     2
+ second_father1       |     1
+(4 rows)
+
+SELECT
+PRIOR "varchar",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "varchar";
+    varchar     | count 
+----------------+-------
+ second_father2 |     1
+                |     1
+ top_father     |     2
+ second_father1 |     1
+(4 rows)
+
+SELECT
+PRIOR "blob",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "blob";
+ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+SELECT
+PRIOR "text",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "text";
+      text      | count 
+----------------+-------
+ second_father2 |     1
+                |     1
+ top_father     |     2
+ second_father1 |     1
+(4 rows)
+
+-- test about HAVING clause
+SELECT
+PRIOR "int1",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int1" HAVING PRIOR "int1" > 1;
+ int1 | count 
+------+-------
+ 3    |     1
+ 2    |     1
+(2 rows)
+
+SELECT
+PRIOR "int2",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int2" HAVING PRIOR "int2" > 1;
+ int2 | count 
+------+-------
+    3 |     1
+    2 |     1
+(2 rows)
+
+SELECT
+PRIOR "int4",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int4" HAVING PRIOR "int4" > 1;
+ int4 | count 
+------+-------
+    3 |     1
+    2 |     1
+(2 rows)
+
+SELECT
+PRIOR "int8",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "int8" HAVING PRIOR "int8" > 1;
+ int8 | count 
+------+-------
+    3 |     1
+    2 |     1
+(2 rows)
+
+SELECT
+PRIOR "float4",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "float4" HAVING PRIOR "float4" > 1.1;
+ float4 | count 
+--------+-------
+    1.2 |     1
+    1.1 |     2
+    1.3 |     1
+(3 rows)
+
+SELECT
+PRIOR "float8",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "float8" HAVING PRIOR "float8" > 1.1;
+ float8 | count 
+--------+-------
+    1.3 |     1
+    1.2 |     1
+(2 rows)
+
+SELECT
+PRIOR "numeric",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "numeric" HAVING PRIOR "numeric" > 1.1;
+ numeric  | count 
+----------+-------
+ 1.300000 |     1
+ 1.200000 |     1
+(2 rows)
+
+SELECT
+PRIOR "bit5",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "bit5" HAVING PRIOR "bit5" > b'00001';
+ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+SELECT
+PRIOR "boolean",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "boolean" HAVING PRIOR "boolean";
+ boolean | count 
+---------+-------
+ t       |     3
+(1 row)
+
+SELECT
+PRIOR "date",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "date" HAVING PRIOR "date" > '2024-01-01';
+           date           | count 
+--------------------------+-------
+ Wed Jan 03 00:00:00 2024 |     1
+ Tue Jan 02 00:00:00 2024 |     1
+(2 rows)
+
+SELECT
+PRIOR "time",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "time" HAVING PRIOR "time" > '00:00:01';
+   time   | count 
+----------+-------
+ 00:00:03 |     1
+ 00:00:02 |     1
+(2 rows)
+
+SELECT
+PRIOR "timetz",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "timetz" HAVING PRIOR "timetz" > '00:00:01';
+   timetz    | count 
+-------------+-------
+ 00:00:02-07 |     1
+ 00:00:03-07 |     1
+(2 rows)
+
+SELECT
+PRIOR "timestamp",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamp" HAVING PRIOR "timestamp" > '2024-01-01 00:00:01';
+        timestamp         | count 
+--------------------------+-------
+ Wed Jan 03 00:00:03 2024 |     1
+ Tue Jan 02 00:00:02 2024 |     1
+(2 rows)
+
+SELECT
+PRIOR "timestamptz",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamptz" HAVING PRIOR "timestamptz" > '2024-01-01 00:00:01';
+         timestamptz          | count 
+------------------------------+-------
+ Wed Jan 03 00:00:03 2024 PST |     1
+ Tue Jan 02 00:00:02 2024 PST |     1
+(2 rows)
+
+SELECT
+PRIOR "char",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "char" HAVING PRIOR "char" LIKE '%second%';
+         char         | count 
+----------------------+-------
+ second_father1       |     1
+ second_father2       |     1
+(2 rows)
+
+SELECT
+PRIOR "varchar",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "varchar" HAVING PRIOR "varchar" LIKE '%second%';
+    varchar     | count 
+----------------+-------
+ second_father1 |     1
+ second_father2 |     1
+(2 rows)
+
+SELECT
+PRIOR "blob",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "blob" HAVING PRIOR "blob" > '0A';
+ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+SELECT
+PRIOR "text",
+COUNT(ID)
+FROM test_type_table
+START WITH id = 1
+CONNECT BY PRIOR id = pid GROUP BY PRIOR "text" HAVING PRIOR "text" LIKE '%second%';
+      text      | count 
+----------------+-------
+ second_father1 |     1
+ second_father2 |     1
+(2 rows)
+

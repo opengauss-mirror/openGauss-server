@@ -156,6 +156,10 @@ static Datum ExecEvalGroupingIdExpr(
 bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
 extern struct varlena *heap_tuple_fetch_and_copy(Relation rel, struct varlena *attr, bool needcheck);
 static void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob);
+static Datum ExecEvalPriorExpr(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+static Datum GetPriorValue(TupleTableSlot *slot, ExprState *exprstate, ExprContext *econtext, AttrNumber origAttnum,
+                           bool *isnull = NULL);
+static inline Datum GetResultByType(char* result, Oid typOid, int typmod);
 
 THR_LOCAL PLpgSQL_execstate* plpgsql_estate = NULL;
 
@@ -6427,6 +6431,10 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
             state->evalfunc = (ExprStateEvalFunc)ExecEvalUserSetElm;
             usestate->instate = ExecInitExpr((Expr *)useexpr->val, parent);
         } break;
+       case T_PriorExpr:
+            state = (ExprState*)makeNode(ExprState);
+            state->evalfunc = ExecEvalPriorExpr;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -7285,5 +7293,168 @@ bool IsJoinExprNull(List *joinExpr, ExprContext *econtext)
     }
  
     return joinkeys_null;
+}
+
+static Datum ExecEvalPriorExpr(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    PriorExpr* pe = (PriorExpr*)exprstate->expr;
+    Var* variable = (Var*)pe->node;
+    TupleTableSlot* slot = NULL;
+    AttrNumber attnum;
+
+    if (isDone != NULL)
+        *isDone = ExprSingleResult;
+
+    /* Get the input slot and attribute number we want */
+    switch (variable->varno) {
+        case INNER_VAR: /* get the tuple from the inner node */
+            slot = econtext->ecxt_innertuple;
+            break;
+
+        case OUTER_VAR: /* get the tuple from the outer node */
+            slot = econtext->ecxt_outertuple;
+            break;
+
+            /* INDEX_VAR is handled by default case */
+        default: /* get the tuple from the relation being scanned */
+            slot = econtext->ecxt_scantuple;
+            if (u_sess->parser_cxt.in_userset) {
+                u_sess->parser_cxt.has_set_uservar = true;
+            }
+            break;
+    }
+
+    attnum = variable->varattno;
+
+    /* This was checked by ExecInitExpr */
+    Assert(attnum != InvalidAttrNumber);
+
+    RightRefState* refState = econtext->rightRefState;
+    int index = attnum - 1;
+    if (refState && refState->values &&
+        ((slot == nullptr && IS_ENABLE_INSERT_RIGHT_REF(refState)) ||
+            (IS_ENABLE_UPSERT_RIGHT_REF(refState) && refState->hasExecs[index] && index < refState->colCnt))) {
+        *isNull = refState->isNulls[index];
+        return refState->values[index];
+    }
+
+    if (slot == nullptr) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE), errmodule(MOD_EXECUTOR),
+                        errmsg("attribute number %d does not exists.", attnum)));
+    }
+    if (attnum > 0) {
+        TupleDesc slot_tupdesc = slot->tts_tupleDescriptor;
+        Form_pg_attribute attr;
+
+        if (attnum > slot_tupdesc->natts) /* should never happen */
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                    errmodule(MOD_EXECUTOR),
+                    errmsg("attribute number %d exceeds number of columns %d", attnum, slot_tupdesc->natts)));
+
+        attr = &slot_tupdesc->attrs[attnum - 1];
+
+        /* can't check type if dropped, since atttypid is probably 0 */
+        if (!attr->attisdropped) {
+            if (variable->vartype != attr->atttypid)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                        errmodule(MOD_EXECUTOR),
+                        errmsg("attribute %d has wrong type", attnum),
+                        errdetail("Table has type %s, but query expects %s.",
+                                    format_type_be(attr->atttypid),
+                                    format_type_be(variable->vartype))));
+        }
+    }
+    return GetPriorValue(slot, exprstate, econtext, attnum, isNull);
+}
+
+static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno)
+{
+    NameData arrayAttName;
+    AttrNumber  arrayAttNum = InvalidAttrNumber;
+    errno_t rc = 0;
+
+    rc = memset_s(arrayAttName.data, NAMEDATALEN, 0, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
+    rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_col_%d", origVarAttno);
+    securec_check_ss(rc, "\0", "\0");
+
+    /* find proper internal array to support */
+    for (int n = tupDesc->natts - 1; n >= 0 ; n--) {
+        Form_pg_attribute attr = TupleDescAttr(tupDesc, n);
+        if (pg_strcasecmp(attr->attname.data, arrayAttName.data) == 0) {
+            arrayAttNum = n + 1;
+            break;
+        }
+    }
+
+    if (arrayAttNum == InvalidAttrNumber) {
+        elog(ERROR, "Internal array_col for origVarAttno:%d related internal array is not found",
+                origVarAttno);
+    }
+
+    return arrayAttNum;
+}
+
+#define SPLIT_COUNT 2
+static Datum GetPriorValue(TupleTableSlot *slot, ExprState *exprstate, ExprContext *econtext, AttrNumber origAttnum,
+                           bool *isnull)
+{
+    TupleDesc tupDesc = slot->tts_tupleDescriptor;
+    bool arrayIsNull = true;
+    Datum result = (Datum)0;
+
+    /* context check */
+    Assert (econtext != NULL && exprstate != NULL && !TupIsNull(slot));
+
+    AttrNumber arrayColAttnum = GetInternalArrayAttnum(tupDesc , origAttnum);
+    Datum arrayColDatum = heap_slot_getattr(slot, arrayColAttnum, &arrayIsNull);
+    Assert (!arrayIsNull && origAttnum != InvalidAttrNumber &&
+            arrayColAttnum != InvalidAttrNumber);
+    Assert (arrayColAttnum > origAttnum);
+    char *token_tmp = NULL;
+    char* arrstr = pstrdup(TextDatumGetCString(arrayColDatum));
+    int len = strlen(arrstr);
+    int count = 0;
+    int i = len - 1;
+    for (; i >= 0 && count < SPLIT_COUNT; i--) {
+        if (arrstr[i] == '/') {
+            count++;
+        }
+    }
+
+    if (count == SPLIT_COUNT) {
+        Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor, origAttnum - 1);
+        Oid typOid = attr->atttypid;
+        int typmod = attr->atttypmod;
+        result = GetResultByType(strtok_s(&arrstr[i + 1], "/", &token_tmp), typOid, typmod);
+    }
+
+    /*
+     * When the number of '/' characters is less than SPLIT_COUNT,
+     * it means that there is only the current node on the path 
+     * from the root to the current node, that is, the current node
+     * does not have a parent node, so it should be null at this time.
+     */
+    if (isnull != NULL) {
+        *isnull = count < SPLIT_COUNT ? true : slot->tts_isnull[origAttnum - 1];
+    }
+
+    pfree(arrstr);
+    return result;
+}
+
+static inline Datum GetResultByType(char* value, Oid typOid, int typmod)
+{
+    char* input = value;
+    if (input == NULL) {
+        input = "";
+    }
+    Oid typeInput;
+    Oid typeIoParam;
+    getTypeInputInfo(typOid, &typeInput, &typeIoParam);
+    Datum result = OidInputFunctionCall(typeInput, input, typeIoParam, typmod);
+    return result;
 }
 #endif

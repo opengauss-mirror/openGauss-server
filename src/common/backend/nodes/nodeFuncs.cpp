@@ -248,6 +248,9 @@ Oid exprType(const Node* expr)
             type = INT4OID;
             break;
 #endif
+        case T_PriorExpr:
+            type = exprType(((const PriorExpr*)expr)->node);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -489,6 +492,8 @@ int32 exprTypmod(const Node* expr)
             return exprTypmod((Node*)((const PrefixKey*)expr)->arg);
         case T_SetVariableExpr:
             return ((const Const*)(((SetVariableExpr*)expr)->value))->consttypmod;
+        case T_PriorExpr:
+            return exprTypmod((Node*)((const PriorExpr*)expr)->node);
         default:
             break;
     }
@@ -977,6 +982,9 @@ Oid exprCollation(const Node* expr)
             coll = InvalidOid;
             break;
 #endif
+        case T_PriorExpr:
+            coll = exprCollation((Node*)((const PriorExpr*)expr)->node);
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1193,6 +1201,8 @@ void exprSetCollation(Node* expr, Oid collation)
             break;
         case T_UserSetElem:
             break;
+        case T_PriorExpr:
+            return exprSetCollation((Node*)((const PriorExpr*)expr)->node, collation);
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -2040,6 +2050,8 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
             p2walker(((UserSetElem*)node)->val, context);
             return true;
         }
+        case T_PriorExpr:
+            return p2walker(((PriorExpr*)node)->node, context);
         default:
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
@@ -2813,6 +2825,13 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             return (Node *)newnode;
         } break;
 #endif
+        case T_PriorExpr: {
+            PriorExpr* p_expr = (PriorExpr*)node;
+            PriorExpr* newnode = NULL;
+            FLATCOPY(newnode, p_expr, PriorExpr, isCopy);
+            MUTATE(newnode->node, p_expr->node, Node*);
+            return (Node*)newnode;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));

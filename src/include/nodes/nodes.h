@@ -282,6 +282,7 @@ typedef enum NodeTag {
     T_HashFilter,
     T_EstSPNode,
     T_Rownum,
+    T_PriorExpr,
     T_PseudoTargetEntry,
     T_PrefixKey,
     T_SetVariableExpr,
