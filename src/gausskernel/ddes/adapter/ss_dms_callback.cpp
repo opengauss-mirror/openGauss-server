@@ -447,6 +447,7 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
             if (ntries >= WAIT_PROMOTE || dms_reform_failed()) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS switchover] Standby promote timeout, please try again later.")));
+                SSWaitStartupExit();
                 return DMS_ERROR;
             }
             ntries = 0;
@@ -1699,22 +1700,7 @@ static void ReformCleanBackends()
         SendPostmasterSignal(PMSIGNAL_DMS_REFORM);
     }
 
-    int ticks = 0;
     while (true) {
-        /*
-         * This code ensure that startup thread must exit. Postmaster process will exit when ticks exceeds
-         * REFORM_START_CLEAN_TICKS.
-         * In standby staring scenario, startup thread not exit for SS_DISASTER_MAIN_STANDBY_NODE. 
-         */
-        if ((!SS_DISASTER_MAIN_STANDBY_NODE) && g_instance.pid_cxt.StartupPID != 0) {
-            if (ticks++ > REFORM_START_CLEAN_TICKS) {
-                ereport(WARNING, (errmodule(MOD_DMS),
-                    errmsg("[SS reform] StartupXLOG debris sigterm timeout 10s, exit now")));
-                _exit(0);
-            }
-            pg_usleep(REFORM_WAIT_LONG);
-            continue;
-        }
         if (dms_reform_failed()) {
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform]reform failed during caneling backends")));
             return;
@@ -1848,7 +1834,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     ereport(LOG, (errmsg("[SS Reform] starts, pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
         pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
         t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
-
+    SSHandleStartupWhenReformStart();
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->is_hashmap_constructed = false;
     reform_info->reform_type = rs_cxt->reform_type;
@@ -1865,13 +1851,16 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
     reform_info->dms_role = rs_cxt->role;
     SSXminInfoPrepare();
+    reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
 
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
-        errmsg("[SS reform] dms reform start, role:%d, reform type:SS %s, standby scenario:%d",
-            reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario())));
+        errmsg("[SS reform] reform start, role:%d, reform type:SS %s, standby scenario:%d, "
+            "reform_ver:%llu.",
+            reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario(),
+            reform_info->reform_ver)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         SSGrantDSSWritePermission();
     }

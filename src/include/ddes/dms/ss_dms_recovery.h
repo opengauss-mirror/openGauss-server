@@ -86,6 +86,8 @@ typedef struct st_reform_info {
     uint64 redo_total_bytes;
     bool reform_success;
     bool is_hashmap_constructed;
+    TimestampTz reform_ver;
+    TimestampTz reform_ver_startup_wait;
 } ss_reform_info_t;
 
 typedef enum st_failover_ckpt_status {
@@ -155,7 +157,6 @@ typedef struct ondemand_htab_ctrl {
 } ondemand_htab_ctrl_t;
 
 extern bool SSRecoveryNodes();
-extern void SSWaitStartupExit();
 extern int SSGetPrimaryInstId();
 extern void SSSavePrimaryInstId(int id);
 extern void SSInitReformerControlPages(void);

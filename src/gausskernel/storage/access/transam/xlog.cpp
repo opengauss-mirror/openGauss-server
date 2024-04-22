@@ -9262,6 +9262,8 @@ void StartupXLOG(void)
      * not do ReadControlFile() here, but might as well do it to be sure.
      */
     if (ENABLE_DMS && ENABLE_DSS) {
+        ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+        reform_info->reform_ver_startup_wait = reform_info->reform_ver;
         int src_id = INVALID_INSTANCEID;
         SSReadControlFile(REFORM_CTRL_PAGE);
         if (SS_CLUSTER_ONDEMAND_NOT_NORAML && SS_PRIMARY_MODE) {

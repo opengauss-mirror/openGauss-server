@@ -562,3 +562,92 @@ bool SSBackendNeedExitScenario()
 
     return true;
 }
+
+static void SSProcessForceExit()
+{
+    int log_level = WARNING;
+#ifdef USE_ASSERT_CHECKING
+    log_level = PANIC;
+#endif 
+    ereport(log_level, (errmodule(MOD_DMS),
+        errmsg("exit now")));
+    _exit(0);
+}
+
+void SSWaitStartupExit(bool send_signal)
+{
+    if (g_instance.pid_cxt.StartupPID == 0) {
+        return;
+    }
+
+    if (send_signal) {
+        if ((SS_STANDBY_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag) ||
+            SS_STANDBY_PROMOTING) {
+            g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = true;
+            pg_memory_barrier();
+        }
+        SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
+    }
+
+    
+    if (SS_IN_REFORM && dms_reform_failed()) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS reform] reform failed")));
+    }
+
+    long rto_limit = SS_RTO_LIMIT;
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS reform] wait startup thread exit until RTO limit time:%d sec",
+        rto_limit / (1000 * 1000))));
+    
+    long wait_time = 0;
+    while (true) {
+        if (g_instance.pid_cxt.StartupPID == 0) {
+            break;
+        }
+
+        if (g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request) {
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[SS reform] pageredo or startup thread are trapped in page request "
+                "during recovery phase, need exit")));
+            _exit(0);
+        }
+        if (wait_time > rto_limit) {
+            SSProcessForceExit();
+        }
+        pg_usleep(REFORM_WAIT_TIME);
+        wait_time += REFORM_WAIT_TIME;
+    }
+}
+
+void SSHandleStartupWhenReformStart()
+{
+    if (g_instance.pid_cxt.StartupPID == 0) {
+        return;
+    }
+
+    if (ENABLE_ONDEMAND_RECOVERY && ENABLE_ONDEMAND_REALTIME_BUILD) {
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS reform][On-demand] start phase, on_demand real time build is enable "
+            "no need wait startup thread exit.")));
+        return;
+    }
+
+    if (SS_DISASTER_MAIN_STANDBY_NODE) {
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS reform] start phase, standby cluster main node "
+            "no need wait startup thread exit.")));
+        return;
+    }
+
+    ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    if (reform_info->reform_ver == reform_info->reform_ver_startup_wait &&
+        reform_info->reform_ver_startup_wait != 0) {
+        SSWaitStartupExit(false);
+    } else {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS reform] start phase, last round reform version:%llu, startup wait version:%llu",
+            reform_info->reform_ver, reform_info->reform_ver_startup_wait)));
+        SSProcessForceExit();
+    }
+}

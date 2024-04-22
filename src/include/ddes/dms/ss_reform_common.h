@@ -35,6 +35,8 @@
 
 #define REFORM_CTRL_VERSION 1
 
+#define SS_RTO_LIMIT (10 * 1000 * 1000) /* 10 sec */
+
 typedef struct SSBroadcastCancelTrx {
     SSBroadcastOp type; // must be first
 } SSBroadcastCancelTrx;
@@ -58,3 +60,5 @@ bool SSPerformingStandbyScenario();
 void SSGrantDSSWritePermission(void);
 bool SSPrimaryRestartScenario();
 bool SSBackendNeedExitScenario();
+void SSWaitStartupExit(bool send_signal = true);
+void SSHandleStartupWhenReformStart();

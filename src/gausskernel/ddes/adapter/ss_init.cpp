@@ -575,10 +575,22 @@ bool DMSWaitInitStartup()
 
 void StartupWaitReform()
 {
+    ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+    TimestampTz wait_ver = reform_info->reform_ver_startup_wait;
+    Assert(wait_ver != 0);
     while (g_instance.dms_cxt.SSReformInfo.in_reform) {
+        if (wait_ver != reform_info->reform_ver) {
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform] startup no need wait for reform finish, cause new reform has begun. "
+                "current reform version:%llu,startup wait reform version:%llu",
+                reform_info->reform_ver, wait_ver)));
+            break;
+        }
+
         if (dms_reform_failed() || dms_reform_last_failed()) {
             if (g_instance.dms_cxt.SSReformInfo.in_reform) {
-                ereport(LOG, (errmsg("[SS reform] reform failed, startup no need wait.")));
+                ereport(LOG, (errmodule(MOD_DMS),
+                    errmsg("[SS reform] reform failed, startup no need wait reform finish.")));
                 break;
             }
         }
