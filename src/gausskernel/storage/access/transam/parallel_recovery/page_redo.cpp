@@ -580,6 +580,8 @@ static void wait_valid_snapshot(XLogReaderState *record)
      */
     while(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin < xlrec->latestRemovedXid &&
                                                             !in_full_sync_dispatch()) {
+        XLogRecPtr lastReplayedEndRecPtr = 0;
+
         if(cur_transed_lsn == InvalidXLogRecPtr)
             cur_transed_lsn = getTransedTxnLsn(g_dispatcher->txnWorker);
         txn_trying_lsn = getTryingTxnLsn(g_dispatcher->txnWorker);
@@ -591,16 +593,16 @@ static void wait_valid_snapshot(XLogReaderState *record)
          * So if all xact record before current vacuum record finished, then avoid wait.
          * And if startup go fast then here on lsn, it can avoid wait too.
          */
-        if (cur_transed_lsn <= GetXLogReplayRecPtr(NULL) || txn_trying_lsn >= record->EndRecPtr)
+        lastReplayedEndRecPtr = GetXLogReplayRecPtr(NULL);
+        if (cur_transed_lsn <= lastReplayedEndRecPtr || txn_trying_lsn >= record->EndRecPtr)
             return;
 
         blockcnt++;
         if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-            XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
             ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                               errmsg("[REDO_LOG_TRACE]wait_valid_snapshot:recordEndLsn:%lu, blockcnt:%lu, "
                                      "Workerid:%u, LatestReplayedRecPtr:%lu",
-                                     record->EndRecPtr, blockcnt, g_redoWorker->id, LatestReplayedRecPtr)));
+                                     record->EndRecPtr, blockcnt, g_redoWorker->id, lastReplayedEndRecPtr)));
         }
         RedoInterruptCallBack();
     }

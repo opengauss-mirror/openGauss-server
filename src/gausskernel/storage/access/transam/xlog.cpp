@@ -16024,15 +16024,19 @@ XLogRecPtr GetXLogReplayRecPtr(TimeLineID *targetTLI, XLogRecPtr *ReplayReadPtr)
     XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
     XLogRecPtr recptr;
 
-    SpinLockAcquire(&xlogctl->info_lck);
-    recptr = xlogctl->lastReplayedEndRecPtr;
-    if (targetTLI != NULL) {
-        *targetTLI = xlogctl->RecoveryTargetTLI;
+    if (!targetTLI && !ReplayReadPtr)
+        recptr = pg_atomic_read_u64((volatile uint64*)&xlogctl->lastReplayedEndRecPtr);
+    else {
+        SpinLockAcquire(&xlogctl->info_lck);
+        recptr = xlogctl->lastReplayedEndRecPtr;
+        if (targetTLI != NULL) {
+            *targetTLI = xlogctl->RecoveryTargetTLI;
+        }
+        if (ReplayReadPtr != NULL) {
+            *ReplayReadPtr = xlogctl->lastReplayedReadRecPtr;
+        }
+        SpinLockRelease(&xlogctl->info_lck);
     }
-    if (ReplayReadPtr != NULL) {
-        *ReplayReadPtr = xlogctl->lastReplayedReadRecPtr;
-    }
-    SpinLockRelease(&xlogctl->info_lck);
 
     return recptr;
 }
