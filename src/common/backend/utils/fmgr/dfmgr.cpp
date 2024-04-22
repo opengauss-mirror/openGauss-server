@@ -217,9 +217,7 @@ void* internal_load_library(const char* libname)
     char* file = last_dir_separator(libname);
     file = (file == NULL) ? ((char*)libname) : (file + 1);
 
-    AutoMutexLock libraryLock(&file_list_lock);
-    libraryLock.lock();
-
+    PthreadMutexLock(t_thrd.utils_cxt.CurrentResourceOwner, &file_list_lock, true);
     /*
      * Scan the list of loaded FILES to see if the file has been loaded.
      */
@@ -401,7 +399,7 @@ void* internal_load_library(const char* libname)
         u_sess->fmgr_cxt.file_init_tail = file_init_scanner;
     }
 
-    libraryLock.unLock();
+    PthreadMutexUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &file_list_lock, true);
 
     return file_scanner->handle;
 }
