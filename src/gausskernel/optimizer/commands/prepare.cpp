@@ -143,6 +143,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
     int nargs;
     Query* query = NULL;
     List* query_list = NIL;
+    bool fixed_result = FORCE_VALIDATE_PLANCACHE_RESULT;
     int i;
 
     /*
@@ -265,7 +266,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         NULL,
         NULL,
         0,    /* default cursor options */
-        true, /* fixed result */
+        fixed_result, /* fixed result */
         stmt->name);
 
     /*
@@ -317,9 +318,9 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
 
     /* Shouldn't find a non-fixed-result cached plan */
-    if (!entry->plansource->fixed_result)
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE does not support variable-result cached plans")));
+    if (!entry->plansource->fixed_result && FORCE_VALIDATE_PLANCACHE_RESULT)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("EXECUTE does not support variable-result cached plans")));
 
     /* Evaluate parameters, if any */
     if (entry->plansource->num_params > 0) {
@@ -956,10 +957,16 @@ bool HaveActiveCoordinatorPreparedStatement(const char* stmt_name)
 TupleDesc FetchPreparedStatementResultDesc(PreparedStatement *stmt)
 {
     /*
-     * Since we don't allow prepared statements' result tupdescs to change,
-     * there's no need to worry about revalidating the cached plan here.
+     * User are allowed to change the result type of plan cache
+     * on the fly, so make sure to revalidate the descriptor
+     * before we pass it to the portal.
      */
-    Assert(stmt->plansource->fixed_result);
+    if (FORCE_VALIDATE_PLANCACHE_RESULT) {
+        Assert(stmt->plansource->fixed_result);
+    } else {
+        RevalidateCachedQuery(stmt->plansource);
+    }
+
     if (stmt->plansource->resultDesc)
         return CreateTupleDescCopy(stmt->plansource->resultDesc);
     else
@@ -1283,11 +1290,9 @@ CachedPlanSource* GetCachedPlanSourceFromExplainExecute(const char* stmt_name)
     Assert(psrc != NULL);
 
     /* Shouldn't find a non-fixed-result cached plan */
-    if (!psrc->fixed_result) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("EXPLAIN EXECUTE does not support variable-result cached plans")));
-    }
+    if (!psrc->fixed_result && FORCE_VALIDATE_PLANCACHE_RESULT)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("EXPLAIN EXECUTE does not support variable-result cached plans")));
 
     return psrc;
 }

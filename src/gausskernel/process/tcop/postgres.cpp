@@ -3473,6 +3473,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
     CachedPlanSource* psrc = NULL;
     bool is_named = false;
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
+    bool fixed_result = FORCE_VALIDATE_PLANCACHE_RESULT;
     char msec_str[PRINTF_DST_MAX];
     char* mask_string = NULL;
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3855,8 +3856,9 @@ static void exec_parse_message(const char* query_string, /* string to execute */
     /* Finish filling in the CachedPlanSource */
     CompleteCachedPlan(psrc, querytree_list, unnamed_stmt_context, paramTypes, paramModes, numParams, NULL, NULL,
         0, /* default cursor options */
-        true, stmt_name, single_exec_node,
-        is_read_only); /* fixed result */
+        fixed_result, /* fixed result */
+        stmt_name, single_exec_node,
+        is_read_only);
 
      /* For ctas query, rewrite is not called in PARSE, so we must set invalidation to revalidate the cached plan. */
     if (is_ctas) {
@@ -5734,8 +5736,8 @@ void exec_describe_statement_message(const char* stmt_name)
 
     Assert(NULL != psrc);
 
-    /* Prepared statements shouldn't have changeable result descs */
-    Assert(psrc->fixed_result);
+    /* Prepared statements shouldn't have changeable result descs unless being forced */
+    Assert(!FORCE_VALIDATE_PLANCACHE_RESULT || psrc->fixed_result);
 
 #ifdef ENABLE_MOT
     /* set current transaction storage engine */
@@ -11849,8 +11851,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
             switch (describe_type) {
                 case 'S': {
                     StringInfoData buf;
-                    /* Prepared statements shouldn't have changeable result descs */
-                    Assert(psrc->fixed_result);
+                    /* Prepared statements shouldn't have changeable result descs unless being forced */
+                    Assert(!FORCE_VALIDATE_PLANCACHE_RESULT || psrc->fixed_result);
 
                     /*
                      * First describe the parameters...

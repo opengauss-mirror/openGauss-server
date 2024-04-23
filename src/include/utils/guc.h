@@ -471,6 +471,10 @@ typedef enum {
         g_instance.shmem_cxt.numaNodeNum <= PARTITION_OPFUSION_MAX_NUMA_NODE && \
         !g_instance.attr.attr_common.enable_global_syscache)
 
+/* Wrapper macro for forced plan cache result type check */
+#define FORCE_VALIDATE_PLANCACHE_RESULT \
+    ((bool)g_instance.attr.attr_sql.plan_cache_type_validation)
+
 typedef enum {
     SUMMARY = 0, /* not collect multi column statistics info */
     DETAIL = 1,  /* collect multi column statistics info */
