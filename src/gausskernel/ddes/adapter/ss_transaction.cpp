@@ -67,6 +67,11 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         if (AM_WAL_SENDER && SS_IN_REFORM) {
             return NULL;
         }
+
+        if (SSBackendNeedExitScenario() &&
+            (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)) {
+            return NULL;
+        }
         pg_usleep(USECS_PER_SEC);
 
     } while (true);
