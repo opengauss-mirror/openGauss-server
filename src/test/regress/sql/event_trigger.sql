@@ -550,6 +550,9 @@ revoke all on LANGUAGE sql from event_trigger_us;
 revoke all on TYPE event_trigger_tp from event_trigger_us;
 revoke all on schema event_trigger_sc from event_trigger_us;
 revoke all on function ddl_command_test() from event_trigger_us;
+
+alter table event_trigger_tt alter column a type bigint;
+
 -- clean
 drop sequence event_trigger_ss;
 drop domain event_trigger_dm;

@@ -770,6 +770,9 @@ NOTICE:  triggered
 revoke all on function ddl_command_test() from event_trigger_us;
 NOTICE:  command: REVOKE
 NOTICE:  triggered
+alter table event_trigger_tt alter column a type bigint;
+NOTICE:  command: ALTER TABLE
+NOTICE:  triggered
 -- clean
 drop sequence event_trigger_ss;
 drop domain event_trigger_dm;
