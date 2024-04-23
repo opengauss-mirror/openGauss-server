@@ -1756,3 +1756,49 @@ drop table t1;
 drop table t2;
 drop function t1_tri_func;
 drop schema part_bri_warnning;
+create schema test_schema_for_trigger;
+set current_schema to test_schema_for_trigger;
+--触发器测试
+--测试时用到的package
+CREATE OR REPLACE PACKAGE func_test_pkg1 AS
+  -- integer 类型的变量
+  int_val INTEGER := 0;
+
+  -- record 类型的定义
+  TYPE rec_type IS RECORD (
+    msg VARCHAR2(100)
+  );
+
+  PROCEDURE proc1;
+END func_test_pkg1;
+/
+CREATE OR REPLACE PACKAGE BODY func_test_pkg1 AS
+  PROCEDURE proc1 AS
+  BEGIN
+    RAISE NOTICE 'In func_test_pkg1.proc1()';
+  END proc1;
+END func_test_pkg1;
+/
+CREATE TABLE trg_test(id int, name text);
+create or replace function global_cache_trigger_test()
+  return TRIGGER as  
+ begin
+	func_test_pkg1.int_val = func_test_pkg1.int_val + 1;
+  raise notice 'func_test_pkg1.int_val=%',func_test_pkg1.int_val;
+  return new;
+end;
+/
+CREATE TRIGGER trigger_global_cache_trigger_test
+AFTER INSERT ON trg_test
+FOR EACH ROW
+EXECUTE PROCEDURE global_cache_trigger_test();
+insert into trg_test values(1,'引用package中的变量');
+NOTICE:  func_test_pkg1.int_val=1
+insert into trg_test values(1,'引用package中的变量');
+NOTICE:  func_test_pkg1.int_val=2
+drop package func_test_pkg1;
+NOTICE:  drop cascades to function test_schema_for_trigger.proc1()
+drop schema test_schema_for_trigger cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table trg_test
+drop cascades to function global_cache_trigger_test()

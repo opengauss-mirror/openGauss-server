@@ -1929,7 +1929,11 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
      */
     estate.err_text = gettext_noop("during initialization of execution state");
     for (i = 0; i < estate.ndatums; i++) {
-        estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+        if (!func->datums[i]->ispkg) {
+            estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+        } else {
+            estate.datums[i] = func->datums[i];
+        }
     }
 
     /*
