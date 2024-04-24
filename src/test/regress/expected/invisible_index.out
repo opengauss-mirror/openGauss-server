@@ -1,17 +1,53 @@
 /* unsupported */
 create schema invisible_index;
 set search_path to 'invisible_index';
-create table t1 (a int, b int, constraint key_a primary key(a) visible); --error
-ERROR:  visible is supported only in B compatible database.
-create table t1 (a int, b int, constraint key_a primary key(a));
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "key_a" for table "t1"
-alter table t1 alter index key_a invisible; --error
-ERROR:  invisible is supported only in B compatible database.
-alter table t1 add constraint key_b unique (b) visible; --error
-ERROR:  visible is supported only in B compatible database.
+create table t1 (a int, b int, constraint key1 primary key(a) visible);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "key1" for table "t1"
+alter table t1 alter index key1 invisible;
+alter table t1 add constraint key2 unique (b) visible;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "key2" for table "t1"
+create table t2 (a int, b int, constraint key3 primary key(a) invisible);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "key3" for table "t2"
+alter table t2 alter index key3 visible;
+alter table t2 add constraint key4 unique (b) invisible;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "key4" for table "t2"
+create table t3 (a int, b int);
+create index key5 on t3(a) visible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | t
+(1 row)
+
+alter index key5 invisible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | f
+(1 row)
+
+create table t4 (a int, b int);
+create index key6 on t4(a) invisible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | f
+(1 row)
+
+alter index key6 visible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | t
+(1 row)
+
 reset search_path;
 drop schema invisible_index cascade;
-NOTICE:  drop cascades to table invisible_index.t1
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table invisible_index.t1
+drop cascades to table invisible_index.t2
+drop cascades to table invisible_index.t3
+drop cascades to table invisible_index.t4
 create database invisible_index_db dbcompatibility 'B';
 \c invisible_index_db
 -- create table with index
@@ -25,6 +61,36 @@ select indkey, indisvisible from pg_index where indrelid = 't1'::regclass order 
  1      | t
  2      | f
 (2 rows)
+
+create table t3 (a int, b int);
+create index key5 on t3(a) visible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | t
+(1 row)
+
+alter index key5 invisible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | f
+(1 row)
+
+create table t4 (a int, b int);
+create index key6 on t4(a) invisible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | f
+(1 row)
+
+alter index key6 visible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
+ indkey | indisvisible 
+--------+--------------
+ 1      | t
+(1 row)
 
 insert into t1 values (generate_series(1, 100), generate_series(1, 100));
 analyze t1;

@@ -4651,9 +4651,22 @@ alter_table_cmd:
 					$$ = (Node *)n;
 				}
 			|
+			INVISIBLE
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_InvisibleIndexDirect;
+					$$ = (Node *)n;
+				}
+			|
+			VISIBLE
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_VisibleIndexDirect;
+					$$ = (Node *)n;
+				}
+			|
 			ALTER INDEX index_name INVISIBLE
 				{
-					BCompatibilityOptionSupportCheck($4);
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_InvisibleIndex;
 					n->name = $3;
@@ -4662,7 +4675,6 @@ alter_table_cmd:
 			|
 			ALTER INDEX index_name VISIBLE
 				{
-					BCompatibilityOptionSupportCheck($4);
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_VisibleIndex;
 					n->name = $3;
@@ -5440,13 +5452,11 @@ table_index_option:
 			 }
 			 | INVISIBLE
 			 {
-					BCompatibilityOptionSupportCheck($1);
 					Value *n = makeString("invisible");
 					$$ = (Node*)n;
 			 }
 			 | VISIBLE
 			 {
-					BCompatibilityOptionSupportCheck($1);
 					Value *n = makeString("visible");
 					$$ = (Node*)n;
 			 }

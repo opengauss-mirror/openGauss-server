@@ -915,6 +915,8 @@ typedef enum AlterTableType {
     AT_COMMENTS,
     AT_InvisibleIndex,
     AT_VisibleIndex,
+    AT_InvisibleIndexDirect,
+    AT_VisibleIndexDirect,
     AT_ModifyColumn,
     AT_SetCharsetCollate,
     AT_ConvertCharset,

@@ -681,6 +681,7 @@ static void ATExecUnusableIndex(Relation rel);
 static void ATUnusableGlobalIndex(Relation rel);
 static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partition_name);
 static void ATExecVisibleIndex(Relation rel, char* index_name, bool visible);
+static void ATExecVisibleIndexDirect(Relation rel, bool visible);
 static void ATExecModifyRowMovement(Relation rel, bool rowMovement);
 static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd);
 static void ATExecTruncateSubPartition(Relation rel, AlterTableCmd* cmd);
@@ -829,6 +830,8 @@ inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 #endif
         case AT_VisibleIndex:
         case AT_InvisibleIndex:
+        case AT_InvisibleIndexDirect:
+        case AT_VisibleIndexDirect:
             ret = true;
             break;
         default:
@@ -8432,6 +8435,8 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
         case AT_ReplaceRelOptions: /* reset them all, then set just these */
         case AT_InvisibleIndex:
         case AT_VisibleIndex:
+        case AT_InvisibleIndexDirect:
+        case AT_VisibleIndexDirect:
             ATSimplePermissions(rel, ATT_TABLE | ATT_INDEX | ATT_VIEW);
             /* This command never recurses */
             /* No command-specific prep needed */
@@ -9059,6 +9064,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
         case AT_VisibleIndex:
             ATExecVisibleIndex(rel, cmd->name, true);
+            break;
+        case AT_InvisibleIndexDirect:
+            ATExecVisibleIndexDirect(rel, false);
+            break;
+        case AT_VisibleIndexDirect:
+            ATExecVisibleIndexDirect(rel, true);
             break;
         case AT_AddIndex: /* ADD INDEX */
             address = ATExecAddIndex(tab, rel, (IndexStmt*)cmd->def, false, lockmode);
@@ -25422,6 +25433,18 @@ static void ATExecVisibleIndex(Relation rel, char* index_name, bool visible)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("index \"%s\" of relation \"%s\" does not exist",
                 index_name, RelationGetRelationName(rel))));
+    }
+}
+
+static void ATExecVisibleIndexDirect(Relation rel, bool visible)
+{
+    if (RelationIsIndex(rel) && OidIsValid(rel->rd_id)) {
+        ATExecSetIndexVisibleState(rel->rd_id, visible);
+    } else {        
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("can not set visible for relation %s, as it is not a index",
+                    RelationGetRelationName(rel))));
     }
 }
 

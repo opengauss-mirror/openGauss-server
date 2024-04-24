@@ -2,11 +2,25 @@
 create schema invisible_index;
 set search_path to 'invisible_index';
 
-create table t1 (a int, b int, constraint key_a primary key(a) visible); --error
+create table t1 (a int, b int, constraint key1 primary key(a) visible);
+alter table t1 alter index key1 invisible;
+alter table t1 add constraint key2 unique (b) visible;
 
-create table t1 (a int, b int, constraint key_a primary key(a));
-alter table t1 alter index key_a invisible; --error
-alter table t1 add constraint key_b unique (b) visible; --error
+create table t2 (a int, b int, constraint key3 primary key(a) invisible);
+alter table t2 alter index key3 visible;
+alter table t2 add constraint key4 unique (b) invisible;
+
+create table t3 (a int, b int);
+create index key5 on t3(a) visible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+alter index key5 invisible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+
+create table t4 (a int, b int);
+create index key6 on t4(a) invisible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
+alter index key6 visible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
 
 reset search_path;
 drop schema invisible_index cascade;
@@ -20,6 +34,18 @@ create index key_b on t1 (b) invisible;
 alter table t1 alter index key_b visible, alter index key_b invisible;
 
 select indkey, indisvisible from pg_index where indrelid = 't1'::regclass order by indkey;
+
+create table t3 (a int, b int);
+create index key5 on t3(a) visible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+alter index key5 invisible;
+select indkey, indisvisible from pg_index where indrelid = 't3'::regclass order by indkey;
+
+create table t4 (a int, b int);
+create index key6 on t4(a) invisible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
+alter index key6 visible;
+select indkey, indisvisible from pg_index where indrelid = 't4'::regclass order by indkey;
 
 insert into t1 values (generate_series(1, 100), generate_series(1, 100));
 analyze t1;
