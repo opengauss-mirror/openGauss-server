@@ -4097,10 +4097,10 @@ static void DCH_from_char(FormatNode* node, char* in, TmFromChar* out, bool* non
         }
     }
 
-    if (*s)
-        *non_match = true;
-    else
+    if (TrimStr(s) == NULL)
         *non_match = false;
+    else
+        *non_match = true;
 }
 
 static DCHCacheEntry* DCH_cache_getnew(const char* str)
