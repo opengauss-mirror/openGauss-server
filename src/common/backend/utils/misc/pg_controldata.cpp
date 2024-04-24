@@ -134,16 +134,16 @@ static void OpenControlFileForDSS(char *controlFilePath, ControlFileData *contro
     while (true) {
         if (pread(fd, buffer, read_size, seekpos) != read_size) {
             LWLockRelease(ControlFileLock);
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from control file %s : %s"), fileName,
-                            TRANSLATE_ERRNO));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from control file %s : %s", fileName,
+                            TRANSLATE_ERRNO)));
         }
 
         rc = memcpy_s(controlFile, (size_t)len, buffer, (size_t)len);
         securec_check(rc, "", "");
         if (close(fd) < 0) {
             LWLockRelease(ControlFileLock);
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not close control file %s : %s"), fileName,
-                            TRANSLATE_ERRNO));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not close control file %s : %s", fileName,
+                            TRANSLATE_ERRNO)));
         }
 
         /* Now check the CRC. */
