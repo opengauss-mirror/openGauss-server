@@ -3118,12 +3118,14 @@ int PostmasterMain(int argc, char* argv[])
             if (ret != 0) {
                 ereport(PANIC, (errmsg("uwal primary init notify failed, ret: %d", ret)));
             }
+            MoveUwalFile();
         } else if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
                    t_thrd.postmaster_cxt.HaShmData->current_mode == PENDING_MODE) {
             ret = GsUwalStandbyInitNotify();
             if (ret != 0) {
                 ereport(PANIC, (errmsg("uwal standby init notify failed, ret: %d", ret)));
             }
+            MoveUwalFile();
         }
     }
 

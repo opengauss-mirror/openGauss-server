@@ -936,6 +936,16 @@ static void WalRcvDie(int code, Datum arg)
             pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, true);
         }
     }
+
+    if (g_instance.attr.attr_storage.enable_uwal) {
+        ereport(WARNING, (errmsg("walreceiver has been shutdown, start notify changed")));
+        if (GsUwalWalReceiverNotify(false) != 0) {
+            ereport(FATAL, (errmsg("uwal standby notify for WalRcvDie() failed.")));
+        }
+        SpinLockAcquire(&walrcv->mutex);
+        walrcv->flagAlreadyNotifyCatchup = false;
+        SpinLockRelease(&walrcv->mutex);
+    }
     /*
      * Shutdown WalRcvWriter thread, clear the data receive buffer.
      * Ensure that all WAL records received are flushed to disk.
@@ -989,15 +999,6 @@ static void WalRcvDie(int code, Datum arg)
                          0, sizeof(walrcv->conn_channel));
     securec_check_c(rc, "\0", "\0");
 
-    if (g_instance.attr.attr_storage.enable_uwal) {
-        ereport(LOG, (errmsg("walreceiver has been shut down, start notify changed")));
-        if (GsUwalWalReceiverNotify(false) != 0) {
-            ereport(FATAL, (errmsg("uwal standby notify for WalRcvDie() failed.")));
-        }
-        SpinLockAcquire(&walrcv->mutex);
-        walrcv->flagAlreadyNotifyCatchup = false;
-        SpinLockRelease(&walrcv->mutex);
-    }
     ereport(LOG, (errmsg("walreceiver thread shut down")));
 }
 
@@ -1880,7 +1881,7 @@ static void ProcessKeepaliveMessage(PrimaryKeepaliveMessage *keepalive)
     bool uwal_update_lsn = (g_instance.attr.attr_storage.enable_uwal &&
                             walrcv->sender_sent_location < keepalive->walEnd && walrcv->flagAlreadyNotifyCatchup);
     if (uwal_update_lsn) {
-        lastReceived = walrcv->receivedUpto;        
+        lastReceived = walrcv->receivedUpto;
         walrcv->sender_write_location = keepalive->walEnd;
         walrcv->sender_flush_location = keepalive->walEnd;
         walrcv->sender_replay_location = keepalive->walEnd;
@@ -1901,7 +1902,9 @@ static void ProcessKeepaliveMessage(PrimaryKeepaliveMessage *keepalive)
     }
 
     if (g_instance.attr.attr_storage.enable_uwal && keepalive->uwal_catchup && !walrcv->flagAlreadyNotifyCatchup) {
+        SpinLockAcquire(&walrcv->mutex);
         walrcv->flagAlreadyNotifyCatchup = true;
+        SpinLockRelease(&walrcv->mutex);
         if (GsUwalWalReceiverNotify() != 0) {
             ereport(FATAL, (errmsg("uwal standby notify failed.")));
             proc_exit(1);

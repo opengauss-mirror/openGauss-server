@@ -40,6 +40,8 @@ int ock_uwal_delete(IN UwalDeleteParam *param);
 
 int ock_uwal_append(IN UwalAppendParam *param, OUT uint64_t *offset, OUT void* result);
 
+int ock_uwal_append_with_offset(IN UwalAppendParam *param, IN uint64_t targetOffset, OUT uint64_t *offset, OUT void* result);
+
 int ock_uwal_read(IN UwalReadParam *param, OUT UwalBufferList *bufferList);
 
 int ock_uwal_truncate(IN const UwalId *uwalId, IN uint64_t offset);

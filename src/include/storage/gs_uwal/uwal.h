@@ -341,6 +341,9 @@ typedef int (*UwalDelete)(IN UwalDeleteParam *param);
 
 typedef int (*UwalAppend)(IN UwalAppendParam *param, OUT uint64_t *offset, OUT void* result);
 
+typedef int (*UwalAppendWithOffset)(IN UwalAppendParam *param, IN uint64_t targetOffset,
+    OUT uint64_t *offset, OUT void* result);
+
 typedef int (*UwalRead)(IN UwalReadParam *param, OUT UwalBufferList *bufferList);
 
 typedef int (*UwalTruncate)(IN const UwalId *uwalId, IN uint64_t offset);

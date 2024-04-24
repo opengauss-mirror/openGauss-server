@@ -301,6 +301,7 @@ void WalRcvShmemInit(void)
         t_thrd.walreceiverfuncs_cxt.WalRcv->flagAlreadyNotifyCatchup = false;
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->mutex);
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->exitLock);
+        SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->uwalMutex);
     }
 }
 

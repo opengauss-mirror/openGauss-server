@@ -63,17 +63,19 @@ typedef struct {
     int opCount;
     int curCount;
     int ret;
-    UwalNodeInfo *infos;
     bool interrupted;
     int interruptCount;
-} UwalAsyncAppendCbCtx;
+} UwalAsynCommonCbCtx;
 
 typedef struct {
-    UwalAsyncAppendCbCtx *commonCbCtx;
     UwalNodeInfo *infos;
     int ret;
-    UwalAppendParam *appendParam;
-} UwalSingleAsyncCbCtx;
+    uint64_t writeOffset;
+    uint64_t writeLen;
+    int index;
+    bool processed;
+    char *buf;
+} UwalAsyncCbCtx;
 
 typedef struct {
     int id;
@@ -120,16 +122,22 @@ int GsUwalStandbyInitNotify();
 /**
  * called after uwal append
  * @param lsn write log success lsn
- * @param infos uwalAppend() return UwalNodeInfo
  */
-void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn, UwalNodeInfo *infos);
+void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn);
+UwalVector *GsUwalGetInitInfo();
 int GsUwalQueryByUser(TimeLineID ThisTimeLineID, bool needHistoryList = true);
 int GsUwalQuery(UwalId *id, UwalBaseInfo *info);
 int GsUwalCreate(uint64_t startOffset);
 int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen);
-int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalWriteResHandle(int ret, int nBytes, char *buf, UwalNodeInfo *infos, uint64_t targetOffset);
+int GsUwalWrite(int nBytes, char *buf, uint64_t writeOffset);
+int GsUwalWriteSync(int nBytes, char *buf, UwalNodeInfo *infos, bool specified = false, uint64_t targetOffset = 0);
 void GsUwalWriteAsyncCallBack(void *cbCtx, int retCode);
-int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalWriteAsync(int nBytes, char *buf, uint64_t targetOffset);
 int GsUwalTruncate(UwalId *id, uint64_t offset);
+void GsUwalRenewFileRenamePtr();
+bool GsUwalCheckFileRename(XLogRecPtr targetPtr);
+int GsUwalRewind(UwalId *id, uint64_t offset);
+bool GsUwalCheckLocalRes(UwalNodeInfo *infos);
 
 #endif

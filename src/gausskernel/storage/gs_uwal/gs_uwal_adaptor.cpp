@@ -43,6 +43,7 @@ typedef struct {
     UwalCreate create;
     UwalDelete remove;
     UwalAppend uappend;
+    UwalAppendWithOffset uappend_with_offset;
     UwalRead uread;
     UwalTruncate truncate;
     UwalQuery query;
@@ -61,6 +62,7 @@ uwal_func_t g_uwal_func;
     ACTION(create, UwalCreate)                                         \
     ACTION(remove, UwalDelete)                                         \
     ACTION(uappend, UwalAppend)                                        \
+    ACTION(uappend_with_offset, UwalAppendWithOffset)                  \
     ACTION(uread, UwalRead)                                            \
     ACTION(truncate, UwalTruncate)                                     \
     ACTION(query, UwalQuery)                                           \
@@ -159,6 +161,12 @@ int ock_uwal_delete(IN UwalDeleteParam *param)
 int ock_uwal_append(IN UwalAppendParam *param, OUT uint64_t *offset, OUT void* result)
 {
     return g_uwal_func.uappend(param, offset, result);
+}
+
+int ock_uwal_append_with_offset(IN UwalAppendParam *param, IN uint64_t targetOffset,
+    OUT uint64_t *offset, OUT void* result)
+{
+    return g_uwal_func.uappend_with_offset(param, targetOffset, offset, result);
 }
 
 int ock_uwal_read(IN UwalReadParam *param, OUT UwalBufferList *bufferList)

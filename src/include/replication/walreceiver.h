@@ -238,8 +238,9 @@ typedef struct WalRcvData {
 
     Latch* walrcvWriterLatch;
     WalRcvCtlBlock* walRcvCtlBlock;
-    UwalrcvWriterState* uwalRcvState;
     slock_t mutex; /* locks shared variables shown above */
+    UwalrcvWriterState* uwalRcvState;
+    slock_t uwalMutex; /* lock uwal state */
     slock_t exitLock;
     char recoveryTargetBarrierId[MAX_BARRIER_ID_LENGTH];
     char recoveryStopBarrierId[MAX_BARRIER_ID_LENGTH];
@@ -353,6 +354,7 @@ extern void XLogWalRecordsPreProcess(char **buf, Size *len, WalDataMessageHeader
 extern int XLogDecompression(const char *buf, Size len, XLogRecPtr dataStart);
 void GetPasswordForHadrStreamingReplication(char user[], char password[]);
 extern char* remove_ipv6_zone(char* addr_src, char* addr_dest, int len);
+extern void MoveUwalFile(void);
 
 static inline void WalRcvCtlAcquireExitLock(void)
 {

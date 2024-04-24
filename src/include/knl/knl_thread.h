@@ -800,6 +800,7 @@ typedef struct knl_t_xlog_context {
     int ssXlogReadFailedTimes;
     UwalInfo uwalInfo;
     List* uwalInfoHis;
+    XLogRecPtr uwalFileRenamePtr;
 } knl_t_xlog_context;
 
 typedef struct knl_t_dfs_context {

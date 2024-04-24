@@ -4871,6 +4871,9 @@ retry:
                 if (0 != GsUwalQueryByUser(t_thrd.xlog_cxt.ThisTimeLineID, false)) {
                     ereport(PANIC, (errcode_for_file_access(), errmsg("uwal query by user failed")));
                 }
+                if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+                    GsUwalRenewFileRenamePtr();
+                }
             } else {
                 if (0 != GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
                     ereport(LOG, (errmsg("walsender xlogread GsUwalQuery return failed")));
@@ -4889,15 +4892,16 @@ retry:
                         nbytes -= readbytes;
                         p += readbytes;
                         continue;
-                    } else {
-                        if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
-                            ereport(LOG, (errmsg("GsUwalQuery return success, goto retry")));
-                            continue;
-                        } else {
-                            ereport(LOG, (errmsg("walsender xlogread GsUwalQuery return failed")));
-                            return;
-                        }
                     }
+
+                    if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
+                        ereport(LOG, (errmsg("GsUwalQuery return success, goto retry")));
+                        continue;
+                    }
+                    ereport(LOG, (errmsg("walsender xlogread GsUwalQuery return failed")));
+                    return;
+                } else if (!GsUwalCheckFileRename(recptr)) {
+                    continue;
                 }
             }
         }
@@ -5583,6 +5587,13 @@ static void XLogSendUwalLSN(char* xlogPath)
     keepalive_message.sendTime = GetCurrentTimestamp();
     keepalive_message.replyRequested = false;
     keepalive_message.catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP);
+    keepalive_message.uwal_catchup = (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_UWALCATCHUP);
+    UwalrcvWriterState *uwalrcv = GsGetCurrentUwalRcvState();
+    if (uwalrcv != NULL) {
+        SpinLockAcquire(&uwalrcv->mutex);
+        keepalive_message.fullSync = uwalrcv->fullSync;
+        SpinLockRelease(&uwalrcv->mutex);
+    }
     ereport(DEBUG2, (errmsg("sending wal replication keepalive")));
     t_thrd.walsender_cxt.walSndCaughtUp = true;
     t_thrd.walsender_cxt.catchup_threshold = 0;

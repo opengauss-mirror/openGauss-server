@@ -379,8 +379,7 @@ static bool UwalAcquire();
 static void SetUwalReadInfo(XLogRecPtr targetPagePtr, XLogRecPtr writeUwalOffSet, uint32 targetPageOff);
 void XlogArchUwal(XLogRecPtr archRqstPtr);
 int GsUwalCreate(uint64_t startOffset);
-int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
-int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos);
+int GsUwalWrite(int nBytes, char *buf, uint64_t writeOffset);
 int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen);
 int GsUwalQuery(UwalId *id, UwalBaseInfo *info);
 static void XLogFlushUwal(XLogRecPtr writeRqstPtr);
@@ -2975,6 +2974,7 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
     XLogRecPtr lastWrited = InvalidXLogRecPtr;
     uint32 offset;
     bool firstUwal = false;
+    uint64_t targetOffset = 0;
     int uwalMaxPages = UWAL_OBJ_ALIGN_LEN / XLOG_BLCKSZ;
     if (g_instance.attr.attr_storage.uwal_async_append_switch) {
         uwalMaxPages = uwalMaxPages * 4;
@@ -3089,32 +3089,16 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
             if (firstUwal) {
                 from = t_thrd.shemem_ptr_cxt.XLogCtl->pages + startidx * (Size)XLOG_BLCKSZ;
                 nbytes = WriteTotal;
+                targetOffset = lastWrited - offset;
             } else {
                 from = t_thrd.shemem_ptr_cxt.XLogCtl->pages + startidx * (Size)XLOG_BLCKSZ + offset;
                 nbytes = WriteTotal - offset;
+                targetOffset = lastWrited;
             }
-            UwalNodeInfo *infos =
-                (UwalNodeInfo *)palloc0(sizeof(UwalNodeInfo) + MAX_GAUSS_NODE * sizeof(UwalNodeStatus));
 
             pgstat_report_waitevent(WAIT_EVENT_WAL_WRITE);
             INSTR_TIME_SET_CURRENT(startTime);
-            if (g_instance.attr.attr_storage.uwal_async_append_switch) {
-                ret = GsUwalWriteAsync(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
-                while (ret == REPLICA_APPEND_LOG_FAIL || ret == U_CAPACITY_NOT_ENOUGH) {
-                    if (ret == U_CAPACITY_NOT_ENOUGH) {
-                        usleep(UWAL_SLEEP_TIME);
-                    }
-                    ret = GsUwalWriteAsync(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
-                }
-            } else {
-                ret = GsUwalWrite(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
-                while (ret == REPLICA_APPEND_LOG_FAIL || ret == U_CAPACITY_NOT_ENOUGH) {
-                    if (ret == U_CAPACITY_NOT_ENOUGH) {
-                        usleep(UWAL_SLEEP_TIME);
-                    }
-                    ret = GsUwalWrite(&t_thrd.xlog_cxt.uwalInfo.id, nbytes, from, infos);
-                }
-            }
+            ret = GsUwalWrite(nbytes, from, targetOffset);
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
             /* when track_activities and enable_instr_track_wait are on,
@@ -3139,11 +3123,11 @@ static void XLogWriteUwal(XLogRecPtr UwalWriteRqst)
             reportRedoWrite((PgStat_Counter)npages, elapsedTime);
 
             lastWrited += WriteTotal - offset;
+
             if (ret == 0) {
-                GsUwalUpdateSenderSyncLsn(lastWrited, infos);
+                GsUwalUpdateSenderSyncLsn(lastWrited);
                 GsUwalRcvStateUpdate(lastWrited);
             }
-            pfree(infos);
             npages = 0;
             offset = lastWrited % XLOG_BLCKSZ;
 
@@ -17356,6 +17340,8 @@ retry:
                         if (havedata && targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
                             SetUwalReadInfo(targetPagePtr, t_thrd.xlog_cxt.receivedUpto, targetPageOff);
                             goto uwal_buf_read;
+                        } else if (havedata && !GsUwalCheckFileRename(targetPagePtr)) {
+                            goto retry;
                         }
                     }
 
@@ -17706,6 +17692,9 @@ retry:
                             (targetPagePtr + reqLen <= t_thrd.xlog_cxt.uwalInfo.info.writeOffset)) {
                             SetUwalReadInfo(targetPagePtr, t_thrd.xlog_cxt.uwalInfo.info.writeOffset, targetPageOff);
                             goto uwal_buf_read;
+                        } else if (targetPagePtr < t_thrd.xlog_cxt.uwalInfo.info.truncateOffset &&
+                            !GsUwalCheckFileRename(targetPagePtr)) {
+                            goto retry;
                         }
                     }
 
@@ -17782,37 +17771,21 @@ retry:
                 if (t_thrd.xlog_cxt.InArchiveRecovery) {
                     sources |= XLOG_FROM_ARCHIVE;
                 }
-                if (g_instance.attr.attr_storage.enable_uwal && UwalAcquire()) {
-                    if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
-                        if (targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
-                            if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
-                                if (0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info)) {
-                                    if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
-                                        goto next_record_is_invalid;
-                                    }
-                                }
-                            }
-                            t_thrd.xlog_cxt.curFileTLI = t_thrd.xlog_cxt.uwalInfo.info.startTimeLine;
-                            t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
-                            t_thrd.xlog_cxt.readOff = targetPageOff;
-                            goto uwal_buf_read;
-                        }
-                    }
-                }
-
                 if (g_instance.attr.attr_storage.enable_uwal && UwalAcquire() &&
-                    t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0 &&
-                    targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
-                    if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
-                        GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info);
-                        if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
+                    t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+                    if (targetPagePtr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
+                        if (targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset &&
+                            0 == GsUwalQuery(&t_thrd.xlog_cxt.uwalInfo.id, &t_thrd.xlog_cxt.uwalInfo.info) &&
+                            targetPagePtr + reqLen > t_thrd.xlog_cxt.uwalInfo.info.writeOffset) {
                             goto next_record_is_invalid;
                         }
+                        t_thrd.xlog_cxt.curFileTLI = t_thrd.xlog_cxt.uwalInfo.info.startTimeLine;
+                        t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
+                        t_thrd.xlog_cxt.readOff = targetPageOff;
+                        goto uwal_buf_read;
+                    } else if (!GsUwalCheckFileRename(targetPagePtr)) {
+                        goto retry;
                     }
-                    t_thrd.xlog_cxt.curFileTLI = t_thrd.xlog_cxt.uwalInfo.info.startTimeLine;
-                    t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
-                    t_thrd.xlog_cxt.readOff = targetPageOff;
-                    goto uwal_buf_read;
                 }
 
                 t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
@@ -17863,6 +17836,8 @@ retry:
                 }
             }
             goto uwal_buf_read;
+        } else if (!GsUwalCheckFileRename(targetPagePtr)) {
+            goto retry;
         }
     }
 
@@ -20766,6 +20741,9 @@ static bool UwalAcquire()
             (t_thrd.xlog_cxt.startup_processing ? t_thrd.xlog_cxt.recoveryTargetTLI : t_thrd.xlog_cxt.ThisTimeLineID);
         if (GsUwalQueryByUser(tli, false) != 0) {
             ereport(PANIC, (errcode_for_file_access(), errmsg("uwal query by user failed")));
+        }
+        if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
+            GsUwalRenewFileRenamePtr();
         }
     }
 

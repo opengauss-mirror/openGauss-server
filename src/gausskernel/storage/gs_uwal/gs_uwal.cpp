@@ -47,16 +47,22 @@
 #define UWAL_TIMEOUT "30000"
 #define UWAL_MIN_PAGES 4
 #define UWAL_WORKER_NUM 4
+#define UWAL_RETRY_INTERVAL_US 10000
 
 int64 uwal_size = XLogSegSize;
 
 UwalConfig g_uwalConfig;
+UwalNodeInfo g_infoList[UWAL_WORKER_NUM];
+UwalAsynCommonCbCtx g_commonCbCtx;
+UwalAsyncCbCtx g_cbCtxList[UWAL_WORKER_NUM];
 
 int ock_uwal_init(IN const char *path, IN const UwalCfgElem *elems, IN int cnt, IN const char *ulogPath);
 void ock_uwal_exit(void);
 int ock_uwal_create(IN UwalCreateParam *param, OUT UwalVector *uwals);
 int ock_uwal_delete(IN UwalDeleteParam *param);
 int ock_uwal_append(IN UwalAppendParam *param, OUT uint64_t *offset, OUT void *result);
+int ock_uwal_append_with_offset(IN UwalAppendParam *param, IN uint64_t targetOffset,
+                                OUT uint64_t *offset, OUT void *result);
 int ock_uwal_read(IN UwalReadParam *param, OUT UwalBufferList *bufferList);
 int ock_uwal_truncate(IN const UwalId *uwalId, IN uint64_t offset);
 int ock_uwal_query(IN UwalQueryParam *param, OUT UwalInfo *info);
@@ -73,6 +79,37 @@ extern void comm_initialize_SSL();
 int GsUwalLoadSymbols()
 {
     return uwal_init_symbols();
+}
+
+static void GsUwalAppendAsyncResetCbCtx()
+{
+    g_commonCbCtx.opCount = 0;
+    g_commonCbCtx.curCount = 0;
+    g_commonCbCtx.ret = 0;
+    g_commonCbCtx.interrupted = false;
+    g_commonCbCtx.interruptCount = 0;
+
+    for (int i = 0; i < UWAL_WORKER_NUM; i++) {
+        g_cbCtxList[i].buf = nullptr;
+        g_cbCtxList[i].ret = 0;
+        g_cbCtxList[i].writeOffset = 0;
+        g_cbCtxList[i].writeLen = 0;
+        g_cbCtxList[i].processed = false;
+    }
+    return;
+}
+
+static void GsUwalInitGlobalVariables()
+{
+    GsUwalAppendAsyncResetCbCtx();
+    pthread_mutex_init(&(g_commonCbCtx.mutex), 0);
+    pthread_cond_init(&(g_commonCbCtx.cond), 0);
+
+    for (int i = 0; i < UWAL_WORKER_NUM; i++) {
+        g_cbCtxList[i].index = i;
+        g_cbCtxList[i].infos = &(g_infoList[i]);
+    }
+    return;
 }
 
 static X509_CRL *ock_rpc_load_crl_file(const char *file)
@@ -558,6 +595,7 @@ int GsUwalInit(ServerMode serverMode)
     if (ret != 0) {
         ereport(LOG, (errmsg("uwal init fail ret code: %d", ret)));
     }
+    GsUwalInitGlobalVariables();
 
     return ret;
 }
@@ -595,6 +633,13 @@ void GsUwalNotifyCallback(void *ctx, int ret)
 
 int GsUwalSyncNotify(NodeStateList *nodeList)
 {
+    ereport(LOG, (errmsg("UwalNotify: nodeNum %d, masterNodeId %d, localNodeId %d",
+        nodeList->nodeNum, nodeList->masterNodeId, nodeList->localNodeId)));
+    for (uint16_t i = 0; i < nodeList->nodeNum; i++) {
+        NodeStateInfo stateInfo = nodeList->nodeList[i];
+        ereport(LOG, (errmsg("UwalNotify: nodeId %d, state %d, groupId %d, groupLevel %d",
+            stateInfo.nodeId, stateInfo.state, stateInfo.groupId, stateInfo.groupLevel)));
+    }
     CBParams cbParams = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false, 0};
     pthread_mutex_lock(&cbParams.mutex);
     int ret = ock_uwal_notify_nodelist_change(nodeList, GsUwalNotifyCallback, (void *)&cbParams);
@@ -771,6 +816,8 @@ int GsUwalWalSenderNotify(bool exceptSelf)
     bool fullSync = true;
     for (int i = 0; i < count; i++) {
         unsigned group_index = nodeList->nodeList[i].groupId;
+        ereport(LOG, (errmsg("SenderNotify: group_index %u, senderGroupLevel %u, senderGroupNumSync %u",
+            group_index, statSendersGroupLevel[group_index], statSendersGroupNumSync[group_index])));
         if (statSendersGroupLevel[group_index] < statSendersGroupNumSync[group_index]) {
             nodeList->nodeList[i].groupLevel = statSendersGroupLevel[group_index];
             fullSync = false;
@@ -778,9 +825,10 @@ int GsUwalWalSenderNotify(bool exceptSelf)
             nodeList->nodeList[i].groupLevel = statSendersGroupNumSync[group_index];
         }
     }
-    if (!exceptSelf && uwalrcv != NULL) {
+    // update fullsync to false before notify to avoid truncate
+    if (exceptSelf && uwalrcv != NULL) {
         SpinLockAcquire(&uwalrcv->mutex);
-        uwalrcv->fullSync = fullSync;
+        uwalrcv->fullSync = false;
         SpinLockRelease(&uwalrcv->mutex);
     }
 
@@ -791,6 +839,12 @@ int GsUwalWalSenderNotify(bool exceptSelf)
 
     int ret = GsUwalSyncNotify(nodeList);
     pfree(nodeList);
+
+    if (!exceptSelf && uwalrcv != NULL) {
+        SpinLockAcquire(&uwalrcv->mutex);
+        uwalrcv->fullSync = fullSync;
+        SpinLockRelease(&uwalrcv->mutex);
+    }
     return ret;
 }
 
@@ -869,9 +923,8 @@ int GsUwalStandbyInitNotify()
 /**
  * called after uwal append
  * @param lsn write log success lsn
- * @param infos uwalAppend() return UwalNodeInfo
  */
-void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn, UwalNodeInfo *infos)
+void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn)
 {
     for (int senderIndex = 0; senderIndex < g_instance.attr.attr_storage.max_wal_senders; ++senderIndex) {
         volatile WalSnd *walSnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[senderIndex];
@@ -894,6 +947,23 @@ void GsUwalUpdateSenderSyncLsn(XLogRecPtr lsn, UwalNodeInfo *infos)
         SpinLockRelease(&walSnd->mutex);
         walSnd->log_ctrl.prev_send_time = GetCurrentTimestamp();
     }
+}
+
+UwalVector *GsUwalGetInitInfo()
+{
+    UwalInfo *uwalInfos = (UwalInfo *)palloc(sizeof(UwalInfo) * UWAL_MAX_NUM);
+    UwalUserType user = UWAL_USER_OPENGAUSS;
+    UwalVector *vec = (UwalVector *)palloc(sizeof(UwalVector));
+    vec->uwals = uwalInfos;
+    int ret = ock_uwal_query_by_user(user, UWAL_ROUTE_LOCAL, vec);
+    if (ret != 0 || vec->cnt == 0) {
+        ereport(LOG, (errmsg("Get uwal base info failed, ret: %d, cnt: %lu", ret, vec->cnt)));
+        pfree(uwalInfos);
+        pfree(vec);
+        return nullptr;
+    }
+
+    return vec;
 }
 
 int GsUwalQueryByUser(TimeLineID thisTimeLineID, bool needHistoryList)
@@ -1009,6 +1079,7 @@ int GsUwalCreate(uint64_t startOffset)
         t_thrd.xlog_cxt.uwalInfo.info.dataSize = vec->uwals->info.dataSize;
         t_thrd.xlog_cxt.uwalInfo.info.truncateOffset = vec->uwals->info.truncateOffset;
         t_thrd.xlog_cxt.uwalInfo.info.writeOffset = vec->uwals->info.writeOffset;
+        t_thrd.xlog_cxt.uwalFileRenamePtr = vec->uwals->info.truncateOffset;
     }
 
     pfree(uwalInfos);
@@ -1016,8 +1087,9 @@ int GsUwalCreate(uint64_t startOffset)
     return ret;
 }
 
-int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos)
+int GsUwalWriteSync(int nBytes, char *buf, UwalNodeInfo *infos, bool specified, uint64_t targetOffset)
 {
+    UwalId *id = &t_thrd.xlog_cxt.uwalInfo.id;
     UwalBuffer uBuff;
     UwalBufferList buffList;
     uint64_t offset;
@@ -1032,80 +1104,45 @@ int GsUwalWrite(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos)
     params.uwalId = id;
     params.cb = NULL;
 
-    int ret = ock_uwal_append(&params, &offset, infos);
-    return ret;
+    if (!specified) {
+        ock_uwal_append(&params, &offset, infos);
+    }
+    return ock_uwal_append_with_offset(&params, targetOffset, &offset, infos);
 }
-
-int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen)
-{
-    UwalDataToRead *dataToRead = (UwalDataToRead *)palloc0(sizeof(UwalDataToRead));
-    dataToRead->offset = targetPagePtr;
-    dataToRead->length = readlen;
-    UwalDataToReadVec *datav = (UwalDataToReadVec *)palloc0(sizeof(UwalDataToReadVec));
-    datav->cnt = 1;
-    datav->dataToRead = dataToRead;
-    UwalReadParam params = {id, UWAL_ROUTE_LOCAL, datav, NULL};
-
-    UwalBufferList *bufflist = (UwalBufferList *)palloc0(sizeof(UwalBufferList));
-    bufflist->cnt = 1;
-    UwalBuffer *buffers = (UwalBuffer *)palloc0(sizeof(UwalBuffer));
-    buffers->buf = readBuf;
-    buffers->len = readlen;
-    bufflist->buffers = buffers;
-
-    int ret = ock_uwal_read(&params, bufflist);
-
-    pfree(buffers);
-    pfree(bufflist);
-    pfree(dataToRead);
-    pfree(datav);
-    return ret;
-}
-
 
 void GsUwalWriteAsyncCallBack(void *cbCtx, int retCode)
 {
-    UwalSingleAsyncCbCtx *curCbCtx = (UwalSingleAsyncCbCtx *)cbCtx;
+    UwalAsyncCbCtx *curCbCtx = (UwalAsyncCbCtx *)cbCtx;
     curCbCtx->ret = retCode;
-    UwalAsyncAppendCbCtx *commonCbCtx = curCbCtx->commonCbCtx;
-    pthread_mutex_lock(&(commonCbCtx->mutex));
-    if (!commonCbCtx->interrupted) {
-        // update nodeinfo
-        if (commonCbCtx->curCount == 0) {
-            commonCbCtx->ret = curCbCtx->ret;
-            commonCbCtx->infos->num = curCbCtx->infos->num;
-            for (uint32_t i = 0; i < curCbCtx->infos->num; i++) {
-                commonCbCtx->infos->status[i].nodeId = curCbCtx->infos->status[i].nodeId;
-                commonCbCtx->infos->status[i].ret = curCbCtx->infos->status[i].ret;
-            }
-        } else if (commonCbCtx->ret == 0 && curCbCtx->ret != 0) {
-            commonCbCtx->ret = curCbCtx->ret;
-            commonCbCtx->infos->num = curCbCtx->infos->num;
-            for (uint32_t i = 0; i < curCbCtx->infos->num; i++) {
-                commonCbCtx->infos->status[i].nodeId = curCbCtx->infos->status[i].nodeId;
-                commonCbCtx->infos->status[i].ret = curCbCtx->infos->status[i].ret;
-            }
-        }
-        commonCbCtx->curCount += 1;
-        if (commonCbCtx->curCount == commonCbCtx->opCount) {
-            pthread_cond_signal(&(commonCbCtx->cond));
-            pthread_mutex_unlock(&(commonCbCtx->mutex));
+    curCbCtx->processed = true;
+
+    pthread_mutex_lock(&(g_commonCbCtx.mutex));
+    if (g_commonCbCtx.interrupted) {
+        g_commonCbCtx.curCount += 1;
+        if (g_commonCbCtx.curCount == g_commonCbCtx.interruptCount) {
+            pthread_cond_signal(&(g_commonCbCtx.cond));
+            pthread_mutex_unlock(&(g_commonCbCtx.mutex));
         } else {
-            pthread_mutex_unlock(&(commonCbCtx->mutex));
+            pthread_mutex_unlock(&(g_commonCbCtx.mutex));
         }
+        return;
+    }
+
+    if (g_commonCbCtx.curCount == 0 || (g_commonCbCtx.ret == 0 && curCbCtx->ret != 0)) {
+        g_commonCbCtx.ret = curCbCtx->ret;
+    }
+    g_commonCbCtx.curCount += 1;
+    if (g_commonCbCtx.curCount == g_commonCbCtx.opCount) {
+        pthread_cond_signal(&(g_commonCbCtx.cond));
+        pthread_mutex_unlock(&(g_commonCbCtx.mutex));
     } else {
-        commonCbCtx->curCount += 1;
-        if (commonCbCtx->curCount == commonCbCtx->interruptCount) {
-            pthread_cond_signal(&(commonCbCtx->cond));
-            pthread_mutex_unlock(&(commonCbCtx->mutex));
-        } else {
-            pthread_mutex_unlock(&(commonCbCtx->mutex));
-        }
+        pthread_mutex_unlock(&(g_commonCbCtx.mutex));
     }
 }
 
-int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos)
+int GsUwalWriteAsync(int nBytes, char *buf, uint64_t targetOffset)
 {
+    UwalId *id = &t_thrd.xlog_cxt.uwalInfo.id;
     uint64_t offset;
     int bufferOffset = 0;
     int batchIOSize = 0;
@@ -1136,59 +1173,143 @@ int GsUwalWriteAsync(UwalId *id, int nBytes, char *buf, UwalNodeInfo *infos)
     }
 
     batchLastIOSize = nBytes - (batchIONumber - 1) * batchIOSize;
-
-    UwalAsyncAppendCbCtx cbCtx = {0};
-    cbCtx.opCount = batchIONumber;
-    cbCtx.infos = infos;
-    pthread_mutex_init(&(cbCtx.mutex), 0);
-    pthread_cond_init(&(cbCtx.cond), 0);
-
-    UwalNodeInfo uwalInfoList[batchIONumber];
-    UwalSingleAsyncCbCtx uwalCbCtxList[batchIONumber];
+    GsUwalAppendAsyncResetCbCtx();
+    g_commonCbCtx.opCount = batchIONumber;
 
     for (int i = 0; i < batchIONumber; i++) {
-        UwalNodeInfo *uwalInfos = &uwalInfoList[i];
-        UwalSingleAsyncCbCtx *uwalCbCtx = &uwalCbCtxList[i];
-
         UwalBuffer buffers[1] = {{buf + bufferOffset, batchIOSize}};
         UwalBufferList bufferList = {1, buffers};
-        UwalCallBack uwalCB = {GsUwalWriteAsyncCallBack, uwalCbCtx};
+        UwalCallBack uwalCB = {GsUwalWriteAsyncCallBack, &(g_cbCtxList[i])};
         UwalAppendParam appendParam = {id, &bufferList, &uwalCB};
+        g_cbCtxList[i].writeOffset = targetOffset + bufferOffset;
+        g_cbCtxList[i].buf = buf + bufferOffset;
 
-        uwalCbCtx->commonCbCtx = &cbCtx;
-        uwalCbCtx->infos = uwalInfos;
-        uwalCbCtx->ret = 0;
-        uwalCbCtx->appendParam = &appendParam;
         if (i == 0) {
             buffers[0].len = batchLastIOSize;
             bufferOffset += batchLastIOSize;
+            g_cbCtxList[i].writeLen = batchLastIOSize;
         } else {
             bufferOffset += batchIOSize;
+            g_cbCtxList[i].writeLen = batchIOSize;
         }
 
-        ret = ock_uwal_append(&appendParam, &offset, (void *)uwalInfos);
-        if (ret != 0) {
-            pthread_mutex_lock(&(cbCtx.mutex));
-            cbCtx.interrupted = true;
-            cbCtx.interruptCount = i;
-            while (cbCtx.interruptCount < cbCtx.curCount) {
-                pthread_cond_wait(&(cbCtx.cond), &(cbCtx.mutex));
-            }
-            pthread_mutex_unlock(&(cbCtx.mutex));
-            pthread_mutex_destroy(&(cbCtx.mutex));
-            pthread_cond_destroy(&(cbCtx.cond));
+        ret = ock_uwal_append(&appendParam, &offset, (void *)(g_cbCtxList[i].infos));
+        if (ret == 0) {
+            continue;
+        }
+        // send request failed, need break
+        g_cbCtxList[i].ret = ret;
+        g_cbCtxList[i].processed = true;
+        pthread_mutex_lock(&(g_commonCbCtx.mutex));
+        g_commonCbCtx.interrupted = true;
+        g_commonCbCtx.interruptCount = i;
+        while (g_commonCbCtx.interruptCount < g_commonCbCtx.curCount) {
+            pthread_cond_wait(&(g_commonCbCtx.cond), &(g_commonCbCtx.mutex));
+        }
+        pthread_mutex_unlock(&(g_commonCbCtx.mutex));
+        for (i = i + 1; i < batchIONumber; i++) {
+            g_cbCtxList[i].writeOffset = targetOffset + bufferOffset;
+            g_cbCtxList[i].buf = buf + bufferOffset;
+            g_cbCtxList[i].writeLen = batchIOSize;
+            bufferOffset += batchIOSize;
+        }
+        return ret;
+    }
+    pthread_mutex_lock(&(g_commonCbCtx.mutex));
+    while (g_commonCbCtx.curCount < g_commonCbCtx.opCount) {
+        pthread_cond_wait(&(g_commonCbCtx.cond), &(g_commonCbCtx.mutex));
+    }
+    pthread_mutex_unlock(&(g_commonCbCtx.mutex));
+
+    ret = g_commonCbCtx.ret;
+    return ret;
+}
+
+int GsUwalWriteResHandle(int ret, int nBytes, char *buf, UwalNodeInfo *infos, uint64_t targetOffset)
+{
+    if (ret == 0 || (ret != REPLICA_APPEND_LOG_FAIL && ret != U_CAPACITY_NOT_ENOUGH)) {
+        return ret;
+    }
+
+    while (ret == U_CAPACITY_NOT_ENOUGH) {
+        usleep(UWAL_RETRY_INTERVAL_US);
+        ret = GsUwalWriteSync(nBytes, buf, infos);
+    }
+
+    if (ret == REPLICA_APPEND_LOG_FAIL) {
+        if (!GsUwalCheckLocalRes(infos)) {
+            ereport(WARNING, (errmsg("Uwal write remote and local failed")));
             return ret;
         }
+        ereport(WARNING, (errmsg("Uwal write remote failed, try to rewrite")));
+        do {
+            ret = GsUwalWriteSync(nBytes, buf, infos, true, targetOffset);
+        } while (ret == REPLICA_APPEND_LOG_FAIL);
     }
-    pthread_mutex_lock(&(cbCtx.mutex));
-    while (cbCtx.curCount < cbCtx.opCount) {
-        pthread_cond_wait(&(cbCtx.cond), &(cbCtx.mutex));
-    }
-    pthread_mutex_unlock(&(cbCtx.mutex));
-    pthread_mutex_destroy(&(cbCtx.mutex));
-    pthread_cond_destroy(&(cbCtx.cond));
 
-    ret = cbCtx.ret;
+    return GsUwalWriteResHandle(ret, nBytes, buf, infos, targetOffset);
+}
+
+int GsUwalWrite(int nBytes, char *buf, uint64_t writeOffset)
+{
+    int ret = 0;
+
+    if (!g_instance.attr.attr_storage.uwal_async_append_switch) {
+        // sync append
+        ret = GsUwalWriteSync(nBytes, buf, &(g_infoList[0]));
+        return GsUwalWriteResHandle(ret, nBytes, buf, &(g_infoList[0]), writeOffset);
+    }
+
+    ret = GsUwalWriteAsync(nBytes, buf, writeOffset);
+    if (ret == 0 || (ret != REPLICA_APPEND_LOG_FAIL && ret != U_CAPACITY_NOT_ENOUGH)) {
+        return ret;
+    }
+
+    for (int i = 0; i < g_commonCbCtx.opCount; i++) {
+        if (g_cbCtxList[i].processed) {
+            ret = GsUwalWriteResHandle(g_cbCtxList[i].ret, g_cbCtxList[i].writeLen,
+                g_cbCtxList[i].buf, g_cbCtxList[i].infos, g_cbCtxList[i].writeOffset);
+            if (ret != 0) {
+                return ret;
+            }
+        } else {
+            ret = GsUwalWriteSync(g_cbCtxList[i].writeLen, g_cbCtxList[i].buf, g_cbCtxList[i].infos);
+            if (ret == 0) {
+                continue;
+            }
+            ret = GsUwalWriteResHandle(ret, g_cbCtxList[i].writeLen, g_cbCtxList[i].buf,
+                g_cbCtxList[i].infos, g_cbCtxList[i].writeOffset);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+    return ret;
+}
+
+int GsUwalRead(UwalId *id, XLogRecPtr targetPagePtr, char *readBuf, uint64_t readlen)
+{
+    UwalDataToRead *dataToRead = (UwalDataToRead *)palloc0(sizeof(UwalDataToRead));
+    dataToRead->offset = targetPagePtr;
+    dataToRead->length = readlen;
+    UwalDataToReadVec *datav = (UwalDataToReadVec *)palloc0(sizeof(UwalDataToReadVec));
+    datav->cnt = 1;
+    datav->dataToRead = dataToRead;
+    UwalReadParam params = {id, UWAL_ROUTE_LOCAL, datav, NULL};
+
+    UwalBufferList *bufflist = (UwalBufferList *)palloc0(sizeof(UwalBufferList));
+    bufflist->cnt = 1;
+    UwalBuffer *buffers = (UwalBuffer *)palloc0(sizeof(UwalBuffer));
+    buffers->buf = readBuf;
+    buffers->len = readlen;
+    bufflist->buffers = buffers;
+
+    int ret = ock_uwal_read(&params, bufflist);
+
+    pfree(buffers);
+    pfree(bufflist);
+    pfree(dataToRead);
+    pfree(datav);
     return ret;
 }
 
@@ -1213,9 +1334,9 @@ UwalrcvWriterState *GsGetCurrentUwalRcvState(void)
     if (walrcv == NULL) {
         return NULL;
     }
-    SpinLockAcquire(&walrcv->mutex);
+    SpinLockAcquire(&walrcv->uwalMutex);
     uwalrcv = walrcv->uwalRcvState;
-    SpinLockRelease(&walrcv->mutex);
+    SpinLockRelease(&walrcv->uwalMutex);
     return uwalrcv;
 }
 
@@ -1239,4 +1360,91 @@ int GsUwalTruncate(UwalId *id, uint64_t offset)
         ereport(WARNING, (errmsg("GsUwalTruncate return failed ret: %d",ret)));
     }
     return ret;
+}
+
+int GsUwalRewind(UwalId *id, uint64_t offset)
+{
+    int ret = ock_uwal_set_rewind_point(id, offset);
+    if (ret != 0) {
+        ereport(WARNING, (errmsg("GsUwalRewind return failed, ret: %d", ret)));
+    }
+    ereport(LOG, (errmsg("UwalRewin: Offset %llu", offset)));
+    return ret;
+}
+
+void GsUwalRenewFileRenamePtr()
+{
+    XLogRecPtr startWritePtr = t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset;
+    XLogRecPtr truncatePtr = t_thrd.xlog_cxt.uwalInfo.info.truncateOffset;
+    TimeLineID tli = t_thrd.xlog_cxt.uwalInfo.info.startTimeLine;
+    if (truncatePtr / XLogSegSize <= startWritePtr / XLogSegSize + 1) {
+        t_thrd.xlog_cxt.uwalFileRenamePtr = truncatePtr;
+        return;
+    }
+
+    XLogSegNo renamedLSN = truncatePtr / XLogSegSize - 1;
+    while (renamedLSN > startWritePtr / XLogSegSize) {
+        char filename[MAXFNAMELEN];
+        errno_t errorno = snprintf_s(filename, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X",
+            tli, (uint32)(renamedLSN / XLogSegmentsPerXLogId), (uint32)(renamedLSN % XLogSegmentsPerXLogId));
+        securec_check_ss(errorno, "", "");
+
+        char path[MAXPGPATH];
+        errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+            g_instance.attr.attr_storage.uwal_devices_path, filename);
+        securec_check_ss(errorno, "", "");
+        // If the file exists, move the offset backwards.
+        if (access(path, F_OK) == 0) {
+            ereport(WARNING, (errmsg("Truncate file is still in uwal path, lsn %llu", renamedLSN)));
+            renamedLSN -= 1;
+            continue;
+        }
+        break;
+    }
+    t_thrd.xlog_cxt.uwalFileRenamePtr = (renamedLSN + 1) * XLogSegSize;
+}
+
+// Check whether the truncated file is renamed
+bool GsUwalCheckFileRename(XLogRecPtr targetPtr)
+{
+    if (targetPtr < t_thrd.xlog_cxt.uwalFileRenamePtr) {
+        return true;
+    }
+
+    XLogRecPtr truncatePtr = t_thrd.xlog_cxt.uwalInfo.info.truncateOffset;
+    if (targetPtr >= truncatePtr) {
+        ereport(PANIC, (errmsg("Try to read xlog file which is not truncated by uwal, readPtr %llu, truncatePtr %llu",
+            targetPtr, truncatePtr)));
+    }
+
+    GsUwalRenewFileRenamePtr();
+    int retryCount = 100;
+    while (targetPtr >= t_thrd.xlog_cxt.uwalFileRenamePtr && retryCount-- > 0) {
+        GsUwalRenewFileRenamePtr();
+        pg_usleep(UWAL_RETRY_INTERVAL_US);
+    }
+    if (targetPtr < t_thrd.xlog_cxt.uwalFileRenamePtr) {
+        return true;
+    }
+    return false;
+}
+
+// Check whether Data is successfully written to the local node
+bool GsUwalCheckLocalRes(UwalNodeInfo *infos)
+{
+    if (infos == nullptr || infos->num == 0) {
+        return false;
+    }
+    uint32_t localUwalId = g_uwalConfig.id;
+    for (uint32_t i = 0; i < infos->num; i++) {
+        if (infos->status[i].nodeId != localUwalId) {
+            continue;
+        }
+        if (infos->status[i].ret == U_OK) {
+            return true;
+        }
+        ereport(WARNING, (errmsg("Uwal write local node failed: %d", infos->status[i].ret)));
+        return false;
+    }
+    return false;
 }

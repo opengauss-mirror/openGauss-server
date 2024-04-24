@@ -103040,14 +103040,14 @@ msgstr "无法重命名旧的事务日志文件\"%s\"：%m"
 
 #: storage/replication/walrcvwriter.cpp:1395
 #, c-format
-msgid "walRcvUwalTruncate truncate not in fullSync"
-msgstr "walRcvUwalTruncate截断不在fullSync中"
+msgid "WalRcvUwalTruncate truncate not in fullSync"
+msgstr "WalRcvUwalTruncate截断不在fullSync中"
 
 #
 #: storage/replication/walrcvwriter.cpp:1401
 #, c-format
-msgid "walRcvUwalTruncate failed retCode: %d"
-msgstr "walRcvUwalTruncate失败, 返回码 = %d"
+msgid "WalRcvUwalTruncate failed retCode: %d"
+msgstr "WalRcvUwalTruncate失败, 返回码 = %d"
 
 #: storage/replication/walrcvwriter.cpp:1442
 #, c-format
