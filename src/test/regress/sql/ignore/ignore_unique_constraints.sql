@@ -217,5 +217,29 @@ insert /*+ ignore_error */ into t_column_orien values(null);
 update /*+ ignore_error */ t_column_orien set c1 = null where c1 = 2;
 update /*+ ignore_error */ t_column_orien set c1 = 1 where c1 = 2;
 
+--test under opfusion+prepare
+set enable_opfusion = on;
+set enable_bitmapscan to off;
+set enable_seqscan to off;
+
+create table t_ignore_0037(c1 int primary key, c2 number(5,2));
+create index i_test on t_ignore_0037(c2);
+analyze t_ignore_0037;
+prepare insert_ignore(int,number(5,2)) as insert /*+ ignore_error */ into t_ignore_0037 values(1,2);
+explain(costs off) execute insert_ignore(0, 123.12);
+execute insert_ignore(0, 123.12);
+execute insert_ignore(0, 123.12);
+
+insert into t_ignore_0037 values(3,1);
+insert into t_ignore_0037 values(4,1);
+
+prepare update_ignore(int) as update /*+ ignore_error */ t_ignore_0037 set c1=$1 where c2=1;
+explain(costs off) execute update_ignore(0);
+execute update_ignore(0);
+execute update_ignore(0);
+reset enable_bitmapscan;
+reset enable_seqscan;
+DEALLOCATE all;
+
 \c postgres
 drop database if exists sql_ignore_unique_test;

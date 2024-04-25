@@ -411,7 +411,8 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     InitResultRelInfo(result_rel_info, rel, 1, 0);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        bool speculative = m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore;
+        bool speculative = (m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore) ||
+            (m_global->m_planstmt && m_global->m_planstmt->hasIgnore);
         ExecOpenIndices(result_rel_info, speculative);
     }
 

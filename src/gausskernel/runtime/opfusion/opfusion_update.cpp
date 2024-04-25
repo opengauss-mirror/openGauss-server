@@ -612,7 +612,8 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        bool speculative = m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore;
+        bool speculative = (m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore) ||
+            (m_global->m_planstmt && m_global->m_planstmt->hasIgnore);
         ExecOpenIndices(result_rel_info, speculative);
     }
 
