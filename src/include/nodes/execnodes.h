@@ -593,6 +593,11 @@ typedef struct ResultRelInfo {
 #ifdef USE_SPQ
     AttrNumber ri_actionAttno; /* is this an INSERT or DELETE ? */
 #endif
+
+    /* number of the unusable index*/
+    int ri_NumUnusableIndices;
+    RelationPtr ri_UnusableIndexRelationDescs;
+    IndexInfo** ri_UnusableIndexRelationInfo;
 } ResultRelInfo;
 
 /* bloom filter controller */

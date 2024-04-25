@@ -1184,6 +1184,82 @@ Partition ExecOpenScanParitition(EState* estate, Relation parent, PartitionIdent
     return partitionOpen(parent, partoid, lockmode);
 }
 
+void ExecOpenUnusedIndices(ResultRelInfo* resultRelInfo, bool speculative)
+{
+    Relation resultRelation = resultRelInfo->ri_RelationDesc;
+    List* indexoidlist = NIL;
+    ListCell* l = NULL;
+    int len, i;
+    RelationPtr relationDescs;
+    IndexInfo** indexInfoArray;
+
+    /* fast path if no indexes */
+    if (!RelationGetForm(resultRelation)->relhasindex)
+        return;
+
+    /*
+     * Get cached list of index OIDs
+     */
+    indexoidlist = RelationGetIndexList(resultRelation, true);
+    len = list_length(indexoidlist);
+    if (len == 0) {
+        return;
+    }
+
+    /*
+     * allocate space for result arrays
+     */
+    relationDescs = (RelationPtr)palloc(len * sizeof(Relation));
+    indexInfoArray = (IndexInfo**)palloc(len * sizeof(IndexInfo*));
+
+    resultRelInfo->ri_UnusableIndexRelationDescs = relationDescs;
+    resultRelInfo->ri_UnusableIndexRelationInfo = indexInfoArray;
+
+    /*
+     * For each index, open the index relation and save pg_index info. We
+     * acquire RowExclusiveLock, signifying we will update the index.
+     *
+     * Note: we do this even if the index is not IndexIsReady; it's not worth
+     * the trouble to optimize for the case where it isn't.
+     */
+    i = 0;
+    foreach (l, indexoidlist) {
+        Oid indexOid = lfirst_oid(l);
+        Relation indexDesc;
+        IndexInfo* ii = NULL;
+
+        indexDesc = index_open(indexOid, RowExclusiveLock);
+
+        if (IndexIsUsable(indexDesc->rd_index) || !IndexIsUnique(indexDesc->rd_index)) {
+            index_close(indexDesc, RowExclusiveLock);
+            continue;
+        }
+
+        /* extract index key information from the index's pg_index info */
+        ii = BuildIndexInfo(indexDesc);
+
+        /*
+         * If the indexes are to be used for speculative insertion, add extra
+         * information required by unique index entries.
+         */
+        if (speculative) {
+            BuildSpeculativeIndexInfo(indexDesc, ii);
+        }
+        relationDescs[i] = indexDesc;
+        indexInfoArray[i] = ii;
+        i++;
+    }
+    // remember to set the number of unusable indexes
+    resultRelInfo->ri_NumUnusableIndices = i;
+
+    if (resultRelInfo->ri_NumUnusableIndices == 0) {
+        ExecCloseUnsedIndices(resultRelInfo);
+    }
+
+    list_free_ext(indexoidlist);
+}
+
+
 /* ----------------------------------------------------------------
  *				  ExecInsertIndexTuples support
  * ----------------------------------------------------------------
@@ -1209,6 +1285,10 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
 
     resultRelInfo->ri_NumIndices = 0;
     resultRelInfo->ri_ContainGPI = false;
+    
+    resultRelInfo->ri_NumUnusableIndices = 0;
+    resultRelInfo->ri_UnusableIndexRelationDescs = NULL;
+    resultRelInfo->ri_UnusableIndexRelationInfo = NULL;
 
     /* fast path if no indexes */
     if (!RelationGetForm(resultRelation)->relhasindex)
@@ -1275,8 +1355,37 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
     // remember to set the number of usable indexes
     resultRelInfo->ri_NumIndices = i;
 
+    if (UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD) {
+        ExecOpenUnusedIndices(resultRelInfo, speculative);
+    }
+
     list_free_ext(indexoidlist);
 }
+
+void ExecCloseUnsedIndices(ResultRelInfo* resultRelInfo)
+{
+    int i;
+    int numIndices = resultRelInfo->ri_NumUnusableIndices;
+    RelationPtr indexDescs = resultRelInfo->ri_UnusableIndexRelationDescs;
+    for (i = 0; i < numIndices; i++) {
+        if (indexDescs[i] == NULL)
+            continue; /* shouldn't happen? */
+        
+         /* Drop lock acquired by ExecOpenIndices */
+         index_close(indexDescs[i], RowExclusiveLock);
+    }
+    pfree_ext(resultRelInfo->ri_UnusableIndexRelationDescs);
+
+    if (resultRelInfo->ri_UnusableIndexRelationInfo) {
+        for (i = 0; i < numIndices; i++) {
+            pfree_ext(resultRelInfo->ri_UnusableIndexRelationInfo[i]);
+        }
+        pfree_ext(resultRelInfo->ri_UnusableIndexRelationInfo);
+    }
+    resultRelInfo->ri_UnusableIndexRelationDescs = NULL;
+    resultRelInfo->ri_UnusableIndexRelationInfo = NULL;
+}
+
 
 /* ----------------------------------------------------------------
  *		ExecCloseIndices
@@ -1308,6 +1417,11 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
         }
         pfree_ext(resultRelInfo->ri_IndexRelationInfo);
     }
+
+    if (UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD && resultRelInfo->ri_NumUnusableIndices > 0) {
+        ExecCloseUnsedIndices(resultRelInfo);
+    }
+
 }
 
 /*
@@ -1873,9 +1987,12 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     ResultRelInfo* resultRelInfo = NULL;
     int i;
     int numIndices;
+    int numUnusedIndices;
     RelationPtr relationDescs;
+    RelationPtr unusedRelationDescs;
     Relation heapRelation;
     IndexInfo** indexInfoArray;
+    IndexInfo** unusedindexInfoArray;
     ExprContext* econtext = NULL;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
@@ -1883,6 +2000,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     bool ispartitionedtable = false;
     bool containGPI;
     List* partitionIndexOidList = NIL;
+    int totalIndices;
 
     /*
      * Get information from the result relation info structure.
@@ -1891,6 +2009,13 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     numIndices = resultRelInfo->ri_NumIndices;
     relationDescs = resultRelInfo->ri_IndexRelationDescs;
     indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
+
+    numUnusedIndices = resultRelInfo->ri_NumUnusableIndices;
+    unusedRelationDescs = resultRelInfo->ri_UnusableIndexRelationDescs;
+    unusedindexInfoArray = resultRelInfo->ri_UnusableIndexRelationInfo;
+
+    totalIndices = numIndices + numUnusedIndices;
+    
     heapRelation = resultRelInfo->ri_RelationDesc;
     containGPI = resultRelInfo->ri_ContainGPI;
 
@@ -1936,8 +2061,8 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     /*
      * for each index, form and insert the index tuple
      */
-    for (i = 0; i < numIndices; i++) {
-        Relation indexRelation = relationDescs[i];
+    for (i = 0; i < totalIndices; i++) {
+        Relation indexRelation = i < numIndices ? relationDescs[i] : unusedRelationDescs[i - numIndices];
         IndexInfo* indexInfo = NULL;
         IndexUniqueCheck checkUnique;
         bool satisfiesConstraint = false;
@@ -1950,7 +2075,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
             continue;
         }
 
-        indexInfo = indexInfoArray[i];
+        indexInfo = i < numIndices ?  indexInfoArray[i] : unusedindexInfoArray[i - numIndices];
 
         /* If the index is marked as read-only, ignore it */
         if (!indexInfo->ii_ReadyForInserts) {
