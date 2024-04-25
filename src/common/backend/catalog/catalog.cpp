@@ -95,6 +95,26 @@ const char* forkNames[] = {
     "init"  /* INIT_FORKNUM */
 };
 
+const char *packageSchemaList[] = {"dbe_application_info",
+                                   "dbe_file",
+                                   "dbe_lob",
+                                   "dbe_match",
+                                   "dbe_output",
+                                   "dbe_perf",
+                                   "dbe_pldebugger",
+                                   "dbe_random",
+                                   "dbe_raw",
+                                   "dbe_scheduler",
+                                   "dbe_session",
+                                   "dbe_sql",
+                                   "dbe_sql_util",
+                                   "dbe_task",
+                                   "dbe_utility",
+                                   "information_schema",
+                                   "pkg_service",
+                                   "pkg_util",
+                                   "sqladvisor"};
+
 /*
  * forkname_to_number - look up fork number by name
  */
@@ -1253,27 +1273,6 @@ bool IsPackageSchemaOid(Oid relnamespace)
 
 bool IsPackageSchemaName(const char* schemaName)
 {
-    const char* packageSchemaList[] = {
-        "dbe_application_info",
-        "dbe_file",
-        "dbe_lob",
-        "dbe_match",
-        "dbe_output",
-        "dbe_perf",
-        "dbe_pldebugger",
-        "dbe_random",
-        "dbe_raw",
-        "dbe_scheduler",
-        "dbe_session",
-        "dbe_sql",
-        "dbe_sql_util",
-        "dbe_task",
-        "dbe_utility",
-        "information_schema",
-        "pkg_service",
-        "pkg_util",
-        "sqladvisor"
-    };
     int schemaNum = lengthof(packageSchemaList);
     for (int i = 0; i < schemaNum; ++i) {
         if (strcmp(schemaName, packageSchemaList[i]) == 0) {

@@ -4567,8 +4567,6 @@ static void exec_bind_message(StringInfo input_message)
     u_sess->parser_cxt.param_info = NULL;
     u_sess->parser_cxt.param_message = NULL;
 
-    StringInfo temp_message = makeStringInfo();
-    copyStringInfo(temp_message, input_message);
     gstrace_entry(GS_TRC_ID_exec_bind_message);
 
     /* Instrumentation: PBE - reset unique sql elapsed start time */
@@ -4866,13 +4864,9 @@ static void exec_bind_message(StringInfo input_message)
     /* Version control for DDL PBE */
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_message = makeStringInfo();
-        copyStringInfo(u_sess->parser_cxt.param_message, temp_message);
+        copyStringInfo(u_sess->parser_cxt.param_message, input_message);
     }
-    if (temp_message != NULL) {
-        if (temp_message->data != NULL)
-            pfree_ext(temp_message->data);
-        pfree_ext(temp_message);
-    }
+
     /* Copy the plan's query string into the portal */
     query_string = pstrdup(psrc->query_string);
 

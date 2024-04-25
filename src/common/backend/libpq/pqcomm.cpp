@@ -133,13 +133,12 @@ extern ProtocolExtensionConfig default_protocol_config;
 #define NAPTIME_PER_SEND 10        /* max sleep before sending next batch of data (10ms) */
 
 void pq_close(int code, Datum arg);
-int internal_putbytes(const char* s, size_t len);
+inline int internal_putbytes(const char* s, size_t len);
 
 /* Internal functions */
-static int internal_flush(void);
-static void pq_set_nonblocking(bool nonblocking);
-static void pq_disk_generate_checking_header(
-    const char* src_data, StringInfo dest_data, uint32 data_len, uint32 seq_num);
+int internal_flush(void);
+void pq_set_nonblocking(bool nonblocking);
+void pq_disk_generate_checking_header(const char *src_data, StringInfo dest_data, uint32 data_len, uint32 seq_num);
 static size_t pq_disk_read_data_block(
     LZ4File* file_handle, char* src_data, char* dest_data, uint32 data_len, uint32 seq_num);
 
@@ -229,7 +228,7 @@ static inline void pq_disk_create_tempfile(void)
  * @in - size, size of data to be written.
  * @return - written size, EOF if error happens.
  */
-static size_t pq_disk_write_tempfile(const void* data, size_t size)
+size_t pq_disk_write_tempfile(const void* data, size_t size)
 {
     size_t nwritten = 0;
 
@@ -2554,8 +2553,7 @@ void pq_revert_recvbuffer(const char* data, int len)
  * @in - src data and length and sequence number
  * @return - int seqnum + int datalength + pg_crc32 crc as char *.
  */
-static void pq_disk_generate_checking_header(
-    const char* src_data, StringInfo dest_data, uint32 data_len, uint32 seq_num)
+void pq_disk_generate_checking_header(const char *src_data, StringInfo dest_data, uint32 data_len, uint32 seq_num)
 {
     Assert(src_data != NULL);
 

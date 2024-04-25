@@ -437,6 +437,8 @@ extern Size SyncScanShmemSize(void);
 
 extern void PushHeapPageToDataQueue(Buffer buffer);
 
+extern bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer, bool *has_cur_xact_write = NULL);
+
 /*
  * HeapTupleSatisfiesVisibility
  *		True iff heap tuple satisfies a time qual.

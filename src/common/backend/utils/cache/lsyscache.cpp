@@ -2151,7 +2151,7 @@ constexpr int16 DATE_TYPLEN = 4;
 constexpr int16 TIMESTAMP_TYPLEN = 8;
 int16 get_typlen(Oid typid)
 {
-    if (typid == INT4OID || typid == DATEOID) {
+    if (typid == INT4OID || typid == DATEOID || typid == FLOAT4OID) {
         return DATE_TYPLEN;
     } else if (typid == BPCHAROID || typid == VARCHAROID) {
         return -1;
@@ -2665,6 +2665,7 @@ Oid get_typeoid_with_namespace(const char* typname)
  */
 Oid get_pgxc_nodeoid(const char* nodename)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     Oid node_oid = InvalidOid;
     CatCList* memlist = NULL;
     int i;
@@ -2679,6 +2680,9 @@ Oid get_pgxc_nodeoid(const char* nodename)
     }
     ReleaseSysCacheList(memlist);
     return node_oid;
+#else
+    return InvalidOid;
+#endif
 }
 
 Oid get_pgxc_datanodeoid(const char* nodename, bool missingOK)

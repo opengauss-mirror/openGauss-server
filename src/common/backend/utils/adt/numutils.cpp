@@ -59,6 +59,38 @@ decimalLength32(const uint32 v)
     return t + (v >= PowersOfTen[t]);
 }
 
+static inline int decimalLength64(const uint64 v)
+{
+    int t;
+    static const uint64 PowersOfTen[] = {UINT64CONST(1),
+                                         UINT64CONST(10),
+                                         UINT64CONST(100),
+                                         UINT64CONST(1000),
+                                         UINT64CONST(10000),
+                                         UINT64CONST(100000),
+                                         UINT64CONST(1000000),
+                                         UINT64CONST(10000000),
+                                         UINT64CONST(100000000),
+                                         UINT64CONST(1000000000),
+                                         UINT64CONST(10000000000),
+                                         UINT64CONST(100000000000),
+                                         UINT64CONST(1000000000000),
+                                         UINT64CONST(10000000000000),
+                                         UINT64CONST(100000000000000),
+                                         UINT64CONST(1000000000000000),
+                                         UINT64CONST(10000000000000000),
+                                         UINT64CONST(100000000000000000),
+                                         UINT64CONST(1000000000000000000),
+                                         UINT64CONST(10000000000000000000UL)};
+
+    /*
+     * Compute base-10 logarithm by dividing the base-2 logarithm by a
+     * good-enough approximation of the base-2 logarithm of 10
+     */
+    t = (pg_leftmost_one_pos64(v) + 1) * 1233 / 4096;
+    return t + (v >= PowersOfTen[t]);
+}
+
 /*
  * pg_atoi: convert string to integer
  *
@@ -407,6 +439,72 @@ void pg_ltoa(int32 value, char* a)
     }
 }
 
+char *pg_ltoa_printtup(int32 value, int *len)
+{
+    uint32 uvalue = (uint32) value;
+    char *a = u_sess->utils_cxt.int4output_buffer;
+    int olength = 0, i = 0, signLength = 0;
+
+    if (value < 0) {
+        uvalue = (uint32) 0 - uvalue;
+        a[signLength++] = '-';
+    }
+
+    a = a + signLength;
+
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        *len = 1;
+        a[*len] = '\0';
+        return u_sess->utils_cxt.int4output_buffer;
+    }
+
+    olength = decimalLength32(uvalue);
+
+    /*
+     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for 
+     * better performance, memcpy_s or memcpy_sp will degrade performance.
+     */
+    while (uvalue >= 10000) {
+        const uint32 c = uvalue - 10000 * (uvalue / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        uvalue /= 10000;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        i += 4;
+    }
+    if (uvalue >= 100) {
+        const uint32 c = (uvalue % 100) << 1;
+
+        char *pos = a + olength - i;
+
+        uvalue /= 100;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+        i += 2;
+    }
+    if (uvalue >= 10) {
+        const uint32 c = uvalue << 1;
+
+        char *pos = a + olength - i;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+    } else {
+        *a = (char)('0' + uvalue);
+    }
+
+    *len = olength + signLength;
+    a[*len] = '\0';
+
+    return u_sess->utils_cxt.int4output_buffer;
+}
+
 /*
  * pg_lltoa: convert a signed 64-bit integer to its string representation
  *
@@ -460,6 +558,94 @@ void pg_lltoa(int64 value, char* a)
         *start++ = *a;
         *a-- = swap;
     }
+}
+
+char* pg_lltoa_printtup(int64 value, int* len)
+{
+    uint64 uvalue = (uint64) value;
+    char *a = u_sess->utils_cxt.int8output_buffer;
+    int olength = 0, i = 0, signLength = 0;
+
+    if (value < 0) {
+        uvalue = (uint64) 0 - uvalue;
+        a[signLength++] = '-';
+    }
+
+    a = a + signLength;
+
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        *len = 1;
+        a[*len] = '\0';
+        return u_sess->utils_cxt.int8output_buffer;
+    }
+
+    olength = decimalLength64(uvalue);
+
+    /*
+     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for 
+     * better performance, memcpy_s or memcpy_sp will degrade performance.
+     */
+    while (uvalue >= 100000000) {
+        const uint64 q = uvalue / 100000000;
+        uint32 value3 = (uint32)(uvalue - 100000000 * q);
+
+        const uint32 c = value3 % 10000;
+        const uint32 d = value3 / 10000;
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+        const uint32 d0 = (d % 100) << 1;
+        const uint32 d1 = (d / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        uvalue = q;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        memcpy(pos - 6, DIGIT_TABLE + d0, 2);
+        memcpy(pos - 8, DIGIT_TABLE + d1, 2);
+        i += 8;
+    }
+
+    /* Switch to 32-bit for speed */
+    uint32 value2 = (uint32)uvalue;
+
+    if (value2 >= 10000) {
+        const uint32 c = value2 - 10000 * (value2 / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value2 /= 10000;
+
+        memcpy(pos - 2, DIGIT_TABLE + c0, 2);
+        memcpy(pos - 4, DIGIT_TABLE + c1, 2);
+        i += 4;
+    }
+    if (value2 >= 100) {
+        const uint32 c = (value2 % 100) << 1;
+        char *pos = a + olength - i;
+
+        value2 /= 100;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+        i += 2;
+    }
+    if (value2 >= 10) {
+        const uint32 c = value2 << 1;
+        char *pos = a + olength - i;
+
+        memcpy(pos - 2, DIGIT_TABLE + c, 2);
+    } else
+        *a = (char)('0' + value2);
+
+    *len = olength + signLength;
+    a[*len] = '\0';
+
+    return u_sess->utils_cxt.int8output_buffer;
 }
 
 /*

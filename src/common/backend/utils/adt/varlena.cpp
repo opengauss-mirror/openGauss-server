@@ -266,20 +266,6 @@ char* output_text_to_cstring(const text* t)
     return result;
 }
 
-char* output_int32_to_cstring(int32 value)
-{
-    u_sess->utils_cxt.int4output_buffer[0] = '\0';
-    pg_ltoa(value, u_sess->utils_cxt.int4output_buffer);
-    return u_sess->utils_cxt.int4output_buffer;
-}
-
-char* output_int64_to_cstring(int64 value)
-{
-    u_sess->utils_cxt.int8output_buffer[0] = '\0';
-    pg_lltoa(value, u_sess->utils_cxt.int8output_buffer);
-    return u_sess->utils_cxt.int8output_buffer;
-}
-
 /*
  * text_to_cstring_buffer
  *

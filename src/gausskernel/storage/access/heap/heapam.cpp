@@ -2511,7 +2511,11 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          */
         if (!skip) {
             /* If it's visible per the snapshot, we must return it */
-            valid = HeapTupleSatisfiesVisibility(heap_tuple, snapshot, buffer, has_cur_xact_write);
+            if (snapshot->satisfies == SNAPSHOT_MVCC) {
+                valid = HeapTupleSatisfiesMVCC(heap_tuple, snapshot, buffer, has_cur_xact_write);
+            } else {
+                valid = HeapTupleSatisfiesVisibility(heap_tuple, snapshot, buffer, has_cur_xact_write);
+            }
             /* We unlock buffer if sync xid to finish and xid base may change, so copy base again */
             HeapTupleCopyBaseFromPage(heap_tuple, dp);
             if (isMySerializableXact) {

@@ -677,9 +677,6 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
          */
         portal->strategy = ChoosePortalStrategy(portal->stmts);
 
-        // Allocate and initialize scan descriptor
-        portal->scanDesc = (TableScanDesc)palloc0(SizeofHeapScanDescData + MaxHeapTupleSize);
-
         /*
          * Fire her up according to the strategy
          */
@@ -1413,6 +1410,13 @@ static uint64 PortalRunSelect(Portal portal, bool forward, long count, DestRecei
                  * id of the command that created the cursor.
                  */
                 RemoteQueryState* rqs = (RemoteQueryState*)queryDesc->planstate;
+
+                MemoryContext oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
+
+                // Allocate and initialize scan descriptor
+                portal->scanDesc = (TableScanDesc)palloc0(SizeofHeapScanDescData + MaxHeapTupleSize);
+
+                MemoryContextSwitchTo(oldContext);
 
                 // get the cached scan descriptor in portal
                 rqs->ss.ss_currentScanDesc = (TableScanDesc)portal->scanDesc;

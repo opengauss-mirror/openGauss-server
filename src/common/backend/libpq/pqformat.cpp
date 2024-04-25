@@ -161,7 +161,7 @@ void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen, int 
     }
     if (unlikely(p != str)) { /* actual conversion has been done? */
         slen = strlen(p);
-        enlargeStringInfo(buf, slen + sizeof(uint32));
+        enlargeBuffer(slen + sizeof(uint32), buf->len, &buf->maxlen, &buf->data);
         pq_writeint32(buf, (uint32)slen);
         errno_t rc = memcpy_sp(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), p, (size_t)slen);
         securec_check(rc, "\0", "\0");
@@ -170,7 +170,7 @@ void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen, int 
         pfree(p);
         p = NULL;
     } else {
-        enlargeStringInfo(buf, slen + sizeof(uint32));
+        enlargeBuffer(slen + sizeof(uint32), buf->len, &buf->maxlen, &buf->data);
         pq_writeint32(buf, (uint32)slen);
         errno_t rc = memcpy_sp(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), str, (size_t)slen);
         securec_check(rc, "\0", "\0");

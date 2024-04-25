@@ -30,6 +30,9 @@
 #include "tcop/tcopprot.h"
 #include "utils/snapmgr.h"
 #include "ddes/dms/ss_transaction.h"
+#include "knl/knl_thread.h"
+#include "storage/lz4_file.h"
+#include "libpq/libpq.h"
 
 #ifdef HAVE_NETINET_TCP_H
 #include <netinet/tcp.h>
@@ -45,6 +48,14 @@
 #ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
 #endif
+
+typedef struct TempFileContextInfo {
+    LZ4File* file_handle;
+    TempFileState file_state;
+    size_t file_size;
+    uint32 seq_count;          /* count number of PqRecvBuffers */
+    StringInfoData crc_buffer; /* store stringinfo with crc header */
+} TempFileContextInfo;
 
 struct pg_conn;
 typedef int (*libpqsw_transfer_standby_func)(const char* s, size_t len);
@@ -67,6 +78,61 @@ bool libpqsw_special_command(const char* commandTag);
 bool libpqsw_savepoint_command(const char* commandTag);
 static void libpqsw_check_savepoint(List *query_list, bool *have_savepoint);
 static bool libpqsw_need_localexec_forSimpleQuery(const char *commandTag, List *query_list, PhaseType ptype);
+
+static inline void pq_disk_create_tempfile(void)
+{
+    MemoryContext oldcontext;
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
+
+    t_thrd.libpq_cxt.PqTempFileContextInfo->file_handle = LZ4FileCreate(true);
+    t_thrd.libpq_cxt.PqTempFileContextInfo->file_state = TEMPFILE_CREATED;
+    t_thrd.libpq_cxt.PqTempFileContextInfo->file_size = 0;
+    t_thrd.libpq_cxt.PqTempFileContextInfo->seq_count = 0;
+
+    initStringInfo(&(t_thrd.libpq_cxt.PqTempFileContextInfo->crc_buffer));
+
+    (void)MemoryContextSwitchTo(oldcontext);
+}
+
+int internal_putbytes(const char* s, size_t len)
+{
+    size_t amount;
+
+    while (len > 0) {
+        /* If buffer is full, then flush it out */
+        if (t_thrd.libpq_cxt.PqSendPointer >= t_thrd.libpq_cxt.PqSendBufferSize) {
+            if (pq_disk_is_temp_file_enabled()) {
+                /* create temp file to store the result, it is caller's responsibility
+                 * to close the file done */
+                if (!t_thrd.libpq_cxt.PqTempFileContextInfo->file_handle) {
+                    pq_disk_create_tempfile();
+                }
+                if ((int)pq_disk_write_tempfile(
+                        t_thrd.libpq_cxt.PqSendBuffer, ((size_t)t_thrd.libpq_cxt.PqSendPointer)) == EOF) {
+                    return EOF;
+                }
+                t_thrd.libpq_cxt.PqSendPointer = 0;
+            } else {
+                StmtRetrySetFileExceededFlag(); /* once flush data to frontend, can not retry this query anymore */
+                pq_set_nonblocking(false);
+                if (internal_flush()) {
+                    return EOF;
+                }
+            }
+        }
+        amount = t_thrd.libpq_cxt.PqSendBufferSize - t_thrd.libpq_cxt.PqSendPointer;
+        if (amount > len) {
+            amount = len;
+        }
+        errno_t rc = memcpy_s(t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendPointer, amount, s, amount);
+        securec_check(rc, "\0", "\0");
+        t_thrd.libpq_cxt.PqSendPointer += amount;
+        s += amount;
+        len -= amount;
+    }
+
+    return 0;
+}
 
 static void libpqsw_set_already_connected()
 {
