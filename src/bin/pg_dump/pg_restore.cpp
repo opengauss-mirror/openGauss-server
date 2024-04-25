@@ -193,7 +193,7 @@ int main(int argc, char** argv)
 #ifdef ENABLE_MULTIPLE_NODES
             puts("gs_restore " DEF_GS_VERSION);
 #else
-            puts("gs_restore (openGauss) " PG_VERSION);
+            puts("gs_restore " DEF_GS_VERSION);
 #endif
             exit_nicely(0);
         }

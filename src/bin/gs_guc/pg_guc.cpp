@@ -2400,7 +2400,7 @@ print_help(const char* infoStr)
 #ifdef ENABLE_MULTIPLE_NODES
         puts("gs_guc " DEF_GS_VERSION);
 #else
-        puts("gs_guc (openGauss) " PG_VERSION);
+        puts("gs_guc " DEF_GS_VERSION);
 #endif
         exit(0);
     }

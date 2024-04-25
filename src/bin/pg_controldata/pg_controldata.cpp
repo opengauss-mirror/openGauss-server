@@ -325,7 +325,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MULTIPLE_NODES
             puts("pg_controldata (PostgreSQL) " PG_VERSION);
 #else
-            puts("pg_controldata (openGauss) " PG_VERSION);
+            puts("pg_controldata " DEF_GS_VERSION);
 #endif
             exit_safely(0);
         }

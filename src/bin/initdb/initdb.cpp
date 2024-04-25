@@ -4065,7 +4065,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MULTIPLE_NODES
             puts("gs_initdb " DEF_GS_VERSION);
 #else
-            puts("gs_initdb (openGauss) " PG_VERSION);
+            puts("gs_initdb " DEF_GS_VERSION);
 #endif
             exit(0);
         }

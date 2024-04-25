@@ -5854,7 +5854,7 @@ static void Help(int argc, const char** argv)
 #ifdef ENABLE_MULTIPLE_NODES
             puts("gs_ctl " DEF_GS_VERSION);
 #else
-            puts("gs_ctl (openGauss) " PG_VERSION);
+            puts("gs_ctl " DEF_GS_VERSION);
 #endif
             exit(0);
         }
