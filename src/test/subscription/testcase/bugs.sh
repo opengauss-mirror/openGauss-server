@@ -253,6 +253,32 @@ partition p_default values less than (maxvalue)
 
     restart_guc "pub_datanode1" "recovery_max_workers = 1"
     restart_guc "pub_datanode2" "recovery_max_workers = 1"
+
+    # BUG8: fix publisher choose relation incorrectly if there are more than one relation in different schemas with the same name.
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE testTab1 cascade"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE testTab1 cascade"
+
+    exec_sql $case_db $pub_node1_port "create table logical_tb1(id int primary key,name varchar(20));"
+    exec_sql $case_db $pub_node1_port "create schema test_sche;create table test_sche.logical_tb1(id int primary key,id1 int);"
+    exec_sql $case_db $sub_node1_port "create schema test_sche;create table test_sche.logical_tb1(id int primary key,id1 int);"
+
+    echo "create publication and subscription."
+    publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
+    exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub FOR TABLE test_sche.logical_tb1;"
+    exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub CONNECTION '$publisher_connstr' PUBLICATION tap_pub"
+
+    wait_for_subscription_sync $case_db $sub_node1_port
+
+    exec_sql $case_db $pub_node1_port "insert into test_sche.logical_tb1(id,id1) values(1,111),(2,222);"
+    wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM test_sche.logical_tb1")" = "1|111
+2|222" ]; then
+        echo "check if table sync success"
+    else
+        echo "$failed_keyword when check if table sync"
+        exit 1
+    fi
 }
 
 function tear_down() {
