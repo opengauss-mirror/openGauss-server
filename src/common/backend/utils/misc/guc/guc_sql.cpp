@@ -385,7 +385,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"allow_orderby_undistinct_column", OPT_ALLOW_ORDERBY_UNDISTINCT_COLUMN},
     {"select_into_return_null", OPT_SELECT_INTO_RETURN_NULL},
     {"accept_empty_str", OPT_ACCEPT_EMPTY_STR},
-    {"proc_uncheck_default_param", OPT_PROC_UNCHECK_DEFAULT_PARAM}
+    {"proc_uncheck_default_param", OPT_PROC_UNCHECK_DEFAULT_PARAM},
+    {"update_unusable_unique_index_on_iud", OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
