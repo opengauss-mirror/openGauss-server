@@ -904,9 +904,10 @@ bool SetDBStateFileState(DbState state, bool optional)
         len = read(fd, &s, sizeof(GaussState));
         /* sizeof(int) is for current_connect_idx of GaussState */
         if ((len != sizeof(GaussState)) && (len != sizeof(GaussState) - sizeof(int))) {
-            write_stderr("Failed to read gaussdb.state: %d", errno);
+            write_stderr("Failed to read gaussdb.state: %d, len: %d", errno, len);
             (void)close(fd);
-            return false;
+            (void)unlink(gaussdb_state_file);
+            return true;
         }
 
         if (close(fd) != 0) {
