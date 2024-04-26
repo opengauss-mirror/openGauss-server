@@ -3173,6 +3173,8 @@ static char *_CompleteFromQuery(int isSchemaQuery, const char *text, int state)
         PQclear(result);
         result = NULL;
 
+        readline_status = COMPLETE_QUERY;
+
         /* Set up suitably-escaped copies of textual inputs */
         eText = (char *)pg_malloc(stringLength * 2 + 1);
         PQescapeString(eText, text, stringLength);
@@ -3300,7 +3302,7 @@ static char *_CompleteFromQuery(int isSchemaQuery, const char *text, int state)
     }
 
     /* Find something that matches */
-    if (result && PQresultStatus(result) == PGRES_TUPLES_OK) {
+    if (readline_status == COMPLETE_QUERY && result && PQresultStatus(result) == PGRES_TUPLES_OK) {
         const char *item = NULL;
 
         while (listIndex < PQntuples(result) && (item = PQgetvalue(result, listIndex++, 0)))
@@ -3311,6 +3313,8 @@ static char *_CompleteFromQuery(int isSchemaQuery, const char *text, int state)
     /* If nothing matches, free the db structure and return null */
     PQclear(result);
     result = NULL;
+    readline_status = WAIT_INPUT;
+
     return NULL;
 }
 

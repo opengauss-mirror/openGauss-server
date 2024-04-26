@@ -74,6 +74,14 @@ extern volatile bool sigint_interrupt_enabled;
 
 extern sigjmp_buf sigint_interrupt_jmp;
 
+enum ReadlineStatus {
+    WAIT_INPUT,
+    COMPLETE_QUERY,
+    COMPLETE_CANCELLED
+};
+
+extern volatile ReadlineStatus readline_status;
+
 extern volatile bool cancel_pressed;
 
 /* Note: cancel_pressed is defined in print.c, see that file for reasons */

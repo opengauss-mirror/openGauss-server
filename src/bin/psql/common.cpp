@@ -271,6 +271,8 @@ sigjmp_buf sigint_interrupt_jmp;
 
 static PGcancel* volatile cancelConn = NULL;
 
+volatile ReadlineStatus readline_status = WAIT_INPUT;
+
 #ifdef WIN32
 static CRITICAL_SECTION cancelConnLock;
 #endif
@@ -290,7 +292,7 @@ static void handle_sigint(SIGNAL_ARGS)
     ResetQueryRetryController();
 
     /* if we are waiting for input, longjmp out of it */
-    if (sigint_interrupt_enabled) {
+    if (sigint_interrupt_enabled && readline_status == WAIT_INPUT) {
         sigint_interrupt_enabled = false;
         siglongjmp(sigint_interrupt_jmp, 1);
     }
@@ -309,6 +311,10 @@ static void handle_sigint(SIGNAL_ARGS)
             rc = write_stderr(errbuf);
             (void)rc; /* ignore errors, nothing we can do here */
         }
+    }
+
+    if (readline_status == WAIT_INPUT) {
+        readline_status = COMPLETE_CANCELLED;
     }
 
     errno = save_errno; /* just in case the write changed it */

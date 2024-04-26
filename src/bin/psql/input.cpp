@@ -55,6 +55,9 @@ char* gets_interactive(const char* prompt, PQExpBuffer query_buf)
         /* Enable SIGINT to longjmp to sigint_interrupt_jmp */
         sigint_interrupt_enabled = true;
 
+        /* Make current input status to WAIT_INPUT */
+        readline_status = WAIT_INPUT;
+
         /* On some platforms, readline is declared as readline(char *) */
         result = readline((char*)prompt);
 
