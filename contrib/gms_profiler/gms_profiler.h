@@ -86,7 +86,9 @@ typedef struct ProfilerUnitHashEntry
  * External declarations
  */
 extern "C" Datum start_profiler(PG_FUNCTION_ARGS);
+extern "C" Datum start_profiler_1(PG_FUNCTION_ARGS);
 extern "C" Datum start_profiler_ext(PG_FUNCTION_ARGS);
+extern "C" Datum start_profiler_ext_1(PG_FUNCTION_ARGS);
 extern "C" Datum stop_profiler(PG_FUNCTION_ARGS);
 extern "C" Datum flush_data(PG_FUNCTION_ARGS);
 extern "C" Datum pause_profiler(PG_FUNCTION_ARGS);

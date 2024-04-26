@@ -26,7 +26,9 @@
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(start_profiler);
+PG_FUNCTION_INFO_V1(start_profiler_1);
 PG_FUNCTION_INFO_V1(start_profiler_ext);
+PG_FUNCTION_INFO_V1(start_profiler_ext_1);
 PG_FUNCTION_INFO_V1(stop_profiler);
 PG_FUNCTION_INFO_V1(flush_data);
 PG_FUNCTION_INFO_V1(pause_profiler);
@@ -1125,6 +1127,16 @@ Datum start_profiler(PG_FUNCTION_ARGS)
     PG_RETURN_INT32(result);
 }
 
+Datum start_profiler_1(PG_FUNCTION_ARGS)
+{
+    uint32 runid = 0;
+    int result;
+
+    result = start_profiler_internal(fcinfo, &runid);
+
+    PG_RETURN_VOID();
+}
+
 Datum start_profiler_ext(PG_FUNCTION_ARGS)
 {
     uint32 runid = 0;
@@ -1136,6 +1148,19 @@ Datum start_profiler_ext(PG_FUNCTION_ARGS)
         return make_profiler_result(runid, result);
     else
         return make_profiler_result(0, result);
+}
+
+Datum start_profiler_ext_1(PG_FUNCTION_ARGS)
+{
+    uint32 runid = 0;
+    int result;
+
+    result = start_profiler_internal(fcinfo, &runid);
+
+    if (result == PROFILER_ERROR_OK)
+        PG_RETURN_INT32(runid);
+    else
+        PG_RETURN_INT32(0);
 }
 
 Datum stop_profiler(PG_FUNCTION_ARGS)

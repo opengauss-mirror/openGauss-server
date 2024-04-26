@@ -5,15 +5,23 @@
 
 CREATE SCHEMA gms_profiler;
 
-CREATE or REPLACE FUNCTION gms_profiler.start_profiler(IN run_comment varchar2 DEFAULT '', IN run_comment1 varchar2 DEFAULT '')
-returns binary_integer
+CREATE or REPLACE FUNCTION gms_profiler.start_profiler(IN run_comment varchar2 DEFAULT '', IN run_comment1 varchar2 DEFAULT '', OUT run_result binary_integer)
 AS 'MODULE_PATHNAME', 'start_profiler'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE or REPLACE FUNCTION gms_profiler.start_profiler_1(IN run_comment varchar2 DEFAULT '', IN run_comment1 varchar2 DEFAULT '')
+returns void
+AS 'MODULE_PATHNAME', 'start_profiler_1'
 LANGUAGE C VOLATILE NOT FENCED;
 
 CREATE or REPLACE FUNCTION gms_profiler.start_profiler_ext(IN run_comment varchar2 DEFAULT '' ,
 IN run_comment1 varchar2 DEFAULT '', OUT run_number binary_integer, OUT run_result binary_integer)
-returns record
 AS 'MODULE_PATHNAME', 'start_profiler_ext'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE or REPLACE FUNCTION gms_profiler.start_profiler_ext_1(IN run_comment varchar2 DEFAULT '' ,
+IN run_comment1 varchar2 DEFAULT '', OUT run_number binary_integer)
+AS 'MODULE_PATHNAME', 'start_profiler_ext_1'
 LANGUAGE C VOLATILE NOT FENCED;
 
 CREATE or REPLACE FUNCTION gms_profiler.stop_profiler()

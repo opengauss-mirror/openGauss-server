@@ -24,6 +24,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gc_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/ndpplugin
     ${CMAKE_CURRENT_SOURCE_DIR}/spq_plugin
+    ${CMAKE_CURRENT_SOURCE_DIR}/gms_profiler
 )
 
 add_subdirectory(hstore)
@@ -48,3 +49,4 @@ add_subdirectory(ndpplugin)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/spq_plugin)
     add_subdirectory(spq_plugin)
 endif()
+add_subdirectory(gms_profiler)
