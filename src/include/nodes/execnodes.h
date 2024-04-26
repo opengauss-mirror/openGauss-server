@@ -526,6 +526,10 @@ typedef struct ResultRelInfo {
     int ri_NumUpdatedNeeded;
     List* ri_WithCheckOptions;
     List* ri_WithCheckOptionExprs;
+    /* number of the unusable index*/
+    int ri_NumUnusableIndices;
+    RelationPtr ri_UnusableIndexRelationDescs;
+    IndexInfo** ri_UnusableIndexRelationInfo;
 } ResultRelInfo;
 
 /* bloom filter controller */

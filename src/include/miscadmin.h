@@ -192,7 +192,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_ACCEPT_EMPTY_STR 134217728
 #define OPT_PLPGSQL_DEPENDENCY 268435456
 #define OPT_PROC_UNCHECK_DEFAULT_PARAM 536870912
-#define OPT_MAX 29
+#define OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD 1073741824
+#define OPT_MAX 30
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -235,6 +236,7 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define SELECT_INTO_RETURN_NULL (u_sess->utils_cxt.behavior_compat_flags & OPT_SELECT_INTO_RETURN_NULL)
 #define PROC_UNCHECK_DEFAULT_PARAM (u_sess->utils_cxt.behavior_compat_flags & OPT_PROC_UNCHECK_DEFAULT_PARAM)
+#define UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD (u_sess->utils_cxt.behavior_compat_flags & OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD)
 
 /* define database compatibility Attribute */
 typedef struct {
