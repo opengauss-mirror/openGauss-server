@@ -310,16 +310,16 @@ size_t CalRealWriteSize(char *buffer)
     uint8 pagetype = PageGetPageLayoutVersion(buffer);
     if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
         UHeapPageCompressData *heapPageData = (UHeapPageCompressData *)(void *)buffer;
-        compressedBufferSize = heapPageData->size + offsetof(UHeapPageCompressData, data);
+        compressedBufferSize = heapPageData->size;
     } else if (pagetype == PG_HEAP_PAGE_LAYOUT_VERSION) {
         HeapPageCompressData *heapPageData = (HeapPageCompressData *)(void *)buffer;
-        compressedBufferSize = heapPageData->size + offsetof(HeapPageCompressData, data);
+        compressedBufferSize = heapPageData->size;
     } else {
         PageCompressData *heapPageData = (PageCompressData *)(void *)buffer;
-        compressedBufferSize = heapPageData->size + offsetof(PageCompressData, data);
+        compressedBufferSize = heapPageData->size;
     }
-
-    return compressedBufferSize;
+    auto allDataSize = GetSizeOfCprsHeadData(pagetype) + compressedBufferSize;
+    return allDataSize;
 }
 
 inline void PunchHoleForCnmpExt(CfsExtentHeader *pcaHead, BlockNumber extNo, FILE *destFd)
