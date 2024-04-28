@@ -319,18 +319,19 @@ size_t CalRealWriteSize(char *buffer, BlockNumber segmentNo, BlockNumber blockNu
     char *data;
     if (PageIs8BXidHeapVersion(buffer)) {
         HeapPageCompressData *heapPageData = (HeapPageCompressData *)buffer;
-        compressedBufferSize = heapPageData->size + offsetof(HeapPageCompressData, data);
+        compressedBufferSize = heapPageData->size;
         crc32 = heapPageData->crc32;
         data = heapPageData->data;
     } else {
         PageCompressData *heapPageData = (PageCompressData *)buffer;
-        compressedBufferSize = heapPageData->size + offsetof(PageCompressData, data);
+        compressedBufferSize = heapPageData->size;
         crc32 = heapPageData->crc32;
         data = heapPageData->data;
     }
-    if (compressedBufferSize > 0 && compressedBufferSize <= ((size_t)chunkSize * (BLCKSZ / chunkSize - 1)) &&
+    auto allDataSize = SIZE_OF_PAGE_COMPRESS_DATA_HEADER_DATA(buffer) + compressedBufferSize;
+    if (compressedBufferSize > 0 && allDataSize <= ((size_t)chunkSize * (BLCKSZ / chunkSize - 1)) &&
         DataBlockChecksum(data, compressedBufferSize, true) == crc32) {
-        return ((compressedBufferSize - 1) / chunkSize + 1) * chunkSize;
+        return ((allDataSize - 1) / chunkSize + 1) * chunkSize;
     }
     /* uncompressed page */
     return BLCKSZ;
