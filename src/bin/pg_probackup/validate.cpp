@@ -18,32 +18,13 @@
 #include "common/fe_memutils.h"
 #include "storage/file/fio_device.h"
 #include "logger.h"
+#include "oss/include/restore.h"
 
 static void *pgBackupValidateFiles(void *arg);
 static void do_validate_instance(void);
 
 static bool corrupted_backup_found = false;
 static bool skipped_due_to_lock = false;
-
-typedef struct
-{
-    const char *base_path;
-    const char *dss_path;
-    parray        *files;
-    bool        corrupted;
-    XLogRecPtr     stop_lsn;
-    uint32        checksum_version;
-    uint32        backup_version;
-    BackupMode    backup_mode;
-    const char    *external_prefix;
-    HeaderMap   *hdr_map;
-
-    /*
-     * Return value from the thread.
-     * 0 means there is no error, 1 - there is an error.
-     */
-    int            ret;
-} validate_files_arg;
 
 /* Progress Counter */
 static int g_inregularFiles = 0;
@@ -111,7 +92,7 @@ bool pre_check_backup(pgBackup *backup)
         return false;
     }
 
-    /* Revalidation is attempted for DONE, ORPHAN and CORRUPT backups */
+    /* Revalidation is attempted for DONE, ORPHAN, LOCAL and CORRUPT backups */
     if (backup->status != BACKUP_STATUS_OK &&
         backup->status != BACKUP_STATUS_DONE &&
         backup->status != BACKUP_STATUS_ORPHAN &&
@@ -669,7 +650,11 @@ do_validate_instance(void)
             continue;
         }
         /* Valiate backup files*/
-        pgBackupValidate(current_backup, NULL);
+        if (current.media_type == MEDIA_TYPE_OSS && current.oss_status != OSS_STATUS_LOCAL) {
+            performRestoreOrValidate(current_backup, true);
+        } else if (current.media_type != MEDIA_TYPE_OSS || current.oss_status == OSS_STATUS_LOCAL) {
+            pgBackupValidate(current_backup, NULL);
+        }
 
         /* Validate corresponding WAL files */
         if (current_backup->status == BACKUP_STATUS_OK)

@@ -25,6 +25,7 @@
 #include "storage/file/fio_device.h"
 #include "storage/dss/dss_adaptor.h"
 #include <sys/resource.h>
+#include "oss/include/restore.h"
 
 #define MIN_ULIMIT_STACK_SIZE 8388608     // 1024 * 1024 * 8
 
@@ -87,6 +88,7 @@ bool         backup_replslots = false;
 bool         smooth_checkpoint;
 char        *remote_agent;
 static char *backup_note = NULL;
+static char *oss_status_string = NULL;
 /* restore options */
 static char           *target_time = NULL;
 static char           *target_xid = NULL;
@@ -148,11 +150,15 @@ static pgSetBackupParams *set_backup_params = NULL;
 pgBackup    current;
 static ProbackupSubcmd backup_subcmd = NO_CMD;
 
+/* Oss Client*/
+void* oss_client = NULL;
+
 static bool help_opt = false;
 
 static void opt_incr_restore_mode(ConfigOption *opt, const char *arg);
 static void opt_backup_mode(ConfigOption *opt, const char *arg);
 static void opt_show_format(ConfigOption *opt, const char *arg);
+static void opt_media_type(ConfigOption *opt, const char *arg);
 
 static void compress_init(void);
 static void dss_init(void);
@@ -222,6 +228,8 @@ static ConfigOption cmd_options[] =
     { 'u', 139, "timeline",            &target_tli,        SOURCE_CMD_STRICT },
     { 's', 144, "lsn",                &target_lsn,        SOURCE_CMD_STRICT },
     { 'b', 140, "immediate",        &target_immediate,    SOURCE_CMD_STRICT },
+    { 'f', 'M', "media-type",        (void *)opt_media_type,        SOURCE_CMD_STRICT },
+    { 's', 241, "s3-status",         &oss_status_string,        SOURCE_CMD_STRICT },
 
     { 0 }
 };
@@ -445,7 +453,13 @@ static void parse_instance_name()
         {
             join_path_components(path, backup_instance_path,
                                  BACKUP_CATALOG_CONF_FILE);
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                restoreConfigFile(path);
+            }
             config_read_opt(path, instance_options, ERROR, true, false);
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                remove(path);
+            }
         }
         setMyLocation();
     }
@@ -610,6 +624,7 @@ static void parse_backup_option_to_params(char *command, char *command_name)
     if (backup_subcmd == SET_BACKUP_CMD || backup_subcmd == BACKUP_CMD)
     {
         time_t expire_time = 0;
+        oss_status_t oss_status = OSS_STATUS_INVALID;
 
         if (expire_time_string && ttl >= 0)
             elog(ERROR, "You cannot specify '--expire-time' and '--ttl' options together");
@@ -622,12 +637,17 @@ static void parse_backup_option_to_params(char *command, char *command_name)
                      expire_time_string);
         }
 
-        if (expire_time > 0 || ttl >= 0 || backup_note)
+        if (oss_status_string) {
+            oss_status = str2ossStatus(oss_status_string);
+        }
+
+        if (expire_time > 0 || ttl >= 0 || backup_note || oss_status_string)
         {
             set_backup_params = pgut_new(pgSetBackupParams);
             set_backup_params->ttl = ttl;
             set_backup_params->expire_time = expire_time;
             set_backup_params->note = backup_note;
+            set_backup_params->oss_status = oss_status;
 
             if (backup_note && strlen(backup_note) > MAX_NOTE_SIZE)
                 elog(ERROR, "Backup note cannot exceed %u bytes", MAX_NOTE_SIZE);
@@ -916,6 +936,12 @@ static void
 opt_backup_mode(ConfigOption *opt, const char *arg)
 {
     current.backup_mode = parse_backup_mode(arg);
+}
+
+static void
+opt_media_type(ConfigOption *opt, const char *arg)
+{
+    current.media_type = parse_media_type(arg);
 }
 
 static void

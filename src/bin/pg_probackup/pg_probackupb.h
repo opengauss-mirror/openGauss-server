@@ -101,6 +101,12 @@ typedef enum ShowFormat
     SHOW_JSON
 } ShowFormat;
 
+typedef enum MediaType {
+    MEDIA_TYPE_UNKNOWN = 0,
+    MEDIA_TYPE_DISK,
+    MEDIA_TYPE_OSS
+} MediaType;
+
 /* special values of pgBackup fields */
 #define INVALID_BACKUP_ID    0    /* backup ID is not provided by user */
 #define BYTES_INVALID        (-1) /* file didn`t changed since previous backup, DELTA backup do not rely on it */
@@ -174,6 +180,9 @@ typedef struct InstanceConfig
 
     /* DSS conntct parameters */
     DssOptions dss;
+
+    /* OSS parameters*/
+    OssOptions oss;
 } InstanceConfig;
 
 extern ConfigOption instance_options[];
@@ -203,6 +212,9 @@ typedef struct HeaderMap
     pthread_mutex_t mutex;
 
 } HeaderMap;
+
+struct SenderCxt;
+struct ReaderCxt;
 
 typedef struct pgBackup pgBackup;
 
@@ -291,6 +303,17 @@ struct pgBackup
 
     /* device type */
     device_type_t storage_type;
+
+    /* media type */
+    MediaType media_type;
+    /* local or oss */
+    oss_status_t oss_status;
+    /* sender context */
+    SenderCxt* sender_cxt;
+    parray* filesinfo;
+    /* reader count and context */
+    uint32 readerThreadCount;
+    ReaderCxt* readerCxt;
 };
 
 /* Recovery target for restore and validate subcommands */
@@ -339,6 +362,7 @@ typedef struct pgSetBackupParams
                           * must be pinned.
                           */
     char   *note;
+    oss_status_t oss_status; 
 } pgSetBackupParams;
 
 typedef struct
@@ -443,6 +467,28 @@ typedef struct BackupPageHeader2
     int32       pos;             /* position in backup file */
     uint16      checksum;
 } BackupPageHeader2;
+
+typedef enum FILE_APPEND_SEG_TYPE
+{
+    FILE_APPEND_TYPE_UNKNOWN = 0,
+    FILE_APPEND_TYPE_FILES,
+    FILE_APPEND_TYPE_DIR,
+    FILE_APPEND_TYPE_FILE,
+    FILE_APPEND_TYPE_FILE_CONTENT,
+    FILE_APPEND_TYPE_FILE_END,
+    FILE_APPEND_TYPE_FILES_END
+} FILE_APPEND_SEG_TYPE;
+
+typedef struct FileAppender {
+    void* filePtr; /* hold the buffer context handle */
+    char* baseFileName;
+    char* currFileName;
+    uint32 fileNo;
+    uint32 minFileNo;
+    uint32 maxFileNo;
+    uint64 currFileSize;
+    FILE_APPEND_SEG_TYPE type;
+} FileAppender;
 
 /* Special value for compressed_size field */
 #define PageIsOk         0

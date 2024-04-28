@@ -15,6 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "common/fe_memutils.h"
+#include "oss/include/oss_operator.h"
 
 static void delete_walfiles_in_tli(XLogRecPtr keep_lsn, timelineInfo *tli,
                                                         uint32 xlog_seg_size, bool dry_run);
@@ -39,6 +40,9 @@ do_delete(time_t backup_id)
     pgBackup   *target_backup = NULL;
     size_t  size_to_delete = 0;
     char    size_to_delete_pretty[20];
+    Oss::Oss* oss = getOssClient();
+    char* bucket_name = NULL;
+
 
     /* Get complete list of backups */
     backup_list = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
@@ -93,6 +97,12 @@ do_delete(time_t backup_id)
 
     if (!dry_run)
     {
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            bucket_name = getBucketName();
+            if (!oss->BucketExists(bucket_name)) {
+                elog(ERROR, "bucket %s not found.", bucket_name);
+            }
+        }
         /* Lock marked for delete backups */
         catalog_lock_backup_list(delete_list, parray_num(delete_list) - 1, 0, false);
 
@@ -105,6 +115,17 @@ do_delete(time_t backup_id)
                 elog(ERROR, "interrupted during delete backup");
 
             delete_backup_files(backup);
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                char*  prefix_name = getPrefixName(backup);
+                parray *delete_obj_list = parray_new();
+                oss->ListObjectsWithPrefix(bucket_name, prefix_name, delete_obj_list);
+                for (size_t j = 0; j < parray_num(delete_obj_list); j++) {
+                    char* object = (char*)parray_get(delete_obj_list, j);
+                    oss->RemoveObject(bucket_name, object);
+                    elog(INFO, "Object '%s' successfully deleted from S3", object);
+                }
+                parray_free(delete_obj_list);
+            }
         }
     }
 
@@ -164,6 +185,10 @@ void do_retention(void)
 
     backup_deleted = false;
     backup_merged = false;
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        elog(ERROR, "Not supported when specifying OSS options");
+    }
 
     /* Get a complete list of backups. */
     backup_list = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
@@ -1018,7 +1043,6 @@ do_delete_instance(void)
     size_t  i = 0;
     char    instance_config_path[MAXPGPATH];
 
-
     /* Delete all backups. */
     backup_list = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
 
@@ -1039,7 +1063,7 @@ do_delete_instance(void)
 
     /* Delete backup instance config file */
     join_path_components(instance_config_path, backup_instance_path, BACKUP_CATALOG_CONF_FILE);
-    if (remove(instance_config_path))
+    if (current.media_type != MEDIA_TYPE_OSS && remove(instance_config_path))
     {
         elog(ERROR, "Can't remove \"%s\": %s", instance_config_path,
             strerror(errno));
@@ -1053,6 +1077,25 @@ do_delete_instance(void)
     if (rmdir(arclog_path) != 0)
         elog(ERROR, "Can't remove \"%s\": %s", arclog_path,
             strerror(errno));
+
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        Oss::Oss* oss = getOssClient();
+        char* bucket_name = getBucketName();
+        if (!oss->BucketExists(bucket_name)) {
+            elog(ERROR, "bucket %s not found.", bucket_name);
+        } else {
+            // delete backups first
+            parray *delete_list = parray_new();
+            char* prefix_name = backup_instance_path + 1;
+            oss->ListObjectsWithPrefix(bucket_name, prefix_name, delete_list);
+            for (i = 0; i < parray_num(delete_list); i++) {
+                char* object = (char*)parray_get(delete_list, i);
+                oss->RemoveObject(bucket_name, object);
+                elog(INFO, "Object '%s' successfully deleted from S3", object);
+            }
+            parray_free(delete_list);
+        }
+    }
 
     elog(INFO, "Instance '%s' successfully deleted", instance_name);
     return 0;
@@ -1069,6 +1112,8 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
     size_t      size_to_delete = 0;
     char        size_to_delete_pretty[20];
     pgBackup   *backup;
+    Oss::Oss* oss = getOssClient();
+    char* bucket_name = NULL;
 
     BackupStatus status_for_delete = str2status(status);
     delete_list = parray_new();
@@ -1126,6 +1171,13 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
         catalog_lock_backup_list(delete_list, parray_num(delete_list) - 1, 0, false);
     }
 
+    if (current.media_type == MEDIA_TYPE_OSS) {
+        bucket_name = getBucketName();
+        if (!oss->BucketExists(bucket_name)) {
+            elog(ERROR, "bucket %s not found.", bucket_name);
+        }
+    }
+
     /* delete and calculate free size from delete_list */
     for (i = 0; i < parray_num(delete_list); i++)
     {
@@ -1140,6 +1192,17 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
 
         if (!dry_run) {
             delete_backup_files(backup);
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                char* prefix_name = getPrefixName(backup);
+                parray *delete_list = parray_new();
+                oss->ListObjectsWithPrefix(bucket_name, prefix_name, delete_list);
+                for (size_t j = 0; j < parray_num(delete_list); j++) {
+                    char* object = (char*)parray_get(delete_list, j);
+                    oss->RemoveObject(bucket_name, object);
+                    elog(INFO, "Object '%s' successfully deleted from S3", object);
+                }
+                parray_free(delete_list);
+            }
         }
 
         n_deleted++;

@@ -17,6 +17,7 @@
 #include "storage/checksum.h"
 #include "storage/file/fio_device.h"
 #include "common/fe_memutils.h"
+#include "oss/include/appender.h"
 
 #define PRINTF_BUF_SIZE  1024
 
@@ -1206,7 +1207,7 @@ static void fio_load_file(int out, char const* path)
 int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *file,
                                     XLogRecPtr horizonLsn, int calg, int clevel, uint32 checksum_version,
                                     bool use_pagemap, BlockNumber* err_blknum, char **errormsg,
-                                    BackupPageHeader2 **headers)
+                                    BackupPageHeader2 **headers, FileAppender* appender, char** fileBuffer)
 {
     FILE *out = NULL;
     char *out_buf = NULL;
@@ -1330,15 +1331,29 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
             COMP_FILE_CRC32(true, file->crc, buf, hdr.size);
 
             /* lazily open backup file */
-            if (!out)
+            if (current.media_type != MEDIA_TYPE_OSS && !out)
                 out = open_local_file_rw(to_fullpath, &out_buf, STDIO_BUFSIZE);
 
-            if (fio_fwrite(out, buf, hdr.size) != hdr.size)
-            {
-                fio_fclose(out);
-                *err_blknum = blknum;
-                return WRITE_FAILED;
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                if (fileBuffer != NULL) {
+                    int rc = memcpy_s(*fileBuffer, hdr.size, buf, hdr.size);
+                    securec_check_c(rc, "\0", "\0");
+                    *fileBuffer += hdr.size;
+                } else {
+                    /* write data page */
+                    FileAppenderSegHeader content_header;
+                    constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, hdr.size, 0, file);
+                    writeHeader(&content_header, appender);
+                    writePayload((char*)buf, hdr.size, appender);
+                }
+            } else {
+                if (fio_fwrite(out, buf, hdr.size) != hdr.size) {
+                    fio_fclose(out);
+                    *err_blknum = blknum;
+                    return WRITE_FAILED;
+                }
             }
+
             file->write_size += hdr.size;
             file->uncompressed_size += BLCKSZ;
         }
@@ -1346,7 +1361,7 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
             elog(ERROR, "Remote agent returned message of unexpected type: %i", hdr.cop);
         }
 
-        if (out)
+        if (current.media_type != MEDIA_TYPE_OSS && out)
             fclose(out);
         pg_free(out_buf);
 
@@ -1681,7 +1696,8 @@ static char *ProcessErrorIn(int out, fio_header &hdr, const char *fromFullpath)
  * If pgFile is not NULL then we must calculate crc and read_size for it.
  */
 int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
-                                pgFile *file, char **errormsg)
+                                pgFile *file, char **errormsg,
+                                FileAppender* appender, char** fileBuffer)
 {
     fio_header hdr;
     int exit_code = SEND_OK;
@@ -1727,17 +1743,32 @@ int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
             }
             IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
 
-            /* We have received a chunk of data data, lets write it out */
-            if (fwrite(buf, 1, hdr.size, out) != hdr.size)
-            {
-                exit_code = WRITE_FAILED;
-                break;
-            }
-
-            if (file)
-            {
+            if (current.media_type == MEDIA_TYPE_OSS) {
+                if (fileBuffer != NULL) {
+                    int rc = memcpy_s(*fileBuffer, hdr.size, buf, hdr.size);
+                    securec_check_c(rc, "\0", "\0");
+                    *fileBuffer += hdr.size;
+                } else {
+                    /* Update CRC */
+                    COMP_FILE_CRC32(true, file->crc, buf, hdr.size);
+                    /* write data page */
+                    FileAppenderSegHeader content_header;
+                    constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, hdr.size, 0, file);
+                    writeHeader(&content_header, appender);
+                    writePayload((char*)buf, hdr.size, appender);
+                }
                 file->read_size += hdr.size;
-                COMP_FILE_CRC32(true, file->crc, buf, hdr.size);
+            } else {
+                /* We have received a chunk of data data, lets write it out */
+                if (fwrite(buf, 1, hdr.size, out) != hdr.size) {
+                    exit_code = WRITE_FAILED;
+                    break;
+                }
+
+                if (file) {
+                    file->read_size += hdr.size;
+                    COMP_FILE_CRC32(true, file->crc, buf, hdr.size);
+                }
             }
         }
         else

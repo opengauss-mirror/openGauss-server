@@ -61,6 +61,7 @@ set(LLVM_HOME ${DEPENDENCY_PATH}/llvm/${LIB_UNIFIED_SUPPORT})
 set(LZ4_HOME ${DEPENDENCY_PATH}/lz4/${SUPPORT_LLT})
 set(NANOMSG_HOME ${DEPENDENCY_PATH}/nng/${LIB_UNIFIED_SUPPORT})
 set(NCURSES_HOME ${DEPENDENCY_PATH}/ncurses/${SUPPORT_LLT})
+set(AWSSDK_HOME ${DEPENDENCY_PATH}/aws-sdk-cpp/${SUPPORT_LLT})
 if(($ENV{WITH_TASSL}) STREQUAL "YES")
     set(OPENSSL_HOME ${DEPENDENCY_PATH}/tassl/${LIB_UNIFIED_SUPPORT})
 else()
@@ -192,6 +193,12 @@ set(LIBCGROUP_LIB_PATH ${CGROUP_HOME}/lib)
 #############################################################################
 set(LIBCURL_INCLUDE_PATH ${CURL_HOME}/include)
 set(LIBCURL_LIB_PATH ${CURL_HOME}/lib)
+
+#############################################################################
+# awssdk component
+#############################################################################
+set(AWSSDK_INCLUDE_PATH ${AWSSDK_HOME}/include)
+set(AWSSDK_LIB_PATH ${AWSSDK_HOME}/lib)
 
 #############################################################################
 # edit component
