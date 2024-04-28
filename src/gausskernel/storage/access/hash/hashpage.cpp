@@ -985,7 +985,6 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
     ovflopaque->hasho_bucket = -1;
     ovflopaque->hasho_flag = LH_UNUSED_PAGE;
     ovflopaque->hasho_page_id = HASHO_PAGE_ID;
-    PageSetChecksumInplace(zerobuf, lastblock);
 
     if (RelationNeedsWAL(rel))
             log_newpage(&rel->rd_node,
@@ -994,6 +993,7 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
                         zerobuf,
                         true);
 
+    PageSetChecksumInplace(page, lastblock);
     if (IsSegmentFileNode(rel->rd_node)) {
         Buffer buf;
         for (BlockNumber i = firstblock; i <= lastblock; i++) {
