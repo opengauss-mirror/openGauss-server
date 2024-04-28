@@ -51,6 +51,7 @@ typedef struct CacheLookupEnt {
             looped++;                                                                                                \
             if (looped > MAX_LOOPS) {                                                                                 \
                 if (retryNum > MAX_RETRY_NUM) {                                                                        \
+                    UnlockSweep();                                                                                   \
                     ereport(ERROR,                                                                                   \
                             (errcode(ERRCODE_OUT_OF_BUFFER), errmodule(MOD_CACHE),                                   \
                              errmsg("No free Cache Blocks! cstore_buffers maybe too small, scanned=%d,"              \
