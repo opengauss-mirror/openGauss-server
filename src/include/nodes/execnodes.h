@@ -511,6 +511,10 @@ typedef struct ResultRelInfo {
 
     /* number of stored generated columns we need to compute */
     int ri_NumGeneratedNeeded;
+    /* number of the unusable index*/
+    int ri_NumUnusableIndices;
+    RelationPtr ri_UnusableIndexRelationDescs;
+    IndexInfo** ri_UnusableIndexRelationInfo;
 } ResultRelInfo;
 
 /* bloom filter controller */

@@ -135,7 +135,10 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_TRUNC_NUMERIC_TAIL_ZERO 8388608
 #define OPT_ARRAY_COUNT_COMPAT 16777216
 #define OPT_ACCEPT_EMPTY_STR 33554432
-#define OPT_MAX 26
+
+#define OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD 1073741824
+
+#define OPT_MAX 27
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -181,6 +184,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define PLSQL_COMPILE_FOR_LOOP (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_FOR_LOOP)
 #define PLSQL_COMPILE_OUTPARAM (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_OUTPARAM)
 #define ARRAY_COUNT_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_ARRAY_COUNT_COMPAT)
+
+#define UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD (u_sess->utils_cxt.behavior_compat_flags & OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD)
 
 #define A_FORMAT_VERSION_10C ((bool)(u_sess->utils_cxt.a_format_version_flag & A_FORMAT_OPT_VER_10C))
 #define A_FORMAT_DEV_VERSION_V1 ((bool)(u_sess->utils_cxt.a_format_dev_version_flag & A_FORMAT_OPT_DEV_V1))
