@@ -1345,6 +1345,18 @@ SELECT * FROM "test_modify_view_f1f2F3";
 DROP VIEW "test_modify_view_f1f2F3";
 DROP TABLE test_at_modify_view_column CASCADE;
 
+-- test MODIFY after ADD COLUMN DEFAULT
+CREATE TABLE test_modify_after_add (
+ c1 INT,
+ value_column INT
+);
+insert into test_modify_after_add values (1,2);
+ALTER TABLE test_modify_after_add ADD COLUMN c2 TIMESTAMP(5) default '2025-11-11 11:11:11';
+select * from test_modify_after_add;
+ALTER TABLE test_modify_after_add MODIFY column c2 TIMESTAMP(5);
+select * from test_modify_after_add;
+DROP TABLE test_modify_after_add;
+
 -- END
 RESET CURRENT_SCHEMA;
 DROP SCHEMA atbdb_schema CASCADE;
