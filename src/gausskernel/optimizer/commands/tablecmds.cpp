@@ -33086,7 +33086,6 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
     pg_attr->attcollation = collid;
     pg_attr->attnotnull = def->is_not_null;
     pg_attr->attislocal = def->is_local;
-    pg_attr->attkvtype = def->kvtype;
     pg_attr->attinhcount = def->inhcount;
     pg_attr->atthasdef = false;
     ReleaseSysCache(type_tuple);
