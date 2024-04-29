@@ -313,7 +313,7 @@ static void handle_sigint(SIGNAL_ARGS)
         }
     }
 
-    if (readline_status == WAIT_INPUT) {
+    if (readline_status == COMPLETE_QUERY) {
         readline_status = COMPLETE_CANCELLED;
     }
 
