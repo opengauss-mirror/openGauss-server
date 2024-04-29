@@ -293,16 +293,17 @@ show collation_connection;
 
 set names gbk;
 set names utf8 collate 'default';
+ERROR:  invalid value for parameter "collation_connection": "default"
 show character_set_connection;
  character_set_connection 
 --------------------------
- UTF8
+ GBK
 (1 row)
 
 show collation_connection;
  collation_connection 
 ----------------------
- default
+ gbk_chinese_ci
 (1 row)
 
 set names gbk;
@@ -321,6 +322,7 @@ show collation_connection;
 
 -- test charset = -1
 set collation_connection = 'C';
+ERROR:  invalid value for parameter "collation_connection": "C"
 show character_set_connection;
  character_set_connection 
 --------------------------
@@ -330,10 +332,11 @@ show character_set_connection;
 show collation_connection;
  collation_connection 
 ----------------------
- C
+ utf8mb4_general_ci
 (1 row)
 
 set collation_connection = 'default';
+ERROR:  invalid value for parameter "collation_connection": "default"
 show character_set_connection;
  character_set_connection 
 --------------------------
@@ -343,10 +346,11 @@ show character_set_connection;
 show collation_connection;
  collation_connection 
 ----------------------
- default
+ utf8mb4_general_ci
 (1 row)
 
 set collation_connection = 'POSIX';
+ERROR:  invalid value for parameter "collation_connection": "POSIX"
 show character_set_connection;
  character_set_connection 
 --------------------------
@@ -356,9 +360,24 @@ show character_set_connection;
 show collation_connection;
  collation_connection 
 ----------------------
- POSIX
+ utf8mb4_general_ci
 (1 row)
 
+set collation_connection = "binary";
+set collation_connection = binary;
+show character_set_connection;
+ character_set_connection 
+--------------------------
+ SQL_ASCII
+(1 row)
+
+show collation_connection;
+ collation_connection 
+----------------------
+ binary
+(1 row)
+
+set names utf8;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 

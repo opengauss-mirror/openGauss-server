@@ -3016,6 +3016,7 @@ opt_boolean_or_string:
 			 * is the same, so we don't need to distinguish them here.
 			 */
 			| ColId_or_Sconst						{ $$ = $1; }
+			| BINARY								{ $$ = "binary";}
 		;
 
 /* Timezone values can be:
