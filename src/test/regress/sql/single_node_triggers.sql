@@ -1194,6 +1194,29 @@ when not matched then insert values (5, 'e', '2023-09-20',0);
 
 select * from t1 order by c1;
 
+-- test for lock
+create table test_lock (a int);
+insert into test_lock values (1);
+\parallel on 2
+DECLARE
+  v1 int;
+  CURSOR emp_cur IS
+    SELECT * from test_lock FOR update of test_lock ; 
+begin
+    OPEN emp_cur;
+    perform pg_sleep(3);
+    CLOSE emp_cur;
+end;
+/
+
+begin
+    perform pg_sleep(1);
+    perform * from  test_lock for update nowait;
+end;
+/
+\parallel off
+
+drop table test_lock;
 drop table t1;
 drop table t2;
 drop function t1_tri_func;

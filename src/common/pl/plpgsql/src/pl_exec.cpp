@@ -8373,6 +8373,11 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
     }
 #endif
     curvar->cursor_closed = false;
+    /* Execute SQL through move cursor, only in A compatibility mode */
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        (void)PortalRunFetch(portal, FETCH_FORWARD, FETCH_ALL, None_Receiver);
+        (void)PortalRunFetch(portal, FETCH_BACKWARD, FETCH_ALL, None_Receiver);
+    }
     return PLPGSQL_RC_OK;
 }
 
