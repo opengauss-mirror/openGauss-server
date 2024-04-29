@@ -1508,14 +1508,20 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
 
                 |       K_TYPE decl_varname as_is K_VARRAY '(' ICONST ')'  K_OF varray_var ';'
                     {
-                        ereport(errstate,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmodule(MOD_PLSQL),
-                                errmsg("array type nested by array is not supported yet."),
-                                errdetail("Define array type \"%s\" of array is not supported yet.", $2->name),
-                                errcause("feature not supported"),
-                                erraction("check define of array type")));
-                        u_sess->plsql_cxt.have_error = true;
+                        IsInPublicNamespace($2->name);
+                        PLpgSQL_var *check_var = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
+                        /* get and check nest tableof's depth */
+                        int depth = get_nest_tableof_layer(check_var, $2->name, errstate);
+                        PLpgSQL_type *nest_type = plpgsql_build_nested_datatype();
+                        nest_type->tableOfIndexType = INT4OID;
+                        nest_type->collectionType = PLPGSQL_COLLECTION_ARRAY;
+                        PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_varrayType($2->name, $2->lineno, nest_type, true);
+                        /* nested table type */
+                        var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
+                        var->nest_layers = depth;
+                        var->isIndexByTblOf = false;
+                        pfree_ext($2->name);
+                        pfree($2);
                     }
 
                 |       K_TYPE decl_varname as_is K_VARRAY '(' ICONST ')'  K_OF table_var ';'
@@ -1552,6 +1558,8 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             IsInPublicNamespace(varname->name);
 
                             PLpgSQL_type *var_type = ((PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$3])->datatype;
+                            PLpgSQL_var *varray_type = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$3];
+
                             PLpgSQL_var *newp;
                             PLpgSQL_type *new_var_type;
 
@@ -1570,6 +1578,10 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                                     (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                                         errmsg("build variable failed")));
                                 u_sess->plsql_cxt.have_error = true;
+                            }
+                            if (varray_type->nest_table != NULL) {
+                                newp->nest_table = plpgsql_build_nested_variable(varray_type->nest_table, $2, varname->name, varname->lineno);
+                                newp->nest_layers = varray_type->nest_layers;
                             }
                             pfree_ext(varname->name);
                         }

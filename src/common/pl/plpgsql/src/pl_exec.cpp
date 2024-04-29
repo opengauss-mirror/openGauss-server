@@ -10506,7 +10506,8 @@ static void evalSubscriptList(PLpgSQL_execstate* estate, const List* subscripts,
     estate->eval_tuptable = NULL;
 
     if (*target != NULL && (*target)->dtype == PLPGSQL_DTYPE_VAR &&
-        ((PLpgSQL_var*)(*target))->datatype->collectionType == PLPGSQL_COLLECTION_TABLE) {
+        (((PLpgSQL_var*)(*target))->datatype->collectionType == PLPGSQL_COLLECTION_TABLE ||
+        ((PLpgSQL_var*)(*target))->datatype->collectionType == PLPGSQL_COLLECTION_ARRAY)) {
         int tableof_level = 0;
         char* valname = ((PLpgSQL_var*)(*target))->refname;
         PLpgSQL_expr* subexprs[nsubscripts];

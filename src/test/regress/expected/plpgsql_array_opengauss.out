@@ -124,7 +124,7 @@ end;
 ERROR:  mismatched parentheses at or near ";"
 LINE 12:     insert into tmp values (null, name_list(1]);
                                                         ^
-QUERY:  DECLARE  cursor c_customers is (select c_name from customers order by id);
+QUERY:  DECLARE cursor c_customers is (select c_name from customers order by id);
     type c_list is varray(6) of customers.c_name%type;
     name_list c_list := c_list();
     counter integer := 0;
@@ -302,7 +302,7 @@ end;
 ERROR:  mismatched parentheses at or near ";"
 LINE 6:         insert into tmp values (null, names(i]);
                                                        ^
-QUERY:  DECLARE  type students is varray(5) of varchar2(10);
+QUERY:  DECLARE type students is varray(5) of varchar2(10);
     names students;
 begin
     names := students(1, 'Zera ', 'Alice', 'Jim  ', 'Kevin'); -- should be able read all values correctly --
@@ -498,9 +498,12 @@ begin
     insert into tmp values (null, mat(1)(2));
 end;
 /
-ERROR:  array type nested by array is not supported yet.
-DETAIL:  Define array type "arraysecond" of array is not supported yet.
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 3
+ERROR:  cannot cast type integer[] to integer
+LINE 1: SELECT ARRAY[(arr)::pg_catalog."int4", (arr)::pg_catalog."in...
+                          ^
+QUERY:  SELECT ARRAY[(arr)::pg_catalog."int4", (arr)::pg_catalog."int4"]
+CONTEXT:  referenced column: array
+PL/pgSQL function inline_code_block line 5 during statement block local variable initialization
 select * from tmp order by 1, 2;
  a | b 
 ---+---

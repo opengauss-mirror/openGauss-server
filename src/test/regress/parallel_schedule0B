@@ -280,7 +280,7 @@ test: select_where_func
 test: arrayinterface_single
 test: plpgsql_table_opengauss  
 test: plpgsql_assign_value_to_array_attribute
-test: plpgsql_array_of_record 
+test: plpgsql_array_of_record
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
 test: function_default_test plpgsql_inout_param
@@ -291,7 +291,7 @@ test: plpgsql_record_attrname
 test: plpgsql_insert_record plpgsql_condition_name
 test: hw_package_variable package_typmod_test
 test: autonomous_cursor
-test: plpgsql_reset_session
+test: plpgsql_reset_session plpgsql_nested_array_and_record
 #test: plpgsql_depend
 test: plpgsql_depend/plpgsql_depend_type  plpgsql_depend/plpgsql_pkg_dependency plpgsql_depend/plpgsql_recompile plpgsql_depend/plpgsql_pkg_variable_dependency plpgsql_depend/plpgsql_depend_reftype
 #test: plancache limit rangefuncs prepare
