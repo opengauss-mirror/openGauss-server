@@ -1,0 +1,61 @@
+create table trigtest(i serial primary key);
+NOTICE:  CREATE TABLE will create implicit sequence "trigtest_i_seq" for serial column "trigtest.i"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "trigtest_pkey" for table "trigtest"
+create function trigtestfunc() returns trigger as $$
+    begin
+        raise notice '% % % %', TG_RELNAME, TG_OP, TG_WHEN, TG_LEVEL;
+        return new;
+    end;$$ language plpgsql;
+create trigger trigtest_b_row_tg before insert or update or delete on trigtest 
+    for each row execute procedure trigtestfunc();
+create trigger trigtest_a_row_tg after insert or update or delete on trigtest 
+    for each row execute procedure trigtestfunc();
+create table trigtest2 (i serial primary key);
+NOTICE:  CREATE TABLE will create implicit sequence "trigtest2_i_seq" for serial column "trigtest2.i"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "trigtest2_pkey" for table "trigtest2"
+create trigger trigtest_a_row_tg after insert or update or delete on trigtest2 
+    for each row execute procedure trigtestfunc();
+    
+select tgname, tgtype, tgenabled from pg_trigger where tgname like 'trigtest%';
+      tgname       | tgtype | tgenabled 
+-------------------+--------+-----------
+ trigtest_a_row_tg |     29 | O
+ trigtest_a_row_tg |     29 | O
+ trigtest_b_row_tg |     31 | O
+(3 rows)
+
+alter trigger trigtest_b_row_tg disable;
+select tgname, tgtype, tgenabled from pg_trigger where tgname = 'trigtest_b_row_tg';
+      tgname       | tgtype | tgenabled 
+-------------------+--------+-----------
+ trigtest_b_row_tg |     31 | D
+(1 row)
+
+insert into trigtest values(1);
+NOTICE:  trigtest INSERT AFTER ROW
+alter trigger trigtest_b_row_tg enable;
+select tgname, tgtype, tgenabled from pg_trigger where tgname = 'trigtest_b_row_tg';
+      tgname       | tgtype | tgenabled 
+-------------------+--------+-----------
+ trigtest_b_row_tg |     31 | O
+(1 row)
+
+insert into trigtest values(2);
+NOTICE:  trigtest INSERT BEFORE ROW
+NOTICE:  trigtest INSERT AFTER ROW
+alter trigger trigtest_a_row_tg disable;
+ERROR:  trigger named "trigtest_a_row_tg" has more than one trigger, please use drop trigger on syntax
+select tgname, tgtype, tgenabled from pg_trigger where tgname like 'trigtest%';
+      tgname       | tgtype | tgenabled 
+-------------------+--------+-----------
+ trigtest_a_row_tg |     29 | O
+ trigtest_a_row_tg |     29 | O
+ trigtest_b_row_tg |     31 | O
+(3 rows)
+
+alter trigger trigtest_err disable;
+ERROR:  trigger "trigtest_err" does not exist
+alter trigger trigtest_err enable;
+ERROR:  trigger "trigtest_err" does not exist
+drop table trigtest cascade;
+drop table trigtest2 cascade;

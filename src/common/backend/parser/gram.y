@@ -367,6 +367,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 		AlterExtensionStmt AlterExtensionContentsStmt AlterForeignTableStmt
 		AlterCompositeTypeStmt AlterUserStmt AlterUserMappingStmt AlterUserSetStmt
 		AlterSystemStmt
+		AlterTriggerStmt
 		AlterRoleStmt AlterRoleSetStmt AlterRlsPolicyStmt
 		AlterDefaultPrivilegesStmt DefACLAction AlterSessionStmt
 		AnalyzeStmt CleanConnStmt ClosePortalStmt ClusterStmt CommentStmt
@@ -1208,6 +1209,7 @@ stmt :
 			| AlterSubscriptionStmt
 			| AlterTableStmt
 			| AlterSystemStmt
+			| AlterTriggerStmt
 			| AlterCompositeTypeStmt
 			| AlterRoleSetStmt
 			| AlterRoleStmt
@@ -2068,6 +2070,18 @@ altersys_option:
 			|				{/* empty */}
 			;
 
+AlterTriggerStmt:
+			ALTER TRIGGER name enable_trigger
+				{
+					if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+						ereport(ERROR,(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("ALTER TRIGGER ... ENABLE/DISABLE is supported only in A_FORMAT database.")));
+					AlterTriggerStmt *n = makeNode(AlterTriggerStmt);
+					n->trigname = $3;
+					n->tgenabled = $4;
+					$$ = (Node *)n;
+				}
+			;
 /*****************************************************************************
  *
  * Drop a postgresql group

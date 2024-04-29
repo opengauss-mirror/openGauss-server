@@ -6889,6 +6889,9 @@ ProcessUtilitySlow(Node *parse_tree,
             case T_CreateAmStmt:
                 address = CreateAccessMethod((CreateAmStmt *) parse_tree);
                 break;
+            case T_AlterTriggerStmt:
+                address = AlterTrigger((AlterTriggerStmt *) parse_tree);
+                break;
             default:
                elog(ERROR, "unrecognized node type: %d",
                     (int) nodeTag(parse_tree));
@@ -9480,6 +9483,10 @@ const char* CreateCommandTag(Node* parse_tree)
             tag = "CREATE ACCESS METHOD";
             break;
 
+        case T_AlterTriggerStmt:
+            tag = "ALTER TRIGGER";
+            break;
+
         case T_PrepareStmt:
             tag = "PREPARE";
             break;
@@ -10387,6 +10394,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             break;
 
         case T_CreateAmStmt:
+            lev = LOGSTMT_DDL;
+            break;
+
+        case T_AlterTriggerStmt:
             lev = LOGSTMT_DDL;
             break;
 

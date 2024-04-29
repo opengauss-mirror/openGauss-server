@@ -1624,6 +1624,10 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
             CreateTrigStmt* createstmt = (CreateTrigStmt*)(parsetree);
             pgaudit_ddl_trigger(createstmt->trigname, queryString);
         } break;
+        case T_AlterTriggerStmt: { /* Audit alter trigger */
+            AlterTriggerStmt *alterstmt = (AlterTriggerStmt *)(parsetree);
+            pgaudit_ddl_trigger(alterstmt->trigname, queryString);
+        } break;
         case T_AlterDefaultPrivilegesStmt: { /* ALTER DEFAULT PRIVILEGES statement */
             AlterDefaultPrivilegesStmt* alterprivilegesstmt = (AlterDefaultPrivilegesStmt*)(parsetree);
             pgaudit_grant_or_revoke_role(alterprivilegesstmt->action->is_grant, NULL, queryString);

@@ -4102,6 +4102,13 @@ static void _outAlterTableStmt(StringInfo str, AlterTableStmt* node)
     WRITE_BOOL_FIELD(fromReplace);
 }
 
+static void _outAlterTriggerStmt(StringInfo str, AlterTriggerStmt *node)
+{
+    WRITE_NODE_TYPE("ALTERTRIGGER");
+    WRITE_STRING_FIELD(trigname);
+    WRITE_CHAR_FIELD(tgenabled);
+}
+
 static void _outCopyStmt(StringInfo str, CopyStmt* node)
 {
     WRITE_NODE_TYPE("COPY");
@@ -6876,6 +6883,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_AlterTableStmt:
                 _outAlterTableStmt(str, (AlterTableStmt*)obj);
+                break;
+            case T_AlterTriggerStmt:
+                _outAlterTriggerStmt(str, (AlterTriggerStmt*)obj);
                 break;
             case T_SelectStmt:
                 _outSelectStmt(str, (SelectStmt*)obj);

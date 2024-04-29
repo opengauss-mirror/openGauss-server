@@ -5146,6 +5146,16 @@ static AlterTableStmt* _copyAlterTableStmt(const AlterTableStmt* from)
     return newnode;
 }
 
+static AlterTriggerStmt *_copyAlterTriggerStmt(const AlterTriggerStmt *from)
+{
+    AlterTriggerStmt *newnode = makeNode(AlterTriggerStmt);
+
+    COPY_STRING_FIELD(trigname);
+    COPY_SCALAR_FIELD(tgenabled);
+
+    return newnode;
+}
+
 static AlterTableCmd* _copyAlterTableCmd(const AlterTableCmd* from)
 {
     AlterTableCmd* newnode = makeNode(AlterTableCmd);
@@ -8407,6 +8417,9 @@ void* copyObject(const void* from)
             break;
         case T_AlterTableStmt:
             retval = _copyAlterTableStmt((AlterTableStmt*)from);
+            break;
+        case T_AlterTriggerStmt:
+            retval = _copyAlterTriggerStmt((AlterTriggerStmt *)from);
             break;
         case T_AlterTableCmd:
             retval = _copyAlterTableCmd((AlterTableCmd*)from);

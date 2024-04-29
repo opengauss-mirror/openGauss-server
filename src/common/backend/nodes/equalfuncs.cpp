@@ -1120,6 +1120,14 @@ static bool _equalAlterTableStmt(const AlterTableStmt* a, const AlterTableStmt* 
     return true;
 }
 
+static bool _equalAlterTriggerStmt(const AlterTriggerStmt *a, const AlterTriggerStmt *b)
+{
+    COMPARE_STRING_FIELD(trigname);
+    COMPARE_SCALAR_FIELD(tgenabled);
+
+    return true;
+}
+
 static bool _equalAlterTableCmd(const AlterTableCmd* a, const AlterTableCmd* b)
 {
     COMPARE_SCALAR_FIELD(subtype);
@@ -3908,6 +3916,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterTableStmt:
             retval = _equalAlterTableStmt((AlterTableStmt*)a, (AlterTableStmt*)b);
+            break;
+        case T_AlterTriggerStmt:
+            retval = _equalAlterTriggerStmt((AlterTriggerStmt*)a, (AlterTriggerStmt*)b);
             break;
         case T_AlterTableCmd:
             retval = _equalAlterTableCmd((AlterTableCmd*)a, (AlterTableCmd*)b);
