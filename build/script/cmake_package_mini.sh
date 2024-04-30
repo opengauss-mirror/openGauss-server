@@ -809,5 +809,6 @@ echo "[makemppdb] $(date +%y-%m-%d' '%T): remove ${BUILD_DIR}" >>"$LOG_FILE" 2>&
 
 mkdir ${ROOT_DIR}/output
 mv ${ROOT_DIR}/build/script/*.tar.gz ${ROOT_DIR}/output/
+test -e ${ROOT_DIR}/build/script/gaussdb.map && mv ${ROOT_DIR}/build/script/gaussdb.map ${ROOT_DIR}/output/
 echo "now, all packages has finished!"
 exit 0

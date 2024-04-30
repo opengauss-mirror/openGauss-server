@@ -754,6 +754,7 @@ enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
+enable_relocation
 enable_finance_mode
 enable_mot
 enable_bbox
@@ -842,6 +843,7 @@ enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
 enable_lite_mode
+enable_relocation
 enable_finance_mode
 enable_mot
 enable_bbox
@@ -3234,7 +3236,21 @@ $as_echo "$as_me: error: no argument expected for --enable-finance-mode option" 
 
 else
   enable_finance_mode=no
+fi
 
+
+# Check whether --enable-relocation was given.
+if test "$enable_relocation" = yes; then
+  major_version=$(echo "$gcc_version" | cut -d'.' -f1)
+  minor_version=$(echo "$gcc_version" | cut -d'.' -f2)
+  if  (( major_version < 10 )) || (( major_version >= 10 && minor_version < 3 )); then
+    { { $as_echo "$as_me:$LINENO: error: --enable-relocation is not supported where GCC compiler version is less than 10.3." >&5
+        $as_echo "$as_me: error: -enable-relocation is not supported where GCC compiler version is less than 10.3." >&2;}
+        { (exit 1); exit 1; }; }
+  fi
+  enable_relocation=yes
+else
+  enable_relocation=no
 fi
 
 if test "$enable_lite_nodes" = yes; then

@@ -181,6 +181,12 @@ function make_package_upgrade_sql()
     echo "Successfully packaged upgrade_sql files."
 }
 
+function move_gaussdb_map()
+{
+      cd $SCRIPT_DIR
+      deploy_pkgs gaussdb.map
+}
+
 function make_package_libpq()
 {
     cd $SCRIPT_DIR
@@ -236,5 +242,6 @@ function gaussdb_pkg()
     make_package_libpq
     make_package_tools
     make_package_upgrade_sql
+    move_gaussdb_map
     echo "End package opengauss."
 }

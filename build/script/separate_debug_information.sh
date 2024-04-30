@@ -104,7 +104,7 @@ separate_symbol()
   			;;
   			esac
 			if [ -x "$x" ]; then
-				if [ "$x" != "install-sh"  ]; then
+				if [ "$x" != "install-sh"  ] && [ "$x" != "gaussdb.map" ]; then
 					objcopy --only-keep-debug "$x" "$INSTALL_DIR/${symbol_name}.symbol" > /dev/null 2>&1
 					objcopy --strip-all "$x" "$x"_release
 					rm  "$x"
@@ -191,3 +191,4 @@ cd $SYMBOLS_DIR/../
 tar -zcf $PACKAGE_DIR/symbols.tar.gz symbols
 chmod 755 $PACKAGE_DIR/symbols.tar.gz
 cp $PACKAGE_DIR/symbols.tar.gz  $DEPTH
+mv "$BIN_DIR/gaussdb.map" $DEPTH

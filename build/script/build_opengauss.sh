@@ -109,7 +109,7 @@ while [ $# -gt 0 ]; do
                 echo "no extra configure options provided"
                 exit 1
             fi
-            extra_cmake_opt=$2
+            extra_cmake_opt=" $2 $extra_cmake_opt "
             shift 2
             ;;
         --config_opt)
@@ -117,7 +117,7 @@ while [ $# -gt 0 ]; do
                 echo "no extra configure options provided"
                 exit 1
             fi
-            extra_config_opt=$2
+            extra_config_opt=" $2 $extra_config_opt "
             shift 2
             ;;
         -T|--tassl)

@@ -305,6 +305,9 @@ ifneq ($(PORTNAME), aix)
 
 gaussdb: $(OBJS) |
 	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) $(HOTPATCH_ATOMIC_LDS) -o $@
+ifeq ($(enable_relocation), yes)
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) $(HOTPATCH_ATOMIC_LDS) -o $@.map -Wl,-q
+endif
 	$(CRC_CHECK)
 
 db: $(OBJS)
@@ -705,6 +708,10 @@ endif
 install-bin: gaussdb $(POSTGRES_IMP) installdirs libcgroup
 	$(INSTALL_PROGRAM) gaussdb$(X) '$(DESTDIR)$(bindir)/gaussdb$(X)'
 	$(INSTALL_PROGRAM) '$(LZ4_BIN_PATH)/lz4' '$(DESTDIR)$(bindir)/lz4'
+ifeq ($(enable_relocation), yes)
+	$(INSTALL_PROGRAM) gaussdb$(X).map '$(DESTDIR)$(bindir)/gaussdb$(X).map'
+endif
+
 ifeq ($(enable_lite_mode), no)
 	@if test -d $(KERBEROS_BIN_PATH); then cp -rf $(KERBEROS_BIN_PATH)/klist $(DESTDIR)$(bindir)/; fi  
 	@if test -d $(KERBEROS_BIN_PATH); then cp -rf $(KERBEROS_BIN_PATH)/kinit $(DESTDIR)$(bindir)/; fi

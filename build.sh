@@ -31,6 +31,7 @@ function print_help()
     -T|--tassl                        build with tassl
     -pm|--product_mode                this values of paramenter is opengauss or lite or finance, the default value is opengauss.
     -nls|--enable_nls                 enable Native Language Support
+    --relocation                      generate gaussdb.map with relocation(GCC >=10.3).
     "
 }
 
@@ -82,7 +83,11 @@ while [ $# -gt 0 ]; do
             shift 1
             ;;
         -nls|--enable_nls)
-            extra_config_opt="--config_opt --enable-nls=zh_CN "
+            extra_config_opt="$extra_config_opt --config_opt --enable-nls=zh_CN "
+            shift 1
+            ;;
+        --relocation)
+            extra_config_opt="$extra_config_opt --config_opt --enable-relocation "
             shift 1
             ;;
          *)
