@@ -522,3 +522,24 @@ select max(name) from test3 connect by parentid = prior id group by sys_connect_
 drop table test3;
 drop table test2;
 drop table test1;
+
+drop table if exists left_table;
+drop table if exists right_table;
+create table left_table(id int);
+create table right_table(id int);
+
+declare
+i int:=0;
+begin
+for i in 1..5 loop
+insert into left_table values(i);
+insert into right_table values(i+1);
+end loop;
+commit;
+end;
+/
+
+select left_table.id as id1,right_table.id as id2 from left_table,right_table where left_table.id+1=right_table.id start with left_table.id=1 connect by prior right_table.id=left_table.id;
+
+drop table left_table;
+drop table right_table;

@@ -273,6 +273,7 @@ void transformStartWith(ParseState *pstate, SelectStmt *stmt, Query *qry)
         transformSingleRTE(pstate, qry, &context, (Node *)stmt->startWithClause);
     } else {
         transformFromList(pstate, qry, &context, (Node *)stmt->startWithClause);
+        stmt->whereClause = context.whereClause;
     }
 
     return;
@@ -1524,6 +1525,82 @@ static bool count_columnref_walker(Node *node, int *columnref_count)
     return false;
 }
 
+/*
+ * split_where_expr_by_join
+ *
+ * According to the logic of Hierarchical Queries processing, start with operation will be as follows
+ * 1. Evaluating JOIN expr in where clause if there any(should only be muti-table join).
+ * 2. Evaluating START WITH/CONNECT BY condition.
+ * 3. Evaluating remaining where clause a.k.a NON-JOIN quals if there any.
+ *
+ * Based on that, we have to push down the join-qual for start-with/connect-by quals, but non-join quals save for later
+ * filtering right after start with operation is done.
+ * Note that, for OR expr, if we have to replace the sub_expr, we have to set it as FALSE, other case will be TRUE.
+ *
+ * For expr = (A AND (B OR C)) OR (D AND E) AND (F OR G) OR (H OR I), and we assume C, E, F, I is non_join qual,
+ *
+ * so the remaining JOIN expr will be
+ *             (A AND B) OR (D) AND (G) OR H
+ * NON-JOIN expr will be
+ *             (C) OR (E) AND (F) OR (I)
+ */
+static void split_where_expr_by_join(Node **p_expr_join, Node **p_expr_non_join)
+{
+    if (p_expr_join == NULL || (p_expr_join != NULL && *p_expr_join == NULL)) {
+        return;
+    }
+ 
+    Node *expr_join = *p_expr_join;
+    Node *expr_non_join = *p_expr_non_join;
+ 
+    if (IsA(expr_join, A_Expr)) {
+        A_Expr *a_expr_join = (A_Expr *)expr_join;
+        A_Expr *a_expr_non_join = (A_Expr *)expr_non_join;
+ 
+        if (a_expr_join->kind == AEXPR_AND || a_expr_join->kind == AEXPR_OR) {
+            if (a_expr_join->lexpr != NULL) {
+                split_where_expr_by_join(&(a_expr_join->lexpr), &(a_expr_non_join->lexpr));
+            }
+            if (a_expr_join->rexpr != NULL) {
+                split_where_expr_by_join(&(a_expr_join->rexpr), &(a_expr_non_join->rexpr));
+            }
+            if (a_expr_join->lexpr == NULL) {
+                *p_expr_join = a_expr_join->rexpr;
+            } else if (a_expr_join->rexpr == NULL) {
+                *p_expr_join = a_expr_join->lexpr;
+            }
+ 
+            if (a_expr_non_join->lexpr == NULL) {
+                *p_expr_non_join = a_expr_non_join->rexpr;
+            } else if (a_expr_non_join->rexpr == NULL) {
+                *p_expr_non_join = a_expr_non_join->lexpr;
+            }
+        } else if (a_expr_join->kind == AEXPR_OP) {
+            int l_cref_count = 0;
+            int r_cref_count = 0;
+            count_columnref_walker(a_expr_join->lexpr, &l_cref_count);
+            count_columnref_walker(a_expr_join->rexpr, &r_cref_count);
+ 
+            /* if there're columnRefs at both sides meaning its a join-qual, otherwise, non-join-qual */
+            if (l_cref_count != 0 && r_cref_count != 0) {
+                pfree_ext(expr_non_join);
+                *p_expr_non_join = NULL;
+            } else {
+                pfree_ext(expr_join);
+                *p_expr_join = NULL;
+            }
+        } else {
+            /* must not be a join qual for non AEXPR_OP type */
+            pfree_ext(expr_join);
+            *p_expr_join = NULL;
+        }
+    } else {
+        /* must not be a join qual for non-a_expr type */
+        pfree_ext(expr_join);
+        *p_expr_join = NULL;
+    }
+}
+
 static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
 {
     if (node == NULL) {
@@ -1616,17 +1693,12 @@ static SelectStmt *CreateStartWithCTEInnerBranch(ParseState* pstate,
 
         if (whereClause != NULL) {
             JoinExpr *final_join = (JoinExpr *)origin_table;
-            /* pushdown requires deep copying of the quals */
-            Node *whereCopy = (Node *)copyObject(whereClause);
-            /* only join quals can be pushed down */
-            raw_expression_tree_walker((Node *)whereCopy,
-                (bool (*)())walker_to_exclude_non_join_quals, (void*)NULL);
 
             if (final_join->quals == NULL) {
-                final_join->quals = whereCopy;
+                final_join->quals = whereClause;
             } else {
                 final_join->quals =
-                    (Node *)makeA_Expr(AEXPR_AND, NULL, whereCopy, final_join->quals, -1);
+                    (Node *)makeA_Expr(AEXPR_AND, NULL, whereClause, final_join->quals, -1);
             }
         }
     }
@@ -1700,17 +1772,11 @@ static SelectStmt *CreateStartWithCTEOuterBranch(ParseState *pstate,
 
     /* push whereClause down to init part, taking care to avoid NULL in expr. */
     quals = (Node *)startWithExpr;
-    Node* whereClauseCopy = (Node *)copyObject(whereClause);
-    if (whereClause != NULL) {
-        /* only join quals can be pushed down */
-        raw_expression_tree_walker((Node*)whereClauseCopy,
-            (bool (*)())walker_to_exclude_non_join_quals, (void*)NULL);
-    }
 
     if (quals == NULL) {
-        quals = whereClauseCopy;
+        quals = whereClause;
     } else if (whereClause != NULL) {
-        quals = (Node *)makeA_Expr(AEXPR_AND, NULL, whereClauseCopy,
+        quals = (Node *)makeA_Expr(AEXPR_AND, NULL, whereClause,
             (Node*)startWithExpr, -1);
     }
 
@@ -1878,15 +1944,19 @@ static void transformFromList(ParseState* pstate, Query* qry,
     A_Expr *startWithExpr = (A_Expr *)context->startWithExpr;
     A_Expr *connectByExpr = (A_Expr *)context->connectByExpr;
     List *relInfoList = context->relInfoList;
-    Node *whereClause = context->whereClause;
+    Node *whereClauseOnlyJoin = (Node *)copyObject(context->whereClause);
+
+    if (context->whereClause != NULL) {
+        split_where_expr_by_join(&whereClauseOnlyJoin, &(context->whereClause));
+    }
 
     /* make union-all branch for none-recursive part */
     SelectStmt *outerBranch = CreateStartWithCTEOuterBranch(pstate, context,
-                        relInfoList, (Node *)startWithExpr, whereClause);
+                        relInfoList, (Node *)startWithExpr, whereClauseOnlyJoin);
 
     /* make joinExpr for recursive part */
     SelectStmt *innerBranch = CreateStartWithCTEInnerBranch(pstate, context,
-                        relInfoList, (Node *)connectByExpr, whereClause);
+                        relInfoList, (Node *)connectByExpr, whereClauseOnlyJoin);
 
     CreateStartWithCTE(pstate, qry, outerBranch, innerBranch, context);
 

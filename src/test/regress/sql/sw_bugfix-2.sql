@@ -810,3 +810,25 @@ connect by
 
 drop synonym sy_pf;
 drop table pf_org_rela_test;
+
+drop table if exists sw_test;
+ 
+-- test join clause in where split and push down into start with/connect by clause
+drop table if exists sw_tb_1;
+create table sw_tb_1(a int,b int,c int,d int);
+create table sw_tb_2(a int,b int,c int,d int);
+insert into sw_tb_1 values(1,1,1,1);
+insert into sw_tb_1 values(2,2,2,2);
+insert into sw_tb_1 values(3,3,3,3);
+insert into sw_tb_1 values(4,4,4,4);
+insert into sw_tb_2 values(1,1,1,1);
+insert into sw_tb_2 values(2,2,2,2);
+insert into sw_tb_2 values(3,3,3,3);
+insert into sw_tb_2 values(4,4,4,4);
+select * from sw_tb_1,sw_tb_2 where sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a=sw_tb_2.b or sw_tb_1.a not in (select 3)) and sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+select * from sw_tb_1,sw_tb_2 where sw_tb_1.a !=3 or sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw_tb_1.a=sw_tb_2.c) and (sw_tb_1.b=sw_tb_2.a or (substr(sw_tb_1.b,2)=substr(sw_tb_2.b,2) and sw_tb_1.b is null)) or (sw_tb_1.c=sw_tb_2.d or sw_tb_1.b!=2) start with sw_tb_1.a=2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+explain select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw_tb_1.a=sw_tb_2.c) and (sw_tb_1.b=sw_tb_2.a or (substr(sw_tb_1.b,2)=substr(sw_tb_2.b,2) and sw_tb_1.b is null)) or (sw_tb_1.c=sw_tb_2.d or sw_tb_1.b!=2) start with sw_tb_1.a=2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+drop table sw_tb_1;
+drop table sw_tb_2;

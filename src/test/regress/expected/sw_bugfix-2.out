@@ -2124,3 +2124,70 @@ connect by
 
 drop synonym sy_pf;
 drop table pf_org_rela_test;
+drop table if exists sw_test;
+ 
+-- test join clause in where split and push down into start with/connect by clause
+drop table if exists sw_tb_1;
+create table sw_tb_1(a int,b int,c int,d int);
+create table sw_tb_2(a int,b int,c int,d int);
+insert into sw_tb_1 values(1,1,1,1);
+insert into sw_tb_1 values(2,2,2,2);
+insert into sw_tb_1 values(3,3,3,3);
+insert into sw_tb_1 values(4,4,4,4);
+insert into sw_tb_2 values(1,1,1,1);
+insert into sw_tb_2 values(2,2,2,2);
+insert into sw_tb_2 values(3,3,3,3);
+insert into sw_tb_2 values(4,4,4,4);
+select * from sw_tb_1,sw_tb_2 where sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3
+ 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4
+(2 rows)
+
+select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a=sw_tb_2.b or sw_tb_1.a not in (select 3)) and sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4
+(1 row)
+
+select * from sw_tb_1,sw_tb_2 where sw_tb_1.a !=3 or sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4
+(1 row)
+
+select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw_tb_1.a=sw_tb_2.c) and (sw_tb_1.b=sw_tb_2.a or (substr(sw_tb_1.b,2)=substr(sw_tb_2.b,2) and sw_tb_1.b is null)) or (sw_tb_1.c=sw_tb_2.d or sw_tb_1.b!=2) start with sw_tb_1.a=2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+(0 rows)
+
+explain select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw_tb_1.a=sw_tb_2.c) and (sw_tb_1.b=sw_tb_2.a or (substr(sw_tb_1.b,2)=substr(sw_tb_2.b,2) and sw_tb_1.b is null)) or (sw_tb_1.c=sw_tb_2.d or sw_tb_1.b!=2) start with sw_tb_1.a=2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+                                                                                                                                                          QUERY PLAN                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=1205332.35..1220171.82 rows=652970 width=32)
+   Filter: (("sw_tb_1@b" IS NULL) OR ("sw_tb_1@b" <> 2))
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..1205332.35 rows=659532 width=32)
+           Start With pseudo atts: RUITR, array_key_4
+           ->  Recursive Union  (cost=0.00..1205332.35 rows=659532 width=32)
+                 ->  Nested Loop  (cost=0.00..659.38 rows=82 width=32)
+                       Join Filter: (((((swtest.sw_tb_1.a + swtest.sw_tb_1.b) = swtest.sw_tb_2.b) OR (swtest.sw_tb_1.a = swtest.sw_tb_2.c)) AND ((swtest.sw_tb_1.b = swtest.sw_tb_2.a) OR (substr((swtest.sw_tb_1.b)::text, 2) = substr((swtest.sw_tb_2.b)::text, 2)))) OR (swtest.sw_tb_1.c = swtest.sw_tb_2.d))
+                       ->  Seq Scan on sw_tb_2  (cost=0.00..27.76 rows=1776 width=16)
+                       ->  Materialize  (cost=0.00..32.25 rows=9 width=16)
+                             ->  Seq Scan on sw_tb_1  (cost=0.00..32.20 rows=9 width=16)
+                                   Filter: (a = 2)
+                 ->  Hash Join  (cost=26.65..119148.23 rows=65945 width=32)
+                       Hash Cond: (swtest.sw_tb_2.c = tmp_reuslt."sw_tb_1@d")
+                       ->  Materialize  (cost=0.00..118341.56 rows=16083 width=32)
+                             ->  Nested Loop  (cost=0.00..118341.56 rows=16083 width=32)
+                                   Join Filter: (((((swtest.sw_tb_1.a + swtest.sw_tb_1.b) = swtest.sw_tb_2.b) OR (swtest.sw_tb_1.a = swtest.sw_tb_2.c)) AND ((swtest.sw_tb_1.b = swtest.sw_tb_2.a) OR (substr((swtest.sw_tb_1.b)::text, 2) = substr((swtest.sw_tb_2.b)::text, 2)))) OR (swtest.sw_tb_1.c = swtest.sw_tb_2.d))
+                                   ->  Seq Scan on sw_tb_1  (cost=0.00..27.76 rows=1776 width=16)
+                                   ->  Materialize  (cost=0.00..36.64 rows=1776 width=16)
+                                         ->  Seq Scan on sw_tb_2  (cost=0.00..27.76 rows=1776 width=16)
+                       ->  Hash  (cost=16.40..16.40 rows=820 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..16.40 rows=820 width=4)
+(22 rows)
+
+drop table sw_tb_1;
+drop table sw_tb_2;
