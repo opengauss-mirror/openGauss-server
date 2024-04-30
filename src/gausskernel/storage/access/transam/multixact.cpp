@@ -1012,6 +1012,7 @@ int GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
      * cases, so it seems better than holding the MultiXactGenLock for a long
      * time on every multixact creation.
      */
+    int retrycount = 0;
 retry:
     (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
@@ -1049,7 +1050,13 @@ retry:
         if (nextMXOffset == 0) {
             /* Corner case 2: next multixact is still being filled in */
             LWLockRelease(MultiXactOffsetControlLock);
+            if (RecoveryInProgress() && retrycount > 100) {
+                ereport(ERROR,
+                    (errmsg("canceling statement due to conflict with recovery"),
+                    errdetail("The redo of multiXact %lu creation is not replayed.", nextMXact)));
+            }
             pg_usleep(1000L);
+            retrycount++;
             goto retry;
         }
 
