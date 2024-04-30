@@ -508,6 +508,9 @@ case $DO_CMD in
     --fastcheck_ss|fastcheck_ss)
         args_val="-d 2 -c 0 -p $p -r 1 "
         real_regresscheck_ss parallel_schedule_ss_read$part make_fastcheck_ss_postgresql.conf "${args_val}" ;;
+    --fastcheck_ss_fi|fastcheck_ss_fi)
+        args_val="-d 2 -c 0 -p $p -r 1 "
+        real_regresscheck_ss parallel_schedule_ss_fi$part make_fastcheck_ss_postgresql.conf "${args_val}" ;;
     --fastcheck_gs_probackup|fastcheck_gs_probackup)
         args_val=$(echo $DO_CMD | sed 's\--\\g')
         check_gs_probackup;;

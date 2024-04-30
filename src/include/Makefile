@@ -178,6 +178,7 @@ endif
 	$(INSTALL_DATA) storage/gs_uwal/uwal.h '$(DESTDIR)$(includedir_server)/storage/gs_uwal/uwal.h'
 	$(INSTALL_DATA) ddes/dms/ss_aio.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_aio.h'
 	$(INSTALL_DATA) ddes/dms/ss_dms_recovery.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_dms_recovery.h'
+	$(INSTALL_DATA) ddes/dms/ss_dms_fi.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_dms_fi.h'
 	$(INSTALL_DATA) ddes/dms/ss_common_attr.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_common_attr.h'
 	$(INSTALL_DATA) ddes/dms/ss_dms_callback.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_dms_callback.h'
 	$(INSTALL_DATA) ddes/dms/ss_init.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_init.h'

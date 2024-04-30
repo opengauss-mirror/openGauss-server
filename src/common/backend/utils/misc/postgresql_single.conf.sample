@@ -835,6 +835,11 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #ss_dss_conn_path = ''
 #ss_interconnect_channel_count = 16
 #ss_work_thread_count = 32
+#ss_fi_packet_loss_prob = 10;
+#ss_fi_net_latency_ms = 10
+#ss_fi_cpu_latency_ms = 10
+#ss_fi_process_fault_prob = 10
+#ss_fi_custom_fault_param = 3000
 #ss_recv_msg_pool_size = 16MB
 #ss_interconnect_type = 'TCP'
 #ss_interconnect_url = '0:127.0.0.1:1611'
@@ -857,6 +862,11 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #ss_stream_cluster = off
 #enable_segment = off
 #ss_work_thread_pool_attr = ''
+#ss_fi_packet_loss_entries = ''
+#ss_fi_net_latency_entries = ''
+#ss_fi_cpu_latency_entries = ''
+#ss_fi_process_fault_entries = ''
+#ss_fi_custom_fault_entries = ''
 
 #------------------------------------------------------------------------------
 # UWAL OPTIONS

@@ -23,6 +23,7 @@
 #include <math.h>
 #include <limits.h>
 #include <string>
+#include <set>
 #include "utils/elog.h"
 
 #ifdef HAVE_SYSLOG
@@ -153,6 +154,7 @@
 #include "utils/guc_storage.h"
 #include "access/ustore/knl_undoworker.h"
 #include "ddes/dms/ss_init.h"
+#include "ddes/dms/ss_dms.h"
 #include "storage/dss/dss_log.h"
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
@@ -230,6 +232,18 @@ static void assign_ss_enable_verify_page(bool newval, void *extra);
 #endif
 static bool check_ss_txnstatus_cache_size(int* newval, void** extra, GucSource source);
 static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSource source);
+#ifdef USE_ASSERT_CHECKING
+static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSource source);
+static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSource source);
+static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSource source);
+static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSource source);
+static bool check_ss_fi_custom_fault_entries(char** newval, void** extra, GucSource source);
+static bool check_ss_fi_packet_loss_prob(int* newval, void** extra, GucSource source);
+static bool check_ss_fi_net_latency_ms(int* newval, void** extra, GucSource source);
+static bool check_ss_fi_cpu_latency_ms(int* newval, void** extra, GucSource source);
+static bool check_ss_fi_process_fault_prob(int* newval, void** extra, GucSource source);
+static bool check_ss_fi_custom_fault_param(int* newval, void** extra, GucSource source);
+#endif
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
@@ -3814,6 +3828,78 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifdef USE_ASSERT_CHECKING
+        {{"ss_fi_packet_loss_prob",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: packet loss probability"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.packet_loss.fi_value,
+            10,
+            0,
+            100,
+            check_ss_fi_packet_loss_prob,
+            NULL,
+            NULL},
+        {{"ss_fi_net_latency_ms",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: net latency ms"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.net_latency.fi_value,
+            10,
+            0,
+            INT_MAX,
+            check_ss_fi_net_latency_ms,
+            NULL,
+            NULL},
+        {{"ss_fi_cpu_latency_ms",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: cpu latency ms"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.cpu_latency.fi_value,
+            10,
+            0,
+            INT_MAX,
+            check_ss_fi_cpu_latency_ms,
+            NULL,
+            NULL},
+        {{"ss_fi_process_fault_prob",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: process fault prob"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.process_fault.fi_value,
+            10,
+            0,
+            100,
+            check_ss_fi_process_fault_prob,
+            NULL,
+            NULL},
+        {{"ss_fi_custom_fault_param",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: custom fault param"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.custom_fault.fi_value,
+            3000,
+            0,
+            INT_MAX,
+            check_ss_fi_custom_fault_param,
+            NULL,
+            NULL},
+#endif
         {{"ss_recv_msg_pool_size",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -4932,6 +5018,68 @@ static void InitStorageConfigureNamesString()
             check_ss_work_thread_pool_attr,
             NULL,
             NULL},
+#ifdef USE_ASSERT_CHECKING
+        {{"ss_fi_packet_loss_entries",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: packet loss entries"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.packet_loss.fi_entries,
+            "",
+            check_ss_fi_packet_loss_entries,
+            NULL,
+            NULL},
+        {{"ss_fi_net_latency_entries",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: net latency entries"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.net_latency.fi_entries,
+            "",
+            check_ss_fi_net_latency_entries,
+            NULL,
+            NULL},
+        {{"ss_fi_cpu_latency_entries",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: cpu latency entries"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.cpu_latency.fi_entries,
+            "",
+            check_ss_fi_cpu_latency_entries,
+            NULL,
+            NULL},
+        {{"ss_fi_process_fault_entries",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: process fault entries"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.process_fault.fi_entries,
+            "",
+            check_ss_fi_process_fault_entries,
+            NULL,
+            NULL},
+        {{"ss_fi_custom_fault_entries",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss DMS fault injection: custom fault entries"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_storage.dms_attr.custom_fault.fi_entries,
+            "",
+            check_ss_fi_custom_fault_entries,
+            NULL,
+            NULL},
+#endif
         {{"uwal_devices_path",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -6937,5 +7085,233 @@ static bool check_undo_limit_size_per_transaction(int *newval, void **extra, Guc
         return false;
     }
     return true;
-
 }
+
+#ifdef USE_ASSERT_CHECKING
+static bool parse_ss_fi_entry_list(char *value, uint32 *entry_list, uint32 *count)
+{
+    char* value_tmp = strdup(value);
+    char *p = strtok(value_tmp, ",");
+    while (p != NULL) {
+        for (uint32 i = 0; i < strlen(p); i++) {
+            if (!isdigit(p[i])) {
+                ereport(ERROR, (errmsg("The para %s does not meet the environment(0 .. %d).", p, FI_ENTRY_END)));
+                return false;
+            }
+        }
+        uint32 entry_point = atoi(p);
+        if (entry_point >= FI_ENTRY_END || entry_point < 0) {
+            ereport(ERROR, (errmsg("%d is outside the valid range for parameter"
+                "(0 .. %d).", entry_point, FI_ENTRY_END)));
+            return false;
+        }
+
+        if (*count >= MAX_FI_ENTRY_COUNT) {
+            ereport(ERROR, (errmsg("The number of fault points exceeds the maximum %d.", MAX_FI_ENTRY_COUNT)));
+            return false;
+        }
+
+        entry_list[*count] = entry_point;
+        *count = *count + 1;
+        p = strtok(NULL, ",");
+    }
+
+    if (*count > 1) {
+        std::set<uint32> s_entry_list;
+        for (uint32 i = 0; i < *count; i++) {
+            if (!s_entry_list.insert(entry_list[i]).second) {
+                ereport(ERROR, (errmsg("set ss_fi_packet_loss_entries fail, duplicate fault points exist.")));
+                return false;
+            } 
+        }
+    }
+
+    return true;
+}
+
+extern ss_dms_func_t g_ss_dms_func;
+static bool check_ss_fi_packet_loss_entries(char** newval, void** extra, GucSource source)
+{
+    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 count = 0;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
+        return false;
+    }
+
+    if (dms_fi_set_entries(DMS_FI_TYPE_PACKET_LOSS, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_packet_loss_entries fail")));
+        return false;
+    }
+    return true;
+}
+
+static bool check_ss_fi_net_latency_entries(char** newval, void** extra, GucSource source)
+{
+    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 count = 0;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
+        return false;
+    }
+
+    if (dms_fi_set_entries(DMS_FI_TYPE_NET_LATENCY, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_entries fail")));
+        return false;
+    }
+    return true;
+}
+
+static bool check_ss_fi_cpu_latency_entries(char** newval, void** extra, GucSource source)
+{
+    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 count = 0;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
+        return false;
+    }
+
+    if (dms_fi_set_entries(DMS_FI_TYPE_CPU_LATENCY, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_entries fail")));
+        return false;
+    }
+    return true;
+}
+
+static bool check_ss_fi_process_fault_entries(char** newval, void** extra, GucSource source)
+{
+    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 count = 0;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
+        return false;
+    }
+
+    if (dms_fi_set_entries(DMS_FI_TYPE_PROCESS_FAULT, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_process_fault_entries fail")));
+        return false;
+    }
+    return true;
+}
+
+static bool check_ss_fi_custom_fault_entries(char** newval, void** extra, GucSource source)
+{
+    uint32 entry_list[MAX_FI_ENTRY_COUNT] = {0};
+    uint32 count = 0;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (!parse_ss_fi_entry_list(*newval, entry_list, &count)) {
+        return false;
+    }
+
+    if (dms_fi_set_entries(DMS_FI_TYPE_CUSTOM_FAULT, entry_list, count) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_custom_fault_entries fail")));
+        return false;
+    }
+    return true;
+}
+
+static bool check_ss_fi_packet_loss_prob(int* newval, void** extra, GucSource source)
+{
+    int32 int_val;
+    int_val = *newval;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (dms_fi_set_entry_value(DMS_FI_TYPE_PACKET_LOSS, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_packet_loss_prob fail")));
+        return false;
+    }
+
+    return true;
+}
+
+static bool check_ss_fi_net_latency_ms(int* newval, void** extra, GucSource source)
+{
+    int32 int_val;
+    int_val = *newval;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (dms_fi_set_entry_value(DMS_FI_TYPE_NET_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_net_latency_ms fail")));
+        return false;
+    }
+
+    return true;
+}
+
+static bool check_ss_fi_cpu_latency_ms(int* newval, void** extra, GucSource source)
+{
+    int32 int_val;
+    int_val = *newval;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (dms_fi_set_entry_value(DMS_FI_TYPE_CPU_LATENCY, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_cpu_latency_ms fail")));
+        return false;
+    }
+
+    return true;
+}
+
+static bool check_ss_fi_process_fault_prob(int* newval, void** extra, GucSource source)
+{
+    int32 int_val;
+    int_val = *newval;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (dms_fi_set_entry_value(DMS_FI_TYPE_PROCESS_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_process_fault_prob fail")));
+        return false;
+    }
+
+    return true;
+}
+
+static bool check_ss_fi_custom_fault_param(int* newval, void** extra, GucSource source)
+{
+    int32 int_val;
+    int_val = *newval;
+
+    if (!g_ss_dms_func.inited) {
+        return true;
+    }
+
+    if (dms_fi_set_entry_value(DMS_FI_TYPE_CUSTOM_FAULT, (unsigned int)int_val) != DMS_SUCCESS) {
+        ereport(ERROR, (errmsg("set parameter ss_fi_custom_fault_param fail")));
+        return false;
+    }
+
+    return true;
+}
+#endif

@@ -375,6 +375,23 @@ static void SetWorkThreadpoolConfig(dms_profile_t *profile)
     profile->enable_mes_task_threadpool = true;
 }
 
+#ifdef USE_ASSERT_CHECKING
+static void set_dms_fi() 
+{    
+    knl_session_attr_dms* attr = &u_sess->attr.attr_storage.dms_attr;
+    dms_fi_set_entries(DMS_FI_TYPE_PACKET_LOSS, attr->packet_loss.ss_fi_cfg.entries, attr->packet_loss.ss_fi_cfg.count);
+    dms_fi_set_entry_value(DMS_FI_TYPE_PACKET_LOSS, attr->packet_loss.ss_fi_cfg.fault_value);
+    dms_fi_set_entries(DMS_FI_TYPE_NET_LATENCY, attr->net_latency.ss_fi_cfg.entries, attr->net_latency.ss_fi_cfg.count);
+    dms_fi_set_entry_value(DMS_FI_TYPE_NET_LATENCY, attr->net_latency.ss_fi_cfg.fault_value);
+    dms_fi_set_entries(DMS_FI_TYPE_CPU_LATENCY, attr->cpu_latency.ss_fi_cfg.entries, attr->cpu_latency.ss_fi_cfg.count);
+    dms_fi_set_entry_value(DMS_FI_TYPE_CPU_LATENCY, attr->cpu_latency.ss_fi_cfg.fault_value);
+    dms_fi_set_entries(DMS_FI_TYPE_PROCESS_FAULT, attr->process_fault.ss_fi_cfg.entries, attr->process_fault.ss_fi_cfg.count);
+    dms_fi_set_entry_value(DMS_FI_TYPE_PROCESS_FAULT, attr->process_fault.ss_fi_cfg.fault_value);
+    dms_fi_set_entries(DMS_FI_TYPE_CUSTOM_FAULT, attr->custom_fault.ss_fi_cfg.entries, attr->custom_fault.ss_fi_cfg.count);
+    dms_fi_set_entry_value(DMS_FI_TYPE_CUSTOM_FAULT, attr->custom_fault.ss_fi_cfg.fault_value);
+}
+#endif
+
 static void setDMSProfile(dms_profile_t* profile)
 {
     knl_instance_attr_dms* dms_attr = &g_instance.attr.attr_storage.dms_attr;
@@ -461,6 +478,10 @@ void DMSInit()
     }
     rc = memset_s(g_instance.dms_cxt.conninfo, MAXCONNINFO, '\0', MAXCONNINFO);
     securec_check(rc, "", "");
+
+#ifdef USE_ASSERT_CHECKING
+    set_dms_fi();
+#endif
 }
 
 void GetSSLogPath(char *sslog_path)

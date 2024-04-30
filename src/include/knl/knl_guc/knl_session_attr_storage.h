@@ -40,6 +40,8 @@
 #include "knl/knl_guc/knl_guc_common.h"
 #include "datatype/timestamp.h"
 
+#define MAX_DMS_FI_ENTRY_COUNT       2000
+
 typedef struct knl_session_attr_dcf {
     /* parameters can be reloaded while DCF is running */
     int dcf_election_timeout;
@@ -56,6 +58,29 @@ typedef struct knl_session_attr_dcf {
     /* dcf log truncate frequency */
     int dcf_truncate_threshold;
 } knl_session_attr_dcf;
+
+typedef struct knl_sess_attr_dms_fi_cfg {
+    unsigned int entries[MAX_DMS_FI_ENTRY_COUNT];
+    unsigned int count;
+    unsigned int fault_value;
+} knl_sess_attr_dms_fi_cfg;
+
+#ifdef USE_ASSERT_CHECKING
+typedef struct knl_session_attr_dms_fi {
+    char* fi_entries;
+    int32 fi_value;
+    knl_sess_attr_dms_fi_cfg ss_fi_cfg;
+} knl_session_attr_dms_fi;
+
+typedef struct knl_session_attr_dms {
+    /* for dms fi */
+    knl_session_attr_dms_fi packet_loss;
+    knl_session_attr_dms_fi net_latency;
+    knl_session_attr_dms_fi cpu_latency;
+    knl_session_attr_dms_fi process_fault;
+    knl_session_attr_dms_fi custom_fault;
+} knl_session_attr_dms;
+#endif
 
 typedef struct knl_session_attr_storage {
     bool raise_errors_if_no_files;
@@ -257,6 +282,9 @@ typedef struct knl_session_attr_storage {
 #endif
     bool reserve_space_for_nullable_atts;
     knl_session_attr_dcf dcf_attr;
+#ifdef USE_ASSERT_CHECKING
+    knl_session_attr_dms dms_attr;
+#endif
     int catchup2normal_wait_time;
     int max_sync_workers_per_subscription;
 
@@ -279,6 +307,7 @@ typedef struct knl_session_attr_storage {
     /* pre-read parms */
     int heap_bulk_read_size;
     int vacuum_bulk_read_size;
+
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */
