@@ -824,7 +824,14 @@ Oid exprCollation(const Node* expr)
             coll = exprCollation((Node*)((const NamedArgExpr*)expr)->arg);
             break;
         case T_UserVar:
-            coll = ((const Const*)(((UserVar*)expr)->value))->constcollid;
+            if (IsA(((UserVar*)expr)->value, FuncExpr)) {
+                coll = ((const FuncExpr*)(((UserVar*)expr)->value))->funccollid;
+            } else {
+                coll = ((const Const*)(((UserVar*)expr)->value))->constcollid;
+            }
+            if (!OidIsValid(coll)) {
+                coll = get_typcollation(exprType((const Node*)(((UserVar*)expr)->value)));
+            }
             break;
         case T_OpExpr:
             coll = ((const OpExpr*)expr)->opcollid;
