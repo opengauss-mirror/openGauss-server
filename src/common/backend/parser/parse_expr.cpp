@@ -98,6 +98,7 @@ static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVa
 static bool CheckSwAbortedRTE(ParseState *pstate, char *relname);
 static char *ColumnRefFindRelname(ParseState *pstate, const char *colname);
 static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, char **colname);
+static Node *transformStartWithWhereClauseColumnRef(ParseState *pstate, ColumnRef *cref, char *colname);
 static Node* tryTransformFunc(ParseState* pstate, List* fields, int location);
 static void SubCheckOutParam(List* exprtargs, Oid funcid);
 static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey);
@@ -859,8 +860,13 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             AssertEreport(IsA(field1, String), MOD_OPT, "");
             colname = strVal(field1);
 
-            if (pstate->p_hasStartWith) {
-                Node *expr = transformStartWithColumnRef(pstate, cref, &colname);
+            if (pstate->p_hasStartWith || pstate->p_split_where_for_swcb) {
+                Node *expr = NULL;
+                if (pstate->p_hasStartWith) {
+                    expr = transformStartWithColumnRef(pstate, cref, &colname);
+                } else {
+                    expr = transformStartWithWhereClauseColumnRef(pstate, cref, colname);
+                }
 
                 /* function case, return directly */
                 if (expr != NULL) {
@@ -1802,7 +1808,7 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
     /* ... and hand off to ParseFuncOrColumn */
     result = ParseFuncOrColumn(pstate, fn->funcname, targs, last_srf, fn, fn->location, fn->call_func);
 
-    if (IsStartWithFunction((FuncExpr*)result) && !pstate->p_hasStartWith) {
+    if (IsStartWithFunction((FuncExpr*)result) && !pstate->p_hasStartWith && !pstate->p_split_where_for_swcb) {
         ereport(ERROR,
                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_OPT),
                 errmsg("Invalid function call."),
@@ -3852,3 +3858,47 @@ ParseExprKindName(ParseExprKind exprKind)
 	}
 	return "unrecognized expression kind";
 }
+
+/*
+ * transformStartWithWhereClauseColumnRef
+ *  transform cref for start with where spliting stage
+ */
+static Node *transformStartWithWhereClauseColumnRef(ParseState *pstate, ColumnRef *cref, char *colname)
+{
+    Assert (colname != NULL);
+ 
+    ListCell *lc = NULL;
+    RangeTblEntry *rte = NULL;
+    foreach (lc, pstate->p_rtable) {
+        rte = (RangeTblEntry *)lfirst(lc);
+        if (rte->rtekind == RTE_SUBQUERY && rte->alias != NULL && rte->alias->aliasname != NULL &&
+            pg_strcasecmp(rte->alias->aliasname, "__sw_pseudo_col_table__") == 0) {
+            break;
+        }
+    }
+ 
+    int len = list_length(cref->fields);
+    if (len == 1) {
+        Node *field = (Node*)linitial(cref->fields);
+ 
+        if (pg_strcasecmp(colname, "connect_by_root") == 0) {
+            Node *funexpr = transformConnectByRootFuncCall(pstate, field, cref);
+ 
+            /*
+             * Return function funexpr, otherwise process
+             * connect_by_root as regular case
+             */
+            if (funexpr != NULL) {
+                return funexpr;
+            }
+        }
+ 
+        /* for pseudo column, we return the corresponding var */
+        if (IsPseudoReturnColumn(colname)) {
+            return scanRTEForColumn(pstate, rte, colname, cref->location);
+        }
+    }
+ 
+    return NULL;
+}
+

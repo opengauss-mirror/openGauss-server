@@ -1897,6 +1897,130 @@ DETAIL:  Unsupported node type: 900.
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
 ERROR:  column specified by prior cannot concide with ROWNUM/LEVEL.
 DETAIL:  Unsupported node type: 900.
+-- test for multi table join used with pseudo col in where clause
+delete from rltest;
+INSERT INTO RLTEST VALUES('1','2'),('2','3'),('3','1');
+explain select * from rltest r1,rltest r2 where r1.a<=connect_by_isleaf+level+connect_by_iscycle+connect_by_root(r1.a) start with r1.a=1 connect by nocycle prior r2.b=r1.a;
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=788273757.40..1796601238.36 rows=8402729008 width=32)
+   Filter: (("r1@a")::bigint <= (((connect_by_isleaf + level) + connect_by_iscycle) + (connect_by_root(("r1@a")::text))::bigint))
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..788273757.40 rows=25208187024 width=32)
+           Start With pseudo atts: RUITR, array_key_4, array_col_1
+           ->  Recursive Union  (cost=0.00..788273757.40 rows=25208187024 width=32)
+                 ->  Nested Loop  (cost=0.00..264.22 rows=15984 width=32)
+                       ->  Seq Scan on rltest r2  (cost=0.00..27.76 rows=1776 width=16)
+                       ->  Materialize  (cost=0.00..36.69 rows=9 width=16)
+                             ->  Seq Scan on rltest r1  (cost=0.00..36.64 rows=9 width=16)
+                                   Filter: ((a)::bigint = 1)
+                 ->  Hash Join  (cost=5194.80..28410975.27 rows=2520817104 width=32)
+                       Hash Cond: (r1.a = tmp_reuslt."r2@b")
+                       ->  Nested Loop  (cost=0.00..39487.16 rows=3154176 width=32)
+                             ->  Seq Scan on rltest r2  (cost=0.00..27.76 rows=1776 width=16)
+                             ->  Materialize  (cost=0.00..36.64 rows=1776 width=16)
+                                   ->  Seq Scan on rltest r1  (cost=0.00..27.76 rows=1776 width=16)
+                       ->  Hash  (cost=3196.80..3196.80 rows=159840 width=8)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..3196.80 rows=159840 width=8)
+(19 rows)
+
+select * from rltest r1,rltest r2 where r1.a<=connect_by_isleaf+level+connect_by_iscycle+connect_by_root(r1.a) start with r1.a=1 connect by nocycle prior r2.b=r1.a;
+ a | b | a | b 
+---+---+---+---
+ 1 | 2 | 1 | 2
+ 2 | 3 | 2 | 3
+ 3 | 1 | 3 | 1
+ 2 | 3 | 3 | 1
+ 1 | 2 | 2 | 3
+ 1 | 2 | 2 | 3
+ 3 | 1 | 1 | 2
+ 2 | 3 | 3 | 1
+ 3 | 1 | 3 | 1
+ 1 | 2 | 1 | 2
+ 1 | 2 | 3 | 1
+ 1 | 2 | 1 | 2
+ 2 | 3 | 2 | 3
+ 1 | 2 | 2 | 3
+ 3 | 1 | 1 | 2
+(15 rows)
+
+-- test cross reference in start with nested query
+create table test_t1(a1 int,b1 int);
+create table test_t2(a2 int,b2 int);
+create table test_t3(a3 int,b3 int);
+insert into test_t1 values(1,2),(2,3),(3,1);
+insert into test_t2 values(1,2),(2,3),(3,1);
+insert into test_t3 values(1,2),(2,3),(3,1);
+explain select * from test_t1 left join test_t2 on a1=a2 where exists (select 1 from test_t3 where a1+a2 is not null connect by level<2) connect by level<2;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=1732932777.76..800532784124548096.00 rows=26659731370 width=16)
+   Filter: (SubPlan 3)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=58.35..1732932777.76 rows=53319462741 width=16)
+           Start With pseudo atts: RUITR
+           ->  Recursive Union  (cost=58.35..1732932777.76 rows=53319462741 width=16)
+                 ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=16)
+                       Hash Cond: (swtest.test_t1.a1 = swtest.test_t2.a2)
+                       ->  Seq Scan on test_t1  (cost=0.00..31.49 rows=2149 width=8)
+                       ->  Hash  (cost=31.49..31.49 rows=2149 width=8)
+                             ->  Seq Scan on test_t2  (cost=0.00..31.49 rows=2149 width=8)
+                 ->  Nested Loop  (cost=58.35..66654316.73 rows=5331943965 width=16)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..4618.20 rows=230910 width=0)
+                       ->  Materialize  (cost=58.35..471.13 rows=23091 width=16)
+                             ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=16)
+                                   Hash Cond: (swtest.test_t1.a1 = swtest.test_t2.a2)
+                                   ->  Seq Scan on test_t1  (cost=0.00..31.49 rows=2149 width=8)
+                                   ->  Hash  (cost=31.49..31.49 rows=2149 width=8)
+                                         ->  Seq Scan on test_t2  (cost=0.00..31.49 rows=2149 width=8)
+   SubPlan 3
+     ->  Result  (cost=15013894.35..24250339.33 rows=461822249 width=0)
+           One-Time Filter: ((tmp_reuslt."test_t1@a1" + tmp_reuslt."test_t2@a2") IS NOT NULL)
+           CTE tmp_reuslt
+             ->  StartWith Operator  (cost=0.00..15013894.35 rows=461822249 width=8)
+                   Start With pseudo atts: RUITR
+                   ->  Recursive Union  (cost=0.00..15013894.35 rows=461822249 width=8)
+                         ->  Seq Scan on test_t3  (cost=0.00..31.49 rows=2149 width=8)
+                         ->  Nested Loop  (cost=0.00..577741.79 rows=46182010 width=8)
+                               ->  WorkTable Scan on tmp_reuslt  (cost=0.00..429.80 rows=21490 width=0)
+                               ->  Materialize  (cost=0.00..42.23 rows=2149 width=8)
+                                     ->  Seq Scan on test_t3  (cost=0.00..31.49 rows=2149 width=8)
+           ->  CTE Scan on tmp_reuslt  (cost=0.00..9236444.98 rows=461822249 width=0)
+(32 rows)
+
+drop table test_t1;
+drop table test_t2;
+drop table test_t3;
+-- test sys funcs in multi table join
+select sys_connect_by_path(r1.a,'->') from rltest r1, rltest r2 where r1.a=r2.a connect by level<2;
+ sys_connect_by_path 
+---------------------
+ ->1
+ ->2
+ ->3
+(3 rows)
+
+select connect_by_root(r1.a) from rltest r1, rltest r2 where r1.a=r2.a connect by level<2;
+ connect_by_root 
+-----------------
+ 1
+ 2
+ 3
+(3 rows)
+
+-- test for where push down
+create table sin_col_tbl(a int);
+SELECT 1
+FROM sin_col_tbl,
+     rltest
+WHERE   (sin_col_tbl.a+rltest.b) IS NOT NULL
+START WITH  1=1
+CONNECT BY level<2 and prior rltest.b=rltest.a;
+ ?column? 
+----------
+(0 rows)
+
+drop table sin_col_tbl;
 DROP TABLE RLTEST;
 create table nocycle_tbl(id int, lid int, name text);
 insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D'),(5,3,'E');
@@ -2130,6 +2254,7 @@ drop table if exists sw_test;
 drop table if exists sw_tb_1;
 create table sw_tb_1(a int,b int,c int,d int);
 create table sw_tb_2(a int,b int,c int,d int);
+create table sw_tb_3(a int, b int, c int, d int);
 insert into sw_tb_1 values(1,1,1,1);
 insert into sw_tb_1 values(2,2,2,2);
 insert into sw_tb_1 values(3,3,3,3);
@@ -2189,5 +2314,31 @@ explain select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw
                              ->  WorkTable Scan on tmp_reuslt  (cost=0.00..16.40 rows=820 width=4)
 (22 rows)
 
+explain select * from sw_tb_3 where exists (select * from sw_tb_1, sw_tb_2 where sw_tb_1.a + sw_tb_2.a = sw_tb_3.a connect by level < 2);
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Seq Scan on sw_tb_3  (cost=0.00..57437072471119520.00 rows=888 width=16)
+   Filter: (SubPlan 2)
+   SubPlan 2
+     ->  CTE Scan on tmp_reuslt  (cost=32340693958958.68..57212759635253.08 rows=4974413135259 width=0)
+           Filter: (("sw_tb_1@a" + "sw_tb_2@a") = sw_tb_3.a)
+           CTE tmp_reuslt
+             ->  StartWith Operator  (cost=0.00..32340693958958.68 rows=994882627051776 width=32)
+                   Start With pseudo atts: RUITR
+                   ->  Recursive Union  (cost=0.00..32340693958958.68 rows=994882627051776 width=32)
+                         ->  Nested Loop  (cost=0.00..39487.16 rows=3154176 width=32)
+                               ->  Seq Scan on sw_tb_1  (cost=0.00..27.76 rows=1776 width=16)
+                               ->  Materialize  (cost=0.00..36.64 rows=1776 width=16)
+                                     ->  Seq Scan on sw_tb_2  (cost=0.00..27.76 rows=1776 width=16)
+                         ->  Nested Loop  (cost=0.00..1244304137843.60 rows=99488262389760 width=32)
+                               ->  Nested Loop  (cost=0.00..700857939.40 rows=56018165760 width=16)
+                                     ->  WorkTable Scan on tmp_reuslt  (cost=0.00..630835.20 rows=31541760 width=0)
+                                     ->  Materialize  (cost=0.00..36.64 rows=1776 width=16)
+                                           ->  Seq Scan on sw_tb_1  (cost=0.00..27.76 rows=1776 width=16)
+                               ->  Materialize  (cost=0.00..36.64 rows=1776 width=16)
+                                     ->  Seq Scan on sw_tb_2  (cost=0.00..27.76 rows=1776 width=16)
+(20 rows)
+
 drop table sw_tb_1;
 drop table sw_tb_2;
+drop table sw_tb_3;

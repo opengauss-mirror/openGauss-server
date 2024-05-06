@@ -2202,6 +2202,12 @@ void expandRTE(RangeTblEntry* rte, int rtindex, int sublevels_up, int location, 
             break;
         case RTE_SUBQUERY: {
             /* Subquery RTE */
+            /* for start with pseudo table, we mark its targetlist resjunk */
+            if (rte->alias != NULL && rte->alias->aliasname != NULL &&
+                pg_strcasecmp(rte->alias->aliasname, "__sw_pseudo_col_table__") == 0) {
+                break;
+            }
+
             ListCell* aliasp_item = list_head(rte->eref->colnames);
             ListCell* tlistitem = NULL;
 

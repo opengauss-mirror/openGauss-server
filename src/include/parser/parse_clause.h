@@ -53,7 +53,8 @@ extern ParseNamespaceItem *makeNamespaceItem(RangeTblEntry *rte, bool lateral_on
  * StartWith support transformStartWith() is the only entry point for START WITH...CONNECT BY
  * processing in parser/transformar layer
  */
-extern void transformStartWith(ParseState *pstate, SelectStmt *stmt, Query *qry);
+extern void transformStartWith(ParseState *pstate, ParseState *origin_pstate, SelectStmt *stmt,
+                                SelectStmt *origin_stmt, Query *qry, bool is_first_node, bool is_creat_view);
 extern void AddStartWithCTEPseudoReturnColumns(CommonTableExpr *cte, RangeTblEntry *rte, Index rte_index);
 extern void pretransformAggWithUserSet(ParseState* pstate, List** targetList, Node* groupClause, ParseExprKind exprKind);
 

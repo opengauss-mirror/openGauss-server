@@ -2894,12 +2894,25 @@ static void transformVariableSetValueStmt(ParseState* pstate, VariableSetStmt* s
 static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isFirstNode, bool isCreateView)
 {
     Query* qry = makeNode(Query);
+    ParseState *origin_pstate = NULL;
+    SelectStmt *origin_stmt = NULL;
     Node* qual = NULL;
     ListCell* l = NULL;
 
     qry->commandType = CMD_SELECT;
 
     if (stmt->startWithClause != NULL) {
+        errno_t rc;
+        origin_stmt = (SelectStmt *)copyObject(stmt);
+        origin_pstate = make_parsestate(NULL);
+        rc = memcpy_s(origin_pstate, sizeof(ParseState), pstate, sizeof(ParseState));
+        origin_pstate->p_rtable = list_copy(pstate->p_rtable);
+        origin_pstate->p_ctenamespace = list_copy(pstate->p_ctenamespace);
+        origin_pstate->p_relnamespace = list_copy(pstate->p_relnamespace);
+        origin_pstate->p_varnamespace = list_copy(pstate->p_varnamespace);
+        origin_pstate->p_joinlist = list_copy(pstate->p_joinlist);
+        origin_pstate->p_joinexprs = list_copy(pstate->p_joinexprs);
+        securec_check(rc, "\0", "\0");
         pstate->p_addStartInfo = true;
         pstate->p_sw_selectstmt = stmt;
         pstate->origin_with = (WithClause *)copyObject(stmt->withClause);
@@ -2934,7 +2947,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
 
     /* transform START WITH...CONNECT BY clause */
     if (shouldTransformStartWithStmt(pstate, stmt, qry)) {
-        transformStartWith(pstate, stmt, qry);
+        transformStartWith(pstate, origin_pstate, stmt, origin_stmt, qry, isFirstNode, isCreateView);
     }
 
     /* transform targetlist */

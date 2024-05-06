@@ -642,6 +642,37 @@ SELECT * FROM RLTEST CONNECT BY NOCYCLE PRIOR B=A AND (MOD(ROWNUM+1,2) = 0);
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (LEVEL < 1 OR ROWNUM < 2);
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND (LEVEL=1 OR B<10) AND (ROWNUM<3 OR PRIOR A=B);
 SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
+
+-- test for multi table join used with pseudo col in where clause
+delete from rltest;
+INSERT INTO RLTEST VALUES('1','2'),('2','3'),('3','1');
+explain select * from rltest r1,rltest r2 where r1.a<=connect_by_isleaf+level+connect_by_iscycle+connect_by_root(r1.a) start with r1.a=1 connect by nocycle prior r2.b=r1.a;
+select * from rltest r1,rltest r2 where r1.a<=connect_by_isleaf+level+connect_by_iscycle+connect_by_root(r1.a) start with r1.a=1 connect by nocycle prior r2.b=r1.a;
+
+-- test cross reference in start with nested query
+create table test_t1(a1 int,b1 int);
+create table test_t2(a2 int,b2 int);
+create table test_t3(a3 int,b3 int);
+insert into test_t1 values(1,2),(2,3),(3,1);
+insert into test_t2 values(1,2),(2,3),(3,1);
+insert into test_t3 values(1,2),(2,3),(3,1);
+explain select * from test_t1 left join test_t2 on a1=a2 where exists (select 1 from test_t3 where a1+a2 is not null connect by level<2) connect by level<2;
+drop table test_t1;
+drop table test_t2;
+drop table test_t3;
+
+-- test sys funcs in multi table join
+select sys_connect_by_path(r1.a,'->') from rltest r1, rltest r2 where r1.a=r2.a connect by level<2;
+select connect_by_root(r1.a) from rltest r1, rltest r2 where r1.a=r2.a connect by level<2;
+-- test for where push down
+create table sin_col_tbl(a int);
+SELECT 1
+FROM sin_col_tbl,
+     rltest
+WHERE   (sin_col_tbl.a+rltest.b) IS NOT NULL
+START WITH  1=1
+CONNECT BY level<2 and prior rltest.b=rltest.a;
+drop table sin_col_tbl;
 DROP TABLE RLTEST;
 create table nocycle_tbl(id int, lid int, name text);
 insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D'),(5,3,'E');
@@ -817,6 +848,7 @@ drop table if exists sw_test;
 drop table if exists sw_tb_1;
 create table sw_tb_1(a int,b int,c int,d int);
 create table sw_tb_2(a int,b int,c int,d int);
+create table sw_tb_3(a int, b int, c int, d int);
 insert into sw_tb_1 values(1,1,1,1);
 insert into sw_tb_1 values(2,2,2,2);
 insert into sw_tb_1 values(3,3,3,3);
@@ -830,5 +862,7 @@ select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a=sw_tb_2.b or sw_tb_1.a not in (se
 select * from sw_tb_1,sw_tb_2 where sw_tb_1.a !=3 or sw_tb_1.c=sw_tb_2.d start with sw_tb_1.a>2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
 select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw_tb_1.a=sw_tb_2.c) and (sw_tb_1.b=sw_tb_2.a or (substr(sw_tb_1.b,2)=substr(sw_tb_2.b,2) and sw_tb_1.b is null)) or (sw_tb_1.c=sw_tb_2.d or sw_tb_1.b!=2) start with sw_tb_1.a=2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
 explain select * from sw_tb_1,sw_tb_2 where (sw_tb_1.a+sw_tb_1.b=sw_tb_2.b or sw_tb_1.a=sw_tb_2.c) and (sw_tb_1.b=sw_tb_2.a or (substr(sw_tb_1.b,2)=substr(sw_tb_2.b,2) and sw_tb_1.b is null)) or (sw_tb_1.c=sw_tb_2.d or sw_tb_1.b!=2) start with sw_tb_1.a=2 connect by nocycle prior sw_tb_1.d=sw_tb_2.c;
+explain select * from sw_tb_3 where exists (select * from sw_tb_1, sw_tb_2 where sw_tb_1.a + sw_tb_2.a = sw_tb_3.a connect by level < 2);
 drop table sw_tb_1;
 drop table sw_tb_2;
+drop table sw_tb_3;

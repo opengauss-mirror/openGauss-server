@@ -196,6 +196,7 @@ struct ParseState {
     List *sw_fromClause;
     WithClause *origin_with;
     bool p_hasStartWith;
+    bool p_split_where_for_swcb;
     bool p_has_ignore;  /* whether SQL has ignore hint */
 
     /*
