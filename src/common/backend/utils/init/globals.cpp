@@ -81,6 +81,7 @@ const uint32 GRAND_VERSION_NUM = 92929;
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 FLUSH_LSN_VERSION_NUM = 92929;
 const uint32 PRIOR_EXPR_VERSION_NUM = 92928;
 const uint32 PUBLICATION_DDL_VERSION_NUM = 92921;
 const uint32 UPSERT_ALIAS_VERSION_NUM = 92920;
