@@ -50,6 +50,13 @@ typedef enum {
     UHEAPTUPLE_ABORT_IN_PROGRESS   /* rollback is still pending */
 } UHTSVResult;
 
+typedef struct UstoreUndoScanDescData {
+    UHeapTupleTransInfo uinfo;
+    TransactionId prevUndoXid;
+    UHeapTuple currentUHeapTuple;
+} UstoreUndoScanDescData;
+typedef UstoreUndoScanDescData* UstoreUndoScanDesc;
+
 bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot snapshot, UHeapTuple *visibleTuple,
     ItemPointer newCtid, bool keepTup, UHeapTupleTransInfo *savedUinfo = NULL, bool *gotTdInfo = NULL,
     const UHeapTuple *saved_tuple = NULL, int16 lastVar = -1, bool *boolArr = NULL, bool *has_cur_xact_write = NULL);
@@ -89,6 +96,12 @@ bool UHeapTupleHasSerializableConflictOut(bool visible, Relation relation, ItemP
 void UHeapTupleCheckVisible(Snapshot snapshot, UHeapTuple tuple, Buffer buffer);
 
 void UHeapUpdateTDInfo(int tdSlot, Buffer buffer, OffsetNumber offnum, UHeapTupleTransInfo* uinfo);
+
+extern bool UHeapSearchBufferShowAnyTuplesFirstCall(ItemPointer tid, Relation relation,
+    Buffer buffer, UstoreUndoScanDesc xc_undo_scan);
+
+extern bool UHeapSearchBufferShowAnyTuplesFromUndo(ItemPointer tid, Relation relation,
+    Buffer buffer, UstoreUndoScanDesc xc_undo_scan);
 
 inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
 {

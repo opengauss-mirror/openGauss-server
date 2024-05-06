@@ -643,6 +643,8 @@ typedef struct HeapTupleData {
     Oid t_tableOid;         /* table the tuple came from */
     TransactionId t_xid_base;
     TransactionId t_multi_base;
+    TransactionId xmin;  /* xmin,xmax is useless in astore */
+    TransactionId xmax;  /* let the length of HeapTupleData equals to UHeapTupleData */
 #ifdef PGXC
     uint32 t_xc_node_id; /* Data node the tuple came from */
 #endif

@@ -33,6 +33,7 @@
 #include "access/xact.h"
 #include "access/tableam.h"
 #include "access/multixact.h"
+#include "access/ustore/knl_uheap.h"
 #include "catalog/namespace.h"
 #include "catalog/gs_matview.h"
 #include "catalog/pg_database.h"
@@ -56,6 +57,7 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/tcap.h"
+#include "storage/freespace.h"
 #include "utils/acl.h"
 #include "utils/extended_statistics.h"
 #include "utils/fmgroids.h"
@@ -115,7 +117,7 @@ typedef struct {
 } VacStates;
 
 extern void do_delta_merge(List* infos, VacuumStmt* stmt);
-
+extern void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy);
 /* release all memory in infos */
 static void free_merge_info(List* infos);
 
@@ -132,6 +134,8 @@ static void GPIVacuumMainPartition(
     Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
 static void CBIVacuumMainPartition(
     Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
+
+static void UstoreVacuum(Relation real, VacuumStmt *vacstmt, LOCKMODE lockmode, BufferAccessStrategy vacstrategy);
 
 #define TryOpenCStoreInternalRelation(r, lmode, r1, r2)                   \
     do {                                                                  \
@@ -1855,10 +1859,10 @@ static inline void proc_snapshot_and_transaction()
 }
 
 static inline void
-TableRelationVacuum(Relation rel, VacuumStmt *vacstmt, BufferAccessStrategy vacStrategy)
+TableRelationVacuum(Relation rel, VacuumStmt *vacstmt, LOCKMODE lockmode, BufferAccessStrategy vacStrategy)
 {
     if (RelationIsUstoreFormat(rel)) {
-        LazyVacuumUHeapRel(rel, vacstmt, vacStrategy);
+        UstoreVacuum(rel, vacstmt, lockmode, vacStrategy);
     } else {
         lazy_vacuum_rel(rel, vacstmt, vacStrategy);
     }
@@ -2431,7 +2435,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         !(RelationIsForeignTable(onerel) && isMOTFromTblOid(onerel->rd_id)) &&
 #endif
         onerel->rd_rel->relkind != RELKIND_MATVIEW &&
-        onerel->rd_rel->relkind != RELKIND_TOASTVALUE && !isPartitionedUHeap) {
+        onerel->rd_rel->relkind != RELKIND_TOASTVALUE) {
 
         if (vacstmt->options & VACOPT_VERBOSE)
             messageLevel = VERBOSEMESSAGE;
@@ -2660,9 +2664,11 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
 #else
     if ((vacstmt->options & VACOPT_FULL) && RelationIsUstoreFormat(onerel)) {
 #endif
-        ereport(INFO, (errmsg("skipping \"%s\" --- Don't vacuum full ustore table,"
-            "this feature to be released in the future.",
-            RelationGetRelationName(onerel))));
+        if(!OidIsValid(relationid)){
+            ereport(INFO, (errmsg("skipping \"%s\" --- Don't vacuum full ustore table,"
+                "this feature to be released in the future.",
+                RelationGetRelationName(onerel))));
+        }
     } else if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SIMPLE_HEAP)) {
         bool is_hdfs_rel = RelationIsPAXFormat(onerel);
         if (is_hdfs_rel) {
@@ -2756,8 +2762,8 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     } else if (!(vacstmt->options & VACOPT_FULL)) {
         if (vacuumMainPartition((uint32)(vacstmt->flags))) {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
-            if (isPartitionedUHeap) {
-                UstoreVacuumMainPartitionGPIs(onerel, vacstmt, lmode, vac_strategy);
+            if (RelationIsUstoreFormat(onerel)) {
+                UstoreVacuum(onerel, vacstmt, lmode, vac_strategy);
             } else {
                 GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
                 CBIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
@@ -2765,7 +2771,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             pgstat_report_vacuum(relid, InvalidOid, false, 0);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
-            TableRelationVacuum(onerel, vacstmt, vac_strategy);
+            TableRelationVacuum(onerel, vacstmt, lmode, vac_strategy);
         }
     }
     (void)pgstat_report_waitstatus(oldStatus);
@@ -4330,3 +4336,25 @@ int GetVacuumLogLevel(void)
 #endif
 }
 
+static void UstoreVacuum(Relation rel, VacuumStmt *vacstmt, LOCKMODE lockmode, BufferAccessStrategy vacstrategy)
+{
+    bool partTable = RelationIsPartitioned(rel);
+
+    /* Only GPI cleanup is performed for partitioned tables regardless of autovacuum or vacuum*/
+    if (partTable) {
+        UstoreVacuumMainPartitionGPIs(rel, vacstmt, lockmode, vacstrategy);
+        return;
+    }
+
+    if (IsAutoVacuumWorkerProcess()) {
+        /* In the autovacuum process, build fsm tree for common tables, toast tables, or partitions. */
+        FreeSpaceMapVacuum(rel);
+        if (vacstmt->needFreeze) {
+            /* Force vacuum for recycle clog. */
+            ForceVacuumUHeapRelBypass(rel, vacstmt, vacstrategy);
+        }
+    } else {
+        /*In vacuum process, the Uheap page and indexes will be cleared for tables, toast, and partitions. */
+        LazyVacuumUHeapRel(rel, vacstmt, vacstrategy);
+    }
+}

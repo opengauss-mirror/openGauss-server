@@ -596,6 +596,8 @@ static void TxnSnapCapProcInterrupts(int rc)
         proc_exit(0);
     }
 
+    CHECK_FOR_INTERRUPTS();
+
     /*
      * reload the postgresql.conf
      */
@@ -885,8 +887,6 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
     /* loop until shutdown request */
     while (!t_thrd.snapcapturer_cxt.got_SIGTERM) {
         int rc;
-
-        CHECK_FOR_INTERRUPTS();
 
         /* Clear any already-pending wakeups */
         ResetLatch(&t_thrd.proc->procLatch);

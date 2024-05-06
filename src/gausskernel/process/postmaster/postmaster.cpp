@@ -4456,7 +4456,8 @@ static int ServerLoop(void)
 
         if (g_instance.attr.attr_storage.enable_ustore &&
             g_instance.pid_cxt.UndoRecyclerPID == 0 &&
-            (pmState == PM_RUN || IS_EXRTO_STANDBY_READ)) {
+            (pmState == PM_RUN || IS_EXRTO_STANDBY_READ) &&
+            u_sess->attr.attr_common.upgrade_mode != 1) {
             g_instance.pid_cxt.UndoRecyclerPID = initialize_util_thread(UNDO_RECYCLER);
         }
 

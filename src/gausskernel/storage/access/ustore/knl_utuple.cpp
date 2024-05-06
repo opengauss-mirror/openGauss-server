@@ -903,67 +903,15 @@ Datum UHeapGetSysAttr(UHeapTuple uhtup, Buffer buf, int attnum, TupleDesc tupleD
             result = PointerGetDatum(&(uhtup->ctid));
             break;
         case MinTransactionIdAttributeNumber:
-            {
-                UHeapTupleTransInfo uinfo;
-                bool releaseBuf = false;
-                OffsetNumber offnum = ItemPointerGetOffsetNumber(&uhtup->ctid);
-                OffsetNumber blockno = ItemPointerGetBlockNumber(&uhtup->ctid);
-
-                /*
-                 * For xmin we may need to fetch the information from the undo
-                 * record, so ensure we have a valid buffer.
-                 *
-                 * ZBORKED: It does not seem acceptable to call
-                 * relation_open() here. This is a very low-level function
-                 * which has no business touching the relcache.
-                 */
-                if (!BufferIsValid(buf)) {
-                    Relation rel = relation_open(uhtup->table_oid, NoLock);
-                    buf = ReadBuffer(rel, blockno);
-                    relation_close(rel, NoLock);
-                    releaseBuf = true;
-                }
-
-                TransactionId lastXid = InvalidTransactionId;
-                UndoRecPtr urp = INVALID_UNDO_REC_PTR;
-                UndoTraversalState state = UHeapTupleGetTransInfo(buf, offnum, &uinfo, NULL, &lastXid, &urp);
-                if (releaseBuf) {
-                    ReleaseBuffer(buf);
-                }
-
-                if (state == UNDO_TRAVERSAL_ABORT) {
-                    int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urp);
-                    undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
-                    ereport(ERROR, (errmodule(MOD_UNDO), errmsg(
-                        "snapshot too old! the undo record has been force discard. "
-                        "Reason: Need fetch transInfo. "
-                        "LogInfo: undo state %d, tuple flag %u. "
-                        "TDInfo: tdxid %lu, tdid %d, undoptr %lu. "
-                        "TransInfo: xid %lu, oid %u, tid(%u, %u), lastXid %lu"
-                        "globalRecycleXid %lu, globalFrozenXid %lu."
-                        "ZoneInfo: urp: %lu, zid %d, insertUrecPtr %lu, forceDiscardUrecPtr %lu, "
-                        "discardUrecPtr %lu, recycleXid %lu. ",
-                        state, PtrGetVal(PtrGetVal(uhtup, disk_tuple), flag),
-                        uinfo.xid, uinfo.td_slot, uinfo.urec_add,
-                        GetTopTransactionIdIfAny(), PtrGetVal(uhtup, table_oid), blockno, offnum, lastXid,
-                        pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
-                        pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
-                        urp, zoneId, PtrGetVal(uzone, GetInsertURecPtr()), PtrGetVal(uzone, GetForceDiscardURecPtr()),
-                        PtrGetVal(uzone, GetDiscardURecPtr()), PtrGetVal(uzone, GetRecycleXid()))));
-                }
-
-                if (!TransactionIdIsValid(uinfo.xid) || TransactionIdOlderThanAllUndo(uinfo.xid)) {
-                    uinfo.xid = FrozenTransactionId;
-                }
-
-                result = TransactionIdGetDatum(uinfo.xid);
-            }
+            result = TransactionIdGetDatum(uhtup->xmin);
             break;
         case MaxTransactionIdAttributeNumber:
+            result = TransactionIdGetDatum(uhtup->xmax);
+            break;
         case MinCommandIdAttributeNumber:
         case MaxCommandIdAttributeNumber:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("xmin, xmax, cmin, and cmax are not supported for ustore tuples")));
+                errmsg("cmin, and cmax are not supported for ustore tuples")));
             break;
         case TableOidAttributeNumber:
             result = ObjectIdGetDatum(uhtup->table_oid);

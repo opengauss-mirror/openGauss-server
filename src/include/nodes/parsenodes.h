@@ -1779,6 +1779,7 @@ typedef struct VacuumStmt {
     Oid curVerifyRel;  /* the current relation is for database mode to send remote query */
     bool isCascade;    /* used to verify table */
     bool gpi_vacuumed;
+    bool needFreeze;
 } VacuumStmt;
 /* Only support analyze, can not support vacuum analyze in transaction block. */
 #define IS_ONLY_ANALYZE_TMPTABLE (((stmt)->isAnalyzeTmpTable) && !((stmt)->options & VACOPT_VACUUM))

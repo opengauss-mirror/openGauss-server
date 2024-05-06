@@ -32,6 +32,8 @@
 #include "utils/snapmgr.h"
 
 static bool UBTreeVisibilityCheckWrap(IndexScanDesc scan, Page page, OffsetNumber offnum, bool *needRecheck);
+static bool UBTreeShowAnyTupleCheckWrap(IndexScanDesc scan, Page page, 
+    OffsetNumber offnum, bool *needRecheck);
 static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, bool xminCommitted, bool xmaxCommitted,
     Snapshot snapshot, Buffer buffer, bool isUpsert = false);
 static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot, Buffer buffer);
@@ -169,7 +171,9 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
     int keysz;
     int ikey;
     ScanKey key;
-
+    bool showAnyTupleMode = u_sess->attr.attr_common.XactReadOnly &&
+            u_sess->attr.attr_storage.enable_show_any_tuples;
+    
     *continuescan = true; /* default assumption */
 
     /*
@@ -180,7 +184,8 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
      * However, if this is the last tuple on the page, we should check the
      * index keys to prevent uselessly advancing to the next page.
      */
-    if (scan->ignore_killed_tuples && ItemIdIsDead(iid)) {
+    if (scan->ignore_killed_tuples && ItemIdIsDead(iid) &&
+        (!showAnyTupleMode || ItemIdHasStorage(iid))) {
         /* return immediately if there are more tuples on the page */
         if (ScanDirectionIsForward(dir)) {
             if (offnum < PageGetMaxOffsetNumber(page)) {
@@ -331,8 +336,11 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
             return NULL;
         }
     }
-
-    tupleVisible = UBTreeVisibilityCheckWrap(scan, page, offnum, needRecheck);
+    if (!showAnyTupleMode) {
+        tupleVisible = UBTreeVisibilityCheckWrap(scan, page, offnum, needRecheck);
+    } else {
+        tupleVisible = UBTreeShowAnyTupleCheckWrap(scan, page, offnum, needRecheck);
+    }
     /* Check for failure due to it being a killed tuple. */
     if (!tupleAlive || !tupleVisible) {
         return NULL;
@@ -340,6 +348,35 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
 
     /* If we get here, the tuple passes all index quals. */
     return tuple;
+}
+
+static bool UBTreeShowAnyTupleCheckWrap(IndexScanDesc scan, Page page, 
+    OffsetNumber offnum, bool *needRecheck)
+{
+    *needRecheck = false;
+    uint64 oldestRecycleXidHavingUndo = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+    ItemId iid = PageGetItemId(page, offnum);
+    IndexTuple itup = (IndexTuple)PageGetItem(page, iid);
+    UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    TransactionId xmin = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmin);
+    TransactionId xmax = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmax);
+    if (TransactionIdIsValid(xmax) && xmax < oldestRecycleXidHavingUndo) {
+        TransactionIdStatus ts = UBTreeCheckXid(xmax);
+        if (ts == XID_COMMITTED) {
+            return false;
+        }
+    }
+    if (!IndexItemIdIsFrozen(iid) && TransactionIdIsValid(xmin) && xmin < oldestRecycleXidHavingUndo) {
+        TransactionIdStatus ts = UBTreeCheckXid(xmin);
+        if (ts != XID_COMMITTED) {
+            return false;
+        }
+    }
+    if (!TransactionIdIsValid(xmin)) {
+        return false;
+    }
+    return true;
 }
 
 static bool UBTreeVisibilityCheckWrap(IndexScanDesc scan, Page page, OffsetNumber offnum, bool *needRecheck)

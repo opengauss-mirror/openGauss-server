@@ -1343,7 +1343,7 @@ static void RawUHeapInsert(RewriteState state, UHeapTuple tup)
     }
 
     /* Compute desired extra freespace due to fillfactor option */
-    saveFreeSpace = RelationGetTargetPageFreeSpace(state->rs_new_rel, HEAP_DEFAULT_FILLFACTOR);
+    saveFreeSpace = RelationGetTargetPageFreeSpace(state->rs_new_rel, UHEAP_DEFAULT_FILLFACTOR);
 
     /* Now we can check to see if there's enough free space already. */
     if (state->rs_buffer_valid) {

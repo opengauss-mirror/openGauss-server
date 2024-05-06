@@ -174,6 +174,8 @@ typedef struct UHeapTupleData {
     Oid                  table_oid;
     TransactionId        t_xid_base;
     TransactionId        t_multi_base;
+    TransactionId        xmin;  /* true xmin without xid_base */
+    TransactionId        xmax;  /* true xmax without xid_base */
 #ifdef PGXC
     uint32 xc_node_id; /* Data node the tuple came from */
 #endif

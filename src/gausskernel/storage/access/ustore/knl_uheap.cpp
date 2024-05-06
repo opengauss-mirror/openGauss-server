@@ -511,7 +511,7 @@ void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Pag
 
     if (hasPruned) {
         Size freespace = PageGetUHeapFreeSpace(page);
-        double thres = RelationGetTargetPageFreeSpacePrune(relation, HEAP_DEFAULT_FILLFACTOR);
+        double thres = RelationGetTargetPageFreeSpacePrune(relation, UHEAP_DEFAULT_FILLFACTOR);
         double prob = FSM_UPDATE_HEURISTI_PROBABILITY * freespace / thres;
         RecordPageWithFreeSpace(relation, blkno, freespace);
         if (rand() % 100 >= 100.0 - prob * 100.0) {
@@ -684,7 +684,7 @@ reacquire_buffer:
         if ((undorec->Uinfo() & UNDO_UREC_INFO_TRANSAC) != 0) {
             xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PREV_URP;
         }
-        if (RelationIsPartition(rel)) {
+        if ((undorec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
             xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
         }
         if (IsSubTransaction() && RelationIsLogicallyLogged(rel)) {
@@ -1940,11 +1940,12 @@ UHeapTuple UHeapExtractReplicaIdentity(Relation relation, UHeapTuple tp, bool* c
          * When logging the entire old tuple, it very well could contain
          * toasted columns. If so, force them to be inlined.
          */
+        UHeapTuple fullTuple = tp;
         if (UHeapTupleHasExternal(tp)) {
             *copy = true;
-            tp = UHeapToastFlattenTuple(tp, RelationGetDescr(relation));
+            fullTuple = UHeapToastFlattenTuple(tp, RelationGetDescr(relation));
         }
-        return tp;
+        return fullTuple;
     }
 
     Relation indexRel = RelationIdGetRelation(replidindex);
@@ -2203,6 +2204,10 @@ check_tup_satisfies_update:
     oldTD.xactid = tdinfo.xid;
     oldTD.undo_record_ptr = tdinfo.urec_add;
 
+    bool isOldTupleCopied = false;
+    char identity;
+    UHeapTuple oldKeyTuple = UHeapExtractReplicaIdentity(relation, &utuple, &isOldTupleCopied, &identity);
+
     /* Prepare Undo */
     UndoPersistence persistence = UndoPersistenceForRelation(relation);
     Oid relOid = RelationIsPartition(relation) ? GetBaseRelOidOfParition(relation) : RelationGetRelid(relation);
@@ -2214,9 +2219,6 @@ check_tup_satisfies_update:
     initStringInfo(&undotup);
     appendBinaryStringInfo(&undotup, (char *)utuple.disk_tuple, utuple.disk_tuple_size);
 
-    bool isOldTupleCopied = false;
-    char identity;
-    UHeapTuple oldKeyTuple = UHeapExtractReplicaIdentity(relation, &utuple, &isOldTupleCopied, &identity);
     /* No ereport(ERROR) from here till changes are logged */
     START_CRIT_SECTION();
     InsertPreparedUndo(t_thrd.ustore_cxt.urecvec);
@@ -2261,7 +2263,7 @@ check_tup_satisfies_update:
         if ((urec->Uinfo() & UNDO_UREC_INFO_TRANSAC) != 0) {
             xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PREV_URP;
         }
-        if (RelationIsPartition(relation)) {
+        if ((urec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
             xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
         }
         if (subxid != InvalidSubTransactionId) {
@@ -2668,7 +2670,7 @@ check_tup_satisfies_update:
         /* Now that we are done with the page, get its available space */
         if (hasPruned) {
             Size freespace = PageGetUHeapFreeSpace(page);
-            double thres = RelationGetTargetPageFreeSpacePrune(relation, HEAP_DEFAULT_FILLFACTOR);
+            double thres = RelationGetTargetPageFreeSpacePrune(relation, UHEAP_DEFAULT_FILLFACTOR);
             double prob = FSM_UPDATE_HEURISTI_PROBABILITY * freespace / thres;
             RecordPageWithFreeSpace(relation, blkno, freespace);
             if (rand() % 100 >= 100.0 - prob * 100.0) {
@@ -2990,6 +2992,11 @@ check_tup_satisfies_update:
     oldtup.ctid = test.t_self;
     oldtup.table_oid = test.t_tableOid;
     oldtup.xc_node_id = test.t_xc_node_id;
+
+    bool isOldTupleCopied = false;
+    char identity;
+    UHeapTuple oldKeyTuple = UHeapExtractReplicaIdentity(relation, &oldtup, &isOldTupleCopied, &identity);
+    
     /* Prepare an undo record for this operation. */
     /* Save the previous updated information in the undo record */
     TD oldTD;
@@ -3049,8 +3056,7 @@ check_tup_satisfies_update:
             undoXorDeltaSize += sizeof(uint16);
     }
 
-    /* The first sizeof(uint8) is space for t_hoff and the second sizeof(uint8) is space for prefix and suffix flag
-     */
+    /* The first sizeof(uint8) is space for t_hoff and the second sizeof(uint8) is space for prefix and suffix flag */
     undoXorDeltaSize += sizeof(uint8) + oldtup.disk_tuple->t_hoff - OffsetTdId + sizeof(uint8);
     undoXorDeltaSize += oldlen - prefixlen - suffixlen;
 
@@ -3079,9 +3085,6 @@ check_tup_satisfies_update:
         infomaskNewTuple = 0;
     }
 
-    bool isOldTupleCopied = false;
-    char identity;
-    UHeapTuple oldKeyTuple = UHeapExtractReplicaIdentity(relation, &oldtup, &isOldTupleCopied, &identity);
     /* No ereport(ERROR) from here till changes are logged */
     START_CRIT_SECTION();
     /*
@@ -3237,7 +3240,7 @@ check_tup_satisfies_update:
         if (newurec->Blkprev() != INVALID_UNDO_REC_PTR) {
             newXlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_BLK_PREV;
         }
-        if (hasSubXactLock) {
+        if ((oldurec->Uinfo() & UNDO_UREC_INFO_CONTAINS_SUBXACT) != 0) {
             oldXlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_SUB_XACT;
 
             if (RelationIsLogicallyLogged(relation)) {
@@ -3249,7 +3252,7 @@ check_tup_satisfies_update:
             t_thrd.proc->workingVersionNum >= LOGICAL_DECODE_FLATTEN_TOAST_VERSION_NUM) {
             oldXlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_TOAST;
         }
-        if (partitionOid != InvalidOid) {
+        if ((oldurec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
             oldXlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
             newXlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
         }
@@ -3373,7 +3376,7 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
     bool skipUndo = false;
     UPageVerifyParams verifyParams;
 
-    saveFreeSpace = RelationGetTargetPageFreeSpace(relation, HEAP_DEFAULT_FILLFACTOR);
+    saveFreeSpace = RelationGetTargetPageFreeSpace(relation, UHEAP_DEFAULT_FILLFACTOR);
 
     /* Toast and set header data in all the tuples */
     uheaptuples = (UHeapTupleData **)palloc(ntuples * sizeof(UHeapTuple));
@@ -3585,14 +3588,15 @@ reacquire_buffer:
             UHeapWALInfo genWalInfo;
             uint8 xlUndoHeaderFlag = 0;
             TransactionId currentXid = InvalidTransactionId;
-            
-            if (((*urecvec)[0]->Uinfo() & (*urecvec)[0]->Urp()) != 0) {
+            UndoRecord *urec = (*urecvec)[0];
+
+            if ((urec->Uinfo() & UNDO_UREC_INFO_TRANSAC) != 0) {
                 xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PREV_URP;
             }
             if (prevUrecptr != INVALID_UNDO_REC_PTR) {
                 xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_BLK_PREV;
             }
-            if (RelationIsPartition(relation)) {
+            if ((urec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
                 xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
             }
             if (IsSubTransaction() && RelationIsLogicallyLogged(relation)) {

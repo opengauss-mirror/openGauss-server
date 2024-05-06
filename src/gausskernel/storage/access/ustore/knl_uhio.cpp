@@ -71,7 +71,7 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
     }
 
     /* Compute desired extra freespace due to fillfactor option */
-    saveFreeSpace = RelationGetTargetPageFreeSpace(relation, HEAP_DEFAULT_FILLFACTOR);
+    saveFreeSpace = RelationGetTargetPageFreeSpace(relation, UHEAP_DEFAULT_FILLFACTOR);
 
     if (otherBuffer != InvalidBuffer) {
         otherBlock = BufferGetBlockNumber(otherBuffer);

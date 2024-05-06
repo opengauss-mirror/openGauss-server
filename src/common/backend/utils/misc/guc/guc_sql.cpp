@@ -2938,7 +2938,7 @@ static void InitSqlConfigureNamesString()
             NULL,
             GUC_LIST_INPUT | GUC_LIST_QUOTE},
             &u_sess->attr.attr_sql.ustore_attr,
-            "",
+            "ustore_verify_level=FAST;ustore_verify_module=UPAGE:UBTREE",
             CheckUStoreAttr,
             AssignUStoreAttr,
             NULL},
@@ -4009,7 +4009,7 @@ static bool IsValidUstoreAttrValues(const char* keyStr, char* value)
             strcasecmp(value, "visibility") == 0 || strcasecmp(value, "showhikey") == 0 ||
             strcasecmp(value, "all") == 0) ? true : false;
     } else if (strcasecmp(keyStr, "enable_log_tuple") == 0) {
-        return (strcasecmp(value, "on") == 0 || strcasecmp(value, "off") == 0) ? true : false;
+        return (strcasecmp(value, "off") == 0) ? true : false;
     }
     return false;
 }
@@ -4226,7 +4226,7 @@ static void AssignUStoreAttr(const char* newval, void* extra)
                 ParseUstoreOption(&u_sess->attr.attr_storage.index_trace_level, ptoken, pdelimiter, psave);
                 status[ENABLE_USTORE_TRACE_LEVEL_IDX] = true;
             } else if (strcasecmp(ptoken, "enable_log_tuple") == 0) {
-                ParseUStoreBool(&u_sess->attr.attr_storage.enable_log_tuple, ptoken, pdelimiter, psave);
+                u_sess->attr.attr_storage.enable_log_tuple = false;
                 status[ENABLE_USTORE_LOG_TUPLE_IDX] = true;
             }
         }

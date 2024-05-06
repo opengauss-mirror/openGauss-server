@@ -575,7 +575,7 @@ static void LazyScanURel(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *v
  *        found in heap page less than that value is already committed, otherwise we
  *        won't find it (rollback is already performed).
  */
-static void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
+void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 {
     Assert(IsAutoVacuumWorkerProcess());
     TransactionId newFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
@@ -726,12 +726,6 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
                 errcause("There is a high probability that the DML operation "
                 "has not been performed on any ustore table. "),
                 erraction("Check the value of globalRecycleXid in undo_cxt.")));
-        return;
-    }
-
-    if (IsAutoVacuumWorkerProcess()) {
-        /* must be force recycle, use another bypass */
-        ForceVacuumUHeapRelBypass(onerel, vacstmt, bstrategy);
         return;
     }
 

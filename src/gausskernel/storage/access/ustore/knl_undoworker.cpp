@@ -89,6 +89,7 @@ static void UndoworkerSigtermHandler(SIGNAL_ARGS)
     int saveErrno = errno;
 
     t_thrd.undoworker_cxt.got_SIGTERM = true;
+    t_thrd.int_cxt.ProcDiePending = true;
     if (t_thrd.proc)
         SetLatch(&t_thrd.proc->procLatch);
 

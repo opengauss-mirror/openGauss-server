@@ -263,13 +263,6 @@ OffsetNumber UPageAddItem(Relation rel, UHeapBufferPage *bufpage, Item item, Siz
         return InvalidOffsetNumber;
     }
 
-    /* Reject placing items beyond heap boundary, if heap */
-    if (!t_thrd.xlog_cxt.InRecovery && offsetNumber > CalculatedMaxUHeapTuplesPerPage(RelationGetInitTd(rel))) {
-        elog(WARNING, "can't put (%d)th item in a Ustore page with max %d items",
-            offsetNumber, CalculatedMaxUHeapTuplesPerPage(RelationGetInitTd(rel)));
-        return InvalidOffsetNumber;
-    }
-
     if (!CalculateLowerUpperPointers(page, offsetNumber, item, size, needshuffle)) {
         return InvalidOffsetNumber;
     }

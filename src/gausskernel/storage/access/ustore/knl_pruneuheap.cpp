@@ -160,7 +160,7 @@ bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid, 
         return false;
     }
 
-    minfree = RelationGetTargetPageFreeSpacePrune(relation, HEAP_DEFAULT_FILLFACTOR);
+    minfree = RelationGetTargetPageFreeSpacePrune(relation, UHEAP_DEFAULT_FILLFACTOR);
     minfree = Max(minfree, BLCKSZ / 10);
     if (PageIsFull(page) || PageGetExactUHeapFreeSpace(page) < minfree) {
         RelationBuffer relbuf = {relation, buffer};

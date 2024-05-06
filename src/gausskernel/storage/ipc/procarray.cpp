@@ -707,6 +707,7 @@ void ProcArrayGroupClearXid(bool isSubTransaction, PGPROC* proc,
         return;
     }
 
+    START_CRIT_SECTION();
     /* We are the leader.  Acquire the lock on behalf of everyone. */
     LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
 
@@ -795,6 +796,7 @@ void ProcArrayGroupClearXid(bool isSubTransaction, PGPROC* proc,
 
         index++;
     }
+    END_CRIT_SECTION();
 }
 
 /*

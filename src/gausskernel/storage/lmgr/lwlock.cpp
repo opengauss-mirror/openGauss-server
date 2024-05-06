@@ -844,6 +844,8 @@ static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMo
     }
     instr_stmt_report_lock(LWLOCK_WAIT_END);
     LWLockReportWaitFailed(lock);
+    /* reset victim flag, we may acquire lock again at fatal process */
+    proc->lwIsVictim = false;
     ereport(FATAL, (errmsg("force thread %lu to exit because of lwlock deadlock", proc->pid),
                     errdetail("Lock Info: (%s), mode %d", T_NAME(lock), mode)));
 }

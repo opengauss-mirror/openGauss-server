@@ -247,6 +247,19 @@ int TableScanBitmapNextTargetRel(TableScanDesc scan, BitmapHeapScanState *node)
     return (result ? 0 : -1);
 }
 
+static void CheckUstoreShowAnyTupleMode(TableScanDesc scan)
+{
+    if (scan == NULL) {
+        return;
+    }
+    if (!RelationIsUstoreFormat(scan->rs_rd)) {
+        return;
+    }
+    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples) {
+        ereport(ERROR, (errmodule(MOD_USTORE), errmsg("ustore bitmap scan is not supported in show any tuple mode")));
+    }
+}
+
 /* ----------------------------------------------------------------
  *		BitmapHeapNext
  *
@@ -301,6 +314,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
      * a LIMIT.
      */
     if (tbm == NULL) {
+        CheckUstoreShowAnyTupleMode(scan);
         tbm = (TIDBitmap*)MultiExecProcNode(outerPlanState(node));
         tbm_handler = tbm_get_handler(tbm);
 

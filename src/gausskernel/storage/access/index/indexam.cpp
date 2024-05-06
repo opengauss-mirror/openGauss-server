@@ -594,9 +594,14 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_
     Relation rel = scan->heapRelation;
     Buffer xsCbuf = scan->xs_cbuf;
     ItemPointer tid = &scan->xs_ctup.t_self;
+    bool showAnyTupleMode = u_sess->attr.attr_common.XactReadOnly &&
+            u_sess->attr.attr_storage.enable_show_any_tuples;
+    bool undoChainEnd = true;
 
     /* Switch to correct buffer if we don't have it already */
-    scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
+    if (!scan->xs_continue_hot) {
+        scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
+    }
 
     /*
      * In single mode and hot standby, we may get a null buffer if index
@@ -609,13 +614,26 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_
 
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 
-    UHeapTuple uheapTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, scan->xs_snapshot, all_dead);
+    UHeapTuple uheapTuple = NULL;
+
+    if (!showAnyTupleMode) {
+        scan->xc_undo_scan = NULL;
+        uheapTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, scan->xs_snapshot, all_dead);
+    } else {
+        if (!scan->xs_continue_hot) {
+            scan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDesc));
+            undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
+        } else {
+            undoChainEnd = UHeapSearchBufferShowAnyTuplesFromUndo(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
+        }
+        uheapTuple = scan->xc_undo_scan->currentUHeapTuple;
+    }
 
     /* Save the XID of the last modified tuple, which is used to determine whether the tuple of the USTORE table 
      * was modified by another transaction. For performance reasons, we reuse t_xid_base or t_multi_base 
      * to record the last modified XID of a tuple.
      */
-    if (scan->isUpsert && uheapTuple) {
+    if (scan->isUpsert && uheapTuple && !showAnyTupleMode) {
         if (UHeapTupleHasMultiLockers((uheapTuple)->disk_tuple->flag)) {
             uheapTuple->t_xid_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false, has_cur_xact_write);
         } else {
@@ -625,8 +643,16 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_
 
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
+    scan->xs_continue_hot = showAnyTupleMode && !undoChainEnd;
+    if (!scan->xs_continue_hot){
+        pfree_ext(scan->xc_undo_scan);
+    }
 
-    return uheapTuple;
+    if (uheapTuple) {
+        return uheapTuple;
+    }
+
+    return NULL;
 }
 
 bool UHeapamIndexFetchTupleInSlot(IndexScanDesc scan, ItemPointer tid, Snapshot snapshot,
@@ -634,9 +660,12 @@ TupleTableSlot *slot, bool *callAgain, bool *allDead, bool* has_cur_xact_write)
 {
     Relation rel = scan->heapRelation;
     Buffer xsCbuf = scan->xs_cbuf;
+    bool showAnyTupleMode = u_sess->attr.attr_common.XactReadOnly &&
+            u_sess->attr.attr_storage.enable_show_any_tuples;
+    bool undoChainEnd = true;
 
     /* No HOT chains in UStore. */
-    Assert(!*callAgain);
+    Assert(!*callAgain || (showAnyTupleMode && scan->xs_continue_hot));
 
     /*
      * IndexScanDesc contains a memory that can hold up to MaxHeapTupleSize,
@@ -650,8 +679,9 @@ TupleTableSlot *slot, bool *callAgain, bool *allDead, bool* has_cur_xact_write)
     dataPageTuple->disk_tuple = (UHeapDiskTuple) ((char *) dataPageTuple + UHeapTupleDataSize);
 
     /* Switch to correct buffer if we don't have it already */
-    scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
-
+    if (!scan->xs_continue_hot) {
+        scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
+    }
     /*
      * In single mode and hot standby, we may get a invalid buffer if index
      * replayed before the tid replayed. This is acceptable, so we return
@@ -662,14 +692,34 @@ TupleTableSlot *slot, bool *callAgain, bool *allDead, bool* has_cur_xact_write)
     }
 
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-    UHeapTuple visibleTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, snapshot, allDead, dataPageTuple,
-                                                has_cur_xact_write);
 
+    UHeapTuple visibleTuple = NULL;
+
+    if (!showAnyTupleMode) {
+        scan->xc_undo_scan = NULL;
+        visibleTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, snapshot, allDead, dataPageTuple,
+                                                has_cur_xact_write);
+    } else {
+        if (!scan->xs_continue_hot) {
+            scan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDesc));
+            undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
+        } else {
+            undoChainEnd = UHeapSearchBufferShowAnyTuplesFromUndo(tid, rel, scan->xs_cbuf, scan->xc_undo_scan);
+        }
+        visibleTuple = scan->xc_undo_scan->currentUHeapTuple;
+    }
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+
+    scan->xs_continue_hot = showAnyTupleMode && !undoChainEnd;
+    /* reach the undo chain end */
+    if (!scan->xs_continue_hot){
+        pfree_ext(scan->xc_undo_scan);
+    }
 
     if (visibleTuple) {
         Assert(visibleTuple->disk_tuple_size <= usableSize);
-        ExecStoreTuple(visibleTuple, slot, InvalidBuffer, (visibleTuple != dataPageTuple));
+        ExecStoreTuple(visibleTuple, slot, InvalidBuffer, 
+            ((visibleTuple != dataPageTuple) && !scan->xs_continue_hot));
     }
 
     return visibleTuple != NULL;

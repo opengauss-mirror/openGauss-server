@@ -42,10 +42,14 @@ static void UHeapGetPagePrune(UHeapScanDesc scan, Buffer buffer)
     bool hasPruned = false;
     Size freespace = 0;
 
+    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples) {
+        return;
+    }
+
     if (!scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis) {
         pg = BufferGetPage(buffer);
         UHeapPageHeaderData *upage = (UHeapPageHeaderData *)pg;
-        double thres = RelationGetTargetPageFreeSpacePrune(scan->rs_base.rs_rd, HEAP_DEFAULT_FILLFACTOR);
+        double thres = RelationGetTargetPageFreeSpacePrune(scan->rs_base.rs_rd, UHEAP_DEFAULT_FILLFACTOR);
         /* Since heuristic probability controls the frequency of pruning,
          * (1.0-heuristic_prob) controls the threshold percentage of potential freespace to perform page pruning
          * do page pruning when potential_freespace takes up at least (1.0-heuristic_prob)
@@ -236,6 +240,8 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
     UHeapTuple tuple = scan->rs_cutup;
     Snapshot snapshot = scan->rs_base.rs_snapshot;
     bool backward = ScanDirectionIsBackward(dir);
+    bool showAnyTupleMode = u_sess->attr.attr_common.XactReadOnly &&
+            u_sess->attr.attr_storage.enable_show_any_tuples;
     BlockNumber page;
     bool finished;
     bool valid;
@@ -270,8 +276,11 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
         } else {
             /* continue from previously returned page/tuple */
             page = scan->rs_base.rs_cblock; /* current page */
-            if (tuple != NULL) {
+            if (tuple != NULL && !scan->xs_continue_undo) {
                 lineoff = OffsetNumberNext(ItemPointerGetOffsetNumber(&(tuple->ctid))); /* next offnum */
+            }
+            if (scan->xs_continue_undo) {
+                lineoff = ItemPointerGetOffsetNumber(&scan->curTid);
             }
         }
 
@@ -325,14 +334,20 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
             lineoff = lines; /* final offnum */
             scan->rs_base.rs_inited = true;
         } else {
-            if (tuple != NULL) {
+            if (tuple != NULL && !scan->xs_continue_undo) {
                 lineoff = OffsetNumberPrev(ItemPointerGetOffsetNumber(&(tuple->ctid))); /* previous offnum */
+            }
+            if (scan->xs_continue_undo) {
+                lineoff = ItemPointerGetOffsetNumber(&scan->curTid);
             }
         }
         /* page and lineoff now reference the physically previous tid */
 
         linesleft = lineoff;
     } else {
+        if (showAnyTupleMode) {
+            elog(ERROR, "Unsupported no move direction in show any tuples mode");
+        }
         if (!scan->rs_base.rs_inited || (tuple == NULL)) {
             Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
             tuple = NULL;
@@ -365,28 +380,50 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
 
 get_next_tuple:
     while (linesleft > 0) {
-        if (RowPtrIsNormal(lpp)) {
+        if (RowPtrIsNormal(lpp) || (RowPtrIsDeleted(lpp) && showAnyTupleMode)) {
             UHeapTuple tuple = NULL;
             bool valid;
+            bool undoChainEnd = true;
 
-            valid = UHeapTupleFetch(scan->rs_base.rs_rd, scan->rs_base.rs_cbuf, lineoff, snapshot,
-                &tuple, NULL, false, NULL, NULL, NULL, -1, NULL);
+            if (!showAnyTupleMode) {
+                valid = UHeapTupleFetch(scan->rs_base.rs_rd, scan->rs_base.rs_cbuf, lineoff, snapshot,
+                    &tuple, NULL, false, NULL, NULL, NULL, -1, NULL);
 
-            /*
-             * If any prior version is visible, we pass latest visible as
-             * true. The state of latest version of tuple is determined by the
-             * called function.
-             *
-             * Note that, it's possible that tuple is updated in-place and
-             * we're seeing some prior version of that. We handle that case in
-             * InplaceHeapTupleHasSerializableConflictOut.
-             */
-            CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void *)&tuple->ctid, scan->rs_base.rs_cbuf,
-                snapshot);
+                /*
+                * If any prior version is visible, we pass latest visible as
+                * true. The state of latest version of tuple is determined by the
+                * called function.
+                *
+                * Note that, it's possible that tuple is updated in-place and
+                * we're seeing some prior version of that. We handle that case in
+                * InplaceHeapTupleHasSerializableConflictOut.
+                */
+                CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void *)&tuple->ctid, scan->rs_base.rs_cbuf,
+                    snapshot);
+            } else {
+                if (!scan->xs_continue_undo) {
+                    ItemPointerSet(&scan->curTid, BufferGetBlockNumber(scan->rs_base.rs_cbuf), lineoff);
+                    errno_t rc = memset_s(scan->xc_undo_scan, sizeof(UstoreUndoScanDesc),
+                        0, sizeof(UstoreUndoScanDesc));
+                    securec_check(rc, "\0", "\0");
+                    undoChainEnd = UHeapSearchBufferShowAnyTuplesFirstCall(&scan->curTid, scan->rs_base.rs_rd,
+                        scan->rs_base.rs_cbuf, scan->xc_undo_scan);
+                } else {
+                    undoChainEnd = UHeapSearchBufferShowAnyTuplesFromUndo(&scan->curTid, scan->rs_base.rs_rd,
+                        scan->rs_base.rs_cbuf, scan->xc_undo_scan);     
+                }
+                tuple = scan->xc_undo_scan->currentUHeapTuple;
+                scan->xs_continue_undo = !undoChainEnd;
+                valid = (tuple != NULL);
+            }
 
             if (valid) {
                 LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
                 return tuple;
+            }
+            /* continue to fetch next tuple in undo */
+            if (showAnyTupleMode && scan->xs_continue_undo) {
+                continue;
             }
         }
 
@@ -663,12 +700,18 @@ TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys, Pa
     uscan->rs_base.rs_cbuf = InvalidBuffer;
     uscan->rs_base.rs_cblock = InvalidBlockNumber;
 
-    /* Disable page-at-a-time mode if it's not a MVCC-safe snapshot. */
-    uscan->rs_base.rs_pageatatime = IsMVCCSnapshot(snapshot);
+    /* Disable page-at-a-time mode if it's not a MVCC-safe snapshot or show any tuple mode. */
+    uscan->rs_base.rs_pageatatime = IsMVCCSnapshot(snapshot) &&
+        !(u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples);
     uscan->rs_base.rs_strategy = NULL;
     uscan->rs_base.rs_ss_accessor = NULL;
     uscan->rs_ctupBatch = NULL;
-
+    uscan->xs_continue_undo = false;
+    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples) {
+        uscan->xc_undo_scan = (UstoreUndoScanDesc)palloc0(sizeof(UstoreUndoScanDescData));
+    } else {
+        uscan->xc_undo_scan = NULL;
+    }
     if (!uscan->rs_bitmapscan && !uscan->rs_samplescan)
         pgstat_count_heap_scan(uscan->rs_base.rs_rd);
 
@@ -804,6 +847,8 @@ void UHeapEndScan(TableScanDesc scan)
     if (uscan->rs_ctupBatch != NULL) {
         pfree_ext(uscan->rs_ctupBatch);
     }
+
+    pfree_ext(uscan->xc_undo_scan);
 
     pfree(uscan);
     uscan = NULL;

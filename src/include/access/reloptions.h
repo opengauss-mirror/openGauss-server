@@ -264,7 +264,7 @@ extern bytea* extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoption
 extern relopt_value* parseRelOptions(Datum options, bool validate, relopt_kind kind, int* numrelopts);
 extern void* allocateReloptStruct(Size base, relopt_value* options, int numoptions);
 extern void fillRelOptions(void* rdopts, Size basesize, relopt_value* options, int numoptions, bool validate,
-    const relopt_parse_elt* elems, int nelems);
+    const relopt_parse_elt* elems, int nelems, bool kindIsHeap = false);
 extern void fillTdeRelOptions(List *options, char relkind);
 extern bytea* default_reloptions(Datum reloptions, bool validate, relopt_kind kind);
 extern bytea* heap_reloptions(char relkind, Datum reloptions, bool validate);

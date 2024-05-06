@@ -9846,10 +9846,12 @@ void StartupXLOG(void)
     t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = InvalidTransactionId;
     /* Read oldest xid having undo from checkpoint and set in proc global. */
     if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
+        pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, checkPointUndo.globalRecycleXid);
         pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, checkPointUndo.globalRecycleXid);
         ereport(LOG, (errmsg("Startup: write global globalRecycleXid %lu from checkpoint %lu",
             g_instance.undo_cxt.globalRecycleXid, checkPointUndo.globalRecycleXid)));
     } else {
+        pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, InvalidTransactionId);
         pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, InvalidTransactionId);
     }
     set_hot_standby_recycle_xid();
@@ -13991,8 +13993,10 @@ void xlog_redo(XLogReaderState *record)
             securec_check(rc, "", "");
             checkPoint = checkPointUndo.ori_checkpoint;
             if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
+                pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, checkPointUndo.globalRecycleXid);
                 pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, checkPointUndo.globalRecycleXid);
             } else {
+                pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, InvalidTransactionId);
                 pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, InvalidTransactionId);
             }
             if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin,
@@ -14117,8 +14121,10 @@ void xlog_redo(XLogReaderState *record)
             securec_check(rc, "", "");
             checkPoint = checkPointUndo.ori_checkpoint;
             if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
+                pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, checkPointUndo.globalRecycleXid);
                 pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, checkPointUndo.globalRecycleXid);
             } else {
+                pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, InvalidTransactionId);
                 pg_atomic_write_u64(&g_instance.undo_cxt.globalRecycleXid, InvalidTransactionId);
             }
             if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin,
@@ -16913,7 +16919,8 @@ void rm_redo_error_callback(void *arg)
     initStringInfo(&buf);
     RmgrTable[XLogRecGetRmid(record)].rm_desc(&buf, record);
 
-    errcontext("xlog redo %s", buf.data);
+    errcontext("xlog redo at lsn %X/%X, %s", (uint32)(record->EndRecPtr >> XLOG_LSN_SWAP),
+        (uint32)record->EndRecPtr, buf.data);
 
     pfree_ext(buf.data);
 }

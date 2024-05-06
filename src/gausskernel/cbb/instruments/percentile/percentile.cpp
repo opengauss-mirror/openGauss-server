@@ -47,7 +47,8 @@
 #include "utils/postinit.h"
 
 extern void destroy_handles();
-const int SLEEP_INTERVAL = 10;
+const int SLEEP_INTERVAL_ONE = 1;
+const int SLEEP_INTERVAL_TEN = 10;
 namespace PercentileSpace {
 bool pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, char tag, int* Count, SqlRTInfo* sqlRT);
 List* pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, char tag, bool* isSendSuccess);
@@ -222,7 +223,7 @@ NON_EXEC_STATIC void PercentileMain()
         t_thrd.percentile_cxt.need_reset_timer = true;
         g_instance.stat_cxt.force_process = false;
         if (t_thrd.percentile_cxt.need_exit) break;
-        sleep(SLEEP_INTERVAL);
+        sleep(SLEEP_INTERVAL_ONE);
     }
     elog(LOG, "instrumention percentile ended");
     gs_thread_exit(0);
@@ -361,7 +362,7 @@ void PercentileSpace::SubPercentileMain(void)
             t_thrd.percentile_cxt.need_reset_timer = true;
             g_instance.stat_cxt.force_process = false;
         }
-        pg_usleep(SLEEP_INTERVAL * 1000L);  // CCN check if need force process percentile
+        pg_usleep(SLEEP_INTERVAL_TEN * 1000L);  // CCN check if need force process percentile
     }                               /* end of loop */
 }
 

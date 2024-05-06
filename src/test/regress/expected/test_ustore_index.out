@@ -593,18 +593,8 @@ create index on t(a, b);
 insert into t values(generate_series(1, 10), generate_series(1, 10));
 delete from t where a % 2 = 0;
 set ustore_attr="index_trace_level=all;enable_log_tuple=on";
+ERROR:  invalid value for parameter "ustore_attr": ""index_trace_level=all;enable_log_tuple=on""
 select /*+ indexscan(t) */ * from t where a = 1;
---? INFO:  Index Trace Page: rel "t_a_b_idx", oid .*, blkno 1
---? INFO:  Tuple (a, b)=(1, 1), Offset 1, State NORMAL, TID (0, 1), partOid 0, xmin/xmax .*/0, Visible
---? INFO:  Tuple (a, b)=(2, 2), Offset 2, State NORMAL, TID (0, 2), partOid 0, xmin/xmax .*/.*, Invisible
---? INFO:  Tuple (a, b)=(3, 3), Offset 3, State NORMAL, TID (0, 3), partOid 0, xmin/xmax .*/0, Visible
---? INFO:  Tuple (a, b)=(4, 4), Offset 4, State NORMAL, TID (0, 4), partOid 0, xmin/xmax .*/.*, Invisible
---? INFO:  Tuple (a, b)=(5, 5), Offset 5, State NORMAL, TID (0, 5), partOid 0, xmin/xmax .*/0, Visible
---? INFO:  Tuple (a, b)=(6, 6), Offset 6, State NORMAL, TID (0, 6), partOid 0, xmin/xmax .*/.*, Invisible
---? INFO:  Tuple (a, b)=(7, 7), Offset 7, State NORMAL, TID (0, 7), partOid 0, xmin/xmax .*/0, Visible
---? INFO:  Tuple (a, b)=(8, 8), Offset 8, State NORMAL, TID (0, 8), partOid 0, xmin/xmax .*/.*, Invisible
---? INFO:  Tuple (a, b)=(9, 9), Offset 9, State NORMAL, TID (0, 9), partOid 0, xmin/xmax .*/0, Visible
---? INFO:  Tuple (a, b)=(10, 10), Offset 10, State NORMAL, TID (0, 10), partOid 0, xmin/xmax .*/.*, Invisible
  a | b 
 ---+---
  1 | 1

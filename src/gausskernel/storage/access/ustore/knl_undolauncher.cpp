@@ -151,7 +151,7 @@ static void StartUndoWorker(UndoWorkInfo work, int idx)
     t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[idx].xid = work->xid;
     t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[idx].startUndoPtr = work->startUndoPtr;
 
-    do {
+    while (!t_thrd.undolauncher_cxt.got_SIGTERM) {
         bool hit10s = (retryTimes % maxRetryTimes == 0);
         if (hit10s) {
             SendPostmasterSignal(PMSIGNAL_START_UNDO_WORKER);
@@ -162,7 +162,7 @@ static void StartUndoWorker(UndoWorkInfo work, int idx)
         }
         pg_usleep(waitTime);
         retryTimes++;
-    } while (true);
+    };
 }
 
 Size UndoWorkerShmemSize(void)

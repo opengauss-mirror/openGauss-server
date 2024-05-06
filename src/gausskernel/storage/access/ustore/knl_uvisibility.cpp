@@ -47,7 +47,7 @@ static UVersionSelector UHeapSelectVersionUpdate(UTupleTidOp op, TransactionId x
 
 static UndoTraversalState GetTupleFromUndoRecord(UndoRecPtr urecPtr, TransactionId xid, Buffer buffer,
     OffsetNumber offnum, UHeapDiskTuple hdr, UHeapTuple *tuple, bool *freeTuple,
-    UHeapTupleTransInfo *uinfo, ItemPointer ctid, TransactionId *lastXid, UndoRecPtr *urp);
+    UHeapTupleTransInfo *uinfo, ItemPointer ctid, TransactionId *lastXid, uint8 *undoType);
 static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapTuple *visibleTuple, Snapshot snapshot,
     CommandId curcid, Buffer buffer, OffsetNumber offnum, ItemPointer ctid, int tdSlot);
 
@@ -920,6 +920,12 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
     } else {
         uint16 infomask = utuple->disk_tuple->flag;
         op = UHeapTidOpFromInfomask(infomask);
+        utuple->xmax = InvalidTransactionId;
+        if (tdinfo.td_slot == UHEAPTUP_SLOT_FROZEN) {
+            utuple->xmin = FrozenTransactionId;
+        } else {
+            utuple->xmin = tdinfo.xid;
+        }
     }
 
     uheapselect = UHeapTupleSatisfies(op, snapshot, &tdinfo, &snapshotRequests, buffer);
@@ -956,14 +962,22 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
      */
     if (uheapselect == UVERSION_OLDER || (utuple == NULL && uheapselect == UVERSION_NONE && keepTup)) {
         UHeapTuple priorTuple = NULL;
+        TransactionId saveXidForDelete = InvalidTransactionId;
 
         /* 
          * Fetch the full tuple from page if utuple was from a partial seq scan. 
          * This is important as the undo has the difference between the old and new tuple in the page.
          */
         if (utuple != NULL && lastVar != -1 && !savedTuple) {
+            TransactionId saveXmin = utuple->xmin;
+            TransactionId saveXmax = utuple->xmax;
             pfree(utuple);
             utuple = UHeapGetTuplePartial(rel, buffer, offnum, -1, boolArr);
+            utuple->xmin = saveXmin;
+            utuple->xmax = saveXmax;
+        }
+        if (utuple == NULL) {
+            saveXidForDelete = tdinfo.xid;
         }
         GetTupleFromUndo(tdinfo.urec_add, utuple, &priorTuple, snapshot, snapshot->curcid, buffer,
             offnum, newCtid, tdinfo.td_slot);
@@ -971,6 +985,12 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
             pfree(utuple);
 
         utuple = priorTuple;
+        if (utuple != NULL) {
+            utuple->table_oid = RelationGetRelid(rel);
+            if (TransactionIdIsValid(saveXidForDelete) && !TransactionIdIsValid(utuple->xmax)) {
+                utuple->xmax = saveXidForDelete;
+            }
+        }
 
         tupleFromUndo = true;
     }
@@ -1888,7 +1908,7 @@ bool UHeapTupleIsSurelyDead(UHeapTuple uhtup, Buffer buffer, OffsetNumber offnum
 
 static UndoTraversalState GetTupleFromUndoRecord(UndoRecPtr urecPtr, TransactionId xid, Buffer buffer,
     OffsetNumber offnum, UHeapDiskTuple hdr, UHeapTuple *tuple, bool *freeTuple,
-    UHeapTupleTransInfo *uinfo, ItemPointer ctid, TransactionId *lastXid, UndoRecPtr *urp)
+    UHeapTupleTransInfo *uinfo, ItemPointer ctid, TransactionId *lastXid, uint8 *undoType)
 {
     BlockNumber blkno = BufferGetBlockNumber(buffer);
     VerifyMemoryContext();
@@ -1904,7 +1924,9 @@ static UndoTraversalState GetTupleFromUndoRecord(UndoRecPtr urecPtr, Transaction
     }
 
     uinfo->td_slot = UpdateTupleHeaderFromUndoRecord(urec, hdr, BufferGetPage(buffer));
-
+    if (undoType) {
+        *undoType = urec->Utype();
+    }
     /*
      * If the tuple is being updated or deleted, the payload contains a whole
      * new tuple.  If the caller wants it, extract it.
@@ -2065,12 +2087,21 @@ static inline UVersionSelector UHeapCheckUndoSnapshot(Snapshot snapshot, UHeapTu
     return UHeapSelectVersionSelf(op, uinfo.xid);
 }
 
+#define SetUTupleXminXmax(tupleXmin, tupleXmax, utuple) \
+    do{                                                 \
+        if ((utuple) != NULL && (*(utuple) != NULL)) {  \
+            (*(utuple))->xmin = (tupleXmin);            \
+            (*(utuple))->xmax = (tupleXmax);            \
+        }                                               \
+    } while (0)
+
 static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapTuple *visibleTuple, Snapshot snapshot,
     CommandId curcid, Buffer buffer, OffsetNumber offnum, ItemPointer ctid, int tdSlot)
 {
     TransactionId prevUndoXid = InvalidTransactionId;
     int prevTdSlotId = tdSlot;
     UHeapTupleTransInfo uinfo;
+    TransactionId saveXmax = InvalidTransactionId;
     bool freeTuple = false;
     BlockNumber blkno = BufferGetBlockNumber(buffer);
     UHeapDiskTupleData hdr;
@@ -2104,8 +2135,10 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
         securec_check_c(rc, "\0", "\0");
 
         /* Initially, result tuple is same as input tuple. */
-        if (visibleTuple != NULL)
+        if (visibleTuple != NULL) {
             *visibleTuple = currentTuple;
+        }
+        saveXmax = currentTuple->xmin;
     }
 
     /*
@@ -2126,7 +2159,7 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
         TransactionId lastXid = InvalidTransactionId;
         UndoRecPtr urp = INVALID_UNDO_REC_PTR;
         state = GetTupleFromUndoRecord(urecAdd, prevUndoXid, buffer, offnum, &hdr, visibleTuple,
-            &freeTuple, &uinfo, ctid, &lastXid, &urp);
+            &freeTuple, &uinfo, ctid, &lastXid, NULL);
         int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urp);
         undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
         if (state == UNDO_TRAVERSAL_ABORT) {
@@ -2178,6 +2211,7 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
                 snapshot->satisfies, snapshot->xmin)));
         } else if (state != UNDO_TRAVERSAL_COMPLETE || uinfo.td_slot == UHEAPTUP_SLOT_FROZEN ||
             TransactionIdOlderThanAllUndo(uinfo.xid)) {
+            SetUTupleXminXmax(FrozenTransactionId, saveXmax, visibleTuple);
             break;
         }
 
@@ -2209,9 +2243,10 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
          * For snapshot_toast, the first undo tuple is the visible one
          */
         if (uinfo.td_slot == UHEAPTUP_SLOT_FROZEN || TransactionIdEquals(uinfo.xid, FrozenTransactionId) ||
-            TransactionIdOlderThanAllUndo(uinfo.xid) || (snapshot != NULL && snapshot->satisfies == SNAPSHOT_TOAST))
+            TransactionIdOlderThanAllUndo(uinfo.xid) || (snapshot != NULL && snapshot->satisfies == SNAPSHOT_TOAST)) {
+            SetUTupleXminXmax(FrozenTransactionId, saveXmax, visibleTuple);
             break;
-
+        }
         /* Preliminary visibility check, without relying on the CID. */
         selector = UHeapCheckUndoSnapshot(snapshot, uinfo, curcid, op, buffer);
         /* If necessary, get and check CID. */
@@ -2227,8 +2262,10 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
         }
 
         /* Return the current version, or nothing, if appropriate. */
-        if (selector == UVERSION_CURRENT)
+        if (selector == UVERSION_CURRENT) {
+            SetUTupleXminXmax(uinfo.xid, saveXmax, visibleTuple);
             break;
+        }
         if (selector == UVERSION_NONE) {
             if (visibleTuple != NULL) {
                 if (freeTuple)
@@ -2243,6 +2280,7 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
         urecAdd = uinfo.urec_add;
         prevUndoXid = uinfo.xid;
         prevTdSlotId = uinfo.td_slot;
+        saveXmax = uinfo.xid;
     }
 
     /* Copy latest header reconstructed from undo back into tuple. */
@@ -2411,3 +2449,166 @@ void UHeapTupleCheckVisible(Snapshot snapshot, UHeapTuple tuple, Buffer buffer)
     }
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
+
+bool UHeapSearchBufferShowAnyTuplesFirstCall(ItemPointer tid, Relation relation,
+    Buffer buffer, UstoreUndoScanDesc xc_undo_scan)
+{
+    Page dp = BufferGetPage(buffer);
+    OffsetNumber offnum = ItemPointerGetOffsetNumber(tid);
+    UHeapTuple utuple = NULL;
+    bool isInvalidSlot;
+    UHeapTupleTransInfo tdinfo;
+    int tdSlot;
+    TransactionId tupXid = InvalidTransactionId;
+    BlockNumber blockno = BufferGetBlockNumber(buffer);
+    UndoTraversalState state = UNDO_TRAVERSAL_DEFAULT;
+    if (offnum < FirstOffsetNumber || offnum > UHeapPageGetMaxOffsetNumber(dp)) {
+        xc_undo_scan->currentUHeapTuple = NULL;
+        return true;
+    }
+    RowPtr *rp = UPageGetRowPtr(dp, offnum);
+
+    if (RowPtrIsNormal(rp)) {
+        utuple = UHeapGetTuple(relation, buffer, offnum, NULL);
+        Assert(utuple->tupTableType == UHEAP_TUPLE);
+        tdSlot = UHeapTupleHeaderGetTDSlot(utuple->disk_tuple);
+        isInvalidSlot = UHeapTupleHasInvalidXact(utuple->disk_tuple->flag);
+        UHeapTupleCopyBaseFromPage(utuple, dp);
+        tupXid = UHeapTupleGetModifiedXid(utuple);
+    } else if (RowPtrIsDeleted(rp)) {
+        utuple = NULL;
+        tdSlot = RowPtrGetTDSlot(rp);
+        isInvalidSlot = (RowPtrGetVisibilityInfo(rp) & ROWPTR_XACT_INVALID);
+    } else {
+        Assert(!RowPtrIsUsed(rp));
+        xc_undo_scan->currentUHeapTuple = NULL;
+        return true;
+    }
+
+    GetTDSlotInfo(buffer, tdSlot, &tdinfo);
+    if (tdinfo.td_slot != UHEAPTUP_SLOT_FROZEN) {
+        uint64 oldestXidHavingUndo = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+        if (TransactionIdIsValid(tdinfo.xid) && TransactionIdPrecedes(tdinfo.xid, oldestXidHavingUndo)) {
+            tdinfo.td_slot = UHEAPTUP_SLOT_FROZEN;
+        } else if (isInvalidSlot) {
+            if (TransactionIdIsValid(tupXid) && UHeapTransactionIdDidCommit(tupXid)) {
+                tdinfo.xid = tupXid;
+                if (tdinfo.xid < oldestXidHavingUndo) {
+                    tdinfo.td_slot = UHEAPTUP_SLOT_FROZEN;
+                }
+            } else {
+                TransactionId lastXid = InvalidTransactionId;
+                UndoRecPtr urp = INVALID_UNDO_REC_PTR;
+                state = FetchTransInfoFromUndo(blockno, offnum, InvalidTransactionId, &tdinfo, NULL, false,
+                    &lastXid, &urp);
+                if (state == UNDO_TRAVERSAL_COMPLETE) {
+                    if (TransactionIdOlderThanAllUndo(tdinfo.xid)) {
+                        tdinfo.td_slot = UHEAPTUP_SLOT_FROZEN;
+                    }
+                } else if (state == UNDO_TRAVERSAL_END || state == UNDO_TRAVERSAL_ENDCHAIN ||
+                    state == UNDO_TRAVERSAL_STOP || state == UNDO_TRAVERSAL_ABORT) {
+                    tdinfo.td_slot = UHEAPTUP_SLOT_FROZEN;
+                }
+            }
+        }
+    }
+
+    bool tupleGone = false;
+
+    if (utuple != NULL) {
+        uint16 infomask = utuple->disk_tuple->flag;
+        tupleGone = ((infomask & (UHEAP_UPDATED | UHEAP_DELETED)) != 0);
+    }
+
+    if (tdinfo.td_slot == UHEAPTUP_SLOT_FROZEN) {
+        if (utuple != NULL) {
+            if (tupleGone) {
+                utuple->xmin = FrozenTransactionId;
+                utuple->xmax = tupXid;
+            } else {
+                utuple->xmin = FrozenTransactionId;
+                utuple->xmax = InvalidTransactionId;
+            }
+        }
+        xc_undo_scan->currentUHeapTuple = utuple;
+        return true;
+    }
+
+    if (utuple != NULL) {
+        utuple->xmin = tdinfo.xid;
+        utuple->xmax = InvalidTransactionId;
+        if (tupleGone) {
+            pfree_ext(utuple);
+        }
+    }
+    xc_undo_scan->uinfo = tdinfo;
+    xc_undo_scan->currentUHeapTuple = utuple;
+    xc_undo_scan->prevUndoXid = InvalidTransactionId;
+    return false;
+}
+
+bool UHeapSearchBufferShowAnyTuplesFromUndo(ItemPointer tid, Relation relation,
+    Buffer buffer, UstoreUndoScanDesc xc_undo_scan)
+{
+    OffsetNumber offnum = ItemPointerGetOffsetNumber(tid);
+    TransactionId lastXid = InvalidTransactionId;
+    UHeapDiskTupleData hdr;
+    UHeapTupleTransInfo oldTdInfo = xc_undo_scan->uinfo;
+    UHeapTupleTransInfo uinfo;
+    TransactionId saveXmax = oldTdInfo.xid;
+    int prevTdSlotId = oldTdInfo.td_slot;
+    UHeapTuple *visibleTuple = &(xc_undo_scan->currentUHeapTuple);
+    UHeapTuple oldTuplePtr = xc_undo_scan->currentUHeapTuple;
+    UndoTraversalState state = UNDO_TRAVERSAL_DEFAULT;
+    bool freeTuple = false;
+    bool undoChainEnd = false;
+    uint8 undoType = UNDO_UNKNOWN;
+    if (*visibleTuple != NULL) {
+        errno_t rc = memcpy_s(&hdr, SizeOfUHeapDiskTupleData, (*visibleTuple)->disk_tuple, SizeOfUHeapDiskTupleData);
+        securec_check(rc, "\0", "\0");
+    }
+    state = GetTupleFromUndoRecord(oldTdInfo.urec_add, xc_undo_scan->prevUndoXid, buffer, offnum, &hdr, visibleTuple,
+        &freeTuple, &uinfo, NULL, &lastXid, &undoType);
+    if (*visibleTuple != oldTuplePtr) {
+        pfree_ext(oldTuplePtr);
+    }
+    if (state == UNDO_TRAVERSAL_COMPLETE) {
+        if (undoType == UNDO_INSERT || undoType == UNDO_MULTI_INSERT) {
+            pfree_ext(oldTuplePtr);
+            *visibleTuple = NULL;
+            return true;
+        }
+    } else if (state == UNDO_TRAVERSAL_ABORT) {
+        *visibleTuple = NULL;
+        return true;
+    } else if (state == UNDO_TRAVERSAL_END || state == UNDO_TRAVERSAL_ENDCHAIN) {
+        *visibleTuple = NULL;
+        return true;
+    } else if (state != UNDO_TRAVERSAL_COMPLETE || uinfo.td_slot == UHEAPTUP_SLOT_FROZEN ||
+        TransactionIdOlderThanAllUndo(uinfo.xid)) {
+        SetUTupleXminXmax(FrozenTransactionId, saveXmax, visibleTuple);
+        undoChainEnd = true;
+        goto END;
+    }
+    
+    if (uinfo.td_slot != prevTdSlotId) {
+        UHeapUpdateTDInfo(uinfo.td_slot, buffer, offnum, &uinfo);
+    }
+
+    if (uinfo.td_slot == UHEAPTUP_SLOT_FROZEN || TransactionIdEquals(uinfo.xid, FrozenTransactionId) ||
+        TransactionIdOlderThanAllUndo(uinfo.xid)) {
+        SetUTupleXminXmax(FrozenTransactionId, saveXmax, visibleTuple);
+        undoChainEnd = true;
+        goto END;
+    }
+
+    SetUTupleXminXmax(FrozenTransactionId, saveXmax, visibleTuple);
+    xc_undo_scan->uinfo = uinfo;
+    xc_undo_scan->prevUndoXid = uinfo.xid;
+
+END:
+    errno_t rc = memcpy_s((*visibleTuple)->disk_tuple, SizeOfUHeapDiskTupleData, &hdr, SizeOfUHeapDiskTupleData);
+    securec_check(rc, "\0", "\0");
+    return undoChainEnd;
+}
+

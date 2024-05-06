@@ -43,6 +43,10 @@ typedef struct UHeapScanDescData {
     UHeapTuple rs_cutup;                             /* current tuple in scan, if any */
     UHeapTuple* rs_ctupBatch;	/* current tuples in scan */
     ParallelHeapScanDesc rs_parallel; /* parallel scan information */
+
+    bool xs_continue_undo;
+    ItemPointerData curTid;
+    UstoreUndoScanDesc xc_undo_scan;
 } UHeapScanDescData;
 
 typedef struct UHeapScanDescData *UHeapScanDesc;

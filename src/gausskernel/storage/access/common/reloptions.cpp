@@ -84,6 +84,8 @@ static void ValidateStrOptStringOptimize(const char *val);
 static void ValidateStrOptEncryptAlgo(const char *val);
 static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
+static void SetUstoreDefaultFillfactor(void *rdopts, relopt_value *options, const relopt_parse_elt *elems,
+    int numoptions, int numelems);
 
 #ifdef USE_SPQ
 static void CheckSpqBTBuildOption(const char *val);
@@ -1411,7 +1413,7 @@ void ForbidUserToSetUnsupportedOptions(List *userOptions, const char *unsupporte
  * When validate is true, it is expected that all options appear in elems.
  */
 void fillRelOptions(void *rdopts, Size basesize, relopt_value *options, int numoptions, bool validate,
-                    const relopt_parse_elt *elems, int numelems)
+                    const relopt_parse_elt *elems, int numelems, bool kindIsHeap)
 {
     int i;
     int offset = basesize;
@@ -1480,6 +1482,9 @@ void fillRelOptions(void *rdopts, Size basesize, relopt_value *options, int numo
         if (validate && !found)
             ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
                             errmsg("reloption \"%s\" not found in parse table", options[i].gen->name)));
+    }
+    if (kindIsHeap) {
+        SetUstoreDefaultFillfactor((void *)rdopts, options, elems, numoptions, numelems);
     }
     SET_VARSIZE(rdopts, offset);
 }
@@ -2034,7 +2039,8 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 
     rdopts = (StdRdOptions *)allocateReloptStruct(sizeof(StdRdOptions), options, numoptions);
 
-    fillRelOptions((void *)rdopts, sizeof(StdRdOptions), options, numoptions, validate, tab, lengthof(tab));
+    fillRelOptions((void *)rdopts, sizeof(StdRdOptions), options, numoptions, 
+        validate, tab, lengthof(tab), kind == RELOPT_KIND_HEAP);
 
     for (int i = 0; i < numoptions; i++) {
         if (options[i].gen->type == RELOPT_TYPE_STRING && options[i].isset)
@@ -3194,3 +3200,39 @@ void CheckSpqBTBuildOption(const char *val)
     }
 }
 #endif
+
+static void SetUstoreDefaultFillfactor(void *rdopts, relopt_value *options, 
+    const relopt_parse_elt *elems, int numoptions, int numelems)
+{
+    int ff_options_idx = -1;
+    int fillfactor_idx = -1;
+    int storage_type_idx = -1;
+
+    for (int i = 0; i < numoptions; i++) {
+        if (ff_options_idx == -1 && pg_strcasecmp("fillfactor", options[i].gen->name) == 0) {
+            ff_options_idx = i;
+            break;
+        }
+    }
+
+    for (int i = 0; i < numelems; i++) {
+        if (fillfactor_idx == -1 && pg_strcasecmp("fillfactor", elems[i].optname) == 0) {
+            fillfactor_idx = i;
+            continue;
+        }
+        if (storage_type_idx == -1 && pg_strcasecmp("storage_type", elems[i].optname) == 0) {
+            storage_type_idx = i;
+        }
+    }
+
+    if (storage_type_idx != -1) {
+        char *stpos = ((char *)rdopts) + elems[storage_type_idx].offset;
+        char *itempos = ((char *)rdopts) + (*(int *)stpos);
+        if (pg_strcasecmp("ustore", itempos) == 0) {
+            char *ffpos = ((char *)rdopts) + elems[fillfactor_idx].offset;
+            if (!options[ff_options_idx].isset) {
+                *(int *)ffpos = UHEAP_DEFAULT_FILLFACTOR;
+            }
+        } 
+    }  
+}

@@ -33,10 +33,7 @@ VACUUM range_list1 PARTITION (p_201901);
 VACUUM range_list1 SUBPARTITION (p_201902_a);
 --vacuum full, success
 VACUUM FULL range_list1 PARTITION (p_201901);
-INFO:  skipping "range_list1" --- Don't vacuum full ustore table,this feature to be released in the future.
-INFO:  skipping "range_list1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list1 SUBPARTITION (p_201902_a);
-INFO:  skipping "range_list1" --- Don't vacuum full ustore table,this feature to be released in the future.
 --vacuum full compact, fail
 VACUUM FULL COMPACT range_list1 PARTITION (p_201901);
 ERROR:  COMPACT can not be used with PARTITION
@@ -68,10 +65,7 @@ There were 0 unused item pointers.
 CPU 0.00s/0.00u sec elapsed 0.00 sec.
 --vacuum option all
 VACUUM (FULL, VERBOSE, FREEZE) range_list1 PARTITION (p_201901);
-INFO:  skipping "range_list1" --- Don't vacuum full ustore table,this feature to be released in the future.
-INFO:  skipping "range_list1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM (FULL, VERBOSE, FREEZE) range_list1 SUBPARTITION (p_201902_a);
-INFO:  skipping "range_list1" --- Don't vacuum full ustore table,this feature to be released in the future.
 --
 --2. test the actual work
 --
@@ -118,7 +112,7 @@ CREATE INDEX range_list_sales1_idx4 ON range_list_sales1(time_id, type_id) LOCAL
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-            73728
+            81920
 (1 row)
 
 --delete & insert
@@ -133,25 +127,18 @@ INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           114688
+           122880
 (1 row)
 
 --vacuum full partition
 INSERT INTO temp1 VALUES(1,1);
 VACUUM FULL range_list_sales1 PARTITION (customer1);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 PARTITION (customer2);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 PARTITION (customer3);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           114688
+           122880
 (1 row)
 
 --delete & insert
@@ -166,29 +153,22 @@ INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           155648
+           163840
 (1 row)
 
 --vacuum full subpartition
 INSERT INTO temp1 VALUES(1,1);
 VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel1);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel2);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel3);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel4);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 SUBPARTITION (customer2_channel1);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 SUBPARTITION (customer2_channel2);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 VACUUM FULL range_list_sales1 SUBPARTITION (customer3_channel1);
-INFO:  skipping "range_list_sales1" --- Don't vacuum full ustore table,this feature to be released in the future.
 SELECT pg_relation_size('range_list_sales1');
  pg_relation_size 
 ------------------
-           155648
+           163840
 (1 row)
 
 --check index is ok
