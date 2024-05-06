@@ -8717,7 +8717,7 @@ static void PostmasterStateMachine(void)
         }
     }
 
-    if (pmState == PM_WAIT_BACKENDS && SS_STANDBY_FAILOVER) {
+    if (SS_IN_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
         if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
             g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
         }
