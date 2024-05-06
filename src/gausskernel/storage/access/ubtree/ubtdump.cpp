@@ -323,12 +323,14 @@ void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNum, Tupl
     /* now we traverse the whole queue from the head page */
     while (true) {
         (void)UBTreeRecycleQueuePageDump(rel, buf, true, tupDesc, tupstore, cols);
-        buf = StepNextRecyclePage(rel, buf);
-        page = BufferGetPage(buf);
-        header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
+        /* exit if current page is tail page*/
         if ((header->flags & URQ_TAIL_PAGE) == 0) {
             break;
         }
+        /* move to the next page*/
+        buf = StepNextRecyclePage(rel, buf);
+        page = BufferGetPage(buf); 
+        header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
     }
     UnlockReleaseBuffer(buf);
 }
