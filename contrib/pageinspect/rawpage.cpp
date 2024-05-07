@@ -144,6 +144,13 @@ static bytea* get_raw_page_internal(text* relname, ForkNumber forknum, BlockNumb
     if (blkno >= RelationGetNumberOfBlocks(rel))
         elog(ERROR, "block number %u is out of range for relation \"%s\"", blkno, RelationGetRelationName(rel));
 
+    if (RelationIsSegmentTable(rel) && ((forknum ==  BCM_FORKNUM) || (forknum ==  INIT_FORKNUM))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot get raw page from segment table if forkname is \"%s\" and \"%s\"", 
+                    forkNames[BCM_FORKNUM], forkNames[INIT_FORKNUM])));
+    }
+
     /* Initialize buffer to copy to */
     raw_page = (bytea*)palloc(BLCKSZ + VARHDRSZ);
     SET_VARSIZE(raw_page, BLCKSZ + VARHDRSZ);
