@@ -1,0 +1,138 @@
+DROP TABLE if exists zytest1;
+NOTICE:  table "zytest1" does not exist, skipping
+DROP TABLE if exists zytest2;
+NOTICE:  table "zytest2" does not exist, skipping
+DROP TABLE if exists zytest3;
+NOTICE:  table "zytest3" does not exist, skipping
+CREATE TABLE zytest1
+(aid NUMERIC,
+name varchar(20)
+);
+CREATE TABLE zytest2
+(bid NUMERIC,
+des varchar(20),
+zid NUMERIC --zytest1.aid
+);
+CREATE TABLE zytest3
+(aid NUMERIC, ----zytest1.aid
+numb NUMERIC --
+);
+INSERT INTO zytest1 values(1,'NAME1');
+INSERT INTO zytest1 values(2,'NAME2');
+INSERT INTO zytest1 values(3,'NAME3');
+INSERT INTO zytest1 values(4,'NAME4');
+INSERT INTO zytest1 values(5,'NAME5');
+INSERT INTO zytest1 values(6,'NAME6');
+INSERT INTO zytest2 values(1,'des1',1);
+INSERT INTO zytest2 values(2,'des2',2);
+INSERT INTO zytest2 values(3,'des3',3);
+INSERT INTO zytest2 values(4,'des4',4);
+INSERT INTO zytest2 values(5,'des5',5);
+INSERT INTO zytest2 values(6,'des6',6);
+INSERT INTO zytest3 values(1,1);
+INSERT INTO zytest3 values(2,2);
+INSERT INTO zytest3 values(3,3);
+INSERT INTO zytest3 values(1,4);
+INSERT INTO zytest3 values(2,5);
+INSERT INTO zytest3 values(3,6);
+SELECT *
+FROM (
+SELECT bid,COALESCE((SELECT SUM(numb) FROM zytest3 WHERE aid = zid),0) nsum
+FROM zytest2
+ORDER BY bid
+)
+WHERE nsum IS NOT NULL OR nsum>5;
+ bid | nsum 
+-----+------
+   1 |    5
+   2 |    7
+   3 |    9
+   4 |    0
+   5 |    0
+   6 |    0
+(6 rows)
+
+explain (analyze, costs off, timing off) SELECT *
+FROM (
+SELECT bid,COALESCE((SELECT SUM(numb) FROM zytest3 WHERE aid = zid),0) nsum
+FROM zytest2
+ORDER BY bid
+)
+WHERE nsum IS NOT NULL OR nsum>5;
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Sort (actual rows=6 loops=1)
+   Sort Key: zytest2.bid
+   Sort Method: quicksort  Memory: 25kB
+   ->  Hash Left Join (actual rows=6 loops=1)
+         Hash Cond: (zytest2.zid = subquery."?column?")
+         Filter: ((COALESCE(subquery.sum, 0::numeric) IS NOT NULL) OR (COALESCE(subquery.sum, 0::numeric) > 5::numeric))
+         ->  Hash Left Join (actual rows=6 loops=1)
+               Hash Cond: (zytest2.zid = subquery."?column?")
+               ->  Seq Scan on zytest2 (actual rows=6 loops=1)
+               ->  Hash (actual rows=3 loops=1)
+                      Buckets: 32768  Batches: 1  Memory Usage: 257kB
+                     ->  Subquery Scan on subquery (actual rows=3 loops=1)
+                           ->  HashAggregate (actual rows=3 loops=1)
+                                 Group By Key: public.zytest3.aid
+                                 ->  Seq Scan on zytest3 (actual rows=6 loops=1)
+         ->  Hash (actual rows=3 loops=1)
+                Buckets: 32768  Batches: 1  Memory Usage: 257kB
+               ->  Subquery Scan on subquery (actual rows=3 loops=1)
+                     ->  HashAggregate (actual rows=3 loops=1)
+                           Group By Key: public.zytest3.aid
+                           ->  Seq Scan on zytest3 (actual rows=6 loops=1)
+         SubPlan 1
+           ->  Aggregate (actual rows=6 loops=6)
+                 ->  Seq Scan on zytest3 (actual rows=6 loops=6)
+                       Filter: (aid = zytest2.zid)
+                       Rows Removed by Filter: 30
+--? Total runtime: .* ms
+(27 rows)
+
+SELECT *
+FROM (
+SELECT bid,COALESCE((SELECT SUM(numb) FROM zytest3 WHERE aid = zid),0) nsum
+FROM zytest2
+)
+WHERE nsum IS NOT NULL OR nsum>5 ORDER BY bid;
+ bid | nsum 
+-----+------
+   1 |    5
+   2 |    7
+   3 |    9
+   4 |    0
+   5 |    0
+   6 |    0
+(6 rows)
+
+explain (analyze, costs off, timing off) SELECT *
+FROM (
+SELECT bid,COALESCE((SELECT SUM(numb) FROM zytest3 WHERE aid = zid),0) nsum
+FROM zytest2
+)
+WHERE nsum IS NOT NULL OR nsum>5 ORDER BY bid;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Sort (actual rows=6 loops=1)
+   Sort Key: zytest2.bid
+   Sort Method: quicksort  Memory: 25kB
+   ->  Seq Scan on zytest2 (actual rows=6 loops=1)
+         Filter: ((COALESCE((SubPlan 2), 0::numeric) IS NOT NULL) OR (COALESCE((SubPlan 3), 0::numeric) > 5::numeric))
+         SubPlan 1
+           ->  Aggregate (actual rows=6 loops=6)
+                 ->  Seq Scan on zytest3 (actual rows=6 loops=6)
+                       Filter: (aid = zytest2.zid)
+                       Rows Removed by Filter: 30
+         SubPlan 2
+           ->  Aggregate (actual rows=6 loops=6)
+                 ->  Seq Scan on zytest3 (actual rows=6 loops=6)
+                       Filter: (aid = zytest2.zid)
+                       Rows Removed by Filter: 30
+         SubPlan 3
+           ->  Aggregate (Actual time: never executed)
+                 ->  Seq Scan on zytest3 (Actual time: never executed)
+                       Filter: (aid = zytest2.zid)
+--? Total runtime: .* ms
+(20 rows)
+

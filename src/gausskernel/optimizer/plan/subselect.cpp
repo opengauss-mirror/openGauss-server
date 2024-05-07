@@ -6283,8 +6283,6 @@ convert_OREXPR_to_join(PlannerInfo *root, BoolExpr *or_clause,
     Query       *subQuery = NULL;
     List        *EqualExprList = NULL;
     Node        *joinQual = NULL;
-    Node        *notNullTest = NULL;
-    Node        *filterNode = NULL;
     JoinExpr        *result = NULL;
     RangeTblEntry   *rte = NULL;
     RangeTblRef     *rtr = NULL;
@@ -6302,7 +6300,7 @@ convert_OREXPR_to_join(PlannerInfo *root, BoolExpr *or_clause,
     expr_sublink->subselect = (Node *)subQuery;
     
     if (get_pullUp_equal_expr((Node*)subQuery->jointree, &EqualExprList) && EqualExprList) {
-        joinQual = transform_equal_expr(root, subQuery, EqualExprList, &notNullTest, false, isnull);
+        joinQual = transform_equal_expr(root, subQuery, EqualExprList, NULL, false, isnull);
         
         /*
          * Upper-level vars in subquery will now be one level closer to their
@@ -6343,7 +6341,6 @@ convert_OREXPR_to_join(PlannerInfo *root, BoolExpr *or_clause,
         result = makeNode(JoinExpr);
         result->jointype = JOIN_LEFT;
         result->quals = joinQual;
-        filterNode = make_and_qual(notNullTest, clause);
 
         /*
          * This op_expr already be pull up as current left join's join quals.
@@ -6379,7 +6376,7 @@ convert_OREXPR_to_join(PlannerInfo *root, BoolExpr *or_clause,
         mark_parent_child_pushdown_flag(root->parse, subQuery);
 
         list_free_ext(EqualExprList);
-        return filterNode;
+        return clause;
     }
     else
     {
