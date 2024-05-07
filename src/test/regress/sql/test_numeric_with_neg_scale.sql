@@ -1,0 +1,123 @@
+create schema numeric_negative_scale_test;
+set current_schema to numeric_negative_scale_test;
+
+set behavior_compat_options = 'truncate_numeric_tail_zero';
+-- test normal functions(valid values)
+CREATE TABLE t1(a numeric(4,-3), b numeric(5,-2), c numeric(6, -1));
+CREATE TABLE t2(a numeric(3,-4), b numeric(2,-5), c numeric(1, -6));
+CREATE TABLE t3(a numeric(5, 7), b numeric(2, 4), c numeric(10, 12));
+\d t1;
+\d t2;
+\d t3;
+
+INSERT INTO t1 VALUES (1234567, 1234567, 1234567);
+INSERT INTO t1 VALUES (123.9435435, 123.9435435, 123.9435435);
+INSERT INTO t1 VALUES (0.8293453, 0.8293453, 0.8293453);
+INSERT INTO t1 VALUES (-1234567, -1234567, -1234567);
+INSERT INTO t1 VALUES (-123.9435435, -123.9435435, -123.9435435);
+INSERT INTO t1 VALUES (-0.8293453, -0.8293453, -0.8293453);
+INSERT INTO t1 VALUES ('NAN', 'NAN', 'NAN');
+INSERT INTO t2 VALUES (8452345, 8452345, 8452345);
+INSERT INTO t2 VALUES (164523.021354, 164523.021354, 164523.021354);
+INSERT INTO t2 VALUES (0.02218383, 0.02218383, 0.02218383);
+INSERT INTO t2 VALUES (-8452345, -8452345, -8452345);
+INSERT INTO t2 VALUES (-164523.021354, -164523.021354, -164523.021354);
+INSERT INTO t2 VALUES (-0.02218383, -0.02218383, -0.02218383);
+INSERT INTO t2 VALUES ('NAN', 'NAN', 'NAN');
+INSERT INTO t3 VALUES (0.002343544, 0.002343544, 0.002343544);
+INSERT INTO t3 VALUES (0.00943244, 0.00943244, 0.00943244);
+INSERT INTO t3 VALUES (-0.002343544, -0.002343544, -0.002343544);
+INSERT INTO t3 VALUES (-0.00943244, -0.00943244, -0.00943244);
+INSERT INTO t3 VALUES ('NAN', 'NAN', 'NAN');
+SELECT * FROM t1;
+SELECT * FROM t2;
+SELECT * FROM t3;
+UPDATE t1 SET a = 1999999, b = 1999999 where c = 'NAN';
+UPDATE t2 SET a = 1999999, b = 1999999 where c = 'NAN';
+UPDATE t3 SET a = 0.00123458345, b = 0.00395345 where c = 'NAN';
+SELECT * FROM t1, t2, t3 where t1.c='NAN' and t2.c='NAN' and t3.c='NAN';
+DELETE FROM t1;
+DELETE FROM t2;
+DELETE FROM t3;
+
+-- test normal functions(invalid values)
+INSERT INTO t1(a) VALUES (222222222.22222);
+INSERT INTO t1(b) VALUES (222222222.22222);
+INSERT INTO t1(c) VALUES (222222222.22222);
+INSERT INTO t1(a) VALUES (9999599);
+INSERT INTO t1(b) VALUES (9999959);
+INSERT INTO t1(c) VALUES (9999995);
+INSERT INTO t2(a) VALUES (222222222.22222);
+INSERT INTO t2(b) VALUES (222222222.22222);
+INSERT INTO t2(c) VALUES (222222222.22222);
+INSERT INTO t2(a) VALUES (9995999);
+INSERT INTO t2(b) VALUES (9959999);
+INSERT INTO t2(c) VALUES (9599999);
+INSERT INTO t3(a) VALUES (0.123234214);
+INSERT INTO t3(b) VALUES (0.123234214);
+INSERT INTO t3(c) VALUES (0.123234214);
+INSERT INTO t3(a) VALUES (0.00999995);
+INSERT INTO t3(b) VALUES (0.00995);
+INSERT INTO t3(c) VALUES (0.0099999999995);
+DROP TABLE t1;
+DROP TABLE t2;
+DROP TABLE t3;
+
+-- boundary test
+CREATE TABLE t1(a numeric(1,1000));
+CREATE TABLE t2(a numeric(1,-84));
+\d t1;
+\d t2;
+DROP TABLE t1;
+DROP TABLE t2;
+
+CREATE TABLE t3(a numeric(1,1001));
+CREATE TABLE t3(a numeric(1,-85));
+CREATE TABLE t3(a numeric(1,1001));
+CREATE TABLE t3(a numeric(1,-85));
+CREATE TABLE t3(a number(1,1001));
+CREATE TABLE t3(a number(1,-85));
+CREATE TABLE t3(a dec(1,1001));
+CREATE TABLE t3(a dec(1,-85));
+CREATE TABLE t3(a decimal(1,1001));
+CREATE TABLE t3(a decimal(1,-85));
+CREATE TABLE t3(a integer(1,1001));
+CREATE TABLE t3(a integer(1,-85));
+CREATE TABLE t3(a numeric(1,-32768));
+CREATE TABLE t3(a numeric(1,32768));
+CREATE TABLE t3(a number(1,-32768));
+CREATE TABLE t3(a number(1,32768));
+CREATE TABLE t3(a dec(1,-32768));
+CREATE TABLE t3(a dec(1,32768));
+CREATE TABLE t3(a decimal(1,-32768));
+CREATE TABLE t3(a decimal(1,32768));
+CREATE TABLE t3(a integer(1,-32768));
+CREATE TABLE t3(a integer(1,32768));
+-- PL/SQL test
+
+CREATE OR REPLACE PACKAGE pak1 as 
+var1 numeric(3,-4);
+var2 numeric(5, 6);
+type tp_tb1 is table of var1%type;
+tb1 tp_tb1;
+type tp_tb2 is table of var2%type;
+tb2 tp_tb2;
+procedure p1;
+end pak1;
+/
+CREATE OR REPLACE package body pak1 as 
+procedure p1 as
+begin
+tb1 = tp_tb1(1235234, 3241235.32432456, 0.00000002342, -1235234, -3241235.32432456, -0.00000002342);
+raise info '%', tb1;
+tb2 = tp_tb2(0.0123456878, 0.000565293244, -0.0123456878, -0.000565293244);
+raise info '%', tb2;
+end;
+end pak1;
+/
+call pak1.p1();
+DROP PACKAGE pak1;
+
+reset behavior_compat_options;
+reset current_schema;
+drop schema numeric_negative_scale_test cascade;

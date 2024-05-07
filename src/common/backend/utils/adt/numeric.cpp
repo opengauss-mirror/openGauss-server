@@ -215,6 +215,7 @@ static char* output_get_str_from_var(NumericVar* var);
 static char* get_str_from_var_sci(NumericVar* var, int rscale);
 
 static void apply_typmod(NumericVar* var, int32 typmod);
+static void round_float_var(NumericVar* var, int precision);
 
 static int32 numericvar_to_int32(const NumericVar* var, bool can_ignore = false);
 static double numericvar_to_double_no_overflow(NumericVar* var);
@@ -725,8 +726,8 @@ Datum numeric_support(PG_FUNCTION_ARGS)
             Node* source = (Node*)linitial(expr->args);
             int32 old_typmod = exprTypmod(source);
             int32 new_typmod = DatumGetInt32(((Const*)typmod)->constvalue);
-            int32 old_scale = (int32)(((uint32)(old_typmod - VARHDRSZ)) & 0xffff);
-            int32 new_scale = (int32)(((uint32)(new_typmod - VARHDRSZ)) & 0xffff);
+            int32 old_scale = (int16)(((uint32)(old_typmod - VARHDRSZ)) & 0xffff);
+            int32 new_scale = (int16)(((uint32)(new_typmod - VARHDRSZ)) & 0xffff);
             int32 old_precision = (int32)(((uint32)(old_typmod - VARHDRSZ)) >> 16 & 0xffff);
             int32 new_precision = (int32)(((uint32)(new_typmod - VARHDRSZ)) >> 16 & 0xffff);
 
@@ -793,7 +794,7 @@ Datum numeric(PG_FUNCTION_ARGS)
      */
     tmp_typmod = typmod - VARHDRSZ;
     precision = (tmp_typmod >> 16) & 0xffff;
-    scale = tmp_typmod & 0xffff;
+    scale = (int16)(tmp_typmod & 0xffff);
     maxdigits = precision - scale;
 
     /*
@@ -842,15 +843,17 @@ Datum numerictypmodin(PG_FUNCTION_ARGS)
     tl = ArrayGetIntegerTypmods(ta, &n);
 
     if (n == 2) {
-        if (tl[0] < 1 || tl[0] > NUMERIC_MAX_PRECISION)
+        if (tl[0] < 1 || tl[0] > NUMERIC_MAX_PRECISION) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("NUMERIC precision %d must be between 1 and %d", tl[0], NUMERIC_MAX_PRECISION)));
-        if (tl[1] < 0 || tl[1] > tl[0])
+        }
+        if (!(DB_IS_CMPT(A_FORMAT) && t_thrd.proc->workingVersionNum >= FLOAT_VERSION_NUMBER) && (tl[1] < 0 || tl[1] > tl[0])) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("NUMERIC scale %d must be between 0 and precision %d", tl[1], tl[0])));
-        typmod = (int32)(((uint32)(tl[0]) << 16) | (uint32)(tl[1])) + VARHDRSZ;
+        }
+        typmod = (int32)(((uint32)(tl[0]) << 16) | (uint16)(tl[1])) + VARHDRSZ;
     } else if (n == 1) {
         if (tl[0] < 1 || tl[0] > NUMERIC_MAX_PRECISION)
             ereport(ERROR,
@@ -871,14 +874,16 @@ Datum numerictypmodout(PG_FUNCTION_ARGS)
     const size_t len = 64;
     int32 typmod = PG_GETARG_INT32(0);
     char* res = (char*)palloc(len + 1);
+    int32 precision = (int32)((((uint32)(typmod - VARHDRSZ)) >> 16) & 0xffff);
+    int32 scale = (int16)(((uint32)(typmod - VARHDRSZ)) & 0xffff);
+    errno_t ret;
 
     if (typmod >= 0) {
-        errno_t ret = snprintf_s(res,
-            len + 1,
-            len,
-            "(%d,%d)",
-            (int32)((((uint32)(typmod - VARHDRSZ)) >> 16) & 0xffff),
-            (int32)(((uint32)(typmod - VARHDRSZ)) & 0xffff));
+        if (scale != PG_INT16_MIN) {
+            ret = snprintf_s(res, len + 1, len, "(%d,%d)", precision, scale);
+        } else {
+            ret = snprintf_s(res, len + 1, len, "(%d)", precision);
+        }
         securec_check_ss(ret, "", "");
     } else
         *res = '\0';
@@ -5224,58 +5229,108 @@ static void apply_typmod(NumericVar* var, int32 typmod)
 
     typmod -= VARHDRSZ;
     precision = (int32)(((uint32)(typmod) >> 16) & 0xffff);
-    scale = (int32)(((uint32)typmod) & 0xffff);
-    maxdigits = precision - scale;
+    scale = (int16)(((uint32)typmod) & 0xffff);
+    if (scale == PG_INT16_MIN && DB_IS_CMPT(A_FORMAT)) {
+        precision = ceil(log10(2) * precision);
+        
+        /* Round the float value to target precision (and set var->dscale) */
+        round_float_var(var, precision);
+    } else {
+        maxdigits = precision - scale;
 
-    /* Round to target scale (and set var->dscale) */
-    round_var(var, scale);
+        /* Round to target scale (and set var->dscale) */
+        round_var(var, scale);
 
-    /*
-     * Check for overflow - note we can't do this before rounding, because
-     * rounding could raise the weight.  Also note that the var's weight could
-     * be inflated by leading zeroes, which will be stripped before storage
-     * but perhaps might not have been yet. In any case, we must recognize a
-     * true zero, whose weight doesn't mean anything.
-     */
-    ddigits = (var->weight + 1) * DEC_DIGITS;
-    if (ddigits > maxdigits) {
-        /* Determine true weight; and check for all-zero result */
-        for (i = 0; i < var->ndigits; i++) {
-            NumericDigit dig = var->digits[i];
+        /*
+        * Check for overflow - note we can't do this before rounding, because
+        * rounding could raise the weight.  Also note that the var's weight could
+        * be inflated by leading zeroes, which will be stripped before storage
+        * but perhaps might not have been yet. In any case, we must recognize a
+        * true zero, whose weight doesn't mean anything.
+        */
+        ddigits = (var->weight + 1) * DEC_DIGITS;
+        if (ddigits > maxdigits) {
+            /* Determine true weight; and check for all-zero result */
+            for (i = 0; i < var->ndigits; i++) {
+                NumericDigit dig = var->digits[i];
 
-            if (dig) {
-                /* Adjust for any high-order decimal zero digits */
-#if DEC_DIGITS == 4
-                if (dig < 10)
-                    ddigits -= 3;
-                else if (dig < 100)
-                    ddigits -= 2;
-                else if (dig < 1000)
-                    ddigits -= 1;
-#elif DEC_DIGITS == 2
-                if (dig < 10)
-                    ddigits -= 1;
-#elif DEC_DIGITS == 1
-                /* no adjustment */
-#else
-#error unsupported NBASE
-#endif
-                if (ddigits > maxdigits)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                            errmsg("numeric field overflow"),
-                            errdetail(
-                                "A field with precision %d, scale %d must round to an absolute value less than %s%d.",
-                                precision,
-                                scale,
-                                /* Display 10^0 as 1 */
-                                maxdigits ? "10^" : "",
-                                maxdigits ? maxdigits : 1)));
-                break;
+                if (dig) {
+                    /* Adjust for any high-order decimal zero digits */
+    #if DEC_DIGITS == 4
+                    if (dig < 10)
+                        ddigits -= 3;
+                    else if (dig < 100)
+                        ddigits -= 2;
+                    else if (dig < 1000)
+                        ddigits -= 1;
+    #elif DEC_DIGITS == 2
+                    if (dig < 10)
+                        ddigits -= 1;
+    #elif DEC_DIGITS == 1
+                    /* no adjustment */
+    #else
+    #error unsupported NBASE
+    #endif
+                    if (ddigits > maxdigits)
+                        ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                errmsg("numeric field overflow"),
+                                errdetail(
+                                    "A field with precision %d, scale %d must round to an absolute value less than %s%d.",
+                                    precision,
+                                    scale,
+                                    /* Display 10^0 as 1 */
+                                    maxdigits ? "10^" : "",
+                                    maxdigits ? maxdigits : 1)));
+                    break;
+                }
+                ddigits -= DEC_DIGITS;
             }
-            ddigits -= DEC_DIGITS;
         }
     }
+}
+
+static void round_float_var(NumericVar* var, int precision)
+{
+    int32 exponent;
+    NumericVar denominator;
+    NumericVar significand;
+    int denom_scale;
+    int all_di;
+
+    if (var->ndigits > 0) {
+        exponent = (var->weight + 1) * DEC_DIGITS;
+
+        exponent -= DEC_DIGITS - (int)log10(var->digits[0]);
+    } else {
+        exponent = 0;
+    }
+
+    if (exponent < 0)
+        denom_scale = -exponent;
+    else
+        denom_scale = 0;
+
+    init_var(&denominator);
+    init_var(&significand);
+
+    /* count all significant digits  */
+    all_di = exponent + var->dscale + 1;
+
+    power_var_int(&const_ten, exponent, &denominator, denom_scale);
+    if (all_di >= precision) {
+        div_var(var, &denominator, &significand, precision - 1, true);
+    } else {
+        div_var(var, &denominator, &significand, all_di - 1, true);
+    }
+    if ((significand.dscale - exponent) >= 0) {
+        mul_var(&significand, &denominator, var, significand.dscale - exponent);
+    } else {
+        mul_var(&significand, &denominator, var, 0);
+    }
+
+    free_var(&denominator);
+    free_var(&significand);
 }
 
 /*
@@ -7613,8 +7668,7 @@ static void round_var(NumericVar* var, int rscale)
     int ndigits;
     int carry;
 
-    var->dscale = rscale;
-
+    var->dscale = rscale >= 0 ? rscale : 0;
     /* decimal digits wanted */
     di = (var->weight + 1) * DEC_DIGITS + rscale;
 
@@ -18823,7 +18877,7 @@ static inline int make_short_numeric_of_int64_minval(_out_ Numeric result, _in_ 
 static inline int make_short_numeric_of_zero(Numeric result, int typmod)
 {
     /// set display scale if typmod is given, otherwise is 0 at default.
-    int dscale = (typmod >= (int32)(VARHDRSZ)) ? ((typmod - VARHDRSZ) & 0xffff) : 0;
+    int dscale = (typmod >= (int32)(VARHDRSZ)) ? (int16)((typmod - VARHDRSZ) & 0xffff) : 0;
 
     SET_VARSIZE(result, NUMERIC_HDRSZ_SHORT);                                   // length info
     result->choice.n_short.n_header = NUMERIC_SHORT                             // sign is NUMERIC_POS
@@ -18912,7 +18966,7 @@ static inline int get_weight_from_ascale(int ndigits, int ascale)
 static int get_dscale_from_typmod(int typmod, int ascale, int last_item)
 {
     if (typmod >= (int32) (VARHDRSZ)) {
-        return (int32) ((uint32) (typmod - VARHDRSZ) & 0xffff);
+        return (int16)((uint32) (typmod - VARHDRSZ) & 0xffff);
     }
 
     /*
@@ -19267,7 +19321,7 @@ int convert_int64_to_short_numeric_byscale(_out_ char* outBuf, _in_ int128 v, _i
 
     int sign = NUMERIC_POS;
     int16 digits_buf[NUMERIC_NDIGITS_UPLIMITED];
-    int scale = (int32)((uint32)(typmod - VARHDRSZ) & 0xffff);
+    int scale = (int16)((uint32)(typmod - VARHDRSZ) & 0xffff);
     int scaleDiff = NUMERIC_SCALE_ADJUST(vscale) * DEC_DIGITS - vscale;
     Assert(scaleDiff >= 0 && scaleDiff <= MAXINT64DIGIT);
     v = v * ScaleMultipler[scaleDiff];
@@ -19504,7 +19558,7 @@ int convert_int128_to_short_numeric_byscale(_out_ char* outBuf, _in_ int128 v, _
         v = multiple;
     };
 
-    scale = (int32)((uint32)(typmod - VARHDRSZ) & 0xffff);
+    scale = (int16)((uint32)(typmod - VARHDRSZ) & 0xffff);
     ndigits = digits_buf + NUMERIC_NDIGITS_INT128_UPLIMITED - digits_ptr;
     weight = get_weight_from_ascale(ndigits, NUMERIC_SCALE_ADJUST(vscale));
 

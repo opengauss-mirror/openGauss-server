@@ -395,7 +395,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"proc_uncheck_default_param", OPT_PROC_UNCHECK_DEFAULT_PARAM},
     {"update_unusable_unique_index_on_iud", OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD},
     {"prefer_parse_cursor_parentheses_as_expr", OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR},
-    {"update_global_index_on_partition_change", OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE}
+    {"update_global_index_on_partition_change", OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE},
+    {"float_as_numeric", OPT_FLOAT_AS_NUMERIC}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
