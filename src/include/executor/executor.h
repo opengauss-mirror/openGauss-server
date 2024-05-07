@@ -399,6 +399,8 @@ static inline RangeTblEntry *exec_rt_fetch(Index rti, EState *estate)
 extern Partition ExecOpenScanParitition(
     EState* estate, Relation parent, PartitionIdentifier* partID, LOCKMODE lockmode);
 
+extern void ExecOpenUnusedIndices(ResultRelInfo* resultRelInfo, bool speculative);
+extern void ExecCloseUnsedIndices(ResultRelInfo* resultRelInfo);
 extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative);
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(

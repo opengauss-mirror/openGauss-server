@@ -109,6 +109,7 @@ typedef FormData_pg_index *Form_pg_index;
  * the less ugly representation used after 9.2.
  */
 #define IndexIsUsable(indexForm) ((indexForm)->indisusable)
+#define IndexIsUnique(indexForm) ((indexForm)->indisunique)
 #define IndexIsReady(indexForm) ((indexForm)->indisready)
 #define IndexIsValid(indexForm) (((indexForm)->indisvalid && (indexForm)->indisready) && ((indexForm)->indisusable))
 #define IndexIsLive(indexForm)  (((indexForm)->indisready || !(indexForm)->indisvalid) && ((indexForm)->indisusable))
