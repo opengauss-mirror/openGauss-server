@@ -2887,6 +2887,14 @@ void ExecARUpdateTriggers(EState* estate, ResultRelInfo* relinfo, Oid oldPartiti
 #ifdef PGXC
         }
 #endif
+        /* If we get there, trigtuple must be astore type, but newtuple could be ustore type.
+        To avoid potential errors in subsequent column value resolution, 
+        we convert newtuple to astore type.*/
+        if (newtuple->tupTableType == UHEAP_TUPLE) {
+            Relation rel = relinfo->ri_RelationDesc;
+            TupleDesc tupdesc = RelationGetDescr(rel);
+            newtuple = (HeapTuple)UHeapToHeap(tupdesc, (UHeapTuple)newtuple);
+        }
         AfterTriggerSaveEvent(estate,
             relinfo,
             TRIGGER_EVENT_UPDATE,
