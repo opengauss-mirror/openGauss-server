@@ -2652,7 +2652,8 @@ Datum gs_xlog_keepers(PG_FUNCTION_ARGS)
             {WALKEEPER_CHECKPOINT, "Standby Checkpoint Keep", "base on redo lsn of recently checkpoint on standby"},
             {WALKEEPER_ARCHIVE, "Archive Keep", "base on wal archive"},
             {WALKEEPER_RESISTARCHIVE, "Resist Archive", "resist OBS archive keeper due to max_size_for_xlog_prune"},
-            {WALKEEPER_COODRECYCLE, "Other keep", "base on recycle xlog for Coordinator"}
+            {WALKEEPER_COODRECYCLE, "Other keep", "base on recycle xlog for Coordinator"},
+            {WALKEEPER_QUORUM_MIN, "QuorumMin keep", "the quorum min lsn keep all wal segments"}
     };
 
     if (SRF_IS_FIRSTCALL()) {

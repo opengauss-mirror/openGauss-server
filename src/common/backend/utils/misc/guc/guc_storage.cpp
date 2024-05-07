@@ -3504,6 +3504,22 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL},
 
+        {{"max_size_xlog_force_prune",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("This param is used for xlog recycled forcely when the majority is satisfied, regardless of "
+                         "whether the standby is connected or not, and whether there are residual replication slots."),
+            NULL,
+            GUC_UNIT_KB},
+            &u_sess->attr.attr_storage.max_size_xlog_force_prune,
+            0,
+            0,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+
         {{"hadr_max_size_for_xlog_receiver",
              PGC_SIGHUP,
              NODE_ALL,

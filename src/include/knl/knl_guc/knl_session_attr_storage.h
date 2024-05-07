@@ -254,6 +254,7 @@ typedef struct knl_session_attr_storage {
     bool enable_xlog_prune;
     int max_size_for_xlog_prune;
     int defer_csn_cleanup_time;
+    int max_size_xlog_force_prune;
 
     bool enable_defer_calculate_snapshot;
     bool enable_hashbucket;

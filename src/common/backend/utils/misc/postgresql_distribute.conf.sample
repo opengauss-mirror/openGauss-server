@@ -329,6 +329,8 @@ hot_standby = on			# "on" allows queries during recovery
 #wal_receiver_buffer_size = 64MB	# wal receiver buffer size
 #enable_xlog_prune = on # xlog keep for all standbys even through they are not connecting and donnot created replslot.
 #max_size_for_xlog_prune = 2147483647  # xlog keep for the wal size less than max_xlog_size when the enable_xlog_prune is on
+#max_size_xlog_force_prune = 0         # xlog size to be force recycled when the majority is satisfied, regardless of whether
+                                       # the standby is connected or not, and whether there are residual replication slots
 
 #------------------------------------------------------------------------------
 # QUERY TUNING

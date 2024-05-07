@@ -13472,6 +13472,32 @@ static XLogSegNo CalculateCNRecycleSegNoForStreamingHadr(XLogRecPtr curInsert, X
     }
 }
 
+static XLogSegNo CalcForceRecycleSegNo(XLogRecPtr curInsert, XLogRecPtr quorumMinReq)
+{
+    /* the unit of max_size_xlog_force_prune is KB */
+    uint64 maxKeepSize = ((uint64)u_sess->attr.attr_storage.max_size_xlog_force_prune << 10);
+    XLogSegNo SegNoForceRecycled = 1;
+    if (XLByteLT(maxKeepSize + XLogSegSize, curInsert)) {
+        XLByteToSeg(curInsert - maxKeepSize, SegNoForceRecycled);
+    }
+
+    /*
+     * For asynchronous replication, we do not care connected sync standbys,
+     * since standby build won't block xact commit on master.
+     */
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if (!XLByteEQ(quorumMinReq, InvalidXLogRecPtr)) {
+            XLogSegNo quorumMinSegNo;
+            XLByteToSeg(quorumMinReq, quorumMinSegNo);
+            if (quorumMinSegNo < SegNoForceRecycled) {
+                SegNoForceRecycled = quorumMinSegNo;
+            }
+        }
+    }
+
+    return SegNoForceRecycled;
+}
+
 static void fill_keeper(XLogSegNo segno, int index, XlogKeeper *xlogkeeper)
 {
     if(!xlogkeeper)
@@ -13649,10 +13675,12 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
      *
      * 1.When dn is in build(full or incremental), just keep log.
      * 2.When not all standbys are alive in multi standby mode, further check enable_xlog_prune.
-     * If false, just keep log; otherwise, keep log only if walSize less than config.
-     * 3.When standby is not alive in dummy standby mode, just keep log.
-     * 4.Notice the users if slot is invalid
-     * 
+     *   If false, just keep log; otherwise, keep log only if walSize less than config.
+     * 3.If max_size_xlog_force_prune is set > 0, calculate segno with its config, and we fetch
+     *   the larger one between this segno and the segno calculated with max_size_for_xlog_prune.
+     * 4.When standby is not alive in dummy standby mode, just keep log.
+     * 5.Notice the users if slot is invalid
+     *
      * while dms and dss enable, t_thrd.xlog_cxt.server_mode only is normal_mode, we do additional
      * check for dms and dss enabling.
      */
@@ -13664,18 +13692,33 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
             fill_keeper(segno, WALKEEPER_BUILD, xlogkeeper);
             ereport(LOG, (errmsg("keep all the xlog segments, because there is a build task in the backend, "
                                  "and gs_rewind count is more than zero")));
-        } else if (IS_DN_MULTI_STANDYS_MODE() && !WalSndAllInProgress(SNDROLE_PRIMARY_STANDBY) &&
-                   !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
-            if (!u_sess->attr.attr_storage.enable_xlog_prune) {
-                /* segno = 1 show all file should be keep */
-                segno = 1;
-                ereport(LOG, (errmsg("keep all the xlog segments, because the value of enable_xlog_prune(GUC) "
-                    "is false")));
-            } else {
-                segno = CalcRecycleSegNo(curInsert, repl_slot_state.quorum_min_required,
-                    repl_slot_state.min_tools_required);
+        } else if (IS_DN_MULTI_STANDYS_MODE() && !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+            XLogSegNo prune_segno = 0;
+            XLogSegNo force_prune_segno = 0;
+            if (!WalSndAllInProgress(SNDROLE_PRIMARY_STANDBY)) {
+                if (!u_sess->attr.attr_storage.enable_xlog_prune) {
+                    /* segno = 1 show all file should be keep */
+                    prune_segno = 1;
+                } else {
+                    prune_segno = CalcRecycleSegNo(curInsert, repl_slot_state.quorum_min_required,
+                        repl_slot_state.min_tools_required);
+                }
+                fill_keeper(prune_segno, WALKEEPER_INVALIDSEND, xlogkeeper);
             }
-            fill_keeper(segno, WALKEEPER_INVALIDSEND, xlogkeeper);
+
+            if (u_sess->attr.attr_storage.max_size_xlog_force_prune > 0) {
+                force_prune_segno = CalcForceRecycleSegNo(curInsert, repl_slot_state.quorum_min_required);
+                fill_keeper(force_prune_segno, WALKEEPER_QUORUM_MIN, xlogkeeper);
+            }
+
+            if (prune_segno > 0 || force_prune_segno > 0) {
+                segno = prune_segno > force_prune_segno ? prune_segno : force_prune_segno;
+                ereport(LOG, (errmsg("enable_xlog_prune %s, prune_segno %lu; max_size_xlog_force_prune %dkB, "
+                    "force_prune_segno %lu; so keep xlog segments after %lu, quorumMinReq %lu, minToolsReq %lu",
+                    u_sess->attr.attr_storage.enable_xlog_prune ? "on" : "off", prune_segno,
+                    u_sess->attr.attr_storage.max_size_xlog_force_prune, force_prune_segno, segno,
+                    repl_slot_state.quorum_min_required, repl_slot_state.min_tools_required)));
+            }
         } else if (IS_DN_DUMMY_STANDYS_MODE() && !WalSndInProgress(SNDROLE_PRIMARY_STANDBY)) {
             /* segno = 1 show all file should be keep */
             segno = 1;
