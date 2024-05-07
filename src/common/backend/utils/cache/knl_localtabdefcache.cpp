@@ -681,7 +681,8 @@ void LocalTabDefCache::InitPhase3(void)
                     uint32 hash_value = oid_hash((void *)&(rel->rd_id), sizeof(Oid));
                     InsertRelationIntoGlobal(rel, hash_value);
                 }
-                elt = DLGetHead(&bucket_entry->cc_bucket);
+                bucket_elt = DLGetHead(m_bucket_list.GetActiveBucketList());
+                elt = NULL;
             }
         }
     }
@@ -755,7 +756,6 @@ void LocalTabDefCache::InvalidateRelationAll()
                 /* Delete this entry immediately */
                 Assert(!rel->rd_isnailed);
                 RelationClearRelation(rel, false);
-                elt = DLGetHead(&bucket_entry->cc_bucket);
             } else {
                 /*
                  * If it's a mapped rel, immediately update its rd_node in
@@ -776,9 +776,6 @@ void LocalTabDefCache::InvalidateRelationAll()
                  * next in no particular order; and everything else goes to the
                  * back of rebuildList.
                  */
-                if (list_member_ptr(rebuildFirstList, rel) || list_member_ptr(rebuildList, rel)) {
-                    continue;
-                }
                 if (RelationGetRelid(rel) == RelationRelationId)
                     rebuildFirstList = lcons(rel, rebuildFirstList);
                 else if (RelationGetRelid(rel) == ClassOidIndexId)
@@ -826,14 +823,7 @@ void LocalTabDefCache::InvalidateRelationNodeList()
             elt = DLGetSucc(elt);
             Relation rel = entry->rel;
             if (rel->rd_locator_info != NULL) {
-                Assert(!rel->rd_isnailed);
-                bool clear = RelationHasReferenceCountZero(rel) &&
-                    !(RelationIsIndex(rel) && rel->rd_refcnt > 0 && rel->rd_indexcxt != NULL);
                 RelationClearRelation(rel, !RelationHasReferenceCountZero(rel));
-                if (!clear) {
-                    elt = DLGetHead(&bucket_entry->cc_bucket);
-                    continue;
-                }
             }
         }
     }
@@ -975,7 +965,6 @@ void LocalTabDefCache::AtEOXact_RelationCache(bool isCommit)
                     rel->rd_createSubid = InvalidSubTransactionId;
                 else if (RelationHasReferenceCountZero(rel)) {
                     RelationClearRelation(rel, false);
-                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 } else {
                     /*
@@ -1008,7 +997,6 @@ void LocalTabDefCache::AtEOXact_RelationCache(bool isCommit)
             }
             if (rel->partMap != NULL && unlikely(rel->partMap->isDirty)) {
                 RelationClearRelation(rel, false);
-                elt = DLGetHead(&bucket_entry->cc_bucket);
             }
         }
     }
@@ -1052,7 +1040,6 @@ void LocalTabDefCache::AtEOSubXact_RelationCache(bool isCommit, SubTransactionId
                     rel->rd_createSubid = parentSubid;
                 else if (RelationHasReferenceCountZero(rel)) {
                     RelationClearRelation(rel, false);
-                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 } else {
                     /*

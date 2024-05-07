@@ -1264,6 +1264,7 @@ Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition *
         }
         (*partIndex)->partrel->pgstat_info = (*partIndex)->pd_pgstat_info;
         index = (*partIndex)->partrel;
+        index->rd_refcnt++;
     } else {
         index = partitionGetRelation(*parentIndex, *partIndex);
     }
@@ -1282,6 +1283,7 @@ void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition* p
         }
         (*partRel)->partrel->pgstat_info = (*partRel)->pd_pgstat_info;
         *rel = (*partRel)->partrel;
+        (*rel)->rd_refcnt++;
     } else {
         *rel = partitionGetRelation(parentRel, *partRel);
     }
@@ -1295,11 +1297,15 @@ void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation* parentRel, Partit
         if (*index != NULL) {
             if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(index);
+            } else {
+                (*index)->rd_refcnt--;
             }
             *index = NULL;
         }
         if (!PARTITION_ENABLE_CACHE_OPFUSION) {
             releaseDummyRelation(rel);
+        } else {
+            (*rel)->rd_refcnt--;
         }
         partitionClose(*parentRel, *part, AccessShareLock);
         heap_close(*parentRel, AccessShareLock);

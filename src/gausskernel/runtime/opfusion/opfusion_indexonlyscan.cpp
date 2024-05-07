@@ -332,6 +332,8 @@ void IndexOnlyScanFusion::End(bool isCompleted)
             partitionClose(m_parentIndex, m_partIndex, NoLock);
             if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(&m_index);
+            } else {
+                m_index->rd_refcnt--;
             }
             index_close(m_parentIndex, NoLock);
         } else {
@@ -344,6 +346,8 @@ void IndexOnlyScanFusion::End(bool isCompleted)
             partitionClose(m_parentRel, m_partRel, NoLock);
             if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(&m_rel);
+            } else {
+                m_rel->rd_refcnt--;
             }
             heap_close(m_parentRel, NoLock);
         } else {
