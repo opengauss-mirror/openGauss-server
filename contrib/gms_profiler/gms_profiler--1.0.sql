@@ -120,3 +120,8 @@ COMMENT ON TABLE gms_profiler.plsql_profiler_data is
         'Accumulated data from all profiler runs';
 
 CREATE SEQUENCE gms_profiler.plsql_profiler_runnumber start with 1 cache 1;
+
+GRANT USAGE ON SCHEMA gms_profiler TO public;
+GRANT SELECT ON ALL tables IN SCHEMA gms_profiler TO public;
+REVOKE EXECUTE ON ALL functions IN SCHEMA gms_profiler FROM public;
+REVOKE USAGE ON SEQUENCE gms_profiler.plsql_profiler_runnumber FROM public;
