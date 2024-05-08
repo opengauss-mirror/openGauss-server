@@ -1388,7 +1388,6 @@ typedef struct PLpgSQL_plugin {
     void (*func_end)(PLpgSQL_execstate* estate, PLpgSQL_function* func);
     void (*stmt_beg)(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
     void (*stmt_end)(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
-    void (*stmt_once)(int lineno);
 
     /* Function pointers set by PL/pgSQL itself */
     void (*error_callback)(void* arg);

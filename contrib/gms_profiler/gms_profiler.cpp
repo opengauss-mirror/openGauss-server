@@ -40,7 +40,6 @@ static void plpgsql_cb_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *fun
 static void plpgsql_cb_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func);
 static void plpgsql_cb_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
 static void plpgsql_cb_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
-static void plpgsql_cb_stmt_once(int lineno);
 
 static PLpgSQL_plugin plugin_funcs = {
 	NULL,
@@ -48,7 +47,6 @@ static PLpgSQL_plugin plugin_funcs = {
 	plpgsql_cb_func_end,
 	plpgsql_cb_stmt_beg,
 	plpgsql_cb_stmt_end,
-	plpgsql_cb_stmt_once,
 	NULL,
 	NULL,
 	NULL,
@@ -666,6 +664,7 @@ static int start_profiler_internal(FunctionCallInfo fcinfo, uint32 *runid)
     ProfilerUnitHashEntry *unit_entry;
     bool found;
     errno_t rc;
+    int32 result = PROFILER_ERROR_OK;
     ProfilerContext *profiler_cxt = get_session_context();
 
     if (RecoveryInProgress())
@@ -780,10 +779,10 @@ static int start_profiler_internal(FunctionCallInfo fcinfo, uint32 *runid)
         pfree_ext(profiler_cxt->run_comment1);
 
         FlushErrorState();
-        return PROFILER_ERROR_IO;
+        result = PROFILER_ERROR_IO;
     }
     PG_END_TRY();
-    return PROFILER_ERROR_OK;
+    return result;
 }
 
 static Datum make_profiler_result(uint32 runid, int32 result)
@@ -1101,6 +1100,8 @@ static void plpgsql_cb_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
     //elog(NOTICE, "statement [%20s] begin - [ln: %d]", plpgsql_stmt_typename(stmt), stmt->lineno);
     if (!cmdtype_is_loop((enum PLpgSQL_stmt_types)stmt->cmd_type)) {
         begin_profile_stmt(stmt->lineno);
+    } else {
+        profile_stmt_once(stmt->lineno);
     }
 }
 
@@ -1110,11 +1111,6 @@ static void plpgsql_cb_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
     if (!cmdtype_is_loop((enum PLpgSQL_stmt_types)stmt->cmd_type)) {
         end_profile_stmt(stmt->lineno);
     }
-}
-
-static void plpgsql_cb_stmt_once(int lineno)
-{
-    profile_stmt_once(lineno);
 }
 
 Datum start_profiler(PG_FUNCTION_ARGS)
