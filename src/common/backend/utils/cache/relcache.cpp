@@ -4142,8 +4142,6 @@ void RelationCacheInvalidate(void)
             /* Delete this entry immediately */
             Assert(!relation->rd_isnailed);
             RelationClearRelation(relation, false);
-            hash_seq_term(&status);
-            hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
         } else {
             /*
              * If it's a mapped relation, immediately update its rd_node in
@@ -4241,19 +4239,7 @@ void InvalidateRelationNodeList()
         relation = idhentry->reldesc;
 
         if (relation->rd_locator_info != NULL) {
-            bool clear = RelationHasReferenceCountZero(relation) &&
-                    !(RelationIsIndex(relation) && relation->rd_refcnt > 0 && relation->rd_indexcxt != NULL);
             RelationClearRelation(relation, !RelationHasReferenceCountZero(relation));
-            if (!clear) {
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
-                while ((idhentry = (RelIdCacheEnt*)hash_seq_search(&status)) != NULL) {
-                    Relation start_relation = idhentry->reldesc;
-                    if (start_relation == relation) {
-                        break;
-                    }
-                }
-            }
         }
     }
 }
@@ -4492,8 +4478,6 @@ void AtEOXact_RelationCache(bool isCommit)
                 relation->rd_createSubid = InvalidSubTransactionId;
             } else if (RelationHasReferenceCountZero(relation)) {
                 RelationClearRelation(relation, false);
-                hash_seq_term(&status);
-                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
                 continue;
             } else {
                 /*
@@ -4528,8 +4512,6 @@ void AtEOXact_RelationCache(bool isCommit)
         }
         if (relation->partMap != NULL && relation->partMap->isDirty) {
             RelationClearRelation(relation, false);
-            hash_seq_term(&status);
-            hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
         }
     }
 
