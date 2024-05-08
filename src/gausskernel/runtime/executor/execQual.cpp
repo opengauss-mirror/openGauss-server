@@ -5446,21 +5446,36 @@ static Datum ExecEvalFieldStore(FieldStoreState* fstate, ExprContext* econtext, 
         * heap_deform_tuple needs a HeapTuple not a bare HeapTupleHeader. We
         * set all the fields in the struct just in case.
         */
-       HeapTupleHeader tuphdr;
-       HeapTupleData tmptup;
-
-       tuphdr = DatumGetHeapTupleHeader(tupDatum);
-       tmptup.t_len = HeapTupleHeaderGetDatumLength(tuphdr);
-       ItemPointerSetInvalid(&(tmptup.t_self));
-       tmptup.t_tableOid = InvalidOid;
-       tmptup.t_bucketId = InvalidBktId;
+       if (GetTableAmType(tupDesc->td_tam_ops) == TAM_USTORE) {
+            UHeapDiskTuple tuphdr;
+            UHeapTupleData tmptup;
+            /* UHeapDiskTuple and HeapTupleHeader have the same layout */
+            tuphdr = (UHeapDiskTuple) DatumGetHeapTupleHeader(tupDatum);
+            tmptup.disk_tuple_size = HeapTupleHeaderGetDatumLength(tuphdr);
+            ItemPointerSetInvalid(&(tmptup.ctid));
+            tmptup.table_oid = InvalidOid;
+            tmptup.t_bucketId = InvalidBktId;
 #ifdef PGXC
-       tmptup.t_xc_node_id = 0;
+            tmptup.xc_node_id = 0;
 #endif
-       HeapTupleSetZeroBase(&tmptup);
-       tmptup.t_data = tuphdr;
-
-       tableam_tops_deform_tuple(&tmptup, tupDesc, values, isnull);
+            HeapTupleSetZeroBase(&tmptup);
+            tmptup.disk_tuple = tuphdr;
+            tableam_tops_deform_tuple(&tmptup, tupDesc, values, isnull);
+        } else {
+            HeapTupleHeader tuphdr;
+            HeapTupleData tmptup;
+            tuphdr = DatumGetHeapTupleHeader(tupDatum);
+            tmptup.t_len = HeapTupleHeaderGetDatumLength(tuphdr);
+            ItemPointerSetInvalid(&(tmptup.t_self));
+            tmptup.t_tableOid = InvalidOid;
+            tmptup.t_bucketId = InvalidBktId;
+#ifdef PGXC
+            tmptup.t_xc_node_id = 0;
+#endif
+            HeapTupleSetZeroBase(&tmptup);
+            tmptup.t_data = tuphdr;
+            tableam_tops_deform_tuple(&tmptup, tupDesc, values, isnull);
+        }
    } else {
        /* Convert null input tuple into an all-nulls row */
        rc = memset_s(isnull, tupDesc->natts * sizeof(bool), true, tupDesc->natts * sizeof(bool));
