@@ -1834,7 +1834,6 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     ereport(LOG, (errmsg("[SS Reform] starts, pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
         pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
         t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
-    SSHandleStartupWhenReformStart();
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->is_hashmap_constructed = false;
     reform_info->reform_type = rs_cxt->reform_type;
@@ -1853,7 +1852,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     SSXminInfoPrepare();
     reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
-
+    SSHandleStartupWhenReformStart();
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),

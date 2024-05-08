@@ -627,10 +627,17 @@ void SSHandleStartupWhenReformStart()
     }
 
     if (ENABLE_ONDEMAND_RECOVERY && ENABLE_ONDEMAND_REALTIME_BUILD) {
-        ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS reform][On-demand] start phase, on_demand real time build is enable "
-            "no need wait startup thread exit.")));
-        return;
+        if (SS_PERFORMING_SWITCHOVER && SS_REFORM_PARTNER) {
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform][On-demand] reform start phase, ondemand realtime build is enabled during switchover .")));
+            SSWaitStartupExit(true);
+            return;
+        } else {
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform][On-demand] start phase, ondemand realtime build is enable "
+                    "ondemand realtime build is enabled during startup, no need wait startup thread exit .")));
+            return;
+        }
     }
 
     if (SS_DISASTER_MAIN_STANDBY_NODE) {
