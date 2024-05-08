@@ -149,6 +149,9 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
     SpinLockInit(&wal_cxt->walReceiverStats->mutex);
     wal_cxt->walRecvWriterStats = (WalRecvWriterStats*)palloc0(sizeof(WalRecvWriterStats));
     SpinLockInit(&wal_cxt->walRecvWriterStats->mutex);
+    if (ENABLE_DMS) {
+        wal_cxt->ssZeroBuffer = (char*)palloc0(SS_XLOG_WRITE_ZERO_STEP + ALIGNOF_BUFFER);
+    }
 }
 
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)

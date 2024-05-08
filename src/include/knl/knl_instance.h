@@ -1059,6 +1059,7 @@ typedef struct knl_g_wal_context {
     WalSenderStats* walSenderStats;
     WalReceiverStats* walReceiverStats;
     WalRecvWriterStats* walRecvWriterStats;
+    char* ssZeroBuffer; /* an all-zero buffer used to write zero when initing xlog file */
 } knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {

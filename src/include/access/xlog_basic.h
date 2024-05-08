@@ -112,6 +112,10 @@
 
 #define SS_DORADO_CTRL_FILE (g_instance.datadir_cxt.controlInfoPath)
 
+/**
+ * The writing zero step when XLogFileInit in share storage mode.
+ */
+#define SS_XLOG_WRITE_ZERO_STEP (XLOG_BLCKSZ * 256)
 
 #define InvalidRepOriginId 0
 #define InvalidXlogPreReadStartPtr 0xFFFFFFFFFFFFFFFF
