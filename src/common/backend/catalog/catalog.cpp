@@ -152,6 +152,10 @@ ForkNumber forkname_to_number(char* forkName, BlockNumber* segno)
 
         subtoken = strtok_r(token, ".", &tmpsubtoken);
         Assert(subtoken != NULL);
+        if (atooid(subtoken)) {
+            return InvalidForkNumber;
+        }
+
         if (strlen(subtoken) == parselen) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

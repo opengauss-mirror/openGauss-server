@@ -156,6 +156,12 @@ static bytea* get_raw_page_internal(text* relname, ForkNumber forknum, BlockNumb
     SET_VARSIZE(raw_page, BLCKSZ + VARHDRSZ);
     raw_page_data = VARDATA(raw_page);
 
+    if ((forknum == InvalidForkNumber) || (forknum > INIT_FORKNUM)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot get raw page from stream for Invlid forkname; Valid forknames are \"main\", \"fsm\", \"vm\", \"bcm\", \"init\"")));
+    }
+    
     /* Take a verbatim copy of the page */
 
     buf = ReadBufferExtended(rel, forknum, blkno, RBM_NORMAL, NULL);
