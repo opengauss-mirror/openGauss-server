@@ -2770,8 +2770,8 @@ static void process_sort(Query* parse, PlannerInfo* root, PlannerTargets* planne
      */
     if (parse->sortClause) {
         if (parse->is_flt_frame && parse->hasTargetSRFs) {
-            List* sortInputTarget = build_plan_tlist(root, plannerTargets->final_target);
-            (*resultPlan)->targetlist = sortInputTarget;
+            tlist = build_plan_tlist(root, plannerTargets->final_target);
+            (*resultPlan)->targetlist = tlist;
         }
 
         /*
@@ -3674,8 +3674,13 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                     wflists,
                     &needSecondLevelAgg,
                     collectiveGroupExpr);
+                /*
+                 * grouping_tlist was modified by build_groupingsets_plan,
+                 * we have to change tlist at the same time.
+                 */
+                tlist = grouping_tlist;
                 /* Delete eq class expr after grouping */
-                delete_eq_member(root, grouping_tlist, collectiveGroupExpr);
+                delete_eq_member(root, tlist, collectiveGroupExpr);
 
                 numGroupCols = list_length(parse->groupClause);
                 /*
@@ -3703,9 +3708,9 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
 
                 if (parse->is_flt_frame) {
                     if (!parse->hasTargetSRFs && IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
-                        Assert(!expression_returns_set((Node*)grouping_tlist));
+                        Assert(!expression_returns_set((Node*)tlist));
 
-                        if (check_subplan_in_qual(grouping_tlist, result_plan->qual)) {
+                        if (check_subplan_in_qual(tlist, result_plan->qual)) {
                             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                 NOTPLANSHIPPING_LENGTH,
                                 "var in quals doesn't exist in targetlist");
@@ -3715,7 +3720,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                     }
                 } else {
                     if (IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
-                        if (expression_returns_set((Node*)grouping_tlist)) {
+                        if (expression_returns_set((Node*)tlist)) {
                             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                 NOTPLANSHIPPING_LENGTH,
                                 "set-valued function + groupingsets");
@@ -3723,7 +3728,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                             mark_stream_unsupport();
                         }
 
-                        if (check_subplan_in_qual(grouping_tlist, result_plan->qual)) {
+                        if (check_subplan_in_qual(tlist, result_plan->qual)) {
                             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                 NOTPLANSHIPPING_LENGTH,
                                 "var in quals doesn't exist in targetlist");
