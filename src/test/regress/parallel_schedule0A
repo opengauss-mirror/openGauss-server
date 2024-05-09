@@ -399,7 +399,7 @@ test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey
 #test: type_sanity
 #test: create_function_1
 test: create_table
-test: temp__4
+test: temp__4 obsscaninfo
 #test: copy#
 
 
