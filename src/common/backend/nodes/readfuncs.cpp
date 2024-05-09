@@ -33,7 +33,7 @@
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
 #include "catalog/gs_opt_model.h"
-#include "nodes/parsenodes.h"
+#include "nodes/primnodes.h"
 #include "foreign/fdwapi.h"
 #include "nodes/plannodes.h"
 #include "optimizer/dataskew.h"
@@ -2904,7 +2904,12 @@ static MinMaxExpr* _readMinMaxExpr(void)
     READ_ENUM_FIELD(op, MinMaxOp);
     READ_NODE_FIELD(args);
     READ_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        READ_OID_FIELD(cmptype);
+        READ_NODE_FIELD(cmpargs);
 
+        READ_TYPEINFO_FIELD(cmptype);
+    }
     READ_TYPEINFO_FIELD(minmaxtype);
 
     READ_DONE();

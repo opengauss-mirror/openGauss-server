@@ -82,6 +82,7 @@ const uint32 GRAND_VERSION_NUM = 92947;
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM = 92948;
 const uint32 PARTITION_NAME_VERSION_NUM = 92947;
 const uint32 AUDIT_SHA_VERSION_NUM = 92946;
 const uint32 NETTIME_TRACE_VERSION_NUM = 92945;

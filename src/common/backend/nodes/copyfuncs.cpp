@@ -3178,6 +3178,10 @@ static MinMaxExpr* _copyMinMaxExpr(const MinMaxExpr* from)
     COPY_SCALAR_FIELD(op);
     COPY_NODE_FIELD(args);
     COPY_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        COPY_SCALAR_FIELD(cmptype);
+        COPY_NODE_FIELD(cmpargs);
+    }
 
     return newnode;
 }

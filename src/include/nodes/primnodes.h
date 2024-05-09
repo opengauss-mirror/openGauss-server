@@ -1033,6 +1033,8 @@ typedef struct MinMaxExpr {
     MinMaxOp op;      /* function to execute */
     List* args;       /* the arguments */
     int location;     /* token location, or -1 if unknown */
+    Oid cmptype;       /* the comparison type */
+    List* cmpargs; /* the comparison arguments */
 } MinMaxExpr;
 
 /*

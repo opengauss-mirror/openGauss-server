@@ -24,6 +24,7 @@
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
 #include "foreign/fdwapi.h"
+#include "nodes/primnodes.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "nodes/nodeFuncs.h"
@@ -3039,7 +3040,12 @@ static void _outMinMaxExpr(StringInfo str, MinMaxExpr* node)
     WRITE_ENUM_FIELD(op, MinMaxOp);
     WRITE_NODE_FIELD(args);
     WRITE_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= MINMAXEXPR_CMPTYPE_VERSION_NUM) {
+        WRITE_OID_FIELD(cmptype);
+        WRITE_NODE_FIELD(cmpargs);
 
+        WRITE_TYPEINFO_FIELD(cmptype);
+    }
     WRITE_TYPEINFO_FIELD(minmaxtype);
 }
 

@@ -1237,6 +1237,7 @@ typedef struct CoalesceExprState {
 typedef struct MinMaxExprState {
     ExprState xprstate;
     List* args;     /* the arguments */
+    List* cmpargs;     /* the comparison arguments */
     FmgrInfo cfunc; /* lookup info for comparison func */
     FunctionCallInfoData cinfo;
 
