@@ -480,7 +480,7 @@ test: hybrid_row_column
 test: retry
 test: hw_replication_slots
 test: insert
-test: copy2 temp
+test: copy2 temp obsscaninfo
 test: truncate
 #test: temp_table
 

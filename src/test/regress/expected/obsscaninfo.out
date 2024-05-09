@@ -1,0 +1,31 @@
+\d gs_obsscaninfo
+          Table "pg_catalog.gs_obsscaninfo"
+    Column    |           Type           | Modifiers 
+--------------+--------------------------+-----------
+ query_id     | bigint                   | not null
+ user_id      | text                     | 
+ table_name   | text                     | 
+ file_type    | text                     | 
+ time_stamp   | timestamp with time zone | 
+ actual_time  | double precision         | 
+ file_scanned | bigint                   | 
+ data_size    | double precision         | 
+ billing_info | text                     | 
+Replica Identity: NOTHING
+Tablespace: "pg_global"
+
+\d pg_obsscaninfo
+          Table "pg_catalog.pg_obsscaninfo"
+    Column    |           Type           | Modifiers 
+--------------+--------------------------+-----------
+ query_id     | bigint                   | not null
+ user_id      | text                     | 
+ table_name   | text                     | 
+ file_type    | text                     | 
+ time_stamp   | timestamp with time zone | 
+ actual_time  | double precision         | 
+ file_scanned | bigint                   | 
+ data_size    | double precision         | 
+ billing_info | text                     | 
+Replica Identity: NOTHING
+
