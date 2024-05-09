@@ -549,12 +549,35 @@ void UnlinkUndoFile(const RelFileNodeBackend& rnode, ForkNumber forkNum, bool is
 {
     Assert(blockNum != InvalidBlockNumber);
 
-    char path[UNDO_FILE_PATH_LEN];
+    char path[UNDO_FILE_PATH_LEN] = { 0 };
+    char prev_path[UNDO_FILE_PATH_LEN] ={ 0 };
     uint32 undoFileBlocks = UNDO_FILE_BLOCK(rnode.node.dbNode);
     int ret;
     int zid = rnode.node.relNode;
     int segno = blockNum / undoFileBlocks;
     GetUndoFilePath(zid, rnode.node.dbNode, segno, path, UNDO_FILE_PATH_LEN);
+
+    if (segno > 0) {
+        undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zid, false);
+        Assert(uzone != NULL);
+        GetUndoFilePath(zid, rnode.node.dbNode, segno - 1, prev_path, UNDO_FILE_PATH_LEN);
+        if (access(prev_path, F_OK) == 0) {
+            ereport(WARNING, (errmodule(MOD_UNDO), 
+                errmsg(UNDOFORMAT("Undo unlink file discontunue: path %s, prevPath %s."
+                "spaceInfo: head %lu, tail %lu, lsn %lu."
+                "slotSpaceInfo: head %lu, tail %lu, lsn %lu."
+                "zoneInfo: insertURecPtr %lu, forceDiscardURecPtr %lu, discardURecPtr %lu, allcateTSlotPtr %lu,"
+                "recycleTSlotPtr %lu, recycleXid %lu, frozenXid %lu, lsn %lu."
+                ),
+                path, prev_path, 
+                uzone->GetUndoSpace()->Head(), uzone->GetUndoSpace()->Tail(), uzone->GetUndoSpace()->LSN(), 
+                uzone->GetSlotSpace()->Head(), uzone->GetSlotSpace()->Tail(), uzone->GetSlotSpace()->LSN(),
+                uzone->GetInsertURecPtr(), uzone->GetForceDiscardURecPtr(), 
+                uzone->GetDiscardURecPtr(), uzone->GetAllocateTSlotPtr(), 
+                uzone->GetRecycleTSlotPtr(), uzone->GetRecycleXid(), uzone->GetFrozenXid(), uzone->GetLSN()
+               )));
+        }
+    }
 
     if (isRedo || u_sess->attr.attr_common.IsInplaceUpgrade || forkNum != MAIN_FORKNUM ||
         RelFileNodeBackendIsTemp(rnode) || rnode.node.bucketNode != InvalidBktId) {

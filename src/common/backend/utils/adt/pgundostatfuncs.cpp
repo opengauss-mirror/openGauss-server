@@ -813,13 +813,18 @@ static void PutTranslotInfoToTuple(int zoneId, uint32 offset, TransactionSlot *s
 }
 
 static void GetTranslotFromOneSegFile(int fd, int zoneId, Tuplestorestate *tupstore,
-    TupleDesc tupDesc, TransactionId xid, MiniSlot *returnSlot)
+    TupleDesc tupDesc, TransactionId xid, int segno, MiniSlot *returnSlot)
 {
     TransactionSlot *slot = NULL;
     errno_t rc = EOK;
     off_t seekpos;
     uint32 ret = 0;
     char buffer[BLCKSZ] = {'\0'};
+    UndoSlotPtr usp = INVALID_UNDO_SLOT_PTR;
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zoneId, false);
+    if (uzone == NULL) {
+        return;
+    }
 
     for (uint32 loop = 0; loop < UNDO_META_SEG_SIZE; loop++) {
         seekpos = (off_t)BLCKSZ * loop;
@@ -835,6 +840,10 @@ static void GetTranslotFromOneSegFile(int fd, int zoneId, Tuplestorestate *tupst
 
         for (uint32 offset = UNDO_LOG_BLOCK_HEADER_SIZE; offset < BLCKSZ - MAXALIGN(sizeof(TransactionSlot));
             offset += MAXALIGN(sizeof(TransactionSlot))) {
+            usp = MAKE_UNDO_PTR(zoneId, segno * UNDO_META_SEGMENT_SIZE + loop * BLCKSZ + offset);
+            if (usp < uzone->GetRecycleTSlotPtr() || usp > uzone->GetAllocateTSlotPtr()) {
+                continue;
+            }
             slot = (TransactionSlot *)(buffer + offset);
             if (TransactionIdIsValid(xid) && slot->XactId() < xid) {
                 continue;
@@ -867,7 +876,7 @@ static void GetTranslotFromSegFiles(int zoneId, int segnobegin, int segnoend, Tu
         securec_check_ss(rc, "\0", "\0");
         int fd = open(fileName, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
         Checkfd(fd, fileName);
-        GetTranslotFromOneSegFile(fd, zoneId, tupstore, tupDesc, xid, returnSlot);
+        GetTranslotFromOneSegFile(fd, zoneId, tupstore, tupDesc, xid, segcurrent, returnSlot);
         close(fd);
     }
 }
