@@ -1,0 +1,270 @@
+CREATE DATABASE test_db DBCOMPATIBILITY 'B';
+\c test_db
+SET autocommit = 1;
+CREATE TABLE test_table (a text) with (storage_type = ustore);
+CREATE DATABASE test_drop;
+INSERT INTO test_table values('aaaaa');
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+ROLLBACK;
+NOTICE:  there is no transaction in progress
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+SET autocommit = 0;
+-- DML
+-- rollback the insert statement
+INSERT INTO test_table values('bbbbb');
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ bbbbb
+(2 rows)
+
+ROLLBACK;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+-- commit the insert statement
+INSERT INTO test_table values('ccccc');
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ ccccc
+(2 rows)
+
+COMMIT;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ ccccc
+(2 rows)
+
+-- commit the insert statement auto
+INSERT INTO test_table values('ddddd');
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ ccccc
+ ddddd
+(3 rows)
+
+SET autocommit = 1;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ ccccc
+ ddddd
+(3 rows)
+
+SET autocommit = 0;
+-- DDL
+-- rollback the create table statement
+CREATE TABLE test_a (a text) with (storage_type = ustore);
+INSERT INTO test_a values('aaaaa');
+SELECT * FROM test_a;
+   a   
+-------
+ aaaaa
+(1 row)
+
+ROLLBACK;
+SELECT * FROM test_a;
+--?ERROR:  relation "test_a" does not exist on .*
+LINE 1: SELECT * FROM test_a;
+                      ^
+COMMIT;
+-- commit the create table statement
+CREATE TABLE test_b (a text) with (storage_type = ustore);
+INSERT INTO test_b values('aaaaa');
+SELECT * FROM test_b;
+   a   
+-------
+ aaaaa
+(1 row)
+
+COMMIT;
+SELECT * FROM test_b;
+   a   
+-------
+ aaaaa
+(1 row)
+
+-- commit the create table statement auto
+CREATE TABLE test_c (a text) with (storage_type = ustore);
+INSERT INTO test_c values('aaaaa');
+SELECT * FROM test_c;
+   a   
+-------
+ aaaaa
+(1 row)
+
+SET autocommit = 1;
+SELECT * FROM test_c;
+   a   
+-------
+ aaaaa
+(1 row)
+
+-- prepare test
+SET autocommit = 0;
+INSERT INTO test_table values('eeeee');
+PREPARE TRANSACTION 'test_id';
+SET autocommit = 1;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ ccccc
+ ddddd
+(3 rows)
+
+COMMIT PREPARED 'test_id';
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+ ccccc
+ ddddd
+ eeeee
+(4 rows)
+
+-- truncate the table test_table
+TRUNCATE test_table;
+SELECT * FROM test_table;
+ a 
+---
+(0 rows)
+
+ROLLBACK;
+NOTICE:  there is no transaction in progress
+TRUNCATE test_table;
+SELECT * FROM test_table;
+ a 
+---
+(0 rows)
+
+COMMIT;
+WARNING:  there is no transaction in progress
+SELECT * FROM test_table;
+ a 
+---
+(0 rows)
+
+-- something statement could not execute in the transaction block
+SET autocommit = 0;
+START TRANSACTION;
+WARNING:  there is already a transaction in progress
+BEGIN;
+WARNING:  there is already a transaction in progress
+CREATE DATABASE test_error;
+ERROR:  CREATE DATABASE cannot run inside a transaction block
+ROLLBACK;
+VACUUM;
+ERROR:  VACUUM cannot run inside a transaction block
+ROLLBACK;
+DROP DATABASE test_drop;
+ERROR:  DROP DATABASE cannot run inside a transaction block
+ROLLBACK;
+CLUSTER test_table;
+ERROR:  CLUSTER cannot run inside a transaction block
+ROLLBACK;
+CREATE TABLESPACE gs_basebackup_tablespace relative LOCATION 'gs_basebackup_tablespace';
+ERROR:  CREATE TABLESPACE cannot run inside a transaction block
+ROLLBACK;
+CREATE INDEX CONCURRENTLY ON test_table(a);
+ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+ROLLBACK;
+REINDEX DATABASE test_db;
+ERROR:  REINDEX DATABASE cannot run inside a transaction block
+ROLLBACK;
+DROP DATABASE test_error;
+ERROR:  DROP DATABASE cannot run inside a transaction block
+ROLLBACK;
+DROP TABLESPACE test_space;
+ERROR:  DROP TABLESPACE cannot run inside a transaction block
+ROLLBACK;
+DROP INDEX test_index;
+ERROR:  index "test_index" does not exist
+ROLLBACK;
+REINDEX TABLE CONCURRENTLY test_table;
+ERROR:  REINDEX CONCURRENTLY cannot run inside a transaction block
+-- test about set autocommit = 1 when the transaction is aborted
+SET autocommit = 1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK;
+-- set autocommit = 0 in a transaction block
+SET autocommit = 1;
+TRUNCATE test_table;
+BEGIN;
+INSERT INTO test_table values('aaaaa');
+SET autocommit = 0;
+SET autocommit = 1;
+SHOW autocommit;
+ autocommit 
+------------
+ on
+(1 row)
+
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+-- only set autocommit = 1 cannot commit transaction
+BEGIN;
+INSERT INTO test_table values('bbbbb');
+SET autocommit = 1;
+ROLLBACK;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+-- set autocommit = 0 and rollback
+BEGIN;
+INSERT INTO test_table values('ccccc');
+SET autocommit = 0;
+ROLLBACK;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+SHOW autocommit;
+ autocommit 
+------------
+ on
+(1 row)
+
+-- error in transaction block
+SET autocommit = 0;
+CREATE;
+ERROR:  syntax error at or near ";"
+LINE 1: CREATE;
+              ^
+SET autocommit = 1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK;
+SET autocommit = 1;
+\c regression
+DROP DATABASE test_db;
+DROP DATABASE test_drop;
