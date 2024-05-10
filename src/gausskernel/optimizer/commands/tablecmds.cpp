@@ -1159,6 +1159,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
     bool assignedStorageType = false;
     bool segment = false;
     TableCreateSupport tableCreateSupport{(int)COMPRESS_TYPE_NONE, false, false, false, false, false, true, false};
+    bool hasOids = false;
     (void)isOrientationSet(options, NULL, false);
     foreach (cell, options) {
         DefElem* def = (DefElem*)lfirst(cell);
@@ -1217,6 +1218,13 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
             }
             assignedStorageType = true;
         }
+        if (pg_strcasecmp(def->defname, "oids") == 0) {
+            hasOids = true;
+        }
+    }
+
+    if (isUstore == true && hasOids == true) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("OIDS option is not supported for ustore table")));
     }
 
     if (isUstore && !createWithOrientationRow && !isCStore && !isTsStore) {
@@ -8394,6 +8402,14 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot set with oids on partitioned table")));
             }
 
+            /*
+             * ustore table can not be setted with or without oids
+             */
+            if (RelationIsUstoreFormat(rel)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot set with oids on ustore table")));
+            }
+
             ATSimplePermissions(rel, ATT_TABLE);
             if (!rel->rd_rel->relhasoids || recursing)
                 ATPrepAddOids(wqueue, rel, recurse, cmd, lockmode);
@@ -8408,6 +8424,14 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             if (RELATION_IS_PARTITIONED(rel)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot set without oids on partitioned table")));
+            }
+
+            /*
+             * ustore table can not be setted with or without oids
+             */
+            if (RelationIsUstoreFormat(rel)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot set with oids on ustore table")));
             }
 
             ATSimplePermissions(rel, ATT_TABLE);
