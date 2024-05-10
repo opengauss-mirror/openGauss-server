@@ -533,17 +533,26 @@ void ThreadPoolListener::WakeupForHang() {
     gs_signal_send(m_tid, SIGUSR2);
 }
 
+Dlelem* ThreadPoolListener::TryRemoveReadySessListHead()
+{
+    Dlelem *elem = NULL;
+    if (m_group->m_idleWorkerNum > 0) {
+        elem = m_readySessionList->RemoveHead();
+    }
+    return elem;
+}
+
 void ThreadPoolListener::WakeupReadySessionList() {
-    Dlelem *elem = m_readySessionList->RemoveHead();
+    Dlelem *elem = TryRemoveReadySessListHead();
     knl_session_context *sess = NULL;
     // last time WakeupReadySession() is not finished, but m_isHang is set again
-    while (elem != NULL && m_group->m_idleWorkerNum > 0) {
+    while (elem != NULL) {
         sess = (knl_session_context *)DLE_VAL(elem);
         ereport(DEBUG2,
                 (errmodule(MOD_THREAD_POOL),
                  errmsg("WakeupReadySessionList remove a session:%lu from m_readySessionList", sess->session_id)));
         DispatchSession(sess);
-        elem = m_readySessionList->RemoveHead();
+        elem = TryRemoveReadySessListHead();
     }
     // m_isHang maybe set true when we do checkGroupHang again before it, now we will miss one time.
     // But if group is actually hang, m_isHang will be set true again.
