@@ -1,0 +1,148 @@
+--
+-- CREATE_VIEW3
+--
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+CREATE VIEW view_const AS SELECT 'abc';
+SELECT * FROM view_const;
+ ?column? 
+----------
+ abc
+(1 row)
+
+DROP VIEW view_const;
+SET search_path to public;
+CREATE SCHEMA DTS_STORAGE;
+SET SEARCH_PATH TO DTS_STORAGE;
+CREATE TABLE RULE_TABLE_001(COL_INT INTEGER) with (storage_type = ustore);
+CREATE TABLE RULE_TABLE_001_01(COL_INT INTEGER) with (storage_type = ustore);
+SELECT RELNAME,RELKIND FROM PG_CLASS WHERE RELNAME LIKE 'rule_table_001%' ORDER BY 1;
+      relname      | relkind 
+-------------------+---------
+ rule_table_001    | r
+ rule_table_001_01 | r
+(2 rows)
+
+SELECT RELNAME, ATTNAME FROM PG_ATTRIBUTE A, PG_CLASS C WHERE C.OID = A.ATTRELID AND C.RELNAME LIKE 'rule_table_001%' ORDER BY 1, 2;
+      relname      |  attname   
+-------------------+------------
+ rule_table_001    | cmax
+ rule_table_001    | cmin
+ rule_table_001    | col_int
+ rule_table_001    | ctid
+ rule_table_001    | tableoid
+ rule_table_001    | xc_node_id
+ rule_table_001    | xmax
+ rule_table_001    | xmin
+ rule_table_001_01 | cmax
+ rule_table_001_01 | cmin
+ rule_table_001_01 | col_int
+ rule_table_001_01 | ctid
+ rule_table_001_01 | tableoid
+ rule_table_001_01 | xc_node_id
+ rule_table_001_01 | xmax
+ rule_table_001_01 | xmin
+(16 rows)
+
+SELECT RELNAME, X.PCLOCATORTYPE, X.PGROUP FROM PGXC_CLASS X JOIN PG_CLASS C ON (C.OID = X.PCRELID) WHERE PCRELID IN (SELECT OID FROM PG_CLASS WHERE RELNAME LIKE 'rule_table_001%') ORDER BY 1;
+ relname | pclocatortype | pgroup 
+---------+---------------+--------
+(0 rows)
+
+CREATE RULE "_RETURN" AS ON SELECT TO RULE_TABLE_001 DO INSTEAD SELECT * FROM RULE_TABLE_001_01;
+RESET SEARCH_PATH;
+SELECT RELNAME,RELKIND FROM PG_CLASS WHERE RELNAME LIKE 'rule_table_001%' ORDER BY 1;
+      relname      | relkind 
+-------------------+---------
+ rule_table_001    | v
+ rule_table_001_01 | r
+(2 rows)
+
+SELECT RELNAME, ATTNAME FROM PG_ATTRIBUTE A, PG_CLASS C WHERE C.OID = A.ATTRELID AND C.RELNAME LIKE 'rule_table_001%' ORDER BY 1, 2;
+      relname      |  attname   
+-------------------+------------
+ rule_table_001    | col_int
+ rule_table_001_01 | cmax
+ rule_table_001_01 | cmin
+ rule_table_001_01 | col_int
+ rule_table_001_01 | ctid
+ rule_table_001_01 | tableoid
+ rule_table_001_01 | xc_node_id
+ rule_table_001_01 | xmax
+ rule_table_001_01 | xmin
+(9 rows)
+
+SELECT RELNAME, X.PCLOCATORTYPE, X.PGROUP FROM PGXC_CLASS X JOIN PG_CLASS C ON (C.OID = X.PCRELID) WHERE PCRELID IN (SELECT OID FROM PG_CLASS WHERE RELNAME LIKE 'rule_table_001%') ORDER BY 1;
+ relname | pclocatortype | pgroup 
+---------+---------------+--------
+(0 rows)
+
+DROP TABLE DTS_STORAGE.RULE_TABLE_001_01 CASCADE;
+NOTICE:  drop cascades to view dts_storage.rule_table_001
+SET SEARCH_PATH TO DTS_STORAGE;
+CREATE TABLE "RULE_TABLE_001"(COL_INT INTEGER) with (storage_type = ustore);
+CREATE TABLE "RULE_TABLE_001_01"(COL_INT INTEGER) with (storage_type = ustore);
+SELECT RELNAME,RELKIND FROM PG_CLASS WHERE RELNAME LIKE 'RULE_TABLE_001%' ORDER BY 1;
+      relname      | relkind 
+-------------------+---------
+ RULE_TABLE_001    | r
+ RULE_TABLE_001_01 | r
+(2 rows)
+
+SELECT RELNAME, ATTNAME FROM PG_ATTRIBUTE A, PG_CLASS C WHERE C.OID = A.ATTRELID AND C.RELNAME LIKE 'RULE_TABLE_001%' ORDER BY 1, 2;
+      relname      |  attname   
+-------------------+------------
+ RULE_TABLE_001    | cmax
+ RULE_TABLE_001    | cmin
+ RULE_TABLE_001    | col_int
+ RULE_TABLE_001    | ctid
+ RULE_TABLE_001    | tableoid
+ RULE_TABLE_001    | xc_node_id
+ RULE_TABLE_001    | xmax
+ RULE_TABLE_001    | xmin
+ RULE_TABLE_001_01 | cmax
+ RULE_TABLE_001_01 | cmin
+ RULE_TABLE_001_01 | col_int
+ RULE_TABLE_001_01 | ctid
+ RULE_TABLE_001_01 | tableoid
+ RULE_TABLE_001_01 | xc_node_id
+ RULE_TABLE_001_01 | xmax
+ RULE_TABLE_001_01 | xmin
+(16 rows)
+
+SELECT RELNAME, X.PCLOCATORTYPE, X.PGROUP FROM PGXC_CLASS X JOIN PG_CLASS C ON (C.OID = X.PCRELID) WHERE PCRELID IN (SELECT OID FROM PG_CLASS WHERE RELNAME LIKE 'RULE_TABLE_001%') ORDER BY 1;
+ relname | pclocatortype | pgroup 
+---------+---------------+--------
+(0 rows)
+
+CREATE RULE "_RETURN" AS ON SELECT TO "RULE_TABLE_001" DO INSTEAD SELECT * FROM "RULE_TABLE_001_01";
+RESET SEARCH_PATH;
+SELECT RELNAME,RELKIND FROM PG_CLASS WHERE RELNAME LIKE 'RULE_TABLE_001%' ORDER BY 1;
+      relname      | relkind 
+-------------------+---------
+ RULE_TABLE_001    | v
+ RULE_TABLE_001_01 | r
+(2 rows)
+
+SELECT RELNAME, ATTNAME FROM PG_ATTRIBUTE A, PG_CLASS C WHERE C.OID = A.ATTRELID AND C.RELNAME LIKE 'RULE_TABLE_001%' ORDER BY 1, 2;
+      relname      |  attname   
+-------------------+------------
+ RULE_TABLE_001    | col_int
+ RULE_TABLE_001_01 | cmax
+ RULE_TABLE_001_01 | cmin
+ RULE_TABLE_001_01 | col_int
+ RULE_TABLE_001_01 | ctid
+ RULE_TABLE_001_01 | tableoid
+ RULE_TABLE_001_01 | xc_node_id
+ RULE_TABLE_001_01 | xmax
+ RULE_TABLE_001_01 | xmin
+(9 rows)
+
+SELECT RELNAME, X.PCLOCATORTYPE, X.PGROUP FROM PGXC_CLASS X JOIN PG_CLASS C ON (C.OID = X.PCRELID) WHERE PCRELID IN (SELECT OID FROM PG_CLASS WHERE RELNAME LIKE 'RULE_TABLE_001%') ORDER BY 1;
+ relname | pclocatortype | pgroup 
+---------+---------------+--------
+(0 rows)
+
+DROP SCHEMA DTS_STORAGE CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table dts_storage."RULE_TABLE_001_01"
+drop cascades to view dts_storage."RULE_TABLE_001"
