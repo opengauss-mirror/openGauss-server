@@ -1019,6 +1019,11 @@ static void DumpUndoRecordByUrpFromPage(void *page, ItemPointer ctid, UndoRecPtr
     int prevTdSlot = tdSlot;
     int currentTdSlot = tdSlot;
     UndoRecPtr currUrp = urp;
+    /*xid is the transaction ID we need for tuple's version when we traverse the TD chain,
+    for one version of tuple in undo_record, it's correct xid is stored in urec->OldXactId();
+    urec->Xid() represents the transaction ID that placed the undo_record into the undo segment. 
+    */
+    TransactionId xid = InvalidTransactionId;
 fetch_undo:
     VerifyMemoryContext();
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
@@ -1048,7 +1053,8 @@ fetch_undo:
         currentTdSlot = diskTuple->td_id;
 
         /* Find matched undo version, and output. */
-        if (ItemPointerGetBlockNumber(ctid) == urec->Blkno() && urec->Offset() == ctid->ip_posid) {
+        if (ItemPointerGetBlockNumber(ctid) == urec->Blkno() && urec->Offset() == ctid->ip_posid
+        && (!TransactionIdIsValid(xid) || TransactionIdEquals(xid, urec->Xid()))) {
             rc = snprintf_s(output + (int)strlen(output), MAXOUTPUTLEN, MAXOUTPUTLEN,
                 "\n\t\tUndoRecPtr(%lu): whdr = xid(%lu), cid(%u), reloid(%u), relfilenode(%u), utype(%u), uinfo(%u).\n",
                 urec->Urp(), urec->Xid(), urec->Cid(), urec->Reloid(), urec->Relfilenode(), urec->Utype(), urec->Uinfo());
@@ -1112,8 +1118,21 @@ fetch_undo:
                 "\n\t\tUndo diskTuple: td_id %u, reserved %u, flag %u, flag2 %u, t_hoff %u.\n",
                 diskTuple->td_id, diskTuple->reserved, diskTuple->flag, diskTuple->flag2, diskTuple->t_hoff);
             securec_check_ss(rc, "\0", "\0");
+        }else{
+            if (IS_VALID_UNDO_REC_PTR(urec->Blkprev())) {
+                currUrp = urec->Blkprev();
+                DELETE_EX(urec);
+                CHECK_FOR_INTERRUPTS();
+                goto fetch_undo;
+            }else{
+                goto fetch_end;
+            }
         }
+    }else{
+        goto fetch_end;
     }
+
+    xid = urec->OldXactId();
 
     if (prevTdSlot == currentTdSlot) {
         if (IS_VALID_UNDO_REC_PTR(urec->Blkprev())) {
