@@ -42,3 +42,11 @@ SELECT regexp_replace(
         '',
         'g'
     );
+drop table if exists numtest;
+create table numtest(
+num int, address varchar);
+Insert into numtest values(1,'Paris'),(2,'BJ'),(3,null),(4,'123asd'),(5,'GZ'),(6,'~!@ASDzxc'),(7,'  12_\');
+select * from numtest where regexp_like(address,'^[A-J]');
+select * from numtest where regexp_like(address,'[[:punct:]]');
+select * from numtest where regexp_like(address,'^[^[:digit:]]+$');
+drop table numtest;
