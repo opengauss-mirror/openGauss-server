@@ -41,7 +41,7 @@
 #define GSObsScanInfoRelationId  5680
 #define GSObsScanInfoRelation_Rowtype_Id 11661
 
-CATALOG(gs_obsscaninfo,5680) BKI_SHARED_RELATION BKI_WITHOUT_OIDS
+CATALOG(gs_obsscaninfo,5680) BKI_SHARED_RELATION BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 {
 	/* These fields form the unique key for the entry: */
 	int8	    query_id;
