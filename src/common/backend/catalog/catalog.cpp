@@ -60,6 +60,7 @@
 #include "commands/tablespace.h"
 #include "commands/directory.h"
 #include "cstore.h"
+#include "funcapi.h"
 #include "storage/custorage.h"
 #include "storage/page_compression.h"
 #include "threadpool/threadpool.h"
@@ -1319,4 +1320,105 @@ bool IsAformatStyleFunctionName(const char* schemaName)
         }
     }
     return false;
+}
+
+/*
+ * Description: Get records in pg_attribte for system catalogs
+ * Returns: Datum
+ */
+Datum gs_catalog_attribute_records(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext oldcontext = NULL;
+        TupleDesc tupdesc = NULL;
+        CatalogRelationBuildParam catalogparam = {InvalidOid};
+        Oid relid;
+
+        if (PG_ARGISNULL(0)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter can not be null.")));
+        }
+
+        relid = PG_GETARG_OID(0);
+        if (relid >= FirstBootstrapObjectId) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("catalog oid should be less than %u", FirstBootstrapObjectId)));
+        }
+
+        catalogparam = GetCatalogParam(relid);
+        if (catalogparam.oid == InvalidOid) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Oid %u does not belong to any catalog relation", relid)));
+        }
+
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        Relation attrdesc = NULL;
+        attrdesc = heap_open(AttributeRelationId, AccessShareLock);
+        tupdesc = CopyTupleDesc(attrdesc->rd_att);
+        /* Schema of pg_attribute should not be allowed to change, so lock can be released earlier. */
+        heap_close(attrdesc, AccessShareLock);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = catalogparam.natts;
+        funcctx->user_fctx = palloc(sizeof(CatalogRelationBuildParam));
+        *(CatalogRelationBuildParam *)(funcctx->user_fctx) = catalogparam;
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    while (funcctx->call_cntr < funcctx->max_calls) {
+        Datum values[Natts_pg_attribute];
+        bool nulls[Natts_pg_attribute];
+        HeapTuple tuple = NULL;
+        errno_t rc;
+        CatalogRelationBuildParam* catparamptr = (CatalogRelationBuildParam *)(funcctx->user_fctx);
+        FormData_pg_attribute attr = catparamptr->attrs[funcctx->call_cntr];
+
+        /* This is a tad tedious, but way cleaner than what we used to do... */
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        values[Anum_pg_attribute_attrelid - 1] = ObjectIdGetDatum(attr.attrelid);
+        values[Anum_pg_attribute_attname - 1] = NameGetDatum(&attr.attname);
+        values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(attr.atttypid);
+        values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(attr.attstattarget);
+        values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(attr.attlen);
+        values[Anum_pg_attribute_attnum - 1] = Int16GetDatum(attr.attnum);
+        values[Anum_pg_attribute_attndims - 1] = Int32GetDatum(attr.attndims);
+        values[Anum_pg_attribute_attcacheoff - 1] = Int32GetDatum(attr.attcacheoff);
+        values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(attr.atttypmod);
+        values[Anum_pg_attribute_attbyval - 1] = BoolGetDatum(attr.attbyval);
+        values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(attr.attstorage);
+        values[Anum_pg_attribute_attalign - 1] = CharGetDatum(attr.attalign);
+        values[Anum_pg_attribute_attnotnull - 1] = BoolGetDatum(attr.attnotnull);
+        values[Anum_pg_attribute_atthasdef - 1] = BoolGetDatum(attr.atthasdef);
+        values[Anum_pg_attribute_attisdropped - 1] = BoolGetDatum(attr.attisdropped);
+        values[Anum_pg_attribute_attislocal - 1] = BoolGetDatum(attr.attislocal);
+        values[Anum_pg_attribute_attcmprmode - 1] = Int8GetDatum(attr.attcmprmode);
+        values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(attr.attinhcount);
+        values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(attr.attcollation);
+        /* kvtype of catalog relations is always 0 */
+        values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(0);
+        values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&attr.attdroppedname);
+
+        /* Variable length attribute fields have little significance for catalog relations */
+        nulls[Anum_pg_attribute_attacl - 1] = true;
+        nulls[Anum_pg_attribute_attoptions - 1] = true;
+        nulls[Anum_pg_attribute_attfdwoptions - 1] = true;
+        nulls[Anum_pg_attribute_attinitdefval - 1] = true;
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+
+    SRF_RETURN_DONE(funcctx);
 }

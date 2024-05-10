@@ -32,6 +32,7 @@
 
 #include <sys/file.h>
 #include <catalog/pg_obsscaninfo.h>
+#include <catalog/gs_obsscaninfo.h>
 
 #include "access/reloptions.h"
 #include "access/sysattr.h"
@@ -294,6 +295,7 @@ static const FormData_pg_attribute Desc_pg_extension_data_source[Natts_pg_extens
     Schema_pg_extension_data_source};
 static const FormData_pg_attribute Desc_pg_directory[Natts_pg_directory] = {Schema_pg_directory};
 static const FormData_pg_attribute Desc_pg_obsscaninfo[Natts_pg_obsscaninfo] = {Schema_pg_obsscaninfo};
+static const FormData_pg_attribute Desc_gs_obsscaninfo[Natts_gs_obsscaninfo] = {Schema_gs_obsscaninfo};
 static const FormData_pg_attribute Desc_pgxc_class[Natts_pgxc_class] = {Schema_pgxc_class};
 static const FormData_pg_attribute Desc_pgxc_group[Natts_pgxc_group] = {Schema_pgxc_group};
 static const FormData_pg_attribute Desc_pgxc_node[Natts_pgxc_node] = {Schema_pgxc_node};
@@ -867,6 +869,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         false,
         Natts_pg_obsscaninfo,
         Desc_pg_obsscaninfo,
+        false,
+        true},
+    {GSObsScanInfoRelationId,
+        "gs_obsscaninfo",
+        GSObsScanInfoRelation_Rowtype_Id,
+        true,
+        false,
+        Natts_gs_obsscaninfo,
+        Desc_gs_obsscaninfo,
         false,
         true},
     {GsGlobalChainRelationId,

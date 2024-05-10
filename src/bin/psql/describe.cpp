@@ -52,6 +52,8 @@
 #define MOT_FDW "mot_fdw"
 #define MOT_FDW_SERVER "mot_server"
 
+#define FirstBootstrapObjectId 10000
+
 static bool describeOneTableDetails(const char* schemaname, const char* relationname, const char* oid, bool verbose);
 static void add_tablespace_footer(printTableContent* const cont, char relkind, Oid tablespace, const bool newline);
 static void add_role_attribute(PQExpBuffer buf, const char* const str);
@@ -1736,7 +1738,12 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     } else {
         appendPQExpBuffer(&buf, ", '' AS generated_column ");
     }
-    appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_attribute a");
+
+    if (tableinfo.relkind == 'r' && atooid(oid) < FirstBootstrapObjectId) {
+        appendPQExpBuffer(&buf, "\nFROM (select * from pg_catalog.gs_catalog_attribute_records('%s')) as a", oid);
+    } else {
+        appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_attribute a");
+    }
     appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped AND "
                             "a.attkvtype != 4 AND a.attname <> 'tableoid' AND a.attname <> 'tablebucketid'", oid);
     appendPQExpBuffer(&buf, "\nORDER BY a.attnum;");
