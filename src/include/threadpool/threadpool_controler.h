@@ -122,6 +122,11 @@ public:
         return m_threadNum;
     }
 
+    inline cpu_set_t *GetCpuSet()
+    {
+        return &m_cpuset;
+    }
+
 	void BindThreadToAllAvailCpu(ThreadId thread) const;
     void EnableAdjustPool();
     static int ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype);
