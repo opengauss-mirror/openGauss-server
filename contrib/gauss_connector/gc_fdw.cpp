@@ -1720,7 +1720,7 @@ void pgfdw_fetch_remote_version(PGconn* conn)
 
         result_count = atoi(PQgetvalue(res, 0, 0));
         if (result_count <= 0) {
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), errmsg("gc_fdw: the remote vesion is not match.")));
+            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), errmsg("gc_fdw: the remote version is not match.")));
         }
 
         PQclear(res);

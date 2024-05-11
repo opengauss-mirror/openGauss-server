@@ -1453,6 +1453,10 @@ static void GetWorkerIds(XLogReaderState *record, uint32 designatedWorker, bool 
             AddWorkerToSet(designatedWorker);
         } else {
             /* output  error info */
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                errmsg("[REDO_LOG_TRACE]AddWorkerToSet:input work id error, id:%u, work num %u", id,
+                g_dispatcher->pageWorkerCount)));
+            return;
         }
     }
 }
