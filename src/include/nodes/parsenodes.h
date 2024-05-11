@@ -1637,7 +1637,7 @@ typedef enum VacuumOption {
     VACOPT_AUTOVAC = 1 << 11,      /* mark automatic vacuum initiation */
 #endif
     VACOPT_COMPACT = 1 << 30,      /* compact hdfs file with invalid data just for DFS table */
-    VACOPT_HDFSDIRECTORY = 1 << 31 /* just clean empty hdfs directory */
+    VACOPT_HDFSDIRECTORY = (uint32)1 << 31 /* just clean empty hdfs directory */
 } VacuumOption;
 
 #define DEFAULT_SAMPLE_ROWCNT 30000
