@@ -35,6 +35,7 @@
 #include "access/redo_statistic.h"
 #include "access/extreme_rto_redo_api.h"
 #include "postmaster/postmaster.h"
+#include "replication/ss_disaster_cluster.h"
 
 #ifdef ENABLE_LITE_MODE
 #define ENABLE_ONDEMAND_RECOVERY false
@@ -93,7 +94,7 @@ static inline int get_recovery_undozidworkers_num()
 
 inline bool IsExtremeRedo()
 {
-    if (ENABLE_DMS && SS_STANDBY_PROMOTING) {
+    if (ENABLE_DMS && SS_STANDBY_PROMOTING && !SS_DISASTER_STANDBY_CLUSTER) {
         /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
         return false;
     }
@@ -102,7 +103,7 @@ inline bool IsExtremeRedo()
 
 inline bool IsParallelRedo()
 {
-    if (ENABLE_DMS && SS_STANDBY_PROMOTING) {
+    if (ENABLE_DMS && SS_STANDBY_PROMOTING && !SS_DISASTER_STANDBY_CLUSTER) {
         /* SS switchover promote replays 1 record, hence no PR/ERTO needed */
         return false;
     }
