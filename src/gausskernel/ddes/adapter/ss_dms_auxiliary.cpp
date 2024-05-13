@@ -125,7 +125,7 @@ void SSInitXminInfo()
     xmin_info->snap_cache = HeapMemInitHash("DMS snapshot xmin cache", 60, 30000, &ctl,
         HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
     if (xmin_info->snap_cache == NULL) {
-        ereport(FATAL, (errmodule(MOD_DMS), errmsg("could not initialize shared xmin_info hash table")));
+        ereport(FATAL, (errmodule(MOD_DMS), errmsg("[SS] could not initialize shared xmin_info hash table")));
     }
 }
 
@@ -137,7 +137,7 @@ void DmsAuxiliaryMain(void)
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 
     if (sigsetjmp(localSigjmpBuf, 1) != 0) {
-        ereport(WARNING, (errmodule(MOD_DMS), errmsg("dms auxiliary thread exception occured.")));
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] dms auxiliary thread exception occured.")));
         dms_auxiliary_handle_exception();
     }
 

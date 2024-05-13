@@ -103,7 +103,7 @@ static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool chec
 {
     if (IsSegmentFileNode(buf_desc->tag.rnode)) {
         SegmentCheck(!IsSegmentPhysicalRelNode(buf_desc->tag.rnode));
-        ereport(WARNING, (errmsg("buffer:%d is segdata page, bufdesc seginfo is empty", buffer)));
+        ereport(WARNING, (errmsg("[SS] buffer:%d is segdata page, bufdesc seginfo is empty", buffer)));
         SegPageLocation loc = seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, check_standby);
         SegmentCheck(loc.blocknum != InvalidBlockNumber);
@@ -130,7 +130,7 @@ bool LockModeCompatible(dms_buf_ctrl_t *buf_ctrl, LWLockMode mode)
             compatible = true;
         }
     } else {
-        AssertEreport(0, MOD_DMS, "lock mode value is wrong");
+        AssertEreport(0, MOD_DMS, "[SS] lock mode value is wrong");
     }
 
     return compatible;
@@ -251,7 +251,7 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
         }
 
         if (rdStatus == SMGR_RD_CRC_ERROR) {
-            ereport(WARNING, (errmsg("[%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
+            ereport(WARNING, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d] read from disk error, maybe buffer in flush",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                 (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
                 buf_desc->tag.blockNum)));
@@ -266,7 +266,7 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
             if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY) {
                 elevel = PANIC;
             }
-            ereport(elevel, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
+            ereport(elevel, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
                 rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
                 buf_desc->tag.forkNum, buf_desc->tag.blockNum,
                 (unsigned long long)lsn_on_mem, (unsigned long long)lsn_on_disk)));
@@ -282,17 +282,17 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     Buffer buffer;
     if (buf_ctrl->state & BUF_NEED_LOAD) {
         if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && AmDmsReformProcProcess()) {
-            ereport(PANIC, (errmsg("SS In flush copy, can't read from disk!")));
+            ereport(PANIC, (errmsg("[SS] In flush copy, can't read from disk!")));
         }
         buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
     } else {
 #ifdef USE_ASSERT_CHECKING
         if (buf_ctrl->state & BUF_IS_EXTEND) {
-            ereport(PANIC, (errmsg("extend page should not be tranferred from DMS, "
+            ereport(PANIC, (errmsg("[SS] extend page should not be tranferred from DMS, "
                 "and needs to be loaded from disk!")));
         }
         if (buf_ctrl->been_loaded == false) {
-            ereport(PANIC, (errmsg("ctrl not marked loaded before transferring from remote")));
+            ereport(PANIC, (errmsg("[SS] ctrl not marked loaded before transferring from remote")));
         }
 #endif
 
@@ -409,7 +409,7 @@ void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
         /* maybe some pages are not protected by WAL-Logged */
         if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
             RelFileNode rnode = buf_desc->tag.rnode;
-            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
+            ereport(PANIC, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
                 rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
                 buf_desc->tag.forkNum, buf_desc->tag.blockNum,
                 (unsigned long long)lsn_on_mem, (unsigned long long)lsn_on_disk)));
@@ -535,8 +535,8 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
     }
 
     ereport(DEBUG1,
-        (errmsg("[On-demand] Start request primary node redo page, spc/db/rel/bucket "
-            "fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+        (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Start request primary node redo page.",
+            tag.rnode.spcNode, tag.rnode.dbNode,
             tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
     InitDmsContext(&dms_ctx);
     dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
@@ -544,32 +544,32 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
         SSReadControlFile(REFORM_CTRL_PAGE);
         ereport(LOG,
-            (errmsg("[On-demand] Request primary node redo page timeout, spc/db/rel/bucket "
-                "fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+            (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Request primary node redo page timeout.",
+                tag.rnode.spcNode, tag.rnode.dbNode,
                 tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
         return false;
     }
 
     if (redo_status == ONDEMAND_REDO_DONE) {
         ereport(DEBUG1,
-            (errmsg("[On-demand] Request primary node redo page done, spc/db/rel/bucket "
-                "fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+            (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Request primary node redo page done.",
+                tag.rnode.spcNode, tag.rnode.dbNode,
                 tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
     } else if (redo_status == ONDEMAND_REDO_SKIP) {
         ereport(DEBUG1,
-            (errmsg("[On-demand] Primary node is not in ondemand recovery now and "
+            (errmsg("[SS][On-demand] Primary node is not in ondemand recovery now and "
                 "ignore this redo request, so refresh reform control file")));
         SSReadControlFile(REFORM_CTRL_PAGE);
     } else if (redo_status == ONDEMAND_REDO_ERROR) {
         ereport(PANIC,
-            (errmsg("[On-demand] Error happend in request primary node redo page, read buffer crash, "
-                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+            (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Error happend in request primary node redo page, "
+                "read buffer crash.", tag.rnode.spcNode, tag.rnode.dbNode,
                 tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
         return false;
     } else if (redo_status == ONDEMAND_REDO_FAIL) {
         ereport(WARNING,
-            (errmsg("[On-demand] Error happend in request primary node redo page, buffer is invalid, "
-                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u", tag.rnode.spcNode, tag.rnode.dbNode,
+            (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Error happend in request primary node redo page, "
+                "buffer is invalid", tag.rnode.spcNode, tag.rnode.dbNode,
                 tag.rnode.relNode, tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
         return false;
     }
@@ -655,7 +655,7 @@ int SSLockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
     int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastDDLLock),
         (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)LOCK_NORMAL_MODE);
     if (ret != DMS_SUCCESS) {
-        ereport(WARNING, (errmsg("SS broadcast DDLLockRelease request failed!")));
+        ereport(WARNING, (errmsg("[SS broadcast] DDLLockRelease request failed!")));
     }
 
     t_thrd.postgres_cxt.whereToSendOutput = output_backup;
@@ -674,7 +674,7 @@ void SSLockReleaseAll()
     int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastCmdOnly),
         (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)LOCK_RELEASE_SELF);
     if (ret != DMS_SUCCESS) {
-        ereport(DEBUG1, (errmsg("SS broadcast DDLLockReleaseAll request failed!")));
+        ereport(DEBUG1, (errmsg("[SS broadcast] DDLLockReleaseAll request failed!")));
     }
 
     t_thrd.postgres_cxt.whereToSendOutput = output_backup;
@@ -697,7 +697,7 @@ void SSLockAcquireAll()
             LOCK *lock = proclock->tag.myLock;
             int ret = SSLockAcquire(&(lock->tag), AccessExclusiveLock, false, false, LOCK_REACQUIRE);
             if (ret) {
-                ereport(WARNING, (errmodule(MOD_DMS), errmsg("SS Broadcast LockAcquire when reform finished failed")));
+                ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS Broadcast] LockAcquire when reform finished failed")));
             }
         }
     }
@@ -756,7 +756,7 @@ void SSRecheckBufferPool()
             mode = PANIC;
 #endif
             ereport(mode,
-                (errmsg("Buffer was not flushed or replayed, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx)",
+                (errmsg("[SS][%u/%u/%u/%d %d-%u] Buffer was not flushed or replayed, page lsn (0x%llx)",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                 buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (unsigned long long)pagelsn)));
         }
@@ -777,7 +777,7 @@ bool CheckPageNeedSkipInRecovery(Buffer buf, uint64 xlogLsn)
     securec_check(err, "\0", "\0");
     int ret = dms_recovery_page_need_skip(pageid, xlogLsn, (unsigned char *)&skip);
     if (ret != DMS_SUCCESS) {
-        ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
+        ereport(PANIC, (errmsg("[SS] DMS Internal error happened during recovery, errno %d", ret)));
     }
 
     return skip;
@@ -854,7 +854,7 @@ bool SSSegRead(SMgrRelation reln, ForkNumber forknum, char *buffer)
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
         if (buf_ctrl->seg_fileno != EXTENT_INVALID && (buf_ctrl->seg_fileno != buf_desc->extra->seg_fileno ||
             buf_ctrl->seg_blockno != buf_desc->extra->seg_blockno)) {
-            ereport(PANIC, (errmsg("It seemd physical location of drc not match with buf desc!")));
+            ereport(PANIC, (errmsg("[SS] It seemd physical location of drc not match with buf desc!")));
         }
 
         seg_physical_read(reln->seg_space, fakenode, forknum, buf_desc->extra->seg_blockno, (char *)buffer);
@@ -949,8 +949,8 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
         if (!SS_IN_REFORM && !SS_IN_ONDEMAND_RECOVERY) {
             ereport(PANIC,
-                (errmsg("[SS] this buffer should not exist with BUF_DIRTY_NEED_FLUSH but not in reform, "
-                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u",
+                (errmsg("[SS][%u/%u/%u/%d %d-%u] this buffer should not exist with BUF_DIRTY_NEED_FLUSH "
+                "but not in reform, page lsn (0x%llx), seg info:%u-%u",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
                 buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
                 (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno,
@@ -959,13 +959,12 @@ bool SSHelpFlushBufferIfNeed(BufferDesc* buf_desc)
         bool in_flush_copy = SS_IN_FLUSHCOPY;
         bool in_recovery = !g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag;
         ereport(LOG,
-            (errmsg("[SS flush copy] ready to flush buffer with need flush, "
-            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx), seg info:%u-%u, reform phase "
-            "is in flush_copy:%d, in recovery:%d",
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
-            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
-            (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno,
-            in_flush_copy, in_recovery)));
+            (errmsg("[SS][%u/%u/%u/%d %d-%u] flush copy: ready to flush buffer with need flush, "
+             "page lsn (0x%llx), seg info:%u-%u, reform phase is in flush_copy:%d, in recovery:%d ",
+             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+             buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, 
+             (unsigned long long)pagelsn, (unsigned int)buf_desc->extra->seg_fileno, buf_desc->extra->seg_blockno,
+             in_flush_copy, in_recovery)));
         if (IsSegmentBufferID(buf_desc->buf_id)) {
             return SSTrySegFlushBuffer(buf_desc);
         } else {

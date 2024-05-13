@@ -36,6 +36,7 @@
 #include "storage/file/fio_device.h"
 #include "storage/smgr/segment_internal.h"
 #include "replication/walreceiver.h"
+#include "replication/walsender_private.h"
 #include "replication/ss_disaster_cluster.h"
 
 /*
@@ -92,8 +93,8 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
         }
 
         if (!FILE_POSSIBLY_DELETED(errno)) { 
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
-                                                              XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno))));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m,"
+                    " %s", path, XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
         }
     }
 
@@ -104,7 +105,7 @@ int SSXLogFileOpenAnyTLI(XLogSegNo segno, int emode, uint32 sources, char* xlog_
     securec_check_ss(errorno, "", "");
 
     errno = ENOENT;
-    ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %m", path,
+    ereport(emode, (errcode_for_file_access(), errmsg("[SS] could not open file \"%s\" (log segment %s): %m", path,
                                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno)))); 
 
     return -1;
@@ -129,7 +130,7 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
              * That preReadStartPtr is InvalidXlogPreReadStartPtr has three kinds of occasions.
              */
             if (xlogreader->preReadStartPtr == InvalidXlogPreReadStartPtr && SS_DISASTER_CLUSTER) {
-                ereport(LOG, (errmsg("In ss disaster cluster mode, preReadStartPtr is 0.")));
+                ereport(LOG, (errmsg("[SS] In ss disaster cluster mode, preReadStartPtr is 0.")));
             }
 
             // pre-reading for dss
@@ -231,7 +232,7 @@ void SSDisasterGetXlogPathList()
     
     DIR* dssdir = opendir(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
     if (dssdir == NULL) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("Error opening dssdir %s", 
+        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] Error opening dssdir %s", 
                         g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name)));                                                  
     }
 
@@ -283,12 +284,14 @@ void SSUpdateReformerCtrl()
         }
 
         if (fd < 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %s", fname[i], TRANSLATE_ERRNO)));
+            ereport(FATAL, (errcode_for_file_access(), errmsg("[SS] could not open control file \"%s\": %s",
+                    fname[i], TRANSLATE_ERRNO)));
         }
 
         SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, write_size);
         if (close(fd)) {
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %s", TRANSLATE_ERRNO)));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %s",
+                    TRANSLATE_ERRNO)));
         }
     }
 }
@@ -309,7 +312,7 @@ loop:
     fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         LWLockRelease(ControlFileLock);
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("[SS] could not open control file \"%s\": %m", fname)));
     }
 
     off_t seekpos = (off_t)BLCKSZ * id;
@@ -324,7 +327,7 @@ loop:
     char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
     if (pread(fd, buffer, read_size, seekpos) != read_size) {
         LWLockRelease(ControlFileLock);
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not read from control file: %m")));
     }
 
     if (id == REFORM_CTRL_PAGE) {
@@ -332,7 +335,7 @@ loop:
         securec_check(rc, "", "");
         if (close(fd) < 0) {
             LWLockRelease(ControlFileLock);
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
         }
 
         /* Now check the CRC. */
@@ -342,13 +345,13 @@ loop:
 
         if (!EQ_CRC32C(crc, g_instance.dms_cxt.SSReformerControl.crc)) {
             if (retry == false) {
-                ereport(WARNING, (errmsg("control file \"%s\" contains incorrect checksum, try backup file", fname)));
+                ereport(WARNING, (errmsg("[SS] control file \"%s\" contains incorrect checksum, try backup file", fname)));
                 fname = XLOG_CONTROL_FILE_BAK;
                 retry = true;
                 goto loop;
             } else {
                 LWLockRelease(ControlFileLock);
-                ereport(FATAL, (errmsg("incorrect checksum in control file")));
+                ereport(FATAL, (errmsg("[SS] incorrect checksum in control file")));
             }
         }
         g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = g_instance.dms_cxt.SSReformerControl.clusterStatus;
@@ -365,7 +368,7 @@ loop:
         securec_check(rc, "", "");
         if (close(fd) < 0) {
             LWLockRelease(ControlFileLock);
-            ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+            ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
         }
 
         /* Now check the CRC. */
@@ -375,13 +378,13 @@ loop:
 
         if (!EQ_CRC32C(crc, controlFile->crc)) {
             if (retry == false) {
-                ereport(WARNING, (errmsg("control file \"%s\" contains incorrect checksum, try backup file", fname)));
+                ereport(WARNING, (errmsg("[SS] control file \"%s\" contains incorrect checksum, try backup file", fname)));
                 fname = XLOG_CONTROL_FILE_BAK;
                 retry = true;
                 goto loop;
             } else {
                 LWLockRelease(ControlFileLock);
-                ereport(FATAL, (errmsg("incorrect checksum in control file")));
+                ereport(FATAL, (errmsg("[SS] incorrect checksum in control file")));
             }
         }
 
@@ -395,14 +398,14 @@ loop:
 void SSClearSegCache()
 {
     (void)LWLockAcquire(ShmemIndexLock, LW_EXCLUSIVE);
-    HeapMemResetHash(t_thrd.storage_cxt.SegSpcCache, "Shared Seg Spc hash by request");
+    HeapMemResetHash(t_thrd.storage_cxt.SegSpcCache, "[SS] Shared Seg Spc hash by request");
     LWLockRelease(ShmemIndexLock);
 }
 
 void SSStandbySetLibpqswConninfo()
 {
     if (strlen(g_instance.dms_cxt.dmsInstAddr[g_instance.dms_cxt.SSReformerControl.primaryInstId]) == 0) {
-        ereport(WARNING, (errmsg("Failed to get ip of primary node!")));
+        ereport(WARNING, (errmsg("[SS] Failed to get ip of primary node!")));
         return;
     }
 
@@ -423,7 +426,7 @@ void SSStandbySetLibpqswConninfo()
     }
 
     if (replIdx == -1) {
-        ereport(WARNING, (errmsg("Failed to get replconninfo of primary node, check the replconninfo config!")));
+        ereport(WARNING, (errmsg("[SS] Failed to get replconninfo of primary node, check the replconninfo config!")));
         return;
     }
 
@@ -450,7 +453,7 @@ static void SSReadClusterRunMode()
     fd = BasicOpenFile(fname, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         LWLockRelease(ControlFileLock);
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not open control file \"%s\": %m", fname)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("[SS] could not open control file \"%s\": %m", fname)));
     }
 
     off_t seekpos = (off_t)BLCKSZ * REFORM_CTRL_PAGE;
@@ -460,14 +463,14 @@ static void SSReadClusterRunMode()
     if (pread(fd, buffer, read_size, seekpos) != read_size) {
         (void)close(fd);
         LWLockRelease(ControlFileLock);
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not read from control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not read from control file: %m")));
     }
     
     g_instance.dms_cxt.SSReformerControl.clusterRunMode = ((ss_reformer_ctrl_t*)buffer)->clusterRunMode;
 
     if (close(fd) < 0) {
         LWLockRelease(ControlFileLock);
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
     }
     LWLockRelease(ControlFileLock);
 }
@@ -478,7 +481,7 @@ void SSDisasterRefreshMode()
 
     SSUpdateReformerCtrl();
     LWLockRelease(ControlFileLock);
-    ereport(LOG, (errmsg("SSDisasterRefreshMode change control file cluster run mode to: %d",
+    ereport(LOG, (errmsg("[SS] SSDisasterRefreshMode change control file cluster run mode to: %d",
         g_instance.dms_cxt.SSReformerControl.clusterRunMode)));
 }
 
@@ -491,7 +494,7 @@ void SSDisasterUpdateHAmode()
         } else if (SS_DISASTER_STANDBY_CLUSTER) {
             t_thrd.postmaster_cxt.HaShmData->current_mode = STANDBY_MODE;
         }
-        ereport(LOG, (errmsg("SSDisasterUpdateHAmode change Ha current mode to: %d",
+        ereport(LOG, (errmsg("[SS] SSDisasterUpdateHAmode change Ha current mode to: %d",
             t_thrd.postmaster_cxt.HaShmData->current_mode)));
     }
 }
@@ -511,15 +514,21 @@ bool SSPerformingStandbyScenario()
 
 void SSGrantDSSWritePermission(void)
 {
+    /*
+     * Whether dss_set_server_status_wrapper leads to dead loop. There exists occasion that database maybe block
+     * here but fail and success log have no print. So it is suspected greatly that dss_set_server_status_wrapper
+     * cause database stuck. 
+     */
+    ereport(LOG, (errmodule(MOD_DMS), (errmsg("[SS reform] set dss server status as primary start."))));
     while (dss_set_server_status_wrapper() != GS_SUCCESS) {
         pg_usleep(REFORM_WAIT_LONG);
         ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
+            errmsg("[SS reform] Failed to set DSS as primary, vgname: \"%s\", socketpath: \"%s\"",
                 g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
                 g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
                 errhint("Check vgname and socketpath and restart later.")));
     }
-    ereport(LOG, (errmsg("set dss server status as primary")));
+    ereport(LOG, (errmodule(MOD_DMS), (errmsg("[SS reform] set dss server status as primary: success"))));
 }
 
 bool SSPrimaryRestartScenario()
@@ -533,9 +542,12 @@ bool SSPrimaryRestartScenario()
     return false;
 }
 
-/* PRIMARY_CLUSTER and single cluster
- *      1)standby scenario 2)primary restart -- no need exit
- *      3)switchover 4)failover -- need exit
+/* 
+ * PRIMARY_CLUSTER and single cluster
+ *      1)standby scenario 
+ *      2)primary restart -- no need exit
+ *      3)switchover 
+ *      4)failover -- need exit
  * STANDBY_CLUSTER
  *      all scenario  -- need exit
  */
@@ -550,7 +562,8 @@ bool SSBackendNeedExitScenario()
     }
 
     if (g_instance.attr.attr_sql.enableRemoteExcute) {
-        ereport(LOG, (errmsg("remote execute is enabled, all backends need exit to ensure complete transaction!")));
+        ereport(LOG, (errmsg("[SS] remote execute is enabled, all backends need exit to ensure"
+                "complete transaction!")));
         return true;
     }
 
@@ -561,14 +574,14 @@ bool SSBackendNeedExitScenario()
     return true;
 }
 
-static void SSProcessForceExit()
+void SSProcessForceExit()
 {
     int log_level = WARNING;
 #ifdef USE_ASSERT_CHECKING
     log_level = PANIC;
 #endif 
     ereport(log_level, (errmodule(MOD_DMS),
-        errmsg("exit now")));
+        errmsg("[SS reform] db exit directly by force now")));
     _exit(0);
 }
 
@@ -585,12 +598,14 @@ void SSWaitStartupExit(bool send_signal)
             pg_memory_barrier();
         }
         SendPostmasterSignal(PMSIGNAL_DMS_TERM_STARTUP);
+        ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform] send terminate startup thread signal to PM.")));
     }
 
     
     if (SS_IN_REFORM && dms_reform_failed()) {
         ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS reform] reform failed")));
+            errmsg("[SS reform] reform failed.")));
     }
 #ifdef USE_ASSERT_CHECKING
     ereport(LOG, (errmodule(MOD_DMS),
@@ -610,8 +625,8 @@ void SSWaitStartupExit(bool send_signal)
 
         if (g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request) {
             ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[SS reform] pageredo or startup thread are trapped in page request "
-                "during recovery phase, need exit")));
+                    errmsg("[SS reform] recovery_trapped_in_page_request: Thread pageredo or startup are trapped"
+                    "in page request during recovery phase, db exit directly by force now.")));
             _exit(0);
         }
 #ifndef USE_ASSERT_CHECKING
@@ -635,19 +650,19 @@ void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt)
             rs_cxt->role != DMS_ROLE_REFORMER) {
             g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = true;
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS reform][On-demand] reform start phase, stop ondemand realtime build before switchover.")));
+                errmsg("[SS reform][On-demand] reform start phase: stop ondemand realtime build before switchover.")));
             SSWaitStartupExit(true);
             return;
         } else {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS reform][On-demand] start phase, ondemand realtime build is enable, no need wait startup thread exit.")));
+                errmsg("[SS reform][On-demand] reform start phase: ondemand realtime build is enable, no need wait startup thread exit.")));
             return;
         }
     }
 
     if (SS_DISASTER_MAIN_STANDBY_NODE) {
         ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS reform] start phase, standby cluster main node "
+            errmsg("[SS reform][Dual cluster] reform start phase: standby cluster main node "
             "no need wait startup thread exit.")));
         return;
     }
@@ -658,8 +673,53 @@ void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt)
         SSWaitStartupExit(false);
     } else {
         ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS reform] start phase, last round reform version:%ld, startup wait version:%ld",
+            errmsg("[SS reform] reform start phase, last round reform version:%ld, startup wait version:%ld",
             reform_info->reform_ver, reform_info->reform_ver_startup_wait)));
         SSProcessForceExit();
     }
 }
+
+char* SSGetLogHeaderTypeStr()
+{   
+    if (!SS_IN_REFORM) {
+        return "[SS]";
+    }
+
+    switch (g_instance.dms_cxt.SSReformInfo.reform_type)
+    {
+        case (DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS):
+            return "[SS reform]";
+            break;
+        case (DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS):
+            return "[SS reform][SS failover]";
+            break;
+        case (DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS):
+            return "[SS reform][SS swithover]";
+            break;
+        default:
+            return "[SS]";
+    }
+}
+
+void ProcessNoCleanBackendsScenario() {
+    /* 
+     * PM_WAIT_REFORM indicates that this node don't do actually thing during reform phase.
+     * what only will be done currently is waiting this round of reform to finish.
+     * 1. primary restart, standby need set PM_WAIT_REFORM
+     * 2. standby restart, primary need set PM_WAIT_REFORM
+     * 3. SS_PERFORMING_SWITCHOVER, primary and standby all return. Because primary need PM_RUN to 
+     *    do ProcessDemoteRequest. 
+     */
+    if (SS_PERFORMING_SWITCHOVER) {
+        return;    
+    }
+
+    if (((uint64)(0x1 << SS_MY_INST_ID) & g_instance.dms_cxt.SSReformInfo.bitmap_reconnect) == 0 &&
+        !g_instance.dms_cxt.SSRecoveryInfo.startup_reform &&
+        g_instance.dms_cxt.SSReformInfo.reform_type != DMS_REFORM_TYPE_FOR_FULL_CLEAN) {
+        pmState = PM_WAIT_REFORM;
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] no clean backends, pmState=%d, SSClusterState=%d, "
+                      "demotion=%d-%d, rec=%d", pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                      t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery))); 
+    }
+} 

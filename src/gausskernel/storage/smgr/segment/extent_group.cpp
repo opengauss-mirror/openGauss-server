@@ -606,6 +606,12 @@ BlockNumber eg_try_alloc_extent(SegExtentGroup *seg, BlockNumber preassigned_blo
         SegmentCheck(map_group->free_page < map_group->page_count);
         for (int j = map_group->free_page; j < map_group->page_count; j++) {
             result = eg_alloc_extent_from_map(seg, curr_map_bno, target_file_size, i, j);
+            /* 
+             * eg_alloc_extent_from_map two condition returning InvalidBlockNumber
+             * 1. map_page->free_bits == 0, need to find next map_page
+             * 2. eg_alloc_extent_from_map find free map and free bit but target_file_size > 0, that is
+             *    block to be allocated > seg->segfile->total_blocks, so need to extend segphysicalfile.
+             */
             if (result != InvalidBlockNumber) {
                 return result;
             }

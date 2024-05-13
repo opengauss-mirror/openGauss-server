@@ -597,6 +597,7 @@ PMStateInfo pmStateDescription[] = {{PM_INIT, "PM_INIT"},
     {PM_WAIT_BACKUP, "PM_WAIT_BACKUP"},
     {PM_WAIT_READONLY, "PM_WAIT_READONLY"},
     {PM_WAIT_BACKENDS, "PM_WAIT_BACKENDS"},
+    {PM_WAIT_REFORM, "PM_WAIT_REFORM"},
     {PM_SHUTDOWN, "PM_SHUTDOWN"},
     {PM_SHUTDOWN_2, "PM_SHUTDOWN_2"},
     {PM_WAIT_DEAD_END, "PM_WAIT_DEAD_END"},
@@ -3062,7 +3063,7 @@ int PostmasterMain(int argc, char* argv[])
             SSDisasterRefreshMode();
         }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
-        ereport(LOG, (errmsg("[SS reform] node%d starts, found cluster PRIMARY:%d",
+        ereport(LOG, (errmsg("[SS reform][db] Node:%d starts, found cluster PRIMARY:%d",
             g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
         Assert(src_id >= 0 && src_id <= DMS_MAX_INSTANCE - 1);
 
@@ -3071,10 +3072,10 @@ int PostmasterMain(int argc, char* argv[])
             while (g_instance.dms_cxt.SSReformerControl.list_stable == 0) {
                 pg_usleep(SLEEP_ONE_SEC);
                 SSReadControlFile(REFORM_CTRL_PAGE);
-                ereport(WARNING, (errmsg("[SS reform] node%d waiting for PRIMARY:%d to finish 1st reform",
+                ereport(WARNING, (errmsg("[SS reform][db wait] Node:%d waiting for PRIMARY:%d to finish 1st reform",
                     g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
             }
-            ereport(LOG, (errmsg("[SS reform] Success: node:%d wait for PRIMARY:%d to finish 1st reform",
+            ereport(LOG, (errmsg("[SS reform][db wait] Node:%d wait for PRIMARY:%d to finish 1st reform: success",
                 g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
         }
     }
@@ -3943,21 +3944,21 @@ static int ServerLoop(void)
         (void)gs_signal_unblock_sigusr2();
 
         if (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.startup_reform && !startup_reform_finish) {
-            ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform start wait.", SS_MY_INST_ID)));
+            ereport(LOG, (errmsg("[SS reform][db sync wait] Node:%d first-round reform start wait.", SS_MY_INST_ID)));
             if (!DMSWaitReform()) {
-                ereport(WARNING, (errmsg("[SS reform] Node:%d first-round reform failed, shutdown now",
+                ereport(WARNING, (errmsg("[SS reform][db sync wait] Node:%d first-round reform failed, shutdown now",
                                          SS_MY_INST_ID)));
                 (void)gs_signal_send(PostmasterPid, SIGTERM);
                 startup_reform_finish = true;
             } else {
-                ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform success.", SS_MY_INST_ID)));
+                ereport(LOG, (errmsg("[SS reform][db sync wait] Node:%d first-round reform success.", SS_MY_INST_ID)));
                 startup_reform_finish = true;
             }
         }
 
-        /**
-         *  Standby node start StartUp thread to start ondemand realtime build, 
-         *  after reform.
+        /*
+         * Standby node initializes StartUp thread to start ondemand realtime build 
+         * after reform.
          */
         if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_ONDEMAND_REALTIME_BUILD_DISABLED &&
             SS_NORMAL_STANDBY && SS_CLUSTER_ONDEMAND_NORMAL && pmState == PM_RUN &&
@@ -6869,7 +6870,7 @@ dms_demote:
                         signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
                     }
 
-                    ereport(LOG, (errmsg("[SS switchover] primary demoting: "
+                    ereport(LOG, (errmsg("[SS reform][SS switchover] primary demoting: "
                         "killed threads, waiting for backends die")));
                     pmState = PM_WAIT_BACKENDS;
                 } else {
@@ -9713,6 +9714,11 @@ static void handle_recovery_started()
         }
         
         pmState = PM_RECOVERY;
+        if (ENABLE_DMS) {
+            ereport(LOG, (errmsg("[SS reform][db startupxlog]recovery start, pmState=%d, SSClusterState=%d,"
+                    "demotion=%d-%d, rec=%d", pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                    t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone)));
+        }
     }
 }
 
@@ -10509,6 +10515,9 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
 
         pmState = PM_WAIT_BACKENDS;
+        ereport(LOG, (errmsg("[SS reform][SS switchover] clean backends, pmState=%d, SSClusterState=%d, "
+                      "demotion=%d-%d, rec=%d", pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                      t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
         }
@@ -10584,22 +10593,26 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
         }
 
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] terminate backends success")));
+        ereport(LOG, (errmsg("[SS reform] clean backends: pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
+                    pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                    t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] clean backens: set reform_ready to true suceessfully")));
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS)) {
+        // failover trriger,cm show promoting in failover node, show starting in normal standby node.
         if (SS_STANDBY_FAILOVER) {
             PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         } else {
             PMUpdateDBState(STARTING_STATE, get_cur_mode(), get_cur_repl_num());
         }
         t_thrd.dms_cxt.CloseAllSessionsFailed = false;
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] kill backends begin.")));
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] kill backends begin.")));
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->CloseAllSessions();
             if (t_thrd.dms_cxt.CloseAllSessionsFailed) {
-                ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS failover] failover failed,"
+                ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] failover failed,"
                                                              "threadpool sessions closed failed.")));
                 _exit(0);
             }
@@ -10641,9 +10654,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
-        if (SS_STANDBY_FAILOVER) {
+        if (SS_PERFORMING_FAILOVER) {
             pmState = PM_WAIT_BACKENDS;
         }
+
+        ereport(LOG, (errmsg("[SS reform][SS failover] clean backends, pmState=%d, SSClusterState=%d, "
+                      "demotion=%d-%d, rec=%d", pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                      t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
 
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->EnableAdjustPool();
@@ -15380,4 +15397,41 @@ void SSOndemandProcExitIfStayWaitBackends()
                 WAIT_PMSTATE_UPDATE_TRIES)));
         _exit(0);
     }
+}
+
+int SSCountAndPrintChildren(int target)
+{
+    Dlelem* curr = NULL;
+    int cnt = 0;
+
+    for (curr = DLGetHead(g_instance.backend_list); curr; curr = DLGetSucc(curr)) {
+        Backend* bp = (Backend*)DLE_VAL(curr);
+
+        /*
+         * Since target == BACKEND_TYPE_ALL is the most common case, we test
+         * it first and avoid touching shared memory for every child.
+         */
+        if (target != BACKEND_TYPE_ALL) {
+            int child = 0;
+
+            if (bp->is_autovacuum)
+                child = BACKEND_TYPE_AUTOVAC;
+            else if (IsPostmasterChildWalSender(bp->child_slot))
+                child = BACKEND_TYPE_WALSND;
+            else if (IsPostmasterChildDataSender(bp->child_slot))
+                child = BACKEND_TYPE_DATASND;
+            else
+                child = BACKEND_TYPE_NORMAL;
+
+            if (!((unsigned int)target & (unsigned int)child))
+                continue;
+        }
+    
+        cnt++;
+        ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[SS reform][SS failover] print thread no exiting, thread id:%lu, thread role:%d",
+                bp->pid, bp->role)));
+    }
+
+    return cnt;
 }

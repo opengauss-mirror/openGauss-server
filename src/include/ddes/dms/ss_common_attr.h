@@ -75,6 +75,7 @@
 
 #define SS_STANDBY_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_FAILOVER_PROMOTING)
 
+/* reform type */
 #define SS_PRIMARY_NORMAL_REFORM \
     (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
 
@@ -82,6 +83,11 @@
     (ENABLE_DMS && SS_IN_REFORM && \
     (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS))
 
+#define SS_PERFORMING_FAILOVER \
+    (ENABLE_DMS && SS_IN_REFORM && \
+    (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS))
+
+/* clusterstate for switchover */
 #define SS_STANDBY_PROMOTING \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_PROMOTING))
 
@@ -95,8 +101,6 @@
 #define SS_STANDBY_WAITING                                                             \
     (ENABLE_DMS && (g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_WAITING || \
     g_instance.dms_cxt.SSClusterState == NODESTATE_STANDBY_REDIRECT))
-
-/* Mode in dorado hyperreplication and dms enabled as follow */
 
 #define SS_CLUSTER_ONDEMAND_NOT_NORAML \
     (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status != CLUSTER_NORMAL))

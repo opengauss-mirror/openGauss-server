@@ -34,6 +34,7 @@
 #include "postmaster/postmaster.h"
 #include "storage/file/fio_device.h"
 #include "replication/ss_disaster_cluster.h"
+#include "replication/walsender_private.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_reform_common.h"
@@ -78,6 +79,9 @@ void SSSavePrimaryInstId(int id)
 bool SSRecoveryNodes()
 {
     bool result = false;
+    
+    long max_wait_time = 300000000L;
+    long wait_time = 0;
     while (true) {
         /** why use lock:
          * time1 startup thread: update IsRecoveryDone, not finish UpdateControlFile
@@ -110,12 +114,25 @@ bool SSRecoveryNodes()
         }
 
         if (dms_reform_failed()) {
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform fail in recovery, pmState=%d, SSClusterState=%d,"
+                    "demotion=%d-%d, rec=%d", pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                    t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone)));
             SSWaitStartupExit();
             result = false;
             break;
         }
+
+        if ((wait_time % max_wait_time) == 0 && wait_time != 0) {
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] wait recovery to"
+                    " apply done for %ld us.", wait_time)));
+        }
+
         pg_usleep(REFORM_WAIT_TIME);
+        wait_time += REFORM_WAIT_TIME;
     }
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] recovery success, pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
+                  pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                  t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone)));
     return result;
 }
 
@@ -179,7 +196,7 @@ void SSInitReformerControlPages(void)
     FIN_CRC32C(g_instance.dms_cxt.SSReformerControl.crc);
 
     if (sizeof(ss_reformer_ctrl_t) > PG_CONTROL_SIZE) {
-        ereport(PANIC, (errmsg("sizeof(ControlFileData) is larger than PG_CONTROL_SIZE; fix either one")));
+        ereport(PANIC, (errmsg("[SS] sizeof(ControlFileData) is larger than PG_CONTROL_SIZE; fix either one")));
     }
 
     errorno = memset_s(buffer, PG_CONTROL_SIZE, 0, PG_CONTROL_SIZE);
@@ -191,18 +208,23 @@ void SSInitReformerControlPages(void)
     fd = BasicOpenFile(XLOG_CONTROL_FILE, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         ereport(PANIC,
-                (errcode_for_file_access(), errmsg("could not create control file \"%s\": %m", XLOG_CONTROL_FILE)));
+                (errcode_for_file_access(), errmsg("[SS] could not create control file \"%s\": %m", XLOG_CONTROL_FILE)));
     }
 
     SSWriteInstanceControlFile(fd, buffer, REFORM_CTRL_PAGE, PG_CONTROL_SIZE);
     if (close(fd)) {
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("[SS] could not close control file: %m")));
     }
 }
 
 void SShandle_promote_signal()
 {
     if (pmState == PM_WAIT_BACKENDS) {
+        /* 
+         * SS_ONDEMAND_REALTIME_BUILD_DISABLED represent 2 conditions
+         * 1. SS_PRIMARY_MODE
+         * 2. SS_STANDBY_MODE and not ENABLE_ONDEMAND_REALTIME_BUILD
+         */
         if (SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
             g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
         }
@@ -210,7 +232,8 @@ void SShandle_promote_signal()
         pmState = PM_STARTUP;
     }
 
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] begin startup.")));
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] initialize startup thread start,"
+            "pmState: %d.", pmState)));
 }
 
 
@@ -242,7 +265,7 @@ void ss_failover_dw_init_internal()
     dw_ext_init();
     dw_init();
     g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile = false;
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] dw init finish")));
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] dw init finish")));
 }
 
 void ss_failover_dw_init()
@@ -262,26 +285,26 @@ XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn()
     XLogRecPtr primaryRedoLsn = InvalidXLogRecPtr;
 
     ereport(DEBUG1, (errmodule(MOD_DMS),
-        errmsg("[On-demand] start request primary node %d do checkpoint", SS_PRIMARY_ID)));
+        errmsg("[SS][On-demand] start request primary node %d do checkpoint", SS_PRIMARY_ID)));
     if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
         dms_context_t dms_ctx;
         InitDmsContext(&dms_ctx);
         dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
         if (dms_req_opengauss_immediate_checkpoint(&dms_ctx, (unsigned long long *)&primaryRedoLsn) == GS_SUCCESS) {
             ereport(DEBUG1, (errmodule(MOD_DMS),
-                errmsg("[On-demand] request primary node %d checkpoint success, redoLoc %X/%X", SS_PRIMARY_ID,
+                errmsg("[SS][On-demand] request primary node %d checkpoint success, redoLoc %X/%X", SS_PRIMARY_ID,
                     (uint32)(primaryRedoLsn << 32), (uint32)primaryRedoLsn)));
             return primaryRedoLsn;
         }
         ereport(DEBUG1, (errmodule(MOD_DMS),
-            errmsg("[On-demand] request primary node %d checkpoint failed", SS_PRIMARY_ID)));
+            errmsg("[SS][On-demand] request primary node %d checkpoint failed", SS_PRIMARY_ID)));
     }
 
     // read from DMS failed, so read from DSS
     SSReadControlFile(SS_PRIMARY_ID, true);
     primaryRedoLsn = g_instance.dms_cxt.ckptRedo;
     ereport(DEBUG1, (errmodule(MOD_DMS),
-        errmsg("[On-demand] read primary node %d checkpoint loc in control file, redoLoc %X/%X", SS_PRIMARY_ID,
+        errmsg("[SS][On-demand] read primary node %d checkpoint loc in control file, redoLoc %X/%X", SS_PRIMARY_ID,
             (uint32)(primaryRedoLsn << 32), (uint32)primaryRedoLsn)));
     return primaryRedoLsn;
 }
@@ -321,7 +344,7 @@ void OndemandRealtimeBuildHandleFailover()
         pg_usleep(REFORM_WAIT_TIME);
     }
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_realtime_build_status = BUILD_TO_REDO;
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[On-demand] Node:%d receive failover signal, "
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS][On-demand] Node:%d receive failover signal, "
         "close realtime build and start ondemand build, set status to BUILD_TO_REDO.", SS_MY_INST_ID)));
 }
 
@@ -335,7 +358,7 @@ XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, Redo
     RedoBufferTag blockinfo;
     if (!XLogRecGetBlockTag(record, block_id, &(blockinfo.rnode), &(blockinfo.forknum), &(blockinfo.blkno),
         &(blockinfo.pblk))) {
-            ereport(PANIC, (errmsg("[SS redo] failed to locate backup block with ID %d", block_id)));
+            ereport(PANIC, (errmsg("[SS redo] failed to locate backup block with ID %d.", block_id)));
     }
     bool skip = false;
     char pageid[DMS_PAGEID_SIZE] = {0};
@@ -352,7 +375,7 @@ XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, Redo
         Buffer buf = XLogReadBufferExtended(blockinfo.rnode, blockinfo.forknum, blockinfo.blkno,
             RBM_NORMAL_NO_LOG, pblk, tde);
         if (BufferIsInvalid(buf)) {
-            ereport(PANIC, (errmsg("[SS redo][%u/%u/%u/%d %d-%u] buffer should be found",
+            ereport(PANIC, (errmsg("[SS redo][%u/%u/%u/%d %d-%u] buffer should be found.",
                 blockinfo.rnode.spcNode, blockinfo.rnode.dbNode, blockinfo.rnode.relNode,
                 blockinfo.rnode.bucketNode, blockinfo.forknum, blockinfo.blkno))); 
         }
@@ -435,6 +458,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
                 xlogLsn, pageLsn)));
         }
 #endif
+        
         if (XLByteLE(xlogLsn, pageLsn)) {
             bufferinfo->buf = buf;
             bufferinfo->lsn = xlogLsn;

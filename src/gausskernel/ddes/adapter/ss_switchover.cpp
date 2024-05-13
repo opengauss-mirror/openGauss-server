@@ -38,6 +38,7 @@
 #include "securec.h"
 #include "storage/procarray.h"
 #include "replication/replicainternal.h"
+#include "replication/walsender_private.h"
 #include "storage/smgr/fd.h"
 #include "access/csnlog.h"
 #include "access/twophase.h"
@@ -79,5 +80,8 @@ void SSHandleSwitchoverPromote()
         Assert(g_instance.pid_cxt.StartupPID != 0);
         pmState = PM_STARTUP;
     }
+    ereport(LOG, (errmsg("[SS reform][SS swithover] swithover promote: pmState=%d, SSClusterState=%d, "
+                      "demotion=%d-%d, rec=%d", pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
+                      t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
     return;
 }

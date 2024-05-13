@@ -30,6 +30,8 @@
 #define REFORM_WAIT_TIME 10000 /* 0.01 sec */
 #define REFORM_WAIT_LONG 100000 /* 0.1 sec */
 #define WAIT_REFORM_CTRL_REFRESH_TRIES 1000
+#define BACKEND_TYPE_NORMAL 0x0001  /* normal backend */
+#define BACKEND_TYPE_AUTOVAC 0x0002 /* autovacuum worker process */
 
 #define WAIT_PMSTATE_UPDATE_TRIES 100
 
@@ -62,3 +64,6 @@ bool SSPrimaryRestartScenario();
 bool SSBackendNeedExitScenario();
 void SSWaitStartupExit(bool send_signal = true);
 void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt);
+char* SSGetLogHeaderTypeStr();
+void ProcessNoCleanBackendsScenario();
+void SSProcessForceExit();

@@ -104,6 +104,7 @@ typedef enum {
     PM_WAIT_BACKUP,   /* waiting for online backup mode to end */
     PM_WAIT_READONLY, /* waiting for read only backends to exit */
     PM_WAIT_BACKENDS, /* waiting for live backends to exit */
+    PM_WAIT_REFORM,   /* waiting for dms reform to finish */
     PM_SHUTDOWN,      /* waiting for checkpointer to do shutdown
                        * ckpt */
     PM_SHUTDOWN_2,    /* waiting for archiver and walsenders to
@@ -262,4 +263,5 @@ extern void InitShmemForDmsCallBack();
 extern void SignalTermAllBackEnd();
 extern void SSRestartFailoverPromote();
 extern void SIGBUS_handler(SIGNAL_ARGS);
+extern int SSCountAndPrintChildren(int target);
 #endif /* _POSTMASTER_H */

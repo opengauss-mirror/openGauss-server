@@ -576,19 +576,29 @@ static bool DMSReformCheckStartup()
 
 bool DMSWaitInitStartup()
 {
-    ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform wait to initialize startup thread.", SS_MY_INST_ID)));
     g_instance.dms_cxt.dms_status = (dms_status_t)DMS_STATUS_JOIN;
+    ereport(LOG, (errmsg("[SS reform][db sync wait] Node:%d first-round reform wait to initialize startup thread."
+            "dms_status:%d", SS_MY_INST_ID, g_instance.dms_cxt.dms_status)));
 
+    long max_wait_time = 300000000L;
+    long wait_time = 0;
     while (g_instance.pid_cxt.StartupPID == 0) {
         (void)DMSReformCheckStartup();
         if (dms_reform_last_failed()) {
             return false;
         }
+
+        if ((wait_time % max_wait_time) == 0 && wait_time != 0) {
+            ereport(WARNING, (errmsg("[SS reform][db sync wait ] Node:%d wait startup thread "
+                    "to initialize for %ld us.", SS_MY_INST_ID, wait_time)));
+        }
+
         pg_usleep(REFORM_WAIT_TIME);
+        wait_time += REFORM_WAIT_TIME;
     }
 
     if (g_instance.pid_cxt.StartupPID != 0) {
-        ereport(LOG, (errmsg("[SS reform] Node:%d initialize startup thread success.", SS_MY_INST_ID)));
+        ereport(LOG, (errmsg("[SS reform][db sync wait] Node:%d initialize startup thread success.", SS_MY_INST_ID)));
     }
 
     return true;
