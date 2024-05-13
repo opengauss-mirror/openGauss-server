@@ -242,6 +242,8 @@ static void WalSndHadrSwitchoverRequest();
 static void ProcessHadrSwitchoverMessage();
 static void ProcessHadrReplyMessage();
 static int WalSndTimeout();
+void process_clean_slot_message();
+void wal_snd_clean_slot(char *msgbuf, char *slot_name);
 
 
 char *DataDir = ".";
@@ -1186,6 +1188,16 @@ static void StartReplication(StartReplicationCmd *cmd)
         if (t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             (errmsg("cannot use a logical replication slot for physical replication"))));
+        load_server_mode();
+        if (pg_atomic_read_u32(&WorkingGrandVersionNum) >= ADD_CLEAN_CASCADE_STANDBY_SLOT_MESSAGE_NUM &&
+            u_sess->attr.attr_common.upgrade_mode == 0 && AM_WAL_STANDBY_SENDER &&
+            t_thrd.xlog_cxt.server_mode == STANDBY_MODE && !t_thrd.xlog_cxt.is_hadr_main_standby &&
+            !t_thrd.xlog_cxt.is_cascade_standby && strncmp(cmd->slotname, "gs_roach", strlen("gs_roach")) != 0) {
+            LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+            g_instance.xlog_cxt.need_clean_slot = true;
+            t_thrd.slot_cxt.MyReplicationSlot->need_clean = true;
+            LWLockRelease(ReplicationSlotControlLock);
+        }
     }
 
     /*
@@ -2510,6 +2522,9 @@ static void ProcessStandbyMessage(void)
             ProcessHadrReplyMessage();
             break;
 
+        case 'C':
+            process_clean_slot_message();
+            break;
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
@@ -6653,6 +6668,23 @@ static void WalSndResponseSwitchover(char *msgbuf)
 }
 
 /*
+ * send cleaned slots message
+ */
+void wal_snd_clean_slot(char *msgbuf, char *slot_name)
+{
+    errno_t errorno = EOK;
+    CompleteCleanSlotRequestMessage request_message;
+    errorno = snprintf_s(request_message.slotName.data, NAMEDATALEN, NAMEDATALEN - 1, "%s", slot_name);
+    securec_check_ss(errorno, "\0", "\0");
+    request_message.sendTime = GetCurrentTimestamp();
+    msgbuf[0] = 'D';
+    errorno = memcpy_s(msgbuf + 1, sizeof(CompleteCleanSlotRequestMessage), &request_message,
+                       sizeof(CompleteCleanSlotRequestMessage));
+    securec_check(errorno, "\0", "\0");
+    (void)pq_putmessage_noblock('d', msgbuf, sizeof(CompleteCleanSlotRequestMessage) + 1);
+}
+
+/*
  * send archive xlog command
  */
 static void WalSndArchiveXlog(ArchiveXlogMessage *archive_message)
@@ -7277,6 +7309,35 @@ static void ProcessHadrSwitchoverMessage()
             (uint32)(switchoverBarrierLsn >> 32), (uint32)(switchoverBarrierLsn),
             (uint32)(walsnd->flush >> 32), (uint32)(walsnd->flush),
             (int32)(walsnd->interactiveState), walsnd->isMasterInstanceReady)));
+}
+
+void process_clean_slot_message()
+{
+    CleanSlotRequestMessage message;
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char *)&message, sizeof(CleanSlotRequestMessage));
+
+    Assert(t_thrd.slot_cxt.MyReplicationSlot != NULL);
+    ereport(LOG, (errmsg("get clean slot:[%s] request from standby:[%s]", NameStr(message.slotName),
+        NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name))));
+
+    if (g_instance.attr.attr_storage.max_replication_slots == 0) {
+        ereport(WARNING, (errmsg("get clean slot:[%s] request, but ""max_replication_slots is 0",
+            NameStr(message.slotName))));
+    }
+
+    if (strncmp(NameStr(message.slotName), "gs_roach", strlen("gs_roach")) == 0) {
+        ereport(WARNING, (errmsg("get clean slot:[%s] request, standby shouldn't send the roach slot clean request.",
+            NameStr(message.slotName))));
+        return;
+    }
+
+    if (IsLogicalReplicationSlot(NameStr(message.slotName))) {
+        ereport(WARNING, (errmsg("get clean slot:[%s] request, but this slot is logical. Won't clean it.",
+            NameStr(message.slotName))));
+    } else {
+        replication_slot_drop_without_acquire(NameStr(message.slotName));
+    }
+    wal_snd_clean_slot(t_thrd.walsender_cxt.output_xlog_message, NameStr(message.slotName));
 }
 
 static void ProcessHadrReplyMessage()

@@ -74,12 +74,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92860;
+const uint32 GRAND_VERSION_NUM = 92861;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 ADD_CLEAN_CASCADE_STANDBY_SLOT_MESSAGE_NUM = 92860;
 const uint32 UPSERT_ALIAS_VERSION_NUM = 92856;
 const uint32 PARAM_MARK_VERSION_NUM = 92858;
 const uint32 MULTI_CHARSET_VERSION_NUM = 92856;

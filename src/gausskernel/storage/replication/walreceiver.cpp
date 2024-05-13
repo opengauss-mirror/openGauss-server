@@ -171,6 +171,7 @@ const WalReceiverFunc WalReceiverFuncTable[] = {
         sub_startstreaming, sub_create_slot}
 };
 
+static const int SEND_CLEAN_SLOT_INTERVAL = 1000;
 /* Prototypes for private functions */
 static void EnableWalRcvImmediateExit(void);
 static void DisableWalRcvImmediateExit(void);
@@ -211,7 +212,8 @@ static void ResetConfirmedLSNOnDisk();
 #ifdef ENABLE_MULTIPLE_NODES
 static void WalRecvHadrSendReply();
 #endif
-
+void xlog_wal_rcv_send_clean_slot_request(char *slot_name);
+void process_complete_clean_slot_request(char *slot_name);
 
 void ProcessWalRcvInterrupts(void)
 {
@@ -329,6 +331,79 @@ void RefuseConnect()
                     disconn_node.disable_conn_node_host, disconn_node.disable_conn_node_port)));
 }
 
+void scan_slots_need_clean_and_request_primary()
+{
+    int cur = 0;
+    char name[NAMEDATALEN] = {0};
+    bool found = false;
+    errno_t errorno = EOK;
+    while (cur < g_instance.attr.attr_storage.max_replication_slots) {
+        errorno = memset_s(name, NAMEDATALEN, 0, NAMEDATALEN);
+        securec_check(errorno, "\0", "\0");
+        LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+        for (; cur < g_instance.attr.attr_storage.max_replication_slots; cur++) {
+            ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[cur];
+            if (!s->in_use || !s->active || s->archive_config != NULL) {
+                continue;
+            }
+            if (s->need_clean) {
+                errorno = memcpy_s(name, NAMEDATALEN, s->data.name.data, NAMEDATALEN);
+                securec_check(errorno, "\0", "\0");
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            g_instance.xlog_cxt.need_clean_slot = false;
+            LWLockRelease(ReplicationSlotControlLock);
+            break;
+        }
+        LWLockRelease(ReplicationSlotControlLock);
+
+        if (cur < g_instance.attr.attr_storage.max_replication_slots) {
+            xlog_wal_rcv_send_clean_slot_request(name);
+            cur++;
+        }
+    }
+}
+
+void xlog_wal_rcv_send_clean_slot_request(char *slot_name)
+{
+    CleanSlotRequestMessage request_message;
+    char buf[sizeof(CleanSlotRequestMessage) + 1];
+    TimestampTz local_now;
+    errno_t errorno = EOK;
+
+    /* Get current timestamp. */
+    local_now = GetCurrentTimestamp();
+    request_message.sendTime = local_now;
+    errorno = snprintf_s(request_message.slotName.data, NAMEDATALEN, NAMEDATALEN - 1, "%s", slot_name);
+    securec_check_ss(errorno, "\0", "\0");
+    /* Prepend with the message type and send it. */
+    buf[0] = 'C';
+    errorno = memcpy_s(&buf[1], sizeof(CleanSlotRequestMessage), &request_message, sizeof(CleanSlotRequestMessage));
+    securec_check(errorno, "\0", "\0");
+    (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(CleanSlotRequestMessage) + 1);
+
+    ereport(LOG, (errmsg("send clean slot:%s request to Primary(%s) successfully.",
+        slot_name, t_thrd.walreceiverfuncs_cxt.WalRcv->slotname)));
+}
+
+void check_and_send_slot_clean(TimestampTz &clean_slot_sent_timestamp)
+{
+    if (pg_atomic_read_u32(&WorkingGrandVersionNum) >= ADD_CLEAN_CASCADE_STANDBY_SLOT_MESSAGE_NUM &&
+        u_sess->attr.attr_common.upgrade_mode == 0 && g_instance.xlog_cxt.need_clean_slot &&
+        t_thrd.xlog_cxt.server_mode == STANDBY_MODE && !t_thrd.xlog_cxt.is_hadr_main_standby &&
+        !t_thrd.xlog_cxt.is_cascade_standby) {
+        TimestampTz nowtime = GetCurrentTimestamp();
+        TimestampTz calculateTime = TimestampTzPlusMilliseconds(clean_slot_sent_timestamp, SEND_CLEAN_SLOT_INTERVAL);
+        if (timestamptz_cmp_internal(nowtime, calculateTime) >= 0) {
+            clean_slot_sent_timestamp = nowtime;
+            scan_slots_need_clean_and_request_primary();
+        }
+    }
+}
+
 void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
 {
     /* use volatile pointer to prevent code rearrangement */
@@ -336,6 +411,8 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
     unsigned char type;
     char *buf = NULL;
     int len;
+
+    static TimestampTz clean_slot_sent_timestamp = 0;
 
 #ifdef ENABLE_DISTRIBUTE_TEST
     if (TEST_STUB(DN_WALRECEIVE_MAINLOOP, stub_sleep_emit)) {
@@ -397,6 +474,7 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         XLogWalRcvSendSwitchRequest();
     }
 
+    check_and_send_slot_clean(clean_slot_sent_timestamp);
     /* Wait a while for data to arrive */
     if ((WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_receive(NAPTIME_PER_CYCLE, &type, &buf, &len)) {
         *last_recv_timestamp = GetCurrentTimestamp();
@@ -1168,6 +1246,16 @@ static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len)
             securec_check(errorno, "\0", "\0");
             ProcessHadrSwitchoverRequest(&hadrSwithoverMessage);
             break;    
+        }
+        case 'D': {
+            CompleteCleanSlotRequestMessage request_message;
+            CHECK_MSG_SIZE(len, CompleteCleanSlotRequestMessage,
+                           "invalid CompleteCleanSlotRequestMessage message received from primary");
+            errorno = memcpy_s(&request_message, sizeof(CompleteCleanSlotRequestMessage), buf,
+                               sizeof(CompleteCleanSlotRequestMessage));
+            securec_check(errorno, "\0", "\0");
+            process_complete_clean_slot_request(NameStr(request_message.slotName));
+            break;
         }
         default:
             ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
@@ -2066,6 +2154,30 @@ static void ProcessSwitchResponse(int code)
         default:
             ereport(WARNING, (errmsg("unknown switchover response message received from primary")));
             break;
+    }
+}
+
+/*
+ * process switchover response message from primary.
+ */
+void process_complete_clean_slot_request(char *slot_name)
+{
+    bool cleaned = false;
+    LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (strcmp(slot_name, NameStr(s->data.name)) == 0) {
+            volatile ReplicationSlot *vslot = s;
+            SpinLockAcquire(&s->mutex);
+            vslot->need_clean = false;
+            SpinLockRelease(&s->mutex);
+            cleaned = true;
+            break;
+        }
+    }
+    LWLockRelease(ReplicationSlotControlLock);
+    if (cleaned) {
+        ereport(LOG, (errmsg("clean [%s] clean_slot sign", slot_name)));
     }
 }
 
