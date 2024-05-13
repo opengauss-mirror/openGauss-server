@@ -921,6 +921,7 @@ typedef struct knl_g_xlog_context {
     ShareStorageOperateCtl shareStorageopCtl;
     int shareStorageLockFd;
     ShareStorageXLogCtl *ssReplicationXLogCtl;
+    bool need_clean_slot;  /* standby node will check cascade standby slot */
 } knl_g_xlog_context;
 
 typedef struct knl_g_undo_context {

@@ -357,6 +357,7 @@ extern uint8 ce_cache_refresh_type;
 #define MIN_QUERY_DOP -(MAX_QUERY_DOP)
 
 extern const uint32 BACKUP_SLOT_VERSION_NUM;
+extern const uint32 ADD_CLEAN_CASCADE_STANDBY_SLOT_MESSAGE_NUM;
 
 /* Debug mode.
  * 0 - Do not change any thing.

@@ -273,6 +273,36 @@ typedef struct StandbySwitchRequestMessage {
 } StandbySwitchRequestMessage;
 
 /*
+ * @@GaussDB@@
+ * switchover request message from standby (message type 'C').  This is wrapped within
+ * a CopyData message at the FE/BE protocol level.
+ *
+ * Note that the data length is not specified here.
+ */
+typedef struct {
+    /* instance name of slot to be cleaned */
+    NameData slotName;
+ 
+    /* receiver's system clock at the time of transmission */
+    TimestampTz sendTime;
+} CleanSlotRequestMessage;
+ 
+/*
+ * @@GaussDB@@
+ * switchover request message from standby (message type 'S').  This is wrapped within
+ * a CopyData message at the FE/BE protocol level.
+ *
+ * Note that the data length is not specified here.
+ */
+typedef struct {
+    /* cleaned slot name */
+    NameData slotName;
+ 
+    /* receiver's system clock at the time of transmission */
+    TimestampTz sendTime;
+} CompleteCleanSlotRequestMessage;
+
+/*
  * switchover request message in the streaming dr (message type '').  This is wrapped within
  * a CopyData message at the FE/BE protocol level.
  *

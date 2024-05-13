@@ -58,6 +58,7 @@
 extern bool PMstateIsRun(void);
 
 static void ReplicationSlotDropAcquired(void);
+static void ReplicationSlotDropWithSlot(ReplicationSlot *slot);
 
 /* internal persistency functions */
 static void RestoreSlotFromDisk(const char *name);
@@ -601,8 +602,6 @@ bool IsLogicalReplicationSlot(const char *name)
 {
     bool isLogical = false;
 
-    Assert(t_thrd.slot_cxt.MyReplicationSlot == NULL);
-
     ReplicationSlotValidateName(name, ERROR);
 
     /* Search for the named slot to identify whether it is a logical replication slot or not. */
@@ -698,6 +697,30 @@ void ReplicationSlotRelease(void)
     LWLockRelease(ProcArrayLock);
 }
 
+void replication_slot_drop_without_acquire(const char *name)
+{
+    ReplicationSlot *slot = NULL;
+    (void)ReplicationSlotValidateName(name, WARNING);
+    LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (s->in_use && strcmp(name, NameStr(s->data.name)) == 0) {
+            volatile ReplicationSlot *vslot = s;
+            SpinLockAcquire(&s->mutex);
+            vslot->active = true;
+            SpinLockRelease(&s->mutex);
+            slot = s;
+            break;
+        }
+    }
+    LWLockRelease(ReplicationSlotControlLock);
+    if (slot == NULL) {
+        return;
+    }
+    ReplicationSlotDropWithSlot(slot);
+    ereport(ERROR, (errmsg("replication_slot_drop_without_acquire:start clean slot:[%s].", name)));
+}
+
 /*
  * Permanently drop replication slot identified by the passed in name.
  */
@@ -743,15 +766,18 @@ void ReplicationSlotDrop(const char *name, bool for_backup, bool nowait)
  */
 static void ReplicationSlotDropAcquired(void)
 {
-    char path[MAXPGPATH];
-    char tmppath[MAXPGPATH];
-    bool is_archive_slot = (t_thrd.slot_cxt.MyReplicationSlot->archive_config != NULL);
     ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
-
     Assert(t_thrd.slot_cxt.MyReplicationSlot != NULL);
     /* slot isn't acquired anymore */
     t_thrd.slot_cxt.MyReplicationSlot = NULL;
-
+    ReplicationSlotDropWithSlot(slot);
+}
+ 
+static void ReplicationSlotDropWithSlot(ReplicationSlot *slot)
+{
+    char path[MAXPGPATH];
+    char tmppath[MAXPGPATH];
+    bool is_archive_slot = (slot->archive_config != NULL);
     char replslot_path[MAXPGPATH];
     GetReplslotPath(replslot_path);
 

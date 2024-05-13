@@ -510,6 +510,7 @@ static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
     pthread_mutex_init(&xlog_cxt->remain_segs_lock, NULL);
     xlog_cxt->shareStorageLockFd = -1;
     xlog_cxt->ssReplicationXLogCtl = NULL;
+    xlog_cxt->need_clean_slot = false;
 }
 
 static void KnlGUndoInit(knl_g_undo_context *undoCxt)
