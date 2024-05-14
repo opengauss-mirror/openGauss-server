@@ -918,4 +918,4 @@
 ./include/pqcomm.h
 ./include/pqexpbuffer.h
 [version]
-6.0.0-RC1
+6.0.0
