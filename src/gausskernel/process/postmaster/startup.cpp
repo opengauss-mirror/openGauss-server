@@ -189,9 +189,6 @@ static void StartupProcShutdownHandler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
-    /* release compression ctx */
-    crps_destory_ctxs();
-
     if (t_thrd.startup_cxt.in_restore_command)
         proc_exit(1);
     else

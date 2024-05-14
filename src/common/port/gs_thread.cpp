@@ -494,6 +494,9 @@ void gs_thread_exit(int code)
 
     RestoreStream();
 
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     if (t_thrd.bn != NULL) {
         t_thrd.bn->dead_end = true;
     } else if (!t_thrd.is_inited) {
