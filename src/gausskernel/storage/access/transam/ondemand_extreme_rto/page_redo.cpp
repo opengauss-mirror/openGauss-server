@@ -1395,8 +1395,14 @@ static void PageManagerPruneIfRealtimeBuildFailover()
     }
 }
 
-void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState)
+void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState, bool isChildState)
 {
+    if (!isChildState && IsRecParseStateHaveChildState(preState)) {
+        XLogRecParseState *child = (XLogRecParseState *)preState->blockparse.extra_rec.blocksegfullsyncrec.childState;
+        ReleaseBlockParseStateIfNotReplay(child, true);
+        preState->blockparse.extra_rec.blocksegfullsyncrec.childState = NULL;
+    }
+
 #ifdef USE_ASSERT_CHECKING
     XLogRecParseState *nextBlockState = preState;
     while (nextBlockState != NULL) {

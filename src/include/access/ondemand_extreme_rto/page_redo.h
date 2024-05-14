@@ -278,7 +278,7 @@ bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag
 void RedoWorkerQueueCallBack();
 void OndemandRequestPrimaryDoCkptIfNeed();
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
-void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState);
+void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState, bool isChildState = false);
 bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate);
 
 }  // namespace ondemand_extreme_rto

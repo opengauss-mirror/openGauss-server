@@ -428,7 +428,7 @@ XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState)
     return type;
 }
 
-static bool IsRecParseStateHaveChildState(XLogRecParseState *checkState)
+bool IsRecParseStateHaveChildState(XLogRecParseState *checkState)
 {
     if (GetCurrentXLogRecParseType(checkState) == PARSE_TYPE_SEG) {
         uint8 info = XLogBlockHeadGetInfo(&checkState->blockparse.blockhead) & ~XLR_INFO_MASK;
