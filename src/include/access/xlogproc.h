@@ -1168,7 +1168,6 @@ XLogRecParseState* xlog_redo_parse_to_block(XLogReaderState* record, uint32* blo
 XLogRecParseState* smgr_redo_parse_to_block(XLogReaderState* record, uint32* blocknum);
 XLogRecParseState* segpage_redo_parse_to_block(XLogReaderState* record, uint32* blocknum);
 void ProcSegPageCommonRedo(XLogRecParseState *parseState);
-void SegPageRedoChildState(XLogRecParseState *childStateList);
 void ProcSegPageJustFreeChildState(XLogRecParseState *parseState);
 XLogRecParseState* XactXlogClogParseToBlock(XLogReaderState* record, XLogRecParseState* recordstatehead,
     uint32* blocknum, TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status);

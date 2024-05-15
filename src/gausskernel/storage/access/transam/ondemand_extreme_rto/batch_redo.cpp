@@ -278,7 +278,7 @@ void PRTrackRemoveEntry(HTAB *hashMap, RedoItemHashEntry *entry)
             DoRecordCheck(prev, InvalidXLogRecPtr, false);
         }
 
-        ereport(LOG, (errmsg("PRTrackRemoveEntry:record(%X/%X) relation %u/%u/%u forknum %u blocknum %u dropped(%p)",
+        ereport(DEBUG1, (errmsg("PRTrackRemoveEntry:record(%X/%X) relation %u/%u/%u forknum %u blocknum %u dropped(%p)",
                              (uint32)(prev->blockparse.blockhead.end_ptr >> 32),
                              (uint32)(prev->blockparse.blockhead.end_ptr), prev->blockparse.blockhead.spcNode,
                              prev->blockparse.blockhead.dbNode, prev->blockparse.blockhead.relNode,
