@@ -524,7 +524,7 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
 
         newcon->consttype = baseTypeId;
         newcon->consttypmod = inputTypeMod;
-        if (!DB_IS_CMPT(B_FORMAT) && OidIsValid(GetCollationConnection()) &&
+        if (OidIsValid(GetCollationConnection()) &&
             IsSupportCharsetType(baseTypeId)) {
             newcon->constcollid = GetCollationConnection();
         } else {

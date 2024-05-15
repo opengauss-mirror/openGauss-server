@@ -1241,7 +1241,7 @@ const char* GetCharsetConnectionName(void)
 
 Oid GetCollationConnection(void)
 {
-    if (!ENABLE_MULTI_CHARSET || !DB_IS_CMPT(B_FORMAT)) {
+    if (!ENABLE_MULTI_CHARSET) {
         return InvalidOid;
     }
     return u_sess->mb_cxt.collation_connection;

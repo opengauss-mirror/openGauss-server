@@ -718,7 +718,7 @@ static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isS
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("SELECT rule's target entry %d has different column name from \"%s\"", i, attname)));
 
-        if (attr->atttypid != exprType((Node*)tle->expr))
+        if (attr->atttypid != exprType((Node*)tle->expr)  && !(attr->attcollation || exprCollation((Node*)tle->expr)))
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     isSelect ? errmsg("SELECT rule's target entry %d has different type from column \"%s\"", i, attname)

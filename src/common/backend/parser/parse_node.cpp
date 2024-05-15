@@ -520,7 +520,7 @@ Const* make_const(ParseState* pstate, Value* value, int location)
             typid = UNKNOWNOID; /* will be coerced later */
             typelen = -2;       /* cstring-style varwidth type */
             typebyval = false;
-            if (!DB_IS_CMPT(B_FORMAT) && OidIsValid(GetCollationConnection())) {
+            if (OidIsValid(GetCollationConnection())) {
                 collid = GetCollationConnection();
             }
             break;

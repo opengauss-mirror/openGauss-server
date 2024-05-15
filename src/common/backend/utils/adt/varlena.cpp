@@ -659,6 +659,10 @@ Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
 {
     Oid new_typid = typeoid;
     if (*collation == BINARY_COLLATION_OID) {
+        if (GetDatabaseEncoding() == PG_SQL_ASCII && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_common.upgrade_mode != 0) {
+            *collation = DEFAULT_COLLATION_OID;
+            return new_typid;
+        }
         /* use switch case stmt for extension in feature */
         switch (typeoid) {
             /* binary type no need to transform */
