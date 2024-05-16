@@ -298,15 +298,17 @@ static void
 show_instance_start(void)
 {
     initPQExpBuffer(&show_buf);
-
+    PQExpBuffer    buf = &show_buf;
     if (show_format == SHOW_PLAIN)
         return;
 
     first_instance = true;
     json_level = 0;
-
-    appendPQExpBufferChar(&show_buf, '[');
+    appendPQExpBufferChar(&show_buf, '{');
     json_level++;
+
+    json_add_key(buf, "backup_info", json_level);
+    json_add(buf, JT_BEGIN_ARRAY, &json_level);
 }
 
 /*
@@ -315,8 +317,10 @@ show_instance_start(void)
 static void
 show_instance_end(void)
 {
+        PQExpBuffer    buf = &show_buf;
     if (show_format == SHOW_JSON)
-        appendPQExpBufferStr(&show_buf, "\n]\n");
+        json_add(buf, JT_END_ARRAY, &json_level);
+        appendPQExpBufferStr(&show_buf, "\n}\n");
 
     fputs(show_buf.data, stdout);
     termPQExpBuffer(&show_buf);
