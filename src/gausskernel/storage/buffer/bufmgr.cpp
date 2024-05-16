@@ -3246,23 +3246,44 @@ retry:
             if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock)
                 LWLockRelease(old_partition_lock);
 
-            /* remaining code should match code at top of routine */
-            buf = GetBufferDescriptor(buf_id);
-
+            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE) {
+                /*release the mapping lock before pinning buffer*/
+                LWLockRelease(new_partition_lock);
 retry_new_buffer:
-            valid = PinBuffer(buf, strategy);
-            /*
-            * Checkpoint if buffer need to redo and try hashMap partition lock,
-            * if need to redo but doesn't get lock, unpinbuffer and retry.
-            */
-            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && SS_PRIMARY_MODE &&
-                ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
-                UnpinBuffer(buf, true);
-                goto retry_new_buffer;
+                buf_id = BufTableLookup(&new_tag, new_hash);
+
+                /* If the slot has been eliminated, find another slot and retry. */
+                if (buf_id < 0)
+                    continue;
+
+                /* remaining code should match code at top of routine */
+                buf = GetBufferDescriptor(buf_id);
+                valid = PinBuffer(buf, strategy);
+
+                if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &new_tag)) {
+                    UnpinBuffer(buf, true);
+                    goto retry_new_buffer;
+                }
+
+                /*
+                * Checkpoint if buffer need to redo and try hashMap partition lock,
+                * if need to redo but doesn't get lock, unpinbuffer and retry.
+                */
+                if (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING &&
+                    SS_PRIMARY_ONDEMAND_RECOVERY) {
+                    UnpinBuffer(buf, true);
+                    goto retry_new_buffer;
+                }
+            } else {
+                /* remaining code should match code at top of routine */
+                buf = GetBufferDescriptor(buf_id);
+
+                valid = PinBuffer(buf, strategy);
+
+                /* Can release the mapping lock as soon as we've pinned it */
+                LWLockRelease(new_partition_lock);
             }
 
-            /* Can release the mapping lock as soon as we've pinned it */
-            LWLockRelease(new_partition_lock);
 
             *found = TRUE;
 
