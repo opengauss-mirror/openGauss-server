@@ -631,6 +631,7 @@ void invalid_buffer_bgwriter_main()
         ResetLatch(&t_thrd.proc->procLatch);
         drop_rel_all_forks_buffers();
         drop_rel_one_fork_buffers();
+        drop_rel_all_cucache();
     }
 }
 
@@ -816,4 +817,34 @@ void drop_rel_one_fork_buffers()
         }
     }
     hash_destroy(rel_bak);
+}
+
+/*
+ * To reduce lock holding time and compete with worker threads.
+ * Here we make a shallow copy and set origin list pointer to
+ * NULL, then perform cleanning async
+ */
+void drop_rel_all_cucache()
+{
+    ListCell* cell = NULL;
+    List* to_invalid_rnode = NULL;
+    RelFileNode* rnode = NULL;
+
+    SpinLockAcquire(CUCache->GetInvalidRnodeListLock());
+
+    List* rnode_list = CUCache->GetInvalidRnodeList();
+    if (0 == list_length(rnode_list)) {
+        SpinLockRelease(CUCache->GetInvalidRnodeListLock());
+        return;
+    }
+
+    to_invalid_rnode = rnode_list;
+    CUCache->SetNullInvalidRList();
+    SpinLockRelease(CUCache->GetInvalidRnodeListLock());
+
+    foreach(cell, to_invalid_rnode) {
+        rnode = (RelFileNode*)lfirst(cell);
+        CUCache->DropRelationCUCache(*rnode);
+    }
+    list_free_deep(to_invalid_rnode);
 }

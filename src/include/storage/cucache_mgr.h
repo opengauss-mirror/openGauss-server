@@ -128,6 +128,7 @@ public:
     void TerminateVerifyCU();
     void InvalidateCU(RelFileNodeOld* rnode, int colId, uint32 cuId, CUPointer cuPtr);
     void DropRelationCUCache(const RelFileNode& rnode);
+    void AsyncDropRelationCUCache(const RelFileNode& rnode);
     CUUncompressedRetCode StartUncompressCU(CUDesc* cuDescPtr, CacheSlotId_t slotId, int planNodeId, bool timing, int align_size);
 
     // async lock used by adio
@@ -145,6 +146,10 @@ public:
     void AcquireCompressLock(CacheSlotId_t slotId);
     void ReleaseCompressLock(CacheSlotId_t slotId);
 
+    List* GetInvalidRnodeList();
+    slock_t* GetInvalidRnodeListLock();
+    void SetNullInvalidRList();
+
     int64 m_cstoreMaxSize;
 
 #ifndef ENABLE_UT
@@ -160,6 +165,8 @@ private:
     CacheMgr* m_cache_mgr;
     slock_t m_adio_write_cache_lock;  // write private cache, not cucache. I add here because spinlock need init once
                                       // for cstore module
+    List* invalid_relfilenodes;
+    slock_t rnode_list_lock;
 };
 
 /* interface for orc data read */

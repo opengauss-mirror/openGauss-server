@@ -4013,7 +4013,11 @@ void CStore::UnlinkColDataFile(const RelFileNode& rnode, AttrNumber attrnum, boo
     CFileNode cFileNode(rnode, attrnum, MAIN_FORKNUM);
 
     CStoreAllocator::InvalidColSpaceCache(cFileNode);
-    CUCache->DropRelationCUCache(rnode);
+    /* If the SPbgwriter thread alive, use async */
+    if (g_instance.pid_cxt.SpBgWriterPID != 0)
+        CUCache->AsyncDropRelationCUCache(rnode);
+    else
+        CUCache->DropRelationCUCache(rnode);
 
     CUStorage cuStorage(cFileNode);
 

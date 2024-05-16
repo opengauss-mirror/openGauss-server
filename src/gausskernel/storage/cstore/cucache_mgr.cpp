@@ -89,6 +89,8 @@ void DataCacheMgr::NewSingletonInstance(void)
     cache_size = CacheMgrCalcSizeByType(MGR_CACHE_TYPE_DATA);
     m_data_cache->m_cstoreMaxSize = cache_size;
     SpinLockInit(&m_data_cache->m_adio_write_cache_lock);
+    SpinLockInit(&m_data_cache->rnode_list_lock);
+    m_data_cache->invalid_relfilenodes = NULL;
     /* init or reset this instance */
     m_data_cache->m_cache_mgr->Init(cache_size, BLCKSZ, MGR_CACHE_TYPE_DATA, Max(sizeof(CU), sizeof(OrcDataValue)));
     ereport(LOG, (errmodule(MOD_CACHE), errmsg("set data cache  size(%ld)", cache_size)));
@@ -202,6 +204,36 @@ void DataCacheMgr::DropRelationCUCache(const RelFileNode& rnode)
             InvalidateCU(&cuTag.m_rnode, cuTag.m_colId, cuTag.m_CUId, cuTag.m_cuPtr);
         }
     }
+}
+
+/*
+ * async invalid all CUs from data cache which belongs to this column relation.
+ * the real worker is SPbgwriter
+ */
+void DataCacheMgr::AsyncDropRelationCUCache(const RelFileNode& rnode)
+{
+    errno_t rc;
+
+    SpinLockAcquire(&rnode_list_lock);
+    MemoryContext old_ctx = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+
+    /*
+     * we need to make a deep copy here, because we are not sure if the
+     * rnode will be released in the subsequent process
+     */
+    RelFileNode* rnode_cpy = (RelFileNode*)palloc(sizeof(RelFileNode));
+    rc = memcpy_s(rnode_cpy, sizeof(RelFileNode), &rnode, sizeof(RelFileNode));
+    securec_check(rc, "\0", "\0");
+    invalid_relfilenodes = lappend(invalid_relfilenodes, rnode_cpy);
+
+    (void)MemoryContextSwitchTo(old_ctx);
+    SpinLockRelease(&rnode_list_lock);
+
+    /*
+     * We dont really care if the execution is successful here, ther is no callback func.
+     * If the failure occurs, then relying on CUCache's own elemination mechanism. 
+     */
+    (void)gs_signal_send(g_instance.pid_cxt.SpBgWriterPID, SIGUSR1);
 }
 
 /*
@@ -583,6 +615,21 @@ void DataCacheMgr::LockPrivateCache()
 void DataCacheMgr::UnLockPrivateCache()
 {
     SpinLockRelease(&m_adio_write_cache_lock);
+}
+
+List* DataCacheMgr::GetInvalidRnodeList()
+{
+    return m_data_cache->invalid_relfilenodes;
+}
+
+slock_t* DataCacheMgr::GetInvalidRnodeListLock()
+{
+    return &m_data_cache->rnode_list_lock;
+}
+
+void DataCacheMgr::SetNullInvalidRList()
+{
+    m_data_cache->invalid_relfilenodes = NULL;
 }
 
 /*
