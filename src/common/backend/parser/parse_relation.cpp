@@ -1078,14 +1078,28 @@ static void CheckPgAttribute(Oid obj_oid, char* attName, Form_pg_attribute new_a
     heap_close(rel, RowExclusiveLock);
 }
 
-bool ValidateDependView(Oid view_oid, char objType)
+enum ValidateDependResult {
+    ValidateDependInvalid,
+    ValidateDependValid,
+    ValidateDependCircularDepend,
+    
+};
+
+static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List** list)
 {
     bool isValid = true;
     Oid rw_objid = InvalidOid;
     // 1. filter the valid view
     if (GetPgObjectValid(view_oid, objType)) {
-        return isValid;
+        return ValidateDependValid;
     }
+
+    if (*list != NIL && list_member_oid(*list, view_oid)) {
+        /* its nest view depended. do not need to check */
+        return ValidateDependCircularDepend;
+    }
+    *list = lappend_oid(*list, view_oid);
+
     // 2. find pg_rewrite entry which this view depends on internally
     const int keyNum = 2;
     ScanKeyData key[keyNum];
@@ -1120,6 +1134,7 @@ bool ValidateDependView(Oid view_oid, char objType)
     ScanKeyInit(&key_dep[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_objid));
     scan_dep = systable_beginscan(rel_dep, DependDependerIndexId, true, NULL, keyNum, key_dep);
     Form_pg_attribute newtuple = (Form_pg_attribute)palloc0(sizeof(FormData_pg_attribute));
+    bool circularDependency = false;
     while (HeapTupleIsValid((tup_dep = systable_getnext(scan_dep)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup_dep);
         if (depform->refclassid != RelationRelationId || depform->deptype != DEPENDENCY_NORMAL ||
@@ -1152,8 +1167,9 @@ bool ValidateDependView(Oid view_oid, char objType)
                 CheckPgAttribute(view_oid, attName, newtuple);
             }
         } else if (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) {
-            isValid &= ValidateDependView(dep_objid,
-                                          relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW);
+            char type = relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW;
+            ValidateDependResult result = ValidateDependView(dep_objid, type, list);
+            isValid &= (result != ValidateDependInvalid);
             if (isValid) {
                 // here means dep_objid is valid, we should keep the same view_oid.attr with dep_objid.dep_objsubid
                 // find dep_objid.dep_objsubid
@@ -1163,6 +1179,7 @@ bool ValidateDependView(Oid view_oid, char objType)
                 // change pg_attribute
                 CheckPgAttribute(view_oid, attName, newtuple);
             }
+            circularDependency |= (result == ValidateDependCircularDepend);
         }
         errno_t rc = memset_s(newtuple, sizeof(FormData_pg_attribute), 0, sizeof(FormData_pg_attribute));
         securec_check_c(rc, "\0", "\0");
@@ -1171,20 +1188,30 @@ bool ValidateDependView(Oid view_oid, char objType)
             pfree_ext(newtuple);
             systable_endscan(scan_dep);
             heap_close(rel_dep, RowExclusiveLock);
-            return false;
+            return ValidateDependInvalid;
         }
     }
     pfree_ext(newtuple);
     systable_endscan(scan_dep);
     heap_close(rel_dep, RowExclusiveLock);
     // 4. mark the current view valid
-    SetPgObjectValid(view_oid, objType, true);
+    if (!circularDependency) {
+        SetPgObjectValid(view_oid, objType, true);
+    }
     /* create or replace view */
-    if (objType == OBJECT_TYPE_VIEW) {
+    if (!circularDependency && objType == OBJECT_TYPE_VIEW) {
         ReplaceViewQueryFirstAfter(query_str);
         CommandCounterIncrement();
     }
-    return isValid;
+    /* 0 or 1 */
+    return (ValidateDependResult)isValid;
+}
+
+bool ValidateDependView(Oid view_oid, char objType) {
+    List * list = NIL;
+    ValidateDependResult result = ValidateDependView(view_oid, objType, &list);
+    list_free_ext(list);
+    return result != ValidateDependInvalid;
 }
 
 /*
@@ -1345,7 +1372,7 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
     
     if (RelationGetRelkind(rel) == RELKIND_VIEW &&
         RelationGetRelid(rel) >= FirstNormalObjectId &&
-        !ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW)) {
+        ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW) == ValidateDependInvalid) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("The view %s is invalid, please make it valid before operation.",
