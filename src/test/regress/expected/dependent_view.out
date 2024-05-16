@@ -626,8 +626,18 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
 drop view v_view_independent_1;
 drop table t_view_independent_1;
 drop table t_view_independent_2;
+-- test4 circular dependency
+create table circular_dependency_t(a int);
+create or replace rule "_RETURN" as on select to circular_dependency_t do instead (select * from circular_dependency_t);
+create or replace view circular_dependency_v as select * from circular_dependency_t;
+select * from circular_dependency_t; -- failed
+ERROR:  infinite recursion detected in rules for relation "circular_dependency_t"
+select * from circular_dependency_v; -- failed
+ERROR:  infinite recursion detected in rules for relation "circular_dependency_t"
 --- clean
 drop schema dependent_view cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table base_table
 drop cascades to materialized view master_view1
+drop cascades to view circular_dependency_t
+drop cascades to view circular_dependency_v

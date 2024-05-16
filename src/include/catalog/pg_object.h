@@ -116,6 +116,7 @@ extern void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, 
 extern void DeletePgObject(Oid objectOid, PgObjectType objectType);
 extern void GetObjectCSN(Oid objectOid, Relation userRel, PgObjectType objectType, ObjectCSN * const csnInfo);
 void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType);
+void updatePgObjectType(Oid objectOid, PgObjectType objectType, PgObjectType newObjectType);
 void UpdatePgObjectChangecsn(Oid objectOid, PgObjectType objectType);
 extern PgObjectType GetPgObjectTypePgClass(char relkind);
 extern void recordCommentObjectTime(ObjectAddress addr, Relation rel, ObjectType objType);

@@ -214,5 +214,14 @@ drop view v_view_independent_1;
 drop table t_view_independent_1;
 drop table t_view_independent_2;
 
+
+-- test4 circular dependency
+create table circular_dependency_t(a int);
+create or replace rule "_RETURN" as on select to circular_dependency_t do instead (select * from circular_dependency_t);
+create or replace view circular_dependency_v as select * from circular_dependency_t;
+select * from circular_dependency_t; -- failed
+select * from circular_dependency_v; -- failed
+
+
 --- clean
 drop schema dependent_view cascade;

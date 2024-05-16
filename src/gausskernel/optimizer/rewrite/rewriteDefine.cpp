@@ -500,6 +500,8 @@ ObjectAddress DefineQueryRewrite(
      */
     event_attno = -1;
 
+    /* assign originRelKind before changed */
+    char originRelKind = event_relation->rd_rel->relkind;
     /* discard rule if it's null action and not INSTEAD; it's a no-op */
     if (action != NIL || is_instead) {
         ruleId = InsertRule(rulename, event_type, event_relid, event_attno, is_instead, event_qual, action, replace);
@@ -586,7 +588,7 @@ ObjectAddress DefineQueryRewrite(
                     errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("cache lookup failed for relation %u", event_relid)));
         classForm = (Form_pg_class)GETSTRUCT(classTup);
-
+        char newObjectType = RELKIND_VIEW;
         nspid = classForm->relnamespace;
         classForm->reltablespace = InvalidOid;
         classForm->relpages = 0;
@@ -595,7 +597,7 @@ ObjectAddress DefineQueryRewrite(
         classForm->reltoastrelid = InvalidOid;
         classForm->reltoastidxid = InvalidOid;
         classForm->relhasindex = false;
-        classForm->relkind = RELKIND_VIEW;
+        classForm->relkind = newObjectType;
         classForm->relhasoids = false;
         classForm->relhaspkey = false;
 
@@ -622,6 +624,10 @@ ObjectAddress DefineQueryRewrite(
 
         tableam_tops_free_tuple(nctup);
         tableam_tops_free_tuple(classTup);
+        
+        /* change pg_object */
+        updatePgObjectType(event_relid, originRelKind, newObjectType);
+        
         heap_close(relationRelation, RowExclusiveLock);
 
 #ifdef ENABLE_MULTIPLE_NODES

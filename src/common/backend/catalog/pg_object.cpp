@@ -304,10 +304,10 @@ bool CheckObjectExist(Oid objectOid, PgObjectType objectType)
  * Parameters:
  * 	@in objectOid: object id.
  * 	@in objectType: object type.
- * 	@in updateChangecsn: If true, update changecSN.
+ * 	@in newObjectType: new object type
  * Returns: void
  */
-void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
+void updatePgObjectType(Oid objectOid, PgObjectType objectType, PgObjectType newObjectType)
 {
     if (objectType == OBJECT_TYPE_INVALID) {
         return;
@@ -345,6 +345,11 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
                 replaces[Anum_pg_object_changecsn - 1] = true;
                 values[Anum_pg_object_changecsn - 1] = UInt64GetDatum(csn);
             }
+            /* (char*)0 means do not change objectType */
+            if (newObjectType != 0) {
+                replaces[Anum_pg_object_type - 1] = true;
+                values[Anum_pg_object_type - 1] = CharGetDatum(newObjectType);
+            }
         }
         HeapTuple newtuple = heap_modify_tuple(tup, RelationGetDescr(relation), values, nulls, replaces);
         simple_heap_update(relation, &newtuple->t_self, newtuple);
@@ -361,6 +366,11 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
         }
     }
     heap_close(relation, RowExclusiveLock);
+}
+
+void UpdatePgObjectMtime(Oid object, PgObjectType objectType)
+{
+    updatePgObjectType(object, objectType, 0);
 }
 
 /*
