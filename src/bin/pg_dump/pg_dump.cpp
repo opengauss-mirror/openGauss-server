@@ -2354,11 +2354,12 @@ static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
  */
 static void selectDumpableDefaultACL(DefaultACLInfo* dinfo)
 {
-    if (dinfo->dobj.nmspace != NULL)
-        dinfo->dobj.dump = dinfo->dobj.nmspace->dobj.dump;
-    else if (isDB4AIschema(dinfo->dobj.nmspace))
-        dinfo->dobj.dump = false;
-    else
+    if (dinfo->dobj.nmspace != NULL) {
+        if (isDB4AIschema(dinfo->dobj.nmspace))
+            dinfo->dobj.dump = false;
+        else
+            dinfo->dobj.dump = dinfo->dobj.nmspace->dobj.dump;
+    } else
         dinfo->dobj.dump = include_everything;
 }
 
