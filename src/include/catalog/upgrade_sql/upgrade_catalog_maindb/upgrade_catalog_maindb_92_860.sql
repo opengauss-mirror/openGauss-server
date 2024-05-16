@@ -27,3 +27,4 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_catalog_attribute_records(
         OUT attinitdefval bytea,
         OUT attkvtype tinyint
     ) RETURNS SETOF RECORD STRICT STABLE ROWS 1000 LANGUAGE INTERNAL AS 'gs_catalog_attribute_records';
+COMMENT ON FUNCTION pg_catalog.gs_catalog_attribute_records(oid) IS 'attribute description for catalog relation';
