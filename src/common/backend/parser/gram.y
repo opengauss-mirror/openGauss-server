@@ -10449,12 +10449,6 @@ AlterExtensionContentsStmt:
 				}
 			| ALTER EXTENSION name add_drop EVENT_TRIGGER name
 				{
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}
 					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
 					n->extname = $3;
 					n->action = $4;
@@ -12203,12 +12197,6 @@ CreateEventTrigStmt:
 			CREATE EVENT_TRIGGER name ON ColLabel
 			EXECUTE PROCEDURE func_name '(' ')'
 				{
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}
 					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
 					n->trigname = $3;
 					n->eventname = $5;
@@ -12220,12 +12208,6 @@ CreateEventTrigStmt:
 			WHEN event_trigger_when_list
 			EXECUTE PROCEDURE func_name '(' ')'
 				{
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}
 					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
 					n->trigname = $3;
 					n->eventname = $5;
@@ -12257,12 +12239,6 @@ event_trigger_value_list:
 AlterEventTrigStmt:
 			ALTER EVENT_TRIGGER name enable_trigger
 				{
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}
 					AlterEventTrigStmt *n = makeNode(AlterEventTrigStmt);
 					n->trigname = $3;
 					n->tgenabled = $4;
@@ -13011,13 +12987,7 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior opt_purge
 					n->arguments = NIL;
 					n->behavior = $6;
 					n->concurrent = false;
-					n->purge = $7;
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->removeType==OBJECT_EVENT_TRIGGER)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}					
+					n->purge = $7;				
 					if (n->removeType != OBJECT_TABLE && n->purge) {
         				const char* message = "PURGE clause only allowed in \"DROP TABLE\" statement";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -13039,12 +13009,6 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior opt_purge
 					n->behavior = $4;
 					n->concurrent = false;
 					n->purge = $5;
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->removeType==OBJECT_EVENT_TRIGGER)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}	
 					if (n->removeType != OBJECT_TABLE && n->purge) {
         				const char* message = "PURGE clause only allowed in \"DROP TABLE\" statement";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -13229,13 +13193,7 @@ CommentStmt:
 					n->objtype = $3;
 					n->objname = $4;
 					n->objargs = NIL;
-					n->comment = $6;
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->objtype==OBJECT_EVENT_TRIGGER)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}						
+					n->comment = $6;				
 					$$ = (Node *) n;
 				}
 			| COMMENT ON AGGREGATE func_name aggr_args IS comment_text
@@ -13445,12 +13403,6 @@ SecLabelStmt:
 					n->objname = $6;
 					n->objargs = NIL;
 					n->label = $8;
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT && n->objtype==OBJECT_EVENT_TRIGGER)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}	
 					$$ = (Node *) n;
 				}
 			| SECURITY LABEL opt_provider ON AGGREGATE func_name aggr_args
@@ -17719,12 +17671,6 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				}
 			| ALTER EVENT_TRIGGER name RENAME TO name
 				{
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_EVENT_TRIGGER;
 					n->object = list_make1(makeString($3));
@@ -17733,12 +17679,6 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				}
 			| ALTER EVENT_TRIGGER name OWNER TO RoleId
 				{
-					if(u_sess->attr.attr_sql.sql_compatibility != PG_FORMAT)
-					{
-						ereport(errstate, 
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("EVENT TRIGGER is only supported in PG compatibility database")));
-					}
 					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
 					n->objectType = OBJECT_EVENT_TRIGGER;
 					n->object = list_make1(makeString($3));
