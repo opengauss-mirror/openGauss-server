@@ -29,8 +29,6 @@
 #define MIN_ZSTD_COMPRESSION_LEVEL ZSTD_minCLevel()
 #define MAX_ZSTD_COMPRESSION_LEVEL ZSTD_maxCLevel()
 
-#define COMPRESS_DEFAULT_ERROR (-1)
-#define COMPRESS_UNSUPPORTED_ERROR (-2)
 #define GS_INVALID_ID16     (uint16)0xFFFF
 #define MIN_DIFF_SIZE (64)
 #define MIN_CONVERT_CNT (4)
@@ -410,7 +408,7 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
         src_copy = (char*)palloc(BLCKSZ);
         if (src_copy == NULL) {
             // add log
-            return -1;
+            return COMPRESS_DEFAULT_ERROR;
         }
         rc = memcpy_s(src_copy, BLCKSZ, src, BLCKSZ);
         securec_check(rc, "", "");
@@ -448,7 +446,7 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
 
             if (ZSTD_isError(compressed_size)) {
                 FreePointer((void*)src_copy);
-                return -1;
+                return COMPRESS_DEFAULT_ERROR;
             }
             break;
         }
@@ -459,7 +457,7 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
 
     if (compressed_size < 0) {
         FreePointer((void*)src_copy);
-        return -1;
+        return COMPRESS_DEFAULT_ERROR;
     }
 
     if (heapPageData) {
@@ -629,19 +627,19 @@ int TemplateDecompressPage(const char* src, char* dst, uint8 algorithm)
     }
 
     if (DataBlockChecksum(data, size, true) != crc32) {
-        return -2;
+        return COMPRESS_CHECKSUM_ERROR;
     }
     switch (algorithm) {
         case COMPRESS_ALGORITHM_PGLZ:
             decompressed_size = pglz_decompress((const PGLZ_Header* )data, dst + headerSize);
             if (decompressed_size == -1) {
-                return -1;
+                return COMPRESS_DEFAULT_ERROR;
             }
             break;
         case COMPRESS_ALGORITHM_ZSTD:
             decompressed_size = ZSTD_decompress(dst + headerSize, BLCKSZ - headerSize, data, size);
             if (ZSTD_isError(decompressed_size)) {
-                return -1;
+                return COMPRESS_DEFAULT_ERROR;
             }
             break;
         default:

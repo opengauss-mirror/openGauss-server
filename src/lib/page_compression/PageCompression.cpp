@@ -106,7 +106,7 @@ BlockNumber PageCompression::GetSegmentNo() const
     return this->segmentNo;
 }
 
-size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign)
+int PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign, bool retry)
 {
     auto chunkSize = this->header->chunk_size;
     PageCompressAddr *currentAddr = GET_PAGE_COMPRESS_ADDR(this->header, chunkSize, blockNum);
@@ -144,11 +144,11 @@ size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer,
             break;
         }
 
-        if (tryCount < MAX_RETRY_LIMIT) {
+        if (retry && tryCount < MAX_RETRY_LIMIT) {
             ++tryCount;
             pg_usleep(RETRY_SLEEP_TIME);
         } else {
-            return 0;
+            return COMPRESS_CHECKSUM_ERROR;
         }
     } while (true);
 

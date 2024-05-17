@@ -56,7 +56,7 @@ public:
     decltype(PageCompressHeader::chunk_size) GetChunkSize() const;
     decltype(PageCompressHeader::algorithm) GetAlgorithm() const;
     PageCompressHeader *GetPageCompressHeader() const;
-    size_t ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign = false);
+    int ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign = false, bool retry = true);
     bool WriteBufferToCurrentBlock(const char *buf, BlockNumber blockNumber, int32 size);
     bool DecompressedPage(const char *src, char *dest) const;
     bool WriteBackUncompressedData(const char *uncompressed, size_t uncompressedLen, char *buffer, size_t size,
