@@ -148,6 +148,7 @@ typedef struct ss_recovery_info {
     bool dorado_sharestorage_inited;        // used in dorado mode
     bool disaster_cluster_promoting;         // standby cluster is promoting
     volatile ondemand_recovery_pause_status_t ondemand_recovery_pause_status;
+    bool realtime_build_in_reform; // used to avoid starting realtime build during reform
 } ss_recovery_info_t;
 
 typedef struct ondemand_htab_ctrl {

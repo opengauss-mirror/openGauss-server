@@ -620,22 +620,23 @@ void SSWaitStartupExit(bool send_signal)
     }
 }
 
-void SSHandleStartupWhenReformStart()
+void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt)
 {
     if (g_instance.pid_cxt.StartupPID == 0) {
         return;
     }
 
     if (ENABLE_ONDEMAND_RECOVERY && ENABLE_ONDEMAND_REALTIME_BUILD) {
-        if (SS_PERFORMING_SWITCHOVER && SS_REFORM_PARTNER) {
+        if (rs_cxt->reform_type == DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS &&
+            rs_cxt->role != DMS_ROLE_REFORMER) {
+            g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = true;
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS reform][On-demand] reform start phase, ondemand realtime build is enabled during switchover .")));
+                errmsg("[SS reform][On-demand] reform start phase, stop ondemand realtime build before switchover.")));
             SSWaitStartupExit(true);
             return;
         } else {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS reform][On-demand] start phase, ondemand realtime build is enable "
-                    "ondemand realtime build is enabled during startup, no need wait startup thread exit .")));
+                errmsg("[SS reform][On-demand] start phase, ondemand realtime build is enable, no need wait startup thread exit.")));
             return;
         }
     }

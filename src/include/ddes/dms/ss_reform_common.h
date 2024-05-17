@@ -61,4 +61,4 @@ void SSGrantDSSWritePermission(void);
 bool SSPrimaryRestartScenario();
 bool SSBackendNeedExitScenario();
 void SSWaitStartupExit(bool send_signal = true);
-void SSHandleStartupWhenReformStart();
+void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt);
