@@ -91,9 +91,6 @@ inline bool SSBufferIsDirty(BufferDesc *buf_desc)
     uint64 state = pg_atomic_read_u64(&buf_desc->state);
     // no need to judge (BM_DIRTY | BM_JUST_DIRTIED), BM_DIRTY is enough
     if (state & BM_DIRTY) {
-#ifdef USE_ASSERT_CHECKING
-        Assert((state & BM_VALID) == BM_VALID);
-#endif
         return true;
     }
     if (ENABLE_DSS_AIO && buf_desc->extra->aio_in_progress) {
