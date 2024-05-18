@@ -2647,8 +2647,13 @@ int PthreadMutexLock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace)
         ResourceOwnerEnlargePthreadMutex(owner);
 
     int ret = pthread_mutex_lock(mutex);
-    if (ret == 0 && trace && owner) {
+    if (unlikely(ret != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("aquire mutex lock failed.")));
+    }
+    if (trace && owner) {
         ResourceOwnerRememberPthreadMutex(owner, mutex);
+    } else {
+        START_CRIT_SECTION();
     }
     RESUME_INTERRUPTS();
     return ret;
@@ -2661,8 +2666,12 @@ int PthreadMutexTryLock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace)
         ResourceOwnerEnlargePthreadMutex(owner);
 
     int ret = pthread_mutex_trylock(mutex);
-    if (ret == 0 && trace && owner) {
-        ResourceOwnerRememberPthreadMutex(owner, mutex);
+    if (likely(ret == 0)) {
+        if (trace && owner) {
+            ResourceOwnerRememberPthreadMutex(owner, mutex);
+        } else {
+            START_CRIT_SECTION();
+        }
     }
     RESUME_INTERRUPTS();
     return ret;
@@ -2672,8 +2681,14 @@ int PthreadMutexUnlock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace)
 {
     HOLD_INTERRUPTS();
     int ret = pthread_mutex_unlock(mutex);
-    if (ret == 0 && trace && owner)
+    if (unlikely(ret != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("release mutex lock failed.")));
+    }
+    if (trace && owner) {
         ResourceOwnerForgetPthreadMutex(owner, mutex);
+    } else {
+        END_CRIT_SECTION();
+    }
     RESUME_INTERRUPTS();
 
     return ret;

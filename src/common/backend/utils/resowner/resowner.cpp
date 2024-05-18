@@ -2014,6 +2014,9 @@ void ResourceOwnerForgetPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRW
 
 int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace)
 {
+    if (owner == NULL) {
+        return PthreadMutexUnlock(owner, pMutex, trace);
+    }
     pthread_mutex_t** mutexs = owner->pThdMutexs;
     int ns1 = owner->nPthreadMutex - 1;
  

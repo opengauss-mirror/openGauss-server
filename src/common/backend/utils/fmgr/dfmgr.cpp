@@ -399,7 +399,7 @@ void* internal_load_library(const char* libname)
         u_sess->fmgr_cxt.file_init_tail = file_init_scanner;
     }
 
-    PthreadMutexUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &file_list_lock, true);
+    ResourceOwnerForgetIfExistPthreadMutex(t_thrd.utils_cxt.CurrentResourceOwner, &file_list_lock, true);
 
     return file_scanner->handle;
 }
