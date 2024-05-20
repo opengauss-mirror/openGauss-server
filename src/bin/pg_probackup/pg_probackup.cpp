@@ -739,6 +739,20 @@ static void check_dss_input()
     }
 }
 
+static void check_threads_num_option()
+{
+#ifdef _SC_NPROCESSORS_ONLN
+    int nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+    if (nprocs <= 0) {
+        elog(ERROR, "Failed to get the number of available cores.");
+    }
+    if (num_threads > nprocs * 10) {
+        elog(ERROR, "Invalid value for '-j' option: %d, the number of cores available is %d, "
+            "more than 10 times is not allowed.", num_threads, nprocs);
+    }
+#endif
+}
+
 int main(int argc, char *argv[])
 {
     char       *command = NULL,
@@ -851,6 +865,8 @@ int main(int argc, char *argv[])
     check_backid_option(command_name);
     
     check_restore_option(command_name);
+
+    check_threads_num_option();
 
     /*
      * Parse set-backup options into set_backup_params structure.
