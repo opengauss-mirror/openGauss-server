@@ -7099,7 +7099,8 @@ bool RecheckIndexTuple(const IndexScanDesc scan, TupleTableSlot *slot)
     /* form index datum with correct tuple descriptor */
     FormIndexDatum(so->indexInfo, slot, so->fakeEstate, values, isnull);
 
-    IndexTuple trueItup = index_form_tuple(RelationGetDescr(scan->indexRelation), values, isnull);
+    IndexTuple trueItup = index_form_tuple(RelationGetDescr(scan->indexRelation), values, isnull, 
+                                           RelationIsUBTree(scan->indexRelation));
     trueItup->t_tid = itup->t_tid;
     /*
      * compare the binary directly. If these index tuples are formed from the

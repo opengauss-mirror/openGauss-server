@@ -5599,6 +5599,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     UndoTraversalState rc = UNDO_TRAVERSAL_DEFAULT;
     Page page = NULL;
     int zoneId;
+    uint16 tdCount = 0;
     UPageVerifyParams verifyParams;
 
     buffer = ReadBuffer(relation, blkno);
@@ -5706,7 +5707,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
 
         if (flags & XLU_ABORT_SPECINSERT_INIT_PAGE) {
             XLogRegisterData((char *)&xidbase, sizeof(TransactionId));
-            uint16 tdCount = UPageGetTDSlotCount(page);
+            tdCount = UPageGetTDSlotCount(page);
             XLogRegisterData((char *)&tdCount, sizeof(uint16));
         }
 

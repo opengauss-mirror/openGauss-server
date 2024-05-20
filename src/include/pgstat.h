@@ -3014,6 +3014,7 @@ extern bool IsGlobalStatsTrackerProcess();
 PgStat_StartBlockTableEntry* StartBlockHashTableLookup(PgStat_StartBlockTableKey *tabkey);
 PgStat_StartBlockTableEntry* StartBlockHashTableAdd(PgStat_StartBlockTableKey *tabkey);
 PgStat_StartBlockTableEntry* GetStartBlockHashEntry(PgStat_StartBlockTableKey *tabkey);
+void StartBlockHashTableRemove(PgStat_StartBlockTableKey *tabkey);
 
 typedef struct IoWaitStatGlobalInfo {
     char device[MAX_DEVICE_DIR]; /* device name */

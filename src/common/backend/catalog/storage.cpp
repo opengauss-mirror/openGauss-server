@@ -465,6 +465,14 @@ void CStoreRelDropColumn(Relation rel, AttrNumber attrnum, Oid ownerid)
  */
 void RelationDropStorage(Relation rel, bool isDfsTruncate)
 {
+    if (RelationIsUstoreFormat(rel)) {
+        PgStat_StartBlockTableKey tabkey;
+        tabkey.dbid = u_sess->proc_cxt.MyDatabaseId;
+        tabkey.relid = RelationGetRelid(rel);
+        tabkey.parentid = RelationIsPartition(rel) ? rel->parentId : InvalidOid;
+        StartBlockHashTableRemove(&tabkey);
+    }
+
     // global temp table files may not exist
     if (RELATION_IS_GLOBAL_TEMP(rel)) {
         if (rel->rd_smgr == NULL) {

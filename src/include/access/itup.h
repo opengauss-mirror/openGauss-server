@@ -128,7 +128,8 @@ typedef IndexAttributeBitMapData* IndexAttributeBitMap;
     ((int)((BLCKSZ - SizeOfPageHeaderData) / (MAXALIGN(sizeof(IndexTupleData) + 1) + sizeof(ItemIdData))))
 
 /* routines in indextuple.c */
-extern IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull);
+extern IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull,
+                                   bool is_ubtree = false);
 extern Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tuple_descriptor, Datum* values, bool* isnull);
 extern IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, int new_indnatts);

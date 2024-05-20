@@ -4639,6 +4639,7 @@ void AbortCurrentTransaction(bool STP_rollback)
         case TBLOCK_SUBINPROGRESS:
             if (STP_rollback || TopTransactionStateData.blockState == TBLOCK_STARTED) {
                 do {
+                    SetUndoActionsInfo();
                     AbortSubTransaction(STP_rollback);
                     ApplyUndoActions();
                     s->blockState = TBLOCK_SUBABORT;

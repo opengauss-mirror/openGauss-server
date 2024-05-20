@@ -1199,10 +1199,13 @@ static void UnlinkJunkRelFile(Relation rel)
     if (rel->rd_smgr == NULL) {
         RelationOpenSmgr(rel);
     }
+
     if (smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
         elog(WARNING, "gtt relfilenode %u already exists", rel->rd_node.relNode);
         smgrdounlink(rel->rd_smgr, false);
         smgrclose(rel->rd_smgr);
+    } else if (RelationIsUstoreIndex(rel)) {
+        DropTempRelFileNodeAllBuffers(rel->rd_smgr->smgr_rnode);
     }
 
     gtt_local_hash_entry* entry = gtt_search_by_relid(rel->rd_id, true);
@@ -1394,7 +1397,6 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
     entry1->relfilenode_list = lappend(entry1->relfilenode_list, gttRnode2);
 
     if (entry1->relkind == RELKIND_RELATION && TransactionIdIsValid(frozenXid)) {
-        /* update relfrozenxid for the new gtt relfilenode */
         remove_gtt_relfrozenxid_from_ordered_list((Oid)gttRnode2->relfrozenxid);
         gttRnode2->relfrozenxid = frozenXid;
         insert_gtt_relfrozenxid_to_ordered_list((Oid)frozenXid);

@@ -210,6 +210,8 @@ static bool check_and_assign_proc_oids(List* elemlist);
 static bool check_and_assign_type_oids(List* elemlist);
 static bool check_and_assign_namespace_oids(List* elemlist);
 static bool check_and_assign_general_oids(List* elemlist);
+static bool check_undo_space_limit_size(int *newval, void **extra, GucSource source);
+static bool check_undo_limit_size_per_transaction(int *newval, void **extra, GucSource source);
 static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 static bool check_ss_interconnect_url(char **newval, void **extra, GucSource source);
@@ -3590,7 +3592,7 @@ static void InitStorageConfigureNamesInt()
             33554432,  /* 256 GB */
             102400,   /* 800 MB */
             INT_MAX,
-            NULL,
+            check_undo_space_limit_size,
             NULL,
             NULL},
         {{"undo_limit_size_per_transaction",
@@ -3604,7 +3606,7 @@ static void InitStorageConfigureNamesInt()
             4194304,  /* 32 GB */
             256,      /* 2 MB */
             INT_MAX,
-            NULL,
+            check_undo_limit_size_per_transaction,
             NULL,
             NULL},
         {{"undo_zone_count",
@@ -6917,4 +6919,23 @@ static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSourc
     g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt = max_cnt;
     pfree(replStr);
     return true;
+}
+
+static bool check_undo_space_limit_size(int *newval, void **extra, GucSource source)
+{
+    if (*newval < u_sess->attr.attr_storage.undo_limit_size_transaction && 
+        u_sess->attr.attr_storage.undo_limit_size_transaction != 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool check_undo_limit_size_per_transaction(int *newval, void **extra, GucSource source)
+{    
+    if (*newval > u_sess->attr.attr_storage.undo_space_limit_size && 
+        u_sess->attr.attr_storage.undo_space_limit_size != 0) {
+        return false;
+    }
+    return true;
+
 }

@@ -164,12 +164,12 @@ Buffer UBTreeGetRoot(Relation rel, int access)
 
             BufferDesc *buf = GetBufferDescriptor(rootbuf - 1); // caveat for GetBufferDescriptor for -1!
             valid = PinBuffer(buf, NULL);
-            if (valid) {
-                LockBuffer(rootbuf, BT_READ);
-                isRootCacheValid = (!IS_EXRTO_STANDBY_READ) && RelFileNodeEquals(buf->tag.rnode, rel->rd_node) &&
-                                   (buf->tag.blockNum == rootblkno);
-                if (!isRootCacheValid)
+            if (valid && TryLockBuffer(rootbuf, BT_READ, false)) {
+                isRootCacheValid = buf->tag.forkNum == MAIN_FORKNUM &&
+                    RelFileNodeEquals(buf->tag.rnode, rel->rd_node) && (buf->tag.blockNum == rootblkno);
+                if (!isRootCacheValid) {
                     UnlockReleaseBuffer(rootbuf);
+                }
             } else {
                 UnpinBuffer(buf, true);
             }
@@ -847,13 +847,13 @@ static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
     itemid = PageGetItemId(page, nextoffset);
     itup = (IndexTuple) PageGetItem(page, itemid);
     if (UBTreeTupleGetDownLink(itup) != rightsib) {
+        _bt_relbuf(rel, topparent);
         Buffer rbuf = _bt_getbuf(rel, rightsib, BT_READ);
         Page rpage = BufferGetPage(rbuf);
         UBTPageOpaqueInternal ropaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(rpage);
         if (P_ISHALFDEAD(ropaque)) {
             /* right page already deleted by concurrent worker, do not continue */
             _bt_relbuf(rel, rbuf);
-            _bt_relbuf(rel, topparent);
             return false;
         }
         elog(ERROR, "right sibling %u of block %u is not next child %u of block %u in index \"%s\"",

@@ -211,7 +211,7 @@ bool UBTreeDelete(Relation rel, Datum* values, const bool* isnull, ItemPointer h
 
     WHITEBOX_TEST_STUB("UBTreeDelete", WhiteboxDefaultErrorEmit);
 
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
     itup->t_tid = *heapTCtid;
     ret = UBTreeDoDelete(rel, itup, isRollbackIndex);
     pfree(itup);
@@ -250,7 +250,7 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
     }
 
     /* generate an index tuple */
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
     itup->t_tid = *htCtid;
 
     /* reserve space for xmin/xmax */

@@ -80,7 +80,7 @@ int2 index_getattr_bucketid(Relation irel, IndexTuple itup)
  *		tuplesort_putindextuplevalues() will be very unhappy.
  * ----------------
  */
-IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull)
+IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull, bool is_ubtree)
 {
     char *tp = NULL;         /* tuple pointer */
     IndexTuple tuple = NULL; /* return tuple */
@@ -206,11 +206,12 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
      * Here we make sure that the size will fit in the field reserved for it
      * in t_info.
      */
-    if ((size & INDEX_SIZE_MASK) != size)
+    Size check_size = size + (is_ubtree ? sizeof(ShortTransactionId) * 2 : 0);
+    if ((check_size & INDEX_SIZE_MASK) != check_size)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                 errmsg("index row requires %lu bytes, maximum size is %lu",
-                    (unsigned long)size,
+                    (unsigned long)check_size,
                     (unsigned long)INDEX_SIZE_MASK)));
 
     infomask |= size;
@@ -592,7 +593,7 @@ IndexTuple UBTreeIndexTruncateTuple(TupleDesc tupleDescriptor, IndexTuple olditu
 
     /* form new tuple that will contain only key attributes */
     itupdesc->natts = leavenatts;
-    newitup = index_form_tuple(itupdesc, values, isnull);
+    newitup = index_form_tuple(itupdesc, values, isnull, true);
     newitup->t_tid = olditup->t_tid;
     Assert(IndexTupleSize(newitup) <= IndexTupleSize(olditup));
 

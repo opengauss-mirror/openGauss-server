@@ -432,3 +432,19 @@ GetStartBlockHashEntry(PgStat_StartBlockTableKey *tabkey)
     Assert(result);
     return result;
 }
+
+void StartBlockHashTableRemove(PgStat_StartBlockTableKey *tabkey)
+{
+    if (g_instance.stat_cxt.tableStat == NULL || g_instance.stat_cxt.tableStat->blocks_map == NULL) {
+        return;
+    }
+
+    if (!StartBlockHashTableLookup(tabkey)) {
+        return;
+    }
+
+    LWLock *lock = LockStartBlockHashTablePartition(tabkey, LW_EXCLUSIVE);
+
+    (void)hash_search(g_instance.stat_cxt.tableStat->blocks_map, tabkey, HASH_REMOVE, NULL);
+    LWLockRelease(lock);
+}

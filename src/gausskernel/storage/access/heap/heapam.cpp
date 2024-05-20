@@ -1543,6 +1543,10 @@ Relation try_relation_open(Oid relationId, LOCKMODE lockmode)
             ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open relation with OID %u", relationId)));
     }
 
+    if (RELATION_IS_GLOBAL_TEMP(r)) {
+        r->rd_rel->relfilenode = r->rd_node.relNode;
+    }
+
     /* Make note that we've accessed a temporary relation */
     if (RelationUsesLocalBuffers(r)) {
         t_thrd.xact_cxt.MyXactAccessedTempRel = true;
