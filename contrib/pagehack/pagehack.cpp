@@ -3120,22 +3120,23 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
     return true;
 }
 
-static BlockNumber CalculateMaxBlockNumber(BlockNumber blknum, BlockNumber start, BlockNumber number)
+static BlockNumber CalculateMaxBlockNumber(BlockNumber maxBlockNumber, BlockNumber start, BlockNumber number)
 {
     /* parse */
-    if (start >= blknum) {
+    BlockNumber endBlockNumber = InvalidBlockNumber;
+    if (start >= maxBlockNumber) {
         (void)fprintf(stderr, "start point exceeds the total block number of relation.\n");
         return InvalidBlockNumber;
-    } else if ((start + number) > blknum) {
+    } else if ((start + number) > maxBlockNumber) {
         (void)fprintf(stderr, "don't have %u blocks from block %u in the relation, only %u blocks\n", number, start,
-                (blknum - start));
-        number = blknum;
+                (maxBlockNumber - start));
+        endBlockNumber = maxBlockNumber;
     } else if (number == 0) {
-        number = blknum;
+        endBlockNumber = maxBlockNumber;
     } else {
-        number += start;
+        endBlockNumber = number + start;
     }
-    return number;
+    return endBlockNumber;
 }
 
 static void MarkBufferDirty(char *buffer, size_t len)
@@ -3243,17 +3244,6 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
     if (number == InvalidBlockNumber) {
         fclose(fd);
         return false;
-    } else if ((start + number) > blknum) {
-        fprintf(stderr,
-            "don't have %u blocks from block %u in the relation, only %u blocks\n",
-            number,
-            start,
-            (blknum - start));
-        number = blknum;
-    } else if (number == 0) {
-        number = blknum;
-    } else {
-        number += start;
     }
 
     Assert((start * BLCKSZ) < size);
