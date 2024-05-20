@@ -114,9 +114,15 @@ uint16 pg_checksum_page(char* page, BlockNumber blkno)
      * the API of this function.
      */
     save_checksum = phdr->pd_checksum;
+    uint16 lower = phdr->pd_lower;
+    
     phdr->pd_checksum = 0;
+    phdr->pd_lower &= (COMP_ASIGNMENT - 1);
+    
     checksum = pg_checksum_block(page, BLCKSZ);
+    
     phdr->pd_checksum = save_checksum;
+    phdr->pd_lower = lower;
 
     /* Mix in the block number to detect transposed pages */
     checksum ^= blkno;

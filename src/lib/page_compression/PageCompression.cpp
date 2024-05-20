@@ -302,7 +302,7 @@ size_t CalRealWriteSize(char *buffer)
     }
 
     /* check the assignment made during backup */
-    if ((phdr->pd_lower & COMP_ASIGNMENT) == 0) {
+    if (phdr->pd_lower & COMP_ASIGNMENT) {
         return BLCKSZ;
     }
 
