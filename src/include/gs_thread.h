@@ -196,8 +196,14 @@ typedef struct ThreadMetaData {
     knl_thread_role    role;
     const char*        thr_name; /* keep strlen(thr_name) < 16 */
     const char*        thr_long_name;
+#ifdef __cplusplus
     bool               bindCpu = true; /* used in gazelle.
                                         * bind thread to cpus specified by threadpool if true*/
+#else
+/* odbc compilation support */
+    bool               bindCpu;
+#endif
+
 } ThreadMetaData;
 
 /*
@@ -223,7 +229,12 @@ extern ThreadId gs_thread_self(void);
 extern void gs_thread_exit(int code);
 extern void gs_thread_args_free(void);
 
+#ifdef __cplusplus
 extern int gs_thread_create_ex(gs_thread_t* thread, void* (*taskRoutine)(void*), int argc, void* argv, cpu_set_t *cpuset = NULL);
+#else
+/* odbc compilation support */
+extern int gs_thread_create_ex(gs_thread_t* thread, void* (*taskRoutine)(void*), int argc, void* argv, cpu_set_t *cpuset);
+#endif
 extern int gs_thread_create(gs_thread_t* thread, void* (*taskRoutine)(void*), int argc, void* argv);
 
 extern int gs_thread_join(gs_thread_t thread, void** value_ptr);
