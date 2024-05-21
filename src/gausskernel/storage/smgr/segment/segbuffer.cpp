@@ -947,8 +947,7 @@ void SegDropSpaceMetaBuffers(Oid spcNode, Oid dbNode)
         }
 
         buf_state = LockBufHdr(buf_desc);
-        if (buf_desc->tag.rnode.spcNode == spcNode && buf_desc->tag.rnode.dbNode == dbNode && 
-            (buf_state & BM_DIRTY) && (buf_state & BM_VALID)) {
+        if (buf_desc->tag.rnode.spcNode == spcNode && buf_desc->tag.rnode.dbNode == dbNode && (buf_state & BM_VALID)) {
             InvalidateBuffer(buf_desc); /* releases spinlock */
         } else {
             UnlockBufHdr(buf_desc, buf_state);
