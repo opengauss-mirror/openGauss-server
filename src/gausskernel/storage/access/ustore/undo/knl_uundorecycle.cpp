@@ -856,7 +856,7 @@ void UndoRecycleMain()
                     "from %u to %u."), t_thrd.undorecycler_cxt.is_recovery_in_progress, is_in_progress)));
             ShutDownRecycle(recycleMaxXIDs);
         }
-        if (!t_thrd.undorecycler_cxt.is_recovery_in_progress) {
+        if ((!t_thrd.undorecycler_cxt.is_recovery_in_progress) && (!IS_EXRTO_STANDBY_READ)) {
             TransactionId recycleXmin = InvalidTransactionId;
             TransactionId oldestXmin = GetOldestXminForUndo(&recycleXmin);
             if (!TransactionIdIsValid(recycleXmin) ||

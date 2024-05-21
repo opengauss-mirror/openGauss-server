@@ -578,7 +578,19 @@ static void LazyScanURel(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *v
 void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 {
     Assert(IsAutoVacuumWorkerProcess());
+    ereport(LOG, (errmodule(MOD_AUTOVAC), errcode(ERRCODE_LOG),
+        errmsg("start force vacuum index of table %s, oid %u, globalRecycleXid %lu,"
+        "RecentGlobalDataXmin %lu, nextXid %lu",
+        onerel ? RelationGetRelationName(onerel) : "unknown",
+        onerel ? onerel->rd_id : InvalidOid,
+        pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+        u_sess->utils_cxt.RecentGlobalDataXmin,
+        t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+
     TransactionId newFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+    if (newFrozenXid > u_sess->utils_cxt.RecentGlobalDataXmin) {
+        u_sess->utils_cxt.RecentGlobalDataXmin = newFrozenXid;
+    }
 
     /* now we only need to vacuum all indexes to make sure we won't have old xid remain there */
     /* STEP 1: construct fake vacrelstats context for index vacuum */
@@ -664,6 +676,15 @@ void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAcces
     }
     pfree_ext(indstats);
     pfree_ext(vacrelstats);
+
+    ereport(LOG, (errmodule(MOD_AUTOVAC), errcode(ERRCODE_LOG),
+        errmsg("start force vacuum index of table %s, oid %u, globalRecycleXid %lu,"
+        "RecentGlobalDataXmin %lu, nextXid %lu",
+        onerel ? RelationGetRelationName(onerel) : "unknown",
+        onerel ? onerel->rd_id : InvalidOid,
+        pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+        u_sess->utils_cxt.RecentGlobalDataXmin,
+        t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
 }
 
 /*
@@ -717,6 +738,9 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
      * reserves a transaction slot in the page for pruning purpose.
      */
     TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+    if (oldestXmin > u_sess->utils_cxt.RecentGlobalDataXmin) {
+        u_sess->utils_cxt.RecentGlobalDataXmin = oldestXmin;
+    }
     if (!TransactionIdIsNormal(oldestXmin)) {
         ereport(WARNING,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

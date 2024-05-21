@@ -144,7 +144,8 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
         if (opaque->btpo.level == 1 && access == BT_WRITE)
             pageAccess = BT_WRITE;
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+            (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+            NULL, NULL, InvalidXLogRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
         }
         /* drop the read lock on the parent page, acquire one on the child */
@@ -1416,7 +1417,8 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
         so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
     }
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, scan->indexRelation, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        (char *) &verifyParams, scan->indexRelation, page, InvalidBlockNumber, InvalidOffsetNumber,
+        NULL, NULL, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
     }
     return (so->currPos.firstItem <= so->currPos.lastItem);

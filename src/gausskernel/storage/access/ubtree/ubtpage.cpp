@@ -373,7 +373,7 @@ bool UBTreePageRecyclable(Page page)
      * before it is able to make a WAL entry for adding the page. If we find a
      * zeroed page then reclaim it.
      */
-    TransactionId frozenXmin = g_instance.undo_cxt.globalFrozenXid;
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
     if (PageIsNew(page)) {
         return true;
     }
@@ -383,7 +383,7 @@ bool UBTreePageRecyclable(Page page)
      * interested in it.
      */
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-    return P_ISDELETED(opaque) && TransactionIdPrecedes(((UBTPageOpaque)opaque)->xact, frozenXmin);
+    return P_ISDELETED(opaque) && TransactionIdPrecedes(((UBTPageOpaque)opaque)->xact, oldestXmin);
 }
 
 /*

@@ -139,7 +139,7 @@ TransactionSlot *UndoSlotBuffer::FetchTransactionSlot(UndoSlotPtr slotPtr)
     uint32 verifyModule = USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_UNDO_SUB_TRANSLOT_BUFFER;
     UndoVerifyParams verifyParam;
     if (unlikely(ConstructUstoreVerifyParam(verifyModule, USTORE_VERIFY_COMPLETE, (char *) &verifyParam,
-        NULL, page, InvalidBlockNumber))) {
+        NULL, page, InvalidBlockNumber, InvalidOffsetNumber))) {
         ExecuteUstoreVerify(verifyModule, (char *) &verifyParam);
     }
     TransactionSlot *slot = (TransactionSlot *)((char *)page + slotOffset);
@@ -317,7 +317,7 @@ void UndoSlotBufferCache::Destory()
 UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr)
 {
     UndoSlotOffset slotOffset = UNDO_PTR_GET_OFFSET(slotPtr);
-    BlockNumber block = slotOffset / BLCKSZ;
+    BlockNumber block = (BlockNumber)(slotOffset / BLCKSZ);
     UndoSlotOffset blkOffset = slotOffset % BLCKSZ;
     UndoSlotOffset offset = blkOffset + MAXALIGN(sizeof(undo::TransactionSlot));
     if (BLCKSZ - offset < MAXALIGN(sizeof(undo::TransactionSlot))) {

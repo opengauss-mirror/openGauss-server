@@ -2429,7 +2429,6 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * relation.
      */
 
-    bool isPartitionedUHeap = RelationIsUstoreFormat(onerel) && RelationIsPartitioned(onerel);
     if (onerel->rd_rel->relkind != RELKIND_RELATION &&
 #ifdef ENABLE_MOT
         !(RelationIsForeignTable(onerel) && isMOTFromTblOid(onerel->rd_id)) &&

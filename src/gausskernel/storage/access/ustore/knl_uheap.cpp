@@ -717,7 +717,8 @@ reacquire_buffer:
     /* Clean up */
     Assert(UHEAP_XID_IS_TRANS(tuple->disk_tuple->flag));
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, rel, page, blkno, NULL, NULL, InvalidXLogRecPtr))) {
+        (char *) &verifyParams, rel, page, blkno, ItemPointerGetOffsetNumber(&(tuple->ctid)),
+        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
     }
 
@@ -2312,7 +2313,8 @@ check_tup_satisfies_update:
     pfree(undotup.data);
     Assert(UHEAP_XID_IS_TRANS(utuple.disk_tuple->flag));
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relation, page, blkno, NULL, NULL, InvalidXLogRecPtr))) {
+        (char *) &verifyParams, relation, page, blkno, offnum,
+        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
     }
 
@@ -3306,8 +3308,18 @@ check_tup_satisfies_update:
     pfree(undotup.data);
     Assert(UHEAP_XID_IS_TRANS(uheaptup->disk_tuple->flag));
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        relation, page, block, NULL, NULL, InvalidXLogRecPtr))) {
+        relation, page, block, ItemPointerGetOffsetNumber(&oldtup.ctid),
+        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+    }
+
+    if(!useInplaceUpdate) {
+        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
+            (char *) &verifyParams, relation, BufferGetPage(newbuf), BufferGetBlockNumber(newbuf),
+            ItemPointerGetOffsetNumber(&(uheaptup->ctid)),
+            NULL, NULL, InvalidXLogRecPtr, NULL, NULL, DML_VERIFY))) {
+            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);    
+        }
     }
 
     URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
@@ -3633,7 +3645,8 @@ reacquire_buffer:
 
         END_CRIT_SECTION();
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, relation, page, BufferGetBlockNumber(buffer), NULL, NULL, InvalidXLogRecPtr))) {
+            (char *) &verifyParams, relation, page, BufferGetBlockNumber(buffer),
+            InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr, NULL, NULL, 0))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
         }
         pfree(ufreeOffsetRanges);
@@ -4173,7 +4186,8 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
 cleanup:
     UPageVerifyParams verifyParams;
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relation, page, BufferGetBlockNumber(buf), NULL, NULL, InvalidXLogRecPtr))) {
+        (char *) &verifyParams, relation, page, BufferGetBlockNumber(buf),
+        InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
     }
 
@@ -5585,6 +5599,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     UndoTraversalState rc = UNDO_TRAVERSAL_DEFAULT;
     Page page = NULL;
     int zoneId;
+    UPageVerifyParams verifyParams;
 
     buffer = ReadBuffer(relation, blkno);
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -5722,6 +5737,12 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     }
 
     END_CRIT_SECTION();
+
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
+        (char *) &verifyParams, relation, page, blkno,
+        InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        (void) ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+    }
 
     UnlockReleaseBuffer(buffer);
 

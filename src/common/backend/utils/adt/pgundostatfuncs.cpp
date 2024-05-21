@@ -115,10 +115,10 @@ typedef struct UHeapDiskTupleDataHeader {
     uint8 t_hoff;                         /*  header incl. bitmap, padding */
 } UHeapDiskTupleDataHeader;
 
-void Checkfd(int fd)
+void Checkfd(int fd, char *filePath)
 {
-    if (fd < 0) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not open file \%s", UNDO_META_FILE)));
+    if (fd < 0 && filePath != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not open file \%s", filePath)));
         return;
     }
 }
@@ -453,7 +453,7 @@ static int OpenUndoBlock(int zoneId, BlockNumber blockno)
     rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName), "undo/permanent/%05X.%07zX", zoneId, segno);
     securec_check_ss(rc, "\0", "\0");
     int fd = open(fileName, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
-    Checkfd(fd);
+    Checkfd(fd, fileName);
 
     return fd;
 }
@@ -866,7 +866,7 @@ static void GetTranslotFromSegFiles(int zoneId, int segnobegin, int segnoend, Tu
             segcurrent);
         securec_check_ss(rc, "\0", "\0");
         int fd = open(fileName, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
-        Checkfd(fd);
+        Checkfd(fd, fileName);
         GetTranslotFromOneSegFile(fd, zoneId, tupstore, tupDesc, xid, returnSlot);
         close(fd);
     }
@@ -926,11 +926,9 @@ static void ReadTranslotFromMemory(int startIdx, int endIdx,
             errno_t rc;
             if (TransactionIdIsValid(xid) && slot->XactId() < xid) {
                 buf.Release();
-                uzone->ReleaseSlotBuffer();
                 continue;
             } else if (TransactionIdIsValid(xid) && (uint64)slot->XactId() > xid) {
                 buf.Release();
-                uzone->ReleaseSlotBuffer();
                 return;
             } else if (TransactionIdIsValid(xid) && (uint64)slot->XactId() == xid) {
                 getSlotFlag = true;
@@ -965,7 +963,6 @@ static void ReadTranslotFromMemory(int startIdx, int endIdx,
             }
             tuplestore_putvalues(tupstore, tupDesc, values, nulls);
             buf.Release();
-            uzone->ReleaseSlotBuffer();
             if (getSlotFlag) {
                 return;
             }
@@ -1146,7 +1143,7 @@ static void ReadUndoMetaFromDisk(int id, TupleDesc *tupleDesc, Tuplestorestate *
     char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
     int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
 
-    Checkfd(fd);
+    Checkfd(fd, UNDO_META_FILE);
     Checkid(id, &startIdx, &endIdx);
     for (auto idx = startIdx; idx <= endIdx; idx++) {
         bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
@@ -1297,7 +1294,7 @@ static void ReadUndoSpaceFromDisk(int id, TupleDesc *tupleDesc, Tuplestorestate 
     char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
     int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
 
-    Checkfd(fd);
+    Checkfd(fd, UNDO_META_FILE);
     Checkid(id, &startIdx, &endIdx);
 
     /* Seek start position for writing transactionGroup meta. */
@@ -1575,7 +1572,7 @@ static void ReadUndoMetaInfoFromFile(int zone_id, TupleDesc *tupleDesc,
     uint32 endIdx = 0;
     int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
 
-    Checkfd(fd);
+    Checkfd(fd, UNDO_META_FILE);
     Checkid(zone_id, &startIdx, &endIdx);
     for (auto idx = startIdx; idx <= endIdx; idx++) {
         bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};

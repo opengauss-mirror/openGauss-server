@@ -132,6 +132,9 @@ const static uint32 DW_VIEW_COL_NAME_LEN = 32;
 
 #define DW_PAGE_CHECKSUM(page) (DW_PAGE_TAIL(page)->checksum)
 
+#define IS_UNDO_RECORD_BUFFER(rnode) (((rnode).dbNode) == (UNDO_DB_OID))
+#define IS_TRANS_SLOT_BUFFER(rnode) (((rnode).dbNode) == (UNDO_SLOT_DB_OID))
+
 #ifdef DW_DEBUG
 #define DW_LOG_LEVEL LOG
 #else

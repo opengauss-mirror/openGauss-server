@@ -678,9 +678,8 @@ static bool VerifyUPageHeader(Page page, VerifyLevel level, int logLevel)
             errmsg("upage tdcount invalid: tdcount = %u.", tdCount)));
     }
 
-    if ((level > USTORE_VERIFY_FAST) &&
-        (TransactionIdFollows(pruneXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid) ||
-        TransactionIdFollows(xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid))) {
+    if (TransactionIdFollows(pruneXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid) ||
+        TransactionIdFollows(xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
             errmsg("upage xidbase invalid: xidbase = %lu, nextxid = %lu.",
             xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
@@ -748,7 +747,7 @@ static bool VerifyUTuple(Relation rel, Page page, BlockNumber blkno, OffsetNumbe
     int tupSize = (rel == NULL) ? 0 : CalTupSize(rel, diskTup, tupDesc);
     if (tupSize > (int)RowPtrGetLen(rp) || (diskTup->reserved != 0 &&
         diskTup->reserved != 0xFF)) {
-        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+        ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
             errmsg("corrupted tuple: tupsize = %d, rpsize = %u.",
             tupSize, RowPtrGetLen(rp))));
     }
@@ -785,6 +784,73 @@ static int RpCompare(const void *rp1, const void *rp2)
 {
     return ((RpSort)rp1)->start - ((RpSort)rp2)->start;
 }
+
+static void VerifyUTupleForDML(Page page, OffsetNumber offnum, int logLevel)
+{
+    if (page == NULL || offnum == InvalidOffsetNumber) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("Invalid page, offnum %d.", offnum)));
+    }
+
+    UHeapPageHeader phdr = (UHeapPageHeader)page;
+    int nline = UHeapPageGetMaxOffsetNumber(page);
+    int i;
+    RowPtr *rp = UPageGetRowPtr(page, offnum);
+    UHeapDiskTuple diskTup = (UHeapDiskTuple)UPageGetRowData(page, rp);
+    uint32 offset = RowPtrGetOffset(rp);
+    uint32 len = SHORTALIGN(RowPtrGetLen(rp));
+    int tdId = UHeapTupleHeaderGetTDSlot(diskTup);
+    bool isInvalidSlot = UHeapTupleHasInvalidXact(diskTup->flag);
+    TransactionId tupXid = UDiskTupleGetModifiedXid(diskTup, page);
+    UHeapPageTDData *tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
+
+    if(!RowPtrIsNormal(rp)) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED), 
+            errmsg("Rp is abnormal (flas:%d, offset %d, len %d).",
+            rp->flags, rp->offset, rp->len)));
+    }
+
+    if (tdId < 1 || tdId > phdr->td_count) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED), 
+            errmsg("Invalid tdid %d, td count  %d.", tdId, phdr->td_count)));
+    }
+
+    TD *thistrans = &tdPtr->td_info[tdId - 1];
+
+    if (!IS_VALID_UNDO_REC_PTR(thistrans->undo_record_ptr) || isInvalidSlot ||
+        !TransactionIdEquals(thistrans->xactid, GetTopTransactionId()) ||
+        !TransactionIdEquals(thistrans->xactid, tupXid)) {
+            ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("Td xid invalid: tdid %d, tdxid %lu, topxid %lu, "
+                "tupxid %lu, isInvalidSlot %d.", tdId, thistrans->xactid, GetTopTransactionId(),
+                tupXid, isInvalidSlot)));
+    }
+    
+    for (i = FirstOffsetNumber; i <= nline; i++) {
+        if (i == offnum) {
+            continue;
+        }
+        rp = UPageGetRowPtr(page, i);
+        if (RowPtrIsNormal(rp)) {
+            uint32 tupOffset = RowPtrGetOffset(rp);
+            uint32 tupLen = SHORTALIGN(RowPtrGetLen(rp));
+            if (tupOffset < offset) {
+                if (tupOffset + tupLen > offset) {
+                    ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("Abnormal rowptr data, flags %d, offset %u, len %d, alignTupLen %u, targetRpOffset %u",
+                        rp->flags, tupOffset, RowPtrGetLen(rp), tupLen, offset)));
+                }
+            } else if (offset + len > tupOffset) {
+                ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("Abnormal rowptr data, flags %d, offset %u, len %d, alignTupLen %u, targetRpOffset %u, targetRpLen %u.",
+                    rp->flags, tupOffset, RowPtrGetLen(rp), tupLen, offset, len)));
+            }
+        }
+    }
+
+    return;
+}
+
 
 static bool VerifyUPageRowPtr(Relation rel, Page page, BlockNumber blkno, TupleDesc tupDesc,
     VerifyLevel level, int logLevel)
@@ -880,11 +946,16 @@ bool VerifyUPageValid(UPageVerifyParams *verifyParams)
     Page page = verifyParams->page;
     BlockNumber blkno = verifyParams->blk;
     TupleDesc tupDesc = verifyParams->tupDesc;
+    OffsetNumber offnum = verifyParams->offnum;
     XLogRecPtr latestRedo = InvalidXLogRecPtr;
-    int logLevel = (verifyParams->bvInfo.analyzeVerify) ? WARNING : PANIC;
+    int logLevel = (verifyParams->bvInfo.process == ANALYZE_VERIFY) ? WARNING : ERROR;
 
     VerifyUPageHeader(page, vLevel, logLevel);
-    VerifyUPageRowPtr(rel, page, blkno, tupDesc, vLevel, logLevel);
+    if (vLevel <= USTORE_VERIFY_FAST && (verifyParams->bvInfo.process == DML_VERIFY)) {
+        VerifyUTupleForDML(page, offnum, logLevel);
+    } else {
+        VerifyUPageRowPtr(rel, page, blkno, tupDesc, vLevel, logLevel);
+    }
     ValidateUPageLsn(page, latestRedo, logLevel);
     return true;
 }

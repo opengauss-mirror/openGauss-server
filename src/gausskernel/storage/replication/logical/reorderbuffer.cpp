@@ -1495,10 +1495,12 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                      * Do not decode private tables, otherwise there will be security problems.
                      */
                     if (is_role_independent(FindRoleid(reloid))) {
+                        RelationClose(relation);
                         continue;
                     }
 
                     if (CSTORE_NAMESPACE == get_rel_namespace(RelationGetRelid(relation))) {
+                        RelationClose(relation);
                         continue;
                     }
 
@@ -1626,7 +1628,13 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                         continue;
                     }
 
+                    if (is_role_independent(FindRoleid(reloid))) {
+                        RelationClose(relation);
+                        continue;
+                    }
+
                     if (CSTORE_NAMESPACE == get_rel_namespace(RelationGetRelid(relation))) {
+                        RelationClose(relation);
                         continue;
                     }
 

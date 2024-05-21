@@ -1300,8 +1300,8 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
                     UPageVerifyParams verifyParam;
                     Page page = (char *) buf;
                     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_FAST,
-                        (char *) &verifyParam, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr, NULL,
-                        NULL, true))) {
+                        (char *) &verifyParam, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, ANALYZE_VERIFY))) {
                         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
                     }
                 }
@@ -1334,8 +1334,8 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
             UPageVerifyParams verifyParam;
             Page page = (char *) buf;
             if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_FAST,
-                (char *) &verifyParam, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr, NULL,
-                NULL, true))) {
+                (char *) &verifyParam, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                NULL, NULL, InvalidXLogRecPtr, NULL, NULL, ANALYZE_VERIFY))) {
                 ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
             }
         }
@@ -1397,8 +1397,8 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
             UPageVerifyParams verifyParam;
             Page page = (char *) buf;
             if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-                (char *) &verifyParam, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr, NULL, NULL,
-                true))) {
+                (char *) &verifyParam, rel, page, InvalidBlockNumber, InvalidOffsetNumber, 
+                NULL, NULL, InvalidXLogRecPtr, NULL, NULL, ANALYZE_VERIFY))) {
                 ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
             }
         }

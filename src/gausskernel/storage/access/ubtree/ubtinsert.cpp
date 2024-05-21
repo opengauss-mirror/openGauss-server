@@ -277,7 +277,8 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
 
     END_CRIT_SECTION();
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+        NULL, NULL, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
     }
     return has_pruned;
@@ -714,7 +715,7 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        rel, page, InvalidBlockNumber, NULL, gpiScan, InvalidXLogRecPtr))) {
+        rel, page, InvalidBlockNumber, InvalidOffsetNumber, NULL, gpiScan, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
     }
 
@@ -900,7 +901,8 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                             errmsg("fell off the end of index \"%s\" at blkno %u",
                                    RelationGetRelationName(rel), nblkno)));
                 if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-                    (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, gpiScan, InvalidXLogRecPtr))) {
+                    (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                    NULL, gpiScan, InvalidXLogRecPtr))) {
                     ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
                 }
             }
@@ -1020,7 +1022,8 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
                 rbuf = _bt_relandgetbuf(rel, rbuf, rblkno, BT_WRITE);
                 page = BufferGetPage(rbuf);
                 if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-                    (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+                    (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                    NULL, NULL, InvalidXLogRecPtr))) {
                     ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
                 }
                 lpageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -1332,7 +1335,8 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
 
         END_CRIT_SECTION();
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+            (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+            NULL, NULL, InvalidXLogRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
         }
         /* release buffers */
@@ -1995,7 +1999,7 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
 
     page = BufferGetPage(*bufP);
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        rel, page, InvalidBlockNumber, InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
     }
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -2079,7 +2083,8 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
                 *bufP = _bt_relandgetbuf(rel, *bufP, nblkno, BT_WRITE);
                 page = BufferGetPage(*bufP);
                 if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-                    (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+                    (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                    NULL, NULL, InvalidXLogRecPtr))) {
                     ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
                 }
                 opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -2263,7 +2268,7 @@ static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bo
 
     END_CRIT_SECTION();
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
-        rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        rel, page, InvalidBlockNumber, InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
     }
     bool needRecordEmpty = (opaque->activeTupleCount == 0);

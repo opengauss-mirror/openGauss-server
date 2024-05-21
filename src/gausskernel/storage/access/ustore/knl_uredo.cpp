@@ -280,7 +280,8 @@ void UHeapXlogInsert(XLogReaderState *record)
         if (action == BLK_NEEDS_REDO) {
             PerformInsertRedoAction(record, buffer.buf, urecptr, tbuf);
             if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-                NULL, BufferGetPage(buffer.buf), blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+                NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber, NULL,
+                NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
                 ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
             }
         }
@@ -475,7 +476,8 @@ static void UHeapXlogDelete(XLogReaderState *record)
         if (action == BLK_NEEDS_REDO) {
             PerformDeleteRedoAction(record, &utup, &buffer, urecptr);
             if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-                NULL, BufferGetPage(buffer.buf), blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+                NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber,
+                NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
                 ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
             }
         }
@@ -538,7 +540,7 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -586,7 +588,7 @@ static void UHeapXlogInvalidTdSlot(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -736,7 +738,8 @@ static void UHeapXlogClean(XLogReaderState *record)
     if (action == BLK_NEEDS_REDO) {
         PerformCleanRedoAction(record, &buffer, &freespace);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, BufferGetPage(buffer.buf), blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber, NULL, NULL,
+            t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -1321,8 +1324,8 @@ static void UHeapXlogUpdate(XLogReaderState *record)
             newlen = GetUHeapDiskTupleFromUpdateNewRedoData(record, &tuples, &affixLens, tbuf, sameBlock);
             freespace = PerformUpdateNewRedoAction(record, &buffers, &tuples, newlen, xlnewundohdr, urecptr, sameBlock);
             if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-                (char *) &verifyParams, NULL, BufferGetPage(buffers.newbuffer.buf), newblk, NULL, NULL,
-                t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+                (char *) &verifyParams, NULL, BufferGetPage(buffers.newbuffer.buf), newblk,
+                InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
                 ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
             }
         }
@@ -1651,7 +1654,8 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
     if (action == BLK_NEEDS_REDO) {
         PerformMultiInsertRedoAction(record, xlrec, &buffer, urecptr, ufreeOffsetRanges);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, BufferGetPage(buffer.buf), blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, BufferGetPage(buffer.buf), blkno, InvalidOffsetNumber, NULL, NULL,
+            t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -1682,7 +1686,7 @@ static void UHeapXlogBaseShift(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -1754,7 +1758,7 @@ static void UHeapXlogExtendTDSlot(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -1833,7 +1837,7 @@ static void UHeapXlogFreeze(XLogReaderState *record)
         PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST, (char *) &verifyParams,
-            NULL, page, blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            NULL, page, blkno, InvalidOffsetNumber, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -2000,7 +2004,8 @@ static void UHeapUndoXlogPage(XLogReaderState *record)
         PageSetLSN(page, record->EndRecPtr);
         MarkBufferDirty(buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-            (char *) &verifyParams, NULL, page, blkno, NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            (char *) &verifyParams, NULL, page, blkno, InvalidOffsetNumber,
+            NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -2026,8 +2031,8 @@ static void UHeapUndoXlogResetXid(XLogReaderState *record)
         PageSetLSN(BufferGetPage(buf), lsn);
         MarkBufferDirty(buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-            (char *) &verifyParams, NULL, BufferGetPage(buf), blkno, NULL, NULL,
-            t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            (char *) &verifyParams, NULL, BufferGetPage(buf), blkno, InvalidOffsetNumber,
+            NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }
@@ -2093,8 +2098,8 @@ static void UHeapUndoXlogAbortSpecinsert(XLogReaderState *record)
         PageSetLSN(BufferGetPage(buf), lsn);
         MarkBufferDirty(buf);
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_REDO, USTORE_VERIFY_FAST,
-            (char *) &verifyParams, NULL, BufferGetPage(buf), blkno, NULL, NULL,
-            t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
+            (char *) &verifyParams, NULL, BufferGetPage(buf), blkno, InvalidOffsetNumber,
+            NULL, NULL, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_REDO, (char *) &verifyParams);
         }
     }

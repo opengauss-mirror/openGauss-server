@@ -3169,16 +3169,17 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
 
             page = BufferGetPage(buffer);
             RowPtr      *rp = UPageGetRowPtr(page, ItemPointerGetOffsetNumber(tid));
+            UHeapDiskTuple diskTuple = NULL;
 
             Assert(RowPtrIsUsed(rp));
 
-            uheaptupdata.disk_tuple = (UHeapDiskTuple) UPageGetRowData(page, rp);
+            diskTuple = (UHeapDiskTuple) UPageGetRowData(page, rp);
+            uheaptupdata.disk_tuple_size = rp->len;
+            errorNo = memcpy_s((char*)uheaptupdata.disk_tuple, rp->len, (char*)diskTuple, rp->len);
+            securec_check(errorNo, "\0", "\0");
             uheaptupdata.ctid = *tid;
             uheaptupdata.table_oid = RelationGetRelid(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation);
-
             uheaptupdata.xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
-
-            uheaptupdata.disk_tuple_size = rp->len;
             uheaptupdata.t_xid_base = ((UHeapPageHeaderData*)page)->pd_xid_base;
 
             LockBuffer(buffer, BUFFER_LOCK_UNLOCK);

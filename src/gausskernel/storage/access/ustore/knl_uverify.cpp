@@ -65,13 +65,14 @@
 
  /* Construct the ustore verify parameter structure. */
 bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevel, char *paramSt, Relation rel, Page page,
-    BlockNumber blk, TupleDesc tupDesc, GPIScanDesc gpiScan, XLogRecPtr lastestRedo, undo::UndoZone *uZone,
-    undo::TransactionSlot *slot, bool analyzeVerify)
+    BlockNumber blk,  OffsetNumber offnum, TupleDesc tupDesc, GPIScanDesc gpiScan, XLogRecPtr lastestRedo, undo::UndoZone *uZone,
+    undo::TransactionSlot *slot, int process)
 {
     errno_t rc = EOK;
     bool finishSetParams = false;
     uint32 mainModule = module & USTORE_VERIFY_MOD_MASK;
     uint32 subModule = module & USTORE_VERIFY_SUB_MOD_MASK;
+    bool analyzeVerify = (process == ANALYZE_VERIFY);
 
     /* Precheck verify parameters. */
     if (!PrecheckUstoreVerifyParams(module, rel, analyzeVerify)) {
@@ -83,11 +84,12 @@ bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevel, char *paramSt
             rc = memset_s(paramSt, sizeof(UPageVerifyParams), 0, sizeof(UPageVerifyParams));
             securec_check(rc, "\0", "\0");
             UPageVerifyParams *params = (UPageVerifyParams *) paramSt;
-            params->bvInfo.analyzeVerify = analyzeVerify;
+            params->bvInfo.process = process;
             params->bvInfo.vLevel = vLevel;
             params->bvInfo.rel = rel;
             params->page = page;
             params->blk = blk;
+            params->offnum = offnum;
             params->tupDesc = tupDesc;
             finishSetParams = true;
         }
@@ -96,7 +98,7 @@ bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevel, char *paramSt
             rc = memset_s(paramSt, sizeof(UBtreePageVerifyParams), 0, sizeof(UBtreePageVerifyParams));
             securec_check(rc, "\0", "\0");
             UBtreePageVerifyParams *params = (UBtreePageVerifyParams *) paramSt;
-            params->bvInfo.analyzeVerify = analyzeVerify;
+            params->bvInfo.process = process;
             params->bvInfo.vLevel = vLevel;
             params->bvInfo.rel = rel;
             params->page = page;
@@ -108,7 +110,7 @@ bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevel, char *paramSt
             rc = memset_s(paramSt, sizeof(UndoVerifyParams), 0, sizeof(UndoVerifyParams));
             securec_check(rc, "\0", "\0");
             UndoVerifyParams *params = (UndoVerifyParams *) paramSt;
-            params->bvInfo.analyzeVerify = analyzeVerify;
+            params->bvInfo.process = process;
             params->bvInfo.vLevel = vLevel;
             if (subModule == USTORE_VERIFY_UNDO_SUB_UNDOZONE) {
                 params->subModule = UNDO_VERIFY_UNDOZONE;
@@ -127,7 +129,7 @@ bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevel, char *paramSt
             rc = memset_s(paramSt, sizeof(URedoVerifyParams), 0, sizeof(URedoVerifyParams));
             securec_check(rc, "\0", "\0");
             URedoVerifyParams *params = (URedoVerifyParams *) paramSt;
-            params->pageVerifyParams.bvInfo.analyzeVerify = analyzeVerify;
+            params->pageVerifyParams.bvInfo.process = process;
             params->pageVerifyParams.bvInfo.vLevel = vLevel;
             params->pageVerifyParams.bvInfo.rel = rel;
             params->pageVerifyParams.page = page;
@@ -159,7 +161,7 @@ bool ExecuteUstoreVerify(uint32 module, char* verifyParam)
         return false;
     }
 
-    bool analyzeVerify = ((baseVerifyInfo *) verifyParam)->analyzeVerify;
+    bool analyzeVerify = (((baseVerifyInfo *) verifyParam)->process == ANALYZE_VERIFY);
     uint32 mainModule = module & USTORE_VERIFY_MOD_MASK;
     VerifyLevel vLevel = ((baseVerifyInfo *) verifyParam)->vLevel;
 

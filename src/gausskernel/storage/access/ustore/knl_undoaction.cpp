@@ -258,7 +258,8 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
 
     UPageVerifyParams verifyParams;
         if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, rel, page, BufferGetBlockNumber(buffer), NULL, NULL, InvalidXLogRecPtr))) {
+            (char *) &verifyParams, rel, page, BufferGetBlockNumber(buffer), InvalidOffsetNumber,
+            NULL, NULL, InvalidXLogRecPtr))) {
             ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
     }
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
@@ -574,7 +575,8 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     END_CRIT_SECTION();
     UPageVerifyParams verifyParams;
     if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relationData.relation, page, blkno, NULL, NULL, InvalidXLogRecPtr))) {
+        (char *) &verifyParams, relationData.relation, page, blkno, InvalidOffsetNumber,
+        NULL, NULL, InvalidXLogRecPtr))) {
         ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
     }
 
@@ -1010,13 +1012,17 @@ bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloi
         /* Given the parent id, search which partition is using the relfilenode. */
         List *partitionsList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, realRelid);
         ListCell *cell = NULL;
+        Oid relTableSpace = relfilenode->spcNode;
+        if (relTableSpace == u_sess->proc_cxt.MyDatabaseTableSpace) {
+            relTableSpace = 0;
+        }
         foreach (cell, partitionsList) {
             HeapTuple tuple = (HeapTuple)lfirst(cell);
             if (HeapTupleIsValid(tuple)) {
                 Form_pg_partition rd_part = (Form_pg_partition)GETSTRUCT(tuple);
                 /* A Partitioned table could have partitions on different tablespaces */
                 if (rd_part->relfilenode == relfilenode->relNode &&
-                    rd_part->reltablespace == relfilenode->spcNode) {
+                    rd_part->reltablespace == relTableSpace) {
                     partitionId = HeapTupleGetOid(tuple);
                     break;
                 }

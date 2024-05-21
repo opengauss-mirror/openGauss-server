@@ -40,6 +40,9 @@
 #define USTORE_VERIFY_MOD_REDO 0x00080000
 #define USTORE_VERIFY_MOD_MASK (USTORE_VERIFY_MOD_UPAGE | USTORE_VERIFY_MOD_UBTREE | USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_MOD_REDO)
 
+#define DML_VERIFY      1
+#define ANALYZE_VERIFY  2
+
 /* Ustore verification submodule list for a specific module. */
 #define USTORE_VERIFY_UNDO_SUB_UNDOZONE 0x0001
 #define USTORE_VERIFY_UNDO_SUB_TRANSLOT 0x0002
@@ -57,7 +60,7 @@ typedef enum VerifyLevel {
 
 /* Base verify info struct for each type. */
 typedef struct baseVerifyInfo {
-    bool analyzeVerify;
+    int process;
     VerifyLevel vLevel;
     Relation rel;
 } baseVerifyInfo;
@@ -67,6 +70,7 @@ typedef struct UPageVerifyParams {
     baseVerifyInfo bvInfo;
     Page page;
     BlockNumber blk;
+    OffsetNumber offnum;
     TupleDesc tupDesc;
 } UPageVerifyParams;
 
@@ -103,8 +107,9 @@ typedef struct UndoVerifyParams {
     } paramVal;
 } UndoVerifyParams;
 
-extern bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevl, char *paramSt, Relation rel, Page page, BlockNumber blk,
-    TupleDesc tupDesc = NULL, GPIScanDesc gpiScan = NULL, XLogRecPtr lastestRedo = InvalidXLogRecPtr,
-    undo::UndoZone *uZone = NULL, undo::TransactionSlot *slot = NULL, bool analyzeVerify = false);
+extern bool ConstructUstoreVerifyParam(uint32 module, VerifyLevel vLevl, char *paramSt, 
+    Relation rel, Page page, BlockNumber blk, OffsetNumber offnum, TupleDesc tupDesc = NULL, 
+    GPIScanDesc gpiScan = NULL, XLogRecPtr lastestRedo = InvalidXLogRecPtr,
+    undo::UndoZone *uZone = NULL, undo::TransactionSlot *slot = NULL, int process = 0);
 extern bool ExecuteUstoreVerify(uint32 module, char* verifyParam);
 #endif

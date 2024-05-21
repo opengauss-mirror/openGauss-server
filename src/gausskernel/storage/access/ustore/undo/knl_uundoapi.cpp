@@ -199,7 +199,7 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
     uint32 verifyModule = USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_UNDO_SUB_TRANSLOT;
     UndoVerifyParams verifyParam;
     if (ConstructUstoreVerifyParam(verifyModule, USTORE_VERIFY_FAST, (char *) &verifyParam, NULL,
-        NULL, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr, NULL, slot, false)) {
+        NULL, InvalidBlockNumber, InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr, NULL, slot, false)) {
         ExecuteUstoreVerify(verifyModule, (char *) &verifyParam);
     }
     ereport(DEBUG2, (errmodule(MOD_UNDO),

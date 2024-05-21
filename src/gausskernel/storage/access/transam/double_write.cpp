@@ -2483,6 +2483,14 @@ bool free_space_enough(int buf_id)
 {
     Page page = BufferGetPage(buf_id + 1);
     PageHeader pghr = (PageHeader)page;
+    BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
+    BufferTag* tag = &buf_desc->tag;
+
+    /* only the heap page's pd_lower and pd_upper space is valid to store the buftag */
+    if (tag->forkNum != MAIN_FORKNUM || IS_UNDO_RECORD_BUFFER(tag->rnode) || IS_TRANS_SLOT_BUFFER(tag->rnode)) {
+        return false;
+    }
+
     if(pghr->pd_upper - pghr->pd_lower >= (int)sizeof(dw_first_flush_item)) {
         return true;
     }
