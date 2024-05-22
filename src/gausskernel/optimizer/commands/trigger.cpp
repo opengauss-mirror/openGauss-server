@@ -1208,6 +1208,7 @@ static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid)
         fkcon->initdeferred = stmt->initdeferred;
         fkcon->skip_validation = false;
         fkcon->initially_valid = true;
+        fkcon->isdisable = false;
 
         /* ... and execute it */
         processutility_context proutility_cxt;
@@ -5120,8 +5121,23 @@ void AfterTriggerSetState(ConstraintsSetStmt* stmt)
                 while (HeapTupleIsValid(tup = systable_getnext(conscan))) {
                     Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
                     if (con->condeferrable) {
-                        TrForbidAccessRbObject(ConstraintRelationId, HeapTupleGetOid(tup), constraint->relname);
-                        conoidlist = lappend_oid(conoidlist, HeapTupleGetOid(tup));
+                        if (con->contype != CONSTRAINT_CHECK) {
+                            TrForbidAccessRbObject(ConstraintRelationId, HeapTupleGetOid(tup), constraint->relname);
+                            conoidlist = lappend_oid(conoidlist, HeapTupleGetOid(tup));
+                        } else {
+                            Relation rel;
+                            rel = relation_open(con->conrelid, NoLock);
+                            CacheInvalidateRelcache(rel);
+                            HeapTuple copyTuple;
+                            Form_pg_constraint copy_con;
+                            copyTuple = (HeapTuple) tableam_tops_copy_tuple(tup);
+                            copy_con = (Form_pg_constraint)GETSTRUCT(copyTuple);
+                            copy_con->condeferred = stmt->deferred;
+                            simple_heap_update(conrel, &copyTuple->t_self, copyTuple);
+                            CatalogUpdateIndexes(conrel, copyTuple);
+                            tableam_tops_free_tuple(copyTuple);
+                            relation_close(rel, NoLock);
+                        }
                     } else if (stmt->deferred) {
                         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                             errmsg("constraint \"%s\" is not deferrable", constraint->relname)));

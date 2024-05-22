@@ -1390,6 +1390,9 @@ typedef struct IndexStmt {
 
     /* adaptive memory assigned for the stmt */
     AdaptMem memUsage;
+
+    bool isvalidated;                      /* is the constraint validated */
+    bool isdisable;                        /* is the constraint disable */
 } IndexStmt;
 
 typedef struct AlterFunctionStmt {

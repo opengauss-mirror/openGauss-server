@@ -224,6 +224,9 @@ extern ResultRelInfo* ExecGetTriggerResultRel(EState* estate, Oid relid);
 extern bool ExecContextForcesOids(PlanState* planstate, bool* hasoids);
 extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate,
     bool skipAutoInc = false, bool replaceNull = false);
+extern void CheckIndexDisableValid(ResultRelInfo* result_rel_info, EState *estate);
+extern void CheckDisableValidateConstr(ResultRelInfo *resultRelInfo);
+extern bool ExecSetArgIsByValue(FunctionCallInfoData* fcinfo);
 extern void ExecWithCheckOptions(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate);
 extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);

@@ -3011,6 +3011,13 @@ IndexStmt* generateClonedIndexStmt(
             index->isconstraint = true;
             index->deferrable = conrec->condeferrable;
             index->initdeferred = conrec->condeferred;
+            index->isvalidated = conrec->convalidated;
+
+            bool isNull = true;
+            Relation pg_constraint;
+            pg_constraint = heap_open(ConstraintRelationId, NoLock);
+            Datum datum = heap_getattr(ht_constr, Anum_pg_constraint_condisable, RelationGetDescr(pg_constraint), &isNull);
+            index->isdisable = DatumGetBool(datum);
 
             /* If it's an exclusion constraint, we need the operator names */
             if (idxrec->indisexclusion) {
@@ -3050,6 +3057,7 @@ IndexStmt* generateClonedIndexStmt(
                 }
             }
 
+            heap_close(pg_constraint, NoLock);
             ReleaseSysCache(ht_constr);
         } else
             index->isconstraint = false;
@@ -3581,6 +3589,8 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
     index->isconstraint = true;
     index->deferrable = constraint->deferrable;
     index->initdeferred = constraint->initdeferred;
+    index->isvalidated = constraint->initially_valid;
+    index->isdisable = constraint->isdisable;
 
     if (constraint->conname != NULL)
         index->idxname = pstrdup(constraint->conname);
@@ -4115,6 +4125,7 @@ static void transformFKConstraints(CreateStmtContext* cxt, bool skipValidation, 
 
             constraint->skip_validation = true;
             constraint->initially_valid = true;
+            constraint->isdisable = false;
 #ifdef PGXC
             /*
              * Set fallback distribution column.
@@ -5223,7 +5234,7 @@ static void transformConstraintAttrs(CreateStmtContext* cxt, List* constraintLis
     ListCell* clist = NULL;
 
 #define SUPPORTS_ATTRS(node)                                                                     \
-    ((node) != NULL && ((node)->contype == CONSTR_PRIMARY || (node)->contype == CONSTR_UNIQUE || \
+    ((node) != NULL && ((node)->contype == CONSTR_PRIMARY || (node)->contype == CONSTR_UNIQUE || (node)->contype == CONSTR_CHECK || \
                            (node)->contype == CONSTR_EXCLUSION || (node)->contype == CONSTR_FOREIGN))
 
     foreach (clist, constraintList) {

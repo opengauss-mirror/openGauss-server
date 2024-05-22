@@ -753,7 +753,7 @@ Oid index_create(Relation heapRelation, const char *indexRelationName, Oid index
     IndexInfo *indexInfo, List *indexColNames, Oid accessMethodObjectId, Oid tableSpaceId, Oid *collationObjectId,
     Oid *classObjectId, int16 *coloptions, Datum reloptions, bool isprimary, bool isconstraint, bool deferrable,
     bool initdeferred, bool allow_system_table_mods, bool skip_build, bool concurrent, IndexCreateExtraArgs *extra,
-    bool useLowLockLevel, int8 relindexsplit, bool visible)
+    bool useLowLockLevel, int8 relindexsplit, bool visible, bool isvalidated, bool isdisable)
 {
     Oid heapRelationId = RelationGetRelid(heapRelation);
     Relation pg_class;
@@ -1078,7 +1078,9 @@ Oid index_create(Relation heapRelation, const char *indexRelationName, Oid index
                     false, /* already marked primary */
                     false, /* pg_index entry is OK */
                     false, /* no old dependencies */
-                    allow_system_table_mods);
+                    allow_system_table_mods,
+                    isvalidated,
+                    isdisable);
             } else {
                 bool have_simple_col = false;
 
@@ -2118,7 +2120,8 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
  */
 ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo* indexInfo,
     const char* constraintName, char constraintType, bool deferrable, bool initdeferred, bool mark_as_primary,
-    bool update_pgindex, bool remove_old_dependencies, bool allow_system_table_mods)
+    bool update_pgindex, bool remove_old_dependencies, bool allow_system_table_mods, 
+    bool isvalidated, bool isdisable)
 {
     Oid namespaceId = RelationGetNamespace(heapRelation);
     ObjectAddress myself, referenced;
@@ -2173,7 +2176,7 @@ ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId
         constraintType,
         deferrable,
         initdeferred,
-        true,
+        isvalidated,
         RelationGetRelid(heapRelation),
         indexInfo->ii_KeyAttrNumbers,
         indexInfo->ii_NumIndexKeyAttrs,
@@ -2196,7 +2199,8 @@ ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId
         true,  /* islocal */
         0,     /* inhcount */
         true,  /* noinherit */
-        NULL); /* @hdfs informational constraint */
+        NULL,  /* @hdfs informational constraint */
+        isdisable);
 
     /*
      * Register the index as internally dependent on the constraint.

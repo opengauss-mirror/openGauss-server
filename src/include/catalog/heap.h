@@ -50,6 +50,7 @@ typedef struct CookedConstraint {
 	bool		is_no_inherit;   /* constraint has local def and cannot be
 								 * inherited */
     Node        *update_expr;
+    bool        isdisable;
 } CookedConstraint;
 
 typedef struct CeHeapInfo {

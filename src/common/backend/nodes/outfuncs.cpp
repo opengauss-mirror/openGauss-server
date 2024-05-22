@@ -4078,6 +4078,10 @@ static void _outIndexStmt(StringInfo str, IndexStmt* node)
     WRITE_BOOL_FIELD(initdeferred);
     WRITE_BOOL_FIELD(concurrent);
     WRITE_NODE_FIELD(inforConstraint);
+    if (t_thrd.proc->workingVersionNum >= DISABLE_CONSTRAINT_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isvalidated);
+        WRITE_BOOL_FIELD(isdisable);
+    }
 }
 
 static void _outNotifyStmt(StringInfo str, NotifyStmt* node)
@@ -5650,6 +5654,9 @@ static void _outConstraint(StringInfo str, Constraint* node)
             WRITE_OID_FIELD(old_pktable_oid);
             WRITE_BOOL_FIELD(skip_validation);
             WRITE_BOOL_FIELD(initially_valid);
+            if (t_thrd.proc->workingVersionNum >= DISABLE_CONSTRAINT_VERSION_NUM) {
+                WRITE_BOOL_FIELD(isdisable);
+            }
             break;
 
         case CONSTR_CLUSTER:

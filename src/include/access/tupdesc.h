@@ -72,6 +72,8 @@ typedef struct constrCheck {
     char* ccbin; /* nodeToString representation of expr */
     bool ccvalid;
     bool ccnoinherit; /* this is a non-inheritable constraint */
+    char cctype;
+    bool ccdisable;
 } ConstrCheck;
 
 typedef struct ConstrAutoInc {

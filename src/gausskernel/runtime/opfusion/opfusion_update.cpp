@@ -406,6 +406,7 @@ lreplace:
                 ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
             }
         }
+        CheckIndexDisableValid(result_rel_info, m_c_local.m_estate);
 
         /* Check unique constraints first if SQL has keyword IGNORE */
         bool isgpi = false;

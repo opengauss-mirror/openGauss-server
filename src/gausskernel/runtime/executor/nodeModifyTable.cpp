@@ -1171,6 +1171,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     }
                 }
             }
+            CheckIndexDisableValid(result_rel_info, estate);
         }
 #endif
         /*
@@ -1216,6 +1217,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
             }
             tuple = ExecAutoIncrement(result_relation_desc, estate, slot, tuple);
         }
+        CheckIndexDisableValid(result_rel_info, estate);
 
 #ifdef PGXC
         if (IS_PGXC_COORDINATOR && result_remote_rel) {
@@ -1743,6 +1745,9 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
     fake_relation = result_relation_desc;
 
 ldelete:
+        if (result_relation_desc->rd_att->constr)
+            CheckDisableValidateConstr(result_rel_info);
+        CheckIndexDisableValid(result_rel_info, estate);
 #ifdef PGXC
         if (IS_PGXC_COORDINATOR && result_remote_rel) {
             /* for merge into we have to provide the slot */
@@ -2203,6 +2208,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                     }
                 }
             }
+            CheckIndexDisableValid(result_rel_info, estate);
         }
 #endif
         slot = result_rel_info->ri_FdwRoutine->ExecForeignUpdate(estate, result_rel_info, slot, planSlot);
@@ -2263,6 +2269,7 @@ lreplace:
                 }
             }
         }
+        CheckIndexDisableValid(result_rel_info, estate);
 
 #ifdef PGXC
         if (IS_PGXC_COORDINATOR && result_remote_rel) {

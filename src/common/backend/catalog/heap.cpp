@@ -163,7 +163,8 @@ static ObjectAddress AddNewRelationType(const char* typeName, Oid typeNamespace,
     Oid new_row_type, Oid new_array_type);
 static void RelationRemoveInheritance(Oid relid);
 static Oid StoreRelCheck(
-    Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit);
+    Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit,
+    bool is_deferrable = false, bool is_deferred = false, bool is_disable = false);
 static void StoreConstraints(Relation rel, List* cooked_constraints);
 static bool MergeWithExistingConstraint(
     Relation rel, char* ccname, Node* expr, bool allow_merge, bool is_local, bool is_no_inherit);
@@ -4025,7 +4026,8 @@ Oid StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generated
  * The OID of the new constraint is returned.
  */
 static Oid StoreRelCheck(
-    Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit)
+    Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit,
+    bool is_deferrable, bool is_deferred, bool is_disable)
 {
     char* ccbin = NULL;
     char* ccsrc = NULL;
@@ -4080,8 +4082,8 @@ static Oid StoreRelCheck(
     constrOid = CreateConstraintEntry(ccname, /* Constraint Name */
         RelationGetNamespace(rel),      /* namespace */
         CONSTRAINT_CHECK,               /* Constraint Type */
-        false,                          /* Is Deferrable */
-        false,                          /* Is Deferred */
+        is_deferrable,                  /* Is Deferrable */
+        is_deferred,                    /* Is Deferred */
         is_validated,
         RelationGetRelid(rel), /* relation */
         attNos,                /* attrs in the constraint */
@@ -4105,7 +4107,8 @@ static Oid StoreRelCheck(
         is_local,      /* conislocal */
         inhcount,      /* coninhcount */
         is_no_inherit, /* connoinherit */
-        NULL);         /* @hdfs softconstraint info */
+        NULL,          /* @hdfs softconstraint info */
+        is_disable);
 
     pfree(ccbin);
     pfree(ccsrc);
@@ -4147,7 +4150,7 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
                 break;
             case CONSTR_CHECK:
                 con->conoid = StoreRelCheck(
-                    rel, con->name, con->expr, !con->skip_validation, con->is_local, con->inhcount, con->is_no_inherit);
+                    rel, con->name, con->expr, !con->skip_validation, con->is_local, con->inhcount, con->is_no_inherit, false, false, con->isdisable);
                 numchecks++;
                 break;
             default:
@@ -4314,6 +4317,7 @@ List* AddRelationNewConstraints(
         cooked->is_local = is_local;
         cooked->inhcount = is_local ? 0 : 1;
         cooked->is_no_inherit = false;
+        cooked->isdisable = false;
         cookedConstraints = lappend(cookedConstraints, cooked);
         expr = NULL;
         update_expr = NULL;
@@ -4425,7 +4429,8 @@ List* AddRelationNewConstraints(
          * OK, store it.
          */
         constrOid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, 
-                                    is_local, is_local ? 0 : 1, cdef->is_no_inherit);
+                                    is_local, is_local ? 0 : 1, cdef->is_no_inherit,
+                                    cdef->deferrable, cdef->initdeferred, cdef->isdisable);
         ListCell *cell = NULL;
         foreach (cell, cdef->constraintOptions) {
             void *pointer = lfirst(cell);
@@ -4447,6 +4452,7 @@ List* AddRelationNewConstraints(
         cooked->is_local = is_local;
         cooked->inhcount = is_local ? 0 : 1;
         cooked->is_no_inherit = cdef->is_no_inherit;
+        cooked->isdisable = cdef->isdisable;
         cookedConstraints = lappend(cookedConstraints, cooked);
     }
 

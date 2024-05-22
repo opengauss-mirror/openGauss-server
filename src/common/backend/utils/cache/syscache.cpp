@@ -288,6 +288,11 @@ const cachedesc cacheinfo[] = {
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         1024},
+    {ConstraintRelationId, /* CONSTRRELID */
+        ConstraintRelidIndexId,
+        2,
+        {Anum_pg_constraint_conrelid, Anum_pg_constraint_contypid, 0, 0},
+        1024},
     {ConversionRelationId, /* CONVOID */
         ConversionOidIndexId,
         1,
@@ -625,11 +630,6 @@ const cachedesc cacheinfo[] = {
             Anum_pg_statistic_ext_stainherit,
             Anum_pg_statistic_ext_stakey},
         STATISTIC_EXT_RELID_KIND_INH_KEY_INDEX_ID_NBUCKETS},
-    {StreamingContQueryRelationId, /* STREAMCQDEFRELID */
-        StreamingContQueryDefrelidIndexId,
-        1,
-        {Anum_streaming_cont_query_defrelid, 0, 0, 0},
-        STREAMING_CONT_QUERY_DEFRELID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQID */
         StreamingContQueryIdIndexId,
         1,

@@ -97,6 +97,7 @@
 #include "gs_ledger/ledger_utils.h"
 #include "gs_policy/gs_policy_masking.h"
 #include "optimizer/gplanmgr.h"
+#include "catalog/pg_constraint.h"
 
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 THR_LOCAL ExecutorStart_hook_type ExecutorStart_hook = NULL;
@@ -2510,6 +2511,23 @@ static void ExecuteVectorizedPlan(EState *estate, PlanState *planstate, CmdType 
     }
 }
 
+
+typedef struct {
+    Bitmapset* varattno;
+} Chk_modify_varattno_context;
+
+static bool check_modify_varattno_walker(Node* node, Chk_modify_varattno_context* context)
+{
+    if (node == NULL)
+        return false;
+
+    if (IsA(node, Var)) {
+        Var* var = (Var*)node;
+        return bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber, context->varattno);
+    }
+    return expression_tree_walker(node, (bool (*)())check_modify_varattno_walker, (void*)context);
+}
+
 /*
  * ExecRelCheck --- check that tuple meets constraints for result relation
  */
@@ -2561,19 +2579,109 @@ static const char *ExecRelCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *sl
          * expression is not to be treated as a failure.  Therefore, tell
          * ExecQual to return TRUE for NULL.
          */
-        if (estate->es_is_flt_frame){
-            if (!ExecCheckByFlatten((ExprState*)qual, econtext)){
-                return check[i].ccname;
+        if(check[i].ccdisable && false == check[i].ccvalid)
+            continue;
+        else if(check[i].ccdisable && check[i].ccvalid) {
+            Bitmapset *insertedCols = NULL;
+            Bitmapset *updatedCols  = NULL;
+            Bitmapset *modifiedCols = NULL;
+            ListCell* l = NULL;
+            insertedCols = GetInsertedColumns(resultRelInfo, estate);
+            updatedCols = GetUpdatedColumns(resultRelInfo, estate);
+            modifiedCols = bms_union(insertedCols, updatedCols);
+            Chk_modify_varattno_context chk_context;
+            chk_context.varattno = modifiedCols;
+            foreach (l, qual) {
+                ExprState *clause = (ExprState*)lfirst(l);
+                if(expression_tree_walker((Node *)clause->expr, (bool(*)())check_modify_varattno_walker, (void *)&chk_context)) {
+                    ereport(ERROR, 
+                            (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CHECK_VIOLATION),
+                                errmsg("forbid DML because relation \"%s\" violates check constraint \"%s\"",
+                                    RelationGetRelationName(rel), check[i].ccname)));
+                }
             }
-        } else {
-            if (!ExecQual(qual, econtext, true)){
-                return check[i].ccname;
+        }else {
+            if (estate->es_is_flt_frame){
+                if (!ExecCheckByFlatten((ExprState*)qual, econtext)){
+                    return check[i].ccname;
+                }
+            } else {
+                if (!ExecQual(qual, econtext, true)){
+                    return check[i].ccname;
+                }
             }
         }
     }
-
     /* NULL result means no error */
     return NULL;
+}
+
+void CheckIndexDisableValid(ResultRelInfo* result_rel_info, EState *estate)
+{
+    Relation rel = result_rel_info->ri_RelationDesc;
+    CatCList* catlist = NULL;
+    HeapTuple tuple;
+    Form_pg_constraint con = NULL;
+
+    catlist = SearchSysCacheList1(CONSTRRELID, ObjectIdGetDatum(RelationGetRelid(rel)));
+    if (!catlist)
+        return;
+
+    Relation pg_constraint;
+    pg_constraint = heap_open(ConstraintRelationId, NoLock);
+    for (int i = 0; i < catlist->n_members; i++) {
+        tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+        if(HeapTupleIsValid(tuple)){
+            con = (Form_pg_constraint)GETSTRUCT(tuple);
+            bool isNull = true;
+            Datum datum = heap_getattr(tuple, Anum_pg_constraint_condisable, RelationGetDescr(pg_constraint), &isNull);
+            bool condisable = DatumGetBool(datum);
+            if (con->convalidated && condisable) {
+                bool overlap = false; 
+                if (estate->es_plannedstmt->commandType == CMD_DELETE)
+                    overlap = true;
+                else if (OidIsValid(con->conindid)) {
+                    Relation indexRel = relation_open(con->conindid, RowExclusiveLock);
+                    IndexInfo* indexInfo = BuildIndexInfo(indexRel);
+                    Bitmapset *indexattrs = IndexGetAttrBitmap(indexRel, indexInfo);
+                    relation_close(indexRel, RowExclusiveLock);
+                    Bitmapset *insertedCols = NULL;
+                    Bitmapset *updatedCols  = NULL;
+                    Bitmapset *modifiedCols = NULL;
+                    insertedCols = GetInsertedColumns(result_rel_info, estate);
+                    updatedCols = GetUpdatedColumns(result_rel_info, estate);
+                    modifiedCols = bms_union(insertedCols, updatedCols);
+                    overlap = bms_overlap(indexattrs, modifiedCols);
+                    pfree(indexInfo);
+                    bms_free(indexattrs);
+                    bms_free(modifiedCols);
+                }
+                if (overlap)
+                    ereport(ERROR, 
+                            (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CHECK_VIOLATION),
+                                errmsg("forbid DML because relation \"%s\" violates check constraint \"%s\"",
+                                    RelationGetRelationName(rel), NameStr(con->conname))));
+            }
+        }
+    }
+    heap_close(pg_constraint, NoLock);
+    ReleaseSysCacheList(catlist);
+}
+
+void CheckDisableValidateConstr(ResultRelInfo *resultRelInfo)
+{
+    Relation rel = resultRelInfo->ri_RelationDesc;
+    int ncheck = rel->rd_att->constr->num_check;
+    ConstrCheck *check = rel->rd_att->constr->check;
+    int i = 0;
+    for (; i < ncheck; i++) {
+        if (check[i].ccdisable == check[i].cctype) {
+            ereport(ERROR, 
+                (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CHECK_VIOLATION),
+                    errmsg("forbid DML because relation \"%s\" violates check constraint \"%s\"",
+                        RelationGetRelationName(rel), check[i].ccname)));
+        }
+    }
 }
 
 bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate, bool skipAutoInc,

@@ -9751,6 +9751,24 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
         case AT_ValidateConstraintRecurse:
             tag = "VALIDATE CONSTRAINT RECURSE";
             break;
+        case AT_NOValidateConstraint:
+            tag = "ENABLE NOVALIDATE CONSTRAINT";
+            break;
+        case AT_NOValidateConstraintRecurse:
+            tag = "ENABLE NOVALIDATE CONSTRAINT RECURSE";
+            break;
+        case AT_DISABLE_ValidateConstraint:
+            tag = "DISABLE VALIDATE CONSTRAINT";
+            break;
+        case AT_DISABLE_ValidateConstraintRecurse:
+            tag = "DISABLE VALIDATE CONSTRAINT RECURSE";
+            break;
+        case AT_DISABLE_NOValidateConstraint:
+            tag = "DISABLE NOVALIDATE CONSTRAINT";
+            break;
+        case AT_DISABLE_NOValidateConstraintRecurse:
+            tag = "DISABLE NOVALIDATE CONSTRAINT RECURSE";
+            break;
         case AT_ProcessedConstraint:
             tag = "PROCESSED CONSTRAINT";
             break;

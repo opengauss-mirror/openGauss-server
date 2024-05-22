@@ -1,0 +1,801 @@
+----------------------------------------------------------
+-- create table add PRIMARY KEY constraint
+----------------------------------------------------------
+-- alter table add constrain NULL
+create table test1(id int PRIMARY KEY, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_pkey"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constrain ENABLE
+create table test1(id int PRIMARY KEY ENABLE, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_pkey"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constraint ENABLE VALIDATE
+create table test1(id int PRIMARY KEY ENABLE VALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_pkey"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constraint ENABLE NOVALIDATE
+create table test1(id int PRIMARY KEY ENABLE NOVALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_pkey"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constraint DISABLE VALIDATE
+create table test1(id int PRIMARY KEY DISABLE VALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | t            | t
+(1 row)
+
+insert into test1 values(1, 'aaa');
+ERROR:  forbid DML because relation "test1" violates check constraint "test1_pkey"
+drop table test1;
+-- alter table add constraint DISABLE NOVALIDATE
+create table test1(id int PRIMARY KEY DISABLE NOVALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(1, 'aaa');
+update test1 set name = 'eee' where id = 1; 
+delete from test1 where id = 1;
+drop table test1;
+-- alter table add constraint DISABLE
+create table test1(id int PRIMARY KEY DISABLE, name varchar2(10));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_pkey%';
+  conname   | contype | condeferrable | condeferred | convalidated | condisable 
+------------+---------+---------------+-------------+--------------+------------
+ test1_pkey | p       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(1, 'aaa');
+update test1 set name = 'eee' where id = 1; 
+delete from test1 where id = 1;
+drop table test1;
+----------------------------------------------------------
+-- alter table add UNIQUE constraint
+----------------------------------------------------------
+-- alter table add constrain NULL
+create table test1(id int UNIQUE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_id_key"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constrain ENABLE
+create table test1(id int UNIQUE ENABLE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_id_key"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constraint ENABLE VALIDATE
+create table test1(id int UNIQUE ENABLE VALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_id_key"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constraint ENABLE NOVALIDATE
+create table test1(id int UNIQUE ENABLE NOVALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  duplicate key value violates unique constraint "test1_id_key"
+DETAIL:  Key (id)=(1) already exists.
+drop table test1;
+-- alter table add constraint DISABLE VALIDATE
+create table test1(id int UNIQUE DISABLE VALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | t            | t
+(1 row)
+
+insert into test1 values(1, 'aaa');
+ERROR:  forbid DML because relation "test1" violates check constraint "test1_id_key"
+drop table test1;
+-- alter table add constraint DISABLE NOVALIDATE
+create table test1(id int UNIQUE DISABLE NOVALIDATE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(1, 'aaa');
+update test1 set name = 'eee' where id = 1; 
+delete from test1 where id = 1;
+drop table test1;
+-- alter table add constraint DISABLE
+create table test1(id int UNIQUE DISABLE, name varchar2(10));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test1_id_key" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ test1_id_key | u       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(1, 'aaa');
+update test1 set name = 'eee' where id = 1; 
+delete from test1 where id = 1;
+drop table test1;
+----------------------------------------------------------
+-- create table add check constraint
+----------------------------------------------------------
+-- alter table add constrain NULL
+create table test1(id int check (id>10), name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  new row for relation "test1" violates check constraint "test1_id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constrain ENABLE
+create table test1(id int check (id>10) ENABLE, name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  new row for relation "test1" violates check constraint "test1_id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constraint ENABLE VALIDATE
+create table test1(id int check (id>10) ENABLE VALIDATE, name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  new row for relation "test1" violates check constraint "test1_id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constraint ENABLE NOVALIDATE
+create table test1(id int check (id>10) ENABLE NOVALIDATE, name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(1, 'ccc');
+ERROR:  new row for relation "test1" violates check constraint "test1_id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constraint DISABLE VALIDATE
+create table test1(id int check (id>10) disable validate, name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | t            | t
+(1 row)
+
+insert into test1 values(11, 'aaa');
+ERROR:  forbid DML because relation "test1" violates check constraint "test1_id_check"
+drop table test1;
+-- alter table add constraint DISABLE NOVALIDATE
+create table test1(id int check (id>10) disable novalidate, name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(11, 'aaa');
+update test1 set name = 'eee' where id = 11; 
+delete from test1 where id = 11;
+drop table test1;
+-- alter table add constraint DISABLE
+create table test1(id int check (id>10) disable, name varchar2(10));
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname like 'test1_%';
+    conname     | contype | condeferrable | condeferred | convalidated | condisable 
+----------------+---------+---------------+-------------+--------------+------------
+ test1_id_check | c       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(11, 'aaa');
+update test1 set name = 'eee' where id = 11; 
+delete from test1 where id = 11;
+drop table test1;
+----------------------------------------------------------
+-- alter table add PRIMARY KEY constraint
+----------------------------------------------------------
+-- alter table add constrain NULL
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'hongloumeng');
+insert into test1 values(5, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(xiyouji) already exists.
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+ERROR:  could not create unique index "name_primary"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+drop table test1;
+-- alter table add constrain ENABLE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'hongloumeng');
+insert into test1 values(5, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(xiyouji) already exists.
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+ERROR:  could not create unique index "name_primary"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+drop table test1;
+-- alter table add constraint ENABLE VALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name) ENABLE VALIDATE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'hongloumeng');
+insert into test1 values(5, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(xiyouji) already exists.
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name) ENABLE VALIDATE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+ERROR:  could not create unique index "name_primary"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+drop table test1;
+-- alter table add constraint ENABLE NOVALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT bname_unq PRIMARY KEY(name) ENABLE NOVALIDATE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "bname_unq" for table "test1"
+ERROR:  could not create unique index "bname_unq"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+delete from test1 where id=4;
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name) ENABLE NOVALIDATE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(5, 'hongloumeng');
+insert into test1 values(6, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(xiyouji) already exists.
+update test1 set name='sanguoyanyi' WHERE id=2;
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(sanguoyanyi) already exists.
+delete from test1 WHERE id=2; 
+-- alter table add constraint DISABLE VALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ERROR:  relation "test1" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
+insert into test1 values(1, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(xiyouji) already exists.
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(sanguoyanyi) already exists.
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name) DISABLE VALIDATE;
+ERROR:  multiple primary keys for table "test1" are not allowed
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(4, 'hongloumeng'); 
+ERROR:  duplicate key value violates unique constraint "name_primary"
+DETAIL:  Key (name)=(hongloumeng) already exists.
+update test1 set name='sanguozhi' WHERE id=3;
+delete from test1 WHERE id=3;
+drop table test1;
+-- alter table add constraint DISABLE NOVALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name) DISABLE NOVALIDATE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(4, 'hongloumeng'); 
+update test1 set name='sanguozhi' WHERE id=3;
+delete from test1 WHERE id=3;
+drop table test1;
+-- alter table add constraint DISABLE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+ALTER TABLE test1 ADD CONSTRAINT name_primary PRIMARY KEY(name) DISABLE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "name_primary" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_primary';
+   conname    | contype | condeferrable | condeferred | convalidated | condisable 
+--------------+---------+---------------+-------------+--------------+------------
+ name_primary | p       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(4, 'hongloumeng'); 
+update test1 set name='sanguozhi' WHERE id=3;
+delete from test1 WHERE id=3;
+drop table test1;
+----------------------------------------------------------
+-- alter table add unique constraint
+----------------------------------------------------------
+-- alter table add constrain NULL
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'hongloumeng');
+insert into test1 values(5, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(xiyouji) already exists.
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+ERROR:  could not create unique index "name_unq"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+drop table test1;
+-- alter table add constrain ENABLE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'hongloumeng');
+insert into test1 values(5, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(xiyouji) already exists.
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+ERROR:  could not create unique index "name_unq"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+drop table test1;
+-- alter table add constraint ENABLE VALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name) ENABLE VALIDATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'hongloumeng');
+insert into test1 values(5, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(xiyouji) already exists.
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name) ENABLE VALIDATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+ERROR:  could not create unique index "name_unq"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+drop table test1;
+-- alter table add constraint ENABLE NOVALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+insert into test1 values(4, 'xiyouji');
+ALTER TABLE test1 ADD CONSTRAINT bname_unq UNIQUE(name) ENABLE NOVALIDATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "bname_unq" for table "test1"
+ERROR:  could not create unique index "bname_unq"
+DETAIL:  Key (name)=(xiyouji) is duplicated.
+delete from test1 where id=4;
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name) ENABLE NOVALIDATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(5, 'hongloumeng');
+insert into test1 values(6, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(xiyouji) already exists.
+update test1 set name='sanguoyanyi' WHERE id=2;
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(sanguoyanyi) already exists.
+delete from test1 WHERE id=2; 
+-- alter table add constraint DISABLE VALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+ERROR:  relation "test1" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
+insert into test1 values(1, 'xiyouji');
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(xiyouji) already exists.
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(sanguoyanyi) already exists.
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name) DISABLE VALIDATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+ERROR:  relation "name_unq" already exists
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(4, 'hongloumeng'); 
+ERROR:  duplicate key value violates unique constraint "name_unq"
+DETAIL:  Key (name)=(hongloumeng) already exists.
+update test1 set name='sanguozhi' WHERE id=3;
+delete from test1 WHERE id=3;
+drop table test1;
+-- alter table add constraint DISABLE NOVALIDATE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name) DISABLE NOVALIDATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(4, 'hongloumeng'); 
+update test1 set name='sanguozhi' WHERE id=3;
+delete from test1 WHERE id=3;
+drop table test1;
+-- alter table add constraint DISABLE
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+insert into test1 values(2, 'shuifuzhuan');
+insert into test1 values(3, 'sanguoyanyi');
+ALTER TABLE test1 ADD CONSTRAINT name_unq UNIQUE(name) DISABLE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "name_unq" for table "test1"
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'name_unq';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ name_unq | u       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(4, 'hongloumeng'); 
+update test1 set name='sanguozhi' WHERE id=3;
+delete from test1 WHERE id=3;
+drop table test1;
+------------------------------------------------
+-- alter table add check constraint
+------------------------------------------------
+-- alter table add constrain NULL
+create table test1(id int, name varchar2(10));
+alter table test1 add constraint id_check check(id > 10);
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(5, 'eee'); 
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+alter table test1 add constraint id_check check(id > 10);
+ERROR:  check constraint "id_check" is violated by some row
+delete from test1 where id=1;
+alter table test1 add constraint id_check check(id > 10);
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(2, 'eee');
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constrain ENABLE
+create table test1(id int, name varchar2(10));
+alter table test1 add constraint id_check check(id > 10) ENABLE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(5, 'eee'); 
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+alter table test1 add constraint id_check check(id > 10) ENABLE;
+ERROR:  check constraint "id_check" is violated by some row
+delete from test1 where id=1;
+alter table test1 add constraint id_check check(id > 10) ENABLE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(2, 'eee');
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constraint ENABLE VALIDATE
+create table test1(id int, name varchar2(10));
+alter table test1 add constraint id_check check(id > 10) ENABLE VALIDATE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(5, 'eee'); 
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+CREATE TABLE test1 (id int, name VARCHAR2(50));
+insert into test1 values(1, 'xiyouji');
+alter table test1 add constraint id_check check(id > 10) ENABLE VALIDATE;
+ERROR:  check constraint "id_check" is violated by some row
+delete from test1 where id=1;
+alter table test1 add constraint id_check check(id > 10) ENABLE VALIDATE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(2, 'eee');
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constraint ENABLE NOVALIDATE
+create table test1(id int, name varchar2(10));
+insert into test1 values(1, 'aaa');
+insert into test1 values(2, 'bbb');
+insert into test1 values(3, 'ccc');
+alter table test1 add constraint id_check check(id > 10) ENABLE NOVALIDATE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | f            | f
+(1 row)
+
+insert into test1 values(11, 'ddd');
+insert into test1 values(5, 'eee');
+ERROR:  new row for relation "test1" violates check constraint "id_check"
+DETAIL:  N/A
+drop table test1;
+-- alter table add constraint DISABLE VALIDATE
+create table test1(id int, name varchar2(10));
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(13, 'ccc');
+alter table test1 add constraint id_check check(id > 10) DISABLE VALIDATE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | t            | t
+(1 row)
+
+insert into test1 values(14, 'ddd');
+ERROR:  forbid DML because relation "test1" violates check constraint "id_check"
+update test1 set id = 21  where name = 'aaa';
+ERROR:  forbid DML because relation "test1" violates check constraint "id_check"
+delete from test1 where id = 12;
+ERROR:  forbid DML because relation "test1" violates check constraint "id_check"
+drop table test1;
+-- alter table add constraint DISABLE NOVALIDATE
+create table test1(id int, name varchar2(10));
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(13, 'ccc');
+alter table test1 add constraint id_check check(id > 10) DISABLE NOVALIDATE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(14, 'ddd');
+update test1 set id = 21  where name = 'aaa';
+delete from test1 where id = 12;
+drop table test1;
+-- alter table add constraint DISABLE
+create table test1(id int, name varchar2(10));
+insert into test1 values(11, 'aaa');
+insert into test1 values(12, 'bbb');
+insert into test1 values(13, 'ccc');
+alter table test1 add constraint id_check check(id > 10) DISABLE;
+select conname,contype,condeferrable,condeferred,convalidated,condisable from pg_constraint WHERE conname = 'id_check';
+ conname  | contype | condeferrable | condeferred | convalidated | condisable 
+----------+---------+---------------+-------------+--------------+------------
+ id_check | c       | f             | f           | f            | t
+(1 row)
+
+insert into test1 values(14, 'ddd');
+update test1 set id = 21  where name = 'aaa';
+delete from test1 where id = 12;
+drop table test1;

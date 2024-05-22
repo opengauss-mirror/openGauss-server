@@ -1536,6 +1536,8 @@ static bool _equalIndexStmt(const IndexStmt* a, const IndexStmt* b)
     COMPARE_SCALAR_FIELD(deferrable);
     COMPARE_SCALAR_FIELD(initdeferred);
     COMPARE_SCALAR_FIELD(concurrent);
+    COMPARE_SCALAR_FIELD(isvalidated);
+    COMPARE_SCALAR_FIELD(isdisable);
 
     return true;
 }
@@ -2861,6 +2863,7 @@ static bool _equalConstraint(const Constraint* a, const Constraint* b)
     COMPARE_SCALAR_FIELD(initially_valid);
     COMPARE_NODE_FIELD(constraintOptions);
     COMPARE_NODE_FIELD(update_expr);
+    COMPARE_SCALAR_FIELD(isdisable);
 
     return true;
 }

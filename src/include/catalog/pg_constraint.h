@@ -149,6 +149,7 @@ CATALOG(pg_constraint,2606) BKI_SCHEMA_MACRO
      */
     int2        conincluding[1];
 #endif
+    bool        condisable;    /* constraint has been disabled */
 } FormData_pg_constraint;
 
 /* ----------------
@@ -162,7 +163,7 @@ typedef FormData_pg_constraint *Form_pg_constraint;
  *        compiler constants for pg_constraint
  * ----------------
  */
-#define Natts_pg_constraint                    27
+#define Natts_pg_constraint                    28
 #define Anum_pg_constraint_conname             1
 #define Anum_pg_constraint_connamespace        2
 #define Anum_pg_constraint_contype             3
@@ -190,7 +191,7 @@ typedef FormData_pg_constraint *Form_pg_constraint;
 #define Anum_pg_constraint_conbin              25
 #define Anum_pg_constraint_consrc              26
 #define Anum_pg_constraint_conincluding        27
-
+#define Anum_pg_constraint_condisable          28
 
 /* Valid values for contype */
 #define CONSTRAINT_CHECK              'c'
@@ -250,7 +251,8 @@ extern Oid CreateConstraintEntry(const char *constraintName,
                                  bool conIsLocal,
                                  int conInhCount,
                                  bool conNoInherit,
-                                 InformationalConstraint *inforConstraint);
+                                 InformationalConstraint *inforConstraint,
+                                 bool condisable = false);
 
 extern void RemoveConstraintById(Oid conId);
 extern void RenameConstraintById(Oid conId, const char *newname);

@@ -1498,7 +1498,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
                     g_instance.attr.attr_common.allowSystemTableMods,
                     true,
                     concurrent,
-                    &extra);
+                    &extra,
+                    stmt->isvalidated,
+                    stmt->isdisable);
 
                 /* Roll back any GUC changes executed by index functions. */
                 AtEOXact_GUC(false, root_save_nestlevel);
@@ -1582,7 +1584,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         &extra,
         false,
         indexsplitMethod,
-        parseVisibleStateFromOptions(stmt->indexOptions));
+        parseVisibleStateFromOptions(stmt->indexOptions),
+        stmt->isvalidated,
+        stmt->isdisable);
 
     /*
      * Roll back any GUC changes executed by index functions, and keep
@@ -5203,7 +5207,7 @@ static Oid buildInformationalConstraint(
         constraintType,
         stmt->deferrable,
         stmt->initdeferred,
-        true,
+        stmt->isvalidated,
         RelationGetRelid(rel),
         indexInfo->ii_KeyAttrNumbers,
         indexInfo->ii_NumIndexKeyAttrs,

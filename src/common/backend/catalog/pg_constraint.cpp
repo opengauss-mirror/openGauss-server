@@ -86,7 +86,7 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
     const Oid* pfEqOp, const Oid* ppEqOp, const Oid* ffEqOp, int foreignNKeys, char foreignUpdateType,
     char foreignDeleteType, char foreignMatchType, const Oid* exclOp, Node* conExpr, const char* conBin,
     const char* conSrc, bool conIsLocal, int conInhCount, bool conNoInherit,
-    InformationalConstraint* inforConstraint) /* @hdfs informatinal constaint */
+    InformationalConstraint* inforConstraint, bool condisable) /* @hdfs informatinal constaint */
 {
     Relation conDesc = NULL;
     Oid conOid;
@@ -191,7 +191,7 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
     values[Anum_pg_constraint_conislocal - 1] = BoolGetDatum(conIsLocal);
     values[Anum_pg_constraint_coninhcount - 1] = Int32GetDatum(conInhCount);
     values[Anum_pg_constraint_connoinherit - 1] = BoolGetDatum(conNoInherit);
-
+    values[Anum_pg_constraint_condisable - 1] = BoolGetDatum(condisable);
     if (inforConstraint == NULL) {
         values[Anum_pg_constraint_consoft - 1] = BoolGetDatum(false);
         values[Anum_pg_constraint_conopt - 1] = BoolGetDatum(false);

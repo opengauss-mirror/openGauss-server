@@ -5927,6 +5927,12 @@ static IndexStmt* _readIndexStmt()
     READ_BOOL_FIELD(initdeferred);
     READ_BOOL_FIELD(concurrent);
     READ_NODE_FIELD(inforConstraint);
+    IF_EXIST(isvalidated) {
+        READ_BOOL_FIELD(isvalidated);
+    }
+    IF_EXIST(isdisable) {
+        READ_BOOL_FIELD(isdisable);
+    }
 
     READ_DONE();
 }
@@ -6007,6 +6013,9 @@ static Constraint* _readConstraint()
         READ_NODE_FIELD(old_pktable_oid);
         READ_BOOL_FIELD(skip_validation);
         READ_BOOL_FIELD(initially_valid);
+        if (t_thrd.proc->workingVersionNum >= DISABLE_CONSTRAINT_VERSION_NUM) {
+            READ_BOOL_FIELD(isdisable);
+        }
     } else if (MATCH_TYPE("CLUSTER")) {
         local_node->contype = CONSTR_CLUSTER;
         READ_NODE_FIELD(keys);

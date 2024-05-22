@@ -132,6 +132,10 @@ unsigned long DeleteFusion::ExecDelete(Relation rel, ResultRelInfo* resultRelInf
             hash_del = get_user_tuple_hash((HeapTuple)oldtup, RelationGetDescr(fake_relation));
         }
 
+        if (rel->rd_att->constr) 
+            CheckDisableValidateConstr(resultRelInfo);
+        CheckIndexDisableValid(resultRelInfo, m_c_local.m_estate);
+
         result = tableam_tuple_delete(fake_relation,
             &((HeapTuple)oldtup)->t_self,
             GetCurrentCommandId(true),

@@ -845,6 +845,12 @@ typedef enum AlterTableType {
     AT_AddConstraintRecurse,      /* internal to commands/tablecmds.c */
     AT_ValidateConstraint,        /* validate constraint */
     AT_ValidateConstraintRecurse, /* internal to commands/tablecmds.c */
+    AT_NOValidateConstraint,        /* novalidate constraint */
+    AT_NOValidateConstraintRecurse, /* internal to commands/tablecmds.c */
+    AT_DISABLE_ValidateConstraint,        /* disable validate constraint */
+    AT_DISABLE_ValidateConstraintRecurse, /* internal to commands/tablecmds.c */
+    AT_DISABLE_NOValidateConstraint,        /* disable novalidate constraint */
+    AT_DISABLE_NOValidateConstraintRecurse, /* internal to commands/tablecmds.c */    
     AT_ProcessedConstraint,       /* pre-processed add constraint (local in
                                    * parser/parse_utilcmd.c) */
     AT_AddIndexConstraint,        /* add constraint using existing index */
@@ -1436,6 +1442,7 @@ typedef struct Constraint {
     char generated_when; /* ALWAYS or BY DEFAULT */
     char generated_kind; /* currently always STORED */
     Node *update_expr;
+    bool isdisable;
 } Constraint;
 
 /*

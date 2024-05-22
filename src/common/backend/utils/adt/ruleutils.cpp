@@ -4141,6 +4141,15 @@ static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int
              * would NOT be good enough, consider "(x > 0) AND (y > 0)".
              */
             appendStringInfo(&buf, "CHECK (%s)%s", consrc, conForm->connoinherit ? " NO INHERIT" : "");
+
+            bool isNull = true;
+            Relation pg_constraint;
+            pg_constraint = heap_open(ConstraintRelationId, NoLock);
+            Datum datum = heap_getattr(tup, Anum_pg_constraint_condisable, RelationGetDescr(pg_constraint), &isNull);
+            bool condisable = DatumGetBool(datum);
+            if (condisable) 
+                appendStringInfo(&buf, " DISABLE");
+            heap_close(pg_constraint, NoLock);
             break;
         }
         case CONSTRAINT_TRIGGER:

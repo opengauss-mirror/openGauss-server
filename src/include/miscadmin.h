@@ -37,6 +37,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 DISABLE_CONSTRAINT_VERSION_NUM;
 extern const uint32 SUPPORT_GS_DEPENDENCY_VERSION_NUM;
 extern const uint32 TXNSTATUS_CACHE_DFX_VERSION_NUM;
 extern const uint32 PARAM_MARK_VERSION_NUM;

@@ -57,6 +57,7 @@ enum SysCacheIdentifier {
     CONDEFAULT,
     CONNAMENSP,
     CONSTROID,
+    CONSTRRELID,
     CONVOID,
     DATABASEOID,
     DATASOURCENAME,
@@ -124,7 +125,6 @@ enum SysCacheIdentifier {
     RULERELNAME,
     STATRELKINDATTINH, /* single column statistics */
     STATRELKINDKEYINH, /* multi column statistics */
-    STREAMCQDEFRELID,
     STREAMCQID,
     STREAMCQLOOKUPID,
     STREAMCQMATRELID,

@@ -126,7 +126,7 @@ extern Oid index_create(Relation heapRelation, const char *indexRelationName, Oi
                         Datum reloptions, bool isprimary, bool isconstraint, bool deferrable,
                         bool initdeferred, bool allow_system_table_mods, bool skip_build, bool concurrent,
                         IndexCreateExtraArgs *extra, bool useLowLockLevel = false,
-                        int8 relindexsplit = 0, bool visible = true);
+                        int8 relindexsplit = 0, bool visible = true, bool isvalidated = true, bool isdisable = false);
 
 
 extern Oid index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId, Oid oldIndexPartId, const char *newName);
@@ -139,7 +139,8 @@ extern void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId,
 extern ObjectAddress index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo *indexInfo,
                                     const char *constraintName, char constraintType, bool deferrable,
                                     bool initdeferred, bool mark_as_primary, bool update_pgindex,
-                                    bool remove_old_dependencies, bool allow_system_table_mods);
+                                    bool remove_old_dependencies, bool allow_system_table_mods, 
+                                    bool isvalidated = true, bool isdisable = false);
 
 extern void index_drop(Oid indexId, bool concurrent, bool concurrent_lock_mode = false);
 

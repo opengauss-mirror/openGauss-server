@@ -4420,6 +4420,7 @@ static Constraint* _copyConstraint(const Constraint* from)
     COPY_NODE_FIELD(inforConstraint);
     COPY_NODE_FIELD(constraintOptions);
     COPY_NODE_FIELD(update_expr);
+    COPY_SCALAR_FIELD(isdisable);
 
     return newnode;
 }
@@ -5504,6 +5505,8 @@ static IndexStmt* _copyIndexStmt(const IndexStmt* from)
     COPY_SCALAR_FIELD(skip_mem_check);
     COPY_SCALAR_FIELD(memUsage.work_mem);
     COPY_SCALAR_FIELD(memUsage.max_mem);
+    COPY_SCALAR_FIELD(isvalidated);
+    COPY_SCALAR_FIELD(isdisable);
 
     return newnode;
 }

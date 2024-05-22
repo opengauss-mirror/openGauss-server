@@ -635,6 +635,8 @@ void ExecSimpleRelationInsert(EState *estate, TupleTableSlot *slot, FakeRelation
         tuple = ExecAutoIncrement(rel, estate, slot, tuple);
     }
 
+    CheckIndexDisableValid(resultRelInfo, estate);
+
     /* OK, store the tuple and create index entries for it */
     (void)tableam_tuple_insert(targetRel, tuple, GetCurrentCommandId(true), 0, NULL);
     if (resultRelInfo->ri_NumIndices > 0) {
@@ -715,6 +717,8 @@ void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot
     if (rel->rd_att->constr) {
         ExecConstraints(resultRelInfo, slot, estate);
     }
+
+    CheckIndexDisableValid(resultRelInfo, estate);
 
     /* check whether there is a row movement for partition table */
     GetFakeRelAndPart(estate, rel, slot, &newTupleInfo);

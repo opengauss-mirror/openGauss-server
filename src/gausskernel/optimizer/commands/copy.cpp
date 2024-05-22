@@ -4854,6 +4854,7 @@ uint64 CopyFrom(CopyState cstate)
                     tuple = ExecAutoIncrement(cstate->rel, estate, slot, tuple);
                 }
 
+                CheckIndexDisableValid(resultRelInfo, estate);
 
                 if (hasBucket) {
                     bucketid = computeTupleBucketId(resultRelationDesc, (HeapTuple)tuple);

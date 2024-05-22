@@ -255,6 +255,7 @@ typedef struct NewConstraint {
     Oid conid;          /* OID of pg_constraint entry, if FOREIGN */
     Node* qual;         /* Check expr or CONSTR_FOREIGN Constraint */
     List* qualstate;    /* Execution state for CHECK */
+    bool isdisable;
 } NewConstraint;
 
 /*
@@ -407,7 +408,8 @@ typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
         (cmd) == AT_ResetRelOptions || (cmd) == AT_ReplaceRelOptions ||                                         \
         (cmd) == AT_EnableRls || (cmd) == AT_DisableRls || (cmd) == AT_ForceRls || (cmd) == AT_NoForceRls ||    \
         (cmd) == AT_SetNotNull || (cmd) == AT_AddIndex || (cmd) == AT_AddIndexConstraint ||                     \
-        (cmd) == AT_ValidateConstraint || (cmd) == AT_AddConstraint || (cmd) == AT_DropConstraint ||           \
+        (cmd) == AT_ValidateConstraint || (cmd) == AT_NOValidateConstraint || (cmd) == AT_DISABLE_ValidateConstraint ||     \
+        (cmd) == AT_DISABLE_NOValidateConstraint || (cmd) == AT_AddConstraint || (cmd) == AT_DropConstraint ||           \
         (cmd) == AT_EncryptionKeyRotation)
 
 #define MATVIEW_SUPPORT_AT_CMD(cmd) ((cmd) == AT_SubCluster || (cmd) == AT_ChangeOwner)
@@ -442,6 +444,8 @@ static void AlterIndexNamespaces(
 static void AlterSeqNamespaces(
     Relation classRel, Relation rel, Oid oldNspOid, Oid newNspOid, ObjectAddresses* objsMoved, LOCKMODE lockmode);
 static ObjectAddress ATExecValidateConstraint(Relation rel, char* constrName, bool recurse, bool recursing, LOCKMODE lockmode);
+static void ExecIndConstaint(Oid indexoid, bool enable);
+static void ATExecValidateAbilityConstraint(Relation rel, char* constrName, bool recurse, bool recursing, bool enable, bool valid, LOCKMODE lockmode);
 static int transformColumnNameList(Oid relId, List* colList, int16* attnums, Oid* atttypids);
 static int transformFkeyGetPrimaryKey(
     Relation pkrel, Oid* indexOid, List** attnamelist, int16* attnums, Oid* atttypids, Oid* opclasses);
@@ -677,7 +681,7 @@ static Oid GetPartOidByATcmd(Relation rel, AlterTableCmd *cmd, const char *comma
 static Oid GetSubpartOidByATcmd(Relation rel, AlterTableCmd *cmd, Oid *partOid, const char *command);
 
 static void ATExecUnusableIndexPartition(Relation rel, const char* partition_name);
-static void ATExecUnusableIndex(Relation rel);
+static void ATExecUnusableIndex(Relation rel, bool needChangeCsn);
 static void ATUnusableGlobalIndex(Relation rel);
 static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partition_name);
 static void ATExecVisibleIndex(Relation rel, char* index_name, bool visible);
@@ -2833,6 +2837,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
             cooked->inhcount = 0;    /* ditto */
             cooked->is_no_inherit = false;
             cooked->update_expr = colDef->update_default;
+            cooked->isdisable = false;
             cookedDefaults = lappend(cookedDefaults, cooked);
             descriptor->attrs[attnum - 1].atthasdef  = true;
         }
@@ -5445,6 +5450,7 @@ static List* MergeAttributes(
                     cooked->is_local = false;
                     cooked->inhcount = 1;
                     cooked->is_no_inherit = false;
+                    cooked->isdisable = false;
                     constraints = lappend(constraints, cooked);
                 }
             }
@@ -8480,6 +8486,24 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
                 cmd->subtype = AT_ValidateConstraintRecurse;
             pass = AT_PASS_MISC;
             break;
+        case AT_NOValidateConstraint: /* ENABLE NOVALIDATE CONSTRAINT */
+            ATSimplePermissions(rel, ATT_TABLE);
+            if (recurse)
+                cmd->subtype = AT_NOValidateConstraintRecurse;
+            pass = AT_PASS_MISC;
+            break;
+        case AT_DISABLE_ValidateConstraint: /* DISABLE VALIDATE CONSTRAINT */
+            ATSimplePermissions(rel, ATT_TABLE);
+            if (recurse)
+                cmd->subtype = AT_DISABLE_ValidateConstraintRecurse;
+            pass = AT_PASS_MISC;
+            break;
+        case AT_DISABLE_NOValidateConstraint: /* DISABLE NOVALIDATE CONSTRAINT */
+            ATSimplePermissions(rel, ATT_TABLE);
+            if (recurse)
+                cmd->subtype = AT_DISABLE_NOValidateConstraintRecurse;
+            pass = AT_PASS_MISC;
+            break;			
         case AT_ReplicaIdentity: /* REPLICA IDENTITY ... */
             ATSimplePermissions(rel, ATT_TABLE);
             pass = AT_PASS_MISC;
@@ -9081,7 +9105,7 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             ATExecUnusableAllIndexOnPartition(rel, cmd->name);
             break;
         case AT_UnusableIndex:
-            ATExecUnusableIndex(rel);
+            ATExecUnusableIndex(rel, true);
             break;
         case AT_InvisibleIndex:
             ATExecVisibleIndex(rel, cmd->name, false);
@@ -9119,6 +9143,24 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         case AT_ValidateConstraintRecurse: /* VALIDATE CONSTRAINT with
                                             * recursion */
             address = ATExecValidateConstraint(rel, cmd->name, true, false, lockmode);
+            break;
+        case AT_NOValidateConstraint: /* ENABLE NOVALIDATE CONSTRAINT */
+            ATExecValidateAbilityConstraint(rel, cmd->name, false, false, true, false, lockmode);
+            break;
+        case AT_NOValidateConstraintRecurse: /* ENABLE NOVALIDATE CONSTRAINT with recursion */
+            ATExecValidateAbilityConstraint(rel, cmd->name, true, false,  true, false, lockmode);
+            break;
+        case AT_DISABLE_ValidateConstraint: /* DISABLE VALIDATE CONSTRAINT */
+            ATExecValidateAbilityConstraint(rel, cmd->name, false, false,  false, true, lockmode);
+            break;
+        case AT_DISABLE_ValidateConstraintRecurse: /* DISABLE VALIDATE CONSTRAINT with recursion */
+            ATExecValidateAbilityConstraint(rel, cmd->name, true, false,  false, true, lockmode);
+            break;
+        case AT_DISABLE_NOValidateConstraint: /* DISABLE NOVALIDATE CONSTRAINT */
+            ATExecValidateAbilityConstraint(rel, cmd->name, false, false, false, false, lockmode);
+            break;
+        case AT_DISABLE_NOValidateConstraintRecurse: /* DISABLE NOVALIDATE CONSTRAINT with recursion */
+            ATExecValidateAbilityConstraint(rel, cmd->name, true, false, false, false, lockmode);
             break;
         case AT_DropConstraint: /* DROP CONSTRAINT */
             ATExecDropConstraint(rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode);
@@ -9735,6 +9777,8 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
     /* Build the needed expression execution states */
     foreach (l, tab->constraints) {
         NewConstraint* con = (NewConstraint*)lfirst(l);
+        if (con->isdisable) 
+            continue;
 
         switch (con->contype) {
             case CONSTR_CHECK:
@@ -9984,6 +10028,8 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                 {
                     NewConstraint *con = (NewConstraint*)lfirst(l);
                     ListCell* lc = NULL;
+                    if (con->isdisable)
+                        continue;
 
                     switch (con->contype)
                     {
@@ -14166,7 +14212,9 @@ static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation re
         stmt->primary,
         true, /* update pg_index */
         true, /* remove old dependencies */
-        (g_instance.attr.attr_common.allowSystemTableMods || u_sess->attr.attr_common.IsInplaceUpgrade));
+        (g_instance.attr.attr_common.allowSystemTableMods || u_sess->attr.attr_common.IsInplaceUpgrade), 
+        stmt->isvalidated,
+        stmt->isdisable);
     /* index constraint */
     CreateNonColumnComment(index_oid, stmt->indexOptions, RelationRelationId);
 
@@ -14319,6 +14367,7 @@ static ObjectAddress ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, 
             newcon = (NewConstraint*)palloc0(sizeof(NewConstraint));
             newcon->name = ccon->name;
             newcon->contype = ccon->contype;
+            newcon->isdisable = ccon->isdisable;
             /* ExecQual wants implicit-AND format */
             newcon->qual = (Node*)make_ands_implicit((Expr*)ccon->expr);
 
@@ -14841,6 +14890,7 @@ static ObjectAddress ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation r
         newcon->refindid = indexOid;
         newcon->conid = constrOid;
         newcon->qual = (Node*)fkconstraint;
+        newcon->isdisable = false;
 
         tab->constraints = lappend(tab->constraints, newcon);
     }
@@ -15039,7 +15089,17 @@ static ObjectAddress ATExecValidateConstraint(Relation rel, char* constrName, bo
         /*
          * Now update the catalog, while we have the door open.
          */
-        copyTuple = (HeapTuple) tableam_tops_copy_tuple(tuple);
+        Datum repl_val[Natts_pg_constraint];
+        bool repl_null[Natts_pg_constraint];
+        bool repl_repl[Natts_pg_constraint];
+        errno_t rc = EOK;
+        rc= memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
+        securec_check(rc, "\0", "\0");
+        rc= memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
+        securec_check(rc, "\0", "\0");
+        repl_val[Anum_pg_constraint_condisable - 1] = BoolGetDatum(false);
+        repl_repl[Anum_pg_constraint_condisable - 1] = true;
+        copyTuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(conrel), repl_val, repl_null, repl_repl);
         copy_con = (Form_pg_constraint)GETSTRUCT(copyTuple);
         copy_con->convalidated = true;
         simple_heap_update(conrel, &copyTuple->t_self, copyTuple);
@@ -15054,6 +15114,212 @@ static ObjectAddress ATExecValidateConstraint(Relation rel, char* constrName, bo
 
     heap_close(conrel, RowExclusiveLock);
     return address;
+}
+
+static void ExecIndConstaint(Oid indexoid, bool enable)
+{
+    if (enable)
+        reindex_index(indexoid, InvalidOid, false, NULL, false);
+    else {
+        Relation indexRel = relation_open(indexoid, RowExclusiveLock);
+        ATExecUnusableIndex(indexRel, false);
+        relation_close(indexRel, RowExclusiveLock);
+    }
+}
+
+static void ATExecValidateAbilityConstraint(Relation rel, char* constrName, bool recurse, bool recursing, bool enable, bool valid, LOCKMODE lockmode)
+{
+    Relation conrel;
+    SysScanDesc scan;
+    ScanKeyData key;
+    HeapTuple tuple;
+    Form_pg_constraint con = NULL;
+    bool found = false;
+    Datum repl_val[Natts_pg_constraint];
+    bool repl_null[Natts_pg_constraint];
+    bool repl_repl[Natts_pg_constraint];
+    errno_t rc = EOK;
+    elog(WARNING, "ATExecValidateAbilityConstraint enable[%d], valid[%d]", enable, valid);
+    conrel = heap_open(ConstraintRelationId, RowExclusiveLock);
+
+    /*
+     * Find and check the target constraint
+     */
+    ScanKeyInit(
+        &key, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
+    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, &key);
+
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        con = (Form_pg_constraint)GETSTRUCT(tuple);
+        if (strcmp(NameStr(con->conname), constrName) == 0) {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg(
+                    "constraint \"%s\" of relation \"%s\" does not exist", constrName, RelationGetRelationName(rel))));
+
+    HeapTuple copyTuple;
+    Form_pg_constraint copy_con;
+
+    List* children = NIL;
+    ListCell* child = NULL;
+
+    /* If we're recursing, the parent has already done this, so skip it. */
+    if (!recursing)
+        children = find_all_inheritors(RelationGetRelid(rel), lockmode, NULL);
+
+    /*
+     * For CHECK constraints, we must ensure that we only mark the
+     * constraint as validated on the parent if it's already validated
+     * on the children.
+     *
+     * We recurse before validating on the parent, to reduce risk of
+     * deadlocks.
+     */
+    foreach (child, children) {
+        Oid childoid = lfirst_oid(child);
+        Relation childrel;
+
+        if (childoid == RelationGetRelid(rel))
+            continue;
+
+        /*
+         * If we are told not to recurse, there had better not be any
+         * child tables; else the addition would put them out of step.
+         */
+        if (!recurse)
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg("constraint must be validated on child tables too")));
+
+        /* find_all_inheritors already got lock */
+        childrel = heap_open(childoid, NoLock);
+
+        ATExecValidateAbilityConstraint(childrel, constrName, false, true, enable, valid, lockmode);
+        heap_close(childrel, NoLock);
+    }
+
+    if (con->contype == CONSTRAINT_PRIMARY || con->contype == CONSTRAINT_UNIQUE)
+        ExecIndConstaint(con->conindid, enable);
+    /*
+     * Invalidate relcache so that others see the new validated
+     * constraint.
+     */
+    CacheInvalidateRelcache(rel);
+
+    /*
+     * Now update the catalog, while we have the door open.
+     */
+    rc = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
+    securec_check(rc, "\0", "\0");
+    repl_val[Anum_pg_constraint_condisable -1] = BoolGetDatum(!enable);
+    repl_repl[Anum_pg_constraint_condisable -1] = true;
+    copyTuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(conrel), repl_val, repl_null, repl_repl);
+    copy_con = (Form_pg_constraint)GETSTRUCT(copyTuple);
+    copy_con->convalidated = valid;
+    simple_heap_update(conrel, &copyTuple->t_self, copyTuple);
+    CatalogUpdateIndexes(conrel, copyTuple);
+    tableam_tops_free_tuple(copyTuple);
+    systable_endscan(scan);
+    heap_close(conrel, RowExclusiveLock);
+}
+
+
+static void ATExecDeferredConstraintOnCommit(Oid relid)
+{
+    Relation conrel;
+    Relation rel;
+    Form_pg_constraint con;
+    SysScanDesc scan;
+    ScanKeyData key;
+    HeapTuple tuple;
+
+    rel = heap_open(relid, NoLock);
+    conrel = heap_open(ConstraintRelationId, RowExclusiveLock);
+    /*
+     * Find and drop the target constraint
+     */
+    ScanKeyInit(
+        &key, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, relid);
+    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, &key);
+
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        con = (Form_pg_constraint)GETSTRUCT(tuple);
+        if (con->contype != CONSTRAINT_CHECK)
+            continue;
+        if (!con->condeferred)
+            continue;
+        if (!RelationIsPartitioned(rel)) {
+            if (RELATION_CREATE_BUCKET(rel)) {
+                /* validate constraint for every buckets */
+                validateCheckConstraintForBucket(rel, NULL, tuple);
+            } else {
+                validateCheckConstraint(rel, tuple);
+            }
+        } else if (RelationIsSubPartitioned(rel)) {
+            List* partitions = NIL;
+            ListCell* cell = NULL;
+            Partition partition = NULL;
+            Relation partRel = NULL;
+
+            partitions = relationGetPartitionList(rel, AccessExclusiveLock);
+            foreach (cell, partitions) {
+                partition = (Partition)lfirst(cell);
+                partRel = partitionGetRelation(rel, partition);
+
+                List *subpartitions = relationGetPartitionList(partRel, AccessExclusiveLock);
+                ListCell *subcell = NULL;
+                foreach (subcell, subpartitions) {
+                    Partition subpartition = (Partition)lfirst(subcell);
+                    if (RELATION_OWN_BUCKETKEY(rel)) {
+                        /* validate constraint for every buckets */
+                        validateCheckConstraintForBucket(partRel, subpartition, tuple);
+                    } else {
+                        Relation subpartRel = partitionGetRelation(partRel, subpartition);
+                        validateCheckConstraint(subpartRel, tuple);
+                        releaseDummyRelation(&subpartRel);
+                    }
+                }
+                releasePartitionList(partRel, &subpartitions, AccessExclusiveLock);
+                releaseDummyRelation(&partRel);
+            }
+            releasePartitionList(rel, &partitions, AccessExclusiveLock);
+        } else {
+            List* partitions = NIL;
+            ListCell* cell = NULL;
+            Partition partition = NULL;
+            Relation partRel = NULL;
+
+            partitions = relationGetPartitionList(rel, AccessExclusiveLock);
+            foreach (cell, partitions) {
+                partition = (Partition)lfirst(cell);
+                if (RELATION_OWN_BUCKETKEY(rel)) {
+                    /* validate constraint for every buckets */
+                    validateCheckConstraintForBucket(rel, partition, tuple);
+                } else {
+                    partRel = partitionGetRelation(rel, partition);
+                    validateCheckConstraint(partRel, tuple);
+                    releaseDummyRelation(&partRel);
+                }
+            }
+            releasePartitionList(rel, &partitions, AccessExclusiveLock);
+        }
+
+        /*
+         * Invalidate relcache so that others see the new validated
+         * constraint.
+         */
+        CacheInvalidateRelcache(rel);
+    }
+    heap_close(conrel, RowExclusiveLock);
+    heap_close(rel, NoLock);
 }
 
 /*
@@ -25354,7 +25620,7 @@ static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partitio
  * Description	:
  * Notes		:
  */
-static void ATExecUnusableIndex(Relation rel)
+static void ATExecUnusableIndex(Relation rel, bool needChangeCsn)
 {
     List* indexPartitionTupleList = NULL;
     ListCell* cell = NULL;
@@ -25422,7 +25688,8 @@ static void ATExecUnusableIndex(Relation rel)
         freePartList(indexPartitionTupleList);
     }
     // recode changecsn of table owing the index
-    UpdatePgObjectChangecsn(heapOid, heapRelation->rd_rel->relkind);
+    if (needChangeCsn)
+        UpdatePgObjectChangecsn(heapOid, heapRelation->rd_rel->relkind);
     // close heap relation but maintain the lock.
     relation_close(heapRelation, NoLock);
 }
