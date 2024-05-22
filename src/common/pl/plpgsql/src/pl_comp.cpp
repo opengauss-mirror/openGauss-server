@@ -48,6 +48,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
+#include "utils/typcache.h"
 #include "miscadmin.h"
 #include "tcop/tcopprot.h"
 #include "commands/event_trigger.h"
@@ -4185,6 +4186,7 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
     ListCell* cell = NULL;
     PLpgSQL_rec_attr* attr = NULL;
     PLpgSQL_rec_type* result = NULL;
+    List* nest_typnames = NIL;
 
     result = (PLpgSQL_rec_type*)palloc0(sizeof(PLpgSQL_rec_type));
 
@@ -4204,10 +4206,12 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
 
         result->attrnames[idx] = pstrdup(attr->attrname);
         result->types[idx] = attr->type;
+        nest_typnames = lappend3(nest_typnames, attr->nest_typnames);
         result->notnulls[idx] = attr->notnull;
         result->defaultvalues[idx] = attr->defaultvalue;
         idx++;
     }
+    result->nest_typnames = nest_typnames;
 
     varno = plpgsql_adddatum((PLpgSQL_datum*)result);
 
@@ -4215,6 +4219,38 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
        plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, typname);
     }
     return result;
+}
+
+List* search_external_nest_type(char* name, Oid typeOid, int layer, List* nest_typnames, PLpgSQL_nest_type* cur_ntype)
+{
+    HeapTuple tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
+    PLpgSQL_nest_type* nntype = NULL;
+    int typmod = -1;
+    int natts = 1;
+    layer++;
+    if (tuple) {
+        cur_ntype->typname = pstrdup(name);
+        cur_ntype->layer = layer;
+        if (cur_ntype->index != -1) {
+            nest_typnames = lappend(nest_typnames, cur_ntype);
+        }
+        TupleDesc tuple_desc = lookup_rowtype_tupdesc_noerror(typeOid, typmod, true);
+        if (tuple_desc) {
+            natts = tuple_desc->natts;
+            for (int i = 0; i < natts; i++) {
+                Form_pg_attribute attr = TupleDescAttr(tuple_desc, i);
+                if (!attr->attisdropped && attr->atttypid != InvalidOid) {
+                    char* typname = get_typename(attr->atttypid);
+                    PLpgSQL_nest_type* new_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                    new_ntype->index = i + 1;
+                    nest_typnames = search_external_nest_type(typname, attr->atttypid, layer, nest_typnames, new_ntype);
+                }
+            }
+            ReleaseTupleDesc(tuple_desc);
+        }
+        ReleaseSysCache(tuple);
+    }
+    return nest_typnames;
 }
 
 /*
@@ -4518,6 +4554,7 @@ PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_re
     row->default_val = NULL;
     row->recordVarTypOid = type->typoid;
     row->atomically_null_object = false;
+    row->nest_typnames = type->nest_typnames;
 
     for (int i = 0; i < row->nfields; i++) {
         PLpgSQL_variable* var = NULL;

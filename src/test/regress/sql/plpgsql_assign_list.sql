@@ -158,6 +158,699 @@ end;
 $$ language plpgsql;
 select get_age();
 
+--test assign a value to a variable with a custom type
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+  TYPE t_rec2 IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec:= t_rec2(1, ',', 'TWO', 'THREE');
+BEGIN
+  raise info 'team.LIMIT = %', l_rec.val1;
+END;
+/
+
+set enable_pltype_name_check = on;
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+  TYPE t_rec2 IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec:= t_rec(1, 'ONE', 'TWO', 'THREE');
+BEGIN
+  raise info 'team.LIMIT = %', l_rec.val1;
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+  TYPE t_rec2 IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec:= t_rec2(1, ',', 'TWO', 'THREE');
+BEGIN
+  raise info 'team.LIMIT = %', l_rec.val1;
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+  TYPE t_rec2 IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec:= t_rec2(1, 'ONE', 'TWO', 'THREE');
+BEGIN
+  raise info 'team.LIMIT = %', l_rec.val1;
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+  TYPE t_rec2 IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec;
+BEGIN
+  l_rec := t_rec2(1, 'ONE', 'TWO', 'THREE');
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec;
+BEGIN
+  l_rec := t_rec(1, 'ONE', 'TWO', 'THREE');
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec;
+BEGIN
+  l_rec := ROW(1, 'ONE', 'TWO', 'THREE');
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec;
+BEGIN
+  l_rec := row(1, 'ONE', 'TWO', 'THREE');
+END;
+/
+
+DECLARE
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10),
+    val2 VARCHAR2(10),
+    val3 VARCHAR2(10)  );
+
+  l_rec t_rec;
+BEGIN
+  l_rec := t_rec2(1, 'ONE', 'TWO', 'THREE');
+END;
+/
+
+DECLARE
+  TYPE nt_type IS TABLE OF INTEGER;
+  TYPE va_type IS VARRAY(4) OF INTEGER;
+  nt  nt_type;
+BEGIN
+  nt := va_type(1,3,5);
+  raise info 'nt(1) = %', nt(1);
+  raise info 'nt(3) = %', nt(3);
+END;
+/
+
+DECLARE
+  TYPE nt_type IS TABLE OF INTEGER;
+  TYPE va_type IS VARRAY(4) OF INTEGER;
+  nt  nt_type;
+BEGIN
+  nt := nt_type(1,3,5);
+  raise info 'team.LIMIT = %', nt(2);
+END;
+/
+
+DECLARE
+  TYPE nt_type IS TABLE OF INTEGER;
+  TYPE va_type IS VARRAY(4) OF INTEGER;
+  nt  nt_type:= va_type(1,3,5);
+BEGIN
+  raise info 'nt(3) = %', nt(1);
+END;
+/
+
+DECLARE
+  TYPE nt_type IS TABLE OF INTEGER;
+  TYPE va_type IS VARRAY(4) OF INTEGER;
+  nt  nt_type:= nt_type(1,3,5);
+BEGIN
+  raise info 'nt(3) = %', nt(1);
+END;
+/
+
+DECLARE
+  TYPE va_type IS VARRAY(4) OF INTEGER;
+  nt  va_type := va_type(1,3,5);
+BEGIN
+  raise info 'nt(1) = %', nt(1);
+  raise info 'nt(3) = %', nt(3);
+END;
+/
+
+DECLARE
+  TYPE va_type IS VARRAY(4) OF INTEGER;
+  nt  va_type;
+BEGIN
+  nt := va_type(1,3,5);
+  raise info 'nt(1) = %', nt(1);
+  raise info 'nt(3) = %', nt(3);
+END;
+/
+
+DECLARE
+  TYPE nt_type IS TABLE OF INTEGER;
+  nt  nt_type := nt_type(1,3,5);
+BEGIN
+  raise info 'nt(1) = %', nt(1);
+  raise info 'nt(3) = %', nt(3);
+END;
+/
+
+DECLARE
+  TYPE nt_type IS TABLE OF INTEGER;
+  nt  nt_type;
+BEGIN
+  nt := nt_type(1,3,5);
+  raise info 'nt(1) = %', nt(1);
+  raise info 'nt(3) = %', nt(3);
+END;
+/
+
+--test nest record
+create type to1 as (val1 VARCHAR2(10), val2 VARCHAR2(10));
+create type to2 as (val3 VARCHAR2(10), val4 to1);
+create type to3 as (val5 VARCHAR2(10), val6 to2, val7 to1);
+
+DECLARE
+    l_rec to3:= ('ONE', to2('TWO',to2(',', 'FOUR')),to1('FIVE','SIX'));
+BEGIN
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+DECLARE
+    l_rec to3;
+BEGIN
+    l_rec := ('ONE', to2('TWO',to3(',', 'FOUR')),to1('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PACKAGE r_types IS
+  TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+  TYPE t_rec1 IS RECORD (val4 t_rec0, val3 VARCHAR2(10));
+END r_types;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val6 r_types.t_rec1, val7 r_types.t_rec0, val5 VARCHAR2(10));
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2(r_types.t_rec1(r_types.t_rec0(',', 'FOUR'), 'TWO'), r_types.t_rec0('FIVE','SIX'), 'ONE');
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val6 r_types.t_rec1, val7 r_types.t_rec0, val5 VARCHAR2(10));
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2(r_types.t_rec1(r_types.t_rec1(',', 'FOUR'), 'TWO'), r_types.t_rec0('FIVE','SIX'), 'ONE');
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PACKAGE r_types IS
+  TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+  TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 t_rec0);
+END r_types;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 r_types.t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 r_types.t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',r_types.t_rec1(',', 'FOUR')),r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 r_types.t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),t_rec2('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 r_types.t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 r_types.t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 r_types.t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),t_rec2('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+DROP PACKAGE r_types;
+
+CREATE OR REPLACE PACKAGE plpgsql_assignlist.r_types IS
+  TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+  TYPE t_rec1 IS RECORD (val4 t_rec0, val3 VARCHAR2(10));
+END r_types;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val6 plpgsql_assignlist.r_types.t_rec1, val7 plpgsql_assignlist.r_types.t_rec0, val5 VARCHAR2(10));
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2(r_types.t_rec1(r_types.t_rec0(',', 'FOUR'), 'TWO'),plpgsql_assignlist.r_types.t_rec0('FIVE','SIX'), 'ONE');
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val6 plpgsql_assignlist.r_types.t_rec1, val7 r_types.t_rec0, val5 VARCHAR2(10));
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2(r_types.t_rec1(plpgsql_assignlist.r_types.t_rec1(',', 'FOUR'), 'TWO'),r_types.t_rec0('FIVE','SIX'), 'ONE');
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PACKAGE plpgsql_assignlist.r_types IS
+  TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+  TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 t_rec0);
+END r_types;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 plpgsql_assignlist.r_types.t_rec1, val7 plpgsql_assignlist.r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),plpgsql_assignlist.r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 plpgsql_assignlist.r_types.t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', r_types.t_rec1('TWO',plpgsql_assignlist.r_types.t_rec1(',', 'FOUR')),r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 r_types.t_rec1, val7 plpgsql_assignlist.r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', plpgsql_assignlist.r_types.t_rec1('TWO',plpgsql_assignlist.r_types.t_rec0(',', 'FOUR')),t_rec2('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 plpgsql_assignlist.r_types.t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 plpgsql_assignlist.r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', plpgsql_assignlist.r_types.t_rec1('TWO',plpgsql_assignlist.r_types.t_rec0(',', 'FOUR')),plpgsql_assignlist.r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 r_types.t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', t_rec1('TWO',plpgsql_assignlist.r_types.t_rec0(',', 'FOUR')),r_types.t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 plpgsql_assignlist.r_types.t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 r_types.t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := t_rec2('ONE', plpgsql_assignlist.r_types.t_rec1('TWO',r_types.t_rec0(',', 'FOUR')),t_rec2('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+DROP PACKAGE r_types;
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS VARRAY(5) OF INTEGER;
+    TYPE arr1 IS VARRAY(5) OF INTEGER;
+    TYPE nt1 IS VARRAY(10) OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1:=rec1(7, nt1(arr2(1,2,4,5),arr1(1,3)));
+BEGIN
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS VARRAY(5) OF INTEGER;
+    TYPE arr1 IS VARRAY(5) OF INTEGER;
+    TYPE nt1 IS VARRAY(10) OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1:=rec1(7, nt1(arr1(1,2,4,5),arr1(1,3)));
+BEGIN
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS VARRAY(5) OF INTEGER;
+    TYPE arr1 IS VARRAY(5) OF INTEGER;
+    TYPE nt1 IS VARRAY(10) OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1;
+BEGIN
+    arr_rec:=rec1(7, nt1(arr2(1,2,4,5),arr1(1,3)))
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS TABLE OF INTEGER;
+    TYPE arr1 IS TABLE OF INTEGER;
+    TYPE nt1 IS TABLE OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1:=rec1(7, nt1(arr2(1,2,4,5),arr1(1,3)));
+BEGIN
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS TABLE OF INTEGER;
+    TYPE arr1 IS TABLE OF INTEGER;
+    TYPE nt1 IS TABLE OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1:=rec1(7, nt1(arr1(1,2,4,5),arr1(1,3)));
+BEGIN
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE arr2 IS TABLE OF INTEGER;
+    TYPE arr1 IS TABLE OF INTEGER;
+    TYPE nt1 IS TABLE OF arr1;
+    TYPE rec1 IS RECORD(id int, arrarg nt1);
+    arr_rec rec1;
+BEGIN
+    arr_rec:=rec1(7, nt1(arr2(1,2,4,5),arr1(1,3)))
+    RAISE NOTICE 'ID: %', arr_rec.id;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 to2, val7 to1);
+    l_rec t_rec2;
+BEGIN
+    l_rec := ('ONE', to2('TWO',to2(',', 'FOUR')),to1('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 to2, val7 to1);
+    l_rec t_rec2;
+BEGIN
+    l_rec := ('ONE', to2('TWO',to1(',', 'FOUR')),to1('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 to2, val7 t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := ('ONE', to2('TWO',to1(',', 'FOUR')),to1('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 to1);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 to2, val7 t_rec1);
+    l_rec t_rec2;
+BEGIN
+    l_rec := ('ONE', to2('TWO',to1(',', 'FOUR')),t_rec2('A', to1('FIVE','SIX')));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val4.val1;
+END;
+/
+
+DECLARE
+    l_rec to3;
+BEGIN
+    l_rec := to2('ONE', to2('TWO',to1(',', 'FOUR')),to1('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 t_rec0);
+    l_rec t_rec2;
+BEGIN
+    l_rec := ('ONE', t_rec1('TWO',t_rec2(',', 'FOUR')),t_rec0('FIVE','SIX'));
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE test_nested AS
+DECLARE
+    TYPE t_rec0 IS RECORD (val1 VARCHAR2(10), val2 VARCHAR2(10));
+    TYPE t_rec1 IS RECORD (val3 VARCHAR2(10), val4 t_rec0);
+    TYPE t_rec2 IS RECORD (val5 VARCHAR2(10), val6 t_rec1, val7 t_rec0);
+    l_rec t_rec2 := ('ONE', t_rec1(',',t_rec2('THREE', 'FOUR')),t_rec0('FIVE','SIX'));
+BEGIN
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val5, l_rec.val6.val3;
+    RAISE NOTICE 'ID: %, NAME: %', l_rec.val6.val4.val1, l_rec.val7.val2;
+END;
+/
+
+--test nest table
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE t2 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE nt2 IS VARRAY(10) OF t2;      -- varray of varray of integer
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nt22 IS VARRAY(10) OF nt2;      -- varray of varray of integer
+TYPE nt11 IS VARRAY(10) OF nt1;      -- varray of varray of integer
+nva nt11;
+BEGIN
+  nva := nt11(nt1(t1(4,5,6), t2(55,6,73), t1(2,4), t1(2,5,6)),nt1(t1(2,4),t1(2,8)));
+END;
+/
+
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE t2 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE nt2 IS VARRAY(10) OF t2;      -- varray of varray of integer
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nt22 IS VARRAY(10) OF nt2;      -- varray of varray of integer
+TYPE nt11 IS VARRAY(10) OF nt1;      -- varray of varray of integer
+nva nt11;
+BEGIN
+  nva := nt22(nt1(t1(4,5,6), t1(55,6,73), t1(2,4), t1(2,5,6)),nt1(t1(2,4),t1(2,8)));
+END;
+/
+
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE t2 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE nt2 IS VARRAY(10) OF t2;      -- varray of varray of integer
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nt22 IS VARRAY(10) OF nt2;      -- varray of varray of integer
+TYPE nt11 IS VARRAY(10) OF nt1;      -- varray of varray of integer
+nva nt11;
+BEGIN
+  nva := nt11(nt1(t1(4,5,6), t1(55,6,73), t1(2,4), t1(2,5,6)),nt2(t1(2,4),t1(2,8)));
+END;
+/
+
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE t2 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE nt2 IS VARRAY(10) OF t2;      -- varray of varray of integer
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nt22 IS VARRAY(10) OF nt2;      -- varray of varray of integer
+TYPE nt11 IS VARRAY(10) OF nt1;      -- varray of varray of integer
+nva nt11 := nt11(nt1(t1(4,5,6), t2(55,6,73), t1(2,4), t1(2,5,6)),nt1(t1(2,4),t1(2,8)));
+va2 t2;
+BEGIN
+  va2(1):=9;
+END;
+/
+
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE t2 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE nt2 IS VARRAY(10) OF t2;      -- varray of varray of integer
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nt22 IS VARRAY(10) OF nt2;      -- varray of varray of integer
+TYPE nt11 IS VARRAY(10) OF nt1;      -- varray of varray of integer
+nva nt11 := nt22(nt1(t1(4,5,6), t1(55,6,73), t1(2,4), t1(2,5,6)),nt1(t1(2,4),t1(2,8)));
+va2 t2;
+BEGIN
+  va2(1):=9;
+END;
+/
+
+DECLARE
+TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE t2 IS VARRAY(10) OF INTEGER;  -- varray of integer
+TYPE nt2 IS VARRAY(10) OF t2;      -- varray of varray of integer
+TYPE nt1 IS VARRAY(10) OF t1;      -- varray of varray of integer
+TYPE nt22 IS VARRAY(10) OF nt2;      -- varray of varray of integer
+TYPE nt11 IS VARRAY(10) OF nt1;      -- varray of varray of integer
+nva nt11 := nt11(nt1(t1(4,5,6), t1(55,6,73), t1(2,4), t1(2,5,6)),nt2(t1(2,4),t1(2,8)));
+va2 t2;
+BEGIN
+  va2(1):=9;
+END;
+/
+
+set enable_pltype_name_check = off;
+
 --test o1.col1.col2 ref
 create type ct as (num int,info text);
 create type ct1 as (num int,info ct);

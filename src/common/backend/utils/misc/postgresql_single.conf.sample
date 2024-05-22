@@ -828,7 +828,7 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #enable_seqscan_fusion = off
 #enable_cachedplan_mgr=on
 #enable_ignore_case_in_dquotes=off
-
+#enable_pltype_name_check=off
 #------------------------------------------------------------------------------
 # SHARED STORAGE OPTIONS
 #------------------------------------------------------------------------------
