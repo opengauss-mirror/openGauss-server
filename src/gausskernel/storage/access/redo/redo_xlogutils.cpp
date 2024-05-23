@@ -1709,37 +1709,35 @@ void ExtremeRtoFlushBuffer(RedoBufferInfo *bufferinfo, bool updateFsm)
         }
         /* release buffer */
         XLogRedoBufferReleaseFunc(bufferinfo->buf);
-    } else {
-        if (bufferinfo->pageinfo.page != NULL) {
-            BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
-            if (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page))) {
-                /* backends may mark buffer dirty already */
-                if (!(bufDesc->state & BM_DIRTY)) {
-                    MarkBufferDirty(bufferinfo->buf);
-                }
-                if (!bufferinfo->dirtyflag && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
-                    int mode = WARNING;
-#ifdef USE_ASSERT_CHECKING
-                    mode = PANIC;
-#endif
-                    const uint32 shiftSz = 32;
-                    ereport(mode, (errmsg("extreme_rto not mark dirty:lsn %X/%X, lsn_disk %X/%X, "
-                                        "lsn_page %X/%X, page %u/%u/%u %u",
-                                        (uint32)(bufferinfo->lsn >> shiftSz), (uint32)(bufferinfo->lsn),
-                                        (uint32)(bufDesc->extra->lsn_on_disk >> shiftSz),
-                                        (uint32)(bufDesc->extra->lsn_on_disk),
-                                        (uint32)(PageGetLSN(bufferinfo->pageinfo.page) >> shiftSz),
-                                        (uint32)(PageGetLSN(bufferinfo->pageinfo.page)), 
-                                        bufferinfo->blockinfo.rnode.spcNode, bufferinfo->blockinfo.rnode.dbNode,
-                                        bufferinfo->blockinfo.rnode.relNode, bufferinfo->blockinfo.blkno)));
-                }
-#ifdef USE_ASSERT_CHECKING
-                bufDesc->lsn_dirty = PageGetLSN(bufferinfo->pageinfo.page);
-#endif
+    } else if (bufferinfo->pageinfo.page != NULL) {
+        BufferDesc *bufDesc = GetBufferDescriptor(bufferinfo->buf - 1);
+        if (bufferinfo->dirtyflag || XLByteLT(bufDesc->extra->lsn_on_disk, PageGetLSN(bufferinfo->pageinfo.page))) {
+            /* backends may mark buffer dirty already */
+            if (!(bufDesc->state & BM_DIRTY)) {
+                MarkBufferDirty(bufferinfo->buf);
             }
-
-            UnlockReleaseBuffer(bufferinfo->buf); /* release buffer */
+            if (!bufferinfo->dirtyflag && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
+                int mode = WARNING;
+#ifdef USE_ASSERT_CHECKING
+                mode = PANIC;
+#endif
+                const uint32 shiftSz = 32;
+                ereport(mode, (errmsg("extreme_rto not mark dirty:lsn %X/%X, lsn_disk %X/%X, "
+                                    "lsn_page %X/%X, page %u/%u/%u %u",
+                                    (uint32)(bufferinfo->lsn >> shiftSz), (uint32)(bufferinfo->lsn),
+                                    (uint32)(bufDesc->extra->lsn_on_disk >> shiftSz),
+                                    (uint32)(bufDesc->extra->lsn_on_disk),
+                                    (uint32)(PageGetLSN(bufferinfo->pageinfo.page) >> shiftSz),
+                                    (uint32)(PageGetLSN(bufferinfo->pageinfo.page)), 
+                                    bufferinfo->blockinfo.rnode.spcNode, bufferinfo->blockinfo.rnode.dbNode,
+                                    bufferinfo->blockinfo.rnode.relNode, bufferinfo->blockinfo.blkno)));
+            }
+#ifdef USE_ASSERT_CHECKING
+            bufDesc->lsn_dirty = PageGetLSN(bufferinfo->pageinfo.page);
+#endif
         }
+
+        UnlockReleaseBuffer(bufferinfo->buf); /* release buffer */
     }
 
     SSMarkBufferDirtyForERTO(bufferinfo);
