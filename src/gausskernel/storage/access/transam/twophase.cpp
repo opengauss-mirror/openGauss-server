@@ -127,6 +127,7 @@
 #endif
 #include "instruments/instr_statement.h"
 #include "storage/file/fio_device.h"
+#include "ddes/dms/ss_reform_common.h"
 
 /*
  * Directory where Two-phase commit files reside within PGDATA
@@ -2182,7 +2183,12 @@ static void XlogReadTwoPhaseData(XLogRecPtr lsn, char **buf, int *len)
     char *errormsg = NULL;
     errno_t rc = 0;
 
-    xlogreader = XLogReaderAllocate(&read_local_xlog_page, NULL);
+    if (ENABLE_DMS) {
+        xlogreader = SSXLogReaderAllocate(&read_local_xlog_page, NULL, ALIGNOF_BUFFER);
+    } else {
+        xlogreader = XLogReaderAllocate(&read_local_xlog_page, NULL);
+    }
+
     if (xlogreader == NULL) {
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory"),
                         errdetail("Failed while allocating an XLog reading processor.")));

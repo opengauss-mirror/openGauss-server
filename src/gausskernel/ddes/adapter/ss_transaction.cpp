@@ -1033,6 +1033,8 @@ bool SSCanFetchLocalSnapshotTxnRelatedInfo()
         bool snap_available = xmin_info->snapshot_available;
         SpinLockRelease(&xmin_info->snapshot_available_lock);
         return snap_available;
+    } else if (SS_STANDBY_FAILOVER && t_thrd.role == STARTUP) {
+        return true;
     }
     
     return false;
