@@ -35,8 +35,9 @@
 
 static UTupleTidOp UHeapTidOpFromInfomask(uint16 infomask);
 static UVersionSelector UHeapTupleSatisfies(UTupleTidOp op, Snapshot snapshot,
-    UHeapTupleTransInfo *uinfo, int *snapshot_requests, Buffer buffer);
-static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid, Snapshot snapshot, Buffer buffer);
+    UHeapTupleTransInfo *uinfo, int *snapshot_requests, Buffer buffer, bool *has_cur_xact_write = NULL);
+static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid, Snapshot snapshot, Buffer buffer,
+    bool *has_cur_xact_write = NULL);
 static UVersionSelector UHeapSelectVersionNow(UTupleTidOp op, TransactionId xid);
 static UVersionSelector UHeapCheckCID(UTupleTidOp op, CommandId tuple_cid, CommandId visibility_cid,
     bool* has_cur_xact_write = NULL);
@@ -111,7 +112,7 @@ TransactionId UDiskTupleGetModifiedXid(UHeapDiskTuple diskTup, Page page)
  * function for UHeapTupleFetch, not a general-purpose facility.
  */
 static UVersionSelector UHeapTupleSatisfies(UTupleTidOp op, Snapshot snapshot,
-    UHeapTupleTransInfo *uinfo, int *snapshot_requests, Buffer buffer)
+    UHeapTupleTransInfo *uinfo, int *snapshot_requests, Buffer buffer, bool *has_cur_xact_write)
 {
     UVersionSelector selector = UVERSION_NONE;
 
@@ -130,7 +131,7 @@ static UVersionSelector UHeapTupleSatisfies(UTupleTidOp op, Snapshot snapshot,
          * NOTICE: We distinguish SNAPSHOT_VERSION_MVCC and SNAPSHOT_MVCC
          * in UHeapSelectVersionMVCC codes.
          */
-        selector = UHeapSelectVersionMVCC(op, uinfo->xid, snapshot, buffer);
+        selector = UHeapSelectVersionMVCC(op, uinfo->xid, snapshot, buffer, has_cur_xact_write);
     } else if (snapshot->satisfies == SNAPSHOT_NOW) {
         selector = UHeapSelectVersionNow(op, uinfo->xid);
     } else if (snapshot->satisfies == SNAPSHOT_SELF) {
@@ -371,7 +372,8 @@ bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer b
  * return UVERSION_CHECK_CID; caller is responsible for calling UHeapCheckCID
  * with the appropriate CID to obtain a final answer.
  */
-static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid, Snapshot snapshot, Buffer buffer)
+static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid, Snapshot snapshot, 
+    Buffer buffer, bool *has_cur_xact_write)
 {
     TransactionIdStatus hintstatus;
     /* IMPORTANT: Version snapshot is independent of the current transaction. */
@@ -384,7 +386,14 @@ static UVersionSelector UHeapSelectVersionMVCC(UTupleTidOp op, TransactionId xid
          */
         if (GetCurrentCommandIdUsed() || GetCurrentCommandId(false) >= snapshot->curcid)
             return UVERSION_CHECK_CID;
-
+        if (op == UTUPLETID_GONE) {
+            return UVERSION_NONE;
+        } else {
+            if (has_cur_xact_write != NULL) {
+                *has_cur_xact_write = true;
+            }
+            return UVERSION_CURRENT;
+        }
         /* Nothing has changed since our scan started. */
         return ((op == UTUPLETID_GONE) ? UVERSION_NONE : UVERSION_CURRENT);
     }
@@ -928,7 +937,7 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
         }
     }
 
-    uheapselect = UHeapTupleSatisfies(op, snapshot, &tdinfo, &snapshotRequests, buffer);
+    uheapselect = UHeapTupleSatisfies(op, snapshot, &tdinfo, &snapshotRequests, buffer, has_cur_xact_write);
     /* If necessary, check CID against snapshot. */
     if (uheapselect == UVERSION_CHECK_CID) {
         /* UHeapUNDO : Fetch the tuple's transaction information from the undo */

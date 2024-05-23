@@ -443,15 +443,21 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
         usp->SetHead(uspMetaInfo->head);
         usp->set_head_exrto(uspMetaInfo->head);
         usp->SetTail(uspMetaInfo->tail);
+        uint64 segSize = 0;
         if (type == UNDO_LOG_SPACE) {
             usp->CreateNonExistsUndoFile(zoneId, UNDO_DB_OID);
+            segSize = USEG_SIZE(UNDO_DB_OID);
         } else {
             usp->CreateNonExistsUndoFile(zoneId, UNDO_SLOT_DB_OID);
+            segSize = USEG_SIZE(UNDO_DB_OID);
         }
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used());
-        ereport(DEBUG1, (errmsg(UNDOFORMAT("recovery_space_meta, zone_id:%u, type:%u, "
-            "lsn:%lu, head:%lu, tail:%lu."),
-            zoneId, type, uspMetaInfo->lsn, uspMetaInfo->head, uspMetaInfo->tail)));
+        uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
+        const uint64 MAX_OFFSET = (UNDO_LOG_MAX_SIZE - transUndoThresholdSize) - segSize;
+        if (usp->Tail() < usp->Head() || usp->Tail() > MAX_OFFSET) {
+            g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT] =
+                bms_del_member(g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT], zoneId);
+        }
     }
     pfree(persistBlock);
 }

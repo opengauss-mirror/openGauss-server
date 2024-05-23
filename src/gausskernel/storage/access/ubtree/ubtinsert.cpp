@@ -66,7 +66,7 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf);
  *
  *      Note: The page must be a leaf page.
  */
-bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
+bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del_blknos)
 {
     Page page = BufferGetPage(buf);
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -136,7 +136,7 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
         Assert(!P_RIGHTMOST(opaque));
         if (PageGetMaxOffsetNumber(page) == 1) {
             /* already empty (only HIKEY left), ok to delete */
-            return UBTreePageDel(rel, buf) > 0;
+            return UBTreePageDel(rel, buf, del_blknos) > 0;
         } else {
             _bt_relbuf(rel, buf);
             return false;

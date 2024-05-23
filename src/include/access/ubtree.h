@@ -101,6 +101,8 @@ typedef UBTRecycleQueueHeaderData* UBTRecycleQueueHeader;
 #define URQ_HEAD_PAGE (1 << 0)
 #define URQ_TAIL_PAGE (1 << 1)
 
+#define URQ_MAX_GET_PAGE_TIMES 5
+
 #define UBTRecycleMaxItems \
     ((BLCKSZ - sizeof(PageHeaderData) - offsetof(UBTRecycleQueueHeaderData, items)) / sizeof(UBTRecycleQueueItemData))
 
@@ -481,7 +483,7 @@ typedef struct {
 extern bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel);
 extern bool UBTreeDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex);
 
-extern bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete);
+extern bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del_blknos = NULL);
 extern bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTree *invisibleParts = NULL);
 extern bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate);
 extern void UBTreePagePruneExecute(Page page, OffsetNumber* nowdead, int ndead, IndexPruneState* prstate,
@@ -537,7 +539,7 @@ extern void UBTreePageInit(Page page, Size size);
 extern void UBTreeInitMetaPage(Page page, BlockNumber rootbknum, uint32 level);
 extern Buffer UBTreeGetRoot(Relation rel, int access);
 extern bool UBTreePageRecyclable(Page page);
-extern int UBTreePageDel(Relation rel, Buffer buf);
+extern int UBTreePageDel(Relation rel, Buffer buf, BTStack del_blknos = NULL);
 
 extern OffsetNumber UBTreeFindsplitloc(Relation rel, Buffer buf, OffsetNumber newitemoff,
     Size newitemsz, bool* newitemonleft);

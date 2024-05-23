@@ -547,8 +547,10 @@ static bool CheckLastRecordSize(UndoRecordSize lastRecordSize, undo::XlogUndoMet
     WHITEBOX_TEST_STUB(UNDO_CHECK_LAST_RECORD_SIZE_FAILED, WhiteboxDefaultErrorEmit);
 
     if (t_thrd.xlog_cxt.InRecovery && (lastRecordSize != xlundometa->lastRecordSize)) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("last record size %u != xlog last record size %u."), 
-            lastRecordSize, xlundometa->lastRecordSize)));
+        ereport(PANIC, (errmsg(UNDOFORMAT("last record size %u != xlog last record size %u,"
+            "xlog info %d, slotPtr %lu,dbid %u."), 
+            lastRecordSize, xlundometa->lastRecordSize, xlundometa->info, xlundometa->slotPtr,
+            xlundometa->dbid)));
         return false;
     } else {
         xlundometa->lastRecordSize = lastRecordSize;
@@ -576,7 +578,7 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
 
     if (t_thrd.xlog_cxt.InRecovery) {
         undoPtr = xlundohdr->urecptr;
-        needSwitch = undo::CheckNeedSwitch(upersistence, totalSize, undoPtr);
+        needSwitch = xlundometa->IsSwitchZone();
         if (needSwitch) {
             urec->SetUinfo(UNDO_UREC_INFO_TRANSAC);
         }
@@ -585,10 +587,11 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
             ereport(ERROR, (errmsg(UNDOFORMAT("Ustore is disabled, "
                 "please set GUC enable_ustore=on and restart database."))));
         }
-        needSwitch = undo::CheckNeedSwitch(upersistence, totalSize);
+        needSwitch = undo::CheckNeedSwitch(upersistence);
         if (needSwitch) {
-            urec->SetUinfo(UNDO_UREC_INFO_TRANSAC);
-            totalSize = urecvec->TotalSize();
+            ereport(ERROR, (errmsg("Need switch zone when PrepareUndoRecord!"
+            "xid %lu, zid = %d, totalSize %u.", GetTopTransactionIdIfAny(),
+            t_thrd.undo_cxt.zids[upersistence], totalSize)));
         }
         undoPtr = undo::AllocateUndoSpace(urec->Xid(), upersistence, totalSize, needSwitch, xlundometa);
     }

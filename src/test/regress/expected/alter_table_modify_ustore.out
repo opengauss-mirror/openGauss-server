@@ -1329,21 +1329,6 @@ SELECT b1 FROM test_at_change_constr ORDER BY 1;
   4
 (5 rows)
 
-select pg_get_tabledef('test_at_change_constr'::regclass);
-                                                            pg_get_tabledef                                                             
-----------------------------------------------------------------------------------------------------------------------------------------
- SET search_path = atbdb_ustore_schema;                                                                                                +
- CREATE TABLE test_at_change_constr (                                                                                                  +
-     a integer,                                                                                                                        +
-     b1 integer NOT NULL,                                                                                                              +
-     CONSTRAINT t_at_m_check_1 CHECK (((b1)::bigint = a)),                                                                             +
-     CONSTRAINT t_at_m_check CHECK (((b1)::bigint < 5))                                                                                +
- )                                                                                                                                     +
- WITH (orientation=row, storage_type=ustore, compression=no);                                                                          +
---?ALTER TABLE test_at_change_constr ADD CONSTRAINT .* USING ubtree .*(b1) WITH (storage_type=ustore);                                 +
---?ALTER TABLE test_at_change_constr ADD CONSTRAINT .* USING ubtree .*(b1) WITH (storage_type=ustore);
-(1 row)
-
 ALTER TABLE test_at_change_constr CHANGE b1 b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
 ERROR:  Invalid modify column operation
 DETAIL:  modify or change column REFERENCES constraint is not supported

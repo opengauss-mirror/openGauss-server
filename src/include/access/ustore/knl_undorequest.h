@@ -57,6 +57,12 @@ typedef enum RollbackReturnType {
     ROLLBACK_OK_NOEXIST = -2
 } RollbackReturnType;
 
+typedef enum RollBackTypeForAlterTabl {
+    ROLLBACK_OP_FOR_MOVE_TBLSPC = 0,
+    ROLLBACK_OP_FOR_MERGE_PARTITION = 1,
+    ROLLBACK_OP_FOR_EXCHANGE_PARTITION = 2
+} RollBackTypeForAlterTabl;
+
 Size AsyncRollbackRequestsHashSize(void);
 Size AsyncRollbackHashShmemSize(void);
 void AsyncRollbackHashShmemInit(void);

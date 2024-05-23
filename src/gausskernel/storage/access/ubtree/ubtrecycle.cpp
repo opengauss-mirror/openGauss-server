@@ -300,10 +300,16 @@ static bool UBTreeTryRecycleEmptyPageInternal(Relation rel)
 
     WHITEBOX_TEST_STUB("UBTreeTryRecycleEmptyPageInternal-prune-page", WhiteboxDefaultErrorEmit);
 
-    if (UBTreePagePruneOpt(rel, buf, true)) {
-        /* successfully deleted, move to freed page queue */
-        UBTreeRecycleQueueAddPage(rel, RECYCLE_FREED_FORK, addr.indexBlkno, ReadNewTransactionId());
+    BTStack dummy_del_blknos = (BTStack) palloc0(sizeof(BTStackData));
+    if (UBTreePagePruneOpt(rel, buf, true, dummy_del_blknos)) {
+        BTStack cur_del_blkno = dummy_del_blknos->bts_parent;
+        while (cur_del_blkno){
+            /* successfully deleted, move to freed page queue */
+            UBTreeRecycleQueueAddPage(rel, RECYCLE_FREED_FORK, cur_del_blkno->bts_blkno, ReadNewTransactionId());
+            cur_del_blkno = cur_del_blkno->bts_parent;
+        }
     }
+    _bt_freestack(dummy_del_blknos);
     /* whether the page can be deleted or not, discard from the queue */
     UBTreeRecycleQueueDiscardPage(rel, addr);
     return true;
@@ -417,7 +423,7 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
 
     Buffer indexBuf = InvalidBuffer;
     bool continueScan = false;
-    for (;;) {
+    for (BlockNumber bufCount = 0; bufCount < URQ_MAX_GET_PAGE_TIMES; bufCount++) {
         indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, oldestXmin, addr, &continueScan);
         if (!continueScan) {
             break;

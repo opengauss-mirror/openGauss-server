@@ -467,6 +467,7 @@ static void UHeapXlogDelete(XLogReaderState *record)
 
     utup.table_oid = xlundohdr->relOid;
     utup.ctid = targetTid;
+    utup.t_xid_base = InvalidTransactionId;
 
     UndoRecPtr urecptr = PrepareAndInsertUndoRecordForDeleteRedo(record, &utup, blkno, 
         (allReplay || onlyReplayUndo), tbuf);
@@ -947,6 +948,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
     /* Construct old tuple for undo record */
     oldtup->table_oid = xlundohdr->relOid;
     oldtup->ctid = oldtid;
+    oldtup->t_xid_base = InvalidTransactionId;
 
     if (allReplay || onlyReplayUndo) {
         bool skipInsert = IsSkipInsertUndo(urecptr);

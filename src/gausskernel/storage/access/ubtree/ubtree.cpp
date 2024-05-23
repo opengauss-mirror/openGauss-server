@@ -916,15 +916,21 @@ restart:
         /* Run pagedel in a temp context to avoid memory leakage */
         MemoryContextReset(vstate->pagedelcontext);
         MemoryContext oldcontext = MemoryContextSwitchTo(vstate->pagedelcontext);
+        BTStack dummy_del_blknos = (BTStack) palloc0(sizeof(BTStackData));
 
-        int ndel = UBTreePageDel(rel, buf);
+        int ndel = UBTreePageDel(rel, buf, dummy_del_blknos);
         if (ndel) {
-            /* successfully deleted, move to freed page queue */
-            UBTreeRecordFreePage(rel, blkno, ReadNewTransactionId());
-            /* count only this page, else may double-count parent */
-            stats->pages_deleted++;
+            BTStack cur_del_blkno = dummy_del_blknos->bts_parent;
+            while (cur_del_blkno) {
+                /* successfully deleted, move to freed page queue */
+                UBTreeRecordFreePage(rel, cur_del_blkno->bts_blkno, ReadNewTransactionId());
+                /* count only this page, else may double-count parent */
+                stats->pages_deleted++;
+                cur_del_blkno = cur_del_blkno->bts_parent;    
+            }
         }
 
+        _bt_freestack(dummy_del_blknos);
         MemoryContextSwitchTo(oldcontext);
         /* pagedel released buffer, so we shouldn't */
     } else {

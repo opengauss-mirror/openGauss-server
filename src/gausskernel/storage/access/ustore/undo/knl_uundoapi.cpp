@@ -48,29 +48,30 @@ void AllocateTransSlot(UndoSlotPtr slotPtr, UndoZone *zone, TransactionId xid, U
     t_thrd.undo_cxt.slots[upersistence] = (void *)slot;
 }
 
-bool CheckNeedSwitch(UndoPersistence upersistence, uint64 size, UndoRecPtr undoPtr)
+bool CheckNeedSwitch(UndoPersistence upersistence)
 {
-    int zid;
-    if (t_thrd.xlog_cxt.InRecovery) {
-        zid = UNDO_PTR_GET_ZONE_ID(undoPtr);
-    } else {
-        zid = t_thrd.undo_cxt.zids[upersistence];
-    }
+    int zid = t_thrd.undo_cxt.zids[upersistence];
     Assert(zid != INVALID_ZONE_ID);
     UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, true);
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("CheckNeedSwitch: uzone is NULL")));
     }
-    return uzone->CheckNeedSwitch(size);
+    if ((uint64)UNDO_PTR_GET_OFFSET(uzone->GetInsertURecPtr()) + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE) {
+        return true;
+    }
+    return false;
 }
 
 void RollbackIfUndoExceeds(TransactionId xid, uint64 size)
 {
     t_thrd.undo_cxt.transUndoSize += size;
-    uint64 transUndoThresholdSize = (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction * BLCKSZ;
+    uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
     if ((!t_thrd.xlog_cxt.InRecovery) && (t_thrd.undo_cxt.transUndoSize > transUndoThresholdSize)) {
-        ereport(ERROR, (errmsg(UNDOFORMAT("xid %lu, the undo size %lu of the transaction exceeds the threshold %lu."),
-            xid, t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize)));
+        ereport(ERROR, (errmsg(UNDOFORMAT("xid %lu, the undo size %lu of the transaction exceeds the threshold %lu."
+            "trans_undo_threshold_size %lu, undo_space_limit_size %lu."),
+            xid, t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize,
+            (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction,
+            (uint64)u_sess->attr.attr_storage.undo_space_limit_size)));
     }
     return;
 }
@@ -382,19 +383,6 @@ void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo)
 #endif
 }
 
-void CheckUndoZoneBitmap()
-{
-    for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
-        if (bms_num_members(g_instance.undo_cxt.uZoneBitmap[i]) !=
-            (g_instance.undo_cxt.uZoneBitmap[i])->nwords * BITS_PER_BITMAPWORD) {
-            ereport(WARNING, (errmsg(
-                "uZoneBitmap is being used in recovery. bitmapnum %d, expect %d.",
-                bms_num_members(g_instance.undo_cxt.uZoneBitmap[i]),
-                (g_instance.undo_cxt.uZoneBitmap[i])->nwords * BITS_PER_BITMAPWORD)));
-        }
-    }
-}
-
 void RebuildUndoZoneBitmap()
 {
     ereport(LOG, (errmsg(UNDOFORMAT("undo zone bitmap rebuild begin."))));
@@ -413,7 +401,7 @@ void RebuildUndoZoneBitmap()
             if (zone == NULL) {
                 continue;
             }
-            if (zone->Attached()) {
+            if (zone->Attached() || zone->CheckNeedSwitch()) {
                 g_instance.undo_cxt.uZoneBitmap[persist] =
                     bms_del_member(g_instance.undo_cxt.uZoneBitmap[persist], idx);
                 Assert(UndoZoneGroup::UndoZoneInUse(retZid, (UndoPersistence)persist));
@@ -439,7 +427,6 @@ void InitUndoCountThreshold()
         undoMemFactor * g_instance.undo_cxt.uZoneCount : undoCountThreshold;
     g_instance.undo_cxt.undoCountThreshold = (g_instance.undo_cxt.undoCountThreshold > UNDO_ZONE_COUNT) ?
         g_instance.undo_cxt.undoCountThreshold : UNDO_ZONE_COUNT;
-    CheckUndoZoneBitmap();
 }
 
 static bool InitZoneMeta(int fd)
@@ -737,6 +724,14 @@ void OnUndoProcExit(int code, Datum arg)
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("on undo exit, thrd: %d"), t_thrd.myLogicTid)));
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
+        if (upersistence == UNDO_TEMP || upersistence == UNDO_UNLOGGED) {
+            TransactionId topXid = GetTopTransactionIdIfAny();
+            undo::TransactionSlot *slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[upersistence]);
+            UndoSlotPtr slotPtr = t_thrd.undo_cxt.slotPtr[upersistence];
+            if (slot != NULL && topXid == slot->XactId() && slotPtr != INVALID_UNDO_SLOT_PTR) {
+                UpdateRollbackFinish(slotPtr);
+            }
+        }
         int zid = t_thrd.undo_cxt.zids[upersistence];
         if (!IS_VALID_ZONE_ID(zid)) {
             continue;

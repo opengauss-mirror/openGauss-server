@@ -1666,6 +1666,7 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
         if (linesLeft > 0) {
             tuple = scan->rs_visutuples[lineOff];
             scan->rs_base.rs_cindex = lineOff;
+            scan->rs_cutup = tuple;
             return tuple;
         }
 

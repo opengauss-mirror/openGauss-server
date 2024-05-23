@@ -6,6 +6,7 @@ create table t_charset_1 (c1 varchar(20)) charset   utf8mb4 collate   utf8mb4_un
 create table a_charset_1 (a1 varchar(20) charset utf8mb4 collate utf8mb4_general_ci);
 create table t_charset_2 (c1 varchar(20)) with(collate = 1537); -- error
 \c regression;
+clean connection to all force for database d_charset;
 drop database d_charset;
 create database d_charset dbcompatibility 'B';
 create database d_charset_bak dbcompatibility 'B';
@@ -236,5 +237,7 @@ select pg_get_tabledef('a_charset_2');
 set b_format_behavior_compat_options = '';
 
 \c regression
+clean connection to all force for database d_charset_bak;
 drop database if exists d_charset_bak;
+clean connection to all force for database d_charset;
 drop database if exists d_charset;

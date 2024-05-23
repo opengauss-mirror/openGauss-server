@@ -11,6 +11,7 @@ create table t_charset_2 (c1 varchar(20)) with(collate = 1537); -- error
 ERROR:  Un-support feature
 DETAIL:  Forbid to set or change "collate" in non-B format
 \c regression;
+clean connection to all force for database d_charset;
 drop database d_charset;
 create database d_charset dbcompatibility 'B';
 create database d_charset_bak dbcompatibility 'B';
@@ -1036,5 +1037,7 @@ select pg_get_tabledef('a_charset_2');
 
 set b_format_behavior_compat_options = '';
 \c regression
+clean connection to all force for database d_charset_bak;
 drop database if exists d_charset_bak;
+clean connection to all force for database d_charset;
 drop database if exists d_charset;

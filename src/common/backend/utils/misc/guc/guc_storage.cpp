@@ -212,8 +212,6 @@ static bool check_and_assign_proc_oids(List* elemlist);
 static bool check_and_assign_type_oids(List* elemlist);
 static bool check_and_assign_namespace_oids(List* elemlist);
 static bool check_and_assign_general_oids(List* elemlist);
-static bool check_undo_space_limit_size(int *newval, void **extra, GucSource source);
-static bool check_undo_limit_size_per_transaction(int *newval, void **extra, GucSource source);
 static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 static bool check_ss_interconnect_url(char **newval, void **extra, GucSource source);
@@ -3606,7 +3604,7 @@ static void InitStorageConfigureNamesInt()
             33554432,  /* 256 GB */
             102400,   /* 800 MB */
             INT_MAX,
-            check_undo_space_limit_size,
+            NULL,
             NULL,
             NULL},
         {{"undo_limit_size_per_transaction",
@@ -3620,7 +3618,7 @@ static void InitStorageConfigureNamesInt()
             4194304,  /* 32 GB */
             256,      /* 2 MB */
             INT_MAX,
-            check_undo_limit_size_per_transaction,
+            NULL,
             NULL,
             NULL},
         {{"undo_zone_count",

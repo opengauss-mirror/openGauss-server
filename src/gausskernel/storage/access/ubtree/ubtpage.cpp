@@ -43,7 +43,7 @@
 #include "utils/snapmgr.h"
 
 static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack);
-static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty);
+static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos = NULL);
 static bool UBTreeLockBranchParent(Relation rel, BlockNumber child, BTStack stack, Buffer *topparent,
     OffsetNumber *topoff, BlockNumber *target, BlockNumber *rightsib);
 static void UBTreeLogReusePage(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid);
@@ -548,7 +548,7 @@ static bool UBTreeLockBranchParent(Relation rel, BlockNumber child, BTStack stac
  * carefully, it's better to run it in a temp context that can be reset
  * frequently.
  */
-int UBTreePageDel(Relation rel, Buffer buf)
+int UBTreePageDel(Relation rel, Buffer buf, BTStack del_blknos)
 {
     int ndeleted = 0;
     BlockNumber rightsib;
@@ -716,9 +716,12 @@ int UBTreePageDel(Relation rel, Buffer buf)
         rightsib_empty = false;
         while (P_ISHALFDEAD(opaque)) {
             /* will check for interrupts, once lock is released */
-            if (!UBTreeUnlinkHalfDeadPage(rel, buf, &rightsib_empty)) {
+            if (!UBTreeUnlinkHalfDeadPage(rel, buf, &rightsib_empty, del_blknos)) {
                 /* _bt_unlink_halfdead_page already released buffer */
                 return ndeleted;
+            }
+            if (del_blknos != NULL) {
+                del_blknos = del_blknos->bts_parent;
             }
             ndeleted++;
         }
@@ -1027,7 +1030,7 @@ static bool ReserveForDeletion(Relation rel, Buffer buf)
  * we'll release both pin and lock before returning (we define it that way
  * to avoid having to reacquire a lock we already released).
  */
-static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty)
+static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos)
 {
     BlockNumber leafblkno = BufferGetBlockNumber(leafbuf);
     BlockNumber leafleftsib;
@@ -1426,6 +1429,11 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
      */
     if (target != leafblkno) {
         _bt_relbuf(rel, buf);
+    }
+    if (del_blknos != NULL) {
+        BTStack del_blkno = (BTStack) palloc0(sizeof(BTStackData));
+        del_blkno->bts_blkno = target;
+        del_blknos->bts_parent = del_blkno;
     }
 
     return true;

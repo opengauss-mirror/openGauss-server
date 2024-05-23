@@ -1274,7 +1274,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
             DefElem* def2 = makeDefElem("compression", (Node*)rowCmprOpt);
             res = list_make2(def1, def2);
             if (g_instance.attr.attr_storage.enable_ustore && u_sess->attr.attr_sql.enable_default_ustore_table &&
-                !IsSystemNamespace(relnamespace) && !assignedStorageType) {
+                relkind != RELKIND_MATVIEW && !IsSystemNamespace(relnamespace) && !assignedStorageType) {
                 DefElem* def3 = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
                 res = lappend(res, def3);
             }
@@ -1292,7 +1292,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                 res = lappend(options, def2);
             }
             if (g_instance.attr.attr_storage.enable_ustore && u_sess->attr.attr_sql.enable_default_ustore_table &&
-                !IsSystemNamespace(relnamespace) && !assignedStorageType) {
+                relkind != RELKIND_MATVIEW && !IsSystemNamespace(relnamespace) && !assignedStorageType) {
                 DefElem *def2 = makeDefElem("storage_type", (Node *)makeString(TABLE_ACCESS_METHOD_USTORE));
                 res = lappend(options, def2);
             }
@@ -20049,7 +20049,7 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
                 int i = 0;
 
                 /* Ustore not support compress yet */
-                if (RelationIsUstoreFormat(src) || !HEAP_TUPLE_IS_COMPRESSED(tuple.t_data)) {
+                if (RelationIsUstoreFormat(src) || !tableam_tuple_check_compress(src, static_cast<Tuple>(&tuple))) {
                     tableam_tops_deform_tuple(&tuple, srcTupleDesc, values, isNull);
                 } else {
                     Assert(page != NULL);
@@ -27182,6 +27182,40 @@ static bool checkChunkIdRepeat(List* srcPartToastRels, int selfIndex, Oid chunkI
     return false;
 }
 
+static void ExecUndoActionsPageForRelation(Relation rel)
+{
+    Assert(RelationIsUstoreFormat(rel));
+
+    RelationOpenSmgr(rel);
+
+    BlockNumber srcHeapBlocks = smgrnblocks(rel->rd_smgr, MAIN_FORKNUM);
+    if (srcHeapBlocks == 0) {
+        RelationCloseSmgr(rel);
+        return;
+    } 
+
+    for (BlockNumber blkno = 0; blkno < srcHeapBlocks; blkno ++) {
+        ExecuteUndoActionsPageForPartition(rel, rel->rd_smgr, MAIN_FORKNUM, blkno, 
+            blkno, ROLLBACK_OP_FOR_EXCHANGE_PARTITION);
+    }
+
+    RelationCloseSmgr(rel);
+}
+
+static void ExecUndoActionsPageForExchangePartition(Relation partTableRel, Oid partOid, Relation ordTableRel)
+{
+    Partition part = NULL;
+    Relation partRel = NULL;
+
+    part = partitionOpen(partTableRel, partOid, NoLock);
+    partRel = partitionGetRelation(partTableRel, part);
+    ExecUndoActionsPageForRelation(partRel);
+    releaseDummyRelation(&partRel);
+    partitionClose(partTableRel, part, NoLock);
+
+    ExecUndoActionsPageForRelation(ordTableRel);
+}
+
 // Description : Execute exchange
 static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
 {
@@ -27262,6 +27296,10 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
 
     // Check number, type of index
     checkIndexForExchange(partTableRel, partOid, ordTableRel, &partIndexList, &ordIndexList);
+
+    if (RelationIsUstoreFormat(partTableRel)) {
+        ExecUndoActionsPageForExchangePartition(partTableRel, partOid, ordTableRel);
+    }
 
     // Check if the tables are colstore
     checkColStoreForExchange(partTableRel, ordTableRel);

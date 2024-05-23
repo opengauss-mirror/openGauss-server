@@ -24,7 +24,7 @@
 #include "access/ustore/undo/knl_uundozone.h"
 
 namespace undo {
-bool CheckNeedSwitch(UndoPersistence upersistence, uint64 size, UndoRecPtr undoPtr = INVALID_ZONE_ID);
+bool CheckNeedSwitch(UndoPersistence upersistence);
 
 void RollbackIfUndoExceeds(TransactionId xid, uint64 size);
 
@@ -63,7 +63,6 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
     UndoRecPtr lastRecord, uint32 lastRecordSize);
 void ReleaseSlotBuffer();
 void InitUndoCountThreshold();
-void CheckUndoZoneBitmap();
 void RebuildUndoZoneBitmap();
 UndoRecPtr GetPrevUrp(UndoRecPtr currUrp);
 } // namespace undo

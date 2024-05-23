@@ -6039,7 +6039,7 @@ int main(int argc, char** argv)
     }
 
     if ((zid != INVALID_ZONE_ID) && (hackingtype != HACKING_UNDO_SPACE_META) &&
-        (hackingtype != HACKING_UNDO_SPACE_META)) {
+        (hackingtype != HACKING_UNDO_SLOT_SPACE_META)) {
         fprintf(stderr, "zid is used for undo space dump.\n");
         zid = -1;
     } else if ((zid < INVALID_ZONE_ID) || (zid >= PERSIST_ZONE_COUNT)) {

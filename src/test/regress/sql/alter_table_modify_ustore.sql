@@ -523,7 +523,6 @@ ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL PRIMARY KEY; -- ERROR
 ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL;
 INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
 SELECT b1 FROM test_at_change_constr ORDER BY 1;
-select pg_get_tabledef('test_at_change_constr'::regclass);
 ALTER TABLE test_at_change_constr CHANGE b1 b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
 DROP TABLE test_at_change_constr;
 

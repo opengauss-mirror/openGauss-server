@@ -10268,8 +10268,7 @@ void Log_copy_error_spi(CopyState cstate)
     Oid argtypes[] = {VARCHAROID, TIMESTAMPTZOID, VARCHAROID, INT8OID, TEXTOID, TEXTOID};
     /* for copy from load. */
     if (cstate->is_from && cstate->is_load_copy) {
-        bool isUHeap = RelationIsUstoreFormat(cstate->rel);
-        if (isUHeap) {
+        if (cstate->err_table->rd_att->td_tam_ops == TableAmUstore) {
             return LogCopyUErrorLogBulk(cstate);
         } else {
             return LogCopyErrorLogBulk(cstate);

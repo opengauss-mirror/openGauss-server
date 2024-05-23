@@ -474,6 +474,8 @@ typedef struct TableAmRoutine {
 
     void (*tuple_abort_speculative)(Relation relation, Tuple tuple);
 
+    bool (*tuple_check_compress)(Tuple tuple);
+
     /* ------------------------------------------------------------------------
      * DDL AM APIs
      * ------------------------------------------------------------------------
@@ -900,6 +902,11 @@ static inline void tableam_tuple_check_visible(Relation relation, Snapshot snaps
 static inline void tableam_tuple_abort_speculative(Relation relation, Tuple tuple)
 {
     relation->rd_tam_ops->tuple_abort_speculative(relation, tuple);
+}
+
+static inline bool tableam_tuple_check_compress(Relation relation, Tuple tuple)
+{
+    relation->rd_tam_ops->tuple_check_compress(tuple);
 }
 
 /* -----------------------------------------------------------------------

@@ -1734,6 +1734,7 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     utup.ctid = targetTid;
     utup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf);
     utup.disk_tuple_size = datalen;
+    utup.t_xid_base = InvalidTransactionId;
 
     TD oldTD;
     oldTD.xactid = blockdatarec->deleteUndoParse.oldxid;
@@ -1825,6 +1826,7 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     /* Construct old tuple for undo record */
     oldtup.table_oid = xlundohdr->relOid;
     oldtup.ctid = oldtid;
+    oldtup.t_xid_base = InvalidTransactionId;
 
     /* We need to pass in tablespace and relfilenode in PrepareUndo but we never explicitly
      * wrote those information in the xlundohdr because we can grab them from the XLOG record itself.

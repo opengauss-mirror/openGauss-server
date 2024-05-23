@@ -307,7 +307,7 @@ public:
         }
         return ((allocateTSlotPtr_ - recycleTSlotPtr_) / BLCKSZ);
     }
-    bool CheckNeedSwitch(UndoRecordSize size);
+    bool CheckNeedSwitch(void);
     UndoRecordState CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle, TransactionId *lastXid);
     bool CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto = false);
 

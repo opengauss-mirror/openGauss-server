@@ -190,6 +190,16 @@ void AdvanceFrozenXid(UndoZone *zone, TransactionId *oldestFozenXid,
     UndoSlotPtr allocate = zone->GetAllocateTSlotPtr();
     UndoSlotPtr currentSlotPtr =  frozenSlotPtr > recycle ? frozenSlotPtr : recycle;
     UndoSlotPtr start = INVALID_UNDO_SLOT_PTR;
+    if (UNDO_PTR_GET_OFFSET(allocate) == UNDO_LOG_BLOCK_HEADER_SIZE &&
+        UNDO_PTR_GET_OFFSET(recycle) != UNDO_LOG_BLOCK_HEADER_SIZE) {
+        allocate += ((uint64)1L << 32);
+        if (recycle < allocate) {
+            ereport(LOG, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT(
+                "zone meta corrupted: zid %d, old allocate %lu, new allocate %lu,  recycle %lu, frozenSlotPtr %lu."),
+                zone->GetZoneId(), zone->GetAllocateTSlotPtr(), allocate, recycle, frozenSlotPtr)));
+        }
+    }
     while (currentSlotPtr < allocate) {
         UndoSlotBuffer& slotBuf = g_slotBufferCache->FetchTransactionBuffer(currentSlotPtr);
         slotBuf.PrepareTransactionSlot(currentSlotPtr);
@@ -264,6 +274,15 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
 {
     UndoSlotPtr recycle = zone->GetRecycleTSlotPtr();
     UndoSlotPtr allocate = zone->GetAllocateTSlotPtr();
+    if (UNDO_PTR_GET_OFFSET(allocate) == UNDO_LOG_BLOCK_HEADER_SIZE &&
+        UNDO_PTR_GET_OFFSET(recycle) != UNDO_LOG_BLOCK_HEADER_SIZE) {
+        allocate += ((uint64)1L << 32);
+        if (recycle < allocate) {
+            ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+                "zone meta corrupted, zid %d, old allocate %lu, new allocate %lu, recycle %lu, frozenSlotPtr %lu."),
+                zone->GetZoneId(), zone->GetAllocateTSlotPtr(), allocate, recycle, zone->GetFrozenSlotPtr())));
+        }
+    }
     TransactionSlot *slot = NULL;
     UndoRecPtr endUndoPtr = INVALID_UNDO_REC_PTR;
     UndoRecPtr oldestEndUndoPtr = INVALID_UNDO_REC_PTR;

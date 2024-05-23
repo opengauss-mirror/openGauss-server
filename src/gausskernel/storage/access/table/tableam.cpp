@@ -400,6 +400,13 @@ void HeapamAbortSpeculative(Relation relation, Tuple tuple)
     heap_abort_speculative(relation, (HeapTuple) tuple);
 }
 
+bool HeapamTupleCheckCompress(Tuple tuple)
+{
+    Assert(tuple != NULL);
+    Assert(((HeapTuple)tuple)->tupTableType == HEAP_TUPLE);
+    return HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)tuple)->t_data);
+}
+
 void HeapamTcapPromoteLock(Relation relation, LOCKMODE *lockmode)
 {
     /* Protect old versions from recycling during timecapsule. */
@@ -522,6 +529,7 @@ static const TableAmRoutine g_heapam_methods = {
     tuple_lock_updated : HeapamTupleLockUpdated,
     tuple_check_visible: HeapamTupleCheckVisible,
     tuple_abort_speculative: HeapamAbortSpeculative,
+    tuple_check_compress: HeapamTupleCheckCompress,
 
     /* ------------------------------------------------------------------------
      * DDL AM APIs
@@ -1086,6 +1094,14 @@ void UHeapamAbortSpeculative(Relation relation, Tuple tuple)
     UHeapAbortSpeculative(relation, (UHeapTuple)tuple);
 }
 
+bool UHeapamTupleCheckCompress(Tuple tuple)
+{
+    Assert(tuple != NULL);
+    Assert(((UHeapTuple)tuple)->tupTableType == UHEAP_TUPLE);
+    
+    return false;
+}
+
 void UHeapamTupleCheckVisible(Snapshot snapshot, Tuple tuple, Buffer buffer)
 {
     UHeapTupleCheckVisible(snapshot, (UHeapTuple)tuple, buffer);
@@ -1219,6 +1235,7 @@ static const TableAmRoutine g_ustoream_methods = {
     tuple_lock_updated : UHeapamTupleLockUpdated,
     tuple_check_visible : UHeapamTupleCheckVisible,
     tuple_abort_speculative : UHeapamAbortSpeculative,
+    tuple_check_compress: UHeapamTupleCheckCompress,
 
 
     /* ------------------------------------------------------------------------

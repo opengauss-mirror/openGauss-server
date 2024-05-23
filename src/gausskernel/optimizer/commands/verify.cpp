@@ -1432,7 +1432,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
                  * deform the passed heap tuple. call heap_deform_tuple() if it's not compressed,
                  * otherwise call heap_deform_cmprs_tuple().
                  */
-                if (!HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)tuple)->t_data)) {
+                if (!tableam_tuple_check_compress(rel, tuple)) {
                     tableam_tops_deform_tuple(tuple, tupleDesc, values, nulls);
                 } else {
                     Page page = BufferGetPage(scandesc->rs_cbuf);
