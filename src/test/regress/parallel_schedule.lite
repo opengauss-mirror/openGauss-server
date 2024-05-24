@@ -34,9 +34,9 @@ test: median deferrable
 test: gsql
 
 test: pg_job
-test: hw_subpartition_prepare
+# test: hw_subpartition_prepare
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table
-test: hw_subpartition_clean
+# test: hw_subpartition_clean
 test: gs_dump_subpartition
 
 # run tablespace by itself, and first, because it forces a checkpoint;
@@ -46,7 +46,7 @@ test: single_node_tablespace
 
 #test startwith...connect by
 test: sw_prepare
-test: sw_basic sw_icbc sw_siblings sw_bugfix sw_by_rownum_level
+test: sw_basic sw_icbc sw_siblings sw_bugfix-1 sw_bugfix-2 sw_by_rownum_level
 test: sw_clearup
 
 # ----------

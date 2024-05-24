@@ -797,15 +797,6 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         if (has_dedup_opt) {
             elog(ERROR, "Index deduplication is not supported for ustore.");
         }
-        if (stmt->deferrable == true) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmodule(MOD_EXECUTOR),
-                    errmsg("Ustore table does not support to set deferrable."),
-                    errdetail("N/A"),
-                    errcause("feature not supported"),
-                    erraction("check constraints of columns")));
-        }
     }
 
     if (strcmp(stmt->accessMethod, "ubtree") == 0 &&

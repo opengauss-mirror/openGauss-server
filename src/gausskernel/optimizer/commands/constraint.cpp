@@ -132,7 +132,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
     }
     fakeRel = RELATION_GET_BUCKET_REL(fakeRel, bucketid);
 
-    if (!heap_hot_search(&tmptid, fakeRel, SnapshotSelf, NULL)) {
+    if (!TableIndexFetchTupleCheck(fakeRel, &tmptid, SnapshotSelf, NULL)) {
         /*
          * All rows in the HOT chain are dead, so skip the check.
          */
