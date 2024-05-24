@@ -135,6 +135,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     Oid toast_relid;
     Oid toast_typid = InvalidOid;
     Oid namespaceid;
+    Oid index_am_oid = BTREE_AM_OID;
     char toast_relname[NAMEDATALEN];
     char toast_idxname[NAMEDATALEN];
     IndexInfo* indexInfo = NULL;
@@ -269,6 +270,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
         DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
         indexOptions = list_make1(def);
         indexReloptions = transformRelOptions((Datum)0, indexOptions, NULL, NULL, false, false);
+        index_am_oid = UBTREE_AM_OID;
     }
 
     /*
@@ -319,7 +321,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
         InvalidOid,
         indexInfo,
         list_make2((void*)"chunk_id", (void*)"chunk_seq"),
-        BTREE_AM_OID,
+        index_am_oid,
         rel->rd_rel->reltablespace,
         collationObjectId,
         classObjectId,

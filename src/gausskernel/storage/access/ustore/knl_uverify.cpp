@@ -46,14 +46,7 @@
     if ((mainModule <= USTORE_VERIFY_MOD_INVALID) || (mainModule > USTORE_VERIFY_MOD_MASK)) {
         return false;
     }
-
-    /*
-     * Precheck relation type. In non-analyze mode, only the ustore non-toast table, ubtree, and undo are allowed.
-     * In analyze mode, only ustore non-toast tables are supported.
-     */
-    if (rel != NULL && RelationIsUstoreFormat(rel) && RelationIsToast(rel)) {
-        return false;
-    }
+    
     if (!analyzeVerify && (rel != NULL && !RelationIsUstoreFormat(rel) && !RelationIsUstoreIndex(rel))) {
         return false;
     }

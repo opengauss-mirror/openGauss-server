@@ -3869,7 +3869,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
         Assert(false);
     }
 
-    if (!aggressiveSearch && tdCount >= TD_THRESHOLD_FOR_PAGE_SWITCH) {
+    if ((!aggressiveSearch && tdCount >= TD_THRESHOLD_FOR_PAGE_SWITCH) || RelationIsToast(relation)) {
         /*
          * Do not extend TD array if the TD allocation request is
          * for an insert statement and the page already has

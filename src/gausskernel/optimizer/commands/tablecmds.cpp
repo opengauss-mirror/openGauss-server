@@ -2564,10 +2564,6 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 ereport(LOG, (errmodule(MOD_TIMESERIES), errmsg("use implicit distribution column method.")));
             }
         } else if (pg_strcasecmp(storeChar, TABLE_ACCESS_METHOD_USTORE) == 0) {
-            if (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support global temp table")));
-            }
             auto compression = StdRdOptionsGetStringData(std_opt, compression, COMPRESSION_NO);
             auto orientation = StdRdOptionsGetStringData(std_opt, orientation, ORIENTATION_ROW);
             if ((pg_strcasecmp(COMPRESSION_NO, compression) != 0 &&

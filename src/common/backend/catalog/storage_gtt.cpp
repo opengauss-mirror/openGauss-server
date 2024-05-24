@@ -1225,10 +1225,6 @@ static void CreateGTTRelFiles(const ResultRelInfo* resultRelInfo)
 
     /* remove junk files when other session exited unexpected */
     UnlinkJunkRelFile(relation);
-    if (RelationIsUstoreFormat(relation)) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("global temp table is not supported in ustore yet")));
-    }
     RelationCreateStorage(
         relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, relation);
     for (i = 0; i < resultRelInfo->ri_NumIndices; i++) {
