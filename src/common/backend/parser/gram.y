@@ -1994,7 +1994,7 @@ AlterSessionStmt:
 /*****************************************************************************
  *
  * Alter SYSTEM 
- * (1. kill a session by "select pg_terminate_backend(pid)", so it only needs a SelectStmt node.)
+ * (1. kill a session by "select pg_terminate_session(pid, sessionId)", so it only needs a SelectStmt node.)
  * (2. disconnect a session. unsupported currently.)
  * (3. set system parameter to, this is used to change configuration parameters persistently.)
  *
@@ -31079,8 +31079,8 @@ makeNodeDecodeCondtion(Expr* firstCond,Expr* secondCond)
 }
 
 // make function infomation to kill the session
-// make "ResTarget" for invoking function "pg_terminate_backend",
-// only the first cell of arguments is effective, it is treated as pid
+// make "ResTarget" for invoking function "pg_terminate_session",
+// the first cell of arguments is pid, the second is sessionId
 static List*
 make_action_func(List *arguments)
 {
@@ -31088,7 +31088,7 @@ make_action_func(List *arguments)
 	ResTarget	*restarget = NULL;
 
 	func = (FuncCall*)makeNode(FuncCall);
-	func->funcname = list_make1(makeString("pg_terminate_backend"));
+	func->funcname = list_make1(makeString("pg_terminate_session"));
 	func->args = arguments;
 	func->agg_star = FALSE;
 	func->agg_distinct = FALSE;
@@ -31105,9 +31105,9 @@ make_action_func(List *arguments)
 }
 
 /*
- * @Description:  get arguments of function "pg_terminate_backend" from a string.
- * @in sid : the pid and serial info which need be terminated.
- * @return : the list include pid and serial information.
+ * @Description:  get arguments of function "pg_terminate_session" from a string.
+ * @in sid : the pid and sessionId info which need be terminated.
+ * @return : the list include pid and sessionId information.
  */
 static List *
 get_func_args(char *sid)
@@ -31115,7 +31115,7 @@ get_func_args(char *sid)
 	char *token = NULL;
 	List *sidlist = NIL;
 	long long pid = 0;
-	long long serial = 0;
+	long long sessionId = 0;
 	const char *sep = ",";
 
 	/*
@@ -31138,12 +31138,12 @@ get_func_args(char *sid)
 	}
 
 	pid = get_pid((const char *)linitial(sidlist));
-	serial= get_pid((const char *)lsecond(sidlist));
+	sessionId = get_pid((const char *)lsecond(sidlist));
 
 	/*
 	 * negative is illegal for session id
 	 */
-	if (pid < 0 || serial < 0)
+	if (pid < 0 || sessionId < 0)
 	{
 		const char* message = "missing or invalid session ID";
 		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -31153,7 +31153,8 @@ get_func_args(char *sid)
 		return NIL;
 	}
 
-	return list_make1(makeStringConst((char *)linitial(sidlist), -1));
+	return list_make2(makeStringConst((char *)linitial(sidlist), -1), 
+		              makeStringConst((char *)lsecond(sidlist), -1));
 }
 
 // transform a string to a Oid
