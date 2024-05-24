@@ -592,13 +592,17 @@ void SSWaitStartupExit(bool send_signal)
         ereport(WARNING, (errmodule(MOD_DMS),
             errmsg("[SS reform] reform failed")));
     }
-
+#ifdef USE_ASSERT_CHECKING
+    ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS reform] wait for the startup thread to exit")));
+#else
     long rto_limit = SS_RTO_LIMIT;
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] wait startup thread exit until RTO limit time:%ld sec",
         rto_limit / (1000 * 1000))));
     
     long wait_time = 0;
+#endif
     while (true) {
         if (g_instance.pid_cxt.StartupPID == 0) {
             break;
@@ -610,11 +614,13 @@ void SSWaitStartupExit(bool send_signal)
                 "during recovery phase, need exit")));
             _exit(0);
         }
+#ifndef USE_ASSERT_CHECKING
         if (wait_time > rto_limit) {
             SSProcessForceExit();
         }
-        pg_usleep(REFORM_WAIT_TIME);
         wait_time += REFORM_WAIT_TIME;
+#endif
+        pg_usleep(REFORM_WAIT_TIME);
     }
 }
 
