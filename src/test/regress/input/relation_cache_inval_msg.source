@@ -1,0 +1,73 @@
+-- 当对象的DDL可以并发时，表锁的机制已经保证不了本地缓存relation结构体中的信息为最新了。
+-- 在嵌套rebuild relation的时候，最外层build的realtion是旧的，最后会交换到cache，
+-- 无效消息消费了，但是cache中的relation却不是最新的。
+
+-- 原问题，在不开启global system cache的时候，很容易复现。
+-- 当前用例在不开启的情况下，手动测试过，没问题。
+-- 把用例加到门禁中，在开启global system cache的情况下测试，作为一个看护。
+
+drop table if exists t_rcim1;
+create table t_rcim1 (id int, dt timestamp)
+partition by range (dt)
+interval ('1 day')
+(
+partition p1 values less than ('2000-1-1')
+);
+
+drop table if exists spt_rcim1;
+create table spt_rcim1(id int, age int)
+partition by range(id)
+subpartition by range(age)
+(
+partition p1 values less than (10)
+    (
+    subpartition sp11 values less than (1),
+    subpartition sp12 values less than (2)
+    ),
+partition p2 values less than (100)
+    (
+    subpartition sp21 values less than (1),
+    subpartition sp22 values less than (MAXVALUE)
+    )
+);
+
+\! rm -f @abs_srcdir@/tmp_check/relation_cache_inval_msg.log
+\! sh @abs_srcdir@/script/relation_cache_inval_msg.sh start "@abs_bindir@/gsql" @portstring@ "@abs_srcdir@/tmp_check/relation_cache_inval_msg.log"
+
+-- expected 0
+select xmin, oid, relname, boundaries, parentid from pg_partition
+    where parentid='t_rcim1'::regclass and
+        boundaries[1] in (select boundaries[1] from pg_partition 
+                            where parentid='t_rcim1'::regclass
+                            group by parentid, boundaries[1] having count(1) > 1)
+    order by 4,3;
+
+select xmin, oid, relname, boundaries, parentid from pg_partition
+    where parentid='spt_rcim1'::regclass and
+        boundaries[1] in (select boundaries[1] from pg_partition 
+                            where parentid='t_rcim1'::regclass
+                            group by parentid, boundaries[1] having count(1) > 1)
+    order by 4,3;
+
+select xmin, oid, relname, boundaries, parentid from pg_partition
+    where parentid in (select oid from pg_partition where parentid='spt_rcim1'::regclass) and
+        boundaries[1] in (select boundaries[1] from pg_partition 
+                            where parentid in (select oid from pg_partition where parentid='spt_rcim1'::regclass)
+                            group by parentid, boundaries[1] having count(1) > 1)
+    order by 4,3;
+
+-- clear
+do $$
+declare
+cnt int;
+begin
+    select max(cnt) into cnt from (select count(1) as cnt from pg_partition
+                            where parentid in (select oid from pg_partition where parentid in ('spt_rcim1'::regclass, 't_rcim1'::regclass))
+                            group by parentid, boundaries[1] );
+    if cnt = 1 then
+        raise notice 'drop table';
+        execute ('drop table t_rcim1;');
+        execute ('drop table spt_rcim1;');
+    end if;
+end
+$$;
