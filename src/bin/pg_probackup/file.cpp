@@ -465,8 +465,10 @@ fio_disconnect(void)
         Assert(hdr.cop == FIO_DISCONNECTED);
         SYS_CHECK(close(fio_stdin));
         SYS_CHECK(close(fio_stdout));
+        SYS_CHECK(close(fio_stderr));
         fio_stdin = 0;
         fio_stdout = 0;
+        fio_stderr = 0;
         wait_ssh();
     }
 }
@@ -2386,7 +2388,8 @@ void fio_communicate(int in, int out)
             case FIO_DISCONNECT:
                 hdr.cop = FIO_DISCONNECTED;
                 IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
-                break;
+                free(buf);
+                return;
             default:
                 Assert(false);
         }
