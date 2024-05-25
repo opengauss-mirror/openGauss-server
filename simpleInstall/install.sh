@@ -15,6 +15,7 @@ Usage: sh $0 -w password
 Arguments:
    -w                   login password
    -p                   datanode port, default 5432
+   -e                   netinterface, default gateway Iface
    --multinode          if specify, will install master_slave cluster. default install single node.
    -h, --help           Show this help, then exit
    "
@@ -238,21 +239,15 @@ function init_db() {
 
 function config_db() {
     info "[config datanode.]"
-    local -a ip_arr
-    local -i index=0
-    for line in $(/sbin/ifconfig -a|grep inet|grep -v 127.0.0.1|grep -v inet6|awk '{print $2}'|tr -d "addr:")
-    do
-        ip_arr[index]=$line
-        let index=$index+1
-    done
-    sed -i "/^#listen_addresses/c\listen_addresses = 'localhost,${ip_arr[0]}'"  $app/data/master/postgresql.conf
-    sed -i "/^#listen_addresses/c\listen_addresses = 'localhost,${ip_arr[0]}'"  $app/data/slave/postgresql.conf
+    ip_arr=$(/sbin/ifconfig ${netinterface_arr[0]}|grep inet|grep -v 127.0.0.1|grep -v inet6|awk '{print $2}'|tr -d "addr:")
+    sed -i "/^#listen_addresses/c\listen_addresses = 'localhost,${ip_arr}'"  $app/data/master/postgresql.conf
+    sed -i "/^#listen_addresses/c\listen_addresses = 'localhost,${ip_arr}'"  $app/data/slave/postgresql.conf
     sed -i "/^#port/c\port = $port"  $app/data/master/postgresql.conf
     sed -i "/^#port/c\port = $slave_port"  $app/data/slave/postgresql.conf
-    sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr[0]} localport=$(($port+1)) localheartbeatport=$(($port+5)) localservice=$(($port+4)) remotehost=${ip_arr[0]} remoteport=$(($slave_port+1)) remoteheartbeatport=$(($slave_port+5)) remoteservice=$(($slave_port+4))'"  $app/data/master/postgresql.conf
-    sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr[0]} localport=$(($slave_port+1)) localheartbeatport=$(($slave_port+5)) localservice=$(($slave_port+4)) remotehost=${ip_arr[0]} remoteport=$(($port+1)) remoteheartbeatport=$(($port+5)) remoteservice=$(($port+4))'"  $app/data/slave/postgresql.conf
+    sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr} localport=$(($port+1)) localheartbeatport=$(($port+5)) localservice=$(($port+4)) remotehost=${ip_arr} remoteport=$(($slave_port+1)) remoteheartbeatport=$(($slave_port+5)) remoteservice=$(($slave_port+4))'"  $app/data/master/postgresql.conf
+    sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr} localport=$(($slave_port+1)) localheartbeatport=$(($slave_port+5)) localservice=$(($slave_port+4)) remotehost=${ip_arr} remoteport=$(($port+1)) remoteheartbeatport=$(($port+5)) remoteservice=$(($port+4))'"  $app/data/slave/postgresql.conf
     echo "remote_read_mode = non_authentication" | tee -a $app/data/master/postgresql.conf $app/data/slave/postgresql.conf
-    echo "host    all             all             ${ip_arr[0]}/32            trust" | tee -a $app/data/master/pg_hba.conf $app/data/slave/pg_hba.conf
+    echo "host    all             all             ${ip_arr}/32            trust" | tee -a $app/data/master/pg_hba.conf $app/data/slave/pg_hba.conf
 }
 
 function start_db() {
@@ -276,9 +271,18 @@ declare app=$(dirname $shell_path)
 declare mode="single"
 declare -i port
 declare -i slave_port=0
+declare -a netinterface_arr
+declare -i index=0
+# Exclude docker* netInterface
+for i in $(/sbin/route -n | grep "UG" | awk '{print $8}'); do
+    if [[ $i != docker* ]]; then
+        netinterface_arr[index]=$i
+        index=$index+1
+    fi
+done
 
 function get_param() {
-    ARGS=$(getopt -a -o w:p:h -l multinode,help -- "$@")
+    ARGS=$(getopt -a -o w:p:e:h -l multinode,help -- "$@")
     [ $? -ne 0 ] && usage
     eval set -- "${ARGS}"
     while [ $# -gt 0 ]
@@ -290,6 +294,10 @@ function get_param() {
             ;;
         -p)
             port="$2"
+            shift
+            ;;
+        -e)
+            netinterface_arr[0]=$(echo "$2")
             shift
             ;;
         --multinode)
