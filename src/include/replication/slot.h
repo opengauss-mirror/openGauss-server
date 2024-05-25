@@ -132,6 +132,8 @@ typedef struct ReplicationSlot {
     /* any outstanding modifications? */
     bool just_dirtied;
     bool dirty;
+    /* need clean in Primary */
+    bool need_clean;
 
     /*
      * For logical decoding, it's extremely important that we never remove any
@@ -263,7 +265,8 @@ extern void ReplicationSlotsShmemInit(void);
 extern void ReplicationSlotCreate(const char* name, ReplicationSlotPersistency persistency, bool isDummyStandby,
     Oid databaseId, XLogRecPtr restart_lsn, char* extra_content = NULL, bool encrypted = false);
 extern void ReplicationSlotPersist(void);
-extern void ReplicationSlotDrop(const char* name, bool for_backup = false);
+extern void ReplicationSlotDrop(const char *name, bool for_backup = false);
+extern void replication_slot_drop_without_acquire(const char *name);
 extern void ReplicationSlotAcquire(const char* name, bool isDummyStandby, bool allowDrop = false);
 extern bool IsReplicationSlotActive(const char *name);
 extern bool IsLogicalReplicationSlot(const char *name);
