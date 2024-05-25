@@ -957,7 +957,7 @@ UwalVector *GsUwalGetInitInfo()
     vec->uwals = uwalInfos;
     int ret = ock_uwal_query_by_user(user, UWAL_ROUTE_LOCAL, vec);
     if (ret != 0 || vec->cnt == 0) {
-        ereport(LOG, (errmsg("Get uwal base info failed, ret: %d, cnt: %lu", ret, vec->cnt)));
+        ereport(LOG, (errmsg("Get uwal base info failed, ret: %d, cnt: %u", ret, vec->cnt)));
         pfree(uwalInfos);
         pfree(vec);
         return nullptr;
@@ -1177,7 +1177,7 @@ int GsUwalWriteAsync(int nBytes, char *buf, uint64_t targetOffset)
     g_commonCbCtx.opCount = batchIONumber;
 
     for (int i = 0; i < batchIONumber; i++) {
-        UwalBuffer buffers[1] = {{buf + bufferOffset, batchIOSize}};
+        UwalBuffer buffers[1] = {{buf + bufferOffset, (uint64_t)batchIOSize}};
         UwalBufferList bufferList = {1, buffers};
         UwalCallBack uwalCB = {GsUwalWriteAsyncCallBack, &(g_cbCtxList[i])};
         UwalAppendParam appendParam = {id, &bufferList, &uwalCB};
@@ -1368,7 +1368,7 @@ int GsUwalRewind(UwalId *id, uint64_t offset)
     if (ret != 0) {
         ereport(WARNING, (errmsg("GsUwalRewind return failed, ret: %d", ret)));
     }
-    ereport(LOG, (errmsg("UwalRewin: Offset %llu", offset)));
+    ereport(LOG, (errmsg("UwalRewin: Offset %lu", offset)));
     return ret;
 }
 
@@ -1395,7 +1395,7 @@ void GsUwalRenewFileRenamePtr()
         securec_check_ss(errorno, "", "");
         // If the file exists, move the offset backwards.
         if (access(path, F_OK) == 0) {
-            ereport(WARNING, (errmsg("Truncate file is still in uwal path, lsn %llu", renamedLSN)));
+            ereport(WARNING, (errmsg("Truncate file is still in uwal path, lsn %lu", renamedLSN)));
             renamedLSN -= 1;
             continue;
         }
@@ -1413,7 +1413,7 @@ bool GsUwalCheckFileRename(XLogRecPtr targetPtr)
 
     XLogRecPtr truncatePtr = t_thrd.xlog_cxt.uwalInfo.info.truncateOffset;
     if (targetPtr >= truncatePtr) {
-        ereport(PANIC, (errmsg("Try to read xlog file which is not truncated by uwal, readPtr %llu, truncatePtr %llu",
+        ereport(PANIC, (errmsg("Try to read xlog file which is not truncated by uwal, readPtr %lu, truncatePtr %lu",
             targetPtr, truncatePtr)));
     }
 

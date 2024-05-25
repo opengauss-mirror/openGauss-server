@@ -1226,7 +1226,6 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
     HeapTuple new_tup = (HeapTuple)tableam_tops_form_tuple(new_tupdesc, NULL, newnulls);
 
     for (fnum = 0; fnum < new_natts; fnum++) {
-        Form_pg_attribute attr = TupleDescAttr(new_tupdesc, fnum);
         Datum value;
         bool isnull;
         Oid valtype;

@@ -651,10 +651,11 @@ static void find_non_keypreservered_rels(PlannerInfo* root, HTAB* htab, Relids* 
                 break;
             }
         }
-        if (leftpart && !is_key_preserved && relidx == leftpart->rtindex) {
+        /* always false if leftpart->rtindex < 0 */
+        if (leftpart && !is_key_preserved && leftpart->rtindex >= 0 && relidx == (Index)leftpart->rtindex) {
             left_is_key_preserved = false;
         }
-        if (rightpart && !is_key_preserved && relidx == rightpart->rtindex) {
+        if (rightpart && !is_key_preserved &&leftpart->rtindex >= 0 && relidx == (Index)rightpart->rtindex) {
             right_is_key_preserved = false;
         }
         if ((!is_key_preserved && rel_is_member_of_non_keypreserved(root, relidx, *non_keypreserved)) ||
@@ -664,7 +665,7 @@ static void find_non_keypreservered_rels(PlannerInfo* root, HTAB* htab, Relids* 
                     errmsg("Cannot sample a join view without a key-preserved table")));
         }
         if (!is_key_preserved) {
-            *non_keypreserved = bms_add_member(*non_keypreserved, relidx);
+            *non_keypreserved = bms_add_member(*non_keypreserved, (int)relidx);
         }
         relation_close(relation, AccessShareLock);
     }

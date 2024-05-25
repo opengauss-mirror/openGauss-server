@@ -143,6 +143,8 @@ extern THR_LOCAL int client_min_messages;
         ereport_domain(elevel, TEXTDOMAIN, rest) : (void)0)
 #endif
 
+/* Suppress redefined warning */
+#undef TEXTDOMAIN
 #define TEXTDOMAIN NULL
 
 extern bool errstart(int elevel, const char* filename, int lineno, const char* funcname, const char* domain);

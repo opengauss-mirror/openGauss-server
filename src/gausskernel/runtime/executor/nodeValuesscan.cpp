@@ -124,7 +124,6 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
         is_null = slot->tts_isnull;
 
         RightRefState* refState = econtext->rightRefState;
-        int targetCount = list_length(expr_state_list);
 
         int colCnt = (IS_ENABLE_RIGHT_REF(refState) && refState->colCnt > 0) ? refState->colCnt : 1;
         bool hasExecs[colCnt];

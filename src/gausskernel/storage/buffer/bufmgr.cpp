@@ -1639,7 +1639,6 @@ Buffer MultiReadBufferExtend(Relation reln, ForkNumber fork_num, BlockNumber blo
     Buffer buf;
     char* bufRead;
     int paramNum = 0;
-    MemoryContext* memCxt = NULL;
     MemoryContext oldContext;
 
     if (block_num == P_NEW) {
@@ -2325,7 +2324,6 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
     bool found = false;
     bool isLocalBuf = SmgrIsTemp(smgr);
     MemoryContext oldContext;
-    bool* check_fail;
 
     *hit = false;
 
@@ -2385,7 +2383,6 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
             pgstatCountSharedBlocksRead4SessionLevel();
         }
     }
-found_branch:
     if (found) {
         *hit = true;
         t_thrd.vacuum_cxt.VacuumPageHit++;
@@ -2417,7 +2414,8 @@ found_branch:
     firstBufHdr =bufHdr;
 
     /* We should caculate the max-blocks again, MAX_SIMUL_LWLOCKS is 4224 */
-    maxBulkCount = Min(maxBulkCount, (BlockNumber) RELSEG_SIZE - (firstBlockNum % (BlockNumber) RELSEG_SIZE));
+    BlockNumber tmpBlk = (BlockNumber)RELSEG_SIZE - (firstBlockNum % (BlockNumber)RELSEG_SIZE);
+    maxBulkCount = Min(maxBulkCount, (int)tmpBlk);
     remaining_lwlock = MAX_SIMUL_LWLOCKS - t_thrd.storage_cxt.num_held_lwlocks;
     maxBulkCount = Min(remaining_lwlock, maxBulkCount);
 

@@ -429,7 +429,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
 #ifdef USE_ASSERT_CHECKING
         if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH && XLByteLT(pageLsn, xlogLsn)) {
         ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page should be newest but not, "
-                "xlogLsn:%llu, pageLsn:%llu",
+                "xlogLsn:%lu, pageLsn:%lu",
                 blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
                 blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
                 xlogLsn, pageLsn)));
@@ -442,7 +442,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
             bufferinfo->pageinfo.pagesize = BufferGetPageSize(buf);
 #ifdef USE_ASSERT_CHECKING
             ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page skip replay, "
-                "xlogLsn:%llu, pageLsn:%llu",
+                "xlogLsn:%lu, pageLsn:%lu",
                 blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
                 blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
                 xlogLsn, pageLsn)));

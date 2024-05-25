@@ -4809,7 +4809,6 @@ static SpqSeqScan* _readSpqSeqScan(void)
 static SpqIndexScan* _readSpqIndexScan(void)
 {
     READ_LOCALS_NO_FIELDS(SpqIndexScan);
-    READ_TEMP_LOCALS();
 
     _readIndexScan(&local_node->scan);
 
@@ -4819,7 +4818,6 @@ static SpqIndexScan* _readSpqIndexScan(void)
 static SpqIndexOnlyScan* _readSpqIndexOnlyScan(void)
 {
     READ_LOCALS_NO_FIELDS(SpqIndexOnlyScan);
-    READ_TEMP_LOCALS();
 
     _readIndexOnlyScan(&local_node->scan);
 
@@ -4829,7 +4827,6 @@ static SpqIndexOnlyScan* _readSpqIndexOnlyScan(void)
 static SpqBitmapHeapScan* _readSpqBitmapHeapScan(void)
 {
     READ_LOCALS_NO_FIELDS(SpqBitmapHeapScan);
-    READ_TEMP_LOCALS();
 
     _readBitmapHeapScan(&local_node->scan);
 

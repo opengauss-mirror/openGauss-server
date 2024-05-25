@@ -217,7 +217,7 @@ static void NvmWaitBufferIO(BufferDesc *buf)
 
     /* To check the InProgressBuf must be NULL. */
     if (t_thrd.storage_cxt.InProgressBuf) {
-        ereport(PANIC, (errmsg("InProgressBuf not null: id %d flags %u, buf: id %d flags %u",
+        ereport(PANIC, (errmsg("InProgressBuf not null: id %d flags %lu, buf: id %d flags %lu",
             t_thrd.storage_cxt.InProgressBuf->buf_id,
             pg_atomic_read_u64(&t_thrd.storage_cxt.InProgressBuf->state) & BUF_FLAG_MASK,
             buf->buf_id, pg_atomic_read_u64(&buf->state) & BUF_FLAG_MASK)));

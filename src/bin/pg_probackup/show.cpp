@@ -318,9 +318,10 @@ static void
 show_instance_end(void)
 {
         PQExpBuffer    buf = &show_buf;
-    if (show_format == SHOW_JSON)
+    if (show_format == SHOW_JSON) {
         json_add(buf, JT_END_ARRAY, &json_level);
         appendPQExpBufferStr(&show_buf, "\n}\n");
+    }
 
     fputs(show_buf.data, stdout);
     termPQExpBuffer(&show_buf);

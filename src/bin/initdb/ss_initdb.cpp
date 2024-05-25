@@ -210,9 +210,9 @@ int ss_check_existdir(const char *path, int node_id, const char **subdir)
     char *subpath = NULL;
     struct stat statbuf;
     int existnum = 0;
-    int totalnum = ARRAY_NUM(subdir);
+    int totalnum = (int)ARRAY_NUM(subdir);
 
-    for (uint32 i = 0; i < totalnum; i++) {
+    for (int i = 0; i < totalnum; i++) {
         subpath = ss_concat_path(node_id, path, subdir[i]);
         if (lstat(subpath, &statbuf) == 0) {
             existnum++;

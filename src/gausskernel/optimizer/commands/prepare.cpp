@@ -915,7 +915,6 @@ DatanodeStatement* light_set_datanode_queries(const char* stmt_name)
 
 void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *plansource, bool from_sql, bool is_share)
 {
-    TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
     bool found = false;
 
     /* Initialize the hash table, if necessary */

@@ -123,7 +123,7 @@ static JsonbValue *setPath(JsonbIterator **it, Datum *path_elems, bool *path_nul
 static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len, JsonbParseState **st,
                             int level, Jsonb *newval, uint32 npairs, int op_type);
 static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls, int path_len, JsonbParseState **st,
-                            int level, Jsonb *newval, uint32 nelems, int op_type);
+                            int level, Jsonb *newval, int nelems, int op_type);
 
 /* search type classification for json_get* functions */
 typedef enum {
@@ -2879,12 +2879,13 @@ static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_null
         addJsonbToParseState(st, newval);
     }
 
-    for (i = 0; i < npairs; i++) {
+    /* npairs is int type */
+    for (i = 0; i < (int)npairs; i++) {
         int r = JsonbIteratorNext(it, &k, true);
 
         Assert(r == WJB_KEY);
 
-        if (!done && k.string.len == VARSIZE_ANY_EXHDR(pathelem) &&
+        if (!done && k.string.len == (int)VARSIZE_ANY_EXHDR(pathelem) &&
             memcmp(k.string.val, VARDATA_ANY(pathelem), k.string.len) == 0) {
 
             if (level == path_len - 1) {
@@ -2911,7 +2912,7 @@ static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_null
                         st, level + 1, newval, op_type);
             }
         } else {
-            if ((op_type & JB_PATH_CREATE_OR_INSERT) && !done && level == path_len - 1 && i == npairs - 1) {
+            if ((op_type & JB_PATH_CREATE_OR_INSERT) && !done && level == path_len - 1 && i == (int)npairs - 1) {
                 JsonbValue	newkey;
 
                 newkey.type = jbvString;
@@ -2947,7 +2948,7 @@ static void setPathObject(JsonbIterator **it, Datum *path_elems, bool *path_null
 * Array walker for setPath
 */
 static void setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
-            int path_len, JsonbParseState **st, int level, Jsonb *newval, uint32 nelems, int op_type)
+            int path_len, JsonbParseState **st, int level, Jsonb *newval, int nelems, int op_type)
 {
     JsonbValue  v;
     int         idx,
@@ -3241,7 +3242,7 @@ Datum jsonb_delete_idx(PG_FUNCTION_ARGS)
     int	idx = PG_GETARG_INT32(1);
     JsonbParseState *state = NULL;
     JsonbIterator *it;
-    uint32      i = 0,
+    int      i = 0,
                 n;
     JsonbValue  v,
             *res = NULL;

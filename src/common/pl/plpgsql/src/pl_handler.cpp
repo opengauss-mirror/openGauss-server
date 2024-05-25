@@ -2142,8 +2142,8 @@ static void get_proc_coverage(Oid func_oid, int* coverage)
         appendStringInfo(&pro_querys, "%s", infoCode[0].code);
         appendStringInfo(&pro_canbreak, "{%s", infoCode[0].canBreak ? "true" : "false");
         appendStringInfo(&pro_coverage, "{%d", coverage[0]);
-
-        for (int i = 1; i < rows; ++i) {
+        /* debug_show_code_worker set int to rows */
+        for (int i = 1; i < (int)rows; ++i) {
             appendStringInfo(&pro_querys, "\n %s", infoCode[i].code);
             appendStringInfo(&pro_canbreak, ",%s", infoCode[i].canBreak ? "true" : "false");
             appendStringInfo(&pro_coverage, ",%d", coverage[i]);

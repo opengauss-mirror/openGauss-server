@@ -695,7 +695,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     LIBCOMM_PTHREAD_MUTEX_LOCK(&pmailbox->sinfo_lock);
     Assert(pmailbox->state == MAIL_CLOSED);
 
-    int version = pmailbox->local_version + 1;
+    uint16 version = pmailbox->local_version + 1;
     if (version >= MAX_MAILBOX_VERSION) {
         version = 0;
     }
@@ -768,15 +768,15 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
         QCConnKey key = {
             .query_id = libcomm_addrinfo->streamKey.queryId,
             .plan_node_id = libcomm_addrinfo->streamKey.planNodeId,
-            .node_id = node_idx,
+            .node_id = (uint16)node_idx,
             .type = SPQ_QE_CONNECTION,
         };
         pthread_rwlock_wrlock(&g_instance.spq_cxt.adp_connects_lock);
         QCConnEntry* entry = (QCConnEntry*)hash_search(g_instance.spq_cxt.adp_connects, (void*)&key, HASH_ENTER, &found);
         if (!found) {
             entry->forward = {
-                .idx = node_idx,
-                .sid = streamid,
+                .idx = (uint16)node_idx,
+                .sid = (uint16)streamid,
                 .ver = version,
                 .type = GSOCK_PRODUCER,
             };
@@ -801,7 +801,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
             QCConnKey key = {
                 .query_id = libcomm_addrinfo->streamKey.queryId,
                 .plan_node_id = libcomm_addrinfo->streamKey.planNodeId,
-                .node_id = node_idx,
+                .node_id = (uint16)node_idx,
                 .type = SPQ_QE_CONNECTION,
             };
             bool found = false;

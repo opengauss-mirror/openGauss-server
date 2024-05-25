@@ -422,7 +422,7 @@ void HandleStartupInterruptsForExtremeRto()
     if (t_thrd.startup_cxt.shutdown_requested) {
         if (g_instance.status != SmartShutdown) {
             if (ENABLE_ONDEMAND_REALTIME_BUILD &&
-                (SS_PERFORMING_SWITCHOVER || (SS_STANDBY_MODE && DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS))) {
+                (SS_PERFORMING_SWITCHOVER || SS_STANDBY_MODE)) {
                 Assert(!SS_ONDEMAND_REALTIME_BUILD_DISABLED);
                 proc_exit(0);
             } else {

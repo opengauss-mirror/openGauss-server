@@ -237,7 +237,6 @@ bool gsplsql_exists_schema_name(const char* schema_name)
     ScanKeyData key[1];
     ScanKeyInit(&key[key_num++], Anum_gs_dependencies_obj_schemaname, BTEqualStrategyNumber,
         F_NAMEEQ, NameGetDatum(schema_name));
-    bool is_null = false;
     HeapTuple tuple;
     Relation obj_rel = heap_open(DependenciesObjRelationId, AccessShareLock);
     SysScanDesc scan = systable_beginscan(obj_rel, DependenciesObjNameIndexId, true, SnapshotSelf, key_num, key);

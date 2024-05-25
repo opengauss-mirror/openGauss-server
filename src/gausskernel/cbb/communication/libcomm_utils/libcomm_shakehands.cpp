@@ -90,14 +90,15 @@ static int gs_r_build_reply_connection(FCMSG_T* fcmsgr, int local_version)
     errno_t ss_rc;
     uint32 cpylen;
 
-    int node_idx = fcmsgr->node_idx;
+    uint16 node_idx = fcmsgr->node_idx;
 #ifdef USE_SPQ
     int streamid = gs_get_stream_id(node_idx);
     *sid = streamid;
 #else
     int streamid = fcmsgr->streamid;
 #endif
-    int remote_version = fcmsgr->version;
+    Assert(streamid >= 0);
+    uint16 remote_version = fcmsgr->version;
 
     // get remote nodename and host from global variable
     char remote_host[HOST_ADDRSTRLEN] = {0x0};
@@ -197,7 +198,7 @@ static int gs_r_build_reply_connection(FCMSG_T* fcmsgr, int local_version)
         if (found) {
             entry->backward = {
                 .idx = node_idx,
-                .sid = streamid,
+                .sid = (uint16)streamid,
                 .ver = remote_version,
                 .type = GSOCK_CONSUMER,
             };

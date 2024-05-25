@@ -96,6 +96,8 @@
 /* Must be before gettext() games below */
 #include <locale.h>
 
+/* Suppress redefined warning */
+#undef _
 #define _(x) gettext(x)
 
 #ifndef likely

@@ -2932,7 +2932,6 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         }
         if (stmt->partTableState) {
             ListCell* cell = NULL;
-            Oid partTablespaceId = InvalidOid;
             char* partitionName = NULL;
             char* tableSpaceName = NULL;
             IntervalPartitionDefState* interValPartDef = stmt->partTableState->intervalPartDef;
@@ -12158,7 +12157,6 @@ void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute 
             AttrNumber rtevarattno = 0;
             if (nodeTag((Node*)tle->expr) == T_Var && tle->resorigtbl == rel_oid &&
                 tle->resorigcol == old_attnum) {
-                ListCell* rtelc = NULL;
                 tle->resorigcol = attForm->attnum;
                 Var *var = (Var *)tle->expr;
                 rtevarno = var->varno;
@@ -15229,97 +15227,6 @@ static void ATExecValidateAbilityConstraint(Relation rel, char* constrName, bool
     tableam_tops_free_tuple(copyTuple);
     systable_endscan(scan);
     heap_close(conrel, RowExclusiveLock);
-}
-
-
-static void ATExecDeferredConstraintOnCommit(Oid relid)
-{
-    Relation conrel;
-    Relation rel;
-    Form_pg_constraint con;
-    SysScanDesc scan;
-    ScanKeyData key;
-    HeapTuple tuple;
-
-    rel = heap_open(relid, NoLock);
-    conrel = heap_open(ConstraintRelationId, RowExclusiveLock);
-    /*
-     * Find and drop the target constraint
-     */
-    ScanKeyInit(
-        &key, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, relid);
-    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, &key);
-
-    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
-        con = (Form_pg_constraint)GETSTRUCT(tuple);
-        if (con->contype != CONSTRAINT_CHECK)
-            continue;
-        if (!con->condeferred)
-            continue;
-        if (!RelationIsPartitioned(rel)) {
-            if (RELATION_CREATE_BUCKET(rel)) {
-                /* validate constraint for every buckets */
-                validateCheckConstraintForBucket(rel, NULL, tuple);
-            } else {
-                validateCheckConstraint(rel, tuple);
-            }
-        } else if (RelationIsSubPartitioned(rel)) {
-            List* partitions = NIL;
-            ListCell* cell = NULL;
-            Partition partition = NULL;
-            Relation partRel = NULL;
-
-            partitions = relationGetPartitionList(rel, AccessExclusiveLock);
-            foreach (cell, partitions) {
-                partition = (Partition)lfirst(cell);
-                partRel = partitionGetRelation(rel, partition);
-
-                List *subpartitions = relationGetPartitionList(partRel, AccessExclusiveLock);
-                ListCell *subcell = NULL;
-                foreach (subcell, subpartitions) {
-                    Partition subpartition = (Partition)lfirst(subcell);
-                    if (RELATION_OWN_BUCKETKEY(rel)) {
-                        /* validate constraint for every buckets */
-                        validateCheckConstraintForBucket(partRel, subpartition, tuple);
-                    } else {
-                        Relation subpartRel = partitionGetRelation(partRel, subpartition);
-                        validateCheckConstraint(subpartRel, tuple);
-                        releaseDummyRelation(&subpartRel);
-                    }
-                }
-                releasePartitionList(partRel, &subpartitions, AccessExclusiveLock);
-                releaseDummyRelation(&partRel);
-            }
-            releasePartitionList(rel, &partitions, AccessExclusiveLock);
-        } else {
-            List* partitions = NIL;
-            ListCell* cell = NULL;
-            Partition partition = NULL;
-            Relation partRel = NULL;
-
-            partitions = relationGetPartitionList(rel, AccessExclusiveLock);
-            foreach (cell, partitions) {
-                partition = (Partition)lfirst(cell);
-                if (RELATION_OWN_BUCKETKEY(rel)) {
-                    /* validate constraint for every buckets */
-                    validateCheckConstraintForBucket(rel, partition, tuple);
-                } else {
-                    partRel = partitionGetRelation(rel, partition);
-                    validateCheckConstraint(partRel, tuple);
-                    releaseDummyRelation(&partRel);
-                }
-            }
-            releasePartitionList(rel, &partitions, AccessExclusiveLock);
-        }
-
-        /*
-         * Invalidate relcache so that others see the new validated
-         * constraint.
-         */
-        CacheInvalidateRelcache(rel);
-    }
-    heap_close(conrel, RowExclusiveLock);
-    heap_close(rel, NoLock);
 }
 
 /*

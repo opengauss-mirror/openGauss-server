@@ -1669,7 +1669,6 @@ loop:
     SpinLockRelease(&Insert->insertpos_lck);
 #endif /* __x86_64__ || __aarch64__ */
     /*
-    /*
      * Wait for the WAL copy thread obtaining the "*lastlrc_ptr - 1" to finish
      * *lastlrc_ptr is the LRC for the next WAL insert thread to acquire
      * I probably should give it a better name other than "lastlrc_ptr" that is
@@ -1948,7 +1947,7 @@ static char *GetXLogBuffer(XLogRecPtr ptr, PGPROC *proc)
 {
     int idx;
     XLogRecPtr endptr;
-    XLogRecPtr pastEndPtr = NULL;
+    XLogRecPtr pastEndPtr = InvalidXLogRecPtr;
     XLogRecPtr expectedEndPtr;
 
     /*

@@ -114,8 +114,6 @@ int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XL
     int readLen)
 {
     uint32 preReadOff;
-    XLogRecPtr xlogFlushPtrForPerRead = xlogreader->xlogFlushPtrForPerRead;
-    bool isReadFile = true;
 
     Assert(readLen > 0);
     Assert(readLen <= XLogPreReadSize);
@@ -597,7 +595,7 @@ void SSWaitStartupExit(bool send_signal)
 
     long rto_limit = SS_RTO_LIMIT;
     ereport(LOG, (errmodule(MOD_DMS),
-        errmsg("[SS reform] wait startup thread exit until RTO limit time:%d sec",
+        errmsg("[SS reform] wait startup thread exit until RTO limit time:%ld sec",
         rto_limit / (1000 * 1000))));
     
     long wait_time = 0;
@@ -654,7 +652,7 @@ void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt)
         SSWaitStartupExit(false);
     } else {
         ereport(WARNING, (errmodule(MOD_DMS),
-            errmsg("[SS reform] start phase, last round reform version:%llu, startup wait version:%llu",
+            errmsg("[SS reform] start phase, last round reform version:%ld, startup wait version:%ld",
             reform_info->reform_ver, reform_info->reform_ver_startup_wait)));
         SSProcessForceExit();
     }

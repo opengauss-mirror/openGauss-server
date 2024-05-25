@@ -2147,7 +2147,6 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
     if (datum->dtype == PLPGSQL_DTYPE_RECORD) {
         param->recordVarTypOid = ((PLpgSQL_row*)datum)->recordVarTypOid;
     } else if (datum->dtype == PLPGSQL_DTYPE_CURSORROW) {
-        Datum value;
         bool isnull;
         param->recordVarTypOid = UNKNOWNOID;
         param->args = NIL;

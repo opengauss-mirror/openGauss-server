@@ -5129,7 +5129,7 @@ alter_table_cmd:
 						const char* message = "inherits is not support in B-format database, it conflicts with multi-relation update";
 						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg(message)));
+								errmsg("%s", message)));
 					}
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_AddInherit;
@@ -5143,7 +5143,7 @@ alter_table_cmd:
 						const char* message = "inherits is not support in B-format database, it conflicts with multi-relation update";
 						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg(message)));
+								errmsg("%s", message)));
 					}
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_DropInherit;

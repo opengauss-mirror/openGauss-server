@@ -582,7 +582,7 @@ void StartupWaitReform()
         if (wait_ver != reform_info->reform_ver) {
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS reform] startup no need wait for reform finish, cause new reform has begun. "
-                "current reform version:%llu,startup wait reform version:%llu",
+                "current reform version:%ld,startup wait reform version:%ld",
                 reform_info->reform_ver, wait_ver)));
             break;
         }

@@ -316,7 +316,6 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
         XLogRecPtr oldReplayedPageLSN = InvalidXLogRecPtr;
         XLogRecPtr lrRead;
         XLogRecPtr lrEnd;
-        XLogRecPtr curRead;
         do {
             GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
             if (XLByteLT(g_dispatcher->dispatchEndRecPtr, lrEnd)) {

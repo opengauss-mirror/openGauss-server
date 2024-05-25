@@ -82,7 +82,6 @@ static int RemoveUwalFile(XLogRecPtr recptr, TimeLineID tli);
 static int WalRcvUwalTruncate(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInfo *info);
 static void RemoveFromUwal(UwalrcvWriterState *uwalrcv, bool needUpdate);
 static void UpdateUwalRcv(UwalrcvWriterState *uwalrcv, UwalInfo *info);
-static void RemoveRestFileFromUwal(UwalrcvWriterState *uwalrcv);
 extern void XlogArchUwal(XLogRecPtr archRqstPtr);
 
 void SetWalRcvWriterPID(ThreadId tid)
@@ -1019,7 +1018,7 @@ int walRcvWriteUwal(WalRcvCtlBlock *walrcb, UwalrcvWriterState *uwalrcv, UwalInf
 
     uwalReadOffset = readPtr - startPtr;
     uwalFreeOffset = recBufferSize - uwalReadOffset;
-    nbytes = Min(MaxReadUwalBytes, Min(uwalFreeOffset, readLen));
+    nbytes = (int)Min((int64)MaxReadUwalBytes, Min(uwalFreeOffset, readLen));
     if (startPtr / XLogSegSize != t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset / XLogSegSize) {
         if (startPtr / XLogSegSize < writePtr / XLogSegSize) {
             startPtr = (startPtr / XLogSegSize + 1) * XLogSegSize;
@@ -1175,7 +1174,7 @@ int uwalRcvStateInit(UwalrcvWriterState *uwalrcv, UwalInfo info)
     SpinLockAcquire(&uwalrcv->writeMutex);
     uwalrcv->writePtr = info.info.writeOffset;
     SpinLockRelease(&uwalrcv->writeMutex);
-    ereport(LOG, (errmsg("uwalRcvStateInit: truncate %llu, write %llu",
+    ereport(LOG, (errmsg("uwalRcvStateInit: truncate %lu, write %lu",
         info.info.truncateOffset, info.info.writeOffset)));
     return 0;
 }
@@ -1549,19 +1548,6 @@ static int MoveNotManagedUwalFile(XLogRecPtr truncatePtr, XLogRecPtr startPtr, T
         (void)closedir(uwaldir);
     }
     return 0;
-}
-
-static void RemoveRestFileFromUwal(UwalrcvWriterState *uwalrcv)
-{
-    XLogRecPtr truncatePtr = InvalidXLogRecPtr;
-    XLogRecPtr startPtr = t_thrd.xlog_cxt.uwalInfo.info.startWriteOffset;
-    TimeLineID tli;
-    SpinLockAcquire(&uwalrcv->mutex);
-    truncatePtr = uwalrcv->truncatePtr;
-    tli = uwalrcv->startTimeLine;
-    SpinLockRelease(&uwalrcv->mutex);
-    MoveNotManagedUwalFile(truncatePtr, startPtr, tli);
-    return;
 }
 
 // Move all files not managed by uwal

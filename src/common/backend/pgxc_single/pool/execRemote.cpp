@@ -503,9 +503,9 @@ static void HandleDirectRead(PGXCNodeHandle *conn, const char *msg_body, size_t 
     securec_check(rc, "", "");
     int oidcount = ntohl(n32);
     readlen += sizeof(uint32);
-    int checkLen = sizeof(uint32) + (sizeof(uint32) + sizeof(uint32)) * oidcount;
+    uint32 checkLen = sizeof(uint32) + (sizeof(uint32) + sizeof(uint32)) * oidcount;
     if (len != checkLen) {
-        elog(LOG, "HandleDirectRead len not match [%d:%d]", len, checkLen);
+        elog(LOG, "HandleDirectRead len not match [%zu:%u]", len, checkLen);
         return;
     }
     ListCell *cell;
@@ -1098,7 +1098,7 @@ bool backward_connection_walker(Node *plan, void *cxt)
     if (IsA(plan, SpqSeqScan)) {
         QCConnKey key = {
             .query_id = u_sess->debug_query_id,
-            .plan_node_id = ((Plan*)plan)->plan_node_id,
+            .plan_node_id = (uint32)((Plan*)plan)->plan_node_id,
             .node_id = 0,
             .type = SPQ_QC_CONNECTION,
         };
@@ -1217,7 +1217,7 @@ bool build_connections(Node* plan, void* cxt)
             QCConnEntry* entry = (QCConnEntry*)palloc(sizeof(QCConnEntry));
             entry->key = {
                 .query_id = walkerCxt->queryId,
-                .plan_node_id = ((Plan*)plan)->plan_node_id,
+                .plan_node_id = (uint32)((Plan*)plan)->plan_node_id,
                 .node_id = addressArray[i]->gs_sock.idx,
                 .type = SPQ_QE_CONNECTION,
             };

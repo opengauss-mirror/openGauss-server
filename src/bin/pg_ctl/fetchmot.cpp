@@ -56,7 +56,7 @@ static void CheckConnResult(PGconn* conn, const char* progname)
 static void* ProgressReportMot(void* arg)
 {
     do {
-        fprintf(stderr, "MOT Process: %dKB files have been received\n", totaldone);
+        fprintf(stderr, "MOT Process: %luKB files have been received\n", totaldone);
         sleep(1);
     } while (!g_isReceiveDone);
     return nullptr;

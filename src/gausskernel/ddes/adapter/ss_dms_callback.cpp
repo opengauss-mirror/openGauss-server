@@ -635,7 +635,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
 
             if (!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) {
                 ereport(WARNING, (errmodule(MOD_DMS),
-                    errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is not valid, state = 0x%x",
+                    errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is not valid, state = 0x%lx",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
@@ -646,7 +646,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
 
             if (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR) {
                 ereport(WARNING, (errmodule(MOD_DMS),
-                    errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is io error, state = 0x%x",
+                    errmsg("[%d/%d/%d/%d %d-%d] try enter page failed, buffer is io error, state = 0x%lx",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
@@ -776,7 +776,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 
                 if (!(buf_state & BM_VALID) || (buf_state & BM_IO_ERROR)) {
                     ereport(LOG, (errmodule(MOD_DMS),
-                        errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
+                        errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%lx",
                         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                         tag->forkNum, tag->blockNum, buf_desc->state)));
                     UnlockBufHdr(buf_desc, buf_state);
@@ -792,7 +792,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     XLogRecPtrIsValid(pg_atomic_read_u64(&buf_desc->extra->rec_lsn)) ||
                     (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
                     ereport(DEBUG1, (errmodule(MOD_DMS),
-                        errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%x",
+                        errmsg("[%d/%d/%d/%d %d-%d] invalidate owner rejected, buffer is dirty/permanent, state = 0x%lx",
                         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                         tag->forkNum, tag->blockNum, buf_desc->state)));
                     ret = DMS_ERROR;
@@ -829,7 +829,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             if ((!(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) ||
                 (pg_atomic_read_u64(&buf_desc->state) & BM_IO_ERROR)) {
                 ereport(LOG, (errmodule(MOD_DMS),
-                    errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%x",
+                    errmsg("[%d/%d/%d/%d %d-%d] invalidate page, buffer is not valid or io error, state = 0x%lx",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_id + 1, IsSegmentBufferID(buf_id));
@@ -1857,7 +1857,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] reform start, role:%d, reform type:SS %s, standby scenario:%d, "
-            "reform_ver:%llu.",
+            "reform_ver:%ld.",
             reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario(),
             reform_info->reform_ver)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
@@ -1867,7 +1867,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     int old_primary = SSGetPrimaryInstId();
     SSReadControlFile(old_primary, true);
     g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
-    ereport(LOG, (errmsg("[SS reform] old cluster node bitmap: %lld", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
+    ereport(LOG, (errmsg("[SS reform] old cluster node bitmap: %lu", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
         FailoverCleanBackends();
@@ -1900,9 +1900,10 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     g_instance.dms_cxt.SSReformInfo.new_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
-    ereport(LOG, (errmsg("[SS reform] new cluster node bitmap: %lld", g_instance.dms_cxt.SSReformInfo.new_bitmap)));
+    ereport(LOG, (errmsg("[SS reform] new cluster node bitmap: %lu", g_instance.dms_cxt.SSReformInfo.new_bitmap)));
     g_instance.dms_cxt.SSReformInfo.reform_end_time = GetCurrentTimestamp();
     g_instance.dms_cxt.SSReformInfo.reform_success = true;
+
     ereport(LOG,
             (errmodule(MOD_DMS),
                 errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",

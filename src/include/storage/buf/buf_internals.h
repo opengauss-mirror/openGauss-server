@@ -58,8 +58,8 @@
  * Note: TAG_VALID essentially means that there is a buffer hashtable
  * entry associated with the buffer's tag.
  */
-#define BM_IN_MIGRATE (1U << 16 << 32)        /* buffer is migrating */
-#define BM_IS_TMP_BUF (1U << 21 << 32)         /* temp buf, can not write to disk */
+#define BM_IN_MIGRATE (1LU << 16 << 32)        /* buffer is migrating */
+#define BM_IS_TMP_BUF (1LU << 21 << 32)         /* temp buf, can not write to disk */
 #define BM_IS_META (1LU << 17 << 32)
 #define BM_LOCKED (1LU << 22 << 32)            /* buffer header is locked */
 #define BM_DIRTY (1LU << 23 << 32)             /* data needs writing */

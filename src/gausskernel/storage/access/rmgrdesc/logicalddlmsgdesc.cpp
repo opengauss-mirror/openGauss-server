@@ -22,7 +22,7 @@ logicalddlmsg_desc(StringInfo buf, XLogReaderState *record)
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
     if (info == XLOG_LOGICAL_DDL_MESSAGE) {
-        int cnt = 0;
+        Size cnt = 0;
         xl_logical_ddl_message *xlrec = (xl_logical_ddl_message *) rec;
         char *prefix = xlrec->message;
         char *message = xlrec->message + xlrec->prefix_size;

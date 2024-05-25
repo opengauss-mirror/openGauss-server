@@ -200,8 +200,10 @@ static void min_max_optimization(PlannerInfo* root, CStoreScan* scan_plan);
 static bool find_var_from_targetlist(Expr* expr, List* targetList);
 static Plan* parallel_limit_sort(
     PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* limitCount, int64 offset_est, int64 count_est);
+#ifdef ENABLE_MULTIPLE_NODES
 static void estimate_directHashjoin_Cost(
     PlannerInfo* root, List* hashclauses, Plan* outerPlan, Plan* hash_plan, HashJoin* join_plan);
+#endif
 
 static bool is_result_random(PlannerInfo* root, Plan* lefttree);
 
@@ -6527,6 +6529,7 @@ static NestLoop* make_nestloop(List* tlist, List* joinclauses, List* otherclause
     return node;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 /* estimate_directHashjoin_Cost
  * the function used to estimate the mem_info for join_plan,	refered to the function initial_cost_hashjoin.
  * it used to copy the inner_mem_info\cost\plan_rows and plan_width to the join_plan.
@@ -6614,7 +6617,6 @@ static void estimate_directHashjoin_Cost(
     join_plan->join.plan.plan_width = outer_width;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 HashJoin* create_direct_hashjoin(
     PlannerInfo* root, Plan* outerPlan, Plan* innerPlan, List* tlist, List* joinClauses, JoinType joinType)
 {
@@ -6734,6 +6736,7 @@ static bool replace_scan_clause_walker(Node* node, replace_scan_clause_context* 
     return expression_tree_walker(node, (bool (*)())replace_scan_clause_walker, (void*)context);
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 static List* replace_scan_clause(List* scan_clauses, Index idx)
 {
     replace_scan_clause_context context;
@@ -6754,7 +6757,6 @@ static List* replace_scan_clause(List* scan_clauses, Index idx)
     return context.scan_clauses;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 Plan* create_direct_scan(PlannerInfo* root, List* tlist, RangeTblEntry* realResultRTE, Index src_idx, Index dest_idx)
 {
     Plan* result = NULL;

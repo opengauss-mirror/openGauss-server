@@ -629,7 +629,7 @@ void StreamNodeGroup::quitSyncPoint()
             ereport(WARNING, (errmsg("Stream sub thread m_quitWaitCond invalid: %d. "
                     "To get backtrace detail, set backtrace_min_messages=warning.", m_quitWaitCond)));
             ereport(LOG, (errmsg("Stream info, smp id: %u, m_streamEnter: %d, m_streamEnterCount: %d, "
-                "ThreadId: %u, m_createThreadNum: %d, m_size: %d", 
+                "ThreadId: %lu, m_createThreadNum: %d, m_size: %d",
                 u_sess->stream_cxt.smp_id, m_streamEnter, m_streamEnterCount,
                 (u_sess->stream_cxt.producer_obj)->getThreadId(), m_createThreadNum, m_size)));
         }
@@ -645,7 +645,7 @@ void StreamNodeGroup::quitSyncPoint()
             }
         }
         streamLock.unLock();
-    } else if (StreamTopConsumerAmI() == true) {
+    } else if (StreamTopConsumerAmI()) {
         /* if none thread is created ,no bother to wait on condition. */
         if (m_createThreadNum != 0) {
             AutoMutexLock streamLock(&m_mutex);

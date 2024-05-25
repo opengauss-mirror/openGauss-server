@@ -1552,7 +1552,8 @@ TargetEntry* get_sortgroupref_tle_spq(Index sortref, List* targetList, bool repo
     foreach (l, targetList) {
         TargetEntry* tle = (TargetEntry*)lfirst(l);
 
-        if (IS_SPQ_COORDINATOR && tle->resno == sortref && tle->ressortgroupref == 0) {
+        /* user defined attribute numbers start at 1 */
+        if (IS_SPQ_COORDINATOR && (Index)tle->resno == sortref && tle->ressortgroupref == 0) {
             return tle;
         }
     }

@@ -4897,7 +4897,7 @@ retry:
             }
             if (t_thrd.xlog_cxt.uwalInfo.info.dataSize > 0) {
                 if (recptr >= t_thrd.xlog_cxt.uwalInfo.info.truncateOffset) {
-                    segbytes = Min(segbytes, MaxReadUwalBytes);
+                    segbytes = Min(segbytes, (int)MaxReadUwalBytes);
                     int ret = GsUwalRead(&t_thrd.xlog_cxt.uwalInfo.id, recptr, p, segbytes);
                     if (ret == 0) {
                         need_read = false;

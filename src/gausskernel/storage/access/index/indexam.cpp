@@ -525,7 +525,7 @@ rescan:
 #ifdef USE_SPQ
     if (IS_SPQ_EXECUTOR && scan->spq_scan != NULL) {
         BlockNumber unitno = SPQSCAN_BlockNum2UnitNum(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self));
-        if ((unitno % scan->spq_scan->slice_num) != scan->spq_scan->instance_id)
+        if ((int)(unitno % scan->spq_scan->slice_num) != scan->spq_scan->instance_id)
             goto rescan;
     }
 #endif

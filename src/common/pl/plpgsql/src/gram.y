@@ -10055,7 +10055,7 @@ make_execsql_stmt(int firsttoken, int location)
                             pfree_ext(lb.data);
                             ereport(errstate,
                                     (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg(err_msg),
+                                    errmsg("%s", err_msg),
                                     parser_errposition(location + num)));
                         }
 
@@ -10076,14 +10076,14 @@ make_execsql_stmt(int firsttoken, int location)
                             pfree_ext(lb.data);
                             ereport(errstate,
                                     (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg(err_msg),
+                                    errmsg("%s", err_msg),
                                     parser_errposition(location + len)));
                         }
                         if(lb.data[0] >= '0' && lb.data[0] <= '9') {
                             pfree_ext(lb.data);
                             ereport(errstate,
                                     (errcode(ERRCODE_SYNTAX_ERROR),
-                                    errmsg(err_msg),
+                                    errmsg("%s", err_msg),
                                     parser_errposition(location)));
                         }
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
@@ -10134,7 +10134,7 @@ make_execsql_stmt(int firsttoken, int location)
                         pfree_ext(lb.data);
                         ereport(errstate,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg(err_msg),
+                                errmsg("%s", err_msg),
                                 parser_errposition(location + len)));
                     }
 
@@ -10161,14 +10161,14 @@ make_execsql_stmt(int firsttoken, int location)
                         pfree_ext(lb.data);
                         ereport(errstate,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg(err_msg),
+                                errmsg("%s", err_msg),
                                 parser_errposition(location + len)));
                     }
                     if(lb.data[0] >= '0' && lb.data[0] <= '9') {
                         pfree_ext(lb.data);
                         ereport(errstate,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg(err_msg),
+                                errmsg("%s", err_msg),
                                 parser_errposition(location)));
                     }
                     if(lb.len >= NAMEDATALEN)

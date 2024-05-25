@@ -468,7 +468,7 @@ static void pg_decode_ddl(LogicalDecodingContext *ctx,
     old = MemoryContextSwitchTo(data->context);
     OutputPluginPrepareWrite(ctx, true);
 
-    appendStringInfo(ctx->out, "prefix: %s, lsn: %llu, relid %u, cmdtype: %s, size: %lu, content: %s",
+    appendStringInfo(ctx->out, "prefix: %s, lsn: %lu, relid %u, cmdtype: %s, size: %lu, content: %s",
                      prefix,
                      message_lsn,
                      relid,

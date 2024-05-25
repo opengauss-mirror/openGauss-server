@@ -2104,7 +2104,6 @@ LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, Blo
  */
 int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum) {
     LWLock *xlog_partition_lock = NULL;
-    RedoBufferInfo bufferInfo;
     ondemand_extreme_rto::RedoItemTag redoItemTag;
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
     bool noNeedRedo = false;
