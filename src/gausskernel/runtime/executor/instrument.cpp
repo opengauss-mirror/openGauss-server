@@ -3030,12 +3030,6 @@ void InitOperStatProfile(void)
         &hash_ctl1,
         HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE | HASH_PARTITION);
 
-    const int max_work_mem = 10 * MBYTES;  // 10MB
-    const int detail_mem = 20 * MBYTES;
-
-    g_operator_table.max_realtime_num = max_work_mem / sizeof(ExplainDNodeInfo);
-    g_operator_table.max_collectinfo_num = detail_mem / sizeof(ExplainDNodeInfo);
-
     MemoryContextSwitchTo(old_context);
 }
 
