@@ -227,6 +227,16 @@ void GlobalSysTupCache::HandleDeadGlobalCatCTup(GlobalCatCTup *ct)
 
 void GlobalSysTupCache::FreeDeadCts()
 {
+    if (m_dead_cts.GetLength() == 0 || m_recovery_ct_flag != 0) {
+        return;
+    }
+    /* only one clean is enough */
+    ResourceOwnerEnlargeGlobalIsExclusive(LOCAL_SYSDB_RESOWNER);
+    if (!atomic_compare_exchange_u32(&m_recovery_ct_flag, 0, 1)) {
+        return;
+    }
+    ResourceOwnerRememberGlobalIsExclusive(LOCAL_SYSDB_RESOWNER, &m_recovery_ct_flag);
+
     while (m_dead_cts.GetLength() > 0) {
         Dlelem *elt = m_dead_cts.RemoveHead();
         if (elt == NULL) {
@@ -241,6 +251,10 @@ void GlobalSysTupCache::FreeDeadCts()
             pfree(ct);
         }
     }
+
+    Assert(m_recovery_ct_flag == 1);
+    atomic_compare_exchange_u32(&m_recovery_ct_flag, 1, 0);
+    ResourceOwnerForgetGlobalIsExclusive(LOCAL_SYSDB_RESOWNER, &m_recovery_ct_flag);
 }
 
 void GlobalSysTupCache::RemoveTailTupleElements(Index hash_index)
@@ -306,6 +320,16 @@ void GlobalSysTupCache::HandleDeadGlobalCatCList(GlobalCatCList *cl)
 
 void GlobalSysTupCache::FreeDeadCls()
 {
+    if (m_dead_cls.GetLength() == 0  || m_recovery_cl_flag != 0) {
+        return;
+    }
+    /* only one clean is enough */
+    ResourceOwnerEnlargeGlobalIsExclusive(LOCAL_SYSDB_RESOWNER);
+    if (!atomic_compare_exchange_u32(&m_recovery_cl_flag, 0, 1)) {
+        return;
+    }
+    ResourceOwnerRememberGlobalIsExclusive(LOCAL_SYSDB_RESOWNER, &m_recovery_cl_flag);
+
     while (m_dead_cls.GetLength() > 0) {
         Dlelem *elt = m_dead_cls.RemoveHead();
         if (elt == NULL) {
@@ -320,6 +344,11 @@ void GlobalSysTupCache::FreeDeadCls()
             FreeGlobalCatCList(cl);
         }
     }
+
+    Assert(m_recovery_cl_flag == 1);
+    atomic_compare_exchange_u32(&m_recovery_cl_flag, 1, 0);
+    ResourceOwnerForgetGlobalIsExclusive(LOCAL_SYSDB_RESOWNER, &m_recovery_cl_flag);
+
     FreeDeadCts();
 }
 
@@ -422,6 +451,8 @@ GlobalSysTupCache::GlobalSysTupCache(Oid dbOid, int cache_id, bool isShared, Glo
     m_is_tup_swappingouts = NULL;
     m_is_list_swappingout = 0;
     enable_rls = false;
+    m_recovery_ct_flag = 0;
+    m_recovery_cl_flag = 0;
 }
 
 void GlobalSysTupCache::SetStatInfoPtr(volatile uint64 *tup_count, volatile uint64 *tup_space)

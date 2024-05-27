@@ -418,6 +418,8 @@ private:
     int cc_id;                                    /* cache identifier --- see syscache.h */
     DllistWithLock m_dead_cts;
     DllistWithLock m_dead_cls;
+    volatile uint32 m_recovery_ct_flag;
+    volatile uint32 m_recovery_cl_flag;
 
     CatTupRelInfoMsg m_relinfo;
     ScanKeyData cc_skey[CATCACHE_MAXKEYS]; /* precomputed key info for
