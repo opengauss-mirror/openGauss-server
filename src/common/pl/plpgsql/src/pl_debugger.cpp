@@ -127,8 +127,6 @@ static void init_debug_server(PLpgSQL_function* func, int socketId, int debugSta
         sock->comm_idx = socketId;
         sock->send_buffer = (char*)palloc0(DEFAULT_DEBUG_BUF_SIZE * sizeof(char));
         sock->send_buf_len = DEFAULT_DEBUG_BUF_SIZE;
-        sock->send_buffer = (char*)palloc0(DEFAULT_DEBUG_BUF_SIZE * sizeof(char));
-        sock->send_buf_len = DEFAULT_DEBUG_BUF_SIZE;
         sock->send_ptr = 0;
         sock->rec_buffer = (char*)palloc0(DEFAULT_DEBUG_BUF_SIZE * sizeof(char));
         sock->rec_buf_len = DEFAULT_DEBUG_BUF_SIZE;
