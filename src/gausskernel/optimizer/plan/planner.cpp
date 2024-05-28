@@ -61,6 +61,7 @@
 #include "parser/parse_hint.h"
 #include "parser/parse_type.h"
 #include "rewrite/rewriteManip.h"
+#include "rewrite/rewriteHandler.h"
 #include "securec.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -193,6 +194,7 @@ static PathTarget *make_group_input_target(PlannerInfo *root, PathTarget *final_
 static void process_planner_targets(PlannerInfo *root, PlannerTargets* targets, List *tlist, List* activeWindows);
 static void adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel, List *targets, List *targets_contain_srfs);
 static Plan *adjust_plan_for_srfs(PlannerInfo *root, Plan *plan, List *targets, List *targets_contain_srfs);
+static List* replace_subquery_result_relation_recurse(Query* parsetree, Query* qry, int resultRelation);
 
 #ifdef PGXC
 static void separate_rowmarks(PlannerInfo* root);
@@ -1208,6 +1210,74 @@ void check_is_support_recursive_cte(PlannerInfo* root)
     return;
 }
 
+static List* replace_subquery_result_relation_recurse(Query* parsetree, Query* qry, int resultRelation)
+{
+    RangeTblEntry* rt_entry = NULL;
+    const char* autoUpdateDetai;
+    rt_entry = rt_fetch(resultRelation, parsetree->rtable);
+
+
+    if (rt_entry->rtekind == RTE_RELATION && (rt_entry->relkind == RELKIND_RELATION || 
+        rt_entry->relkind == RELKIND_FOREIGN_TABLE)) {
+        int oldResultRelation = linitial2_int(parsetree->resultRelations);
+        if (oldResultRelation != resultRelation) {
+            qry->resultRelations = list_delete_int(qry->resultRelations, oldResultRelation);
+            qry->resultRelations = lcons_int(resultRelation, qry->resultRelations);
+        }
+        return qry->resultRelations;
+    } 
+
+    Query* subqry = NULL;
+
+    if (rt_entry->rtekind == RTE_RELATION && rt_entry->relkind == RELKIND_VIEW) {
+        Relation view_relation = heap_open(rt_entry->relid, NoLock);
+
+        if (view_has_instead_trigger(view_relation, parsetree->commandType)) {
+            heap_close(view_relation, NoLock);
+            return qry->resultRelations;
+        }
+
+        subqry = (Query*)copyObject(get_view_query(view_relation));
+        heap_close(view_relation, NoLock);
+    } else if (rt_entry->rtekind == RTE_SUBQUERY && rt_entry->subquery != NULL) {
+        subqry = rt_entry->subquery;
+    }
+
+    if (subqry != NULL) {
+        autoUpdateDetai = view_query_is_auto_updatable(subqry, parsetree->commandType != CMD_DELETE, false);
+    } else {
+        autoUpdateDetai = gettext_noop("Views that do not select from tables, views or subqueries are not automatically updatable.");
+    }
+
+    if (autoUpdateDetai) {
+        /* messages here should match execMain.c's CheckValidResultRel */
+        switch (parsetree->commandType) {
+            case CMD_UPDATE:
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("cannot update the view or subquery"),
+                        errdetail_internal("%s", _(autoUpdateDetai)),
+                        errhint("To enable updating the view, provide an INSTEAD OF UPDATE trigger or "
+                                "an unconditional ON UPDATE DO INSTEAD rule.")));
+                break;
+            case CMD_DELETE:
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("cannot delete from the view or subquery"),
+                        errdetail_internal("%s", _(autoUpdateDetai)),
+                        errhint("To enable deleting from the view, provide an INSTEAD OF DELETE trigger or "
+                                "an unconditional ON DELETE DO INSTEAD rule.")));
+                break;
+            default:
+                ereport(ERROR, (errmsg("unrecognized CmdType: %d", (int)parsetree->commandType)));
+                break;
+        }
+    }
+
+
+    int newRtIndex = ReplaceResultTargetEntry(parsetree, subqry, subqry->rtable, resultRelation);
+
+    return replace_subquery_result_relation_recurse(parsetree, subqry, newRtIndex);
+}
+
 /*
  * Process set hint at top level. DO NOT handle subquery.
  * apply_set_hint and recover_set_hint should wrap around pg_plan_query
@@ -1516,6 +1586,22 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * query.
      */
     parse->jointree = (FromExpr*)pull_up_subqueries(root, (Node*)parse->jointree);
+
+    if (parse->commandType == CMD_UPDATE || parse->commandType == CMD_DELETE) {
+        ListCell* cell = NULL;
+        int resultRelation = linitial2_int(parse->resultRelations);
+        RangeTblEntry* res_rte = rt_fetch(resultRelation, parse->rtable);
+            if (res_rte->rtekind == RTE_SUBQUERY) {
+            foreach(cell, parse->rtable) {
+                RangeTblEntry* rte = (RangeTblEntry*)lfirst(cell);
+                if (rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_VIEW && resultRelation != 0) {
+                    parse->resultRelations = replace_subquery_result_relation_recurse(parse, parse, resultRelation);
+                    RewriteQuery(parse, NIL);
+                    break;
+                }
+            }
+        }
+    }
 
     DEBUG_QRW("After simple subquery pull up");
 
