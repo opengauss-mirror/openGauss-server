@@ -160,6 +160,28 @@ static inline void free_sync_standbys_list(List* sync_standbys)
     list_free(sync_standbys);
 }
 
+/* 
+ * Update WalSnder->lsn[mode] by CAS operation by increase order.
+ * If update as the newVal, result truns to true.
+ */
+void AtomicUpdateIfGreater(volatile XLogRecPtr* ptr, XLogRecPtr newVal, bool* result)
+{
+    while (true) {
+        XLogRecPtr oldVal = *ptr;
+        if (oldVal >= newVal) {
+            break;
+        }
+        XLogRecPtr currentVal = pg_atomic_compare_exchange_u64(ptr, &oldVal, newVal);
+        if (currentVal == oldVal) {
+            /* If value not change after cas, we modify correct. */
+            *result = true;
+            break;
+        }
+        /* If we get here, we modify incorrect. */
+    }
+    return;
+}
+
 /*
  * Determine whether to wait for standby catching up, if requested by user.
  * 
@@ -202,9 +224,9 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  *
  * Initially backends start in state SYNC_REP_NOT_WAITING and then
  * change that state to SYNC_REP_WAITING before adding ourselves
- * to the wait queue. During SyncRepWakeQueue() a WALSender changes
- * the state to SYNC_REP_WAIT_COMPLETE once replication is confirmed.
- * This backend then resets its state to SYNC_REP_NOT_WAITING.
+ * to the wait queue. During SyncRepWakeQueue() a WALSender update
+ * the lsn by order, and set latch for the backend which in waitting.
+ * There are tow wait status: wait for the lock, wait for the latch.
  */
 SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
@@ -222,14 +244,10 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         !SyncStandbysDefined() || (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
         return NOT_REQUEST;
 
-    Assert(SHMQueueIsDetached(&(t_thrd.proc->syncRepLinks)));
     Assert(t_thrd.walsender_cxt.WalSndCtl != NULL);
 
-    /* Prevent the queue cleanups to be influenced by external interruptions */
+    /* Prevent the unexpected cleanups to be influenced by external interruptions */
     HOLD_INTERRUPTS();
-
-    (void)LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
-    Assert(t_thrd.proc->syncRepState == SYNC_REP_NOT_WAITING);
 
     /*
      * We don't wait for sync rep if WalSndCtl->sync_standbys_defined is not
@@ -240,37 +258,36 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      * be a low cost check. We don't wait for sync rep if no sync standbys alive
      */
     if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined) {
-        LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return NOT_SET_STANDBY_DEFINED;
     }
-    if (XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode])) {
-        LWLockRelease(SyncRepLock);
-        RESUME_INTERRUPTS();
-        return REPSYNCED;
-    }
+
     if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !DelayIntoMostAvaSync(false) &&
         !IS_SHARED_STORAGE_MODE && !SS_DORADO_CLUSTER) {
-        LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return STAND_ALONE;
     }
     
     if (!SynRepWaitCatchup(XactCommitLSN)) {
-        LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return NOT_WAIT_CATCHUP;
     }
 
     /*
-     * Set our waitLSN so WALSender will know when to wake us, and add
-     * ourselves to the queue.
+     * The WalSndCtl is updated quick by WalSnder as usual， so we may be
+     * waitting for a while better, instead of acquiring a lock.
      */
-    t_thrd.proc->waitLSN = XactCommitLSN;
-    t_thrd.proc->syncRepState = SYNC_REP_WAITING;
-    SyncRepQueueInsert(mode);
-    Assert(SyncRepQueueIsOrderedByLSN(mode));
-    LWLockRelease(SyncRepLock);
+    #define SYNCREPWAIT_TRY_TIMES 10000
+    for (int tryTime = 0; tryTime < SYNCREPWAIT_TRY_TIMES; tryTime++) {
+         XLogRecPtr loopLSN = (XLogRecPtr)pg_atomic_barrier_read_u64(&t_thrd.walsender_cxt.WalSndCtl->lsn[mode]);
+        if (XLByteLE(XactCommitLSN, loopLSN) && !DelayIntoMostAvaSync(true)) {
+            waitStopRes = SYNC_COMPLETE;
+            t_thrd.proc->syncRepState = SYNC_REP_WAIT_COMPLETE;
+            RESUME_INTERRUPTS();
+            return REPSYNCED;
+        }
+        pg_usleep(1);
+    }
 
     /* Alter ps display to show waiting for sync rep. */
     if (u_sess->attr.attr_common.update_process_title) {
@@ -296,15 +313,20 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_WALSYNC);
 
     /*
+     * Get the lsn what this backend watiing for, ancd check for a loop.
+     */
+    volatile XLogRecPtr remoteLSN = (XLogRecPtr)pg_atomic_barrier_read_u64(&t_thrd.walsender_cxt.WalSndCtl->lsn[mode]);
+    
+    /*
      * Wait for specified LSN to be confirmed.
      *
-     * Each proc has its own wait latch, so we perform a normal latch
-     * check/wait loop here.
+     * Each proc try to lock walSyncRepWaitLock, and only one backend can
+     * get that lock, other backends will wait for it.
+     * The backend which get lock will waitlatch for a while. If it is waked
+     * by WalSnder or wait time out, it will release lock. And all backends
+     * will reloop again.
      */
-    for (;;) {
-        /* Must reset the latch before testing state. */
-        ResetLatch(&t_thrd.proc->procLatch);
-
+    while (true) {
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(DN_STANDBY_SLEEPIN_SYNCCOMMIT, stub_sleep_emit)) {
             ereport(get_distribute_test_param()->elevel,
@@ -313,13 +335,8 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         }
 #endif
 
-        /*
-         * Acquiring the lock is not needed, the latch ensures proper barriers.
-         * If it looks like we're done, we must really be done, because once
-         * walsender changes the state to SYNC_REP_WAIT_COMPLETE, it will never
-         * update it again, so we can't be seeing a stale value in that case.
-         */
-        if (t_thrd.proc->syncRepState == SYNC_REP_WAIT_COMPLETE && !DelayIntoMostAvaSync(true)) {
+        if (XLByteLE(XactCommitLSN, remoteLSN) && !DelayIntoMostAvaSync(true)) {
+            t_thrd.proc->syncRepState = SYNC_REP_WAIT_COMPLETE;
             waitStopRes = SYNC_COMPLETE;
             break;
         }
@@ -349,10 +366,9 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
             t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-            if (SyncRepCancelWait()) {
-                waitStopRes = STOP_WAIT;
-                break;
-            }
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            waitStopRes = STOP_WAIT;
+            break;
         }
 
         /*
@@ -370,12 +386,11 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                     (errmsg("canceling wait for synchronous replication due to user request"),
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
-            if (SyncRepCancelWait()) {
-                waitStopRes = STOP_WAIT;
-                break;
-            }
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            waitStopRes = STOP_WAIT;
+            break;
         }
-
+        
         /*
          * If the postmaster dies, we'll probably never get an
          * acknowledgement, because all the wal sender processes will exit. So
@@ -384,10 +399,9 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         if (!PostmasterIsAlive()) {
             t_thrd.int_cxt.ProcDiePending = true;
             t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-            if (SyncRepCancelWait()) {
-                waitStopRes = STOP_WAIT;
-                break;
-            }
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            waitStopRes = STOP_WAIT;
+            break;
         }
 
         /*
@@ -403,10 +417,19 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                     (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
-            if (SyncRepCancelWait()) {
-                waitStopRes = STOP_WAIT;
-                break;
-            }
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            waitStopRes = STOP_WAIT;
+            break;
+        }
+
+        /*
+         * If sync_standbys is changed, it's also no need to wait, this backend
+         * should break loop to do next step.
+         */
+        if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined) {
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            waitStopRes = STOP_WAIT;
+            break;
         }
 
         /*
@@ -421,10 +444,9 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                                 "secondary is not connected."),
                          errdetail("The transaction has already committed locally, but might not have been replicated "
                                    "to the standby.")));
-                if (SyncRepCancelWait()) {
-                    waitStopRes = STOP_WAIT;
-                    break;
-                }
+                t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+                waitStopRes = STOP_WAIT;
+                break;
             }
         }
 
@@ -437,40 +459,32 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                     (errmsg("canceling wait for synchronous replication due to session close."),
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
-            if (SyncRepCancelWait()) {
-                waitStopRes = STOP_WAIT;
-                break;
-            }
+            t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
+            waitStopRes = STOP_WAIT;
+            break;
         }
 
         /*
-         * Wait on latch.  Any condition that should wake us up will set the
-         * latch, so no need for timeout.
+         * If there is no unexpected condition, and the lsn is smaller the what this backend want.
+         * All Backends will Acquire walSyncRepWaitLock, and wait for release if not hold.
          */
-        WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 3000L);
-    }
-
-    /* Make sure that syncRepLinks is read after syncRepState */
-    pg_read_barrier();
-
-    /* Leader informs following procs */
-    if (t_thrd.proc->syncRepLinks.next != NULL) {
-        SyncRepNotifyComplete();
+        if (LWLockAcquireOrWait(g_instance.wal_cxt.walSyncRepWaitLock->l.lock, LW_EXCLUSIVE)) {
+            t_thrd.walsender_cxt.WalSndCtl->syncWaitProc = t_thrd.proc;
+            pg_write_barrier();
+            ResetLatch(&t_thrd.proc->procLatch);
+            /*
+            * Wait on latch.  Any condition that should wake us up will set the
+            * latch. When unexpected condition happend and no one set latch, this backend will
+            * wake to deal with after a while.
+            */
+            WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 1000L);
+            t_thrd.walsender_cxt.WalSndCtl->syncWaitProc = NULL;
+            LWLockRelease(g_instance.wal_cxt.walSyncRepWaitLock->l.lock);
+        }
+        remoteLSN = (XLogRecPtr)pg_atomic_barrier_read_u64(&t_thrd.walsender_cxt.WalSndCtl->lsn[mode]);
     }
 
     (void)pgstat_report_waitstatus(oldStatus);
-
-    /*
-     * WalSender has checked our LSN and has removed us from queue. Clean up
-     * state and leave.  It's OK to reset these shared memory fields without
-     * holding SyncRepLock, because any walsenders will ignore us anyway when
-     * we're not on the queue. pg_read_barrier() has been invoked after for
-     * loop to make sure the changes to the queue link is visible.
-     */
-    Assert(SHMQueueIsDetached(&(t_thrd.proc->syncRepLinks)));
-    t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
-    t_thrd.proc->syncRepInCompleteQueue = false;
-    t_thrd.proc->waitLSN = 0;
 
     if (new_status != NULL) {
         /* Reset ps display */
@@ -666,46 +680,36 @@ void SyncRepReleaseWaiters(void)
                                  t_thrd.walsender_cxt.MyWalSnd->sync_standby_group)));
         }
     }
-
+    LWLockRelease(SyncRepLock);
     /*
      * If the number of sync standbys is less than requested or we aren't
      * managing a sync standby then just leave.
      */
     if (!got_recptr || !am_sync) {
-        LWLockRelease(SyncRepLock);
         t_thrd.syncrep_cxt.announce_next_takeover = !am_sync;
         return;
     }
 
     /*
-     * Set the lsn first so that when we wake backends they will release up to
+     * Check the multi-lsn array whether updated by WalSnder, if updated
      * this location.
      */
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_RECEIVE], receivePtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_RECEIVE] = receivePtr;
-        numreceive = SyncRepWakeQueue(false, SYNC_REP_WAIT_RECEIVE);
-    }
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_WRITE], writePtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_WRITE] = writePtr;
-        numwrite = SyncRepWakeQueue(false, SYNC_REP_WAIT_WRITE);
-    }
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_FLUSH], flushPtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_FLUSH] = flushPtr;
-        numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_FLUSH);
-    }
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_APPLY], replayPtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_APPLY] = replayPtr;
-        numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
-    }
+    bool updateResult = false;
+    
+    /*
+     * Update the lsn by CAS, and will update by increase order.
+     */
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_RECEIVE], receivePtr, &updateResult);
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_WRITE], writePtr, &updateResult);
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_FLUSH], flushPtr, &updateResult);
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_APPLY], replayPtr, &updateResult);
 
-    LWLockRelease(SyncRepLock);
-
-    ereport(DEBUG3,
-            (errmsg("released %d procs up to receive %X/%X, %d procs up to write %X/%X, "
-                    "%d procs up to flush %X/%X, %d procs up to apply %X/%X",
-                    numreceive, (uint32)(receivePtr >> 32), (uint32)receivePtr, numwrite, (uint32)(writePtr >> 32),
-                    (uint32)writePtr, numflush, (uint32)(flushPtr >> 32), (uint32)flushPtr,
-                    numapply, (uint32)(replayPtr >> 32), (uint32)replayPtr)));
+    /*
+     * Wake Backend if lsn array is updated.
+     */
+    if (updateResult) {
+        SyncRepWakeBackend();
+    }
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1294,6 +1298,18 @@ static void SyncRepGetStandbyGroupAndPriority(int* gid, int* prio)
 }
 
 /*
+ * Try to wake the specified proc's which get lock.
+ */
+void SyncRepWakeBackend()
+{
+    volatile WalSndCtlData *walsndctl = t_thrd.walsender_cxt.WalSndCtl;
+    pg_read_barrier();
+    if (walsndctl->syncWaitProc) {
+        SetLatch(&(walsndctl->syncWaitProc->procLatch));
+    }
+}
+
+/*
  * Wake the specified queue from head.	Set the state of any backends that
  * need to be woken, remove them from the queue, and then wake them.
  * Pass all = true to wake whole queue; otherwise, just wake up to
@@ -1474,10 +1490,7 @@ void SyncRepUpdateSyncStandbysDefined(void)
          * wants synchronous replication, we'd better wake them up.
          */
         if (!sync_standbys_defined) {
-            int i;
-
-            for (i = 0; i < NUM_SYNC_REP_WAIT_MODE; i++)
-                (void)SyncRepWakeQueue(true, i);
+            (void)SyncRepWakeBackend();
         }
 
         /*
@@ -1703,8 +1716,7 @@ void SyncRepCheckSyncStandbyAlive(void)
          * If there is any waiting sender, then wake-up them as
          * master has switched to standalone mode
          */
-        for (i = 0; i < NUM_SYNC_REP_WAIT_MODE; i++)
-            (void)SyncRepWakeQueue(true, i);
+        (void)SyncRepWakeBackend();
     }
 }
 

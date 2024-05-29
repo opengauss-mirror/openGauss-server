@@ -5899,6 +5899,7 @@ void WalSndShmemInit(void)
             SpinLockInit(&walsnd->mutex);
             InitSharedLatch(&walsnd->latch);
         }
+        t_thrd.walsender_cxt.WalSndCtl->syncWaitProc = NULL;
         t_thrd.walsender_cxt.WalSndCtl->most_available_sync = false;
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone = false;
         t_thrd.walsender_cxt.WalSndCtl->keep_sync_window_start = 0;

@@ -9006,6 +9006,14 @@ void InitWalSemaphores()
     PGSemaphoreCreate(&g_instance.wal_cxt.walInitSegLock->l.sem);
     PGSemaphoreReset(&g_instance.wal_cxt.walInitSegLock->l.sem);
 
+    /*
+     * Lock structure used for backedns lsn waitting.
+     */
+    g_instance.wal_cxt.walSyncRepWaitLock = (WALSyncRepWaitLockPadded*)palloc(sizeof(WALSyncRepWaitLockPadded) * 2);
+    g_instance.wal_cxt.walSyncRepWaitLock = (WALSyncRepWaitLockPadded*)TYPEALIGN(sizeof(WALSyncRepWaitLockPadded),
+                                                                        g_instance.wal_cxt.walSyncRepWaitLock);
+    g_instance.wal_cxt.walSyncRepWaitLock->l.lock = LWLockAssign(LWTRANCHE_SYNCREP_WAIT);
+
     (void)MemoryContextSwitchTo(old_context);
 }
 

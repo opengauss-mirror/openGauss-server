@@ -167,6 +167,11 @@ typedef struct {
     PGSemaphoreData	sem;
 } WALBufferInitWaitLock;
 
+typedef struct {
+    LWLock* lock;
+    PGSemaphoreData	sem;
+} WALSyncRepWaitLock;
+
 #define WAL_NOT_COPIED 0
 #define WAL_COPIED 1
 #define WAL_COPY_SUSPEND (-1)
@@ -223,6 +228,12 @@ struct WALInitSegLockPadded {
     WALInitSegLock l;
     char padding[PG_CACHE_LINE_SIZE];
 };
+
+struct WALSyncRepWaitLockPadded {
+    WALSyncRepWaitLock l;
+    char padding[PG_CACHE_LINE_SIZE];
+};
+
 
 /*
  * OR-able request flag bits for checkpoints.  The "cause" bits are used only

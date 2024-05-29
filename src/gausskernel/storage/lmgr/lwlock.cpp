@@ -203,7 +203,8 @@ static const char *BuiltinTrancheNames[] = {
     "XlogTrackPartLock",
     "SSTxnStatusCachePartLock",
     "SSSnapshotXminCachePartLock",
-    "DmsBufCtrlLock"
+    "DmsBufCtrlLock",
+    "WalSyncRepWaitLock"
 };
 
 static void RegisterLWLockTranches(void);

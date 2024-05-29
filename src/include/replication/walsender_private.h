@@ -179,6 +179,12 @@ typedef struct WalSndCtlData {
     SHM_QUEUE SyncRepQueue[NUM_SYNC_REP_WAIT_MODE];
 
     /*
+    * Current proc which held the lock, and all waiters should acquire for
+    * the lock. WalSnder will set latch for this proc after update lsn.
+    */
+    PGPROC* syncWaitProc;
+    
+    /*
      * Current location of the head of the queue. All waiters should have a
      * waitLSN that follows this value. Protected by SyncRepLock.
      */

@@ -289,6 +289,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_SS_TXNSTATUS_PARTITION,
     LWTRANCHE_SS_SNAPSHOT_XMIN_PARTITION,
     LWTRANCHE_DMS_BUF_CTRL,
+    LWTRANCHE_SYNCREP_WAIT,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

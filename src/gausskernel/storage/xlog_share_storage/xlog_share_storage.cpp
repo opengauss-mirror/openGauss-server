@@ -210,25 +210,25 @@ void NotifySyncWaiters(XLogRecPtr newPos)
 {
     volatile WalSndCtlData *walsndctl = t_thrd.walsender_cxt.WalSndCtl;
 
-    (void)LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
     /*
-     * Set the lsn first so that when we wake backends they will release up to
+     * Check the multi-lsn array whether updated by WalSnder, if updated
      * this location.
      */
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_RECEIVE], newPos)) {
-        walsndctl->lsn[SYNC_REP_WAIT_RECEIVE] = newPos;
-        (void)SyncRepWakeQueue(false, SYNC_REP_WAIT_RECEIVE);
-    }
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_WRITE], newPos)) {
-        walsndctl->lsn[SYNC_REP_WAIT_WRITE] = newPos;
-        (void)SyncRepWakeQueue(false, SYNC_REP_WAIT_WRITE);
-    }
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_FLUSH], newPos)) {
-        walsndctl->lsn[SYNC_REP_WAIT_FLUSH] = newPos;
-        (void)SyncRepWakeQueue(false, SYNC_REP_WAIT_FLUSH);
-    }
+    bool updateResult = false;
 
-    LWLockRelease(SyncRepLock);
+    /*
+     * Update the lsn by CAS, and will update by increase order.
+     */
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_RECEIVE], newPos, &updateResult);
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_WRITE], newPos, &updateResult);
+    (void)AtomicUpdateIfGreater(&walsndctl->lsn[SYNC_REP_WAIT_FLUSH], newPos, &updateResult);
+    
+    /*
+     * Wake Backend if lsn array is updated.
+     */
+    if (updateResult) {
+        SyncRepWakeBackend();
+    }
 }
 
 void PushCtlLsn(XLogRecPtr flushPtr)

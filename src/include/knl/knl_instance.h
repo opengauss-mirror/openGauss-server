@@ -984,6 +984,7 @@ typedef struct WALFlushWaitLockPadded WALFlushWaitLockPadded;
 typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
 typedef struct WALInitSegLockPadded WALInitSegLockPadded;
 typedef struct XlogFlushStats XlogFlushStatistics;
+typedef struct WALSyncRepWaitLockPadded WALSyncRepWaitLockPadded;
 
 typedef struct WalSenderStat {
     uint64 sendTimes;
@@ -1060,6 +1061,7 @@ typedef struct knl_g_wal_context {
     WalReceiverStats* walReceiverStats;
     WalRecvWriterStats* walRecvWriterStats;
     char* ssZeroBuffer; /* an all-zero buffer used to write zero when initing xlog file */
+    WALSyncRepWaitLockPadded* walSyncRepWaitLock;
 } knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {

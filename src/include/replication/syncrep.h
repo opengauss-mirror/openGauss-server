@@ -120,6 +120,7 @@ extern void SyncRepCleanupAtProcExit(void);
 extern void SyncRepInitConfig(void);
 extern void SyncRepReleaseWaiters(void);
 extern int SyncRepWakeQueue(bool all, int mode);
+extern void SyncRepWakeBackend();
 extern void SyncPaxosReleaseWaiters(XLogRecPtr PaxosConsensusLSN);
 
 /* called by wal writer */
@@ -150,6 +151,7 @@ typedef union syncrep_scanner_YYSTYPE {
 
 extern int syncrep_scanner_yylex(syncrep_scanner_YYSTYPE* lvalp, YYLTYPE* llocp, syncrep_scanner_yyscan_t yyscanner);
 extern void syncrep_scanner_yyerror(const char* message, syncrep_scanner_yyscan_t yyscanner);
+extern void AtomicUpdateIfGreater(volatile XLogRecPtr* ptr, XLogRecPtr newVal, bool* result);
 extern bool SyncRepGetSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, bool* am_sync, bool check_am_sync = true);
 #ifndef ENABLE_MULTIPLE_NODES
 extern void SetXactLastCommitToSyncedStandby(XLogRecPtr recptr);
