@@ -506,6 +506,10 @@ LocalCatCTup *LocalSysTupCache::SearchTupleInternal(int nkeys, Datum v1, Datum v
     for (Dlelem *elt = DLGetHead(GetBucket(hash_index)); elt;) {
         ct = (LocalCatCTup *)DLE_VAL(elt);
         elt = DLGetSucc(elt);
+        if (unlikely(ct->global_ct != NULL && ct->global_ct->dead)) {
+            HandleDeadLocalCatCTup(ct);
+            continue;
+        }
         if (unlikely(ct->hash_value != hash_value)) {
             continue; /* quickly skip entry if wrong hash val */
         }
