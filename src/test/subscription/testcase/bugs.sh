@@ -203,6 +203,40 @@ create table t_pubsub_0349(
         echo "$failed_keyword when check if delete incremental mview"
         exit 1
     fi
+
+    # BUG6: fix sync insert-data during splitting partition
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE tab_rep cascade"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE tab_rep cascade"
+
+    echo "create publication and subscription."
+    publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
+    exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub FOR ALL TABLES with(publish='insert,update,delete',ddl='all')"
+    exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub CONNECTION '$publisher_connstr' PUBLICATION tap_pub"
+
+    wait_for_subscription_sync $case_db $sub_node1_port
+
+    ddl="create table testTab1
+(id number(6,3) not null,
+hire_date date not null)
+partition by range(hire_date)
+(partition p_1998 values less than (to_date('1998-12-31','YYYY-MM-DD')),
+partition p_1999 values less than (to_date('1999-12-31','YYYY-MM-DD')),
+partition p_default values less than (maxvalue)
+);"
+    exec_sql $case_db $pub_node1_port "$ddl"
+    exec_sql $case_db $pub_node1_port "insert into testTab1 values(30,to_date('1999-5-27','YYYY-MM-DD'));"
+    exec_sql $case_db $pub_node1_port "insert into testTab1 values(60.3,to_date('2000-5-27','YYYY-MM-DD'));"
+    exec_sql $case_db $pub_node1_port "insert into testTab1 values(403.3,to_date('2001-10-02','YYYY-MM-DD'));"
+
+    exec_sql $case_db $pub_node1_port "ALTER TABLE testTab1 SPLIT PARTITION p_default AT (to_date('2000-12-31','YYYY-MM-DD')) INTO (PARTITION p_2000, PARTITION p_other);"
+    wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM testTab1")" = "3" ]; then
+        echo "check if not sync insert-data during splitting partition success"
+    else
+        echo "$failed_keyword when check if not sync insert-data during splitting partition"
+        exit 1
+    fi
 }
 
 function tear_down() {
