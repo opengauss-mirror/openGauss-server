@@ -3035,6 +3035,10 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
             bufflags |= REGBUF_KEEP_DATA;
         }
 
+        if (options & HEAP_INSERT_SPLIT_PARTITION) {
+            xlrec.flags |= XLH_INSERT_SPLIT_PARTITION;
+        }
+
         XLogBeginInsert();
         if (info & XLOG_HEAP_INIT_PAGE) {
             XLogRegisterData((char*)&((HeapPageHeader)(page))->pd_xid_base, sizeof(TransactionId));
