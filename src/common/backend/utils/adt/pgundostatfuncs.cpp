@@ -450,8 +450,18 @@ static int OpenUndoBlock(int zoneId, BlockNumber blockno)
     char fileName[100] = {0};
     errno_t rc = EOK;
     int segno = blockno / UNDOSEG_SIZE;
-    rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName), "undo/permanent/%05X.%07zX", zoneId, segno);
-    securec_check_ss(rc, "\0", "\0");
+    DECLARE_NODE_COUNT();
+    GET_UPERSISTENCE_BY_ZONEID(zoneId, nodeCount);
+    if (upersistence == UNDO_PERMANENT) {
+        rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName), "undo/permanent/%05X.%07zX", zoneId, segno);
+        securec_check_ss(rc, "\0", "\0");
+    } else if (upersistence == UNDO_UNLOGGED) {
+        rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName), "undo/unlogged/%05X.%07zX", zoneId, segno);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName), "undo/temp/%05X.%07zX", zoneId, segno);
+        securec_check_ss(rc, "\0", "\0");
+    }
     int fd = open(fileName, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
     Checkfd(fd, fileName);
 

@@ -791,7 +791,12 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->ss.partScanDirection = node->scan.partScanDirection;
     tidstate->ss.ps.ExecProcNode = ExecTidScan;
 
-    tidstate->tss_htup.tupTableType = HEAP_TUPLE;
+    current_relation = ExecOpenScanRelation(estate, node->scan.scanrelid);
+    if (GetTableAmType(current_relation->rd_tam_ops) == TAM_USTORE) {
+        tidstate->tss_uhtup.tupTableType = UHEAP_TUPLE;
+    } else {
+        tidstate->tss_htup.tupTableType = HEAP_TUPLE;
+    }
     /*
      * Miscellaneous initialization
      *
@@ -817,11 +822,6 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->tss_TidList = NULL;
     tidstate->tss_NumTids = 0;
     tidstate->tss_TidPtr = -1;
-
-    /*
-     * open the base relation and acquire appropriate lock on it.
-     */
-    current_relation = ExecOpenScanRelation(estate, node->scan.scanrelid);
 
     tidstate->ss.ss_currentRelation = current_relation;
     tidstate->ss.ss_currentScanDesc = NULL; /* no heap scan here */

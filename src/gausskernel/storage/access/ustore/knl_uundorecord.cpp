@@ -24,6 +24,13 @@
 namespace {
 const UndoRecordSize UNDO_RECORD_FIX_SIZE = SIZE_OF_UNDO_RECORD_HEADER + SIZE_OF_UNDO_RECORD_BLOCK;
 
+
+const int TEN_MINUTES = 10;
+const int TEN_MINUTES_TO_MS = TEN_MINUTES * MSECS_PER_MIN;
+
+const int SIX_HOURS = 6;
+const int SIX_HOURS_TO_MS = SIX_HOURS * MINS_PER_HOUR * MSECS_PER_MIN;
+
 bool InsertUndoBytes(_in_ const char *srcptr, _in_ int srclen, __inout char **writeptr, _in_ const char *endptr,
     __inout int *myBytesWritten, __inout int *alreadyWritten)
 {
@@ -520,16 +527,23 @@ UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRec
     Assert(urec);
 
     if (RecoveryInProgress()) {
-        uint64 blockcnt = 0;
+        uint64 noInsertCnt = 0;
         while (undo::CheckUndoRecordValid(urec->Urp(), false, NULL) == UNDO_RECORD_NOT_INSERT) {
-            ereport(LOG,
-                (errmsg(UNDOFORMAT("urp: %ld is not replayed yet. ROS waiting for UndoRecord replay."),
-                urec->Urp())));
-
             pg_usleep(1000L); /* 1ms */
-            if (blockcnt % 1000 == 0) {
+            if (noInsertCnt < SIX_HOURS_TO_MS && noInsertCnt % TEN_MINUTES_TO_MS == 0) {
+                ereport(LOG,
+                    (errmsg(UNDOFORMAT("urp: %ld is not replayed yet. ROS waiting for UndoRecord replay."),
+                     urec->Urp())));
+            }
+            if (noInsertCnt > SIX_HOURS_TO_MS) {
+                ereport(ERROR,
+                    (errmsg(UNDOFORMAT("urp: %ld is not replayed yet. ROS waiting for UndoRecord replay."),
+                     urec->Urp())));
+            }
+            if (noInsertCnt % MSECS_PER_SEC == 0) {
                 CHECK_FOR_INTERRUPTS();
             }
+            noInsertCnt++;
         }
         if (undo::CheckUndoRecordValid(urec->Urp(), false, NULL) == UNDO_RECORD_DISCARD) {
             return UNDO_TRAVERSAL_END;

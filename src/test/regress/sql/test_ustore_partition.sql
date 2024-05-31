@@ -1,3 +1,6 @@
+create schema test_ustore_part;
+set current_schema = test_ustore_part;
+
 drop table if exists ustore_part;
 drop table if exists ustore_part2;
 drop table if exists ustore_part3;
@@ -152,3 +155,25 @@ ALTER TABLE ustore_part ADD CONSTRAINT ustore_part_pk PRIMARY KEY (c1);
 INSERT INTO ustore_part values(1, 10) on duplicate key update c3 = 10;
 INSERT INTO ustore_part values(1, 11) on duplicate key update c3 = 10;
 drop table ustore_part;
+
+create table ustore_part(
+  tc1 timetz default now(),
+  a int,
+  id int,
+  b text
+) with (storage_type=USTORE) 
+partition by range(id)
+(
+partition ustore_part_p1 values less than(4),
+partition ustore_part_p2 values less than(7),
+partition ustore_part_p3 values less than(10)
+);
+INSERT INTO ustore_part values(now(), 1, generate_series(1,3), 'p1');
+INSERT INTO ustore_part values(now(), 2, generate_series(4,6), 'p2');
+INSERT INTO ustore_part values(now(), 3, generate_series(7,9), 'p3');
+INSERT INTO ustore_part values(now(), NULL, generate_series(3,4), 'pn');
+select ctid, a, id ,b from ustore_part;
+drop table ustore_part;
+
+reset search_path;
+drop schema test_ustore_part cascade;

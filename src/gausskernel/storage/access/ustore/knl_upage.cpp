@@ -498,7 +498,7 @@ LocateUsableItemIds(Page page, UHeapTuple *tuples, int ntuples, Size saveFreeSpa
     OffsetNumber limit;
     Size         availSpace;
     UHeapFreeOffsetRanges *ufreeOffsetRanges;
-
+    bool isFirstInsert = true;
     ufreeOffsetRanges = (UHeapFreeOffsetRanges *) palloc0(sizeof(UHeapFreeOffsetRanges));
     ufreeOffsetRanges->nranges = 0;
 
@@ -519,9 +519,14 @@ LocateUsableItemIds(Page page, UHeapTuple *tuples, int ntuples, Size saveFreeSpa
         }
 
         if (!RowPtrIsUsed(rp) && !RowPtrHasStorage(rp)) {
-            UHeapTuple      uheaptup = tuples[*nthispage];
-            Size            neededSpace = *usedSpace + uheaptup->disk_tuple_size + saveFreeSpace;
-
+            UHeapTuple      uheaptup = tuples[*nthispage]; 
+            Size            neededSpace;
+            if (isFirstInsert) {
+                neededSpace = *usedSpace + uheaptup->disk_tuple_size;
+                isFirstInsert = false;
+            } else {
+                neededSpace = *usedSpace + uheaptup->disk_tuple_size + saveFreeSpace;
+            }
             /* Check if we can fit this tuple in the page */
             if (availSpace < neededSpace) {
                 /* No more space to insert tuples in this page */
@@ -561,7 +566,7 @@ UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tup
     Size availSpace;
     OffsetNumber limit;
     UHeapFreeOffsetRanges *ufreeOffsetRanges = NULL;
-
+    bool isFirstInsert;
     page = BufferGetPage(buffer);
 
     limit = OffsetNumberNext(UHeapPageGetMaxOffsetNumber(page));
@@ -574,6 +579,7 @@ UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tup
         ufreeOffsetRanges = (UHeapFreeOffsetRanges *) palloc0(sizeof(UHeapFreeOffsetRanges));
         ufreeOffsetRanges->nranges = 0;
     }
+    isFirstInsert = (ufreeOffsetRanges->nranges == 0);
 
     /*
      * Now, there are no free line pointers. Check whether we can insert
@@ -583,8 +589,13 @@ UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tup
      */
     if ((limit <= CalculatedMaxUHeapTuplesPerPage(UPageGetTDSlotCount(page))) && (nthispage < ntuples)) {
         UHeapTuple uheaptup = tuples[nthispage];
-        Size neededSpace = usedSpace + sizeof(ItemIdData) + uheaptup->disk_tuple_size + saveFreeSpace;
-
+        Size neededSpace;
+        if (isFirstInsert) {
+            neededSpace = usedSpace + sizeof(ItemIdData) + uheaptup->disk_tuple_size;
+            isFirstInsert = false;
+        } else {
+            neededSpace = usedSpace + sizeof(ItemIdData) + uheaptup->disk_tuple_size + saveFreeSpace;
+        }
         /* Check if we can fit this tuple + a new offset in the page */
         if (availSpace >= neededSpace) {
             OffsetNumber maxRequiredOffset;

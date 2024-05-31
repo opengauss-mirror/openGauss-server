@@ -1806,7 +1806,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
      * attribute: it must be zero.	This eliminates the need for special cases
      * for attnum=1 that used to exist in fastgetattr() and index_getattr().
      */
-    if (!RelationIsUstoreFormat(relation) && RelationGetNumberOfAttributes(relation) > 0)
+    if (RelationGetNumberOfAttributes(relation) > 0)
         relation->rd_att->attrs[0].attcacheoff = 0;
 
     /*
@@ -2375,6 +2375,9 @@ static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool b
         get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind, relation->rd_rel->relam));
     relation->rd_att->td_tam_ops = relation->rd_tam_ops;
 
+    if (RelationIsUstoreFormat(relation) && relation->rd_att->attrs[0].attcacheoff == 0) {
+        relation->rd_att->attrs[0].attcacheoff = -1;
+    }
     relation->rd_indexsplit = get_indexsplit_from_reloptions(relation->rd_options, relation->rd_rel->relam);
 
     /* get row level security policies for this relation */

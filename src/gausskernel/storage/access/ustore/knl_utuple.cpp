@@ -1135,8 +1135,8 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
     char *tp = (char *)tup; /* ptr to data part of tuple */
     bits8 *bp = tup->data;  /* ptr to null bitmap in tuple */
     bool slow = false;      /* do we have to walk attrs? */
-    int off;                /* current offset within data */
     int hoff = tup->t_hoff; /* header length on tuple data */
+    int off = hoff;                /* current offset within data */
     bool hasnulls = UHeapDiskTupHasNulls(tup);
 
     /* ----------------
@@ -1199,12 +1199,16 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
                 }
             }
         }
+
+        if (att[0].attlen <= 0) {
+            slow = true;
+        }
     }
 
     if (!slow) {
         uint32 natts = tupleDesc->natts;
         uint32 j = 1;
-
+        Assert(att[0].attlen > 0);
         /*
          * If we get here, we have a tuple with no nulls or var-widths up to
          * and including the target attribute, so we can use the cached offset
@@ -1214,19 +1218,28 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
          * fixed-width columns, in hope of avoiding future visits to this
          * routine.
          */
-        att[0].attcacheoff = 0;
+        if (att[0].attbyval) {
+            att[0].attcacheoff = 0;
+        } else {
+            off = att_align_nominal((uint32)off, att[0].attalign);
+            att[0].attcacheoff = off - hoff;
+        }
+        
 
         /* we might have set some offsets in the slow path previously */
         while (j < natts && att[j].attcacheoff > 0)
             j++;
 
-        off = att[j - 1].attcacheoff + att[j - 1].attlen;
+        off = att[j - 1].attcacheoff + att[j - 1].attlen + hoff;
 
         for (; j < natts; j++) {
             if (att[j].attlen <= 0)
-                break;
+                break;  
 
-            att[j].attcacheoff = off;
+            if (!att[j].attbyval) {
+                off = att_align_nominal((uint32)off, att[j].attalign);
+            }
+            att[j].attcacheoff = off - hoff;
 
             off += att[j].attlen;
         }
@@ -1235,8 +1248,6 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
 
         off = att[attnum].attcacheoff + hoff;
     } else {
-        bool usecache = true;
-
         /*
          * Now we know that we have to walk the tuple CAREFULLY.  But we still
          * might be able to cache some offsets for next time.
@@ -1247,7 +1258,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
          * storage and no alignment padding either.  We can use/set
          * attcacheoff until we reach either a null or a var-width attribute.
          */
-        off = hoff;
+        bool usecache = true;
         int nullcount = 0;
         int tupleAttrs = UHeapTupleHeaderGetNatts(tup);
         bool enableReverseBitmap = NAttrsReserveSpace(tupleAttrs);

@@ -405,17 +405,22 @@ Datum UHeapFastGetAttr(UHeapTuple tup, int attnum, TupleDesc tupleDesc, bool *is
     char *dp = ((tupleDesc)->attrs[0].attlen >= 0)
                    ? tp
                    : (char *)att_align_pointer(tp, (tupleDesc)->attrs[(attnum)-1].attalign, -1, tp);
-
-    return ((attnum) > 0 ? ((*(isnull) = false),
-                            UHeapDiskTupNoNulls(tup->disk_tuple)
-                                ? (TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff >= 0
-                                       ? (fetchatt(TupleDescAttr((tupleDesc), (attnum)-1),
-                                                   (dp + TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff)))
-                                       : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc))))
-                                : (att_isnull((attnum)-1, (tup)->disk_tuple->data)
-                                       ? ((*(isnull) = true), (Datum)NULL)
-                                       : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)))))
-                         : ((Datum)NULL));
+    if (attnum > 0) {
+        *isnull = false;
+        if (UHeapDiskTupNoNulls(tup->disk_tuple)) {
+            bool noUseCache = (attnum == 1) && (TupleDescAttr(tupleDesc, 0)->attlen >= 0) &&
+                !(TupleDescAttr(tupleDesc, 0)->attbyval) && (TupleDescAttr(tupleDesc, 0)->attcacheoff == 0);
+            return TupleDescAttr(tupleDesc, attnum - 1)->attcacheoff >= 0 && !noUseCache
+                ? (fetchatt(TupleDescAttr(tupleDesc, attnum - 1), (dp + TupleDescAttr(tupleDesc, attnum - 1)->attcacheoff)))
+                : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)));  
+        } else {
+            return att_isnull((attnum)-1, (tup)->disk_tuple->data)
+                ? ((*(isnull) = true), (Datum)NULL)
+                : (UHeapNoCacheGetAttr((tup), (attnum), (tupleDesc)));
+        }
+    } else {
+        return (Datum)NULL;
+    }
 }
 
 enum UHeapDMLType {
@@ -3522,8 +3527,11 @@ reacquire_buffer:
 
                 /* Make sure that the tuple fits in the page. */
                 Size pagefreespace = PageGetUHeapFreeSpace(page);
-                if (pagefreespace < uheaptup->disk_tuple_size + saveFreeSpace)
+                bool isFirstInsert = (offnum == ufreeOffsetRanges->startOffset[0]);
+                if ((isFirstInsert && pagefreespace < uheaptup->disk_tuple_size) ||
+                    (!isFirstInsert && (pagefreespace < uheaptup->disk_tuple_size + saveFreeSpace))) {
                     break;
+                }
                 UHeapTupleHeaderSetTDSlot(uheaptup->disk_tuple, tdSlot);
                 if (!setTupleXid) {
                     tupleXid = UHeapTupleSetModifiedXid(relation, buffer, uheaptup, fxid);
