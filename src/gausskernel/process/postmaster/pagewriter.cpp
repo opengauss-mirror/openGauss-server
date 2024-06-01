@@ -1656,16 +1656,34 @@ static void incre_ckpt_aio_callback(struct io_event *event)
 #ifdef USE_ASSERT_CHECKING
     char *write_buf = (char *)(event->obj->u.c.buf);
     char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
-    char *temp_buf = (char *)BUFFERALIGN(origin_buf);
+    char *read_buf = (char *)BUFFERALIGN(origin_buf);
     if (IsSegmentBufferID(buf_desc->buf_id)) {
         SegSpace *spc = spc_open(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, false);
-        seg_physical_read(spc, buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, temp_buf);
+        seg_physical_read(spc, buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, read_buf);
     } else if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
         (void)SmgrNetPageCheckRead(buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
                                             buf_desc->extra->seg_fileno, buf_desc->tag.forkNum,
-                                            buf_desc->extra->seg_blockno, (char *)temp_buf);
+                                            buf_desc->extra->seg_blockno, (char *)read_buf);
     }
-    Assert(memcmp(write_buf, temp_buf, BLCKSZ) == 0);
+    
+    if (XLByteEQ(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
+        Assert(memcmp(write_buf, read_buf, BLCKSZ) == 0);   
+    } else if (XLByteLT(PageGetLSN(read_buf), PageGetLSN(write_buf))) {
+        ereport(PANIC, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d]aio write error", 
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum))); 
+    } else {
+        /* PageGetLSN(read_buf) > PageGetLSN(write_buf). Here main work is to check what write_buf has wrote by aio,
+         * therefore, the lsn of read_buf read from disk must be more than or equal to the lsn of write_buf wrote by 
+         * aio. So when PageGetLSN(read_buf) > PageGetLSN(write_buf), what should happend is aio write concurrence.
+         */
+        ereport(LOG, (errmsg("[SS][%d/%d/%d/%d/%d %d-%d]aio write concurrence", 
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum))); 
+    }
+      
     pfree(origin_buf);
 #endif
 
