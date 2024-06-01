@@ -774,7 +774,7 @@ static void AssignTransactionId(TransactionState s)
         log_unknown_top = true;
 
     /* allocate undo zone before generate a new xid. */
-    if (!isSubXact && IsUnderPostmaster && !ENABLE_DSS) {
+    if (g_instance.attr.attr_storage.enable_ustore && !isSubXact && IsUnderPostmaster && !ENABLE_DSS) {
         undo::AllocateUndoZone();
         pg_memory_barrier();
     }

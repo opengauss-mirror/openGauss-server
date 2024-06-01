@@ -70,7 +70,7 @@ typedef struct registered_buffer {
     SizeOfXLogRecordDataHeaderLong + SizeOfXlogOrigin)
 
 static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_info, XLogRecPtr *fpw_lsn,
-                                       int bucket_id = -1, bool istoast = false);
+                                       int bucket_id = -1, bool istoast = false, TransactionId xid = InvalidTransactionId);
 static void XLogResetLogicalPage(void);
 
 /*
@@ -504,7 +504,7 @@ void XlogInsertSleep(void)
  * though not on the data they reference.  This is OK since the XLogRecData
  * structs are always just temporaries in the calling code.
  */
-XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast)
+XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast, TransactionId xid)
 {
     XLogRecPtr EndPos;
     bool isSwitchoverBarrier = ((rmid == RM_BARRIER_ID) && (info == XLOG_BARRIER_SWITCHOVER));
@@ -550,7 +550,7 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast)
          */
         GetFullPageWriteInfo(&fpw_info);
 
-        rdt = XLogRecordAssemble(rmid, info, fpw_info, &fpw_lsn, bucket_id, istoast);
+        rdt = XLogRecordAssemble(rmid, info, fpw_info, &fpw_lsn, bucket_id, istoast, xid);
 
         EndPos = XLogInsertRecord(rdt, fpw_lsn);
     } while (XLByteEQ(EndPos, InvalidXLogRecPtr));
@@ -685,7 +685,7 @@ static bool XLogNeedVMPhysicalLocation(RmgrId rmi, uint8 info, int blockId)
  * 
  */
 static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_info, XLogRecPtr *fpw_lsn,
-    int bucket_id, bool istoast)
+    int bucket_id, bool istoast, TransactionId xid)
 {
     XLogRecData *rdt = NULL;
     uint32 total_len = 0;
@@ -1022,9 +1022,13 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
      * once we know where in the WAL the record will be inserted. The CRC does
      * not include the record header yet.
      */
-    bool isUHeap = (rmid >= RM_UHEAP_ID) && (rmid <= RM_UHEAPUNDO_ID);
+    if ((rmid >= RM_UHEAP_ID) && (rmid <= RM_UNDOACTION_ID)) {
+        xid = TransactionIdIsValid(GetTopTransactionIdIfAny()) ? GetTopTransactionIdIfAny() : xid;
+    } else {
+        xid = GetCurrentTransactionIdIfAny();
+    }
 
-    rechdr->xl_xid = (isUHeap) ? GetTopTransactionIdIfAny() : GetCurrentTransactionIdIfAny();
+    rechdr->xl_xid = xid;
     rechdr->xl_tot_len = total_len;
     rechdr->xl_info = info;
     rechdr->xl_rmid = rmid;

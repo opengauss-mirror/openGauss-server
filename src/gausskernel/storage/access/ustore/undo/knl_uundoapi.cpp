@@ -709,7 +709,7 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
         xlrec.slotPtr = slotPtr;
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, sizeof(xlrec));
-        lsn = XLogInsert(RM_UNDOACTION_ID, XLOG_ROLLBACK_FINISH);
+        lsn = XLogInsert(RM_UNDOACTION_ID, XLOG_ROLLBACK_FINISH, InvalidBktId, false, slot->XactId());
         PageSetLSN(page, lsn);
     }
     MarkBufferDirty(buf.Buf());

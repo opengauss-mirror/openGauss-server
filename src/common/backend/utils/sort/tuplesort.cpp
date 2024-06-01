@@ -3813,8 +3813,14 @@ static void writetup_cluster(Tuplesortstate* state, int tapenum, SortTuple* stup
 static void readtup_cluster(Tuplesortstate* state, SortTuple* stup, int tapenum, unsigned int tuplen)
 {
     unsigned int t_len = tuplen - sizeof(ItemPointerData) - sizeof(int) - sizeof(TransactionId) * 2;
-    HeapTuple tuple = (HeapTuple) readtup_alloc(state, t_len + HEAPTUPLESIZE);
-    tuple->tupTableType = HEAP_TUPLE;
+    HeapTuple tuple;
+    if (state->tupDesc->td_tam_ops == TableAmHeap) {
+        tuple = (HeapTuple) readtup_alloc(state, t_len + HEAPTUPLESIZE);
+        tuple->tupTableType = HEAP_TUPLE;
+    } else {
+        tuple = (HeapTuple) readtup_alloc(state, t_len + UHeapTupleDataSize);
+        tuple->tupTableType = UHEAP_TUPLE;
+    }
 
     /* Reconstruct the HeapTupleData header */
     tuple->t_data = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);

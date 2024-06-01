@@ -1930,7 +1930,6 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
      * We can skip inserting undo records if the tuples are to be marked as
      * frozen.
      */
-    elog(LOG, "Undo record prepared: %d for Block Number: %d", nranges, blockdatarec->multiInsertUndoParse.blkno);
     if (!skipUndo && !skipInsert) {
         for (int i = 0; i < nranges; i++) {
             MemoryContext old_cxt = MemoryContextSwitchTo((*urecvec)[i]->mem_context());

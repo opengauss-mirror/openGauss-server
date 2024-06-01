@@ -733,7 +733,7 @@ void InsertPreparedUndo(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn)
                     diffpage = true;
                 }
                 if (!t_thrd.xlog_cxt.InRecovery || PageGetLSN(page) < lsn) {
-                    if (startingByte != phdr->pd_upper) {
+                    if (startingByte > phdr->pd_upper) {
                         ereport(LOG, (errmsg("undo record discontinuous,zid %u, buffer %d, startingByte %u, "
                             "page start %u, page end %u, alreadyWritten %d, lastPageWritten %d, diffpage %s, urp %lu, "
                             "newpage %s.", phdr->pd_prune_xid, buffer, startingByte, phdr->pd_lower, phdr->pd_upper,
