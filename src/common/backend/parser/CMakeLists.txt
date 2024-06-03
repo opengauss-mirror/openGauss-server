@@ -11,6 +11,12 @@ execute_process(
 )
 
 execute_process(
+    COMMAND sed -i "s/\# define YYINITDEPTH .*/\# define YYINITDEPTH 1000/g" gram.cpp 
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE PARSER_GRAM
+)
+
+execute_process(
     COMMAND bison -d -o hint_gram.cpp hint_gram.y
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     OUTPUT_VARIABLE PARSER_HINT_GRAM
