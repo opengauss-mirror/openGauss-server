@@ -1998,6 +1998,16 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         lmodePartTable = ShareUpdateExclusiveLock;
     }
 
+    if (OidIsValid(relationid)) {
+        Relation parent_rel = try_relation_open(relationid, NoLock);
+        if (parent_rel != NULL) {
+            if (RelationIsUstoreFormat(parent_rel) && parent_rel->rd_rel->relhasindex) {
+                lmodePartTable = ShareLock;
+            }
+            relation_close(parent_rel, NoLock);
+        }
+    }
+
 #ifdef ENABLE_MOT
     if (vacuumRelation(vacstmt->flags) && vacstmt->isMOTForeignTable) {
         if (IS_PGXC_COORDINATOR) {

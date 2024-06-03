@@ -3763,9 +3763,23 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                     Assert(bucketid != InvalidBktId);
                     fakeRelation = bucketGetRelation(erm->relation, NULL, bucketid);
                 }
-                if (!tableam_tuple_fetch(fakeRelation, SnapshotAny, &tuple, &buffer, false, NULL)) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("failed to fetch tuple for EvalPlanQual recheck")));
+                if (!tableam_tuple_fetch(fakeRelation, SnapshotAny, &tuple, &buffer, true, NULL)) {
+                    Page page = BufferGetPage(buffer);
+                    ItemPointer tid = &tuple.t_self;
+                    OffsetNumber offnum = ItemPointerGetOffsetNumber(tid);
+                    if (offnum < FirstOffsetNumber || offnum > PageGetMaxOffsetNumber(page)) {
+                        ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
+                            errmsg("out of range items")));
+                    } else if (offnum < FirstOffsetNumber || offnum > UHeapPageGetMaxOffsetNumber(page)) {
+                        ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
+                            errmsg("out of range items")));
+                    } else {
+                        ereport(LOG, (errcode(ERRCODE_FETCH_DATA_FAILED),
+                            errmsg("tuple is invalid")));
+                    }
+                    ReleaseBuffer(buffer);
+                    ereport(ERROR, (errcode(ERRCODE_FETCH_DATA_FAILED),
+                        errmsg("failed to fetch tuple")));
                 }
 
                 if (RELATION_OWN_BUCKET(erm->relation)) {
