@@ -28,6 +28,7 @@
 #include "access/ustore/knl_whitebox_test.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "catalog/index.h"
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
 #include "utils/pg_lzcompress.h"
@@ -37,6 +38,7 @@
 #include "commands/vacuum.h"
 #include "utils/snapmgr.h"
 #include "miscadmin.h"
+#include "executor/executor.h"
 
 static void UHeapToastDeleteDatum(Relation rel, Datum value, int options);
 static Datum UHeapToastSaveDatum(Relation rel, Datum value, struct varlena *oldexternal, int options);
@@ -895,6 +897,15 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
     toastrel = heap_open(toastPointer.va_toastrelid, RowExclusiveLock, bucketid);
     toastidx = index_open(toastrel->rd_rel->reltoastidxid, RowExclusiveLock, bucketid);
 
+    IndexInfo *indexInfo = BuildIndexInfo(toastidx);
+    EState *estate = NULL;
+    bool estateIsNotNull = false;
+
+    if (indexInfo->ii_Expressions != NIL || indexInfo->ii_ExclusionOps != NULL) {
+        estate = CreateExecutorState();
+        estateIsNotNull = true;
+    }
+
     /* The toast table of ustore table should also be of ustore type */
     Assert(RelationIsUstoreFormat(toastrel));
     /* should index must be ustore format ? */
@@ -917,6 +928,16 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
          */
         toasttup = ExecGetUHeapTupleFromSlot(slot);
         SimpleUHeapDelete(toastrel, &toasttup->ctid, SnapshotToast);
+
+        Datum values[INDEX_MAX_KEYS];
+        bool isnulls[INDEX_MAX_KEYS];
+
+        if (estateIsNotNull && estate != NULL) {
+            ExprContext *econtext = GetPerTupleExprContext(estate);
+            econtext->ecxt_scantuple = slot;
+        }
+        FormIndexDatum(indexInfo, slot, estateIsNotNull ? estate : NULL, values, isnulls);
+        index_delete(toastidx, values, isnulls, &toasttup->ctid, false);
     }
 
     /*
@@ -926,6 +947,10 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
     ExecDropSingleTupleTableSlot(slot);
     index_close(toastidx, RowExclusiveLock);
     heap_close(toastrel, RowExclusiveLock);
+
+    if (PointerIsValid(estate)) {
+        FreeExecutorState(estate);
+    }
 }
 
 /* ----------

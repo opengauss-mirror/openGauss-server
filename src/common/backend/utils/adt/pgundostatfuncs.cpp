@@ -483,6 +483,7 @@ static bool ParseUndoRecord(UndoRecPtr urp, Tuplestorestate *tupstore, TupleDesc
     rc = memset_s(urec, sizeof(UndoHeader), (0), sizeof(UndoHeader));
     securec_check(rc, "\0", "\0");
     do {
+        CHECK_FOR_INTERRUPTS();
         fd = OpenUndoBlock(zoneId, blockno);
         if (fd < 0) {
             free(urec);
@@ -685,8 +686,8 @@ Datum gs_stat_undo(PG_FUNCTION_ARGS)
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in multiple nodes mode.")));
     PG_RETURN_VOID();
 #else
-    uint32 undoTotalSize = g_instance.undo_cxt.undoTotalSize;
-    uint32 limitSize = (uint32)(u_sess->attr.attr_storage.undo_space_limit_size * FORCE_RECYCLE_PERCENT);
+    uint64 undoTotalSize = (uint64)g_instance.undo_cxt.undoTotalSize;
+    uint64 limitSize = (uint64)(u_sess->attr.attr_storage.undo_space_limit_size * FORCE_RECYCLE_PERCENT);
     uint32 createdUndoFiles = 0;
     uint32 discardedUndoFiles = 0;
     uint32 zoneUsedCount = 0;
@@ -837,6 +838,7 @@ static void GetTranslotFromOneSegFile(int fd, int zoneId, Tuplestorestate *tupst
     }
 
     for (uint32 loop = 0; loop < UNDO_META_SEG_SIZE; loop++) {
+        CHECK_FOR_INTERRUPTS();
         seekpos = (off_t)BLCKSZ * loop;
         lseek(fd, seekpos, SEEK_SET);
         rc = memset_s(buffer, BLCKSZ, 0, BLCKSZ);
@@ -850,6 +852,7 @@ static void GetTranslotFromOneSegFile(int fd, int zoneId, Tuplestorestate *tupst
 
         for (uint32 offset = UNDO_LOG_BLOCK_HEADER_SIZE; offset < BLCKSZ - MAXALIGN(sizeof(TransactionSlot));
             offset += MAXALIGN(sizeof(TransactionSlot))) {
+            CHECK_FOR_INTERRUPTS();
             usp = MAKE_UNDO_PTR(zoneId, segno * UNDO_META_SEGMENT_SIZE + loop * BLCKSZ + offset);
             if (usp < uzone->GetRecycleTSlotPtr() || usp > uzone->GetAllocateTSlotPtr()) {
                 continue;
@@ -879,6 +882,7 @@ static void GetTranslotFromSegFiles(int zoneId, int segnobegin, int segnoend, Tu
     TupleDesc tupDesc, TransactionId xid, MiniSlot *returnSlot)
 {
     for (int segcurrent = segnobegin; segcurrent <= segnoend; segcurrent++) {
+        CHECK_FOR_INTERRUPTS();
         errno_t rc = EOK;
         char fileName[100] = {0};
         rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName) - 1, "undo/permanent/%05X.meta.%07zX", zoneId,
@@ -896,6 +900,7 @@ static void ReadTranslotFromDisk(int startIdx, int endIdx, Tuplestorestate *tups
 {
     int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
     for (auto idx = startIdx; idx <= endIdx; idx++) {
+        CHECK_FOR_INTERRUPTS();
         uint32 undoSpaceBegin = 0;
         uint32 undoZoneMetaPageCnt = 0;
         uint32 undoSpaceMetaPageCnt = 0;
@@ -929,12 +934,14 @@ static void ReadTranslotFromMemory(int startIdx, int endIdx,
     char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
     bool getSlotFlag = false;
     for (auto idx = startIdx; idx <= endIdx; idx++) {
+        CHECK_FOR_INTERRUPTS();
         UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[idx];
         if (uzone == NULL) {
             continue;
         }
         for (UndoSlotPtr slotPtr = uzone->GetRecycleTSlotPtr(); slotPtr < uzone->GetAllocateTSlotPtr();
             slotPtr = GetNextSlotPtr(slotPtr)) {
+            CHECK_FOR_INTERRUPTS();
             /* Query translot meta info from shared memory. */
             UndoSlotBuffer buf;
             buf.PrepareTransactionSlot(slotPtr);
@@ -1594,6 +1601,7 @@ static void ReadUndoMetaInfoFromFile(int zone_id, TupleDesc *tupleDesc,
     Checkfd(fd, UNDO_META_FILE);
     Checkid(zone_id, &startIdx, &endIdx);
     for (auto idx = startIdx; idx <= endIdx; idx++) {
+        CHECK_FOR_INTERRUPTS();
         bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
         Datum values[PG_STAT_USP_PERSIST_META_COLS];
         uint32 readPos = 0;
@@ -1683,6 +1691,7 @@ static void ReadUndoMetaInfoFromMemory(int zone_id, TupleDesc *tupleDesc,
     }
 
     for (auto idx = startIdx; idx <= endIdx; idx++) {
+        CHECK_FOR_INTERRUPTS();
         Datum values[PG_STAT_USP_PERSIST_META_COLS];
         bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
         UndoZone *uzone = (undo::UndoZone *)g_instance.undo_cxt.uZones[idx];
