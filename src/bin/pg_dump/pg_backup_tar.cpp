@@ -834,6 +834,10 @@ static void _CloseArchive(ArchiveHandle* AH)
         RestoreArchive((Archive*)AH);
 
         if (AH->ropt != NULL) {
+            if (AH->ropt->dbname) {
+                free(AH->ropt->dbname);
+                AH->ropt->dbname = NULL;
+            }
             free(AH->ropt);
             AH->ropt = NULL;
         }
