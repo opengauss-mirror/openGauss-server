@@ -89,7 +89,7 @@ bool UndoZone::CheckNeedSwitch(void)
     UndoLogOffset newInsert = UNDO_LOG_OFFSET_PLUS_USABLE_BYTES(insertURecPtr_, transUndoThresholdSize);
     if (unlikely(newInsert + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE ||
         undoSpace_.Tail() + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE ||
-        slotSpace_.Tail() + UNDO_LOG_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE)) {
+        slotSpace_.Tail() + UNDO_META_SEGMENT_SIZE > UNDO_LOG_MAX_SIZE)) {
         return true;
     }
     return false;
