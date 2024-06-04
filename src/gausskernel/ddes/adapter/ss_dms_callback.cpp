@@ -1329,7 +1329,10 @@ static int SSBufRebuildOneDrc(int index, unsigned char thread_index)
     bool is_owner = DMS_BUF_CTRL_IS_OWNER(buf_ctrl);
     LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
     if (is_owner) {
-        if (LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
+        uint64 buf_state = pg_atomic_read_u64(&buf_desc->state); 
+        if (BUF_STATE_GET_REFCOUNT(buf_state) > 1) {
+            need_rebuild = true;
+        } else if (LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
             if (!SSBufferIsDirty(buf_desc)) {
                 LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
                 buf_ctrl->lock_mode = DMS_LOCK_NULL;
@@ -1344,12 +1347,13 @@ static int SSBufRebuildOneDrc(int index, unsigned char thread_index)
     } else {
         need_rebuild = false;
     }
-    SSUnPinBuffer(buf_desc);
 
     if (need_rebuild) {
         int ret = SSBufRebuildOneDrcInternal(buf_desc, thread_index);
+        SSUnPinBuffer(buf_desc);
         return ret;
     }
+    SSUnPinBuffer(buf_desc);
     return DMS_SUCCESS;
 }
 
