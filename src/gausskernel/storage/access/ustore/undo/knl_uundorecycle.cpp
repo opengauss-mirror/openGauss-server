@@ -935,15 +935,15 @@ void UndoRecycleMain()
                 }
             }
             smgrcloseall();
+            if (t_thrd.undorecycler_cxt.shutdown_requested) {
+                ShutDownRecycle(recycleMaxXIDs);
+            }
             if (isAnyZoneUsed) {
                 VerifyFrozenXidAdvance(oldestXmin, oldestFrozenXidInUndo, USTORE_VERIFY_FAST);
                 ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(
                     UNDOFORMAT("oldestFrozenXidInUndo for update: oldestFrozenXidInUndo=%lu"),
                     oldestFrozenXidInUndo)));
                 pg_atomic_write_u64(&g_instance.undo_cxt.globalFrozenXid, oldestFrozenXidInUndo);
-            }
-            if (t_thrd.undorecycler_cxt.shutdown_requested) {
-                ShutDownRecycle(recycleMaxXIDs);
             }
             if (g_instance.undo_cxt.uZoneCount != 0) {
                 UpdateXidHavingUndo(recycleMaxXIDs, recycleMaxXIDCount, &oldestXidHavingUndo, recycleXmin);

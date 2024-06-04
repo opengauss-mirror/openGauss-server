@@ -1176,6 +1176,7 @@ TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer
 
     utuple->table_oid = RelationGetRelid(rel);
     utuple->ctid = *tid;
+    utuple->xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
 
     *inplaceUpdated = false;
     if (ctid != NULL) {

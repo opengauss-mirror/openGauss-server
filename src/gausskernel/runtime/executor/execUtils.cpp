@@ -2150,6 +2150,16 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
             }
         }
 
+#ifdef USE_ASSERT_CHECKING
+        if (ispartitionedtable && RelationIsGlobalIndex(indexRelation)) {
+            if (RelationIsUstoreFormat(heapRelation)) {
+                Assert(((UHeapTuple)slot->tts_tuple)->table_oid != InvalidOid);
+            } else {
+                Assert(((HeapTuple)slot->tts_tuple)->t_tableOid != InvalidOid);
+            }
+        }        
+#endif
+
         /*
          * FormIndexDatum fills in its values and isnull parameters with the
          * appropriate values for the column(s) of the index.

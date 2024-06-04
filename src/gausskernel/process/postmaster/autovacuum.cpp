@@ -3300,8 +3300,12 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, bytea* ra
 
     /* The AutoVacuum function is temporarily enabled for the ustore table. */
     ustoreTable = (rawRelopts != NULL && RelationIsTableAccessMethodUStoreType(rawRelopts));
-    if (ustoreTable && allowVacuum && userEnabled) {
-        *dovacuum = true;
+    if (ustoreTable && !(*dovacuum)) {
+        Relation tmprel = heap_open(relid, NoLock);
+        if(RelationIsPartitioned(tmprel)) {
+             *dovacuum = true;
+        }
+        heap_close(tmprel, NoLock);
     }
 
     if (*dovacuum || *doanalyze) {

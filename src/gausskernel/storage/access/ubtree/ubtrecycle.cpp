@@ -453,6 +453,9 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
     LockBuffer(metaBuf, BT_READ);
     UBTRecycleMeta metaData = (UBTRecycleMeta)PageGetContents(BufferGetPage(metaBuf));
     for (BlockNumber curBlkno = metaData->nblocksUpper; curBlkno < nblocks; curBlkno++) {
+        if (t_thrd.int_cxt.QueryCancelPending || t_thrd.int_cxt.ProcDiePending) {
+            ereport(ERROR, (errmsg("Received cancel interrupt while getting available page.")));
+        }
         if (metaData->nblocksUpper > curBlkno) {
             continue;
         }
