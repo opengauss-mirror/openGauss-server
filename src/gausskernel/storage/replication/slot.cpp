@@ -718,7 +718,7 @@ void replication_slot_drop_without_acquire(const char *name)
         return;
     }
     ReplicationSlotDropWithSlot(slot);
-    ereport(ERROR, (errmsg("replication_slot_drop_without_acquire:start clean slot:[%s].", name)));
+    ereport(LOG, (errmsg("clean slot:[%s] successfully.", name)));
 }
 
 /*
