@@ -2,6 +2,10 @@
 #some enviroment vars
 
 export g_base_port=8888
+# Remove the trailing slash from the path: 
+while [ "${GAUSSHOME: -1}" == "/" ]; do
+    GAUSSHOME="${GAUSSHOME%/}"
+done
 export prefix=${GAUSSHOME}
 export g_pooler_base_port=`expr $g_base_port \+ 410`
 export g_base_standby_port=`expr $g_base_port \+ 400`
@@ -477,7 +481,7 @@ function check_multi_standby_startup()
 function start_standby()
 {
 cluster_mode_param=""
-if [-n "$1" ]; then
+if [ -n "$1" ]; then
   cluster_mode_param=$1
 fi
 echo "start standby $standby_data_dir"
@@ -495,7 +499,7 @@ sleep 10
 function start_standby2()
 {
   cluster_mode_param=""
-  if [-n "$1" ]; then
+  if [ -n "$1" ]; then
     cluster_mode_param=$1
   fi
   echo "start standby2 $standby2_data_dir"
@@ -506,7 +510,7 @@ function start_standby2()
 function start_standby3()
 {
   cluster_mode_param=""
-  if [-n "$1" ]; then
+  if [ -n "$1" ]; then
     cluster_mode_param=$1
   fi
   echo "start standby3 $standby3_data_dir"
@@ -524,7 +528,7 @@ function start_standby4()
 function start_primary_as_primary()
 {
 cluster_mode_param=""
-if [-n "$1" ]; then
+if [ -n "$1" ]; then
   cluster_mode_param=$1
 fi
 echo "start primary $primary_data_dir as primary"
@@ -535,7 +539,7 @@ check_primary_startup
 function start_primary_as_standby()
 {
 cluster_mode_param=""
-if [-n "$1" ]; then
+if [ -n "$1" ]; then
   cluster_mode_param=$1
 fi
 echo "start primary $primary_data_dir as standby"
@@ -553,7 +557,7 @@ check_standby_startup
 function start_standby2_as_primary()
 {
 cluster_mode_param=""
-if [-n "$1" ]; then
+if [ -n "$1" ]; then
   cluster_mode_param=$1
 fi
 echo "start standby $standby2_data_dir as primary"
