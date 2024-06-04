@@ -163,7 +163,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForInsertRedo(XLogReaderState *recor
             errmsg(UNDOFORMAT("redo:undoptr=%lu, xid %lu, partoid=%u, spcoid=%u."),
                 urecptr, xid, *partitionOid, targetNode.spcNode)));
         /* recover undo record */
-        Assert(urecptr == xlundohdr->urecptr);
+        Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
         undorec->SetOffset(xlrec->offnum);
         if (!skipInsert) {
             /* Insert the Undo record into the undo store */
@@ -259,7 +259,7 @@ static void PerformInsertRedoAction(XLogReaderState *record, const Buffer buf, c
 
 void UHeapXlogInsert(XLogReaderState *record)
 {
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     RelFileNode targetNode;
     BlockNumber blkno = InvalidBlockNumber;
     XLogRedoAction action;
@@ -445,7 +445,7 @@ static void PerformDeleteRedoAction(XLogReaderState *record, UHeapTupleData *utu
 
 static void UHeapXlogDelete(XLogReaderState *record)
 {
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     UHeapTupleData utup;
     RelFileNode targetNode;
     BlockNumber blkno = InvalidBlockNumber;
@@ -494,7 +494,7 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
     XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapFreezeTdSlot *xlrec = (XlUHeapFreezeTdSlot *)XLogRecGetData(record);
     int *frozenSlots = (int *)((char *)xlrec + SizeOfUHeapFreezeTDSlot);
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     Page page;
     XLogRedoAction action;
     RelFileNode rnode = ((RelFileNode) {0, 0, 0, -1});
@@ -556,7 +556,7 @@ static void UHeapXlogInvalidTdSlot(XLogReaderState *record)
     XLogRecPtr lsn = record->EndRecPtr;
     uint16 *nCompletedSlots = (uint16 *)XLogRecGetData(record);
     int *completedXactSlots = (int *)((char *)nCompletedSlots + sizeof(uint16));
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     Page page;
     XLogRedoAction action;
     int slotNo = 0;
@@ -707,7 +707,7 @@ static void PerformCleanRedoAction(XLogReaderState *record, RedoBufferInfo *buff
 static void UHeapXlogClean(XLogReaderState *record)
 {
     XlUHeapClean *xlrec = (XlUHeapClean *)XLogRecGetData(record);
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     Size freespace = 0;
     RelFileNode rnode = ((RelFileNode) {0, 0, 0, -1});
     BlockNumber blkno = InvalidBlockNumber;
@@ -1269,7 +1269,7 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
 static void UHeapXlogUpdate(XLogReaderState *record)
 {
     XlUndoHeader *xlnewundohdr = NULL;
-    UpdateRedoBuffers buffers;
+    UpdateRedoBuffers buffers = { 0 };
     RelFileNode rnode = {0};
     BlockNumber oldblk = InvalidBlockNumber;
     BlockNumber newblk = InvalidBlockNumber;
@@ -1480,7 +1480,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
              * undo should be inserted at same location as it was during the
              * actual insert (DO operation).
              */
-            Assert((*urecvec)[0]->Urp() == xlundohdr->urecptr);
+            Assert(UNDO_PTR_GET_OFFSET((*urecvec)[0]->Urp()) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
             InsertPreparedUndo(urecvec, lsn);
         }
 
@@ -1631,7 +1631,7 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
 {
     RelFileNode rnode;
     BlockNumber blkno = InvalidBlockNumber;
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     XlUHeapMultiInsert *xlrec = NULL;
     XLogRedoAction action = BLK_NOTFOUND;
     UHeapFreeOffsetRanges *ufreeOffsetRanges = NULL;
@@ -1673,7 +1673,7 @@ static void UHeapXlogMultiInsert(XLogReaderState *record)
 
 static void UHeapXlogBaseShift(XLogReaderState *record)
 {
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     XLogRecPtr lsn = record->EndRecPtr;
     BlockNumber blkno = InvalidBlockNumber;
     URedoVerifyParams verifyParams;
@@ -1700,7 +1700,7 @@ static void UHeapXlogBaseShift(XLogReaderState *record)
 
 static void UHeapXlogExtendTDSlot(XLogReaderState *record)
 {
-    RedoBufferInfo buffer;
+    RedoBufferInfo buffer = { 0 };
     XLogRecPtr lsn = record->EndRecPtr;
     Page   page;
     XLogRedoAction action = (XLogRedoAction)-1;

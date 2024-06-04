@@ -2572,10 +2572,6 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
                 ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support compression.")));
             }
-            if (g_instance.attr.attr_storage.recovery_parse_workers > 1) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support extreme rto.")));
-            }
             ForbidToSetOptionsForRowTbl(stmt->options);
             ForbidToSetOptionsForUstoreTbl(stmt->options);
         } else {
@@ -27193,11 +27189,6 @@ static void ExecUndoActionsPageForRelation(Relation rel)
         RelationCloseSmgr(rel);
         return;
     } 
-
-    for (BlockNumber blkno = 0; blkno < srcHeapBlocks; blkno ++) {
-        ExecuteUndoActionsPageForPartition(rel, rel->rd_smgr, MAIN_FORKNUM, blkno, 
-            blkno, ROLLBACK_OP_FOR_EXCHANGE_PARTITION);
-    }
 
     RelationCloseSmgr(rel);
 }
