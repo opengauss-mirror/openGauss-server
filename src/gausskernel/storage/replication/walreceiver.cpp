@@ -384,7 +384,7 @@ void xlog_wal_rcv_send_clean_slot_request(char *slot_name)
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(CleanSlotRequestMessage) + 1);
 
     ereport(LOG, (errmsg("send clean slot:%s request to Primary(%s) successfully.",
-        slot_name, t_thrd.walreceiverfuncs_cxt.WalRcv->slotname)));
+        slot_name, t_thrd.walreceiverfuncs_cxt.WalRcv->conn_channel.remotehost)));
 }
 
 void check_and_send_slot_clean(TimestampTz &clean_slot_sent_timestamp)
@@ -691,6 +691,37 @@ void WalReceiverMain(void)
         WalReceiverFuncTable[GET_FUNC_IDX].walrcv_connect(conninfo, &startpoint, slotname[0] != '\0' ? slotname : NULL,
                                                         channel_identifier);
         DisableWalRcvImmediateExit();
+
+        /*
+         * When a standby connects to the primary, if there is a live walsender
+         * process on it, it indicates that it has a cascading standby mounted.
+         * Therefore, it is necessary to set the need_clean_slot flag to true
+         * and mark the corresponding replication slot as need_clean.
+         */
+        if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+            volatile WalSnd *walsnd = NULL;
+            LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+            for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+                walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+                ThreadId pid;
+                int slotIdx = -1;
+                SndRole sendRole = SNDROLE_PRIMARY_STANDBY;
+                SpinLockAcquire(&walsnd->mutex);
+                pid = walsnd->pid;
+                slotIdx = walsnd->slot_idx;
+                sendRole = walsnd->sendRole;
+                SpinLockRelease(&walsnd->mutex);
+                if (pid != 0 && sendRole == SNDROLE_PRIMARY_STANDBY) {
+                    g_instance.xlog_cxt.need_clean_slot = true;
+                    ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slotIdx];
+                    volatile ReplicationSlot *vslot = s;
+                    SpinLockAcquire(&s->mutex);
+                    vslot->need_clean = true;
+                    SpinLockRelease(&s->mutex);
+                }
+            }
+            LWLockRelease(ReplicationSlotControlLock);
+        }
 
         if (GetWalRcvDummyStandbySyncPercent() == SYNC_DUMMY_STANDBY_END && !((walrcv->conn_target == REPCONNTARGET_OBS)
             || (walrcv->conn_target == REPCONNTARGET_SHARED_STORAGE))) {
