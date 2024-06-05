@@ -443,7 +443,7 @@ bool queryIsReadOnly(Query* query)
             case CMD_INSERT:
             case CMD_DELETE:
             case CMD_MERGE: {
-                if (SS_STANDBY_MODE && get_redirect_manager()->state.transaction) {
+                if (SS_STANDBY_MODE_WITH_REMOTE_EXECUTE && get_redirect_manager()->state.transaction) {
                     get_redirect_manager()->ss_standby_state |= SS_STANDBY_REQ_WRITE_REDIRECT;
                 }
             }

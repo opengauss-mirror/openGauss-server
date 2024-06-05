@@ -160,3 +160,58 @@ select * from account;
 ----+----------------+---------
 (0 rows)
 
+create or replace function func_multi_node_write_0032(tb_name varchar) return varchar is
+begin
+    execute immediate 'drop table if exists  ' || tb_name || ';';
+    execute immediate 'create table  '|| tb_name || '(id int, name varchar(20));';
+    execute immediate 'insert into ' || tb_name || ' values (generate_series(1,10), ''test'');';
+    execute immediate 'update ' || tb_name || ' set name=''software'' where id = 3;';
+    execute immediate 'delete from ' || tb_name || ' where id = 5;';
+return tb_name;
+end;
+/
+start transaction;
+call func_multi_node_write_0032('t_multi_node_write_0032');
+NOTICE:  table "t_multi_node_write_0032" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists  t_multi_node_write_0032;"
+PL/pgSQL function func_multi_node_write_0032(character varying) line 2 at EXECUTE statement
+ func_multi_node_write_0032 
+----------------------------
+ t_multi_node_write_0032
+(1 row)
+
+commit;
+select * from t_multi_node_write_0032;
+ id |   name   
+----+----------
+  1 | test
+  2 | test
+  4 | test
+  6 | test
+  7 | test
+  8 | test
+  9 | test
+ 10 | test
+  3 | software
+(9 rows)
+
+drop table t_multi_node_write_0032;
+drop function func_multi_node_write_0032;
+start transaction;
+call func_multi_node_write_0032('t_multi_node_write_0032');
+ERROR:  function "func_multi_node_write_0032" doesn't exist 
+commit;
+select * from t_multi_node_write_0032;
+ERROR:  relation "t_multi_node_write_0032" does not exist on datanode2
+LINE 1: select * from t_multi_node_write_0032;
+                      ^
+create or replace function func_multi_node_write_0032(tb_name varchar) return varchar is
+begin
+    execute immediate 'drop table if exists  ' || tb_name || ';';
+    execute immediate 'create table  '|| tb_name || '(id int, name varchar(20));';
+    execute immediate 'insert into ' || tb_name || ' values (generate_series(1,10), ''test'');';
+    execute immediate 'update ' || tb_name || ' set name=''software'' where id = 3;';
+    execute immediate 'delete from ' || tb_name || ' where id = 5;';
+return tb_name;
+end;
+/

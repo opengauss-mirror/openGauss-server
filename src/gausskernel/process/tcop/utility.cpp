@@ -440,7 +440,7 @@ static void check_xact_readonly(Node* parse_tree)
 {
     if (!u_sess->attr.attr_common.XactReadOnly)
         return;
-    if (libpqsw_skip_check_readonly()) {
+    if (ENABLE_REMOTE_EXECUTE && libpqsw_skip_check_readonly()) {
         return;
     }
 

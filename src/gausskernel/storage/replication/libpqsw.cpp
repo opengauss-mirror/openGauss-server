@@ -33,6 +33,7 @@
 #include "knl/knl_thread.h"
 #include "storage/lz4_file.h"
 #include "libpq/libpq.h"
+#include "access/xact.h"
 
 #ifdef HAVE_NETINET_TCP_H
 #include <netinet/tcp.h>
@@ -323,9 +324,7 @@ static bool libpqsw_receive(bool transfer = true)
         if (u_sess->attr.attr_common.enable_full_encryption && *(conn->inBuffer) == 'Z') {
             get_redirect_manager()->state.client_enable_ce = true;
         } else {
-            if (get_sw_cxt()->streamConn->xactStatus != PQTRANS_INERROR) {
-                transfer_func(conn->inBuffer, conn->inEnd);
-            }
+            transfer_func(conn->inBuffer, conn->inEnd);
         }
     }
 
@@ -419,7 +418,7 @@ static bool libpqsw_remote_in_transaction()
 /* get if session seek next */
 bool libpqsw_can_seek_next_session()
 {
-    if (!get_redirect_manager()->get_remote_excute()) {
+    if (!ENABLE_REMOTE_EXECUTE || !get_redirect_manager()->get_remote_excute()) {
         return true;
     }
     return !libpqsw_remote_in_transaction() && !libpqsw_get_transaction();
@@ -466,7 +465,8 @@ static bool libpqsw_before_redirect(const char* commandTag, List* query_list, co
         if (!SS_STANDBY_MODE && set_command_type_by_commandTag(commandTag) == CMD_DDL &&
             !libpqsw_fetch_command(commandTag)) {
             libpqsw_disconnect(true);
-            ereport(ERROR, (errmsg("The multi-write feature doesn't support DDL within transaction!")));
+            ereport(ERROR,
+                (errmsg("The multi-write feature doesn't support DDL within transaction(checked before redirect)!")));
         }
         libpqsw_check_savepoint(query_list, &(redirect_manager->state.have_savepoint));
     }
@@ -1102,7 +1102,7 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
 /* process Q type msg, true if need in redirect mode*/
 bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string, bool is_multistmt, bool is_last)
 {
-    if (IsAbortedTransactionBlockState()) {
+    if (IsAbortedTransactionBlockState() && !libpqsw_remote_in_transaction()) {
         return false;
     }
 
@@ -1131,7 +1131,7 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
 
         if (get_sw_cxt()->streamConn->xactStatus == PQTRANS_INERROR) {
             libpqsw_disconnect(true);
-            ereport(ERROR, (errmsg("The primary node report error when last request was transferred to it!")));
+            AbortCurrentTransaction();
         }
 
         // because we are not skip Q message process, so send_ready_for_query will be true after transfer.

@@ -1548,7 +1548,9 @@ void knl_session_init(knl_session_context* sess_cxt)
 #ifdef USE_SPQ
     knl_u_spq_init(&sess_cxt->spq_cxt);
 #endif
-    knl_u_libsw_init(&sess_cxt->libsw_cxt);
+    if (ENABLE_REMOTE_EXECUTE) {
+        knl_u_libsw_init(&sess_cxt->libsw_cxt);
+    }
     KnlURepOriginInit(&sess_cxt->reporigin_cxt);
 
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);

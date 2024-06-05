@@ -2717,7 +2717,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
 
         set_ps_display(commandTag, false);
-        if (libpqsw_skip_check_readonly()) {
+        if (ENABLE_REMOTE_EXECUTE && libpqsw_skip_check_readonly()) {
             if (is_multistmt) {
                 querystringForLibpqsw = query_string_single[stmt_num - 1];
             } else {
@@ -2732,7 +2732,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         }
 
-        if (libpqsw_get_redirect()) {
+        if (ENABLE_REMOTE_EXECUTE && libpqsw_get_redirect()) {
             if (libpqsw_process_query_message(commandTag, NULL, querystringForLibpqsw, is_multistmt, lnext(parsetree_item) == NULL)) {
                 libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
                 if (snapshot_set) {
@@ -2855,7 +2855,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
 
         // Mixed statement judgments
-        if (libpqsw_process_query_message(commandTag, querytree_list, querystringForLibpqsw, is_multistmt, lnext(parsetree_item) == NULL)) {
+        if (ENABLE_REMOTE_EXECUTE && libpqsw_process_query_message(commandTag, querytree_list, querystringForLibpqsw,
+            is_multistmt, lnext(parsetree_item) == NULL)) {
             libpqsw_trace_q_msg(commandTag, querystringForLibpqsw);
             if (libpqsw_begin_command(commandTag) || libpqsw_end_command(commandTag)) {
                 libpqsw_trace("libpq send sql at my side as well:%s", commandTag);
@@ -3985,11 +3986,14 @@ pass_parsing:
     /*
      * Send ParseComplete.
      */
-    bool need_redirect = libpqsw_process_parse_message(psrc->commandTag, psrc->query_list);
-    libpqsw_trace("we find pbe new %s cmdtag:%s, sql:%s",
-                  need_redirect ? "transfer" : "select",
-                  psrc->commandTag == NULL ? "" : psrc->commandTag,
-                  psrc->query_string);
+    bool need_redirect = false;
+    if (ENABLE_REMOTE_EXECUTE) {
+        need_redirect = libpqsw_process_parse_message(psrc->commandTag, psrc->query_list);
+        libpqsw_trace("we find pbe new %s cmdtag:%s, sql:%s",
+                      need_redirect ? "transfer" : "select",
+                      psrc->commandTag == NULL ? "" : psrc->commandTag,
+                      psrc->query_string);
+    }
     if ((!need_redirect || libpqsw_is_begin()) && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
         pq_putemptymessage('1');
     }
@@ -7574,7 +7578,7 @@ static void InitGlobalNodeDefinition(PlannedStmt* planstmt)
 void InitThreadLocalWhenSessionExit()
 {
     t_thrd.postgres_cxt.xact_started = false;
-    if (u_sess != NULL) {
+    if (ENABLE_REMOTE_EXECUTE && u_sess != NULL) {
         if (u_sess->libsw_cxt.redirect_manager == NULL) {
             u_sess->libsw_cxt.redirect_manager = New(CurrentMemoryContext) RedirectManager();
         }
@@ -8732,7 +8736,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
              */
             Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
             if (IS_CLIENT_CONN_VALID(MyProcPort) && (!t_thrd.int_cxt.ClientConnectionLost)) {
-                if (libpqsw_need_end()) {
+                if (!ENABLE_REMOTE_EXECUTE || libpqsw_need_end()) {
                     /*
                      * before send 'Z' to frontend, we should check if INTERRUPTS happends or not.
                      * In SyncRepWaitForLSN() function, take HOLD_INTERRUPTS() to prevent interrupt happending and set
@@ -8744,7 +8748,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     MyProcPort->protocol_config->fn_send_ready_for_query((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
                }
             }
-            libpqsw_set_end(true);
+            if (ENABLE_REMOTE_EXECUTE) {
+                libpqsw_set_end(true);
+            }
 #ifdef ENABLE_MULTIPLE_NODES
             /*
              * Helps us catch any problems where we did not send down a snapshot
@@ -8979,7 +8985,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 u_sess->proc_cxt.MyProcPort->gs_sock.sid,
                 firstchar);
 
-        if (libpqsw_process_message(firstchar, &input_message)) {
+        if (ENABLE_REMOTE_EXECUTE && libpqsw_process_message(firstchar, &input_message)) {
             _local_tmp_opt1.exit();
             continue;
         }
@@ -9595,7 +9601,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
-                if ((libpqsw_redirect() || libpqsw_get_set_command()) && !libpqsw_only_localrun()) {
+                if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command()) &&
+                    !libpqsw_only_localrun()) {
                     get_redirect_manager()->push_message(firstchar,
                         &input_message,
                         true,

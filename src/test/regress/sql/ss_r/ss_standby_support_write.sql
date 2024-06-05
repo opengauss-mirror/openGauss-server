@@ -57,3 +57,39 @@ insert into account(id,transaction_id,balance) values (4,1,700),(4,2,800),(5,3,3
 select * from account;
 rollback;
 select * from account;
+
+create or replace function func_multi_node_write_0032(tb_name varchar) return varchar is
+begin
+    execute immediate 'drop table if exists  ' || tb_name || ';';
+    execute immediate 'create table  '|| tb_name || '(id int, name varchar(20));';
+    execute immediate 'insert into ' || tb_name || ' values (generate_series(1,10), ''test'');';
+    execute immediate 'update ' || tb_name || ' set name=''software'' where id = 3;';
+    execute immediate 'delete from ' || tb_name || ' where id = 5;';
+return tb_name;
+end;
+/
+
+start transaction;
+call func_multi_node_write_0032('t_multi_node_write_0032');
+commit;
+select * from t_multi_node_write_0032;
+
+drop table t_multi_node_write_0032;
+drop function func_multi_node_write_0032;
+
+start transaction;
+call func_multi_node_write_0032('t_multi_node_write_0032');
+commit;
+select * from t_multi_node_write_0032;
+
+create or replace function func_multi_node_write_0032(tb_name varchar) return varchar is
+begin
+    execute immediate 'drop table if exists  ' || tb_name || ';';
+    execute immediate 'create table  '|| tb_name || '(id int, name varchar(20));';
+    execute immediate 'insert into ' || tb_name || ' values (generate_series(1,10), ''test'');';
+    execute immediate 'update ' || tb_name || ' set name=''software'' where id = 3;';
+    execute immediate 'delete from ' || tb_name || ' where id = 5;';
+return tb_name;
+end;
+/
+

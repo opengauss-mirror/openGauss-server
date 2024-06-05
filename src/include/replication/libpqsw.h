@@ -93,6 +93,7 @@ void libpqsw_check_ddl_on_primary(const char* commandTag);
 // default is output log.
 #define LIBPQSW_ENABLE_LOG 1
 #define LIBPQSW_DEFAULT_LOG_LEVEL LOG
+#define ENABLE_REMOTE_EXECUTE (g_instance.attr.attr_sql.enableRemoteExcute)
 
 // default is not output libpq message trace
 // log will in $GAUSSLOG/libpqsw/xx.log
