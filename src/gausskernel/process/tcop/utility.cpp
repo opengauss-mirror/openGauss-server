@@ -26,6 +26,7 @@
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
+#include "access/multi_redo_api.h"
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/index.h"
@@ -123,6 +124,7 @@
 #include "tsdb/optimizer/policy.h"
 #include "tsdb/time_bucket.h"
 #include "streaming/streaming_catalog.h"
+#include "storage/buf/bufmgr.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
 #ifdef PGXC
 #include "pgxc/barrier.h"
@@ -249,6 +251,9 @@ extern void ts_check_feature_disable();
 static bool IsAllTempObjectsInVacuumStmt(Node* parsetree);
 static int64 getCopySequenceMaxval(const char *nspname, const char *relname, const char *colname);
 static int64 getCopySequenceCountval(const char *nspname, const char *relname);
+static void PreRedoInOndemandRecovery(Node* parse_tree);
+static void PreRedoIndexInOndemandRecovery(Oid indexId);
+static void PreRedoTableInOndemandRecovery(Oid relId);
 
 /* the hash value of extension script */
 #define POSTGIS_VERSION_NUM 2
@@ -647,19 +652,36 @@ void PreventCommandDuringRecovery(const char* cmd_name)
 void PreventCommandDuringSSOndemandRedo(Node* parseTree)
 {
     switch(nodeTag(parseTree)) {
+        case T_AlterSchemaStmt:
         case T_InsertStmt:
         case T_DeleteStmt:
         case T_UpdateStmt:
         case T_SelectStmt:
+        case T_AlterTableStmt:
+        case T_CreateStmt:  /* no need to adapt */
+        case T_DropStmt:
+        case T_IndexStmt:
+        case T_CreateFunctionStmt: /* no need to adapt */
+        case T_AlterFunctionStmt: /* no need to adapt */
+        case T_CompileStmt:
+        case T_RenameStmt:
         case T_TransactionStmt:
+        case T_ViewStmt: /* no need to adapt */
+        case T_CreateTableAsStmt:
         case T_VariableSetStmt:
         case T_VariableShowStmt:
+        case T_ReindexStmt:
+        case T_CreateSchemaStmt:
+        case T_AlterDatabaseStmt: /* no need to adapt */
+        case T_AlterDatabaseSetStmt: /* no need to adapt */
+        case T_AlterObjectSchemaStmt:
+        case T_AlterOwnerStmt:
             break;
         default:
             if (SS_IN_ONDEMAND_RECOVERY) {
                 ereport(ERROR,
                     (errcode(ERRCODE_RUN_TRANSACTION_DURING_RECOVERY),
-                        errmsg("only support INSERT/UPDATE/DELETE/SELECT/SET/SHOW during SS on-demand recovery, "
+                        errmsg("only support INSERT/UPDATE/DELETE/SELECT/SET/SHOW/CALL, and ALTER/CREATE/DROP on Table/Index/View/Procedure/Schema, and ALTER on Database during SS on-demand recovery, "
                                "command %d", nodeTag(parseTree))));
             }
             break;
@@ -2664,6 +2686,8 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
     if (completion_tag != NULL)
         completion_tag[0] = '\0';
+
+    PreRedoInOndemandRecovery(parse_tree);
 
     errno_t errorno = EOK;
     switch (nodeTag(parse_tree)) {
@@ -13878,4 +13902,622 @@ static int64 getCopySequenceMaxval(const char *nspname, const char *relname, con
     }
     SPI_finish();
     return DatumGetInt64(attval);
+}
+
+struct OndemandParseInfo {
+    NodeTag parseType;
+    ObjectType objectType;
+    RangeVar* relationRangeVar;
+};
+
+static List* AppendItemToOndemandParseList(List* ondemandParseList, NodeTag parseType, ObjectType objectType, RangeVar* relationRangeVar) {
+    OndemandParseInfo* info = (OndemandParseInfo*)palloc(sizeof(OndemandParseInfo));
+    info->parseType = parseType;
+    info->objectType = objectType;
+    info->relationRangeVar = relationRangeVar;
+    ondemandParseList = lappend(ondemandParseList, info);
+    return ondemandParseList;
+}
+
+/**
+ * @brief Get the table by index rangeVar, where the index is on,
+ * and pre redo the table.
+ *
+ * @param ondemandParseInfo
+ */
+static void PreRedoRelationByIndexRangeVar(OndemandParseInfo* ondemandParseInfo) {
+    Oid relId = RangeVarGetRelid(ondemandParseInfo->relationRangeVar, NoLock, true);
+    if (!OidIsValid(relId)) {
+        ereport(LOG,
+            (errmsg("[On-demand] The relation doesn't exists, no need to redo, relname: %s.",
+                ondemandParseInfo->relationRangeVar->relname)));
+        return;
+    }
+    Oid relationOid = IndexGetRelation(relId, true);
+    if (OidIsValid(relationOid)) {
+        PreRedoTableInOndemandRecovery(relationOid);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", relId)));
+    }
+}
+
+/**
+ * @brief pre redo in ondemand redo phase before execute ddl.
+ * 
+ * @param parseTree 
+ */
+static void PreRedoInOndemandRecovery(Node* parseTree) {
+    if (!ENABLE_ONDEMAND_RECOVERY || !SS_IN_ONDEMAND_RECOVERY) {
+        return;
+    }
+
+    List* ondemandParseList = NULL;
+    switch (nodeTag(parseTree)) {
+        /* ALTER PROCEDURE XXX COMPLIE */
+        case T_CompileStmt: {
+            CompileStmt* compileStmt = (CompileStmt*) parseTree;
+            switch (compileStmt->compileItem) {
+                case COMPILE_PROCEDURE: {
+                    break;
+                }
+                default: {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                            parseTree->type, compileStmt->compileItem)));
+                    break;
+                }
+            }
+            break;
+        }
+        /* ALTER TABLE */
+        case T_AlterTableStmt: {
+            AlterTableStmt* alterTableStmt = (AlterTableStmt*) parseTree;
+            ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_AlterTableStmt,
+                                                              alterTableStmt->relkind, alterTableStmt->relation);
+            break;
+        }
+        /* DROP INDEX/TABLE/PROCEDURE/VIEW/SCHEMA */
+        case T_DropStmt: {
+            DropStmt* dropStmt = (DropStmt*) parseTree;
+            ListCell* cell = NULL;
+            foreach (cell, dropStmt->objects) {
+                RangeVar* relationRangeVar = makeRangeVarFromNameList((List*)lfirst(cell));
+                ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_DropStmt,
+                                                                  dropStmt->removeType, relationRangeVar);
+            }
+            break;
+        }
+        /* CREATE INDEX */
+        case T_IndexStmt: {
+            IndexStmt* indexStmt = (IndexStmt*) parseTree;
+            ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_IndexStmt,
+                                                              OBJECT_INDEX, indexStmt->relation);
+            break;
+        }
+        /* ALTER DATABASE/PROCEDURE/TABLE/INDEX/VIEW RENAME TO */
+        case T_RenameStmt: {
+            RenameStmt* renameStmt = (RenameStmt*) parseTree;
+            if (renameStmt->renameType == OBJECT_PARTITION || renameStmt->renameType == OBJECT_COLUMN) {
+                 ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_RenameStmt,
+                                                                   renameStmt->relationType, renameStmt->relation);
+            } else {
+                ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_RenameStmt,
+                                                                  renameStmt->renameType, renameStmt->relation);
+            }
+
+            break;
+        }
+        /*ALTER TABLE/INDEX REBUILD */
+        case T_ReindexStmt: {
+            ReindexStmt* reindexStmt = (ReindexStmt*) parseTree;
+            ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_ReindexStmt,
+                                                              reindexStmt->kind, reindexStmt->relation);
+            break;
+        }
+        /* ALTER TABLE/INDEX/PROCEDURE/ SET SCHEMA */
+        case T_AlterObjectSchemaStmt: {
+            AlterObjectSchemaStmt* alterObjectSchemaStmt = (AlterObjectSchemaStmt*) parseTree;
+            ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_AlterObjectSchemaStmt,
+                                                              alterObjectSchemaStmt->objectType, alterObjectSchemaStmt->relation);
+            break;
+        }
+        case T_AlterOwnerStmt: {
+            AlterOwnerStmt* alterOwnerStmt = (AlterOwnerStmt*) parseTree;
+            ondemandParseList = AppendItemToOndemandParseList(ondemandParseList, T_AlterObjectSchemaStmt,
+                                                              alterOwnerStmt->objectType, NULL);
+            break;
+        }
+        /**
+         * Some syntax types no need to adapt, in ondemand reovery phase.
+         * See PreventCommandDuringSSOndemandRedo to get all the support syntax type.
+         */
+        default:
+            break;
+    }
+
+    ListCell* cell = NULL;
+    foreach (cell, ondemandParseList) {
+        OndemandParseInfo* ondemandParseInfo = (OndemandParseInfo*)lfirst(cell);
+        switch (ondemandParseInfo->objectType) {
+            case OBJECT_DATABASE: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_RenameStmt:
+                    case T_AlterOwnerStmt: {
+                        break;
+                    }
+                    case T_ReindexStmt:
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_FUNCTION: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_DropStmt:
+                    case T_RenameStmt:
+                    case T_AlterObjectSchemaStmt:
+                    case T_AlterOwnerStmt: {
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_INDEX: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_AlterTableStmt:
+                    case T_DropStmt: {
+                        Oid relId = RangeVarGetRelid(ondemandParseInfo->relationRangeVar, NoLock, true);
+                        if (!OidIsValid(relId)) {
+                            ereport(LOG,
+                                (errmsg("[On-demand] The relation doesn't exists, no need to redo, relname: %s.", ondemandParseInfo->relationRangeVar->relname)));
+                            break;
+                        }
+                        PreRedoIndexInOndemandRecovery(relId);
+                        break;
+                    }
+                    case T_IndexStmt: {
+                        RangeVar* relationRangeVar =  ondemandParseInfo->relationRangeVar;
+                        char* relname = relationRangeVar->relname;
+                        Oid namespaceId  = RangeVarGetCreationNamespace(relationRangeVar);
+                        HeapTuple tuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(relationRangeVar->relname), ObjectIdGetDatum(namespaceId));
+                        if (!HeapTupleIsValid(tuple)) {
+                            ereport(LOG,
+                                (errmsg("[On-demand] The relation doesn't exists, no need to redo, relname: %s.",
+                                    relname)));
+                            break;
+                        }
+                        Oid relId = HeapTupleGetOid(tuple);
+                        ReleaseSysCache(tuple);
+                        /* 
+                        * Pre-redo the relation which this index is on before create index.
+                        * We will pre-redo all the relation and partition associated with the relation.
+                        */
+                        PreRedoTableInOndemandRecovery(relId);
+                        break;
+                    }
+                    case T_ReindexStmt:
+                    case T_RenameStmt: {
+                        PreRedoRelationByIndexRangeVar(ondemandParseInfo);
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_INDEX_PARTITION: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_ReindexStmt: {
+                        PreRedoRelationByIndexRangeVar(ondemandParseInfo);
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_SCHEMA: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_DropStmt: {
+                        RangeVar* schemaRangeVar = ondemandParseInfo->relationRangeVar;
+                        char* schemaName = schemaRangeVar->relname;
+                        Oid schemaOid = get_namespace_oid(schemaName, true);
+                        if (!OidIsValid(schemaOid)) {
+                            ereport(LOG,
+                                (errmsg("[On-demand] The schema doesn't exists, no need to redo, schemaname: %s.", schemaName)));
+                            break;
+                        }
+                        RedoDatabaseForOndemandExtremeRTO(u_sess->proc_cxt.MyDatabaseId);
+                        break;
+                    }
+                    case T_RenameStmt:
+                    case T_AlterOwnerStmt: {
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_PARTITION_INDEX: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_RenameStmt: {
+                        Oid relId = RangeVarGetRelid(ondemandParseInfo->relationRangeVar, NoLock, true);
+                        if (!OidIsValid(relId)) {
+                            ereport(LOG,
+                                (errmsg("[On-demand] The relation doesn't exists, no need to redo, relname: %s.", ondemandParseInfo->relationRangeVar->relname)));
+                            break;
+                        }
+                        Oid relationOid = IndexGetRelation(relId, true);
+                        if (OidIsValid(relationOid)) {
+                            PreRedoTableInOndemandRecovery(relationOid);
+                        } else {
+                            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", relId)));
+                        }
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_TABLE: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_AlterTableStmt:
+                    case T_DropStmt:
+                    case T_RenameStmt:
+                    case T_ReindexStmt:
+                    case T_AlterObjectSchemaStmt: {
+                        Oid relId = RangeVarGetRelid(ondemandParseInfo->relationRangeVar, NoLock, true);
+                        if (!OidIsValid(relId)) {
+                            ereport(LOG,
+                                (errmsg("[On-demand] The relation doesn't exists, no need to redo, relname: %s.", ondemandParseInfo->relationRangeVar->relname)));
+                            break;
+                        }
+                        PreRedoTableInOndemandRecovery(relId);
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            case OBJECT_TABLE_PARTITION: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_ReindexStmt: {
+                        Oid relId = RangeVarGetRelid(ondemandParseInfo->relationRangeVar, NoLock, true);
+                        if (!OidIsValid(relId)) {
+                            ereport(LOG,
+                                (errmsg("[On-demand] The relation doesn't exists, no need to redo, relname: %s.", ondemandParseInfo->relationRangeVar->relname)));
+                            break;
+                        }
+                        PreRedoTableInOndemandRecovery(relId);
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    } 
+                }
+                break;
+            }
+            case OBJECT_VIEW: {
+                switch (ondemandParseInfo->parseType) {
+                    case T_AlterTableStmt:
+                    case T_DropStmt:
+                    case T_RenameStmt:
+                    case T_AlterObjectSchemaStmt: {
+                        break;
+                    }
+                    default: {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                                ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                        break;
+                    }
+                }
+                break;
+            }
+            default: {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("[On-demand] Not support this sql in ondemand redo phase, nodeType: %d, relKind: %d.",
+                        ondemandParseInfo->parseType, ondemandParseInfo->objectType)));
+                break;
+            }
+        }
+    }
+    list_free_deep(ondemandParseList);
+}
+
+/**
+ * @brief Find out all the index and the partition of inex on of target relation, and pre
+ * redo the before execute ddl.
+ * 
+ * @param relation target relation
+ * @return int 
+ */
+int PreRedoIndexByRelation(Relation relation) {
+    Assert(RelationIsValid(relation));
+    int indexNum = 0;
+    List* indexList = RelationGetIndexList(relation);
+    ListCell* indexCell = NULL;
+
+    if (indexList == NULL || indexList->length == 0) {
+        return 0;
+    }
+
+    foreach (indexCell, indexList) {
+        Oid indexOid = lfirst_oid(indexCell);
+        Relation indexRelation;
+        indexRelation = index_open(indexOid, ExclusiveLock);
+
+        if (indexRelation->rd_rel->relkind != RELKIND_INDEX || RelationIsNonpartitioned(indexRelation)) {
+            if (SS_IN_ONDEMAND_RECOVERY) {
+                RedoRelationForOndemandExtremeRTO(indexRelation);
+            }
+            indexNum++;
+        } else {
+            List *partitionTupleList = NULL;
+            Partition partition = NULL;
+            partitionTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, indexRelation->rd_id);
+
+            Assert(PointerIsValid(partitionTupleList));
+            ListCell *partitionCell = NULL;
+            foreach (partitionCell, partitionTupleList) {
+                HeapTuple tuple = (HeapTuple)lfirst(partitionCell);
+                Oid partitionId = HeapTupleGetOid(tuple);
+                partition = partitionOpen(indexRelation, partitionId, ExclusiveLock);
+                Relation partitionRelation = partitionGetRelation(indexRelation, partition);
+                if (SS_IN_ONDEMAND_RECOVERY) {
+                    RedoRelationForOndemandExtremeRTO(partitionRelation);
+                }
+                releaseDummyRelation(&partitionRelation);
+                partitionClose(indexRelation, partition, ExclusiveLock);
+            }
+            list_free_deep(partitionTupleList);
+        }
+
+        index_close(indexRelation, ExclusiveLock);
+    }
+    list_free(indexList);
+
+    return indexNum;
+}
+
+/**
+ * @brief Find out all the partition or relation of target relation, and pre
+ * redo the before execute ddl.
+ * 
+ * @param relation 
+ * @return int 
+ */
+int PreRedoRelationByRelation(Relation relation) {
+    Assert(RelationIsValid(relation));
+    int partitionNum = 0;
+
+    if (!RELATION_IS_PARTITIONED(relation)) {
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            RedoRelationForOndemandExtremeRTO(relation);
+        }
+        partitionNum++;
+        return partitionNum;
+    }
+
+    List* partitionList = NULL;
+    if (RelationIsCommonPartitioned(relation)) {
+        partitionList = relationGetPartitionList(relation, ExclusiveLock);
+    } else {
+        partitionList = RelationGetSubPartitionList(relation, ExclusiveLock);
+    }
+
+    ListCell* partitionCell = NULL;
+    if (partitionList == NULL) {
+        return partitionNum;
+    }
+
+    foreach (partitionCell, partitionList) {
+        Partition partition = (Partition)lfirst(partitionCell);
+        Relation partitionRelation = partitionGetRelation(relation, partition);
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            RedoRelationForOndemandExtremeRTO(partitionRelation);
+        }
+        releaseDummyRelation(&partitionRelation);
+        partitionNum++;
+    }
+    releasePartitionList(relation, &partitionList, ExclusiveLock);
+
+    return partitionNum;
+}
+
+
+/**
+ * @brief Find out all the toast table of taget relation, and pre redo them before execute ddl.
+ * 
+ * @param relation target relation
+ * @return int the num of toast table
+ */
+int PreRedoToastByRelation(Relation relation) {
+    Assert(RelationIsValid(relation));
+    int toastNum = 0;
+    if (!RELATION_IS_PARTITIONED(relation)) {
+        Relation toastRelation = try_relation_open(relation->rd_rel->reltoastrelid, ExclusiveLock);
+        if (RelationIsValid(toastRelation)) {
+            if (SS_IN_ONDEMAND_RECOVERY) {
+                RedoRelationForOndemandExtremeRTO(toastRelation);
+            }
+            toastNum++;
+            heap_close(toastRelation, ExclusiveLock);
+        }
+        return toastNum;
+    }
+
+    List* partitionList = NULL;
+    /* Get partition or subpartition list by relation */
+    if (RelationIsCommonPartitioned(relation)) {
+        partitionList = relationGetPartitionList(relation, ExclusiveLock);
+    } else {
+        partitionList = RelationGetSubPartitionList(relation, ExclusiveLock);
+    }
+
+    if (partitionList == NULL) {
+        return toastNum; 
+    }
+
+    ListCell* partitionCell = NULL;
+    foreach (partitionCell, partitionList) {
+        Partition partition = (Partition)lfirst(partitionCell);
+        Relation partitionRelation = partitionGetRelation(relation, partition);
+        if (!RelationIsValid(partitionRelation) || !OidIsValid(partitionRelation->rd_rel->reltoastrelid)) {
+            releaseDummyRelation(&partitionRelation);
+            continue;
+        }
+
+        Relation toastRelation = heap_open(partitionRelation->rd_rel->reltoastrelid, ExclusiveLock);
+        if (!RelationIsValid(toastRelation)) {
+            releaseDummyRelation(&toastRelation);
+            continue;
+        }
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            RedoRelationForOndemandExtremeRTO(toastRelation);
+        }
+        heap_close(toastRelation, ExclusiveLock);
+        releaseDummyRelation(&partitionRelation);
+        toastNum++;
+    }
+    releasePartitionList(relation, &partitionList, ExclusiveLock);
+
+    return toastNum;
+}
+
+/**
+ * @brief Redo for index In ondemand recvery by relId, before execute ddl.
+ * 
+ * @param indexId oid of index.
+ */
+static void PreRedoIndexInOndemandRecovery(Oid indexId) {
+    int indexNum = 0;
+
+    if (!SS_IN_ONDEMAND_RECOVERY) {
+        return;
+    }
+
+    Relation indexRelation =  index_open(indexId, ExclusiveLock);
+    if (!RelationIsValid(indexRelation)) {
+        return;
+    }
+
+    /* If the index has no partition. */
+    if (indexRelation->rd_rel->relkind != RELKIND_INDEX || RelationIsNonpartitioned(indexRelation)) {
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            RedoRelationForOndemandExtremeRTO(indexRelation);
+        }
+        indexNum++;
+    /* If the index has partitions. */
+    } else {
+        List *partitionTupleList = NULL;
+        Partition partition = NULL;
+        partitionTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, indexRelation->rd_id);
+
+        Assert(PointerIsValid(partitionTupleList));
+        ListCell *partitionCell = NULL;
+        foreach (partitionCell, partitionTupleList) {
+            HeapTuple tuple = (HeapTuple)lfirst(partitionCell);
+            Oid partitionId = HeapTupleGetOid(tuple);
+            partition = partitionOpen(indexRelation, partitionId, ExclusiveLock);
+            Relation partitionRelation = partitionGetRelation(indexRelation, partition);
+            if (SS_IN_ONDEMAND_RECOVERY) {
+                RedoRelationForOndemandExtremeRTO(partitionRelation);
+            }
+            releaseDummyRelation(&partitionRelation);
+            partitionClose(indexRelation, partition, ExclusiveLock);
+        }
+        list_free_deep(partitionTupleList);
+    }
+
+    index_close(indexRelation, ExclusiveLock);
+}
+
+/**
+ * @brief Redo for table In ondemand recvery by relId, before execute ddl.
+ * 
+ * @param relId Oid of relation 
+ */
+static void PreRedoTableInOndemandRecovery(Oid relId) {
+
+    if (!SS_IN_ONDEMAND_RECOVERY) {
+        return;
+    }
+
+    Relation relation = heap_open(relId, ExclusiveLock);
+    if (!RelationIsValid(relation)) {
+        return;
+    }
+
+    /* Check if support target relation type when enable DMS. If not, no need to redo. */
+    if ((relation->rd_rel->relkind == RELKIND_RELATION && IsSegmentPhysicalRelNode(relation->rd_node)) ||
+        relation->rd_rel->relkind == RELKIND_MATVIEW ||
+        relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE ||
+        RelationIsTableAccessMethodUStoreType(relation->rd_options) ||
+        RelationIsCUFormat(relation) ||
+        relation->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED ||
+        relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP ||
+        relation->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP ||
+        RowRelationIsCompressed(relation)) {
+        if (SS_IN_ONDEMAND_RECOVERY) {
+            heap_close(relation, ExclusiveLock);
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("[On-demand]Only support segment storage type and ASTORE while DMS and DSS enable.\n"
+                    "Foreign table, matview, temp table or unlogged table is not supported.\nCompression is not "
+                    "supported.")));
+        }
+    }
+
+    /* redo for indexs on relation */
+    int indexNum = 0;
+    indexNum = PreRedoIndexByRelation(relation);
+
+    /* redo for partitions on relation */
+    int partitionNum = 0;
+    partitionNum = PreRedoRelationByRelation(relation);
+
+    int toastNum = 0;
+    /* redo for toasts on relation */
+    toastNum = PreRedoToastByRelation(relation);
+
+    ereport(DEBUG1,
+        (errmsg("[On-demand] pre redo relation befor execute ddl, relId: %u, indexNum: %d, partitionNum/relationNum: %d, toastNum: %d.",
+            relId, indexNum, partitionNum, toastNum)));
+
+    heap_close(relation, ExclusiveLock);
 }

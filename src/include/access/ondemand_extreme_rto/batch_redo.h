@@ -49,6 +49,8 @@ namespace ondemand_extreme_rto {
 #define XlogTrackTableHashPartition(hashcode) ((hashcode) % NUM_XLOG_TRACK_PARTITIONS)
 #define XlogTrackMappingPartitionLock(hashcode) \
     (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstXlogTrackLock + XlogTrackTableHashPartition(hashcode)].lock)
+#define XLogTrackMappingScanningLock(slotId) \
+    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstScanningXLOGTrackLock + (slotId)].lock)
 
 /*
  * Note: if there are any pad bytes in the struct, INIT_RedoItemTag have
