@@ -364,7 +364,8 @@ void UndoRecord::Load(bool keepBuffer)
         Page page = BufferGetPage(buffer);
         BufferDesc *bufDesc = GetBufferDescriptor(buffer - 1);
         if (bufDesc->tag.blockNum != blk || bufDesc->tag.rnode.dbNode != UNDO_DB_OID ||
-            bufDesc->tag.rnode.relNode != (Oid)zoneId) {
+            bufDesc->tag.rnode.relNode != (Oid)zoneId || 
+            (!PageIsNew(page) && PageGetPageLayoutVersion(page) != PG_COMM_PAGE_LAYOUT_VERSION)) {    
             ereport(PANIC,
                 (errmsg(UNDOFORMAT("undo buffer desc invalid, bufdesc: dbid=%u, relid=%u, blockno=%u. "
                 "expect: dbid=%u, zoneid=%u, blockno=%u."),

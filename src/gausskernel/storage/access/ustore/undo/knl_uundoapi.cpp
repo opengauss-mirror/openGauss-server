@@ -785,4 +785,25 @@ void ReleaseSlotBuffer()
         PG_END_TRY();
     }
 }
+
+void initUndoZoneLock()
+{
+    if (g_instance.undo_cxt.uZones != NULL) {
+        int persistZoneCount = PERSIST_ZONE_COUNT;
+        for (int persist = (int)UNDO_PERMANENT; persist <= (int)UNDO_TEMP; persist++) {
+            CHECK_FOR_INTERRUPTS();
+            for (auto idx = 0; idx < persistZoneCount; idx++) {
+                CHECK_FOR_INTERRUPTS();
+                int zoneId = (int)(idx + persist * PERSIST_ZONE_COUNT);
+                UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
+                if (uzone == NULL) {
+                    break;
+                }
+                uzone->InitLock();
+                uzone->GetUndoSpace()->LockInit();
+                uzone->GetSlotSpace()->LockInit();
+            }
+        }
+    }
+}
 } // namespace undo

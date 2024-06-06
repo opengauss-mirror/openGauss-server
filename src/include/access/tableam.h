@@ -906,7 +906,7 @@ static inline void tableam_tuple_abort_speculative(Relation relation, Tuple tupl
 
 static inline bool tableam_tuple_check_compress(Relation relation, Tuple tuple)
 {
-    relation->rd_tam_ops->tuple_check_compress(tuple);
+    return relation->rd_tam_ops->tuple_check_compress(tuple);
 }
 
 /* -----------------------------------------------------------------------

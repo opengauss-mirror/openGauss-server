@@ -904,6 +904,7 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
      * doesn't enforce it.)
      */
     const char *storageType = NULL;
+    const char *toastStorageType = NULL;
     bool toastStorageTypeSet = false;
     foreach (cell, defList) {
         DefElem *def = (DefElem *)lfirst(cell);
@@ -954,6 +955,9 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
                     continue;
                 } else if (pg_strcasecmp(def->defnamespace, namspace) != 0) {
                     continue;
+                } else {
+                    toastStorageType = ((def->arg != NULL) ? defGetString(def) : NULL);
+                    continue;
                 }
                 toastStorageTypeSet = true; /* toast table set the storage type itself */
             } else if (def->defnamespace == NULL)
@@ -978,6 +982,22 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
             rc = sprintf_s(VARDATA(t), len + 1, "%s=%s", def->defname, value);
             securec_check_ss(rc, "\0", "\0");
             astate = accumArrayResult(astate, PointerGetDatum(t), false, TEXTOID, CurrentMemoryContext);
+        }
+    }
+
+    if (namspace != NULL && pg_strcasecmp(namspace, "toast") == 0 && toastStorageType != NULL) {
+        const char *actualStorageType = NULL;
+        if (storageType == NULL) {
+            actualStorageType = u_sess->attr.attr_sql.enable_default_ustore_table ? "ustore" : "astore";
+        } else {
+            actualStorageType = storageType;
+        }
+
+        if (pg_strcasecmp(actualStorageType, "astore") == 0 || pg_strcasecmp(actualStorageType, "ustore") == 0) {
+            if (pg_strcasecmp(actualStorageType, toastStorageType) != 0) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("toast cannot be set for %s with storage_type=%s", actualStorageType, toastStorageType)));
+            }
         }
     }
 
