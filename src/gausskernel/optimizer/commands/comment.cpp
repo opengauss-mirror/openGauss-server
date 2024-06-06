@@ -132,6 +132,19 @@ ObjectAddress CommentObject(CommentStmt* stmt)
     }
 
     /*
+     * For only A compatibility, comment on table support table and view object
+     */
+    if (DB_IS_CMPT(A_FORMAT) && stmt->objtype == OBJECT_TABLE) {
+        Relation rel = relation_openrv_extended(makeRangeVarFromNameList(stmt->objname), ShareUpdateExclusiveLock, false);
+        if (rel) {
+            if(rel->rd_rel->relkind == RELKIND_VIEW) {
+                stmt->objtype = OBJECT_VIEW;
+            }
+            RelationClose(rel);
+        }
+    }
+
+    /*
      * Translate the parser representation that identifies this object into an
      * ObjectAddress.  get_object_address() will throw an error if the object
      * does not exist, and will also acquire a lock on the target to guard

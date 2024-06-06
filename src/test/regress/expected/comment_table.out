@@ -1,0 +1,79 @@
+--
+-- comment on table
+--
+-- A compatibility
+create database comment_table_testa with dbcompatibility = 'A';
+\c comment_table_testa
+create table t1(id int);
+create index index1 on t1(id);
+create view t1_v as select * from t1;
+comment on table t1 is 'table t1';
+comment on table t1_v is 'table t1 view';
+comment on table index1 is 'table t1 index';
+ERROR:  "index1" is not a table
+comment on index index1 is 'table t1 index';
+drop view t1_v;
+drop table t1;
+create schema test_comment_schema;
+create table test_comment_schema.t1(id int);
+create index idx1 on test_comment_schema.t1(id);
+create view test_comment_schema.t1_v as select * from test_comment_schema.t1;
+comment on table test_comment_schema.t1 is 'table t1';
+comment on table test_comment_schema.t1_v is 'table t1 view';
+comment on table idx1 is 'table t1 index';
+ERROR:  relation "idx1" does not exist
+comment on table test_comment_schema.idx1 is 'table t1 index';
+ERROR:  "idx1" is not a table
+comment on index test_comment_schema.idx1 is 'table t1 index';
+-- not exist
+comment on table t2 is 'table t2';
+ERROR:  relation "t2" does not exist
+comment on table test_comment_schema.t2 is 'table test_comment_schema.t2';
+ERROR:  relation "test_comment_schema.t2" does not exist
+comment on table schema1.t2 is 'table schema1.t2';
+ERROR:  schema "schema1" does not exist
+drop schema test_comment_schema cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table test_comment_schema.t1
+drop cascades to view test_comment_schema.t1_v
+\c postgres
+drop database comment_table_testa;
+-- B compatibility
+create database comment_table_testb with dbcompatibility = 'B';
+\c comment_table_testb
+create table t1(id int);
+create index index1 on t1(id);
+create view t1_v as select * from t1;
+comment on table t1 is 'table t1';
+comment on table t1_v is 'table t1 view';
+ERROR:  "t1_v" is not a table
+comment on table index1 is 'table t1 index';
+ERROR:  "index1" is not a table
+comment on index index1 is 'table t1 index';
+drop view t1_v;
+drop table t1;
+create schema test_comment_schema;
+create table test_comment_schema.t1(id int);
+create index idx1 on test_comment_schema.t1(id);
+create view test_comment_schema.t1_v as select * from test_comment_schema.t1;
+comment on table test_comment_schema.t1 is 'table t1';
+comment on table test_comment_schema.t1_v is 'table t1 view';
+ERROR:  "t1_v" is not a table
+comment on table idx1 is 'table t1 index';
+ERROR:  relation "idx1" does not exist
+comment on table test_comment_schema.idx1 is 'table t1 index';
+ERROR:  "idx1" is not a table
+comment on index test_comment_schema.idx1 is 'table t1 index';
+-- not exist
+comment on table t2 is 'table t2';
+ERROR:  relation "t2" does not exist
+comment on table test_comment_schema.t2 is 'table test_comment_schema.t2';
+ERROR:  relation "test_comment_schema.t2" does not exist
+comment on table schema1.t2 is 'table schema1.t2';
+ERROR:  schema "schema1" does not exist
+drop schema test_comment_schema cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table test_comment_schema.t1
+drop cascades to view test_comment_schema.t1_v
+\c postgres
+drop database comment_table_testb;

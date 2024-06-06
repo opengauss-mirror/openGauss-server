@@ -427,7 +427,7 @@ test: create_seg_table
 # ----------
 #test: hw_hashagg_start
 test: create_misc
-test: create_view1 create_view2 create_view3 create_view4 create_view5
+test: create_view1 create_view2 create_view3 create_view4 create_view5 comment_table
 #test: int8#
 
 #dupliacated select int8
