@@ -2002,7 +2002,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         Relation parent_rel = try_relation_open(relationid, NoLock);
         if (parent_rel != NULL) {
             if (RelationIsUstoreFormat(parent_rel) && parent_rel->rd_rel->relhasindex) {
-                lmodePartTable = ShareLock;
+                lmodePartTable = ExclusiveLock;
             }
             relation_close(parent_rel, NoLock);
         }

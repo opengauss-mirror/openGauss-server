@@ -397,7 +397,7 @@ TransactionId exrto_calculate_recycle_xmin_for_undo()
     /*
      * If there is no backend read threads, set read oldest lsn to snapshot lsn.
      */
-    if ((oldest_xmin == InvalidTransactionId) && (extreme_rto::g_dispatcher != NULL)) {
+    if (extreme_rto::g_dispatcher != NULL) {
         ExrtoSnapshot exrto_snapshot = NULL;
         exrto_snapshot = g_instance.comm_cxt.predo_cxt.exrto_snapshot;
         (void)LWLockAcquire(ExrtoSnapshotLock, LW_SHARED);
@@ -417,6 +417,10 @@ TransactionId exrto_calculate_recycle_xmin_for_undo()
                 snapshot_xmin)));
 
     if (oldest_xmin == InvalidTransactionId) {
+        return snapshot_xmin;
+    }
+
+    if (TransactionIdPrecedes(snapshot_xmin, oldest_xmin)) {
         return snapshot_xmin;
     }
     return oldest_xmin;

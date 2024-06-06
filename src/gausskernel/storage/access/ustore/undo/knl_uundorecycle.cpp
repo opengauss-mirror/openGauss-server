@@ -270,7 +270,7 @@ void AdvanceFrozenXid(UndoZone *zone, TransactionId *oldestFozenXid,
 }
 
 bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId frozenXid,
-    TransactionId *oldestRecycleXid, TransactionId forceRecycleXid)
+    TransactionId *oldestRecycleXid, TransactionId forceRecycleXid, TransactionId oldestXmin)
 {
     UndoSlotPtr recycle = zone->GetRecycleTSlotPtr();
     UndoSlotPtr allocate = zone->GetAllocateTSlotPtr();
@@ -360,9 +360,18 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
                     break;
                 }
                 ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("ForceRecycle: slot=%lu, slotxid=%lu, " 
-                    "recyclexid=%lu, recycleXmin=%lu, startptr=%lu, endptr=%lu."), recycle, slot->XactId(), 
+                    "recyclexid=%lu, recycleXmin=%lu, startptr=%lu, endptr=%lu, "
+                    "glovalRecycleXid=%lu, globalFrozenXid=%lu, oldestXmin=%lu, "
+                    "undoTotalSize=%u, undo_space_limit_size=%d, "
+                    "metasize=%ld, g_force_recycle_size=%d."), recycle, slot->XactId(), 
                     forceRecycleXid, recycleXmin, UNDO_PTR_GET_OFFSET(slot->StartUndoPtr()),
-                    UNDO_PTR_GET_OFFSET(slot->EndUndoPtr()))));
+                    UNDO_PTR_GET_OFFSET(slot->EndUndoPtr()),
+                    pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+                    pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
+                    oldestXmin,
+                    pg_atomic_read_u32(&g_instance.undo_cxt.undoTotalSize),
+                    u_sess->attr.attr_storage.undo_space_limit_size,
+                    (int64)g_instance.undo_cxt.undoMetaSize, g_forceRecycleSize)));
                 forceRecycle = true;
             }
 #ifdef DEBUG_UHEAP
@@ -921,7 +930,7 @@ void UndoRecycleMain()
                             UNDOFORMAT("oldestFrozenXidInUndo: oldestFrozenXidInUndo=%lu, frozenXid=%lu"
                             " before RecycleUndoSpace"),
                             oldestFrozenXidInUndo, frozenXid)));
-                        if (RecycleUndoSpace(zone, recycleXmin, frozenXid, &recycleXid, forceRecycleXid)) {
+                        if (RecycleUndoSpace(zone, recycleXmin, frozenXid, &recycleXid, forceRecycleXid, oldestXmin)) {
                             recycled = true;
                         }
                         isAnyZoneUsed = true;
