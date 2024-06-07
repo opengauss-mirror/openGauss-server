@@ -30,7 +30,7 @@
 #include "dss_api_def.h"
 
 #define SS_LIBDSS_NAME "libdssapi.so"
-
+#define DSS_FT_NODE_FLAG_INNER_INITED 0x80000000
 int dss_device_init(const char *conn_path, bool enable_dss);
 
 // callback for register dssapi

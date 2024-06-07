@@ -104690,8 +104690,8 @@ msgstr "无法找到文件\"%s\": "
 
 #: storage/smgr/segment/data_file.cpp:57
 #, c-format
-msgid "dv_open_file filename: %s, flags is %u, mode is %d, fd is %d"
-msgstr "dv_open_file filename: %s, flags is %u, mode is %d, fd is %d"
+msgid "dv_open_file filename: %s, flags is %d, mode is %d, fd is %d"
+msgstr "dv_open_file filename: %s, flags is %d, mode is %d, fd is %d"
 
 #: storage/smgr/segment/data_file.cpp:67
 #, c-format
