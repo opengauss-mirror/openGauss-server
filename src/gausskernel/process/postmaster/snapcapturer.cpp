@@ -902,7 +902,7 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
         TxnSnapCapProcInterrupts(rc);
 
         /* Do the hard work. */
-        if (TcapFeatureAvail()) {
+        if (TcapFeatureAvail() && ENABLE_TCAP_VERSION) {
             TxnSnapCapImpl();
         }
 

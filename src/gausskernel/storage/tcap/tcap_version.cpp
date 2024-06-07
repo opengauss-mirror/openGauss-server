@@ -124,6 +124,10 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
     Relation rel = RelationIdGetRelation(relid);
     Form_pg_class classForm;
 
+    if (!ENABLE_TCAP_VERSION) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("timecapsule feature is not enabled.")));
+    }
     if (!RelationIsValid(rel)) {
         ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR),
             errmsg("could not open relation with OID %u", relid)));
