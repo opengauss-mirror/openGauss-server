@@ -49,7 +49,7 @@ extern Oid findPackageParameter(const char* objname);
 
 extern int plpgsql_getCustomErrorCode(void);
 
-extern PLpgSQL_row* build_row_from_class(Oid class_oid);
+extern PLpgSQL_row* build_row_from_class(Oid class_oid, PLpgSQL_expr** defaultvalues);
 
 extern int GetLineNumber(const char* procedureStr, int loc);
 

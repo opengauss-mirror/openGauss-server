@@ -12777,10 +12777,11 @@ parse_datatype(const char *string, int location)
 {
     Oid			type_id;
     int32		typmod;
+    int expr_len = 0;
     sql_error_callback_arg cbarg;
     ErrorContextCallback  syntax_errcontext;
     MemoryContext oldCxt = NULL;
-
+    PLpgSQL_type* datatype = NULL;
     cbarg.location = location;
     cbarg.leaderlen = 0;
 
@@ -12827,11 +12828,13 @@ parse_datatype(const char *string, int location)
     /* Okay, build a PLpgSQL_type data structure for it */
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile == NULL)
     {
-        return plpgsql_build_datatype(type_id, typmod, 0, typeDependExtend);
-    }
-
-    return plpgsql_build_datatype(type_id, typmod,
+        datatype = plpgsql_build_datatype(type_id, typmod, 0, typeDependExtend);
+    } else {
+        datatype = plpgsql_build_datatype(type_id, typmod,
                                   u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation, typeDependExtend);
+    }
+    datatype->defaultvalues = get_default_plpgsql_expr_from_typeoid(type_id, &expr_len);
+    return datatype;
 }
 
 /* Build a arrary_type by elem_type. */
@@ -13546,7 +13549,7 @@ static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr)
     n->is_not_null = false;
     n->is_from_type = false;
     n->storage = 0;
-    n->raw_default = NULL;
+    n->raw_default = attr->defaultvalue ? get_default_node_from_plpgsql_expr(attr->defaultvalue) : NULL;
     n->cooked_default = NULL;
     n->collClause = NULL;
     n->clientLogicColumnRef=NULL;

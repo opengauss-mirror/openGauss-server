@@ -783,6 +783,7 @@ test: plpgsql_array_of_record
 test: arrayinterface_ted
 test: function_default_test plpgsql_inout_param record_slow_sql_in_proc
 test: plpgsql_cursor_rowtype
+test: plpgsql_default_value_various_type
 test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param
 test: plpgsql_record_attrname
