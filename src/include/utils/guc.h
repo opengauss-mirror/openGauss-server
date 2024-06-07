@@ -153,6 +153,11 @@ struct config_enum_entry {
     bool hidden;
 };
 
+struct ignore_keyword_opt_data {
+    const char* option_name;
+    uint16 token;
+};
+
 /*
  * Signatures for per-variable check/assign/show hook functions
  */
@@ -555,6 +560,8 @@ extern char* SetVariableExprGetConfigOption(SetVariableExpr* set);
 #ifdef ENABLE_MULTIPLE_NODES
 extern const char* show_nodegroup_mode(void);
 #endif
+extern int16 semtc_get_ignore_keyword_token(const char* item);
+bool semtc_is_token_in_ignore_keyword_list(int token, bool isPlpgsqlKeyword = false);
 
 extern THR_LOCAL GucContext currentGucContext;
 

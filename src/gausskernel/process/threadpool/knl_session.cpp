@@ -478,6 +478,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
 
     utils_cxt->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
     InitSpiPrinttupDR(utils_cxt->spi_printtupDR);
+    utils_cxt->ignore_keyword_list = NIL;
 }
 
 static void knl_u_security_init(knl_u_security_context* sec_cxt) {

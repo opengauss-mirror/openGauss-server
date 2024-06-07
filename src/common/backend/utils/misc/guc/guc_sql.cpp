@@ -192,6 +192,8 @@ static bool check_snapshot_separator(char** newval, void** extra, GucSource sour
 static bool check_sql_ignore_strategy(char** newval, void** extra, GucSource source);
 static void assign_sql_ignore_strategy(const char* newval, void* extra);
 static void strategy_assign_vector_targetlist(int newval, void* extra);
+static bool check_disable_keyword_options(char **newval, void **extra, GucSource source);
+static void assign_disable_keyword_options(const char *newval, void *extra);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -2893,6 +2895,18 @@ static void InitSqlConfigureNamesString()
             check_behavior_compat_options,
             assign_behavior_compat_options,
             NULL},
+        {{"disable_keyword_options",
+          PGC_USERSET,
+          NODE_ALL,
+          COMPAT_OPTIONS,
+          gettext_noop("compatibility keyword options"),
+          NULL,
+          GUC_LIST_INPUT | GUC_REPORT},
+         &u_sess->attr.attr_sql.disable_keyword_string,
+         "",
+         check_disable_keyword_options,
+         assign_disable_keyword_options,
+         NULL},
         {{"plsql_compile_check_options",
             PGC_USERSET,
             NODE_SINGLENODE,
@@ -3663,6 +3677,73 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
     list_free(elemlist);
 
     u_sess->utils_cxt.behavior_compat_flags = result;
+}
+
+static bool check_disable_keyword_options(char **newval, void **extra, GucSource source)
+{
+    char *rawstring = NULL;
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+
+    /* Need a modifiable copy of string */
+    rawstring = pstrdup(*newval);
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        GUC_check_errdetail("invalid paramater for disable keyword information.");
+        pfree(rawstring);
+        list_free(elemlist);
+
+        return false;
+    }
+    MemoryContext old_context = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    foreach(cell, elemlist)
+    {
+        const char *item = (const char *)lfirst(cell);
+        int token = semtc_get_ignore_keyword_token(item);
+        if (token < 0) {
+            GUC_check_errdetail("invalid disable keyword \"%s\"", item);
+            MemoryContextSwitchTo(old_context);
+            pfree(rawstring);
+            list_free(elemlist);
+            return false;
+        }
+    }
+    MemoryContextSwitchTo(old_context);
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    return true;
+}
+
+static void assign_disable_keyword_options(const char *newval, void *extra)
+{
+    char *rawstring = NULL;
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+    List* result = NULL;
+
+    rawstring = pstrdup(newval);
+    (void)SplitIdentifierString(rawstring, ',', &elemlist);
+
+    list_free_ext(u_sess->utils_cxt.ignore_keyword_list);
+    MemoryContext old_context = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    foreach(cell, elemlist)
+    {
+        const char *item = (const char *)lfirst(cell);
+
+        int token = semtc_get_ignore_keyword_token(item);
+        if (token >= 0) {
+            result = lappend_int(result, token);
+        }
+    }
+    MemoryContextSwitchTo(old_context);
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    u_sess->utils_cxt.ignore_keyword_list = result;
 }
 
 /*

@@ -1,0 +1,29 @@
+create schema ignore_keyword_list;
+set current_schema to 'ignore_keyword_list';
+select 1 interval; --error
+ERROR:  syntax error at or near "interval"
+LINE 1: select 1 interval;
+                 ^
+set disable_keyword_options = 'interval';
+select 1 interval; --ok
+ interval 
+----------
+        1
+(1 row)
+
+set disable_keyword_options = 'intervalxx';
+ERROR:  invalid value for parameter "disable_keyword_options": "intervalxx"
+DETAIL:  invalid disable keyword "intervalxx"
+set disable_keyword_options = 'interval,interval';
+select 1 interval; --ok
+ interval 
+----------
+        1
+(1 row)
+
+reset disable_keyword_options;
+select 1 interval; --error
+ERROR:  syntax error at or near "interval"
+LINE 1: select 1 interval;
+                 ^
+drop schema ignore_keyword_list cascade;

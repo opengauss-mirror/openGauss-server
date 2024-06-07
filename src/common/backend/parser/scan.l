@@ -1128,8 +1128,9 @@ other			.
 
 					yyextra->is_hint_str = false;
 					bool isPlpgsqlKeyword = yyextra->isPlpgsqlKeyWord;
-
-					if (kwnum >= 0)
+					bool need_ignore = (!isPlpgsqlKeyword && kwnum >= 0) ?
+						semtc_is_token_in_ignore_keyword_list(yyextra->keyword_tokens[kwnum], false) : false;
+					if (kwnum >= 0 && !need_ignore)
 					{
 						yylval->keyword = GetScanKeyword(kwnum, yyextra->keywordlist);
                         uint16 token = yyextra->keyword_tokens[kwnum];

@@ -196,6 +196,7 @@ typedef struct knl_session_attr_sql {
     char* b_format_behavior_compat_string;
     char* behavior_compat_string;
     char* plsql_compile_behavior_compat_string;
+    char* disable_keyword_string;
     char* connection_info;
     char* retry_errcode_list;
     char* sql_ignore_strategy_string;

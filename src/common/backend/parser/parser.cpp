@@ -25,6 +25,7 @@
 
 #include "parser/gramparse.h"
 #include "parser/parser.h"
+#include "utils/guc.h"
 
 extern void resetOperatorPlusFlag();
 
@@ -799,3 +800,42 @@ char** get_next_snippet(
 
     return query_string_single;
 }
+
+const struct ignore_keyword_opt_data ignore_keywords[] = {
+    {"interval", INTERVAL}
+};
+#define INGORE_KEYWORDS_LEN (sizeof(ignore_keywords) / sizeof(struct ignore_keyword_opt_data))
+
+/*
+ * @Description: Avoid hooks, privides public interface, this can select ignore_keywords_list based on database
+ * compatibility to find ignore_keywords.
+ * @Param [IN] item: keyword
+ * @return token: token value for import item in ignore_keywords_list, if not in ignore_keywords_list, reutrn -1.
+ */
+int16 semtc_get_ignore_keyword_token(const char *item)
+{
+    const struct ignore_keyword_opt_data *ignore_keywords_list = ignore_keywords;
+    int ignore_keywords_length = (int)INGORE_KEYWORDS_LEN;
+
+    for (int i = 0; i < ignore_keywords_length; i++) {
+        if (strcmp(item, ignore_keywords_list[i].option_name) == 0) {
+            return ignore_keywords_list[i].token;
+        }
+    }
+    return -1;
+}
+
+bool semtc_is_token_in_ignore_keyword_list(int token, bool isPlpgsqlKeyword)
+{
+    ListCell *cell = NULL;
+    List *keyword_list = isPlpgsqlKeyword ? NULL : u_sess->utils_cxt.ignore_keyword_list;
+    foreach(cell, keyword_list)
+    {
+        int ignore_token = lfirst_int(cell);
+        if (token == ignore_token) {
+            return true;
+        }
+    }
+    return false;
+}
+

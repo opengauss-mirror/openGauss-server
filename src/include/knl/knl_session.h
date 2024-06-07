@@ -696,6 +696,7 @@ typedef struct knl_u_utils_context {
 
     /* var in tsrank.cpp */
     float tsrankWs[TSRANK_WEIGHTS_LEN];
+    List* ignore_keyword_list;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
