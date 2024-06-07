@@ -90,6 +90,7 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
             uint64 undoSize = (g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize) * BLCKSZ /
                 (1024 * 1024);
             uint64 limitSize = u_sess->attr.attr_storage.undo_space_limit_size * BLCKSZ / (1024 * 1024);
+            smgrclose(reln);
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
                 "undo space size %luM > limit size %luM. Please increase the undo_space_limit_size."),
                 undoSize, limitSize)));
@@ -100,7 +101,8 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         tail += segSize;
     }
-
+    
+    smgrclose(reln);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
         "entxend undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu."),
         g_instance.undo_cxt.undoTotalSize, zid, dbId, offset)));
@@ -211,7 +213,7 @@ void UndoSpace::CreateNonExistsUndoFile(int zid, uint32 dbId)
  */
 void UndoSpace::CheckPointUndoSpace(int fd, UndoSpaceType type)
 {
-    Assert(fd > 0);
+    Assert(fd >= 0);
     bool retry = false;
     bool needFlushMetaPage = false;
     uint32 ret = 0;
@@ -359,7 +361,7 @@ void UndoSpace::CheckPointUndoSpace(int fd, UndoSpaceType type)
 
 void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
 {
-    Assert(fd > 0);
+    Assert(fd >= 0);
     int rc = 0;
     uint32 zoneId = 0;
     uint32 spaceMetaSize = 0;

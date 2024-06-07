@@ -390,6 +390,7 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
         return false;
     }
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    uint32 saveCritSectionCount = t_thrd.int_cxt.CritSectionCount;
     MemoryContext currentContext = CurrentMemoryContext;
     PG_TRY();
     {
@@ -403,6 +404,7 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
     PG_CATCH();
     {
         MemoryContext oldContext = MemoryContextSwitchTo(currentContext);
+        t_thrd.int_cxt.CritSectionCount = saveCritSectionCount;
         if (BufferIsValid(urec->Buff())) {
             if (urec->Buff() == *buffer) {
                 *buffer = InvalidBuffer;

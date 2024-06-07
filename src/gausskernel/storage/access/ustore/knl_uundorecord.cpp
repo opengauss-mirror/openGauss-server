@@ -482,6 +482,7 @@ static UndoRecordState LoadUndoRecord(UndoRecord *urec, TransactionId *lastXid)
     }
 
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    uint32 saveCritSectionCount = t_thrd.int_cxt.CritSectionCount;
     MemoryContext currentContext = CurrentMemoryContext;
     PG_TRY();
     {
@@ -495,6 +496,7 @@ static UndoRecordState LoadUndoRecord(UndoRecord *urec, TransactionId *lastXid)
     PG_CATCH();
     {
         MemoryContext oldContext = MemoryContextSwitchTo(currentContext);
+        t_thrd.int_cxt.CritSectionCount = saveCritSectionCount;
         state = undo::CheckUndoRecordValid(urec->Urp(), true, lastXid);
         if (state == UNDO_RECORD_DISCARD || state == UNDO_RECORD_FORCE_DISCARD) {
             t_thrd.undo_cxt.fetchRecord = false;

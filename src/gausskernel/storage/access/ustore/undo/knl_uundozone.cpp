@@ -459,7 +459,7 @@ static void GetMetaFromUzone(UndoZone *uzone, UndoZoneMetaInfo *uspMetaPointer)
  */
 void UndoZone::CheckPointUndoZone(int fd)
 {
-    Assert(fd > 0);
+    Assert(fd >= 0);
     bool retry = false;
     bool needFlushMetaPage = false;
     int rc = 0;
@@ -669,7 +669,7 @@ void InitUndoSpace(UndoZone *uzone, UndoSpaceType type)
 
 void UndoZone::RecoveryUndoZone(int fd)
 {
-    Assert(fd > 0);
+    Assert(fd >= 0);
     int rc = 0;
     uint32 zoneId = 0;
     uint32 zoneMetaSize = 0;
