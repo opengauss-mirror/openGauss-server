@@ -3993,7 +3993,8 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
     char path[MAXPGPATH];
     char tmppath[MAXPGPATH];
     char *zbuffer = NULL;
-    char *ss_zbuffer = NULL;
+    char* ss_zero_buffer_raw = NULL;
+    char* ss_zero_buffer = NULL;
     char zbuffer_raw[XLOG_BLCKSZ + ALIGNOF_BUFFER];
     XLogSegNo installed_segno;
     int max_advance;
@@ -4064,7 +4065,6 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
     securec_check(rc, "\0", "\0");
 
     if (is_dss_fd(fd)) {
-        char ssZeroBuffer[SS_XLOG_WRITE_ZERO_STEP + ALIGNOF_BUFFER];
         /* extend file and fill space at once to avoid performance issue */
         pgstat_report_waitevent(WAIT_EVENT_WAL_INIT_WRITE);
         errno = 0;
@@ -4079,17 +4079,17 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
         if (g_instance.wal_cxt.ssZeroBuffer != NULL) {
-            ss_zbuffer = (char *)BUFFERALIGN(g_instance.wal_cxt.ssZeroBuffer);
+            ss_zero_buffer = (char *)BUFFERALIGN(g_instance.wal_cxt.ssZeroBuffer);
         } else {
-            ss_zbuffer = (char *)BUFFERALIGN(ssZeroBuffer);
-            rc = memset_s(ss_zbuffer, SS_XLOG_WRITE_ZERO_STEP, 0, SS_XLOG_WRITE_ZERO_STEP);
-            securec_check(rc, "\0", "\0");
+            /* If we run without initializing wal_cxt, such as BootStrap mode */
+            ss_zero_buffer_raw = (char*)palloc0(SS_XLOG_WRITE_ZERO_STEP + ALIGNOF_BUFFER);
+            ss_zero_buffer = (char *)BUFFERALIGN(ss_zero_buffer_raw);
         }
         /* zero-file the file after ftruncate */
         for (nbytes = 0; (uint32)nbytes < XLogSegSize; nbytes += SS_XLOG_WRITE_ZERO_STEP) {
             errno = 0;
             pgstat_report_waitevent(WAIT_EVENT_WAL_INIT_WRITE);
-            if ((int)write(fd, ss_zbuffer, SS_XLOG_WRITE_ZERO_STEP) != (int)SS_XLOG_WRITE_ZERO_STEP) {
+            if ((int)write(fd, ss_zero_buffer, SS_XLOG_WRITE_ZERO_STEP) != (int)SS_XLOG_WRITE_ZERO_STEP) {
                 int save_errno = errno;
 
                 /* If we fail to make the file, delete it to release disk space */
@@ -4102,6 +4102,10 @@ static int XLogFileInitInternal(XLogSegNo logsegno, bool *use_existent, bool use
                                                                     tmppath, TRANSLATE_ERRNO)));
             }
             pgstat_report_waitevent(WAIT_EVENT_END);
+        }
+        if (ss_zero_buffer_raw != NULL) {
+            ss_zero_buffer = NULL;
+            pfree(ss_zero_buffer_raw);
         }
     } else {
         for (nbytes = 0; (uint32)nbytes < XLogSegSize; nbytes += XLOG_BLCKSZ) {
