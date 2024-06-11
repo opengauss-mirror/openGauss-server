@@ -903,7 +903,6 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
          * Count dead or recently dead tuple in result and update the space
          * that can be freed.
          */
-        ndeleted++;
         Assert(!TransactionIdIsValid(xid) || !TransactionIdIsInProgress(xid));
         if (TransactionIdIsValid(xid) && TransactionIdIsInProgress(xid)) {
             ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
@@ -917,6 +916,7 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
     /* Record dead item */
     if (tupdead) {
         UHeapPruneRecordDead(prstate, offnum, relbuf->relation);
+        ndeleted++;
     }
 
     /* Record deleted item */

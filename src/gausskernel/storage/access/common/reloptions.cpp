@@ -2236,8 +2236,8 @@ static void ValidateStrOptOrientation(const char *val)
  */
 static void ValidateStrOptIndexsplit(const char *val)
 {
-    if (pg_strncasecmp(val, INDEXSPLIT_OPT_DEFAULT, strlen(val)) != 0 &&
-        pg_strncasecmp(val, INDEXSPLIT_OPT_INSERTPT, strlen(val)) != 0) {
+    if (pg_strcasecmp(val, INDEXSPLIT_OPT_DEFAULT) != 0 &&
+        pg_strcasecmp(val, INDEXSPLIT_OPT_INSERTPT) != 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"INDEXSPLIT\" option"),
             errdetail("Valid string are \"default\", \"insertpt\".")));
     }

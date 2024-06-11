@@ -439,10 +439,9 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
                         lsn, recycleXid, g_recycleLoops, recycleXmin)));
             }
             END_CRIT_SECTION();
-
-            zone->UnlockUndoZone();
             zone->ReleaseSpace(startUndoPtr, endUndoPtr, &g_forceRecycleSize);
             zone->ReleaseSlotSpace(start, recycle, &g_forceRecycleSize);
+            zone->UnlockUndoZone();
         } else {
             /* zone has nothing to recycle. */
             break;

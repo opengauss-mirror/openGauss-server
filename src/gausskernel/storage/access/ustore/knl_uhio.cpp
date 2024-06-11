@@ -424,6 +424,7 @@ start:
         /* Temporarily tell other backends we are working on this subset.
          * pg_atomic_exchange_u32 should return the old value.
         */
+        pgStatInfo->startBlockIndex = (uint32)random() % START_BLOCK_ARRAY_SIZE;
         uint32 index = pgStatInfo->startBlockIndex;
         BlockNumber startBlkno = pg_atomic_exchange_u32(&pgStatInfo->startBlockArray[index],
                                                         InvalidBlockNumber);

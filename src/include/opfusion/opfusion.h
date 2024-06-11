@@ -71,6 +71,8 @@ public:
 
     static void setCurrentOpFusionObj(OpFusion* obj);
 
+    static void setOpFusionReuseObj(OpFusion* obj);
+
     static bool process(int op, StringInfo msg, char* completionTag, bool isTopLevel, bool* isQueryCompleted);
 
     static void SaveInGPC(OpFusion* obj);

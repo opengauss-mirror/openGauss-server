@@ -310,6 +310,11 @@ void OpFusion::setCurrentOpFusionObj(OpFusion *obj)
     u_sess->exec_cxt.CurrentOpFusionObj = obj;
 }
 
+void OpFusion::setOpFusionReuseObj(OpFusion *obj)
+{
+    u_sess->opfusion_reuse_ctx.opfusionObj = obj;
+}
+
 void OpFusion::checkPermission()
 {
     bool check = false;
@@ -1112,6 +1117,7 @@ void OpFusion::tearDown(OpFusion *opfusion)
     delete opfusion;
 
     OpFusion::setCurrentOpFusionObj(NULL);
+    OpFusion::setOpFusionReuseObj(NULL);
 }
 
 void OpFusion::clearForCplan(OpFusion *opfusion, CachedPlanSource *psrc)
