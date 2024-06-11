@@ -8326,7 +8326,7 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel)
     {
         UndoSlotPtr slotPtr = t_thrd.undo_cxt.slotPtr[pLevel];
         ExecuteUndoActions(slot->XactId(), s->latest_urp[pLevel], s->first_urp[pLevel],
-            slotPtr, !IsSubTransaction());
+            slotPtr, !IsSubTransaction(), pLevel);
     }
     PG_CATCH();
     {
@@ -8374,16 +8374,32 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel)
 void ApplyUndoActions()
 {
     TransactionState s = CurrentTransactionState;
+    bool needRollback = false;
+    undo::TransactionSlot *slot = NULL;
+    TransactionId topXid = GetTopTransactionIdIfAny();
 
-    if (!s->perform_undo) {
+    for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+        if (s->latest_urp[i] || (!IsSubTransaction() && t_thrd.undo_cxt.slotPtr[i] != INVALID_UNDO_SLOT_PTR)) {
+            slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[i]);
+            Assert(slot != NULL && topXid == slot->XactId());
+            if (slot != NULL && topXid == slot->XactId()) {
+                needRollback = true;
+                break;
+            }
+        }
+    }
+
+    if (!needRollback) {
         return;
     }
 
     if (t_thrd.xact_cxt.executeSubxactUndo) {
         ereport(WARNING, (errmodule(MOD_USTORE),
-            errmsg("Failed to execute undo for subxact, rollback of the entire transaction will be done by "
+            errmsg("[Rollback skip] xid(%ld), curxid(%lu), start(%lu), end(%lu). "
+                "Failed to execute undo for subxact, rollback of the entire transaction will be done by "
                 "asynchronous rollback or page-level rollback. Remark info, firstUrp(%lu,%lu,%lu), "
                 "lastestUrp(%lu,%lu,%lu), lastestXactUrp(%lu,%lu,%lu).",
+                slot->XactId(), GetTopTransactionIdIfAny(), slot->StartUndoPtr(), slot->EndUndoPtr(),
                 s->first_urp[0], s->first_urp[1], s->first_urp[UNDO_PERSISTENCE_LEVELS - 1],
                 s->latest_urp[0], s->latest_urp[1], s->latest_urp[UNDO_PERSISTENCE_LEVELS - 1],
                 s->latest_urp_xact[0], s->latest_urp_xact[1], s->latest_urp_xact[UNDO_PERSISTENCE_LEVELS - 1])));
@@ -8426,10 +8442,29 @@ void ApplyUndoActions()
     s->state = TRANS_UNDO;
 
     for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+        slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[i]);
+        if (slot == NULL) {
+            continue;
+        }
         if (s->latest_urp[i]) {
             WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
             TryExecuteUndoActions(s, (UndoPersistence)i);
             pgstat_report_waitstatus(oldStatus);
+        } else if (!IsSubTransaction() && t_thrd.undo_cxt.slotPtr[i] != INVALID_UNDO_SLOT_PTR) {
+            Assert(slot != NULL && topXid == slot->XactId());
+            if (slot != NULL && topXid == slot->XactId()) {
+                ereport(WARNING, (errmodule(MOD_USTORE),
+                    errmsg("[Rollback skip] xid(%ld), curxid(%lu), start(%lu), end(%lu). "
+                        "There is no undo record in the top-level transaction. "
+                        "FirstUrp(%lu,%lu,%lu), lastestUrp(%lu,%lu,%lu), lastestXactUrp(%lu,%lu,%lu).",
+                        slot->XactId(), GetTopTransactionIdIfAny(), slot->StartUndoPtr(), slot->EndUndoPtr(),
+                        s->first_urp[0], s->first_urp[1], s->first_urp[UNDO_PERSISTENCE_LEVELS - 1],
+                        s->latest_urp[0], s->latest_urp[1], s->latest_urp[UNDO_PERSISTENCE_LEVELS - 1],
+                        s->latest_urp_xact[0], s->latest_urp_xact[1], s->latest_urp_xact[UNDO_PERSISTENCE_LEVELS - 1])));
+                UndoRecPtr prev = undo::GetPrevUrp(slot->EndUndoPtr());
+                (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), true, true);
+                undo::UpdateRollbackFinish(t_thrd.undo_cxt.slotPtr[i]);
+            }
         }
     }
 
@@ -8471,6 +8506,17 @@ extern void ResetUndoActionsInfo(void)
         CurrentTransactionState->first_urp[i] = INVALID_UNDO_REC_PTR;
         CurrentTransactionState->latest_urp[i] = INVALID_UNDO_REC_PTR;
         CurrentTransactionState->latest_urp_xact[i] = INVALID_UNDO_REC_PTR;
+    }
+
+    if (IsSubTransaction()) {
+        return;
+    }
+
+    t_thrd.undo_cxt.transUndoSize = 0;
+    for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+        t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
+        t_thrd.undo_cxt.slots[i] = NULL;
+        t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
     }
 }
 

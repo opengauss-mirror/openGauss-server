@@ -72,8 +72,10 @@ bool IsRollbackRequestHashFull();
 bool AddRollbackRequest(TransactionId xid, UndoRecPtr fromAddr, UndoRecPtr toAddr, Oid dbid, UndoSlotPtr slotPtr);
 bool RemoveRollbackRequest(TransactionId xid, UndoRecPtr startAddr, ThreadId pid);
 void ReportFailedRollbackRequest(TransactionId xid, UndoRecPtr fromAddr, UndoRecPtr toAddr, Oid dbid);
+bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
+    bool isTopTxn, bool isVerify);
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr, UndoSlotPtr slotPtr,
-    bool nopartial);
+    bool nopartial, UndoPersistence plevel);
 void ExecuteUndoActionsPage(UndoRecPtr urp, Relation relation, Buffer buf, TransactionId xid);
 int UHeapUndoActions(URecVector *urecvector, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
     BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);

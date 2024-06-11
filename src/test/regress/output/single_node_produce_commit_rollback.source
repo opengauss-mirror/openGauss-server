@@ -1513,6 +1513,8 @@ exception when others then
 end;
 /
 call p1_test_ustore();
+--?ARNING:  [Rollback skip] xid(.*), curxid(.*), start(.*), end(.*). There is no undo record in the top-level transaction. FirstUrp(.*), lastestUrp(.*), lastestXactUrp(.*).
+CONTEXT:  PL/pgSQL function p1_test_ustore() line 6 at ROLLBACK
  p1_test_ustore 
 ----------------
  

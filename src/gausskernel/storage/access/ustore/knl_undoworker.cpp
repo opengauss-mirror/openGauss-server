@@ -153,7 +153,7 @@ static void UndoPerformWork(UndoWorkInfo undowork)
             undowork->startUndoPtr, undowork->endUndoPtr);
         ExecuteUndoActions(undowork->xid, undowork->startUndoPtr, /* last undorecord created in the txn */
             undowork->endUndoPtr,                                 /* first undorecord created in the txn */
-            undowork->slotPtr, true);
+            undowork->slotPtr, true, UNDO_PERSISTENT_BUTT);
     }
     PG_CATCH();
     {

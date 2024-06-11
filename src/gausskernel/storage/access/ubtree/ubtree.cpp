@@ -1348,5 +1348,13 @@ bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool nee
     int64 newBase = oldestXmin - FirstNormalTransactionId; /* reserve 3 more xid for Invalid/Bootstrap/Frozen */
     int64 delta = newBase - curBase;
     IndexPageShiftBase(rel, page, delta, needWal, buf);
+    
+    if (xid < opaque->xid_base + FirstNormalTransactionId || xid > opaque->xid_base + MaxShortTransactionId) {
+        ereport(ERROR, (errcode(ERRCODE_CANNOT_MODIFY_XIDBASE),
+                        errmsg("Page fix failed. \"%s\", now xid is %lu,"
+                               "page xid base is %lu, oldestXmin is %lu.",
+                               RelationGetRelationName(rel), xid, opaque->xid_base, oldestXmin)));
+    }
+    
     return hasPruned;
 }

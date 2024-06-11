@@ -46,6 +46,7 @@
 #include "gssignal/gs_signal.h"
 #include "access/ustore/knl_undoworker.h"
 #include "access/ustore/knl_undorequest.h"
+#include "access/gtm.h"
 
 #define InvalidPid ((ThreadId)(-1))
 
@@ -196,6 +197,16 @@ void UndoWorkerShmemInit(void)
     }
 }
 
+void UndoLuncherQuitAndClean(int code, Datum arg)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    CloseGTM();
+#endif
+    ereport(LOG, (errmsg("undo launcher shutting down")));
+    t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_launcher_pid = 0;
+    DisownLatch(&t_thrd.undolauncher_cxt.UndoWorkerShmem->latch);
+}
+
 NON_EXEC_STATIC void UndoLauncherMain()
 {
     sigjmp_buf localSigjmpBuf;
@@ -255,6 +266,8 @@ NON_EXEC_STATIC void UndoLauncherMain()
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(NULL, InvalidOid, NULL);
     t_thrd.proc_cxt.PostInit->InitUndoLauncher();
+
+    on_proc_exit(UndoLuncherQuitAndClean, 0);
 
     SetProcessingMode(NormalProcessing);
 
@@ -316,8 +329,5 @@ NON_EXEC_STATIC void UndoLauncherMain()
     }
 
 shutdown:
-    ereport(LOG, (errmsg("undo launcher shutting down")));
-    t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_launcher_pid = 0;
-    DisownLatch(&t_thrd.undolauncher_cxt.UndoWorkerShmem->latch);
     proc_exit(0);
 }

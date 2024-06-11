@@ -44,26 +44,14 @@ static int GetUndoApplySize()
     return (int)applySize;
 }
 
-/*
- * execute_undo_actions - Execute the undo actions
- *
- * xid - Transaction id that is getting rolled back.
- * fromUrecptr - undo record pointer from where to start applying undo action.
- * toUrecptr   - undo record pointer upto which point apply undo action.
- * isTopTxn    - true if rollback is for top transaction.
- */
-void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
-    UndoSlotPtr slotPtr, bool isTopTxn)
+bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
+    bool isTopTxn, bool isVerify)
 {
-    Assert(toUrecptr != INVALID_UNDO_REC_PTR && fromUrecptr != INVALID_UNDO_REC_PTR);
-    Assert(slotPtr != INVALID_UNDO_REC_PTR);
-    Assert(fullXid  != InvalidTransactionId);
+    if (isVerify && u_sess->attr.attr_storage.ustore_verify_level < USTORE_VERIFY_FAST) {
+        return true;
+    }
     int undoApplySize = GetUndoApplySize();
     UndoRecPtr urecPtr = fromUrecptr;
-    VerifyMemoryContext();
-    UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
-    urec->SetUrp(toUrecptr);
-    urec->SetMemoryContext(CurrentMemoryContext);
 
     if (isTopTxn) {
         /*
@@ -78,18 +66,23 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
          * worker processed it and backend tries to process it some later
          * point.
          */
+        VerifyMemoryContext();
+        UndoRecord *urec = New(CurrentMemoryContext) UndoRecord();
+        urec->SetMemoryContext(CurrentMemoryContext);
+        urec->SetUrp(toUrecptr);
         UndoTraversalState rc = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
             InvalidTransactionId, false, NULL);
+         DELETE_EX(urec);
         /* already processed. */
         if (rc != UNDO_TRAVERSAL_COMPLETE) {
-            DELETE_EX(urec);
-            return;
+            ereport(ERROR, (errmodule(MOD_USTORE),
+                errmsg("[Rollbakc Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu), rc(%d)",
+                    fullXid, toUrecptr, fromUrecptr, rc)));
+            return false;
         }
     }
 
-    DELETE_EX(urec);
-
-    /*
+/*
      * Fetch the multiple undo records which can fit into uur_segment; sort
      * them in order of reloid and block number then apply them together
      * page-wise. Repeat this until we get invalid undo record pointer.
@@ -112,16 +105,23 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
          * for this transaction, otherwise we need to fetch the next batch of
          * the undo records.
          */
-        if (!IS_VALID_UNDO_REC_PTR(urecPtr))
+        if (!IS_VALID_UNDO_REC_PTR(urecPtr)){
             break;
+        }
+            
 
         /*
          * Fetch multiple undo record in bulk.
          * This will return a URecVector which contains an array of UndoRecords.
          */
         URecVector *urecvec = FetchUndoRecordRange(&urecPtr, toUrecptr, undoApplySize, false);
-        if (urecvec->Size() == 0)
+        if (urecvec->Size() == 0){
+            ereport(ERROR, (errmodule(MOD_USTORE),
+                errmsg("[Rollbakc Skip]: xid(%lu), toUrecptr(%lu), fromUrecptr(%lu)",
+                    fullXid, toUrecptr, fromUrecptr)));
             break;
+        }
+           
 
         if (isTopTxn && !IS_VALID_UNDO_REC_PTR(urecPtr)) {
             containsFullChain = true;
@@ -136,7 +136,6 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
         int i = 0;
         for (i = 0; i < urecvec->Size(); i++) {
             UndoRecord *uur = (*urecvec)[i];
-
             if (currRelfilenode != InvalidOid && (currTablespace != uur->Tablespace() ||
                 currRelfilenode != uur->Relfilenode() || currBlkno != uur->Blkno())) {
                 preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid,
@@ -157,8 +156,35 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
 
         DELETE_EX(urecvec);
     } while (true);
+    
+    return true;
+}
+/*
+ * execute_undo_actions - Execute the undo actions
+ *
+ * xid - Transaction id that is getting rolled back.
+ * fromUrecptr - undo record pointer from where to start applying undo action.
+ * toUrecptr   - undo record pointer upto which point apply undo action.
+ * isTopTxn    - true if rollback is for top transaction.
+ */
+void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
+    UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel)
+{
+    Assert(toUrecptr != INVALID_UNDO_REC_PTR && fromUrecptr != INVALID_UNDO_REC_PTR);
+    Assert(slotPtr != INVALID_UNDO_REC_PTR);
+    Assert(fullXid  != InvalidTransactionId);
+    if (!VerifyAndDoUndoActions(fullXid, fromUrecptr, toUrecptr, isTopTxn, false)) {
+        return;
+    }
 
     if (isTopTxn) {
+        if (plevel != UNDO_PERSISTENT_BUTT) {
+            undo::TransactionSlot *slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[plevel]);
+            UndoRecPtr prev = undo::GetPrevUrp(slot->EndUndoPtr());
+            if (prev != fromUrecptr || slot->StartUndoPtr() != toUrecptr) {
+                (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), isTopTxn, true);
+            }
+        }
         undo::UpdateRollbackFinish(slotPtr);
     }
 }

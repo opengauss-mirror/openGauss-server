@@ -7109,6 +7109,23 @@ bool RecheckIndexTuple(const IndexScanDesc scan, TupleTableSlot *slot)
     bool result = IndexTupleSize(itup) == IndexTupleSize(trueItup) &&
                   memcmp(itup, trueItup, IndexTupleSize(itup)) == 0;
 
+    if (so->indexInfo->ii_Predicate != NIL) {
+        List* predicate = NIL;
+        predicate = so->indexInfo->ii_PredicateState;
+        if (predicate == NIL) {
+            if (so->fakeEstate->es_is_flt_frame) {
+                predicate = (List*)ExecPrepareQualByFlatten(so->indexInfo->ii_Predicate, so->fakeEstate);
+            } else {
+                predicate = (List*)ExecPrepareExpr((Expr*)so->indexInfo->ii_Predicate, so->fakeEstate);
+            }
+            so->indexInfo->ii_PredicateState = predicate;
+        }
+
+        if (!ExecQual(predicate, econtext, false)) {
+            result = false;
+        }
+    }
+
     /* be tidy */
     MemoryContextSwitchTo(oldContext);
     ResetExprContext(econtext); /* reset per tuple context */

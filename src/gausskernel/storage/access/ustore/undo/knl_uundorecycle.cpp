@@ -87,7 +87,7 @@ void UndoShutdownHandler(SIGNAL_ARGS)
 bool AsyncRollback(UndoZone *zone, UndoSlotPtr recycle, TransactionSlot *slot)
 {
     if (slot->NeedRollback()) {
-        if (zone->GetPersitentLevel() == UNDO_TEMP || zone->GetPersitentLevel() == UNDO_UNLOGGED) {
+        if (zone->GetPersitentLevel() == UNDO_TEMP) {
             return true;
         }
         if (!u_sess->attr.attr_storage.enable_ustore_async_rollback) {
