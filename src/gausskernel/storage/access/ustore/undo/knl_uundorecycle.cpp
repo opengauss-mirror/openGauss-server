@@ -420,6 +420,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
             zone->SetRecycleTSlotPtr(recycle);
             Assert(zone->GetForceDiscardURecPtr() <= zone->GetInsertURecPtr());
             result = true;
+            XLogRecPtr lsn = InvalidXLogRecPtr;
 
             if (needWal) {
                 zone->MarkDirty();
@@ -430,7 +431,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
                 xlrec.recycledXid = recycleXid;
                 xlrec.oldestXmin = recycleXmin;
                 xlrec.endUndoPtr = endUndoPtr;
-                XLogRecPtr lsn = WriteUndoXlog(&xlrec, XLOG_UNDO_DISCARD);
+                lsn = WriteUndoXlog(&xlrec, XLOG_UNDO_DISCARD);
                 zone->SetLSN(lsn);
                 ereport(DEBUG1,
                     (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d recycle slot start %lu end %lu from slot %lu "
@@ -439,6 +440,11 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
                         lsn, recycleXid, g_recycleLoops, recycleXmin)));
             }
             END_CRIT_SECTION();
+            if (lsn != InvalidXLogRecPtr) {
+                XLogWaitFlush(lsn);
+            }
+
+            zone->UnlockUndoZone();
             zone->ReleaseSpace(startUndoPtr, endUndoPtr, &g_forceRecycleSize);
             zone->ReleaseSlotSpace(start, recycle, &g_forceRecycleSize);
             zone->UnlockUndoZone();

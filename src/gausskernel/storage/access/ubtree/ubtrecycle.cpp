@@ -418,7 +418,12 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
 Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress *addr)
 {
     TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
-
+    if (RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
+        TransactionId frozenXid = g_instance.undo_cxt.globalFrozenXid;
+        TransactionId recycleXid = g_instance.undo_cxt.globalRecycleXid;
+        TransactionId waterLevelXid = ((forkNumber == RECYCLE_EMPTY_FORK) ? recycleXid : frozenXid);
+        oldestXmin = Min(oldestXmin, waterLevelXid);
+    }
     Buffer queueBuf = RecycleQueueGetEndpointPage(rel, forkNumber, true, BT_READ);
 
     Buffer indexBuf = InvalidBuffer;

@@ -98,6 +98,9 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del_bl
     }
 
     TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    if (RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
+         GetOldestXminForUndo(&oldestXmin);
+    }
     Assert(TransactionIdIsValid(oldestXmin));
 
     /*
@@ -209,7 +212,8 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
         }
 
         /* check visibility and record dead tuples */
-        if (UBTreePruneItem(page, offnum, oldestXmin, &prstate)) {
+        if (UBTreePruneItem(page, offnum, oldestXmin, &prstate,
+            RelationGetNamespace(rel) == PG_TOAST_NAMESPACE)) {
             activeTupleCount++;
         }
     }
@@ -289,7 +293,8 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
  *
  * The return value indicates whether the item is active.
  */
-bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate)
+bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate,
+    bool isToast)
 {
     TransactionId xmin, xmax;
     bool isDead = false;
@@ -297,7 +302,7 @@ bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, I
     bool xmaxCommitted = false;
 
     isDead = UBTreeItupGetXminXmax(page, offnum, oldestXmin, &xmin, &xmax,
-        &xminCommitted, &xmaxCommitted);
+        &xminCommitted, &xmaxCommitted, isToast);
     /*
     * INDEXTUPLE_DEAD: xmin invalid || xmax frozen
     * INDEXTUPLE_DELETED: xmax valid && xmax committed
@@ -819,7 +824,8 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                     bool xmaxVisible = false;
 
                     isdead = UBTreeItupGetXminXmax(page, offset, InvalidTransactionId,
-                                                   &xmin, &xmax, &xminCommitted, &xmaxCommitted);
+                                                   &xmin, &xmax, &xminCommitted, &xmaxCommitted,
+                                                   RelationGetNamespace(rel) == PG_TOAST_NAMESPACE);
 
                     /* here we guarantee the same semantics as UNIQUE_CHECK_PARTIAL */
                     if (checkUnique == UNIQUE_CHECK_PARTIAL) {
@@ -2042,7 +2048,8 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
                 bool xminCommitted = false;
                 bool xmaxCommitted = false;
                 isDead = UBTreeItupGetXminXmax(page, offset, InvalidTransactionId,
-                                               &xmin, &xmax, &xminCommitted, &xmaxCommitted);
+                                               &xmin, &xmax, &xminCommitted, &xmaxCommitted,
+                                               RelationGetNamespace(rel) == PG_TOAST_NAMESPACE);
 
                 if (!isDead && ItemPointerEquals(&itup->t_tid, &curitup->t_tid) && !TransactionIdIsValid(xmax)) {
                     /* check partOid match for global index */

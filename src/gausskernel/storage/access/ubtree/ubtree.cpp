@@ -1229,7 +1229,11 @@ void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned,
     int nfrozen = 0;
     OffsetNumber nowfrozen[MaxIndexTuplesPerPage];
     if (!TransactionIdIsValid(oldestXmin)) {
-        oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+        if (RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
+            GetOldestXminForUndo(&oldestXmin);
+        } else {
+            oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+        }
     }
 
     WHITEBOX_TEST_STUB("FreezeSingleIndexPage", WhiteboxDefaultErrorEmit);
@@ -1339,6 +1343,10 @@ bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool nee
     }
 
     TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    if (RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
+        GetOldestXminForUndo(&oldestXmin);
+    }
+
     /* remove old xids first. we don't need to do this when creating index without valid rel and buf */
     if (rel != NULL && BufferIsValid(buf)) {
         FreezeSingleIndexPage(rel, buf, &hasPruned, oldestXmin);

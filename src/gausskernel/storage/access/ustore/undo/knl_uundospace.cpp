@@ -101,7 +101,6 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         tail += segSize;
     }
-    
     smgrclose(reln);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
         "entxend undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu."),
@@ -196,7 +195,8 @@ void UndoSpace::CreateNonExistsUndoFile(int zid, uint32 dbId)
         if (!smgrexists(reln, MAIN_FORKNUM, blockno)) {
             smgrextend(reln, MAIN_FORKNUM, blockno, NULL, false);
             ereport(DEBUG1, (errmodule(MOD_UNDO), 
-                errmsg(UNDOFORMAT("undo file not exists, zid %d, blockno=%u."), zid, blockno)));
+                errmsg(UNDOFORMAT("undo file not exists: zid %d, blockno %u, dbid %u."), 
+                    zid, blockno, dbId)));
             pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         }
         offset += segSize;

@@ -420,6 +420,7 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
         if (state == UNDO_RECORD_DISCARD || state == UNDO_RECORD_FORCE_DISCARD) {
             t_thrd.undo_cxt.fetchRecord = false;
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+            EmitErrorReport();
             FlushErrorState();
             return false;
         } else {

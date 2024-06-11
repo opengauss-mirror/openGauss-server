@@ -485,7 +485,8 @@ extern bool UBTreeDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex);
 
 extern bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del_blknos = NULL);
 extern bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTree *invisibleParts = NULL);
-extern bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate);
+extern bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate,
+    bool isToast);
 extern void UBTreePagePruneExecute(Page page, OffsetNumber* nowdead, int ndead, IndexPruneState* prstate,
     TransactionId oldest_xmin);
 extern void UBTreePageRepairFragmentation(Relation rel, BlockNumber blkno, Page page);
@@ -529,7 +530,7 @@ extern int	UBTreeKeepNattsFast(Relation rel, IndexTuple lastleft, IndexTuple fir
 extern bool UBTreeCheckNatts(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum);
 extern void BtCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page, IndexTuple newtup);
 extern bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_xmin, TransactionId *xmin,
-    TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted);
+    TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted, bool isToast);
 extern TransactionIdStatus UBTreeCheckXid(TransactionId xid);
 
 /*

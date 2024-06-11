@@ -387,7 +387,8 @@ static bool UBTreeVisibilityCheckWrap(IndexScanDesc scan, Page page, OffsetNumbe
     bool xminCommitted = false;
     bool xmaxCommitted = false;
     bool isDead = UBTreeItupGetXminXmax(page, offnum, InvalidTransactionId,
-                                        &xmin, &xmax, &xminCommitted, &xmaxCommitted);
+                                        &xmin, &xmax, &xminCommitted, &xmaxCommitted,
+                                        RelationGetNamespace(scan->indexRelation) == PG_TOAST_NAMESPACE);
 
     bool isVisible = !isDead;
     if (needVisibilityCheck && !isDead) {
@@ -448,7 +449,7 @@ TransactionIdStatus UBTreeCheckXid(TransactionId xid)
  * return (isDead)
  */
 bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_xmin, TransactionId *xmin,
-    TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted)
+    TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted, bool isToast)
 {
     ItemId iid = PageGetItemId(page, offnum);
     IndexTuple itup = (IndexTuple)PageGetItem(page, iid);
@@ -516,7 +517,11 @@ bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_
 
     /* if there is no passed oldest_xmin, we will ues the current oldest_xmin */
     if (!TransactionIdIsValid(oldest_xmin)) {
-        oldest_xmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+        if (isToast) {
+            GetOldestXminForUndo(&oldest_xmin);
+        } else {
+            oldest_xmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+        }
     }
     /* we can't do bypass in hotstandby read mode, or there will be different between index scan and seq scan */
     if (RecoveryInProgress()) {

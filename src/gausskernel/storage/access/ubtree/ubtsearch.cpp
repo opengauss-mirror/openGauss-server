@@ -387,6 +387,9 @@ static void UBTreeFixActiveTupleCount(Relation rel, Buffer buf, UBTPageOpaqueInt
     UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
     TransactionId xmin = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmin);
     TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    if (RelationGetNamespace(rel) == PG_TOAST_NAMESPACE) {
+        GetOldestXminForUndo(&oldestXmin);
+    }
     if (TransactionIdPrecedes(xmin, oldestXmin)) {
         if (UBTreeCheckXid(xmin) == XID_ABORTED) {
             ItemIdMarkDead(iid);
