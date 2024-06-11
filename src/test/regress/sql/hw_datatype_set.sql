@@ -879,7 +879,7 @@ select
 from
   test_collation2 as t2,
   test_collation2 as t3
-where t2.a = t3.a;
+where t2.a = t3.a order by 1;
 
 -- '<>'
 select a, b from test_collation_op where a <> b; -- set <> other set

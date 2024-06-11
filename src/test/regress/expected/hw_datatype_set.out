@@ -4428,13 +4428,13 @@ select
 from
   test_collation2 as t2,
   test_collation2 as t3
-where t2.a = t3.a;
+where t2.a = t3.a order by 1;
    a    |   a    
 --------+--------
- aaa    | aaa
- 高斯ss | 高斯ss
- 高斯SS | 高斯SS
  AAA    | AAA
+ aaa    | aaa
+ 高斯SS | 高斯SS
+ 高斯ss | 高斯ss
 (4 rows)
 
 -- '<>'

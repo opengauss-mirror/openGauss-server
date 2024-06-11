@@ -411,6 +411,17 @@ exception
 END;
 /
 call test_condition_7();
+drop table if exists test1;
+drop table if exists test2;
+create table test1 (c set('a','b','c','d'));
+insert into test1 values ('a'),('b'),('c'),('d');
+create table test2 (c set('d','c','b','a'));
+insert into test2 values ('a'),('b'),('c'),('d');
+set enable_nestloop=off;
+set enable_hashjoin=off;
+explain (costs off) select test1.c from test1, test2 where test1.c = test2.c order by 1;
+set enable_nestloop=on;
+set enable_hashjoin=on;
 \c regression
 drop trigger animal_trigger1;
 drop trigger if exists animal_trigger1;

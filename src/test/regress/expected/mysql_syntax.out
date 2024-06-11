@@ -526,6 +526,32 @@ NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
  
 (1 row)
 
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+drop table if exists test2;
+NOTICE:  table "test2" does not exist, skipping
+create table test1 (c set('a','b','c','d'));
+NOTICE:  CREATE TABLE will create implicit set "test1_c_set" for column "test1.c"
+insert into test1 values ('a'),('b'),('c'),('d');
+create table test2 (c set('d','c','b','a'));
+NOTICE:  CREATE TABLE will create implicit set "test2_c_set" for column "test2.c"
+insert into test2 values ('a'),('b'),('c'),('d');
+set enable_nestloop=off;
+set enable_hashjoin=off;
+explain (costs off) select test1.c from test1, test2 where test1.c = test2.c order by 1;
+                QUERY PLAN                
+------------------------------------------
+ Sort
+   Sort Key: test1.c
+   ->  Nested Loop
+         Join Filter: (test1.c = test2.c)
+         ->  Seq Scan on test1
+         ->  Materialize
+               ->  Seq Scan on test2
+(7 rows)
+
+set enable_nestloop=on;
+set enable_hashjoin=on;
 \c regression
 drop trigger animal_trigger1;
 ERROR:  drop trigger without table name only support in B-format database

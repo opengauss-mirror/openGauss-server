@@ -2105,7 +2105,7 @@ static void check_mergejoinable(RestrictInfo* restrictinfo)
     Expr* clause = restrictinfo->clause;
     Oid opno;
     Node* leftarg = NULL;
-
+    Node* rightarg = NULL;
     if (restrictinfo->pseudoconstant)
         return;
     if (!is_opclause(clause))
@@ -2115,6 +2115,22 @@ static void check_mergejoinable(RestrictInfo* restrictinfo)
 
     opno = ((OpExpr*)clause)->opno;
     leftarg = (Node*)linitial(((OpExpr*)clause)->args);
+    rightarg = (Node*)lsecond(((OpExpr*)clause)->args);
+    /* 
+     * For data of type set, using the merge join plan will result in inconsistent outcomes.
+     */
+    if (nodeTag(leftarg) == T_Var) {
+        Var* leftCol = (Var*)leftarg;
+        if (type_is_set(leftCol->vartype)) {
+            return;
+        }
+    }
+    if (nodeTag(rightarg) == T_Var) {
+        Var* rightCol = (Var*)rightarg;
+        if (type_is_set(rightCol->vartype)) {
+            return;
+        }     
+    }
     if (op_mergejoinable(opno, exprType(leftarg)) && !contain_volatile_functions((Node*)clause))
         restrictinfo->mergeopfamilies = get_mergejoin_opfamilies(opno);
 
