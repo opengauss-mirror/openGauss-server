@@ -439,11 +439,11 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
             if (IS_DN_MULTI_STANDYS_MODE() ||
                 (IS_DN_DUMMY_STANDYS_MODE() &&
                  !(WalSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY)))) {
-                ereport(WARNING,
+                    ereport(WARNING,
                         (errmsg("canceling wait for synchronous replication due to client is gs_rewind and "
                                 "secondary is not connected."),
                          errdetail("The transaction has already committed locally, but might not have been replicated "
-                                   "to the standby.")));
+                                   "to the standby, and is waitting for sync lsn %lu.", XactCommitLSN)));
                 t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
                 waitStopRes = STOP_WAIT;
                 break;
