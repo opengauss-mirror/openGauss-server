@@ -104,8 +104,15 @@ function query_standby2()
 
 function query_standby3()
 {
- echo query standby2
+ echo query standby3
  gs_ctl query -D  $data_dir/datanode3_standby
+
+}
+
+function query_standby4()
+{
+ echo query standby4
+ gs_ctl query -D  $standby4_data_dir
 
 }
 
