@@ -2212,7 +2212,7 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
             cnst->consttypmod = TupleDescAttr(tupdesc, i)->atttypmod;
             cnst->constcollid = attr->attcollation;
             cnst->constlen = attr->attlen;
-            cnst->constvalue = SPI_getbinval(rec->tup, tupdesc, i + 1, &isnull);
+            cnst->constvalue = rec->tup!=NULL ? SPI_getbinval(rec->tup, tupdesc, i + 1, &isnull) : NULL;
             cnst->constisnull = isnull;
             cnst->constbyval = attr->attbyval;
             cnst->location = -1; /* "unknown" */
