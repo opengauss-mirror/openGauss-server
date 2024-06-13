@@ -1403,7 +1403,15 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
      *            before we release the Exclusive lock.
      */
     UBTRecycleQueueAddress addr;
-    rbuf = UBTreeGetNewPage(rel, &addr);
+    NewPageState *npstate = NULL;
+    if (module_logging_is_on(MOD_UBT_NEWPAGE)) {
+        npstate = (NewPageState *)palloc0(sizeof(NewPageState));
+    }
+    rbuf = UBTreeGetNewPage(rel, &addr, npstate);
+    if (npstate != NULL) {
+        UBTreePrintNewPageState(npstate);
+        pfree(npstate);
+    }
 
     /*
      * origpage is the original page to be split.  leftpage is a temporary
@@ -2471,7 +2479,15 @@ static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
      *            before we release the Exclusive lock.
      */
     UBTRecycleQueueAddress addr;
-    rootbuf = UBTreeGetNewPage(rel, &addr);
+    NewPageState *npstate = NULL;
+    if (module_logging_is_on(MOD_UBT_NEWPAGE)) {
+        npstate = (NewPageState *)palloc0(sizeof(NewPageState));
+    }
+    rootbuf = UBTreeGetNewPage(rel, &addr, npstate);
+    if (npstate != NULL) {
+        UBTreePrintNewPageState(npstate);
+        pfree(npstate);
+    }
     rootpage = BufferGetPage(rootbuf);
     rootblknum = BufferGetBlockNumber(rootbuf);
 

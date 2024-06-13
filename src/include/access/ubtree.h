@@ -27,6 +27,7 @@
 #include "catalog/pg_index.h"
 #include "lib/stringinfo.h"
 #include "storage/buf/bufmgr.h"
+#include "datatype/timestamp.h"
 
 /*
  * prototypes for functions in ubtree.cpp (external entry points for ubtree)
@@ -475,6 +476,34 @@ typedef struct {
     OffsetNumber previousdead[MaxIndexTuplesPerPage];
 } IndexPruneState;
 
+typedef struct {
+    TimestampTz firstGetAvailablePageTime;
+    TimestampTz secondGetAvailablePageTime;
+    TimestampTz extendBlocksTime;
+    TimestampTz extendOneTime;
+    TimestampTz getHeadTime;
+    TimestampTz getAvailablePageOnPageTime;
+    TimestampTz getAvailablePageOnPageTimeMax;
+    uint32 firstGetAvailablePageCount;
+    uint32 secondGetAvailablePageCount;
+    uint32 bufferInvalidCount;
+    uint32 needLockCount;
+    uint32 extendBlocksCount;
+    uint32 extendBlocks;
+    uint32 extendOneCount;
+    uint32 queueCount;
+    uint32 itemsCount;
+    uint32 itemsValidCount;
+    uint32 itemsValidConditionalLockCount;
+    uint32 getAvailablePageOnPageCount;
+    uint32 firstGotoRestartCount;
+    uint32 secondGotoRestartCount;
+    uint32 checkNewCreatePagesCount;
+    uint32 getFromNewCreatePagesCount;
+    double avgTravelQueuePages;
+    double avgTravelQueueItems;
+} NewPageState;
+
 #define TXNINFOSIZE (sizeof(ShortTransactionId) * 2)
 
 /*
@@ -547,8 +576,8 @@ extern OffsetNumber UBTreeFindsplitloc(Relation rel, Buffer buf, OffsetNumber ne
 extern OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz,
     bool *newitemonleft, IndexTuple newitem);
 
-extern Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr);
-
+extern Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr, NewPageState* npState = NULL);
+extern void UBTreePrintNewPageState(NewPageState* npstate);
 /*
  * prototypes for functions in ubtxlog.cpp
  */
@@ -628,7 +657,8 @@ extern void UBTreeTryRecycleEmptyPage(Relation rel);
 extern void UBTreeRecordFreePage(Relation rel, BlockNumber blkno, TransactionId xid);
 extern void UBTreeRecordEmptyPage(Relation rel, BlockNumber blkno, TransactionId xid);
 extern void UBTreeRecordUsedPage(Relation rel, UBTRecycleQueueAddress addr);
-extern Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress* addr);
+extern Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress* addr,
+    NewPageState* npState = NULL);
 extern void UBTreeRecycleQueueInitPage(Relation rel, Page page, BlockNumber blkno, BlockNumber prevBlkno,
     BlockNumber nextBlkno);
 extern void UBtreeRecycleQueueChangeChain(Buffer buf, BlockNumber newBlkno, bool setNext);

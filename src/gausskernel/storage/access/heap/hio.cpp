@@ -129,7 +129,7 @@ void CheckRelation(const Relation relation, int* extraBlocks, int lockWaiters)
     }
 }
 
-static void UBtreeAddExtraBlocks(Relation relation, BulkInsertState bistate)
+static void UBtreeAddExtraBlocks(Relation relation, BulkInsertState bistate, NewPageState* npstate)
 {
     int extraBlocks = 0;
     int lockWaiters = RelationExtensionLockWaiterCount(relation);
@@ -137,6 +137,9 @@ static void UBtreeAddExtraBlocks(Relation relation, BulkInsertState bistate)
         return;
     }
     CheckRelation(relation, &extraBlocks, lockWaiters);
+    if (npstate != NULL) {
+        npstate->extendBlocks += (uint32)extraBlocks;
+    }
     while (extraBlocks-- >= 0) {
         /* Ouch - an unnecessary lseek() each time through the loop! */
         Buffer buffer = ReadBufferBI(relation, P_NEW, RBM_NORMAL, bistate);
@@ -145,7 +148,7 @@ static void UBtreeAddExtraBlocks(Relation relation, BulkInsertState bistate)
     }
 }
 
-void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
+void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate, NewPageState* npstate)
 {
     BlockNumber block_num = InvalidBlockNumber;
     BlockNumber first_block = InvalidBlockNumber;
@@ -155,7 +158,7 @@ void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
 
     if (RelationIsUstoreIndex(relation)) {
         /* ubtree, use another bypass */
-        UBtreeAddExtraBlocks(relation, bistate);
+        UBtreeAddExtraBlocks(relation, bistate, npstate);
         return;
     }
 

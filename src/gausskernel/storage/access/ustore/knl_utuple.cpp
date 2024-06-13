@@ -201,7 +201,7 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
             /* varlena */
             Pointer val = DatumGetPointer(values[i]);
 
-            diskTuple->flag |= HEAP_HASVARWIDTH;
+            diskTuple->flag |= UHEAP_HASVARWIDTH;
 
             if (VARATT_IS_EXTERNAL(val)) {
                 diskTuple->flag |= HEAP_HASEXTERNAL;
@@ -226,7 +226,7 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
                 securec_check(rc, "\0", "\0");
             }
         } else if (att[i].attlen == LEN_CSTRING) {
-            diskTuple->flag |= HEAP_HASVARWIDTH;
+            diskTuple->flag |= UHEAP_HASVARWIDTH;
             Assert(att[i].attalign == 'c');
             attrLength = strlen(DatumGetCString(values[i])) + 1;
             Assert(attrLength <= MaxPossibleUHeapTupleSize);

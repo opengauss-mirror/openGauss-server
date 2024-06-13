@@ -2645,8 +2645,8 @@ check_tup_satisfies_update:
         Assert(!UHeapTupleHasExternal(newtup));
         needToast = false;
     } else {
-        needToast = (newtup->disk_tuple_size >= UTOAST_TUPLE_THRESHOLD || UHeapTupleHasExternal(&oldtup) ||
-            UHeapTupleHasExternal(newtup));
+        needToast = ((newtup->disk_tuple_size >= UTOAST_TUPLE_THRESHOLD && UHeapDiskTupHasVarWidth(newtup->disk_tuple))
+            || UHeapTupleHasExternal(&oldtup) || UHeapTupleHasExternal(newtup));
     }
 
     oldtupsize = SHORTALIGN(oldtup.disk_tuple_size);
@@ -3003,7 +3003,7 @@ check_tup_satisfies_update:
     bool isOldTupleCopied = false;
     char identity;
     UHeapTuple oldKeyTuple = UHeapExtractReplicaIdentity(relation, &oldtup, &isOldTupleCopied, &identity);
-    
+
     /* Prepare an undo record for this operation. */
     /* Save the previous updated information in the undo record */
     TD oldTD;

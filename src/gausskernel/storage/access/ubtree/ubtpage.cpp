@@ -41,6 +41,7 @@
 #include "storage/procarray.h"
 #include "utils/inval.h"
 #include "utils/snapmgr.h"
+#include "datatype/timestamp.h"
 
 static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack);
 static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos = NULL);
@@ -86,6 +87,27 @@ void UBTreeInitMetaPage(Page page, BlockNumber rootbknum, uint32 level)
      * but it makes the page look compressible to xlog.c.
      */
     ((PageHeader)page)->pd_lower = (uint16)(((char *)metad + sizeof(BTMetaPageData)) - (char *)page);
+}
+
+void UBTreePrintNewPageState(NewPageState* npstate)
+{
+    ereport(LOG, (errmodule(MOD_UBT_NEWPAGE), (errmsg(
+        "NewPageState: first_get_available_page_time:%ld, count:%u; second_get_available_page_time:%ld, count:%u; "
+        "extend_blocks_time:%ld, count:%u, blocks:%u; extend_one_time:%ld, count:%u; "
+        "get_head_time:%ld; get_available_page_on_page_time:%ld, get_available_page_on_page_time_max:%ld; "
+        "buffer_invalid_count:%u; need_lock_count:%u; queue_count:%u, items_count:%u, items_valid_count:%u; "
+        "conditional_lock_count:%u; get_available_page_on_page_count:%u; goto_restart_count first:%u, second:%u;"
+        "new_create_pages_count check:%u, get:%u; avg_travel_queue pages:%.2f, items:%.2f.",
+        npstate->firstGetAvailablePageTime, npstate->firstGetAvailablePageCount,
+        npstate->secondGetAvailablePageTime, npstate->secondGetAvailablePageCount,
+        npstate->extendBlocksTime, npstate->extendBlocksCount, npstate->extendBlocks,
+        npstate->extendOneTime, npstate->extendOneCount, npstate->getHeadTime,
+        npstate->getAvailablePageOnPageTime, npstate->getAvailablePageOnPageTimeMax,
+        npstate->bufferInvalidCount, npstate->needLockCount, npstate->queueCount, npstate->itemsCount,
+        npstate->itemsValidCount, npstate->itemsValidConditionalLockCount,
+        npstate->getAvailablePageOnPageCount, npstate->firstGotoRestartCount,
+        npstate->secondGotoRestartCount, npstate->checkNewCreatePagesCount,
+        npstate->getFromNewCreatePagesCount, npstate->avgTravelQueuePages, npstate->avgTravelQueueItems))));
 }
 
 /*
@@ -255,7 +277,15 @@ Buffer UBTreeGetRoot(Relation rel, int access)
          *            before we release the Exclusive lock.
          */
         UBTRecycleQueueAddress addr;
-        rootbuf = UBTreeGetNewPage(rel, &addr);
+        NewPageState *npstate = NULL;
+        if (module_logging_is_on(MOD_UBT_NEWPAGE)) {
+            npstate = (NewPageState *)palloc0(sizeof(NewPageState));
+        }
+        rootbuf = UBTreeGetNewPage(rel, &addr, npstate);
+        if (npstate != NULL) {
+            UBTreePrintNewPageState(npstate);
+            pfree(npstate);
+        }
         rootblkno = BufferGetBlockNumber(rootbuf);
         rootpage = BufferGetPage(rootbuf);
         rootopaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
@@ -1453,11 +1483,19 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
  *		page in the Recycle Queue, and we need to call UBTreeRecordUsedPage()
  *		with this addr when the returned page is used correctly.
  */
-Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr)
+Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr, NewPageState* npstate)
 {
     WHITEBOX_TEST_STUB("UBTreeGetNewPage-begin", WhiteboxDefaultErrorEmit);
+    TimestampTz startTime = 0;
 restart:
-    Buffer buf = UBTreeGetAvailablePage(rel, RECYCLE_FREED_FORK, addr);
+    if (npstate != NULL) {
+        startTime = GetCurrentTimestamp(); 
+    }
+    Buffer buf = UBTreeGetAvailablePage(rel, RECYCLE_FREED_FORK, addr, npstate);
+    if (npstate != NULL) {
+        npstate->firstGetAvailablePageTime += GetCurrentTimestamp() - startTime;
+        npstate->firstGetAvailablePageCount++;
+    }
     if (buf == InvalidBuffer) {
         /*
          * No free page left, need to extend the relation
@@ -1469,24 +1507,51 @@ restart:
          * page.  We can skip locking for new or temp relations, however,
          * since no one else could be accessing them.
          */
+        if (npstate != NULL) {
+            npstate->bufferInvalidCount++;
+        }
         bool needLock = !RELATION_IS_LOCAL(rel);
         if (needLock) {
+            if (npstate != NULL) {
+                npstate->needLockCount++;
+            }
             if (!ConditionalLockRelationForExtension(rel, ExclusiveLock)) {
                 /* couldn't get the lock immediately; wait for it. */
                 LockRelationForExtension(rel, ExclusiveLock);
+                if (npstate != NULL) {
+                    startTime = GetCurrentTimestamp();
+                }
                 /* check again, relation may extended by other backends */
-                buf = UBTreeGetAvailablePage(rel, RECYCLE_FREED_FORK, addr);
+                buf = UBTreeGetAvailablePage(rel, RECYCLE_FREED_FORK, addr, npstate);
+                if (npstate != NULL) {
+                    npstate->secondGetAvailablePageTime += GetCurrentTimestamp() - startTime;
+                    npstate->secondGetAvailablePageCount++;
+                }
                 if (buf != InvalidBuffer) {
                     UnlockRelationForExtension(rel, ExclusiveLock);
                     goto out;
                 }
+                if (npstate != NULL) {
+                    startTime = GetCurrentTimestamp();
+                }
                 /* Time to bulk-extend. */
-                RelationAddExtraBlocks(rel, NULL);
+                RelationAddExtraBlocks(rel, NULL, npstate);
+                if (npstate != NULL) {
+                    npstate->extendBlocksTime += GetCurrentTimestamp() - startTime;
+                    npstate->extendBlocksCount++;
+                }
                 WHITEBOX_TEST_STUB("UBTreeGetNewPage-bulk-extend", WhiteboxDefaultErrorEmit);
             }
         }
+        if (npstate != NULL) {
+            startTime = GetCurrentTimestamp();
+        }
         /* extend by one page */
         buf = ReadBuffer(rel, P_NEW);
+        if (npstate != NULL) {
+            npstate->extendOneTime += GetCurrentTimestamp() - startTime;
+            npstate->extendOneCount++;
+        }
         WHITEBOX_TEST_STUB("UBTreeGetNewPage-extend", WhiteboxDefaultErrorEmit);
         if (!ConditionalLockBuffer(buf)) {
             /* lock failed. To avoid dead lock, we need to retry */
@@ -1494,6 +1559,9 @@ restart:
                 UnlockRelationForExtension(rel, ExclusiveLock);
             }
             ReleaseBuffer(buf);
+            if (npstate != NULL) {
+                npstate->firstGotoRestartCount++;
+            }
             goto restart;
         }
         /*
@@ -1517,6 +1585,9 @@ out:
         if (BufferIsValid(addr->queueBuf)) {
             ReleaseBuffer(addr->queueBuf);
             addr->queueBuf = InvalidBuffer;
+        }
+        if (npstate != NULL) {
+            npstate->secondGotoRestartCount++;
         }
         goto restart;
     }
