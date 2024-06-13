@@ -51,6 +51,7 @@ void OnDemandWaitRealtimeBuildShutDown();
 void OnDemandBackupControlFile(ControlFileData* controlFile);
 XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record);
 void OnDemandUpdateRealtimeBuildPrunePtr();
+void OnDemandNotifyHashMapPruneIfNeed();
 XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState);
 bool IsRecParseStateHaveChildState(XLogRecParseState *checkState);
 

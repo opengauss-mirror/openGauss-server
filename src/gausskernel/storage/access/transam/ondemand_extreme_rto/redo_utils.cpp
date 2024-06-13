@@ -92,23 +92,24 @@ void *OndemandXLogMemCtlInit(RedoMemManager *memctl, Size itemsize, int itemnum)
         memctl->memslot[i - 1].buf_id = i; /*  start from 1 , 0 is invalidbuffer */
         memctl->memslot[i - 1].freeNext = i - 1;
     }
-    memctl->firstfreeslot = memctl->totalblknum;
-    memctl->firstreleaseslot = InvalidBuffer;
+    // only used firstreleaseslot of globalmemctl
+    memctl->firstfreeslot = InvalidBuffer;
+    memctl->firstreleaseslot = memctl->totalblknum;
     return (void *)t_thrd.storage_cxt.ondemandXLogMem;
 }
 
 static RedoMemSlot *OndemandGlobalXLogMemAlloc()
 {
     RedoMemManager *glbmemctl = &ondemand_extreme_rto::g_dispatcher->parseManager.memctl;
-    Buffer firstfreebuffer = AtomicReadBuffer(&glbmemctl->firstfreeslot);
-    while (firstfreebuffer != InvalidBuffer) {
-        RedoMemSlot *firstfreeslot = &glbmemctl->memslot[firstfreebuffer - 1];
-        Buffer nextfreebuffer = firstfreeslot->freeNext;
-        if (AtomicCompareExchangeBuffer(&glbmemctl->firstfreeslot, &firstfreebuffer, nextfreebuffer)) {
-            firstfreeslot->freeNext = InvalidBuffer;
-            return firstfreeslot;
+    Buffer firstreleasebuffer = AtomicReadBuffer(&glbmemctl->firstreleaseslot);
+    while (firstreleasebuffer != InvalidBuffer) {
+        RedoMemSlot *firstreleaseslot = &glbmemctl->memslot[firstreleasebuffer - 1];
+        Buffer nextreleasebuffer = firstreleaseslot->freeNext;
+        if (AtomicCompareExchangeBuffer(&glbmemctl->firstreleaseslot, &firstreleasebuffer, nextreleasebuffer)) {
+            firstreleaseslot->freeNext = InvalidBuffer;
+            return firstreleaseslot;
         }
-        firstfreebuffer = AtomicReadBuffer(&glbmemctl->firstfreeslot);
+        firstreleasebuffer = AtomicReadBuffer(&glbmemctl->firstreleaseslot);
     }
     return NULL;
 }
@@ -116,10 +117,10 @@ static RedoMemSlot *OndemandGlobalXLogMemAlloc()
 static void OndemandGlobalXLogMemReleaseIfNeed(RedoMemManager *memctl)
 {
     RedoMemManager *glbmemctl = &ondemand_extreme_rto::g_dispatcher->parseManager.memctl;
-    if (AtomicReadBuffer(&glbmemctl->firstfreeslot) == InvalidBuffer) {
+    if (AtomicReadBuffer(&glbmemctl->firstreleaseslot) == InvalidBuffer) {
         Buffer firstreleaseslot = AtomicExchangeBuffer(&memctl->firstreleaseslot, InvalidBuffer);
         Buffer invalidbuffer = InvalidBuffer;
-        if (!AtomicCompareExchangeBuffer(&glbmemctl->firstfreeslot, &invalidbuffer, firstreleaseslot)) {
+        if (!AtomicCompareExchangeBuffer(&glbmemctl->firstreleaseslot, &invalidbuffer, firstreleaseslot)) {
             AtomicWriteBuffer(&memctl->firstreleaseslot, firstreleaseslot);
         }
     }
@@ -156,18 +157,22 @@ RedoMemSlot *OndemandXLogMemAlloc(RedoMemManager *memctl)
 void OndemandXLogMemRelease(RedoMemManager *memctl, Buffer bufferid)
 {
     RedoMemSlot *bufferslot;
+    RedoMemManager *releasememctl = memctl;
     if (!RedoMemIsValid(memctl, bufferid)) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("XLogMemRelease failed!, totalblknum:%u, buf_id:%u", memctl->totalblknum, bufferid)));
-        /* panic */
     }
     bufferslot = &(memctl->memslot[bufferid - 1]);
     Assert(bufferslot->freeNext == InvalidBuffer);
-    Buffer oldFirst = AtomicReadBuffer(&memctl->firstreleaseslot);
+    // release to global firstreleaseslot directly if hashmap full
+    if (unlikely(SS_ONDEMAND_RECOVERY_HASHMAP_FULL)) {
+        releasememctl = &ondemand_extreme_rto::g_dispatcher->parseManager.memctl;
+    }
+    Buffer oldFirst = AtomicReadBuffer(&releasememctl->firstreleaseslot);
     pg_memory_barrier();
     do {
         AtomicWriteBuffer(&bufferslot->freeNext, oldFirst);
-    } while (!AtomicCompareExchangeBuffer(&memctl->firstreleaseslot, &oldFirst, bufferid));
+    } while (!AtomicCompareExchangeBuffer(&releasememctl->firstreleaseslot, &oldFirst, bufferid));
     pg_atomic_fetch_sub_u32(&memctl->usedblknum, 1);
 
     OndemandGlobalXLogMemReleaseIfNeed(memctl);
@@ -577,4 +582,11 @@ XLogRecPtr GetRedoLocInCheckpointRecord(XLogReaderState *record)
         checkPoint = checkPointUndo.ori_checkpoint;
     }
     return checkPoint.redo;
+}
+
+void OnDemandNotifyHashMapPruneIfNeed()
+{
+    if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
+        ondemand_extreme_rto::StartupSendMarkToBatchRedo(&ondemand_extreme_rto::g_hashmapPruneMark);
+    }
 }

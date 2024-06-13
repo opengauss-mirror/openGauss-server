@@ -125,10 +125,10 @@ bool SSRecoveryApplyDelay()
         return true;
     }
 
+    OnDemandNotifyHashMapPruneIfNeed();
     while (g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag || SS_ONDEMAND_RECOVERY_PAUSE) {
         /* might change the trigger file's location */
         RedoInterruptCallBack();
-
         pg_usleep(REFORM_WAIT_TIME);
     }
 

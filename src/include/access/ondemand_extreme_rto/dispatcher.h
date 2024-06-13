@@ -265,6 +265,7 @@ List *CheckImcompleteAction(List *imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
 void GetReplayedRecPtr(XLogRecPtr *startPtr, XLogRecPtr *endPtr);
 void StartupSendFowarder(RedoItem *item);
+void StartupSendMarkToBatchRedo(RedoItem *item);
 XLogRecPtr GetSafeMinCheckPoint();
 RedoWaitInfo redo_get_io_event(int32 event_id);
 void redo_get_worker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen);

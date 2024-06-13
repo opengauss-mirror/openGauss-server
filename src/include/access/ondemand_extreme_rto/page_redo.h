@@ -41,10 +41,11 @@
 
 namespace ondemand_extreme_rto {
 
-#define ONDEMAND_DISTRIBUTE_RATIO 0.95
+#define ONDEMAND_DISTRIBUTE_CANCEL_RATIO 0.5
 #define ONDEMAND_FORCE_PRUNE_RATIO 0.99
 #define ONDEMAND_HASHTAB_SWITCH_LIMIT 100000
 #define SEG_PROC_PIPELINE_SLOT 0
+#define ONDEMAND_LOG_PAUSE_STATUS_TIME 30
 
 #define ONDEMAND_HASHMAP_ENTRY_REDO_DONE 0
 #define ONDEMAND_HASHMAP_ENTRY_REDOING 1
@@ -58,11 +59,11 @@ static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
 static const uint32 ADVANCE_GLOBALLSN_INTERVAL = 1; /* unit second */
 
 extern uint32 g_ondemandXLogParseMemFullValue;
-extern uint32 g_ondemandXLogParseMemApproachFullVaule;
+extern uint32 g_ondemandXLogParseMemCancelPauseVaule;
 extern uint32 g_ondemandRealtimeBuildQueueFullValue;
 
 typedef bool (*OndemandCheckPauseCB)(void);
-typedef void (*OndemandRefreshPauseStatusCB)(void);
+typedef void (*OndemandProcPauseStatusCB)(void);
 
 typedef enum {
     REDO_BATCH,
@@ -276,7 +277,7 @@ int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum,
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock);
 void RedoWorkerQueueCallBack();
-void OndemandRequestPrimaryDoCkptIfNeed();
+void OndemandProcPauseStatus();
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
 void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState, bool isChildState = false);
 bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate);

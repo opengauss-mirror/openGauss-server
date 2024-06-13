@@ -116,7 +116,7 @@ RedoItem g_forceDistributeMark;
 RedoItem g_hashmapPruneMark;
 
 uint32 g_ondemandXLogParseMemFullValue = 0;
-uint32 g_ondemandXLogParseMemApproachFullVaule = 0;
+uint32 g_ondemandXLogParseMemCancelPauseVaule = 0;
 uint32 g_ondemandRealtimeBuildQueueFullValue = 0;
 
 static const int PAGE_REDO_WORKER_ARG = 3;
@@ -148,6 +148,11 @@ static void PageManagerPruneIfRealtimeBuildFailover();
 static void RealtimeBuildReleaseRecoveryLatch(int code, Datum arg);
 static void OnDemandPageManagerRedoSegParseState(XLogRecParseState *preState);
 static void SegWorkerRedoAllSegBlockRecord();
+static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activatePauseFunc,
+    OndemandCheckPauseCB inactivatePauseFunc, OndemandProcPauseStatusCB refreshPauseStatusFunc,
+    OndemandProcPauseStatusCB logPauseStatusFunc, ondemand_recovery_pause_status_t pauseState,
+    bool onlyInRealtimeBuild);
+static void BatchRedoProcIfXLogParseMemFull();
 
 RefOperate recordRefOperate = {
     AddRefRecord,
@@ -174,7 +179,7 @@ static inline bool OndemandXLogParseMemFull()
 
 static inline bool OndemandXLogParseMemApproachFull()
 {
-    return (pg_atomic_read_u32(&g_dispatcher->parseManager.memctl.usedblknum) > g_ondemandXLogParseMemApproachFullVaule);
+    return (pg_atomic_read_u32(&g_dispatcher->parseManager.memctl.usedblknum) > g_ondemandXLogParseMemCancelPauseVaule);
 }
 
 static inline bool OndemandTrxnQueueFullInRealtimeBuild()
@@ -611,16 +616,28 @@ void BatchRedoSendMarkToPageRedoManager(RedoItem *sendMark)
     AddPageRedoItem(myRedoLine->managerThd, sendMark);
 }
 
+/*
+ * If hashmap is full, we send prune/distribute signal to pageRedoMng and release hashmap.
+ * We need call this func in these scenario:
+ * 1. batchRedo's queue is empty, so we send release signal from startup to all batchRedo pipelines
+ * 2. batchRedo's queue is not empty, so we call this func when we parse xlog record
+ */
 static void BatchRedoProcIfXLogParseMemFull()
 {
-    while (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
+    if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
         if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
             BatchRedoSendMarkToPageRedoManager(&g_hashmapPruneMark);
         } else {
             BatchRedoSendMarkToPageRedoManager(&g_forceDistributeMark);
         }
-        RedoInterruptCallBack();
-        pg_usleep(100000);     // 100 ms
+        // wait until hashmap have enough free block-records or current pipeline do not use any block-records
+        do {
+            if (pg_atomic_read_u32(&g_redoWorker->parseManager.memctl.usedblknum) == 0) {
+                break;
+            }
+            RedoInterruptCallBack();
+            pg_usleep(100000L);     // 100 ms
+        } while (SS_ONDEMAND_RECOVERY_HASHMAP_FULL);
     }
 }
 
@@ -638,6 +655,8 @@ bool BatchRedoDistributeItems(void **eleArry, uint32 eleNum)
             smgrcloseall();
         } else if (eleArry[i] == (void *)&g_cleanInvalidPageMark) {
             forget_range_invalid_pages((void *)eleArry[i]);
+        } else if (eleArry[i] == (void *)&g_hashmapPruneMark) {
+            BatchRedoProcIfXLogParseMemFull();
         } else {
             BatchRedoProcIfXLogParseMemFull();
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
@@ -728,7 +747,7 @@ void RedoPageManagerDistributeToAllOneBlock(XLogRecParseState *ddlParseState)
     }
 }
 
-void ReleaseRecParseState(PageRedoPipeline *myRedoLine, HTAB *redoItemHash, RedoItemHashEntry *redoItemEntry, uint32 workId)
+void ReleaseRecParseState(HTAB *redoItemHash, RedoItemHashEntry *redoItemEntry)
 {
     XLogRecParseState *cur_state = redoItemEntry->head;
     XLogRecParseState *releaseHeadState = redoItemEntry->head;
@@ -809,7 +828,9 @@ void RedoPageManagerDistributeToRedoThd(PageRedoPipeline *myRedoLine,
 
 static void WaitSegRedoWorkersQueueEmpty()
 {
-    while (!SPSCBlockingQueueIsEmpty(g_dispatcher->auxiliaryLine.segRedoThd->queue)) {
+    while (!SPSCBlockingQueueIsEmpty(g_dispatcher->auxiliaryLine.segRedoThd->queue) ||
+        !SPSCBlockingQueueIsEmpty(g_dispatcher->segQueue)) {
+        pg_usleep(100000L);   /* 100 ms */
         RedoInterruptCallBack();
     }
 }
@@ -827,7 +848,7 @@ void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
 
     while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
         uint32 workId = GetWorkerId(&redoItemEntry->redoItemTag, WorkerNumPerMng);
-        ReleaseRecParseState(myRedoLine, curMap, redoItemEntry, workId);
+        ReleaseRecParseState(curMap, redoItemEntry);
         RedoPageManagerDistributeToRedoThd(myRedoLine, curMap, redoItemEntry, workId);
     }
 
@@ -848,7 +869,7 @@ void WaitCurrentPipeLineRedoWorkersQueueEmpty()
     }
 }
 
-static void ReleaseReplayedInParse(PageRedoPipeline* myRedoLine, uint32 workerNum)
+static void ReleaseReplayedInParse()
 {
     HASH_SEQ_STATUS status;
     RedoItemHashEntry *redoItemEntry = NULL;
@@ -856,10 +877,7 @@ static void ReleaseReplayedInParse(PageRedoPipeline* myRedoLine, uint32 workerNu
     hash_seq_init(&status, curMap);
 
     while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
-        if (g_redoWorker->slotId == GetSlotId(redoItemEntry->redoItemTag.rNode, 0, 0, GetBatchCount())) {
-            uint32 workId = GetWorkerId(&redoItemEntry->redoItemTag, workerNum);
-            ReleaseRecParseState(myRedoLine, curMap, redoItemEntry, workId);
-        }
+        ReleaseRecParseState(curMap, redoItemEntry);
     }
 }
 
@@ -871,11 +889,19 @@ static void WaitAndTryReleaseWorkerReplayedRec(PageRedoPipeline *myRedoLine, uin
         for (uint32 i = 0; i < workerNum; i++) {
             if (!RedoWorkerIsIdle(myRedoLine->redoThd[i])) {
                 queueIsEmpty = false;
-                ReleaseReplayedInParse(myRedoLine, workerNum);
-                pg_usleep(50000L);
+                pg_usleep(50000L);  /* 50 ms */
                 break;
             }
         }
+        ReleaseReplayedInParse();
+    }
+}
+
+static void ReleaseRecParseStateUntilRedoNotPause()
+{
+    while (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
+        ReleaseReplayedInParse();
+        pg_usleep(50000L);   /* 50 ms */
     }
 }
 
@@ -900,8 +926,7 @@ void PageManagerDispatchEndMarkAndWait()
         WaitPageRedoWorkerReachLastMark(g_dispatcher->auxiliaryLine.segRedoThd);
     }
     WaitPageRedoWorkerReachLastMark(myRedoLine->htabThd);
-
-    ReleaseReplayedInParse(myRedoLine, WorkerNumPerMng);
+    ReleaseReplayedInParse();
 }
 
 void RedoPageManagerDdlAction(XLogRecParseState *parsestate)
@@ -1354,7 +1379,7 @@ static void OnDemandPageManagerProcSegParseState(XLogRecParseState *preState, XL
 
 static bool WaitPrimaryDoCheckpointAndAllPRTrackEmpty(XLogRecParseState *preState, HTAB *redoItemHash)
 {
-    if (SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
+    if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
         return false;
     }
 
@@ -1591,12 +1616,8 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
             Assert(!SS_ONDEMAND_REALTIME_BUILD_NORMAL);
             // double check
             if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
-                ereport(WARNING, (errcode(ERRCODE_LOG),
-                    errmsg("[On-demand] Parse buffer num approach critical value, distribute block record by force,"
-                        " slotid %d, usedblknum %d, totalblknum %d", g_redoWorker->slotId,
-                        pg_atomic_read_u32(&g_dispatcher->parseManager.memctl.usedblknum),
-                        g_dispatcher->parseManager.memctl.totalblknum)));
                 RedoPageManagerDistributeBlockRecord(NULL);
+                ReleaseRecParseStateUntilRedoNotPause();
             }
             continue;
         }
@@ -2531,6 +2552,13 @@ void StartupSendFowarder(RedoItem *item)
     AddPageRedoItem(g_dispatcher->auxiliaryLine.ctrlThd, item);
 }
 
+void StartupSendMarkToBatchRedo(RedoItem *item)
+{
+    for (uint32 i = 0; i < g_dispatcher->pageLineNum; ++i) {
+        AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
+    }
+}
+
 void SendLsnFowarder()
 {
     // update and read in the same thread, so no need atomic operation
@@ -3401,12 +3429,12 @@ void OndemandCtrlWorkerMain()
         OndemandUpdateXLogParseMemUsedBlkNum();
 
         CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_1], g_redoWorker->timeCostList[TIME_COST_STEP_2]);
-        OndemandRequestPrimaryDoCkptIfNeed();
+        OndemandProcPauseStatus();
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2]);
 
         RedoInterruptCallBack();
         ADD_ABNORMAL_POSITION(13);
-        pg_usleep(500000L);    /* 500 ms */
+        pg_usleep(50000L);    /* 50 ms */
     } while (true);
 
     SPSCBlockingQueuePop(g_redoWorker->queue);
@@ -3988,48 +4016,92 @@ static XLogRecPtr RequestPrimaryCkptAndUpdateCkptRedoPtr()
 }
 
 static void OndemandPauseRedoAndRequestPrimaryDoCkpt(OndemandCheckPauseCB activatePauseFunc,
-    OndemandCheckPauseCB inactivatePauseFunc, OndemandRefreshPauseStatusCB refreshPauseStatusFunc,
-    ondemand_recovery_pause_status_t pauseState)
+    OndemandCheckPauseCB continuePauseFunc, OndemandProcPauseStatusCB refreshPauseStatusFunc,
+    OndemandProcPauseStatusCB logPauseStatusFunc, ondemand_recovery_pause_status_t pauseState,
+    bool onlyInRealtimeBuild)
 {
-    while (activatePauseFunc() && SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+    if (onlyInRealtimeBuild && !SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        return;
+    }
+
+    if (activatePauseFunc()) {
+        int sleepTime = 0;
+        int level = SS_ONDEMAND_REALTIME_BUILD_NORMAL ? LOG : WARNING;
         g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status = pauseState;
-        (void)RequestPrimaryCkptAndUpdateCkptRedoPtr();
+        ereport(level, (errcode(ERRCODE_LOG),
+            errmsg("[On-demand] ondemand recovery meet pause status, type %d", pauseState)));
+        do {
+            // other redo workers will proc pause state directly if primary node crash
+            if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+                (void)RequestPrimaryCkptAndUpdateCkptRedoPtr();
+            }
 
-        if ((inactivatePauseFunc != NULL) && !inactivatePauseFunc()) {
-            break;
-        }
+            if (refreshPauseStatusFunc != NULL) {
+                refreshPauseStatusFunc();
+            }
 
-        if (refreshPauseStatusFunc != NULL) {
-            refreshPauseStatusFunc();
-        }
-
-        RedoInterruptCallBack();
-        pg_usleep(100000L);	/* 100 ms */
+            if (sleepTime++ % ONDEMAND_LOG_PAUSE_STATUS_TIME == 0) {
+                logPauseStatusFunc();
+                sleepTime = 1;
+            }
+            RedoInterruptCallBack();
+            pg_usleep(100000L);	/* 100 ms */
+        } while (continuePauseFunc());
     }
     g_instance.dms_cxt.SSRecoveryInfo.ondemand_recovery_pause_status = NOT_PAUSE;
 }
 
-void OndemandRequestPrimaryDoCkptIfNeed()
+static void OndemandLogHashMapUsedStatus()
 {
-    if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
-        return;
-    }
+    ereport(LOG, (errcode(ERRCODE_LOG),
+        errmsg("[On-demand] hashmap usedblknum %lu, totalblknum %lu, pause value %lu, continue value %lu",
+        pg_atomic_read_u32(&g_dispatcher->parseManager.memctl.usedblknum),
+        g_dispatcher->parseManager.memctl.totalblknum, g_ondemandXLogParseMemFullValue,
+        g_ondemandXLogParseMemCancelPauseVaule)));
+}
 
+static void OndemandLogTrxnQueueUsedStatus()
+{
+    ereport(LOG, (errcode(ERRCODE_LOG),
+        errmsg("[On-demand] trxn queue usedblknum %lu, totalblknum %lu, pause value %lu",
+        SPSCGetQueueCount(g_dispatcher->trxnQueue), REALTIME_BUILD_RECORD_QUEUE_SIZE,
+        g_ondemandRealtimeBuildQueueFullValue)));
+}
+
+static void OndemandLogSegQueueUsedStatus()
+{
+    ereport(LOG, (errcode(ERRCODE_LOG),
+        errmsg("[On-demand] seg queue usedblknum %lu, totalblknum %lu, pause value %lu",
+        SPSCGetQueueCount(g_dispatcher->segQueue), REALTIME_BUILD_RECORD_QUEUE_SIZE,
+        g_ondemandRealtimeBuildQueueFullValue)));
+}
+
+static void OndemandLogSyncRecordStatus()
+{
+    XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&g_dispatcher->ckptRedoPtr);
+    XLogRecPtr syncRecordPtr = pg_atomic_read_u64(&g_dispatcher->syncRecordPtr);
+    ereport(LOG, (errcode(ERRCODE_LOG),
+        errmsg("[On-demand] primary checkpoint redo lsn %X/%X, sync record lsn %X/%X",
+        (uint32)(ckptRedoPtr >> 32), (uint32)ckptRedoPtr, (uint32)(syncRecordPtr >> 32), (uint32)syncRecordPtr)));
+}
+
+void OndemandProcPauseStatus()
+{
     /* check whether parse mem is not enough */
-    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandXLogParseMemApproachFull, &OndemandXLogParseMemFull,
-        &OndemandUpdateXLogParseMemUsedBlkNum, PAUSE_FOR_PRUNE_HASHMAP);
+    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandXLogParseMemFull, &OndemandXLogParseMemApproachFull,
+        &OndemandUpdateXLogParseMemUsedBlkNum, &OndemandLogHashMapUsedStatus, PAUSE_FOR_PRUNE_HASHMAP, false);
 
     /* check whether trxn record queue is full */
-    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandTrxnQueueFullInRealtimeBuild, NULL, NULL,
-        PAUSE_FOR_PRUNE_TRXN_QUEUE);
+    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandTrxnQueueFullInRealtimeBuild,
+        &OndemandTrxnQueueFullInRealtimeBuild, NULL, &OndemandLogTrxnQueueUsedStatus, PAUSE_FOR_PRUNE_TRXN_QUEUE, true);
 
     /* check whether seg record queue is full */
-    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandSegQueueFullInRealtimeBuild, NULL, NULL,
-        PAUSE_FOR_PRUNE_SEG_QUEUE);
+    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandSegQueueFullInRealtimeBuild,
+        &OndemandTrxnQueueFullInRealtimeBuild, NULL, &OndemandLogSegQueueUsedStatus, PAUSE_FOR_PRUNE_SEG_QUEUE, true);
 
     /* check whether redo workers need handle sync record */
-    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandNeedHandleSyncRecord, NULL, NULL,
-        PAUSE_FOR_SYNC_REDO);
+    OndemandPauseRedoAndRequestPrimaryDoCkpt(&OndemandNeedHandleSyncRecord, &OndemandNeedHandleSyncRecord, NULL,
+        &OndemandLogSyncRecordStatus, PAUSE_FOR_SYNC_REDO, true);
 }
 
 bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate)
