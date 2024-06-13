@@ -32,6 +32,7 @@
 #include "storage/ipc.h"
 #include "storage/smgr/segment.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/inval.h"
