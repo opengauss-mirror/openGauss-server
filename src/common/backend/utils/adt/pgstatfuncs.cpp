@@ -8913,7 +8913,7 @@ Datum ss_buffer_ctrl(PG_FUNCTION_ARGS)
             fctx->record[i].lock_mode = buf_ctrl->lock_mode;
             fctx->record[i].is_edp = buf_ctrl->is_edp;
             fctx->record[i].force_request = buf_ctrl->force_request;
-            fctx->record[i].need_flush = buf_ctrl->need_flush;
+            fctx->record[i].need_flush = 0;
             fctx->record[i].buf_id = buf_ctrl->buf_id;
             fctx->record[i].state = buf_ctrl->state;
             fctx->record[i].pblk_relno = buf_ctrl->pblk_relno;

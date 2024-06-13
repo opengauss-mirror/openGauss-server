@@ -704,7 +704,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         } else {
             if (readmethod != WITH_LOCAL_CACHE && mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK &&
                 ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY) {
-                Assert(!CheckPageNeedSkipInRecovery(buf));
+                Assert(!CheckPageNeedSkipInRecovery(buf, xloglsn));
                 LockBuffer(buf, BUFFER_LOCK_UNLOCK);
                 if (get_cleanup_lock) {
                     LockBufferForCleanup(buf);

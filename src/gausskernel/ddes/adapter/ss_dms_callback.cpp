@@ -476,30 +476,35 @@ static void CBSwitchoverResult(void *db_handle, int result)
     }
 }
 
-static int SetPrimaryIdOnStandby(int primary_id)
+static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
 {
     for (int ntries = 0;; ntries++) {
         SSReadControlFile(REFORM_CTRL_PAGE); /* need to double check */
-        if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id) {
+        if (g_instance.dms_cxt.SSReformerControl.primaryInstId == primary_id &&
+            g_instance.dms_cxt.SSReformerControl.list_stable == list_stable) {
             ereport(LOG, (errmodule(MOD_DMS),
-                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d, confirm ntries=%d.",
-                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id, ntries)));
+                errmsg("[SS %s] Reform success, this is a standby:%d confirming new primary:%d, list_stable:%llu, "
+                    "confirm ntries=%d.",
+                    SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", SS_MY_INST_ID, primary_id, list_stable,
+                    ntries)));
             return DMS_SUCCESS;
         } else {
             if (dms_reform_failed()) {
                 ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d,"
-                        " control file indicates primary is %d; dms reform failed.",
-                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id,
-                        g_instance.dms_cxt.SSReformerControl.primaryInstId)));
+                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d, list_stable:%llu, "
+                        "control file indicates primary is %d, list_stable%llu; dms reform failed.",
+                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id, list_stable,
+                        g_instance.dms_cxt.SSReformerControl.primaryInstId,
+                        g_instance.dms_cxt.SSReformerControl.list_stable)));
                 return DMS_ERROR;
             }
             if (ntries >= WAIT_REFORM_CTRL_REFRESH_TRIES) {
                 ereport(ERROR,
-                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d,"
-                        " control file indicates primary is %d; wait timeout.",
-                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id,
-                        g_instance.dms_cxt.SSReformerControl.primaryInstId)));
+                    (errmodule(MOD_DMS), errmsg("[SS %s] Failed to confirm new primary: %d, list_stable:%llu, "
+                        " control file indicates primary is %d, list_stable%llu; wait timeout.",
+                        SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", (int)primary_id, list_stable,
+                        g_instance.dms_cxt.SSReformerControl.primaryInstId,
+                        g_instance.dms_cxt.SSReformerControl.list_stable)));
                 return DMS_ERROR;
             }
         }
@@ -531,12 +536,12 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
         SSUpdateReformerCtrl();
         LWLockRelease(ControlFileLock);
         Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == (int)primary_id);
-        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS %s] set current instance:%d as primary.",
-            SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", primary_id)));
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS %s] set current instance:%d as primary, list_stable:%llu.",
+            SS_PERFORMING_SWITCHOVER ? "switchover" : "reform", primary_id, list_stable)));
         ret = DMS_SUCCESS;
     } else { /* we are on standby */
         LWLockRelease(ControlFileLock);
-        ret = SetPrimaryIdOnStandby(primary_id);
+        ret = SetPrimaryIdOnStandby(primary_id, list_stable);
     }
     return ret;
 }
@@ -1477,33 +1482,6 @@ static BufferDesc* SSGetBufferDesc(char *pageid)
     return buf_desc;
 }
 
-static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
-    unsigned long long *edp_lsn)
-{
-    *is_edp = (unsigned char)false;
-    dms_buf_ctrl_t *buf_ctrl = NULL;
-    BufferDesc *buf_desc = SSGetBufferDesc(pageid);
-    if (buf_desc == NULL) {
-        *lock_mode = (uint8)DMS_LOCK_NULL;
-        return GS_SUCCESS;
-    }
-
-    buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
-    *lock_mode = buf_ctrl->lock_mode;
-#ifdef USE_ASSERT_CHECKING
-    if (buf_ctrl->is_edp) {
-        BufferTag *tag = &buf_desc->tag;
-        ereport(PANIC, (errmsg("[SS][%u/%u/%u/%d %d-%u] CBConfirmOwner, do not allow edp exist, please check.",
-            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-            tag->forkNum, tag->blockNum)));
-    }
-#endif
-    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
-    SSUnPinBuffer(buf_desc);
-    return GS_SUCCESS;
-}
-
 static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn)
 {
@@ -1955,46 +1933,6 @@ static int CBCacheMsg(void *db_handle, char* msg)
     return GS_SUCCESS;
 }
 
-static int CBMarkNeedFlush(void *db_handle, char *pageid, unsigned char *is_edp)
-{
-    *is_edp = false;
-    BufferTag *tag = (BufferTag *)pageid;
-    BufferDesc *buf_desc = SSGetBufferDesc(pageid);
-    if (buf_desc == NULL) {
-        ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS][%u/%u/%u/%d %d-%u] CBMarkNeedFlush, buf_desc not found",
-                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                tag->forkNum, tag->blockNum)));
-        return DMS_ERROR;
-    }
-
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
-    if (!DMS_BUF_CTRL_IS_OWNER(buf_ctrl)) {
-        LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
-        ereport(LOG, (errmodule(MOD_DMS),
-            errmsg("[SS][%u/%u/%u/%d %d-%u] CBMarkNeedFlush, do not have current page",
-            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-            tag->forkNum, tag->blockNum)));
-        SSUnPinBuffer(buf_desc);
-        return DMS_ERROR;
-    }
-    LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
-
-#ifdef USE_ASSERT_CHECKING
-    if (buf_ctrl->is_edp) {
-        ereport(PANIC, (errmsg("[SS][%u/%u/%u/%d %d-%u] CBMarkNeedFlush, do not allow edp exist, please check.",
-            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-            tag->forkNum, tag->blockNum)));
-    }
-#endif
-    ereport(LOG, (errmsg("[SS] CBMarkNeedFlush found buf: %u/%u/%u/%d %d-%u",
-        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-        tag->forkNum, tag->blockNum)));
-    SSUnPinBuffer(buf_desc);
-    return DMS_SUCCESS;
-}
-
 static int CBUpdateNodeOldestXmin(void *db_handle, uint8 inst_id, unsigned long long oldest_xmin)
 {
     SSUpdateNodeOldestXmin(inst_id, oldest_xmin);
@@ -2145,7 +2083,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->set_dms_status = CBSetDmsStatus;
     callback->dms_reform_rebuild_parallel = CBBufRebuildDrcParallel;
     callback->dms_thread_init = DmsCallbackThreadShmemInit;
-    callback->confirm_owner = CBConfirmOwner;
     callback->confirm_converting = CBConfirmConverting;
     callback->flush_copy = CBFlushCopy;
     callback->get_db_primary_id = CBGetDBPrimaryId;
@@ -2196,7 +2133,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->drc_validate = CBDrcBufValidate;
     callback->db_check_lock = CBDBCheckLock;
     callback->cache_msg = CBCacheMsg;
-    callback->need_flush = CBMarkNeedFlush;
     callback->update_node_oldest_xmin = CBUpdateNodeOldestXmin;
 
     callback->get_buf_info = CBGetBufInfo;

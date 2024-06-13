@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           153
+#define DMS_LOCAL_VERSION           155
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -430,22 +430,30 @@ typedef struct st_dms_broadcast_context {
     unsigned int *output_msg_len;
 } dms_broadcast_context_t;
 
-typedef struct st_dms_buf_ctrl {
+// make sure dms_buf_ctrl is aligned by cach line size in V3
+#ifndef OPENGAUSS
+#ifdef WIN32
+typedef struct st_dms_buf_ctrl
+#else
+typedef struct __attribute__((aligned(128))) st_dms_buf_ctrl
+#endif
+#else
+typedef struct st_dms_buf_ctrl
+#endif
+{
     volatile unsigned char lock_mode;       // used only in DMS, 0: Null, 1: Shared lock, 2: Exclusive lock
     // used only in DMS, 0: no, 1: yes, this page is old version,
     // can be discard only after latest version in other instance is cleaned
     volatile unsigned char is_edp;
     volatile unsigned char force_request;   // force to request page from remote
-    volatile unsigned char need_flush;      // for recovery, owner is abort, copy instance should flush before release
     volatile unsigned char been_loaded;     // first alloc ctrl:FALSE, after successfully loaded: TRUE
     volatile unsigned char in_rcy;          // if drc lost, we can rebuild in_recovery flag according buf_ctrl
-    unsigned short release_conflict : 1;
-    unsigned short unused : 15;
+    volatile unsigned char release_conflict;
+    volatile unsigned char is_reform_visit;
+    volatile unsigned char unused;
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
-    volatile unsigned char is_reform_visit;
-    unsigned unused_array[3];
     volatile unsigned int lock_ss_read; // concurrency control for rebuild/confirm
 #ifdef OPENGAUSS
     int buf_id;
@@ -808,13 +816,7 @@ typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn);
-typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
-    unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
-typedef int(*dms_flush_copy_check_lsn)(void *db_handle, char *pageid, unsigned long long lsn);
-typedef int(*dms_need_flush)(void *db_handle, char *pageid, unsigned char *is_edp);
-typedef int(*dms_edp_to_owner)(void *db_handle, char *pageid, unsigned char *is_edp);
-typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
 typedef int(*dms_recovery_analyse)(void *db_handle, void *recovery_list, int is_reformer);
@@ -905,8 +907,6 @@ typedef int (*dms_check_session_invalid)(unsigned int sid);
 typedef int (*dms_drc_buf_res_rebuild)(void *db_handle);
 typedef int (*dms_drc_buf_res_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
 typedef int (*dms_drc_tlock_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
-typedef int (*dms_drc_validate_page)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
-typedef int (*dms_drc_validate_tlock)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
 typedef int(*dms_ctl_rcy_clean_parallel_t)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
 typedef unsigned char(*dms_ckpt_session)(void *db_handle);
 typedef void (*dms_check_if_build_complete)(void *db_handle, unsigned int *build_complete);
@@ -920,7 +920,6 @@ typedef int (*dms_drc_xa_res_rebuild)(void *db_handle, unsigned char thread_inde
 typedef void (*dms_reform_shrink_xa_rms)(void *db_handle, unsigned char undo_seg_id);
 typedef void (*dms_ckpt_unblock_rcy_local)(void *db_handle, unsigned long long list_in);
 typedef int (*dms_drc_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
-typedef int (*dms_drc_validate_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
@@ -944,7 +943,6 @@ typedef int (*dms_get_tlock_by_tid)(void *db_handle, char *tlock, char *out_msg)
 typedef void (*dms_get_tlock_by_tid_ack)(char *data, char *stack, char *w_marks, unsigned int *cnt);
 
 typedef int (*dms_switchover_demote)(void *db_handle);
-typedef int (*dms_switchover_promote)(void *db_handle);
 typedef int (*dms_switchover_promote_opengauss)(void *db_handle, unsigned char origPrimaryId);
 typedef int (*dms_failover_promote_opengauss)(void *db_handle);
 typedef int (*dms_reform_done_notify)(void *db_handle);
@@ -972,7 +970,6 @@ typedef void (*dms_buf_ctrl_recycle)(void *db_handle);
 typedef void *(*dms_malloc_prot_proc)(size_t size);
 typedef void (*dms_free_prot_proc)(void *ptr);
 typedef int (*dms_get_kernel_error_code)();
-typedef int (*dms_lsn_validate)(void *db_handle, char *pageid, unsigned long long lsn, unsigned char in_recovery);
 typedef int (*dms_invld_tlock_ownership)(void *db_handle, char *resid, unsigned char req_mode, unsigned char is_try);
 typedef unsigned short (*dms_get_tlock_mode)(void *db_handle, char *resid);
 typedef void (*dms_set_current_point)(void *db_handle);
@@ -1008,13 +1005,8 @@ typedef struct st_dms_callback {
     dms_save_list_stable save_list_stable;
     dms_get_dms_status get_dms_status;
     dms_set_dms_status set_dms_status;
-    dms_confirm_owner confirm_owner;
     dms_confirm_converting confirm_converting;
     dms_flush_copy flush_copy;
-    dms_flush_copy_check_lsn flush_copy_check_lsn;
-    dms_need_flush need_flush;
-    dms_edp_to_owner edp_to_owner;
-    dms_edp_lsn edp_lsn;
     dms_disk_lsn disk_lsn;
     dms_recovery recovery;
     dms_recovery_analyse recovery_analyse;
@@ -1032,8 +1024,6 @@ typedef struct st_dms_callback {
     dms_drc_buf_res_rebuild dms_reform_rebuild_buf_res;
     dms_drc_buf_res_rebuild_parallel dms_reform_rebuild_parallel;
     dms_drc_tlock_rebuild_parallel dms_reform_rebuild_tlock_parallel;
-    dms_drc_validate_page validate_page;
-    dms_drc_validate_tlock validate_table_lock;
     dms_ctl_rcy_clean_parallel_t dms_ctl_rcy_clean_parallel;
     dms_check_if_build_complete check_if_build_complete;
     dms_check_if_restore_recover check_if_restore_recover;
@@ -1043,7 +1033,6 @@ typedef struct st_dms_callback {
     dms_ckpt_unblock_rcy_local ckpt_unblock_rcy_local;
 
     dms_drc_rebuild_parallel rebuild_alock_parallel;
-    dms_drc_validate_parallel validate_alock_parallel;
     // used in reform for opengauss
     dms_thread_init_t dms_thread_init;
     dms_thread_deinit_t dms_thread_deinit;
@@ -1132,7 +1121,6 @@ typedef struct st_dms_callback {
 
     // for switchover
     dms_switchover_demote switchover_demote;
-    dms_switchover_promote switchover_promote;
     dms_switchover_promote_opengauss switchover_promote_opengauss;
     dms_failover_promote_opengauss failover_promote_opengauss;
     dms_set_switchover_result set_switchover_result;
@@ -1166,7 +1154,6 @@ typedef struct st_dms_callback {
     dms_malloc_prot_proc dms_malloc_prot;
     dms_free_prot_proc dms_free_prot;
     dms_get_kernel_error_code db_get_kernel_error_code;
-    dms_lsn_validate lsn_validate;
     dms_invld_tlock_ownership invld_tlock_ownership;
     dms_invld_alock_ownership invld_alock_ownership;
     dms_get_alock_mode get_alock_mode;
@@ -1290,8 +1277,6 @@ typedef struct st_wait_cmd_stat_result {
 
 typedef struct st_drc_local_lock_res_result {
     char               lock_id[DMS_MAX_NAME_LEN];
-    unsigned char      is_owner;
-    unsigned char      is_locked;
     unsigned char      releasing;
     unsigned char      unused;
     unsigned short     shared_count;
@@ -1315,22 +1300,8 @@ typedef enum en_reform_callback_stat {
     REFORM_MES_TASK_STAT_CONFIRM_OWNER_GET_DISK_LSN,
     REFORM_MES_TASK_STAT_CONFIRM_CVT_BUCKET_LOCK,
     REFORM_MES_TASK_STAT_CONFIRM_CVT_SS_READ_LOCK,
-    REFORM_MES_TASK_STAT_NEED_FLUSH_ALLOC_CTRL,
-    REFORM_MES_TASK_STAT_NEED_FLUSH_SS_READ_LOCK,
-    REFORM_MES_TASK_STAT_EDP_TO_OWNER_GET_DISK_LSN,
-    REFORM_MES_TASK_STAT_EDP_TO_OWNER_ALLOC_CTRL,
-    REFORM_CALLBACK_STAT_VALIDATE_DRC_PAGE_BUCKET_LOCK,
-    REFORM_CALLBACK_STAT_VALIDATE_DRC_PAGE_SS_READ_LOCK,
-    REFORM_CALLBACK_STAT_VALIDATE_DRC_PAGE_REMOTE,
-    REFORM_CALLBACK_STAT_VALIDATE_DRC_TLOCK_REMOTE,
-    REFORM_MES_TASK_STAT_VALIDATE_LSN_GET_CTRL,
-    REFORM_MES_TASK_STAT_VALIDATE_LSN_GET_CTRL_TIMEOUT,
-    REFORM_MES_TASK_STAT_VALIDATE_LSN_GET_DISK_LSN,
-    REFORM_MES_TASK_STAT_VALIDATE_LSN_BUF_UNLATCH,
     REFORM_CALLBACK_STAT_REBUILD_ALOCK_LOCAL,
     REFORM_CALLBACK_STAT_REBUILD_DRC_ALOCK_REMOTE,
-    REFORM_CALLBACK_STAT_VALIDATE_ALOCK_LOCAL,
-    REFORM_CALLBACK_STAT_VALIDATE_DRC_ALOCK_REMOTE,
     REFORM_CALLBACK_STAT_COUNT
 } reform_callback_stat_e;
 

@@ -341,7 +341,7 @@ XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, Redo
     char pageid[DMS_PAGEID_SIZE] = {0};
     errno_t rc = memcpy_s(pageid, DMS_PAGEID_SIZE, &blockinfo, sizeof(BufferTag));
     securec_check(rc, "\0", "\0");
-    dms_recovery_page_need_skip(pageid, (unsigned char*)&skip, (unsigned int)false);
+    dms_recovery_page_need_skip(pageid, record->EndRecPtr, (unsigned char*)&skip);
 
     if (skip) {
         XLogPhyBlock *pblk = (blockinfo.pblk.relNode != InvalidOid) ? &blockinfo.pblk : NULL;
