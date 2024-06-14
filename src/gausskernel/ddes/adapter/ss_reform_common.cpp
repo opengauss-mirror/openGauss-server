@@ -645,15 +645,20 @@ void SSHandleStartupWhenReformStart(dms_reform_start_context_t *rs_cxt)
         return;
     }
 
-    if (ENABLE_ONDEMAND_RECOVERY && ENABLE_ONDEMAND_REALTIME_BUILD) {
+    if (ENABLE_ONDEMAND_RECOVERY) {
         if (rs_cxt->reform_type == DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS &&
-            rs_cxt->role != DMS_ROLE_REFORMER) {
+            rs_cxt->role != DMS_ROLE_REFORMER && ENABLE_ONDEMAND_REALTIME_BUILD) {
             g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = true;
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS reform][On-demand] reform start phase: stop ondemand realtime build before switchover.")));
             SSWaitStartupExit(true);
             return;
-        } else {
+        /*
+         * Ondemand recovery feature need to make sure startup-process alive in follow scenarios:
+         * 1. Standby node does not need to stop startup process if ondemand realtime build is enable before normal reform.
+         * 2. Primary node does not need to stop startup process in ondemand-redo pharse, because startup process is performing recovery.
+         */
+        } else if (SS_IN_ONDEMAND_RECOVERY || !SS_ONDEMAND_REALTIME_BUILD_DISABLED) {
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS reform][On-demand] reform start phase: ondemand realtime build is enable, no need wait startup thread exit.")));
             return;
