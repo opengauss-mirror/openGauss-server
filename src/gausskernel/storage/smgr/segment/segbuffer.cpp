@@ -565,19 +565,11 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
 Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
     bool found = false;
-    dms_buf_ctrl_t *buf_ctrl;
 
     /* Make sure we will have room to remember the buffer pin */
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
     BufferDesc *bufHdr = SegBufferAlloc(spc, rnode, forkNum, blockNum, &found);
-
-    if (ENABLE_DMS) {
-        buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
-        if (mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) {
-            buf_ctrl->state |= BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
-        }
-    }
 
     if (!found) {
         SegmentCheck(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));
@@ -601,6 +593,7 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                     goto found_branch;
                 }
 
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
                 LWLockMode lockmode = LW_SHARED;
                 if (!LockModeCompatible(buf_ctrl, lockmode)) {
                     if (!StartReadPage(bufHdr, lockmode)) {
@@ -624,13 +617,7 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
 
                 break;
             } while (true);
-            Buffer tmp_buffer = TerminateReadSegPage(bufHdr, mode, spc);
-            if (BufferIsInvalid(tmp_buffer) && (mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) &&
-                !(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
-                SSUnPinBuffer(bufHdr);
-                return InvalidBuffer;
-            }
-            return tmp_buffer;
+            return TerminateReadSegPage(bufHdr, mode, spc);
         }
 
         if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
@@ -744,7 +731,7 @@ retry:
 
         SegPinBufferLocked(buf, &new_tag);
 
-        if (!SSPageCheckIfCanEliminate(buf, old_flags) || !SSOndemandRealtimeBuildAllowFlush(buf)) {
+        if (!SSPageCheckIfCanEliminate(buf, old_flags)) {
             SegUnpinBuffer(buf);
             continue;
         }

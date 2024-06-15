@@ -76,9 +76,6 @@ typedef enum {
     RBM_NORMAL_NO_LOG,         /* Don't log page as invalid during WAL
                                 * replay; otherwise same as RBM_NORMAL */
     RBM_FOR_REMOTE,            /* Like RBM_NORMAL, but not remote read again when PageIsVerified failed. */
-    RBM_FOR_ONDEMAND_REALTIME_BUILD  /* Like RBM_NORMAL, only used in ondemand realtime time
-                                      * build (shared storage mode), need newest page by DMS,
-                                      * but do not load from disk */
 } ReadBufferMode;
 
 typedef enum

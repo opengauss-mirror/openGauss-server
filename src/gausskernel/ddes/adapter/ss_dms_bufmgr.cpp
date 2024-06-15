@@ -33,7 +33,6 @@
 #include "securec_check.h"
 #include "miscadmin.h"
 #include "access/double_write.h"
-#include "access/ondemand_extreme_rto/dispatcher.h"
 #include "access/multi_redo_api.h"
 
 void InitDmsBufCtrl(void)
@@ -231,11 +230,6 @@ RETRY:
 
 void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
 {
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
-        return;
-    }
-
     /*
      * prerequisite is that the page that initialized to zero in memory should be flush to disk
      */
@@ -282,17 +276,6 @@ void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, con
 }
 #endif
 
-static Buffer ReadBufferInRealtimeBuildFailoverForDMS(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
-{
-    Page page = (Page)BufHdrGetBlock(buf_desc);
-    XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
-    if (XLByteLT(ckptRedoPtr, PageGetLSN(page))) {
-        return BufferDescriptorGetBuffer(buf_desc);
-    } else {
-        return ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
-    }
-}
-
 Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -301,21 +284,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
         if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && AmDmsReformProcProcess()) {
             ereport(PANIC, (errmsg("SS In flush copy, can't read from disk!")));
         }
-        /*
-         * do not allow pageredo workers read buffer from disk if standby node in ondemand
-         * realtime build status, because some buffer need init directly in recovery mode
-         */
-        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
-            buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
-            buffer = InvalidBuffer;
-        } else {
-            if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (read_mode == RBM_NORMAL) &&
-                (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
-                buffer = ReadBufferInRealtimeBuildFailoverForDMS(buf_desc, read_mode, pblk);
-            } else {
-                buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
-            }
-        }
+        buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
     } else {
 #ifdef USE_ASSERT_CHECKING
         if (buf_ctrl->state & BUF_IS_EXTEND) {
@@ -427,11 +396,6 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
 #ifdef USE_ASSERT_CHECKING
 void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
 {
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
-        return;
-    }
-
     /*
      * prequisite is that the page that initialized to zero in memory should be flushed to disk,
      * references to seg_extend
@@ -455,39 +419,12 @@ void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
 }
 #endif
 
-static Buffer ReadSegBufferInRealtimeBuildFailoverForDMS(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc)
-{
-    Page page = (Page)BufHdrGetBlock(buf_desc);
-    XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
-    if (XLByteLT(ckptRedoPtr, PageGetLSN(page))) {
-        SegTerminateBufferIO(buf_desc, false, BM_VALID);
-        return BufferDescriptorGetBuffer(buf_desc);
-    } else {
-        return ReadSegBufferForDMS(buf_desc, read_mode, spc);
-    }
-}
-
 Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     Buffer buffer;
     if (buf_ctrl->state & BUF_NEED_LOAD) {
-        /*
-         * do not allow pageredo workers read buffer from disk if standby node in ondemand
-         * realtime build status, because some buffer need init directly in recovery mode
-         */
-        if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
-            buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
-            SegTerminateBufferIO(buf_desc, false, BM_VALID);
-            buffer = InvalidBuffer;
-        } else {
-            if (SS_ONDEMAND_REALTIME_BUILD_FAILOVER && (read_mode == RBM_NORMAL) &&
-                (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED)) {
-                buffer = ReadSegBufferInRealtimeBuildFailoverForDMS(buf_desc, read_mode, spc);
-            } else {
-                buffer = ReadSegBufferForDMS(buf_desc, read_mode, spc);
-            }
-        }
+        buffer = ReadSegBufferForDMS(buf_desc, read_mode, spc);
     } else {
         Page page = (Page)BufHdrGetBlock(buf_desc);
         PageSetChecksumInplace(page, buf_desc->tag.blockNum);
@@ -521,12 +458,6 @@ Buffer DmsReadSegPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, 
         return buffer;
     }
 
-    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
-        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
-        *with_io = false;
-        return InvalidBuffer;
-    }
-
     if (!DmsCheckBufAccessible()) {
         *with_io = false;
         return 0;
@@ -555,12 +486,6 @@ Buffer DmsReadPage(Buffer buffer, LWLockMode mode, ReadBufferMode read_mode, boo
 
     if (buf_ctrl->state & BUF_IS_RELPERSISTENT_TEMP) {
         return buffer;
-    }
-
-    if (unlikely(AmPageRedoWorker() && (read_mode == RBM_FOR_ONDEMAND_REALTIME_BUILD) && SS_IN_REFORM)) {
-        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
-        *with_io = false;
-        return InvalidBuffer;
     }
 
     XLogPhyBlock pblk = {0, 0, 0};
@@ -806,19 +731,6 @@ void SSOndemandClearRedoDoneState()
     }
 }
 
-static void SSOndemandCheckBufferState()
-{
-    for (int buffer = 0; buffer < TOTAL_BUFFER_NUM; buffer++) {
-        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer);
-        Assert(!(buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD));
-
-        // realtime build pinned buffer are already mark dirty in CBFlushCopy, do not need label
-        if (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED) {
-            buf_ctrl->state &= ~BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED;
-        }
-    }
-}
-
 void SSRecheckBufferPool()
 {
     uint64 buf_state;
@@ -849,7 +761,6 @@ void SSRecheckBufferPool()
                 buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (unsigned long long)pagelsn)));
         }
     }
-    SSOndemandCheckBufferState();
 }
 
 bool CheckPageNeedSkipInRecovery(Buffer buf, uint64 xlogLsn)
@@ -1150,26 +1061,6 @@ bool SSWaitIOTimeout(BufferDesc *buf)
     return ret;
 }
 
-bool SSOndemandRealtimeBuildAllowFlush(BufferDesc *buf_desc)
-{
-    if (!ENABLE_DMS || IsInitdb) {
-        return true;
-    }
-
-    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
-    if (buf_ctrl->state & BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED) {
-        if (!SS_ONDEMAND_REALTIME_BUILD_DISABLED && IsExtremeRtoRunning()) {
-            XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&ondemand_extreme_rto::g_dispatcher->ckptRedoPtr);
-            XLogRecPtr bufferLsn = PageGetLSN(BufHdrGetBlock(buf_desc));
-            if (XLByteLT(ckptRedoPtr, bufferLsn)) {
-                return false;
-            }
-        }
-        buf_ctrl->state &= ~BUF_IS_ONDEMAND_REALTIME_BUILD_PINNED;
-    }
-    return true;
-}
-
 Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode)
 {
     Buffer buffer;
@@ -1198,11 +1089,6 @@ bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
     }
 
     if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
-        return true;
-    }
-
-    if (AmPageRedoProcess() && SS_IN_REFORM && (buf_ctrl->state & BUF_READ_MODE_ONDEMAND_REALTIME_BUILD)) {
-        buf_ctrl->state &= ~BUF_READ_MODE_ONDEMAND_REALTIME_BUILD;
         return true;
     }
     return false;
