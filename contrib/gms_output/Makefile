@@ -5,6 +5,9 @@ OBJS	= gms_output.o
 EXTENSION = gms_output
 DATA = gms_output--1.0.sql
 
+exclude_option = -fPIE
+override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
+
 REGRESS = gms_output
 
 ifdef USE_PGXS
@@ -21,5 +24,3 @@ REGRESS_OPTS = -c 0 -d 1 -r 1 -p 25632 --single_node -w --keep_last_data=false  
                --temp-config=$(regress_home)/make_fastcheck_postgresql.conf
 include $(top_srcdir)/contrib/contrib-global.mk
 endif
-
-gms_output.o: gms_output.cpp
