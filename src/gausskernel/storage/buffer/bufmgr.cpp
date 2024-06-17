@@ -2287,6 +2287,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
 #endif
 
     buf_desc->extra->lsn_on_disk = PageGetLSN(bufBlock);
+    buf_ctrl->lsn_on_disk = PageGetLSN(bufBlock);
 #ifdef USE_ASSERT_CHECKING
     buf_desc->lsn_dirty = InvalidXLogRecPtr;
 #endif
@@ -3359,6 +3360,7 @@ retry_new_buffer:
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
         GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
+        GetDmsBufCtrl(buf->buf_id)->lsn_on_disk= InvalidXLogRecPtr;
     }
 
     if (old_flags & BM_TAG_VALID) {
@@ -5135,9 +5137,8 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             .opt = 0
         };
 
-#ifdef USE_ASSERT_CHECKING
-        SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno, bufToWrite);
-#endif
+        SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->extra->seg_blockno,
+                             bufdesc, bufToWrite);
 
         if (ENABLE_DMS && (t_thrd.role == PAGEWRITER_THREAD) && ENABLE_DSS_AIO) {
             int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;

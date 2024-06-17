@@ -319,9 +319,22 @@ void SegMarkBufferDirty(Buffer buf)
     UnlockBufHdr(bufHdr, buf_state);
 }
 
-#ifdef USE_ASSERT_CHECKING
-void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum, char *buf)
-{
+void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum,
+                          BufferDesc *buf_desc, char *buf)
+{   
+#ifndef USE_ASSERT_CHECKING
+    if (!IsInitdb && !RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+        XLogRecPtr lsn_on_mem = PageGetLSN(buf);
+            /* latest page must satisfy condition: page lsn_on_disk bigger than transfered page which is latest page */
+        if ((lsn_on_mem != InvalidXLogRecPtr) && XLByteLT(lsn_on_mem, buf_ctrl->lsn_on_disk)) {
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than lsn_on_disk(0x%llx)",
+                rNode.spcNode, rNode.dbNode, rNode.relNode, rNode.bucketNode, rNode.opt,
+                forknum, blocknum, (unsigned long long)lsn_on_mem,
+                (unsigned long long)buf_ctrl->lsn_on_disk)));
+        }
+    }       
+#else
     if (!RecoveryInProgress() && !SS_IN_ONDEMAND_RECOVERY && ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
         char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
         char *temp_buf = (char *)BUFFERALIGN(origin_buf);
@@ -336,8 +349,8 @@ void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, 
         }
         pfree(origin_buf);
     }
-}
 #endif
+}
 
 void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
 {
@@ -395,9 +408,7 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
         buf_to_write = PageSetChecksumCopy((Page)buf_to_write, buffer_info.blockinfo.blkno, true);
     }
 
-#ifdef USE_ASSERT_CHECKING
-    SegFlushCheckDiskLSN(spc, buf->tag.rnode, buf->tag.forkNum, buf->tag.blockNum, buf_to_write);
-#endif
+    SegFlushCheckDiskLSN(spc, buf->tag.rnode, buf->tag.forkNum, buf->tag.blockNum, buf, buf_to_write);
 
     if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
         int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
@@ -816,6 +827,7 @@ retry:
     if (ENABLE_DMS) {
         GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
         GetDmsBufCtrl(buf->buf_id)->been_loaded = false;
+        GetDmsBufCtrl(buf->buf_id)->lsn_on_disk= InvalidXLogRecPtr;
     }
 
     if (old_flag_valid) {

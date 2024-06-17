@@ -58,6 +58,7 @@ void InitDmsBufCtrl(void)
             buf_ctrl->ctrl_lock = LWLockAssign(LWTRANCHE_DMS_BUF_CTRL);
             buf_ctrl->need_check_pincount = false;
             buf_ctrl->pinned_count = 0;
+            buf_ctrl->lsn_on_disk = 0;
         }
     }
 }
@@ -196,6 +197,20 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
     return (ret == DMS_SUCCESS);
 }
 
+void SegPageCheckDiskLSNForRelease(BufferDesc *buf_desc)
+{
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    RelFileNode rnode = buf_desc->tag.rnode;
+    XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
+    /* latest page must satisfy condition: page lsn_on_disk bigger than transfered page which is latest page */
+    if ((lsn_on_mem != InvalidXLogRecPtr) && XLByteLT(lsn_on_mem, buf_ctrl->lsn_on_disk)) {
+        ereport(PANIC, (errmsg("[SS check][%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than lsn_on_disk(0x%llx)",
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                (int)buf_desc->tag.rnode.bucketNode, (int)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum,
+                buf_desc->tag.blockNum, (unsigned long long)lsn_on_mem, (unsigned long long)buf_ctrl->lsn_on_disk)));
+    }    
+}
+
 #ifdef USE_ASSERT_CHECKING
 SMGR_READ_STATUS SmgrNetPageCheckRead(Oid spcNode, Oid dbNode, Oid relNode, ForkNumber forkNum,
     BlockNumber blockNo, char *blockbuf)
@@ -302,8 +317,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
 #ifdef USE_ASSERT_CHECKING
         SmgrNetPageCheckDiskLSN(buf_desc, read_mode, pblk);
+#else
+        SegPageCheckDiskLSNForRelease(buf_desc);
 #endif
-
         buffer = BufferDescriptorGetBuffer(buf_desc);
         if ((!RecoveryInProgress() || g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) &&
             buf_desc->extra->seg_fileno == EXTENT_INVALID) {
@@ -431,6 +447,8 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
 
 #ifdef USE_ASSERT_CHECKING
         SegNetPageCheckDiskLSN(buf_desc, read_mode, spc);
+#else
+        SegPageCheckDiskLSNForRelease(buf_desc);
 #endif
 
         SegTerminateBufferIO(buf_desc, false, BM_VALID);

@@ -63,6 +63,7 @@ void SSRecheckBufferPool();
 void SSOndemandClearRedoDoneState();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
 bool CheckPageNeedSkipInRecovery(Buffer buf, uint64 xlogLsn);
+void SegPageCheckDiskLSNForRelease(BufferDesc *buf_desc);
 void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
 dms_session_e DMSGetProcType4RequestPage();

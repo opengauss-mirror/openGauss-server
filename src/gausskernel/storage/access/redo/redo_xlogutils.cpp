@@ -1593,6 +1593,7 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
     XLogRecPtr xlogLsn = XLogBlockHeadGetLSN(blockhead);
     XLogRedoAction redoaction = BLK_NOTFOUND;
     ReadBufferMode mode = RBM_NORMAL;
+    XLogRecPtr pageLsn = InvalidXLogRecPtr;
 
     if (bufferinfo->pageinfo.page != NULL) {
         return BLK_NEEDS_REDO;
@@ -1604,6 +1605,7 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
         XLogBlockDataParse *blockdatarec = (XLogBlockDataParse *)blockrecbody;
 
         bool willinit = XLogBlockDataGetBlockFlags(blockdatarec) & BKPBLOCK_WILL_INIT;
+        bool buf_willinit = XLogBlockDataGetBlockFlags(blockdatarec) & REGBUF_WILL_INIT;
         if ((willinit == false) && (notfound == true)) {
             return BLK_NOTFOUND;
         }
@@ -1622,7 +1624,19 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
         }
 
         if (ENABLE_DMS && mode != RBM_NORMAL) {
-            if (SSPageReplayNeedSkip(bufferinfo, xlogLsn)) {
+            if (SSPageReplayNeedSkip(bufferinfo, xlogLsn, &pageLsn)) {
+                /*
+                 * check REGBUF_WILL_INIT xlog
+                 * if REGBUF_WILL_INIT xlog is skipped during recovery phase, replay of subsequent xlog by
+                 * reading pages in NORMAL_MODE type will result in invalid pages.
+                 */
+                if (buf_willinit) {
+                    RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
+                    ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page skip replay "
+                            "REGBUF_WILL_INIT xlog, xlogLsn:%lu, pageLsn:%lu", blockinfo->rnode.spcNode,
+                            blockinfo->rnode.dbNode, blockinfo->rnode.relNode, blockinfo->rnode.bucketNode,
+                            blockinfo->forknum, blockinfo->blkno, xlogLsn, pageLsn)));
+                }
                 return BLK_DONE;
             }
         }

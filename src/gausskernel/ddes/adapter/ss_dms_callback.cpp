@@ -906,6 +906,7 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
     }
 
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
+    RelFileNode rnode = buf_desc->tag.rnode;
 
     if (buf_ctrl->need_check_pincount && (pg_atomic_read_u32(&(buf_ctrl->pinned_count)) == 0)) {
         buf_ctrl->need_check_pincount = false;
@@ -929,15 +930,24 @@ static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
         return;
     }
 
+    char *page = (char *)BufHdrGetBlock(buf_desc);
+    XLogRecPtr lsn_past = PageGetLSN(page);
+    XLogRecPtr lsn_now = PageGetLSN(new_page);
+  
+    /* latest page must satisfy condition: page lsn_on_disk bigger than transfered page which is latest page */
+    if ((lsn_now != InvalidXLogRecPtr) &&  XLByteLT(lsn_now, buf_ctrl->lsn_on_disk)) {
+        ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than lsn_on_disk(0x%llx)",
+            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            (unsigned long long)lsn_now, (unsigned long long)buf_ctrl->lsn_on_disk)));
+    }
+    
     /* we only verify segment-page version */
     if (!(buf_desc->extra->seg_fileno != EXTENT_INVALID || IsSegmentBufferID(buf_desc->buf_id))) {
         return;
     }
 
-    char *page = (char *)BufHdrGetBlock(buf_desc);
-    XLogRecPtr lsn_past = PageGetLSN(page);
-    XLogRecPtr lsn_now = PageGetLSN(new_page);
-    if ((lsn_now != InvalidXLogRecPtr) && (lsn_past > lsn_now)) {
+    if ((lsn_now != InvalidXLogRecPtr) && XLByteLT(lsn_now, lsn_past)) {
         RelFileNode rnode = buf_desc->tag.rnode;
         ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS page][%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
             rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
@@ -1890,7 +1900,7 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
 
 static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_cxt)
 {
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS Reform] reform start enter: pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform start enter: pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
                   pmState, g_instance.dms_cxt.SSClusterState, g_instance.demotion,
                   t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery)));
     /*

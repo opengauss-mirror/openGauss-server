@@ -9321,7 +9321,7 @@ void StartupXLOG(void)
         } else {
             if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
                 src_id = SSGetPrimaryInstId();
-                ereport(LOG, (errmsg("[SS Reform]: Standby:%d promoting, reading control file of original primary:%d",
+                ereport(LOG, (errmsg("[SS reform]: Standby:%d promoting, reading control file of original primary:%d",
                     g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
             } else {
                 src_id = g_instance.attr.attr_storage.dms_attr.instance_id;

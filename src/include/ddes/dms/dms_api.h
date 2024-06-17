@@ -34,7 +34,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           155
+#define DMS_LOCAL_VERSION           156
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -466,6 +466,7 @@ typedef struct st_dms_buf_ctrl
     void *ctrl_lock;
     volatile unsigned char need_check_pincount;
     volatile unsigned int pinned_count;
+    volatile unsigned long long lsn_on_disk;
 #endif
 } dms_buf_ctrl_t;
 

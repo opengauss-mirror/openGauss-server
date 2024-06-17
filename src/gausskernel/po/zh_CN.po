@@ -89169,7 +89169,7 @@ msgstr "[On-demand]:上次reform点播恢复未完成, 读取原主:%d 控制文
 
 #: storage/access/transam/xlog.cpp:9317
 #, c-format
-msgid "[SS Reform]: Standby:%d promoting, reading control file of original primary:%d"
+msgid "[SS reform]: Standby:%d promoting, reading control file of original primary:%d"
 msgstr "[SS reform]:备机:%d 选主、读取原主:%d 控制文件"
 
 #: storage/access/transam/xlog.cpp:9332

@@ -401,7 +401,7 @@ XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id
 }
 
 // used for extreme recovery and on-demand recovery
-bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
+bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn, XLogRecPtr *pageLsn)
 {
     if (!ENABLE_DMS || SS_DISASTER_STANDBY_CLUSTER) {
         return BLK_NEEDS_REDO;
@@ -448,18 +448,17 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn)
     if (DMS_BUF_CTRL_IS_OWNER(buf_ctrl)) {
         Buffer buf = buf_id + 1;
         Page page = BufferGetPage(buf);
-        uint64 pageLsn = PageGetLSN(page);
-#ifdef USE_ASSERT_CHECKING
-        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH && XLByteLT(pageLsn, xlogLsn)) {
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page should be newest but not, "
-                "xlogLsn:%lu, pageLsn:%lu",
-                blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
-                blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
-                xlogLsn, pageLsn)));
+        *pageLsn = PageGetLSN(page);
+
+        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH && XLByteLT(*pageLsn, xlogLsn)) {
+            ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] page should be newest but not, "
+                    "xlogLsn:%lu, pageLsn:%lu",
+                    blockinfo->rnode.spcNode, blockinfo->rnode.dbNode, blockinfo->rnode.relNode,
+                    blockinfo->rnode.bucketNode, blockinfo->forknum, blockinfo->blkno,
+                    xlogLsn, pageLsn)));
         }
-#endif
-        
-        if (XLByteLE(xlogLsn, pageLsn)) {
+
+        if (XLByteLE(xlogLsn, *pageLsn)) {
             bufferinfo->buf = buf;
             bufferinfo->lsn = xlogLsn;
             bufferinfo->pageinfo.page = page;

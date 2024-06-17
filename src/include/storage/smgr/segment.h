@@ -151,9 +151,8 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
 void SetInProgressFlags(BufferDesc *bufDesc, bool input);
 bool HasInProgressBuf(void);    
 void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint64 set_flag_bits);
-#ifdef USE_ASSERT_CHECKING
-void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum, char *buf);
-#endif
+void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum,
+                          BufferDesc *buf_desc, char *buf);
 
 /* Segment Remain API */
 enum StatRemainExtentType {

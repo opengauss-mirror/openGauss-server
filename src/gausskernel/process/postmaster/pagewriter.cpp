@@ -2179,12 +2179,6 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
     bool check_lsn_not_match = (local_buf_state & BM_VALID) && !(local_buf_state & BM_DIRTY) &&
         XLByteLT(buf_desc->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress() && !segment_buf;
 
-    if (ENABLE_DMS && check_lsn_not_match &&
-        (XLogRecPtrIsInvalid(buf_desc->extra->lsn_on_disk) ||
-         GetDmsBufCtrl(buf_desc->buf_id)->state & BUF_DIRTY_NEED_FLUSH)) {
-        return false;
-    }
-
     if (check_lsn_not_match) {
         PinBuffer(buf_desc, NULL);
         if (LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
