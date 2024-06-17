@@ -188,12 +188,14 @@ uint32 UBTreeVerifyRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNum, 
     /* now we traverse the whole queue from the head page */
     while (true) {
         errVerified += UBTreeRecycleQueuePageDump(rel, buf, false, tupDesc, tupstore, cols);
+        /* exit if current page is tail page*/
+        if ((header->flags & URQ_TAIL_PAGE) != 0) {
+            break;
+        }
+        /* move to the next page*/
         buf = StepNextRecyclePage(rel, buf);
         page = BufferGetPage(buf);
         header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
-        if ((header->flags & URQ_TAIL_PAGE) == 0) {
-            break;
-        }
     }
     UnlockReleaseBuffer(buf);
     RelationCloseSmgr(rel);
@@ -324,12 +326,12 @@ void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNum, Tupl
     while (true) {
         (void)UBTreeRecycleQueuePageDump(rel, buf, true, tupDesc, tupstore, cols);
         /* exit if current page is tail page*/
-        if ((header->flags & URQ_TAIL_PAGE) == 0) {
+        if ((header->flags & URQ_TAIL_PAGE) != 0) {
             break;
         }
         /* move to the next page*/
         buf = StepNextRecyclePage(rel, buf);
-        page = BufferGetPage(buf); 
+        page = BufferGetPage(buf);
         header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
     }
     UnlockReleaseBuffer(buf);
