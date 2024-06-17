@@ -86,7 +86,7 @@ bool SSRecoveryNodes()
          * time4 read the checkpoint which created before failover. oops, it is wrong
          */
         LWLockAcquire(ControlFileLock, LW_SHARED);
-        if (t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone &&
+        if (!SS_DISASTER_MAIN_STANDBY_NODE && t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone &&
             t_thrd.shemem_ptr_cxt.ControlFile->state == DB_IN_PRODUCTION) {
             LWLockRelease(ControlFileLock);
             result = true;
