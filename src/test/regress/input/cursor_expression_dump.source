@@ -1,0 +1,88 @@
+create database cursor_expression_dump;
+\c cursor_expression_dump
+create schema cursor_expression_dump;
+set search_path to cursor_expression_dump;
+
+
+create table employees(employees_id int, name varchar(50), department_id int, salary int, hire_date date);
+create table departments(department_id int, department_name varchar(50));
+create table company(name varchar(50));
+
+insert into employees values (1, 'zhangsan', 1, 1000, '2001-10-10'),(2, 'lisi', 1, 1000, '1998-10-10'),(3, 'wangwu', 2, 2000, '2002-10-10'),(4, 'heliu', 2, 2000, '2003-10-10');
+insert into departments values (1, 'sale'),(2, 'rd'),(3, 'pro');
+insert into company values ('h'),('a'),('t'); 
+
+-- pl
+
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+    end loop; 
+end;
+/
+
+
+
+create or replace procedure test_cursor_3 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	last_name_name2    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+	my_cur2 ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name, CURSOR(select c2.name from company c2) fff FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name, my_cur2;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %  % ',last_name_name, my_cur2;
+			loop
+			    fetch my_cur2 into last_name_name2;
+				exit when my_cur2%notfound;
+				raise notice '          last_name_name2 : %',last_name_name2;
+			end loop;
+			close my_cur2;
+	    end loop;
+		close my_cur;
+    end loop; 
+end;
+/
+
+-- view
+create view v1 as SELECT department_name, CURSOR(SELECT e1.name, CURSOR(select c2.name from company c2) fff FROM employees e1) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+
+
+\! @abs_bindir@/gs_dump cursor_expression_dump -p @portstring@ -f @abs_bindir@/cursor_expression_dump.sql -n cursor_expression_dump -w >/dev/null 2>&1; echo $?
+drop schema cursor_expression_dump cascade;
+\! @abs_bindir@/gsql -dcursor_expression_dump -p @portstring@ -f "@abs_bindir@/cursor_expression_dump.sql";
+
+-- cursor expression check
+
+call test_cursor_2();
+call test_cursor_3();
+select * from v1;
+
+drop schema cursor_expression_dump cascade;
+\c postgres
+drop database cursor_expression_dump;

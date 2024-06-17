@@ -585,6 +585,9 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     if (parse->utilityStmt && IsA(parse->utilityStmt, DeclareCursorStmt))
         cursorOptions = (uint32)cursorOptions | (uint32)(((DeclareCursorStmt*)parse->utilityStmt)->options);
 
+    else if (parse->utilityStmt && IsA(parse->utilityStmt, CursorExpression))
+        cursorOptions = (uint32)cursorOptions | (uint32)(((CursorExpression*)parse->utilityStmt)->options);
+
     /*
      * Set up global state for this planner invocation.  This data is needed
      * across all levels of sub-Query that might exist in the given command,

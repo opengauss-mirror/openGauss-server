@@ -339,6 +339,7 @@ typedef enum NodeTag {
     T_ListPartitionDefState,
     T_HashPartitionDefState,
     T_PrefixKeyState,
+    T_CursorExpressionState,
 
     /*
      * TAGS FOR PLANNER NODES (relation.h)
@@ -581,6 +582,7 @@ typedef enum NodeTag {
     T_DropSubscriptionStmt,
     T_ShrinkStmt,
     T_VariableMultiSetStmt,
+    T_CursorExpression,
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)
      */

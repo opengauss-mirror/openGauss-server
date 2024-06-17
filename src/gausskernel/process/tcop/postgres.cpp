@@ -1079,7 +1079,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
  *
  * NOTE: for reasons mentioned above, this must be separate from raw parsing.
  */
-List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams)
+List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams, ParseState* parent_pstate)
 {
     OgRecordAutoController _local_opt(SRT3_ANALYZE_REWRITE);
     Query* query = NULL;
@@ -1103,7 +1103,7 @@ List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* par
     }
 #endif
 
-    query = parse_analyze(parsetree, query_string, paramTypes, numParams);
+    query = parse_analyze(parsetree, query_string, paramTypes, numParams, true, false, parent_pstate);
 
     if (u_sess->attr.attr_common.log_parser_stats)
         ShowUsage("PARSE ANALYSIS STATISTICS");

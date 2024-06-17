@@ -1232,6 +1232,17 @@ static bool _equalDeclareCursorStmt(const DeclareCursorStmt* a, const DeclareCur
     return true;
 }
 
+static bool _equalCursorExpression(const CursorExpression* a, const CursorExpression* b)
+{
+    COMPARE_STRING_FIELD(portalname);
+    COMPARE_SCALAR_FIELD(options);
+    COMPARE_NODE_FIELD(plan);
+    COMPARE_STRING_FIELD(raw_query_str);
+    COMPARE_NODE_FIELD(param);
+    COMPARE_SCALAR_FIELD(location);
+    return true;
+}
+
 static bool _equalClosePortalStmt(const ClosePortalStmt* a, const ClosePortalStmt* b)
 {
     COMPARE_STRING_FIELD(portalname);
@@ -3879,6 +3890,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_DeclareCursorStmt:
             retval = _equalDeclareCursorStmt((DeclareCursorStmt*)a, (DeclareCursorStmt*)b);
+            break;
+        case T_CursorExpression:
+            retval = _equalCursorExpression((CursorExpression*)a, (CursorExpression*)b);
             break;
         case T_ClosePortalStmt:
             retval = _equalClosePortalStmt((ClosePortalStmt*)a, (ClosePortalStmt*)b);

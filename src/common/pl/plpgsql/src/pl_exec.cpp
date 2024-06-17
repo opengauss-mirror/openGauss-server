@@ -213,8 +213,8 @@ static void exec_set_found(PLpgSQL_execstate* estate, bool state);
 
 static void exec_set_cursor_found(PLpgSQL_execstate* estate, PLpgSQL_state state, int dno);
 static void exec_set_notfound(PLpgSQL_execstate* estate, PLpgSQL_state state, int dno);
-static void exec_set_isopen(PLpgSQL_execstate* estate, bool state, int varno);
-static void exec_set_rowcount(PLpgSQL_execstate* estate, int rowcount, bool reset, int dno);
+static void exec_set_isopen(PLpgSQL_execstate* estate, bool state, int varno, bool isnull = false);
+static void exec_set_rowcount(PLpgSQL_execstate* estate, int rowcount, bool reset, int dno, bool isnull = true);
 static void exec_set_sql_cursor_found(PLpgSQL_execstate* estate, PLpgSQL_state state);
 static void exec_set_sql_notfound(PLpgSQL_execstate* estate, PLpgSQL_state state);
 static void exec_set_sql_isopen(PLpgSQL_execstate* estate, bool state);
@@ -8354,6 +8354,36 @@ static void hold_portal_if_necessary(Portal portal)
 }
 #endif
 
+
+static void set_target_refcursor_var_state(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt) 
+{
+    PLpgSQL_row* row = NULL;
+    int nfields = 0;
+    int target_varno;
+    PLpgSQL_var* curvar = NULL;
+    
+    if (estate == NULL || stmt == NULL) {
+        return;
+    }
+    row = stmt->row;
+    if (row == NULL) {
+        return;
+    }
+    nfields = row->nfields;
+    for (int i = 0; i < nfields; i++) {
+        target_varno = row->varnos[i];
+        if (target_varno < estate->ndatums && estate->datums[target_varno]->dtype == PLPGSQL_DTYPE_VAR) {
+            curvar = (PLpgSQL_var*)(estate->datums[target_varno]);
+            if (curvar->datatype->typoid == REFCURSOROID) {
+                exec_set_notfound(estate, PLPGSQL_FALSE, target_varno + CURSOR_NOTFOUND);
+                exec_set_cursor_found(estate, PLPGSQL_FALSE, target_varno + CURSOR_FOUND);
+                exec_set_isopen(estate, true, target_varno + CURSOR_ISOPEN);
+                exec_set_rowcount(estate, -1, true, target_varno + CURSOR_ROWCOUNT, false);
+            }
+        }
+    }
+}
+
 /* ----------
  * exec_stmt_open			Execute an OPEN cursor statement
  * ----------
@@ -8751,6 +8781,7 @@ static int exec_stmt_fetch(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt)
     }
     exec_set_rowcount(estate, n, false, stmt->curvar + CURSOR_ROWCOUNT);
 
+    set_target_refcursor_var_state(estate, stmt);
     return PLPGSQL_RC_OK;
 }
 
@@ -13889,13 +13920,13 @@ static void exec_set_notfound(PLpgSQL_execstate* estate, PLpgSQL_state state, in
 /*
  * Set the global explicit cursor attribute isopen variable to true/false
  */
-static void exec_set_isopen(PLpgSQL_execstate* estate, bool state, int varno)
+static void exec_set_isopen(PLpgSQL_execstate* estate, bool state, int varno, bool isnull)
 {
     PLpgSQL_var* var = NULL;
 
     var = (PLpgSQL_var*)(estate->datums[varno]);
     var->value = BoolGetDatum(state);
-    var->isnull = false;
+    var->isnull = isnull;
 }
 
 /*
@@ -13904,7 +13935,7 @@ static void exec_set_isopen(PLpgSQL_execstate* estate, bool state, int varno)
  * reset == false, add the rowcount to global rowcount.
  * reset == true and rowcount == -1, rowcount is set NULL
  */
-static void exec_set_rowcount(PLpgSQL_execstate* estate, int rowcount, bool reset, int dno)
+static void exec_set_rowcount(PLpgSQL_execstate* estate, int rowcount, bool reset, int dno, bool isnull)
 {
     PLpgSQL_var* var = NULL;
 
@@ -13912,7 +13943,7 @@ static void exec_set_rowcount(PLpgSQL_execstate* estate, int rowcount, bool rese
     /* reset == true and rowcount == -1, rowcount is set NULL */
     if ((rowcount == -1) && reset) {
         var->value = (Datum)0;
-        var->isnull = true;
+        var->isnull = isnull;
     } else {
         var->value += rowcount;
         var->isnull = false;

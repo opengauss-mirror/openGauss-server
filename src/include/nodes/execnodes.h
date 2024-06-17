@@ -2932,5 +2932,13 @@ typedef struct TrainModelState {
     callback_ml_rescan  rescan;
     void                *callback_data; // for direct ML, used by the fetch callback
 } TrainModelState;
+
+typedef struct CursorExpressionState {
+    ExprState xprstate;
+    CursorExpression* cursor_expression;
+    List* param;
+} CursorExpressionState;
+
+
 #endif /* EXECNODES_H */
 

@@ -1,0 +1,817 @@
+-- FOR cursor expression --
+-- create new schema --
+drop schema if exists cursor_expression;
+NOTICE:  schema "cursor_expression" does not exist, skipping
+create schema cursor_expression;
+set search_path=cursor_expression;
+create table employees(employees_id int, name varchar(50), department_id int, salary int, hire_date date);
+create table departments(department_id int, department_name varchar(50));
+create table company(name varchar(50));
+create table employees2(employees_id int, department_id int, first_name varchar(50), last_name varchar(50), email varchar(50), phone_number int);
+insert into employees values (1, 'zhangsan', 1, 1000, '2001-10-10'),(2, 'lisi', 1, 1000, '1998-10-10'),(3, 'wangwu', 2, 2000, '2002-10-10'),(4, 'heliu', 2, 2000, '2003-10-10');
+insert into departments values (1, 'sale'),(2, 'rd'),(3, 'pro');
+insert into company values ('h'),('a'),('t'); 
+insert into employees2 values (1, 1, 'zhang', 'san', '1@abc.com', 123),(2, 1, 'li', 'si', '2@abc.com', 124);
+-- test cursor in select directly
+SELECT department_name, CURSOR(SELECT e.name FROM employees e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ department_name |      ?column?      
+-----------------+--------------------
+ sale            | <unnamed portal 1>
+(1 row)
+
+-- test cursor in declare
+START TRANSACTION;
+CURSOR cursor1 FOR SELECT e.name, CURSOR(SELECT e1.name, CURSOR(select c2.name from company c2) fff FROM employees e1) abc FROM employees e;
+FETCH  cursor1;
+   name   |        abc         
+----------+--------------------
+ zhangsan | <unnamed portal 2>
+(1 row)
+
+CLOSE cursor1;
+END;
+-- test cursor in pl
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  company_name : zhangsan  <unnamed portal 8>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  company_name : lisi  <unnamed portal 9>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  company_name : wangwu  <unnamed portal 10>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  company_name : heliu  <unnamed portal 11>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	last_name_name2    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+	my_cur2 ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name, CURSOR(select c2.name from company c2) fff FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name, my_cur2;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %  % ',last_name_name, my_cur2;
+			loop
+			    fetch my_cur2 into last_name_name2;
+				exit when my_cur2%notfound;
+				raise notice '          last_name_name2 : %',last_name_name2;
+			end loop;
+			close my_cur2;
+	    end loop;
+		close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  company_name : zhangsan  <unnamed portal 17>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 18> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : lisi  <unnamed portal 19> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : wangwu  <unnamed portal 20> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : heliu  <unnamed portal 21> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:  company_name : lisi  <unnamed portal 22>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 23> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : lisi  <unnamed portal 24> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : wangwu  <unnamed portal 25> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : heliu  <unnamed portal 26> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:  company_name : wangwu  <unnamed portal 27>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 28> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : lisi  <unnamed portal 29> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : wangwu  <unnamed portal 30> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : heliu  <unnamed portal 31> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:  company_name : heliu  <unnamed portal 32>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 33> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : lisi  <unnamed portal 34> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : wangwu  <unnamed portal 35> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+NOTICE:       last_name_name : heliu  <unnamed portal 36> 
+NOTICE:            last_name_name2 : h
+NOTICE:            last_name_name2 : a
+NOTICE:            last_name_name2 : t
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+-- anonymous block
+DECLARE CURSOR c1 IS SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+  v_name VARCHAR2(10);	
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  v_name2 VARCHAR2(10);	
+BEGIN
+  OPEN c1;
+  loop
+    fetch c1 into v_name,c2;
+    exit when c1%notfound;
+	raise notice 'company_name : %  %',v_name, c2;
+	loop
+	    fetch c2 into v_name2;
+		raise notice 'employee_name : %',v_name2;
+        exit when c2%notfound;
+	end loop;
+  end loop; 
+  
+  CLOSE c1;
+END;
+/
+NOTICE:  company_name : zhangsan  <unnamed portal 42>
+NOTICE:  employee_name : zhangsan
+NOTICE:  employee_name : lisi
+NOTICE:  employee_name : wangwu
+NOTICE:  employee_name : heliu
+NOTICE:  employee_name : heliu
+NOTICE:  company_name : lisi  <unnamed portal 43>
+NOTICE:  employee_name : zhangsan
+NOTICE:  employee_name : lisi
+NOTICE:  employee_name : wangwu
+NOTICE:  employee_name : heliu
+NOTICE:  employee_name : heliu
+NOTICE:  company_name : wangwu  <unnamed portal 44>
+NOTICE:  employee_name : zhangsan
+NOTICE:  employee_name : lisi
+NOTICE:  employee_name : wangwu
+NOTICE:  employee_name : heliu
+NOTICE:  employee_name : heliu
+NOTICE:  company_name : heliu  <unnamed portal 45>
+NOTICE:  employee_name : zhangsan
+NOTICE:  employee_name : lisi
+NOTICE:  employee_name : wangwu
+NOTICE:  employee_name : heliu
+NOTICE:  employee_name : heliu
+-- test column attribute
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+		raise notice 'my_cur isopen : %',  my_cur%isopen;
+	    raise notice 'my_cur found : %',my_cur%found;
+	    raise notice 'my_cur not found : %',my_cur%notfound;
+        raise notice 'my_cur row count : %',my_cur%rowcount;
+		raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+                raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+        raise notice 'my_cur isopen : %',my_cur%isopen;
+        raise notice 'my_cur found : %',my_cur%found;
+        raise notice 'my_cur not found : %',my_cur%notfound;
+        raise notice 'my_cur row count : %',my_cur%rowcount;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : f
+NOTICE:  my_cur row count : 0
+NOTICE:  company_name : zhangsan  <unnamed portal 51>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : t
+NOTICE:  my_cur row count : 4
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : f
+NOTICE:  my_cur row count : 0
+NOTICE:  company_name : lisi  <unnamed portal 52>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : t
+NOTICE:  my_cur row count : 4
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : f
+NOTICE:  my_cur row count : 0
+NOTICE:  company_name : wangwu  <unnamed portal 53>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : t
+NOTICE:  my_cur row count : 4
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : f
+NOTICE:  my_cur row count : 0
+NOTICE:  company_name : heliu  <unnamed portal 54>
+NOTICE:       last_name_name : zhangsan
+NOTICE:       last_name_name : lisi
+NOTICE:       last_name_name : wangwu
+NOTICE:       last_name_name : heliu
+NOTICE:  my_cur isopen : t
+NOTICE:  my_cur found : f
+NOTICE:  my_cur not found : t
+NOTICE:  my_cur row count : 4
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+-- test cursor expression as cursor para
+CREATE FUNCTION f(cur SYS_REFCURSOR, mgr_hiredate DATE) 
+   RETURN NUMBER IS
+   emp_hiredate DATE;
+   before number :=0;
+   after number:=0;
+begin
+  loop
+    fetch cur into emp_hiredate;
+    exit when cur%NOTFOUND;
+    if emp_hiredate > mgr_hiredate then
+      after:=after+1;
+    else
+      before:=before+1;
+    end if;
+  end loop;
+  close cur;
+  if before > after then
+    return 1;
+  else
+    return 0;
+  end if;
+end;
+/
+SELECT e1.name FROM employees e1 WHERE f(CURSOR(SELECT hire_date FROM employees e2),  '2000-01-01'::date) = 0 ORDER BY name;
+   name   
+----------
+ heliu
+ lisi
+ wangwu
+ zhangsan
+(4 rows)
+
+create TYPE  my_outrec_typ as  (
+    employee_id number(6), department_id NUMBER, first_name varchar2(30), last_name varchar2(30), email varchar2(30), phone_number varchar2(30)
+  );
+create TYPE my_outrecset IS TABLE OF my_outrec_typ;
+CREATE OR REPLACE FUNCTION parallel_my_f_trans (p SYS_REFCURSOR) RETURN setof my_outrec_typ IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+  BEGIN
+    LOOP
+      FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+      EXIT WHEN p%NOTFOUND;
+      return next out_rec;
+    END LOOP;
+    CLOSE p;
+    RETURN;
+END parallel_my_f_trans;
+/
+select count(*) into res_count1 from parallel_my_f_trans(cursor (SELECT * FROM employees2));
+select * from res_count1;
+ count 
+-------
+     2
+(1 row)
+
+-- test cursor expression access outer var
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name FROM employees2 e WHERE e.department_id = d.department_id) FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  department_name : pro  <unnamed portal 63>
+NOTICE:  department_name : rd  <unnamed portal 62>
+NOTICE:  department_name : sale  <unnamed portal 61>
+NOTICE:   department employees info : 1 zhang
+NOTICE:   department employees info : 2 li
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = 'sale') FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  department_name : pro  <unnamed portal 67>
+NOTICE:  department_name : rd  <unnamed portal 66>
+NOTICE:  department_name : sale  <unnamed portal 65>
+NOTICE:   department employees info : 1 zhang
+NOTICE:   department employees info : 2 li
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+-- expected error
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name,cursor(select d.department_name) FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = 'sale') FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+ERROR:  only spport access cursor and it's parent var in cursor expression.
+CONTEXT:  referenced column: department_name
+SQL statement "SELECT department_name, cursor(SELECT employees_id,first_name,cursor(select d.department_name)FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = 'sale')FROM departments d  ORDER BY department_name"
+PL/pgSQL function test_cursor_2() line 9 at OPEN
+drop procedure test_cursor_2;
+-- test cursor expression access outer pl var
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+	pl_var varchar(100) := 'sale';
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = pl_var) FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  department_name : pro  <unnamed portal 71>
+NOTICE:  department_name : rd  <unnamed portal 70>
+NOTICE:  department_name : sale  <unnamed portal 69>
+NOTICE:   department employees info : 1 zhang
+NOTICE:   department employees info : 2 li
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+-- test start with query
+SELECT department_name, CURSOR(with aa as (select employees_id from employees) select * from aa) FROM departments d;
+ department_name |      ?column?       
+-----------------+---------------------
+ sale            | <unnamed portal 72>
+ rd              | <unnamed portal 73>
+ pro             | <unnamed portal 74>
+(3 rows)
+
+-- test conflict with cursor function
+create function pg_catalog.cursor(varchar) RETURNS varchar LANGUAGE SQL IMMUTABLE STRICT as $$ SELECT $1 $$;
+select cursor('abc');
+ cursor 
+--------
+ abc
+(1 row)
+
+select cursor(123);
+ cursor 
+--------
+ 123
+(1 row)
+
+-- expect error
+select cursor(abcdefg);
+ERROR:  column "abcdefg" does not exist
+LINE 1: select cursor(abcdefg);
+                      ^
+CONTEXT:  referenced column: cursor
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: cursor
+drop function pg_catalog.cursor(varchar);
+set behavior_compat_options = 'prefer_parse_cursor_parentheses_as_expr';
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ department_name |      ?column?       
+-----------------+---------------------
+ sale            | <unnamed portal 75>
+(1 row)
+
+-- view contain cursor expr
+create view v1 as SELECT department_name, CURSOR(SELECT e.name FROM employees e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+select * from v1;
+ department_name |      ?column?       
+-----------------+---------------------
+ sale            | <unnamed portal 76>
+(1 row)
+
+drop view v1;
+-- some spec case
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ department_name |      ?column?       
+-----------------+---------------------
+ sale            | <unnamed portal 77>
+(1 row)
+
+SELECT department_name, CURSOR(((SELECT e.name FROM employees e))) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ department_name |      ?column?       
+-----------------+---------------------
+ sale            | <unnamed portal 78>
+(1 row)
+
+SELECT department_name, CURSOR(((/*test*/SELECT e.name FROM employees e))) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ department_name |      ?column?       
+-----------------+---------------------
+ sale            | <unnamed portal 79>
+(1 row)
+
+-- permission
+create user normalrole_user_001 password 'Gauss@123';
+GRANT USAGE ON SCHEMA cursor_expression TO normalrole_user_001;
+GRANT SELECT ON departments TO normalrole_user_001 with grant option;
+SET SESSION AUTHORIZATION normalrole_user_001 PASSWORD 'Gauss@123';
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ERROR:  permission denied for relation employees
+DETAIL:  N/A
+RESET SESSION AUTHORIZATION;
+drop user normalrole_user_001 cascade;
+-- error input
+SELECT department_name, CURSOR(SELEC e.name FROM employees e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ERROR:  syntax error at or near "SELEC"
+LINE 1: SELECT department_name, CURSOR(SELEC e.name FROM employees e...
+                                       ^
+SELECT department_name, CURSOR(SELECT e.name FROM employees11 e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ERROR:  relation "employees11" does not exist on datanode1
+LINE 1: SELECT department_name, CURSOR(SELECT e.name FROM employees1...
+                           ^
+SELECT department_name, CURSOR(insert into employees11 values (1, 1, 1, 1, '2001-10-10 00:00:00')) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+ERROR:  syntax error at or near "insert"
+LINE 1: SELECT department_name, CURSOR(insert into employees11 value...
+                                       ^
+-- record
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row record;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into curr_row;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',curr_row.name, curr_row.abc;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  company_name : zhangsan  <unnamed portal 86>
+NOTICE:  company_name : lisi  <unnamed portal 87>
+NOTICE:  company_name : wangwu  <unnamed portal 88>
+NOTICE:  company_name : heliu  <unnamed portal 89>
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row record;
+	last_name varchar(20);
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into curr_row;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',curr_row.name, curr_row.abc;
+		my_cur := curr_row.abc;
+		loop
+	   	fetch my_cur into last_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name : %',last_name;
+		end loop;
+    end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  company_name : zhangsan  <unnamed portal 95>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+NOTICE:  company_name : lisi  <unnamed portal 96>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+NOTICE:  company_name : wangwu  <unnamed portal 97>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+NOTICE:  company_name : heliu  <unnamed portal 98>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+-- rowtype
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+begin
+    for curr_row in c1 loop
+        raise notice '% %', curr_row.name, curr_row.abc;
+    end loop;
+end;
+/
+call test_cursor_2();
+NOTICE:  zhangsan <unnamed portal 100>
+NOTICE:  lisi <unnamed portal 101>
+NOTICE:  wangwu <unnamed portal 102>
+NOTICE:  heliu <unnamed portal 103>
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+begin
+    for curr_row in c1 loop
+        raise notice '% %', curr_row.name, curr_row.abc;
+		
+    end loop;
+end;
+/
+call test_cursor_2();
+NOTICE:  zhangsan <unnamed portal 105>
+NOTICE:  lisi <unnamed portal 106>
+NOTICE:  wangwu <unnamed portal 107>
+NOTICE:  heliu <unnamed portal 108>
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+begin
+    open c1;
+	loop
+	    fetch c1 into curr_row;
+	    exit when c1%notfound;
+	    raise notice 'name : %  %',curr_row.name, curr_row.abc;
+	end loop; 
+end;
+/
+call test_cursor_2();
+NOTICE:  name : zhangsan  <unnamed portal 114>
+NOTICE:  name : lisi  <unnamed portal 115>
+NOTICE:  name : wangwu  <unnamed portal 116>
+NOTICE:  name : heliu  <unnamed portal 117>
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+	last_name varchar(20);
+begin
+    for curr_row in c1 loop
+        raise notice '% %', curr_row.name, curr_row.abc;
+		my_cur := curr_row.abc;
+		loop
+	   	fetch my_cur into last_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name : %',last_name;
+		end loop;
+    end loop;
+end;
+/
+call test_cursor_2();
+NOTICE:  zhangsan <unnamed portal 119>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+NOTICE:  lisi <unnamed portal 120>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+NOTICE:  wangwu <unnamed portal 121>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+NOTICE:  heliu <unnamed portal 122>
+NOTICE:       last_name : zhangsan
+NOTICE:       last_name : lisi
+NOTICE:       last_name : wangwu
+NOTICE:       last_name : heliu
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+-- clean
+drop table res_count1;
+drop table employees;
+drop table departments;
+drop table company;
+drop table employees2;
+drop FUNCTION f;
+drop FUNCTION parallel_my_f_trans;
+drop TYPE my_outrecset;
+drop TYPE  my_outrec_typ;
+drop schema if exists cursor_expression cascade;

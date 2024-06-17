@@ -4114,6 +4114,19 @@ static void _outDeclareCursorStmt(StringInfo str, DeclareCursorStmt* node)
     WRITE_NODE_FIELD(query);
 }
 
+static void _outCursorExpression(StringInfo str, CursorExpression* node)
+{
+    WRITE_NODE_TYPE("CURSOREXPRESSION");
+
+    WRITE_STRING_FIELD(portalname);
+    WRITE_INT_FIELD(options);
+    WRITE_NODE_FIELD(plan);
+    WRITE_STRING_FIELD(raw_query_str);
+    WRITE_NODE_FIELD(param);
+    WRITE_INT_FIELD(location);
+}
+
+
 static void _outMergeStmt(StringInfo str, MergeStmt* node)
 {
     WRITE_NODE_TYPE("MERGEINTO");
@@ -6808,6 +6821,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_DeclareCursorStmt:
                 _outDeclareCursorStmt(str, (DeclareCursorStmt*)obj);
+                break;
+            case T_CursorExpression:
+                _outCursorExpression(str, (CursorExpression*)obj);
                 break;
             case T_CopyStmt:
                 _outCopyStmt(str, (CopyStmt*)obj);

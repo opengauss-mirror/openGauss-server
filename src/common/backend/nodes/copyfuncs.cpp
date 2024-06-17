@@ -5238,6 +5238,18 @@ static DeclareCursorStmt* _copyDeclareCursorStmt(const DeclareCursorStmt* from)
     return newnode;
 }
 
+static CursorExpression* _copyCursorExpression(const CursorExpression* from)
+{
+    CursorExpression* newnode = makeNode(CursorExpression);
+    COPY_STRING_FIELD(portalname);
+    COPY_SCALAR_FIELD(options);
+    COPY_NODE_FIELD(plan);
+    COPY_STRING_FIELD(raw_query_str);
+    COPY_NODE_FIELD(param);
+    COPY_SCALAR_FIELD(location);
+    return newnode;
+}
+
 static ClosePortalStmt* _copyClosePortalStmt(const ClosePortalStmt* from)
 {
     ClosePortalStmt* newnode = makeNode(ClosePortalStmt);
@@ -8371,6 +8383,9 @@ void* copyObject(const void* from)
             break;
         case T_DeclareCursorStmt:
             retval = _copyDeclareCursorStmt((DeclareCursorStmt*)from);
+            break;
+        case T_CursorExpression:
+            retval = _copyCursorExpression((CursorExpression*)from);
             break;
         case T_ClosePortalStmt:
             retval = _copyClosePortalStmt((ClosePortalStmt*)from);

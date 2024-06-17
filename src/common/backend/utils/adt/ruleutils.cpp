@@ -10590,6 +10590,11 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             appendStringInfo(buf, "(%d)", pkey->length);
         } break;
 
+        case T_CursorExpression: {
+            CursorExpression* stmt = (CursorExpression*) node;
+            appendStringInfo(buf, "CURSOR(%s)", stmt->raw_query_str);
+        } break;
+
 #ifdef USE_SPQ
         case T_DMLActionExpr:
             appendStringInfo(buf, "DMLAction");

@@ -203,6 +203,9 @@ const uint32 PREDPUSH_VERSION_NUM = 92096;
 const uint32 SUBLINKPULLUP_VERSION_NUM = 92094;
 const uint32 PARTIALPUSH_VERSION_NUM = 92087;
 
+const uint32 CURSOR_EXPRESSION_VERSION_NUMBER = 92935;
+
+
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
 bool InplaceUpgradePrecommit = false;

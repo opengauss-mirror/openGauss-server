@@ -20,14 +20,32 @@
  */
 
 #include "postgres.h"
+#include "storage/proc.h"
 #include "knl/knl_variable.h"
+
 #include "nodes/parsenodes.h"
 
 #include "parser/gramparse.h"
 #include "parser/parser.h"
 #include "utils/guc.h"
+#include "miscadmin.h"
+#include "catalog/pg_namespace.h"
 
 extern void resetOperatorPlusFlag();
+
+static bool is_prefer_parse_cursor_parentheses_as_expr()
+{
+    return PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR;
+}
+
+static bool is_cursor_function_exist()
+{
+    return get_func_oid("cursor", InvalidOid, NULL) != InvalidOid;
+}
+
+static bool is_select_stmt_definitely(int start_token) {
+    return start_token == SELECT || start_token == WITH;
+}
 
 static void resetIsTimeCapsuleFlag()
 {
@@ -144,6 +162,32 @@ List* raw_parser(const char* str, List** query_string_locationlist)
         yyextra->lookahead_num = 1;                         \
     } while (0)
 
+
+#define PARSE_CURSOR_PARENTHESES_AS_EXPR()                   \
+    do {                                                     \
+        cur_token = CURSOR_EXPR;                             \
+        yyextra->lookahead_token[0] = next_token_2;          \
+        yyextra->lookahead_yylval[0] = lvalp->core_yystype;  \
+        yyextra->lookahead_yylloc[0] = *llocp;               \
+        yyextra->lookahead_num = 1;                          \
+        lvalp->core_yystype = core_yystype_2;                \
+        *llocp = cur_yylloc_2;                               \
+    } while (0)
+
+
+#define PARSE_CURSOR_PARENTHESES_AS_FUNCTION()               \
+    do {                                                     \
+        yyextra->lookahead_token[1] = next_token_1;          \
+        yyextra->lookahead_yylval[1] = core_yystype_2;       \
+        yyextra->lookahead_yylloc[1] = cur_yylloc_2;         \
+        yyextra->lookahead_token[0] = next_token_2;          \
+        yyextra->lookahead_yylval[0] = lvalp->core_yystype;  \
+        yyextra->lookahead_yylloc[0] = *llocp;               \
+        yyextra->lookahead_num = 2;                          \
+        lvalp->core_yystype = core_yystype_1;                \
+        *llocp = cur_yylloc_1;                               \
+    } while (0)
+
 /*
  * Intermediate filter between parser and core lexer (core_yylex in scan.l).
  *
@@ -168,6 +212,13 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
     int next_token;
     core_YYSTYPE cur_yylval;
     YYLTYPE cur_yylloc;
+    int next_token_1 = 0;
+    core_YYSTYPE core_yystype_1;
+    YYLTYPE cur_yylloc_1 = 0;
+    int next_token_2 = 0;
+    core_YYSTYPE core_yystype_2;
+    YYLTYPE cur_yylloc_2 = 0;
+
 
     /* Get next token --- we might already have it */
     if (yyextra->lookahead_num != 0) {
@@ -690,6 +741,30 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
+         case CURSOR:
+             GET_NEXT_TOKEN();
+             core_yystype_1 = cur_yylval;  // the value of cursor
+             cur_yylloc_1 = cur_yylloc;    // the lloc of cursor
+             next_token_1 = next_token;    // the token after curosr
+             GET_NEXT_TOKEN();
+             core_yystype_2 = cur_yylval;   // the value after cursor
+             cur_yylloc_2 = cur_yylloc;    // the lloc after cursor
+             next_token_2 = next_token;   // the token after after curosr
+
+             if (next_token_1 == '(' && (is_select_stmt_definitely(next_token))) {
+                 PARSE_CURSOR_PARENTHESES_AS_EXPR();
+             } else if (is_prefer_parse_cursor_parentheses_as_expr() && !is_cursor_function_exist()) {
+                 PARSE_CURSOR_PARENTHESES_AS_EXPR();
+             } else {
+                 PARSE_CURSOR_PARENTHESES_AS_FUNCTION();
+             }
+
+             if (t_thrd.proc->workingVersionNum < CURSOR_EXPRESSION_VERSION_NUMBER &&
+                cur_token == CURSOR_EXPR) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Unsupported feature: cursor expression during the upgrade")));
+             }
+             break;
         default:
             break;
     }

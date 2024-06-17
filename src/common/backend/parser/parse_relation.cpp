@@ -483,7 +483,8 @@ int RTERangeTablePosn(ParseState* pstate, RangeTblEntry* rte, int* sublevels_up)
     while (pstate != NULL) {
         index = 1;
         foreach (l, pstate->p_rtable) {
-            if (rte == (RangeTblEntry*)lfirst(l)) {
+            RangeTblEntry* rte_entry = (RangeTblEntry*)lfirst(l);
+            if (rte == rte_entry || (pstate->is_outer_parse_state == true && strcmp(rte->relname, rte_entry->relname) == 0)) {
                 return index;
             }
             index++;

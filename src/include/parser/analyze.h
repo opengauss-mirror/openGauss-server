@@ -26,7 +26,7 @@ typedef void (*post_parse_analyze_hook_type)(ParseState* pstate, Query* query);
 extern THR_LOCAL PGDLLIMPORT post_parse_analyze_hook_type post_parse_analyze_hook;
 
 extern Query* parse_analyze(Node* parseTree, const char* sourceText, Oid* paramTypes, int numParams,
-    bool isFirstNode = true, bool isCreateView = false);
+    bool isFirstNode = true, bool isCreateView = false, ParseState* parent_pstate = NULL);
 
 extern Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams);
 

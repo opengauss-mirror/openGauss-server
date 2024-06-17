@@ -466,7 +466,7 @@ test: select_into subselect_part2 gs_aggregate
 #test: select_distinct subselect_part1 transactions btree_index select_distinct_on arrays hash_index
 #test: transactions_control random union
 #test: aggregates
-test: holdable_cursor
+test: holdable_cursor cursor_expression cursor_expression_dump
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
 test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify

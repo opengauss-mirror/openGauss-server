@@ -625,6 +625,23 @@ typedef struct DeclareCursorStmt {
     Node *query;      /* the raw SELECT query */
 } DeclareCursorStmt;
 
+
+/* ----------------------
+ * Cursor Expression Statement
+ *
+ * for cursor(select ...) case
+ * ----------------------
+ */
+typedef struct CursorExpression {
+    NodeTag type;
+    char *portalname; /* name of the portal (cursor) */
+    int options;      /* bitmask of options (see above) */
+    Node *plan;       /* PlannedStmt */
+    char * raw_query_str;  /* cursor expression raw query string*/
+    List* param;      /* cursor expression param. used to passed outer var to expression query*/
+    int location;     /* token location, or -1 if unknown */
+} CursorExpression;
+
 /* ----------------------
  * Select Statement
  *

@@ -5678,6 +5678,47 @@ static Datum ExecEvalPrefixBytea(PrefixKeyState* state, ExprContext* econtext, b
     return PointerGetDatum(bytea_substring(result, 1, pkey->length, false));
 }
 
+static Datum ExecEvalCursorExpression(CursorExpressionState* state, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    Portal portal = NULL;
+    const char* portal_name;
+    MemoryContext oldContext;
+    CursorExpression* cursor_expression = state->cursor_expression;
+    PlannedStmt* portal_plan_stmt = NULL; 
+    if (isDone != NULL) {
+        *isDone = ExprSingleResult;
+    }
+    *isNull = false;
+
+    portal = CreateNewPortal(false);
+    oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
+
+    portal_name = pstrdup(portal->name);
+    portal_plan_stmt = (PlannedStmt*)copyObject(cursor_expression->plan);
+    PortalDefineQuery(portal,
+        NULL,
+        pstrdup(cursor_expression->raw_query_str),
+        "SELECT", /* cursor's query is always a SELECT */
+        list_make1(portal_plan_stmt),
+        NULL);
+             
+    PortalStart(portal, econtext->ecxt_param_list_info, 0, GetActiveSnapshot());
+
+    int plan_param_number = ((PlannedStmt*)(cursor_expression->plan))->nParamExec;
+    for (int i = 0; i < plan_param_number; i++) {
+        bool expr_is_null = false;
+        ParamExecData* prm = &(portal->queryDesc->estate->es_param_exec_vals[i]);
+        ExprState* expr_state = (ExprState*)list_nth(state->param, i);
+        prm->value  = ExecEvalExprSwitchContext(expr_state, econtext, &expr_is_null, NULL);
+        prm->isChanged = true;
+    }
+
+    (void)MemoryContextSwitchTo(oldContext);
+    PinPortal(portal);
+    return CStringGetTextDatum(portal_name);
+}
+
+
 /*
 * ExecInitExpr: prepare an expression tree for execution
 *
@@ -6454,6 +6495,25 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
             state = (ExprState*)makeNode(ExprState);
             state->evalfunc = ExecEvalPriorExpr;
             break;
+
+        case T_CursorExpression: {
+            ListCell* l = NULL;
+            CursorExpression* cursor_expression = (CursorExpression*)node;
+            CursorExpressionState* dstate = makeNode(CursorExpressionState);
+            dstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalCursorExpression;
+            dstate->cursor_expression = cursor_expression;
+            List* outlist = NIL;
+            foreach (l, cursor_expression->param) {
+                Expr* e = (Expr*)lfirst(l);
+                ExprState* estate = NULL;
+                estate = ExecInitExprByRecursion(e, parent);
+                outlist = lappend(outlist, estate);
+            }
+            dstate->param = outlist;
+            state = (ExprState*)dstate;
+         } break;
+
+        
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

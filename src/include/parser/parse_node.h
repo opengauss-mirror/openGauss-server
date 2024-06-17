@@ -96,6 +96,8 @@ typedef Node* (*CreateProcOperatorHook)(ParseState* pstate, Node* left, Node* ri
 typedef void (*CreateProcInsertrHook)(ParseState* pstate, int param_no, Oid param_new_type, Oid relid,
                 const char* col_name);
 typedef void* (*GetFuncinfoFromStateHelper)(void* param);
+typedef Node* (*TransformOuterColumnRefAsParamHook)(ParseState* pstate, ColumnRef* cref, Node* var);
+
 
 /*
  * State information used during parse analysis
@@ -211,6 +213,7 @@ struct ParseState {
     CoerceParamHook p_coerce_param_hook;
     CreateProcOperatorHook p_create_proc_operator_hook;
     CreateProcInsertrHook p_create_proc_insert_hook;
+    TransformOuterColumnRefAsParamHook transform_outer_columnref_as_param_hook;
     void* p_ref_hook_state; /* common passthrough link for above */
     void* p_cl_hook_state; /* cl related state - SQLFunctionParseInfoPtr  */
     List* p_target_list;
@@ -286,6 +289,8 @@ struct ParseState {
     List* orderbyCols; 
     List* p_indexhintLists; /*Force or use index in index hint list*/
     bool has_uservar;
+    bool is_outer_parse_state;  /*is parse state is from outer scope, for cursor expression case*/
+    List* cursor_expression_para_var;
 };
 
 /* An element of p_relnamespace or p_varnamespace */

@@ -359,7 +359,7 @@ static const struct b_format_behavior_compat_entry b_format_behavior_compat_opti
 
 typedef struct behavior_compat_entry {
     const char* name; /* name of behavior compat entry */
-    int flag;         /* bit flag position */
+    int64 flag;         /* bit flag position */
 } behavior_compat_entry;
 
 static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
@@ -393,7 +393,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"accept_empty_str", OPT_ACCEPT_EMPTY_STR},
     {"plpgsql_dependency", OPT_PLPGSQL_DEPENDENCY},
     {"proc_uncheck_default_param", OPT_PROC_UNCHECK_DEFAULT_PARAM},
-    {"update_unusable_unique_index_on_iud", OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD}
+    {"update_unusable_unique_index_on_iud", OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD},
+    {"prefer_parse_cursor_parentheses_as_expr", OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -3658,7 +3659,7 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
     List* elemlist = NULL;
     ListCell* cell = NULL;
     int start = 0;
-    int result = 0;
+    int64 result = 0;
 
     rawstring = pstrdup(newval);
     (void)SplitIdentifierString(rawstring, ',', &elemlist);

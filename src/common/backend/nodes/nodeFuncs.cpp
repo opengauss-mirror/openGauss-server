@@ -251,6 +251,11 @@ Oid exprType(const Node* expr)
         case T_PriorExpr:
             type = exprType(((const PriorExpr*)expr)->node);
             break;
+
+        case T_CursorExpression:
+             type = REFCURSOROID;
+             break;
+
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -992,6 +997,11 @@ Oid exprCollation(const Node* expr)
         case T_PriorExpr:
             coll = exprCollation((Node*)((const PriorExpr*)expr)->node);
             break;
+
+        case T_CursorExpression:
+            coll = InvalidOid;
+            break;
+            
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1210,6 +1220,8 @@ void exprSetCollation(Node* expr, Oid collation)
             break;
         case T_PriorExpr:
             return exprSetCollation((Node*)((const PriorExpr*)expr)->node, collation);
+        case T_CursorExpression:
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -2059,6 +2071,10 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         }
         case T_PriorExpr:
             return p2walker(((PriorExpr*)node)->node, context);
+
+        case T_CursorExpression:
+            return false;
+
         default:
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
@@ -2839,6 +2855,15 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->node, p_expr->node, Node*);
             return (Node*)newnode;
         } break;
+
+        case T_CursorExpression: {
+            CursorExpression* cursor_expression = (CursorExpression*)node;
+            CursorExpression* newnode = NULL;
+            FLATCOPY(newnode, cursor_expression, CursorExpression, isCopy);
+            MUTATE(newnode->param, cursor_expression->param, List*);
+            return (Node*)newnode;
+        } break;
+        
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));

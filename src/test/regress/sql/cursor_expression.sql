@@ -1,0 +1,496 @@
+-- FOR cursor expression --
+
+-- create new schema --
+drop schema if exists cursor_expression;
+create schema cursor_expression;
+set search_path=cursor_expression;
+
+
+create table employees(employees_id int, name varchar(50), department_id int, salary int, hire_date date);
+create table departments(department_id int, department_name varchar(50));
+create table company(name varchar(50));
+create table employees2(employees_id int, department_id int, first_name varchar(50), last_name varchar(50), email varchar(50), phone_number int);
+
+insert into employees values (1, 'zhangsan', 1, 1000, '2001-10-10'),(2, 'lisi', 1, 1000, '1998-10-10'),(3, 'wangwu', 2, 2000, '2002-10-10'),(4, 'heliu', 2, 2000, '2003-10-10');
+insert into departments values (1, 'sale'),(2, 'rd'),(3, 'pro');
+insert into company values ('h'),('a'),('t'); 
+insert into employees2 values (1, 1, 'zhang', 'san', '1@abc.com', 123),(2, 1, 'li', 'si', '2@abc.com', 124);
+
+-- test cursor in select directly
+SELECT department_name, CURSOR(SELECT e.name FROM employees e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+
+-- test cursor in declare
+START TRANSACTION;
+CURSOR cursor1 FOR SELECT e.name, CURSOR(SELECT e1.name, CURSOR(select c2.name from company c2) fff FROM employees e1) abc FROM employees e;
+FETCH  cursor1;
+CLOSE cursor1;
+END;
+
+
+-- test cursor in pl
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	last_name_name2    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+	my_cur2 ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name, CURSOR(select c2.name from company c2) fff FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name, my_cur2;
+            exit when my_cur%notfound;
+            raise notice '     last_name_name : %  % ',last_name_name, my_cur2;
+			loop
+			    fetch my_cur2 into last_name_name2;
+				exit when my_cur2%notfound;
+				raise notice '          last_name_name2 : %',last_name_name2;
+			end loop;
+			close my_cur2;
+	    end loop;
+		close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+-- anonymous block
+DECLARE CURSOR c1 IS SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+  v_name VARCHAR2(10);	
+  type emp_cur_type is ref cursor;
+  c2 emp_cur_type;
+  v_name2 VARCHAR2(10);	
+BEGIN
+  OPEN c1;
+  loop
+    fetch c1 into v_name,c2;
+    exit when c1%notfound;
+	raise notice 'company_name : %  %',v_name, c2;
+	loop
+	    fetch c2 into v_name2;
+		raise notice 'employee_name : %',v_name2;
+        exit when c2%notfound;
+	end loop;
+  end loop; 
+  
+  CLOSE c1;
+END;
+/
+
+
+-- test column attribute
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    last_name_name    varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into company_name, my_cur;
+        exit when c1%notfound;
+		raise notice 'my_cur isopen : %',  my_cur%isopen;
+	    raise notice 'my_cur found : %',my_cur%found;
+	    raise notice 'my_cur not found : %',my_cur%notfound;
+        raise notice 'my_cur row count : %',my_cur%rowcount;
+		raise notice 'company_name : %  %',company_name, my_cur;
+	    loop
+	        fetch my_cur into last_name_name;
+            exit when my_cur%notfound;
+                raise notice '     last_name_name : %',last_name_name;
+	    end loop;
+        raise notice 'my_cur isopen : %',my_cur%isopen;
+        raise notice 'my_cur found : %',my_cur%found;
+        raise notice 'my_cur not found : %',my_cur%notfound;
+        raise notice 'my_cur row count : %',my_cur%rowcount;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+-- test cursor expression as cursor para
+CREATE FUNCTION f(cur SYS_REFCURSOR, mgr_hiredate DATE) 
+   RETURN NUMBER IS
+   emp_hiredate DATE;
+   before number :=0;
+   after number:=0;
+begin
+  loop
+    fetch cur into emp_hiredate;
+    exit when cur%NOTFOUND;
+    if emp_hiredate > mgr_hiredate then
+      after:=after+1;
+    else
+      before:=before+1;
+    end if;
+  end loop;
+  close cur;
+  if before > after then
+    return 1;
+  else
+    return 0;
+  end if;
+end;
+/
+
+SELECT e1.name FROM employees e1 WHERE f(CURSOR(SELECT hire_date FROM employees e2),  '2000-01-01'::date) = 0 ORDER BY name;
+
+
+create TYPE  my_outrec_typ as  (
+    employee_id number(6), department_id NUMBER, first_name varchar2(30), last_name varchar2(30), email varchar2(30), phone_number varchar2(30)
+  );
+
+create TYPE my_outrecset IS TABLE OF my_outrec_typ;
+
+
+CREATE OR REPLACE FUNCTION parallel_my_f_trans (p SYS_REFCURSOR) RETURN setof my_outrec_typ IS
+    out_rec my_outrec_typ := my_outrec_typ(NULL, NULL, NULL, NULL, NULL, NULL);
+  BEGIN
+    LOOP
+      FETCH p INTO out_rec.employee_id, out_rec.department_id, out_rec.first_name, out_rec.last_name, out_rec.email, out_rec.phone_number;  -- input row
+      EXIT WHEN p%NOTFOUND;
+      return next out_rec;
+    END LOOP;
+    CLOSE p;
+    RETURN;
+END parallel_my_f_trans;
+/
+
+select count(*) into res_count1 from parallel_my_f_trans(cursor (SELECT * FROM employees2));
+
+select * from res_count1;
+
+
+-- test cursor expression access outer var
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name FROM employees2 e WHERE e.department_id = d.department_id) FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = 'sale') FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+-- expected error
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name,cursor(select d.department_name) FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = 'sale') FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+-- test cursor expression access outer pl var
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+	department_name  varchar(100);
+	pl_var varchar(100) := 'sale';
+    employees_id_var    int;
+	name_var varchar(100);
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT department_name, cursor(SELECT employees_id,first_name FROM employees2 e WHERE e.department_id = d.department_id and d.department_name = pl_var) FROM departments d  ORDER BY department_name;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into department_name, my_cur;
+        exit when c1%notfound;
+	    raise notice 'department_name : %  %',department_name, my_cur;
+	    loop
+	        fetch my_cur into employees_id_var, name_var;
+            exit when my_cur%notfound;
+            raise notice ' department employees info : % %',employees_id_var, name_var;
+	    end loop;
+        close my_cur;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+-- test start with query
+SELECT department_name, CURSOR(with aa as (select employees_id from employees) select * from aa) FROM departments d;
+
+
+-- test conflict with cursor function
+create function pg_catalog.cursor(varchar) RETURNS varchar LANGUAGE SQL IMMUTABLE STRICT as $$ SELECT $1 $$;
+select cursor('abc');
+select cursor(123);
+
+-- expect error
+select cursor(abcdefg);
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+
+
+drop function pg_catalog.cursor(varchar);
+set behavior_compat_options = 'prefer_parse_cursor_parentheses_as_expr';
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+
+
+-- view contain cursor expr
+create view v1 as SELECT department_name, CURSOR(SELECT e.name FROM employees e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+select * from v1;
+drop view v1;
+
+
+-- some spec case
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+SELECT department_name, CURSOR(((SELECT e.name FROM employees e))) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+SELECT department_name, CURSOR(((/*test*/SELECT e.name FROM employees e))) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+
+
+-- permission
+create user normalrole_user_001 password 'Gauss@123';
+GRANT USAGE ON SCHEMA cursor_expression TO normalrole_user_001;
+GRANT SELECT ON departments TO normalrole_user_001 with grant option;
+SET SESSION AUTHORIZATION normalrole_user_001 PASSWORD 'Gauss@123';
+SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+RESET SESSION AUTHORIZATION;
+drop user normalrole_user_001 cascade;
+
+
+-- error input
+SELECT department_name, CURSOR(SELEC e.name FROM employees e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+SELECT department_name, CURSOR(SELECT e.name FROM employees11 e) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+SELECT department_name, CURSOR(insert into employees11 values (1, 1, 1, 1, '2001-10-10 00:00:00')) FROM departments d WHERE department_name='sale' ORDER BY department_name;
+
+
+-- record
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row record;
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into curr_row;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',curr_row.name, curr_row.abc;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row record;
+	last_name varchar(20);
+begin 
+    OPEN c1;
+    loop
+        fetch c1 into curr_row;
+        exit when c1%notfound;
+	    raise notice 'company_name : %  %',curr_row.name, curr_row.abc;
+		my_cur := curr_row.abc;
+		loop
+	   	fetch my_cur into last_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name : %',last_name;
+		end loop;
+    end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+-- rowtype
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+begin
+    for curr_row in c1 loop
+        raise notice '% %', curr_row.name, curr_row.abc;
+    end loop;
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+begin
+    for curr_row in c1 loop
+        raise notice '% %', curr_row.name, curr_row.abc;
+		
+    end loop;
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+begin
+    open c1;
+	loop
+	    fetch c1 into curr_row;
+	    exit when c1%notfound;
+	    raise notice 'name : %  %',curr_row.name, curr_row.abc;
+	end loop; 
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+create or replace procedure test_cursor_2 
+as 
+	type ref_cur_type is ref cursor;
+    my_cur ref_cur_type;
+    cursor c1 is SELECT e.name as name, CURSOR(SELECT e1.name FROM employees e1) abc FROM employees e;
+	curr_row c1%rowtype;
+	last_name varchar(20);
+begin
+    for curr_row in c1 loop
+        raise notice '% %', curr_row.name, curr_row.abc;
+		my_cur := curr_row.abc;
+		loop
+	   	fetch my_cur into last_name;
+            exit when my_cur%notfound;
+            raise notice '     last_name : %',last_name;
+		end loop;
+    end loop;
+end;
+/
+call test_cursor_2();
+drop procedure test_cursor_2;
+
+
+-- clean
+drop table res_count1;
+drop table employees;
+drop table departments;
+drop table company;
+drop table employees2;
+
+drop FUNCTION f;
+drop FUNCTION parallel_my_f_trans;
+drop TYPE my_outrecset;
+drop TYPE  my_outrec_typ;
+
+drop schema if exists cursor_expression cascade;

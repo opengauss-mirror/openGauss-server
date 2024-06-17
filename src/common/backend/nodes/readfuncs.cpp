@@ -1690,6 +1690,22 @@ static DeclareCursorStmt* _readDeclareCursorStmt(void)
     READ_DONE();
 }
 
+/*
+ * _readCursorExpressionStmt
+ */
+static CursorExpression* _readCursorExpression(void)
+{
+    READ_LOCALS(CursorExpression);
+    READ_STRING_FIELD(portalname);
+    READ_INT_FIELD(options);
+    READ_NODE_FIELD(plan);
+    READ_STRING_FIELD(raw_query_str);
+    READ_NODE_FIELD(param);
+    READ_INT_FIELD(location);
+    READ_DONE();
+}
+
+
 static CopyStmt* _readCopyStmt(void)
 {
     READ_LOCALS(CopyStmt);
@@ -6558,6 +6574,8 @@ Node* parseNodeString(void)
         return_value = _readNotifyStmt();
     } else if (MATCH("DECLARECURSOR", 13)) {
         return_value = _readDeclareCursorStmt();
+    } else if (MATCH("CURSOREXPRESSION", 16)) {
+        return_value = _readCursorExpression();
     } else if (MATCH("NESTLOOP", 8)) {
         return_value = _readNestLoop();
     } else if (MATCH("SEQSCAN", 7)) {

@@ -990,6 +990,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			EVENT_TRIGGER
 			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
 			FORCE_INDEX USE_INDEX IGNORE_INDEX
+			CURSOR_EXPR
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -27543,6 +27544,25 @@ func_expr_common_subexpr:
 					d = SystemTypeName("timestamptz");
 					d->typmods = list_make1(makeIntConst($3, @3));
 					$$ = makeTypeCast(n, d, @1);
+				}		
+			| CURSOR_EXPR SelectStmt ')'
+			    {
+					int cursor_start;
+					int cursor_end;
+					CursorExpression *n = makeNode(CursorExpression);
+					n->portalname = NULL;
+					n->options = CURSOR_OPT_FAST_PLAN;
+					n->location = @1;
+					cursor_start = @2;
+					cursor_end = @3;
+					StringInfoData buf;
+					initStringInfo(&buf);
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					char* raw_parse_query_string = yyextra->core_yy_extra.scanbuf;
+					appendBinaryStringInfo(&buf, raw_parse_query_string + cursor_start, cursor_end - cursor_start);
+					n->raw_query_str = pstrdup(buf.data);
+					FreeStringInfo(&buf);
+					$$ = (Node *)n;
 				}
 			| LOCALTIME
 				{
