@@ -1506,7 +1506,7 @@ static XLogRedoAction GetMultiInsertRedoAction(XLogReaderState *record, RedoBuff
         }
         UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
         uheappage->pd_xid_base = *xidBase;
-        uheappage->pd_multi_base = *xidBase;
+        uheappage->pd_multi_base = 0;
         action = BLK_NEEDS_REDO;
     } else {
         action = XLogReadBufferForRedo(record, 0, buffer);
