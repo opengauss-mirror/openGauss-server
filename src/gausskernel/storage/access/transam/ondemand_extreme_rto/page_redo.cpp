@@ -1144,16 +1144,15 @@ void PageManagerMergeHashMapInRealtimeBuild()
 {
     ondemand_htab_ctrl_t *procHtabCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
     ondemand_htab_ctrl_t *targetHtabCtrl = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl;
-    ondemand_htab_ctrl_t *nextHtabCtrlHold = (ondemand_htab_ctrl_t *)procHtabCtrl->nextHTabCtrl; //nextHtabCtrl for hold the next HtabCtrl
-    ondemand_htab_ctrl_t *nextHtabCtrlFree = procHtabCtrl; //nextHtabCtrl for free space
+    ondemand_htab_ctrl_t *nextHtabCtrlHold = (ondemand_htab_ctrl_t *)procHtabCtrl->nextHTabCtrl; // nextHtabCtrl for hold the next HtabCtrl
+    ondemand_htab_ctrl_t *nextHtabCtrlFree = procHtabCtrl; // nextHtabCtrl for free space
     g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl =
         g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
-    
     while (nextHtabCtrlHold != NULL) {
-        nextHtabCtrlFree = nextHtabCtrlHold;        
+        nextHtabCtrlFree =  (ondemand_htab_ctrl_t *)nextHtabCtrlHold;
         OndemandMergeHashMap(nextHtabCtrlHold->hTab, procHtabCtrl->hTab);
         nextHtabCtrlHold = (ondemand_htab_ctrl_t *)nextHtabCtrlHold->nextHTabCtrl;
-        pfree(nextHtabCtrlFree);    
+        PRRedoItemHashDestory(nextHtabCtrlFree);
     }
     procHtabCtrl->nextHTabCtrl = NULL;
 }
@@ -3385,7 +3384,7 @@ void HashMapManagerMain()
             if (XLByteLT(procHtabCtrl->maxRedoItemPtr, ckptRedoPtr)) {
                 PRTrackAllClear(procHtabCtrl->hTab);
                 pg_atomic_write_u64(&g_redoWorker->nextPrunePtr, procHtabCtrl->maxRedoItemPtr);
-                pfree(procHtabCtrl);
+                PRRedoItemHashDestory(procHtabCtrl);
                 g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId] = nextHtabCtrl;
             } else {
                 updateStat = false;

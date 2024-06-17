@@ -125,6 +125,20 @@ ondemand_htab_ctrl_t *PRRedoItemHashInitialize(MemoryContext context)
     return htab_ctrl;
 }
 
+/**
+ * Destory redo item hashtable.
+ */
+void PRRedoItemHashDestory(ondemand_htab_ctrl_t* htab_ctrl) {
+    if (htab_ctrl != NULL) {
+        if (htab_ctrl->hTab != NULL) {
+            hash_destroy(htab_ctrl->hTab);
+            htab_ctrl->hTab = NULL;
+            htab_ctrl->nextHTabCtrl = NULL;
+        }
+        pfree(htab_ctrl);
+    }
+}
+
 ondemand_htab_ctrl_t **PRInitRedoItemHashForAllPipeline(MemoryContext context)
 {
     int batchNum = get_batch_redo_num();
@@ -352,6 +366,10 @@ void PRTrackDatabaseDrop(XLogRecParseState *recordBlockState, HTAB *hashMap)
     XLogBlockParseStateRelease(recordBlockState);
 }
 
+/*
+ * Remove all the redoItemEntry from redoItemHash,
+ * and release all the recordBlockState.
+ */
 void PRTrackAllClear(HTAB *redoItemHash)
 {
     HASH_SEQ_STATUS status;
@@ -453,9 +471,9 @@ void PRTrackAddBatchBlock(XLogRecParseState *headBlockState, XLogRecParseState *
                                        isHead);
 }
 
-/**
-     others state, clear related block state(including release), release it
-*/
+/*
+ *    others state, clear related block state(including release), release it
+ */
 void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
 {
     Assert(recordBlockState != NULL);

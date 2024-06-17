@@ -70,6 +70,7 @@ typedef struct redoitemhashentry {
 
 extern void PRPrintRedoItemHashTab(HTAB *redoItemHash);
 extern ondemand_htab_ctrl_t *PRRedoItemHashInitialize(MemoryContext context);
+extern void PRRedoItemHashDestory(ondemand_htab_ctrl_t* htab_ctrl);
 extern ondemand_htab_ctrl_t **PRInitRedoItemHashForAllPipeline(MemoryContext context);
 extern void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
 extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash, bool isHead = false);
