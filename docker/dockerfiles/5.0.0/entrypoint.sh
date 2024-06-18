@@ -274,13 +274,13 @@ opengauss_setup_postgresql_conf() {
                     echo "password_encryption_type = 0"
                     echo "wal_level = logical"
                 fi
+                echo "application_name = '$NODE_NAME'"
 
                 if [ -n "$SERVER_MODE" ]; then
                     echo "listen_addresses = '0.0.0.0'"
                     echo "most_available_sync = on"
                     echo "remote_read_mode = non_authentication"
                     echo "pgxc_node_name = '$NODE_NAME'"
-                    # echo "application_name = '$NODE_NAME'"
                     if [ "$SERVER_MODE" = "primary" ]; then
                         echo "max_connections = 100"
                     else
@@ -313,7 +313,7 @@ docker_temp_server_start() {
 
         PGUSER="${PGUSER:-$GS_USER}" \
         gs_ctl -D "$PGDATA" \
-                -w start
+                -w start $@
 }
 
 # stop postgresql server after done setting up user and running scripts
