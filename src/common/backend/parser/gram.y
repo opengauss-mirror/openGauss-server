@@ -9025,7 +9025,7 @@ OptTableSpace:   TABLESPACE opt_equal name					{ $$ = $3; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
 OptGPI: 	UPDATE GLOBAL INDEX 	{ $$ = TRUE; }
-			| /*EMPTY*/				{ $$ = FALSE; }
+			| /*EMPTY*/				{ if (UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE) {$$ = TRUE;} else {$$ = false;}}
 		;
 OptCompress: COMPRESS	{ $$ = REL_CMPRS_FIELDS_EXTRACT; }
 			| NOCOMPRESS { $$ = REL_CMPRS_PAGE_PLAIN; }

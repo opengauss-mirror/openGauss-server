@@ -394,7 +394,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"plpgsql_dependency", OPT_PLPGSQL_DEPENDENCY},
     {"proc_uncheck_default_param", OPT_PROC_UNCHECK_DEFAULT_PARAM},
     {"update_unusable_unique_index_on_iud", OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD},
-    {"prefer_parse_cursor_parentheses_as_expr", OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR}
+    {"prefer_parse_cursor_parentheses_as_expr", OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR},
+    {"update_global_index_on_partition_change", OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy

@@ -211,7 +211,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_PROC_UNCHECK_DEFAULT_PARAM (1LL << 29)
 #define OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD (1LL << 30)
 #define OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR (1LL << 31)
-#define OPT_MAX 32
+#define OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE (1LL << 32)
+#define OPT_MAX 33
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -257,6 +258,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define PROC_UNCHECK_DEFAULT_PARAM (u_sess->utils_cxt.behavior_compat_flags & OPT_PROC_UNCHECK_DEFAULT_PARAM)
 #define UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD (u_sess->utils_cxt.behavior_compat_flags & OPT_UPDATE_UNUSABLE_UNIQUE_INDEX_ON_IUD)
 #define PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR (u_sess->utils_cxt.behavior_compat_flags & OPT_PREFER_PARSE_CURSOR_PARENTHESES_AS_EXPR)
+#define UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE (u_sess->utils_cxt.behavior_compat_flags & OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE)
 
 
 /* define database compatibility Attribute */

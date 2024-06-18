@@ -340,4 +340,56 @@ drop index idx_nv_num_u;
 drop index idx_uq_u;
 drop table web_returns_p_u;
 
+
+CREATE TABLE web_returns_p_a
+(
+    sk_date       INTEGER,
+    cm_num        INTEGER,
+    nv_num        INTEGER,
+    cn_name       INTEGER
+)
+with (STORAGE_TYPE=ASTORE)
+PARTITION BY RANGE(sk_date)
+(
+    PARTITION P1 VALUES LESS THAN(1),
+    PARTITION P2 VALUES LESS THAN(2),
+    PARTITION P3 VALUES LESS THAN(3),
+    PARTITION P4 VALUES LESS THAN(4),
+    PARTITION P5 VALUES LESS THAN(5),
+    PARTITION P6 VALUES LESS THAN(6),
+    PARTITION P7 VALUES LESS THAN(7),
+    PARTITION P8 VALUES LESS THAN(8),
+    PARTITION P9 VALUES LESS THAN(9),
+    PARTITION Pmax VALUES LESS THAN(MAXVALUE)
+);
+
+insert into web_returns_p_a values (1,1,1,1);
+insert into web_returns_p_a values (2,2,2,2);
+insert into web_returns_p_a values (3,3,3,3);
+insert into web_returns_p_a values (4,4,4,4);
+insert into web_returns_p_a values (5,5,5,5);
+insert into web_returns_p_a values (6,6,6,6);
+insert into web_returns_p_a values (7,7,7,7);
+insert into web_returns_p_a values (8,8,8,8);
+insert into web_returns_p_a values (9,9,9,9);
+
+create index idx_cm_num_a on web_returns_p_a(cm_num) global;
+create index idx_nv_num_a on web_returns_p_a(nv_num) local;
+create unique index idx_uq_a on web_returns_p_a(sk_date) global;
+
+
+\d+ web_returns_p_a;
+set behavior_compat_options = 'update_global_index_on_partition_change';
+alter table web_returns_p_a drop partition p2;
+\d+ web_returns_p_a;
+
+reset behavior_compat_options;
+alter table web_returns_p_a drop partition p3;
+\d+ web_returns_p_a;
+
+drop index idx_cm_num_a;
+drop index idx_nv_num_a;
+drop index idx_uq_a;
+drop table web_returns_p_a;
+
 -- End. Clean u
