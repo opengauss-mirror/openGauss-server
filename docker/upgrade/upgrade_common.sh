@@ -179,8 +179,9 @@ function parse_cmd_line() {
       action=$2
       action_list="upgrade_pre upgrade_bin upgrade_post rollback_pre rollback_bin rollback_post upgrade_commit query_start_mode switch_over"
       if ! echo "$action_list"|grep -wq "$action"; then
-        die "only these actions are supported: upgrade_pre, upgrade_bin, upgrade_post, rollback_pre, \
-rollback_bin, rollback_post, upgrade_commit and query_start_mode switch_over" ${err_parameter}
+        local error_msg="only these actions are supported: upgrade_pre, upgrade_bin, upgrade_post, rollback_pre, \
+rollback_bin, rollback_post, upgrade_commit and query_start_mode switch_over"
+        die "$error_msg" ${err_parameter}
       fi
       shift 2
       ;;
@@ -329,7 +330,6 @@ function check_version() {
     big_cfg="True"
   fi
 
-  # TODO: flag_file, 记录旧版本号和新版本号
   local flag_file="$GAUSS_TMP_PATH"/version_flag
   if echo "old_version=$old_version" > "$flag_file" && chmod 600 "$flag_file"; then
     debug "Begin to generate $flag_file"
@@ -991,6 +991,7 @@ function upgrade_pre() {
 function upgrade_pre_step1() {
   check_disk
   check_version
+  check_cluster_state
   if [[ "$big_cfg" == "True" ]]; then
     prepare_sql_all
   fi
@@ -1029,9 +1030,21 @@ function upgrade_bin() {
     die "exec upgrade pre first" ${err_upgrade_bin}
   elif [[ "$current_step" -gt 3 ]]; then
     log "no need do upgrade_bin step"
-  else
-    upgrade_bin_step4
+    return
   fi
+  upgrade_bin_check
+  upgrade_bin_step4
+}
+
+function upgrade_bin_check() {
+  # Before performing the upgrade_bin operation, check if the gaussdb process exists.
+  # If it exists, it indicates that the gaussdb process was not stopped after the upgrade_pre.
+  if gs_ctl query -D ${GAUSSDATA} > /dev/null; then
+    local error_msg="Before performing the upgrade_bin, it is necessary to ensure that the old gaussdb \
+process has been stopped, but the current gaussdb is running."
+    die "$error_msg" ${err_upgrade_bin}
+  fi
+  debug "The old process has been stopped; you can proceed with executing upgrade_bin."
 }
 
 function upgrade_bin_step4() {
@@ -1055,20 +1068,67 @@ function upgrade_bin_step4() {
   log "The upgrade_bin step is executed successfully. "
 }
 
+function check_real_gaussdb_version() {
+  log "Checking the real gaussdb version."
+  local real_gaussdb_version
+  real_gaussdb_version=$(gsql -tA -d postgres -p $GAUSS_LISTEN_PORT -c "select version();")
+  if [[ $? -ne 0 ]]; then
+    die "Get real gaussdb version failed" ${err_upgrade_bin}
+  fi
+  local new_version=""
+  new_version=`tail -n 1 $UPGRADE_NEW_PKG_PATH/version.cfg`
+  debug "new_version: $new_version"
+  debug "real_gaussdb_version: $real_gaussdb_version"
+  if ! echo "$real_gaussdb_version" | grep "$new_version" > /dev/null; then
+    die "real gaussdb version is still old!" ${err_upgrade_bin}
+  fi
+  log "Check the real gaussdb version successfully."
+}
+
+function check_cluster_state() {
+  log "Checking the cluster state."
+  debug "dn_role: $dn_role"
+  if [[ "$dn_role" != "primary" ]]; then
+    return
+  fi
+  gs_ctl query -D ${GAUSSDATA} > ${GAUSS_TMP_PATH}/temp_dn_role
+  if [[ $? -ne 0 ]]; then
+    die "Get cluster state failed" ${err_upgrade_bin}
+  fi
+  local static_connections=$(grep "static_connections" ${GAUSS_TMP_PATH}/temp_dn_role | awk -F': ' '{print $2}')
+  local standby_nums=$(grep "sender_pid" ${GAUSS_TMP_PATH}/temp_dn_role -c)
+  if [[ $standby_nums -lt $static_connections ]]; then
+    local error_msg="The cluster state is abnormal.\nThe number of standby nodes($standby_nums) is less than \
+the number of static connections($static_connections). Please check the standby state."
+    die "$error_msg" ${err_upgrade_bin}
+  fi
+
+  log "Check the cluster state successfully."
+}
+
+function upgrade_post_check() {
+  check_real_gaussdb_version
+  check_cluster_state
+}
+
 function upgrade_post() {
   parses_step
   if [[ "$current_step" -lt 0 ]]; then
     die "Step file may be changed invalid" ${err_upgrade_post}
   elif [[ "$current_step" -lt 4 ]]; then
     die "You should exec upgrade_bin first" ${err_upgrade_post}
-  elif [[ "$current_step" -eq 4 ]]; then
-    upgrade_post_step56
-  elif [[ "$current_step" -eq 5 ]]; then
-    rollback_post
-    upgrade_post_step56
-  else
+  elif [[ "$current_step" -gt 5 ]]; then
     log "no need do upgrade_post step"
+    return
   fi
+
+  upgrade_post_check
+
+  if [[ "$current_step" -eq 5 ]]; then
+    rollback_post
+  fi
+  # "$current_step" -eq 4
+  upgrade_post_step56
 }
 
 function upgrade_post_step56() {
