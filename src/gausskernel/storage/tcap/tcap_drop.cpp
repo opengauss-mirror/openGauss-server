@@ -1112,7 +1112,10 @@ static bool TrNeedPhyDelete(Relation depRel, ObjectAddresses *targetObjects, Obj
     /* Step 1: tag refobjs of thisobj, return directly if ALL refobjs not need physical drop. */
     for (int i = 0; i < refobjs->numrefs; i++) {
         item = refobjs->refs + i;
-        if (!TrObjIsInList(targetObjects, item)) {
+        /* Skip the judgemnt on the obj in the pg_proc table and perform logical delection 
+         * by default.
+         */
+        if (item->classId != ProcedureRelationId && !TrObjIsInList(targetObjects, item)) {
             result = true;
             break;
         }
