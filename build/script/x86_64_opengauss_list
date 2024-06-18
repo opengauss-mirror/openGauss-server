@@ -90,6 +90,8 @@
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/age--1.0.0.sql
 ./share/postgresql/extension/age.control
+./share/postgresql/extension/timescaledb.control
+./share/postgresql/extension/timescaledb--1.7.4.sql
 ./share/postgresql/extension/datavec--0.4.4.sql
 ./share/postgresql/extension/datavec.control
 ./share/postgresql/extension/assessment--1.0.sql
@@ -803,6 +805,9 @@
 ./lib/postgresql/pg_plugin
 ./lib/postgresql/proc_srclib
 ./lib/postgresql/security_plugin.so
+./lib/postgresql/timescaledb-1.7.4.so
+./lib/postgresql/timescaledb.so
+./lib/postgresql/timescaledb-tsl-1.7.4.so
 ./lib/postgresql/dolphin.so
 ./lib/postgresql/age.so
 ./lib/postgresql/datavec.so
