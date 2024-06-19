@@ -26,6 +26,7 @@
 #define __SS_DMS_FI_H__
 
 #include "dms_api.h"
+#include "ddes/dms/ddes_fault_injection_defs.h"
 #include "ddes/dms/ss_dms.h"
 #include "utils/elog.h"
 
@@ -33,23 +34,33 @@
 extern "C" {
 #endif
 
+#define DB_FI_ENTRY_BEGIN      10000
+#define DB_FI_ENTRY_COUNT      1024
+
 typedef enum en_db_fi_point_name {
-    // if CALL and TRIGGER both in kernel point range [10001, 10799]
+    // if CALL and TRIGGER both in kernel point range [10001, 10799]DDES_FI_ENTRY_END
     DB_FI_CHANGE_BUFFERTAG_BLOCKNUM = DB_FI_ENTRY_BEGIN + 1,
 } db_fi_point_name;
 
-int dms_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int count);
-int dms_fi_set_entry_value(unsigned int type, unsigned int value);
-int dms_fi_get_tls_trigger_custom(void);
-void dms_fi_set_tls_trigger_custom(int val);
-unsigned char dms_fi_entry_custom_valid(unsigned int point);
-void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args);
+// for alloc fi context with size return size
+int ss_fi_get_context_size(void);
+// set the fi context with the context, and init the context, the context alloced by DB
+void ss_fi_set_and_init_context(void *context);
+
+int ss_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int count);
+int ss_fi_get_entry_value(unsigned int type);
+int ss_fi_set_entry_value(unsigned int type, unsigned int value);
+int ss_fi_get_tls_trigger_custom(void);
+void ss_fi_set_tls_trigger_custom(int val);
+unsigned char ss_fi_entry_custom_valid(unsigned int point);
+
+void ss_fi_change_buffertag_blocknum(const void *ddes_fi_entry, va_list args);
 
 #ifdef USE_ASSERT_CHECKING
-#define FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(point, action)                                       \
+#define SS_FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(point, action)                                    \
     do {                                                                                           \
-        if (dms_fi_entry_custom_valid(point) && dms_fi_get_tls_trigger_custom() == TRUE) {         \
-            dms_fi_set_tls_trigger_custom(FALSE);                                                  \
+        if (ss_fi_entry_custom_valid(point) && ss_fi_get_tls_trigger_custom() == TRUE) {           \
+            ss_fi_set_tls_trigger_custom(FALSE);                                                   \
             ereport(DEBUG1, (errmsg("[KERNEL_FI] fi custom action happens at %s", __FUNCTION__))); \
             action;                                                                                \
         }                                                                                          \
@@ -58,12 +69,12 @@ void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args);
 #define SS_FAULT_INJECTION_CALL(point, ...)                                                        \
     do {                                                                                           \
         if (g_ss_dms_func.inited) {                                                                \
-            g_ss_dms_func.fault_injection_call(point, ##__VA_ARGS__);                              \
+            g_ss_dms_func.ddes_fi_call(point, ##__VA_ARGS__);                                      \
         }                                                                                          \
     } while (0)
 
 #else
-#define FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(point, action)
+#define SS_FAULT_INJECTION_ACTION_TRIGGER_CUSTOM(point, action)
 #define SS_FAULT_INJECTION_CALL(point, ...)
 #endif
 
