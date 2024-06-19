@@ -139,12 +139,16 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_req_opengauss_immediate_ckpt));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fsync_logfile));
 #ifdef USE_ASSERT_CHECKING
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_set_entries));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_set_entry_value));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_get_tls_trigger_custom));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_set_tls_trigger_custom));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(fault_injection_call));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_entry_custom_valid));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_get_context_size));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_and_init_context));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_entries));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_get_entry_value));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_entry_value));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_get_tls_trigger_custom));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_tls_trigger_custom));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_entry_custom_valid));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_call));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_call_ex));
 #endif
 
     g_ss_dms_func.inited = true;

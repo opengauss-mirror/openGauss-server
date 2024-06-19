@@ -377,18 +377,23 @@ static void SetWorkThreadpoolConfig(dms_profile_t *profile)
 
 #ifdef USE_ASSERT_CHECKING
 static void set_dms_fi() 
-{    
+{
     knl_session_attr_dms* attr = &u_sess->attr.attr_storage.dms_attr;
-    dms_fi_set_entries(DMS_FI_TYPE_PACKET_LOSS, attr->packet_loss.ss_fi_cfg.entries, attr->packet_loss.ss_fi_cfg.count);
-    dms_fi_set_entry_value(DMS_FI_TYPE_PACKET_LOSS, attr->packet_loss.ss_fi_cfg.fault_value);
-    dms_fi_set_entries(DMS_FI_TYPE_NET_LATENCY, attr->net_latency.ss_fi_cfg.entries, attr->net_latency.ss_fi_cfg.count);
-    dms_fi_set_entry_value(DMS_FI_TYPE_NET_LATENCY, attr->net_latency.ss_fi_cfg.fault_value);
-    dms_fi_set_entries(DMS_FI_TYPE_CPU_LATENCY, attr->cpu_latency.ss_fi_cfg.entries, attr->cpu_latency.ss_fi_cfg.count);
-    dms_fi_set_entry_value(DMS_FI_TYPE_CPU_LATENCY, attr->cpu_latency.ss_fi_cfg.fault_value);
-    dms_fi_set_entries(DMS_FI_TYPE_PROCESS_FAULT, attr->process_fault.ss_fi_cfg.entries, attr->process_fault.ss_fi_cfg.count);
-    dms_fi_set_entry_value(DMS_FI_TYPE_PROCESS_FAULT, attr->process_fault.ss_fi_cfg.fault_value);
-    dms_fi_set_entries(DMS_FI_TYPE_CUSTOM_FAULT, attr->custom_fault.ss_fi_cfg.entries, attr->custom_fault.ss_fi_cfg.count);
-    dms_fi_set_entry_value(DMS_FI_TYPE_CUSTOM_FAULT, attr->custom_fault.ss_fi_cfg.fault_value);
+    ss_fi_set_entries(DDES_FI_TYPE_PACKET_LOSS, (unsigned int *)attr->packet_loss.fi_entries,
+        attr->packet_loss.ss_fi_cfg.count);
+    ss_fi_set_entry_value(DDES_FI_TYPE_PACKET_LOSS, attr->packet_loss.fi_value);
+    ss_fi_set_entries(DDES_FI_TYPE_NET_LATENCY, (unsigned int *)attr->net_latency.fi_entries,
+        attr->net_latency.ss_fi_cfg.count);
+    ss_fi_set_entry_value(DDES_FI_TYPE_NET_LATENCY, attr->net_latency.fi_value);
+    ss_fi_set_entries(DDES_FI_TYPE_CPU_LATENCY, (unsigned int *)attr->cpu_latency.fi_entries,
+        attr->cpu_latency.ss_fi_cfg.count);
+    ss_fi_set_entry_value(DDES_FI_TYPE_CPU_LATENCY, attr->cpu_latency.fi_value);
+    ss_fi_set_entries(DDES_FI_TYPE_PROCESS_FAULT, (unsigned int *)attr->process_fault.fi_entries,
+        attr->process_fault.ss_fi_cfg.count);
+    ss_fi_set_entry_value(DDES_FI_TYPE_PROCESS_FAULT, attr->process_fault.fi_value);
+    ss_fi_set_entries(DDES_FI_TYPE_CUSTOM_FAULT, (unsigned int *)attr->custom_fault.fi_entries,
+        attr->custom_fault.ss_fi_cfg.count);
+    ss_fi_set_entry_value(DDES_FI_TYPE_CUSTOM_FAULT, attr->custom_fault.fi_value);
 }
 #endif
 
@@ -407,7 +412,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->max_session_cnt = DMS_MAX_SESSIONS;
     profile->time_stat_enabled = TRUE;
     profile->pipe_type = convertInterconnectType();
-    profile->conn_created_during_init = false;
+    profile->conn_created_during_init = FALSE;
     setRdmaWorkConfig(profile);
     setScrlConfig(profile);
     SetOckLogPath(dms_attr, profile->ock_log_path);

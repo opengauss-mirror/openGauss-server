@@ -32,6 +32,7 @@
 #define SRC_INCLUDE_KNL_KNL_INSTANCE_H_
 
 #include <sched.h>
+#include <atomic>
 #include "c.h"
 #include "datatype/timestamp.h"
 #include "gs_thread.h"
@@ -1454,6 +1455,11 @@ typedef struct knl_instance_context {
     bool pq_inited;
 #ifdef USE_SPQ
     knl_g_spq_context spq_cxt;
+#endif
+#ifdef USE_ASSERT_CHECKING
+    void *shared_fi_ctx;
+    std::atomic<bool> fi_ctx_inited;
+    bool fi_ctx_init_finished;
 #endif
 } knl_instance_context;
 

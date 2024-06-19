@@ -59,13 +59,13 @@ typedef struct knl_session_attr_dcf {
     int dcf_truncate_threshold;
 } knl_session_attr_dcf;
 
+#ifdef USE_ASSERT_CHECKING
 typedef struct knl_sess_attr_dms_fi_cfg {
     unsigned int entries[MAX_DMS_FI_ENTRY_COUNT];
     unsigned int count;
     unsigned int fault_value;
 } knl_sess_attr_dms_fi_cfg;
 
-#ifdef USE_ASSERT_CHECKING
 typedef struct knl_session_attr_dms_fi {
     char* fi_entries;
     int32 fi_value;

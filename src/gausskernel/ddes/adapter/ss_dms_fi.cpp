@@ -27,54 +27,87 @@
 #include "storage/file/fio_device_com.h"
 
 #ifdef USE_ASSERT_CHECKING
-int dms_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int count)
+// for alloc fi context with size return size
+int ss_fi_get_context_size(void)
 {
     if (g_ss_dms_func.inited) {
-        return g_ss_dms_func.dms_fi_set_entries(type, entries, count);
+        return g_ss_dms_func.ddes_fi_get_context_size();
     }
     return GS_ERROR;
 }
 
-int dms_fi_set_entry_value(unsigned int type, unsigned int value)
+// set the fi context with the context, and init the context, the context alloced by DB
+void ss_fi_set_and_init_context(void *context)
 {
     if (g_ss_dms_func.inited) {
-        return g_ss_dms_func.dms_fi_set_entry_value(type, value);
+        return g_ss_dms_func.ddes_fi_set_and_init_context(context);
+    }
+}
+
+int ss_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int count)
+{
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.ddes_fi_set_entries(type, entries, count);
     }
     return GS_ERROR;
 }
 
-int dms_fi_get_tls_trigger_custom()
+int ss_fi_get_entry_value(unsigned int type)
 {
     if (g_ss_dms_func.inited) {
-        return g_ss_dms_func.dms_fi_get_tls_trigger_custom();
+        return g_ss_dms_func.ddes_fi_get_entry_value(type);
     }
     return GS_ERROR;
 }
 
-void dms_fi_set_tls_trigger_custom(int val)
+int ss_fi_set_entry_value(unsigned int type, unsigned int value)
 {
     if (g_ss_dms_func.inited) {
-        return g_ss_dms_func.dms_fi_set_tls_trigger_custom(val);
-    }
-}
-
-unsigned char dms_fi_entry_custom_valid(unsigned int point)
-{
-    if (g_ss_dms_func.inited) {
-        return g_ss_dms_func.dms_fi_entry_custom_valid(point);
+        return g_ss_dms_func.ddes_fi_set_entry_value(type, value);
     }
     return GS_ERROR;
 }
 
-void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args)
+int ss_fi_get_tls_trigger_custom(void)
 {
-    dms_fi_set_tls_trigger_custom(TRUE);
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.ddes_fi_get_tls_trigger_custom();
+    }
+    return GS_ERROR;
+}
+
+void ss_fi_set_tls_trigger_custom(int val)
+{
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.ddes_fi_set_tls_trigger_custom(val);
+    }
+}
+
+unsigned char ss_fi_entry_custom_valid(unsigned int point)
+{
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.ddes_fi_entry_custom_valid(point);
+    }
+    return GS_ERROR;
+}
+
+void ss_fi_call_ex(unsigned int point, ...)
+{
+    va_list args;
+    va_start(args, point);
+
+    if (g_ss_dms_func.inited) {
+        return g_ss_dms_func.ddes_fi_call_ex(point, args);
+    }
+    va_end(args);
+}
+#endif
+
+#ifdef USE_ASSERT_CHECKING
+void ss_fi_change_buffertag_blocknum(const void *ddes_fi_entry, va_list args)
+{
+    ss_fi_set_tls_trigger_custom(TRUE);
 }
 #else
-int dms_fi_set_entries(unsigned int type, unsigned int *entries, unsigned int count) {return GS_ERROR;}
-int dms_fi_set_entry_value(unsigned int type, unsigned int value) {return GS_ERROR;}
-int dms_fi_get_tls_trigger_custom() {return GS_ERROR;}
-void dms_fi_set_tls_trigger_custom(int val) {}
-unsigned char dms_fi_entry_custom_valid(unsigned int point) {return GS_ERROR;}
-void dms_fi_change_buffertag_blocknum(const dms_fi_entry *entry, va_list args) {};
+void ss_fi_change_buffertag_blocknum(const void *ddes_fi_entry, va_list args) {}
 #endif
