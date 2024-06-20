@@ -1094,6 +1094,7 @@ static void pgaudit_write_file(char* buffer, int count)
         }
     }
 
+    uint32 retry_cnt = 0;
 retry1:
     rc = fwrite(buffer, 1, count, t_thrd.audit.sysauditFile);
 
@@ -1103,8 +1104,13 @@ retry1:
          * there is not space to write.
          */
         if (errno == ENOSPC) {
-            ereport(WARNING, (errmsg("No free space left on audit disk.")));
             pg_usleep(1000000);
+            /* Report no space warning every 30s. */
+            if (retry_cnt % 30 == 0) {
+                ereport(WARNING, (errmsg("No free space left on audit disk.")));
+                retry_cnt = 0;
+            }
+            retry_cnt += 1;
             goto retry1;
         }
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to audit file: %m")));
@@ -1130,6 +1136,7 @@ static void pgaudit_write_policy_audit_file(const char* buffer, int count)
         return;
     }
 /* temporary duble writing to policy auditing file */
+    uint32 retry_cnt = 0;
 retry:
     int rc = fwrite(buffer, 1, count, t_thrd.audit.policyauditFile);
     if (rc != count) {
@@ -1138,8 +1145,13 @@ retry:
          * there is not space to write.
          */
         if (errno == ENOSPC) {
-            ereport(WARNING, (errmsg("No free space left on audit disk.")));
             pg_usleep(1000000);
+            /* Report no space warning every 30s. */
+            if (retry_cnt % 30 == 0) {
+                ereport(WARNING, (errmsg("No free space left on audit disk.")));
+                retry_cnt = 0;
+            }
+            retry_cnt += 1;
             goto retry;
         }
     }
