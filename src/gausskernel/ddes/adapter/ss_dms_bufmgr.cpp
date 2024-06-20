@@ -995,15 +995,6 @@ void SSMarkBufferDirtyForERTO(RedoBufferInfo* bufferinfo)
     }
 }
 
-const int ss_buf_retry_threshold = 5;
-long SSGetBufSleepTime(int retry_times)
-{
-    if (retry_times < ss_buf_retry_threshold) {
-        return 5000L * retry_times;
-    }
-    return SS_BUF_MAX_WAIT_TIME;
-}
-
 bool SSLWLockAcquireTimeout(LWLock* lock, LWLockMode mode)
 {
     bool get_lock = false;

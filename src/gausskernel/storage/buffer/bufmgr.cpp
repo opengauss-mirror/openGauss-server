@@ -6250,7 +6250,6 @@ void LockBuffer(Buffer buffer, int mode)
 {
     volatile BufferDesc *buf = NULL;
     bool need_update_lockid = false;
-    int dms_retry_times = 0;
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {
@@ -6315,23 +6314,7 @@ retry:
                 g_instance.dms_cxt.SSRecoveryInfo.recovery_trapped_in_page_request = true;
             }
 
-            if (!DmsCheckBufAccessible()) {
-                dms_retry_times = 1;
-            } else {
-                dms_retry_times++;
-            }
-            long sleep_time = SSGetBufSleepTime(dms_retry_times);
-            if (sleep_time == SS_BUF_MAX_WAIT_TIME && !SS_IN_REFORM) {
-                volatile BufferTag *tag = &buf->tag;
-                int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
-                t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-                ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS buf][%u/%u/%u/%d %d-%u] LockBuffer, request buf timeout, "
-                    "buf_id:%d",
-                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum, buf->buf_id))));
-                t_thrd.postgres_cxt.whereToSendOutput = output_backup;
-            }
-            pg_usleep(sleep_time);
+            pg_usleep(5000L);
             goto retry;
         }
     }
