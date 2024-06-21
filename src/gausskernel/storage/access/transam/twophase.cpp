@@ -3121,6 +3121,9 @@ TransactionId PrescanPreparedTransactions(TransactionId **xids_p, int *nxids_p)
             char *buf = NULL;
             GlobalTransaction gxact = currentStatePtr->prepXacts[i];
 
+            if (!gxact->inredo && SS_PERFORMING_SWITCHOVER) {
+                continue;
+            }
             Assert(gxact->inredo);
 
             xid = gxact->xid;
@@ -3238,6 +3241,10 @@ void RecoverPreparedTransactions(void)
             TransactionId xid;
             char *buf = NULL;
             GlobalTransaction gxact = currentStatePtr->prepXacts[i];
+
+            if (!gxact->inredo && SS_PERFORMING_SWITCHOVER) {
+                continue;
+            }
             char *bufptr = NULL;
             TwoPhaseFileHeader *hdr = NULL;
             TransactionId *subxids = NULL;
@@ -3698,7 +3705,7 @@ void PrepareRedoAdd(char *buf, XLogRecPtr start_lsn, XLogRecPtr end_lsn)
 
     /* unfortunately we can't check if the lock is held exclusively */
     Assert(LWLockHeldByMe(TwoPhaseStateMappingPartitionLock(hdr->xid)));
-    Assert(RecoveryInProgress());
+    Assert(RecoveryInProgress() || SS_PERFORMING_SWITCHOVER);
 
     gid = hdr->gid;
 
@@ -3708,6 +3715,9 @@ void PrepareRedoAdd(char *buf, XLogRecPtr start_lsn, XLogRecPtr end_lsn)
         gxact = currentStatePtr->prepXacts[i];
 
         if (gxact->xid == hdr->xid) {
+            if (!gxact->inredo && SS_PERFORMING_SWITCHOVER) {
+                return;
+            }
             Assert(gxact->inredo);
             ereport(LOG, (errmsg("2PC data xid : " XID_FMT " has already existed", gxact->xid)));
             return;
