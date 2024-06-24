@@ -607,6 +607,7 @@ static Oid get_package_id(Oid func_oid)
 
 static bool CheckSelectElementParse(SelectStmt* stmt);
 
+void CheckPipelinedWithOutParam(const PLpgSQL_function *func);
 static bool CheckSelectTargetListParse(List * TargetList)
 {
     bool result = true;
@@ -961,30 +962,30 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
              * subhandler
              */
             if (CALLED_AS_TRIGGER(fcinfo)) {
-                retval = PointerGetDatum(plpgsql_exec_trigger(func, (TriggerData*)fcinfo->context));
-	    } else if (CALLED_AS_EVENT_TRIGGER(fcinfo)) {
-                plpgsql_exec_event_trigger(func,
-                    (EventTriggerData *) fcinfo->context);
+                retval = PointerGetDatum(plpgsql_exec_trigger(func, (TriggerData *)fcinfo->context));
+            } else if (CALLED_AS_EVENT_TRIGGER(fcinfo)) {
+                plpgsql_exec_event_trigger(func, (EventTriggerData *)fcinfo->context);
 
             } else {
                 if (func->is_private && !u_sess->is_autonomous_session) {
                     if (OidIsValid(secondLevelPkgOid)) {
                         if (func->pkg_oid != secondLevelPkgOid) {
                             ereport(ERROR, (errcode(ERRCODE_NO_FUNCTION_PROVIDED),
-                                    (errmsg("not support call package private function or procedure"))));
+                                            (errmsg("not support call package private function or procedure"))));
                         }
                     } else {
                         ereport(ERROR, (errcode(ERRCODE_NO_FUNCTION_PROVIDED),
-                                (errmsg("not support call package private function or procedure"))));
+                                        (errmsg("not support call package private function or procedure"))));
                     }
                 }
                 if (func->action->isAutonomous && u_sess->plsql_cxt.is_package_instantiation) {
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
-                            errmsg("package instantiation can not have autonomous function"),
-                            errdetail("this package have autonmous function"),
-                            errcause("package have autonmous function"),
-                            erraction("redefine package")));
+                                    errmsg("package instantiation can not have autonomous function"),
+                                    errdetail("this package have autonmous function"),
+                                    errcause("package have autonmous function"), erraction("redefine package")));
                 }
+
+                CheckPipelinedWithOutParam(func);
 
                 if (IsAutonomousTransaction(func->action->isAutonomous)) {
                     retval = plpgsql_exec_autonm_function(func, fcinfo, NULL);
@@ -1163,6 +1164,29 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         u_sess->exec_cxt.cast_owner = InvalidOid;
     }
     return retval;
+}
+void CheckPipelinedWithOutParam(const PLpgSQL_function *func)
+{
+    if (func->is_pipelined) {
+        HeapTuple procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->fn_oid));
+        bool isNull;
+        /* ignore return value */
+        (void)SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proallargtypes, &isNull);
+        ReleaseSysCache(procTup);
+        /**
+         * if all the parameters are IN parameters,  this column is null.
+         */
+        if (!isNull) {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Function %s has out arguments", get_func_name(func->fn_oid)),
+                            errcause("A SQL statement references either a packaged, or a stand-alone, "
+                                     "PL/SQL function that contains an OUT parameter in its argument list. "
+                                     "PL/SQL functions referenced by SQL statements must "
+                                     "not contain the OUT parameter."),
+                            erraction("Recreate the PL/SQL "
+                                      "function without the OUT parameter in the argument list.")));
+        }
+    }
 }
 
 /* ----------

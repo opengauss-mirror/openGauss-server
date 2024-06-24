@@ -230,6 +230,7 @@ extern void CopyArrayEls(ArrayType* array, Datum* values, const bool* nulls, int
     char typalign, bool freedata);
 
 extern ArrayType* construct_array(Datum* elems, int nelems, Oid elmtype, int elmlen, bool elmbyval, char elmalign);
+ArrayType* construct_array(Datum* elems, bool * nulls, int nelems, Oid elmtype, int elmlen, bool elmbyval, char elmalign);
 extern ArrayType* construct_md_array(Datum* elems, bool* nulls, int ndims, int* dims, const int* lbs, Oid elmtype,
     int elmlen, bool elmbyval, char elmalign);
 extern ArrayType* construct_empty_array(Oid elmtype);

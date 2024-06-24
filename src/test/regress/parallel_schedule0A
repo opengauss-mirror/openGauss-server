@@ -69,7 +69,7 @@ test: out_param_func
 test: gs_dump_tableconstraint
 
 # test AI4DB
-test: plpgsql_override_out test_plsql_core
+test: plpgsql_override_out test_plsql_core plpgsql/plpgsql_normal plpgsql/plpgsql_othercase plpgsql/plpgsql_unsupported plpgsql_dump plpgsql/plpgsql_table
 test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error b_pg_plsql_show_all_error
 test: pldeveloper_gs_source

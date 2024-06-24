@@ -290,6 +290,8 @@ static void CheckHostId(char* hostId);
 static void CheckUserHostIsValid();
 
 static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
+static Node* MakeNoArgFunctionCall(List* funcName, int location);
+static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 %}
 
 %define api.pure
@@ -521,6 +523,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 				opt_include opt_c_include index_including_params
 				sort_clause opt_sort_clause sortby_list index_params constraint_params
 				name_list UserIdList from_clause from_list opt_array_bounds
+				from_list_for_no_table_function
 				qualified_name_list any_name any_name_list type_name_list collate_name
 				any_operator expr_list attrs callfunc_args
 				target_list insert_column_list set_target_list rename_clause_list rename_clause
@@ -627,7 +630,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <node>	def_arg columnElem where_clause where_or_current_clause start_with_expr connect_by_expr
                                 a_expr b_expr c_expr c_expr_noparen AexprConst indirection_el siblings_clause
                                 columnref in_expr start_with_clause having_clause func_table array_expr set_ident_expr set_expr set_expr_extension
-				ExclusionWhereClause
+				ExclusionWhereClause func_table_with_table
 %type <list>	ExclusionConstraintList ExclusionConstraintElem
 %type <list>	func_arg_list
 %type <node>	func_arg_expr
@@ -642,6 +645,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <sortby>	sortby
 %type <ielem>	index_elem constraint_elem
 %type <node>	table_ref
+%type <node>	table_ref_for_no_table_function
 %type <jexpr>	joined_table
 %type <range>	relation_expr relation_expr_for_delete relation_expr_common
 %type <range>	relation_expr_opt_alias delete_relation_expr_opt_alias relation_expr_opt_alias_for_delete
@@ -924,6 +928,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
 
 	PACKAGE PACKAGES PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
+	PIPELINED
 /* PGXC_BEGIN */
 	POOL PRECEDING PRECISION
 /* PGXC_END */
@@ -15065,6 +15070,10 @@ index_functional_expr_key:	col_name_keyword_nonambiguous '(' Iconst ')'
 					}
 				| func_application_special  { $$ = $1; }
 				| func_expr_common_subexpr  { $$ = $1; }
+				| CURRENT_SCHEMA
+					{
+						$$ = MakeNoArgFunctionCall(SystemFuncName("current_schema"), @1);
+					}
 		;
 
 opt_include:		INCLUDE '(' index_including_params ')'			{ $$ = $3; }
@@ -17047,6 +17056,10 @@ createfunc_opt_item:
 				{
 					$$ = makeDefElem("window", (Node *)makeInteger(TRUE));
 				}
+			| PIPELINED
+				{
+					$$ = makeDefElem("pipelined", (Node *)makeInteger(TRUE));
+				}
 			| common_func_opt_item
 				{
 					$$ = $1;
@@ -17058,6 +17071,10 @@ createproc_opt_item:
 			common_func_opt_item
 				{
 					$$ = $1;
+				}
+			| PIPELINED
+				{
+					$$ = makeDefElem("pipelined", (Node *)makeInteger(TRUE));
 				}
 		;
 
@@ -23118,7 +23135,7 @@ DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias_li
 				}
 		/* this is only used in multi-relation DELETE for compatibility B database. */
 		| opt_with_clause DELETE_P hint_string relation_expr_opt_alias_list
-			FROM from_list where_or_current_clause
+			FROM from_list_for_no_table_function where_or_current_clause
 				{
 					DeleteStmt *n = makeNode(DeleteStmt);
 					n->relations = $4;
@@ -23192,7 +23209,7 @@ opt_nowait_or_skip:
  *
  *****************************************************************************/
 
-UpdateStmt: opt_with_clause UPDATE hint_string from_list
+UpdateStmt: opt_with_clause UPDATE hint_string from_list_for_no_table_function
 			SET set_clause_list
 			from_clause
 			where_or_current_clause
@@ -24536,11 +24553,82 @@ from_clause:
 			| /*EMPTY*/								%prec EMPTY_FROM_CLAUSE
 				{ $$ = NIL; }
 		;
+from_list_for_no_table_function:
+			table_ref_for_no_table_function								{ $$ = list_make1($1); }
+			| from_list_for_no_table_function ',' table_ref_for_no_table_function				{ $$ = lappend($1, $3); }
+
+
+func_table_with_table:
+	TABLE '(' func_expr_windowless ')'			{ $$ = $3; }
+	/* function call without parameters */
+	| TABLE '(' IDENT ')'                               	{
+		List* funcNames = list_make1(makeString(IdentResolveToChar($3, yyscanner)));
+		$$ = MakeNoArgFunctionCall(funcNames, @3);
+	}
+	| TABLE '(' unreserved_keyword ')'			{
+		$$ = MakeNoArgFunctionCall(list_make1(makeString(pstrdup($3))), @3);
+	}
+	| TABLE '(' type_func_name_keyword ')'			{
+		$$ = MakeNoArgFunctionCall(list_make1(makeString(pstrdup($3))), @3);
+	}
+	| TABLE '(' ColId indirection ')'			{
+		$$ = MakeNoArgFunctionCall(check_func_name(lcons(makeString($3), $4), yyscanner), @3);
+	};
+
 
 from_list:
 			table_ref								{ $$ = list_make1($1); }
 			| from_list ',' table_ref				{ $$ = lappend($1, $3); }
 		;
+
+
+table_ref:
+	table_ref_for_no_table_function
+		{
+			$$ = $1;
+		}
+	| func_table_with_table		%prec UMINUS
+		{
+			RangeFunction *n = makeNode(RangeFunction);
+			n->funccallnode = $1;
+			n->coldeflist = NIL;
+			$$ = (Node *) n;
+		}
+	| func_table_with_table alias_clause
+		{
+			RangeFunction *n = makeNode(RangeFunction);
+			n->funccallnode = $1;
+			n->alias = $2;
+			n->coldeflist = NIL;
+			$$ = (Node *) n;
+		}
+	| func_table_with_table AS '(' TableFuncElementList ')'
+		{
+			RangeFunction *n = makeNode(RangeFunction);
+			n->funccallnode = $1;
+			n->coldeflist = $4;
+			$$ = (Node *) n;
+		}
+	| func_table_with_table AS ColId '(' TableFuncElementList ')'
+		{
+			RangeFunction *n = makeNode(RangeFunction);
+			Alias *a = makeNode(Alias);
+			n->funccallnode = $1;
+			a->aliasname = $3;
+			n->alias = a;
+			n->coldeflist = $5;
+			$$ = (Node *) n;
+		}
+	| func_table_with_table ColId '(' TableFuncElementList ')'
+		{
+			RangeFunction *n = makeNode(RangeFunction);
+			Alias *a = makeNode(Alias);
+			n->funccallnode = $1;
+			a->aliasname = $2;
+			n->alias = a;
+			n->coldeflist = $4;
+			$$ = (Node *) n;
+		}
 
 /*
  * table_ref is where an alias clause can be attached.	Note we cannot make
@@ -24549,7 +24637,7 @@ from_list:
  * and joined_table := '(' joined_table ')'.  So, we must have the
  * redundant-looking productions here instead.
  */
-table_ref:	relation_expr		%prec UMINUS
+table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 				{
 #ifndef ENABLE_MULTIPLE_NODES
         			StringInfoData detailInfo;
@@ -25314,6 +25402,9 @@ opt_repeatable_clause:
 
 
 func_table: func_expr_windowless					{ $$ = $1; }
+		| CURRENT_SCHEMA					{
+			$$ = MakeNoArgFunctionCall(SystemFuncName("current_schema"), @1);
+		}
 		;
 
 
@@ -27247,6 +27338,10 @@ func_expr:	func_application within_group_clause over_clause
 				}
 			| func_expr_common_subexpr
 				{ $$ = $1; }
+			| CURRENT_SCHEMA
+				{
+					$$ = MakeNoArgFunctionCall(SystemFuncName("current_schema"), @1);
+				}
 		;
 
 func_application:	func_name '(' func_arg_list opt_sort_clause ')'
@@ -27696,20 +27791,6 @@ func_expr_common_subexpr:
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("current_database");
-					n->args = NIL;
-					n->agg_order = NIL;
-					n->agg_star = FALSE;
-					n->agg_distinct = FALSE;
-					n->func_variadic = FALSE;
-					n->over = NULL;
-					n->location = @1;
-					n->call_func = false;
-					$$ = (Node *)n;
-				}
-			| CURRENT_SCHEMA
-				{
-					FuncCall *n = makeNode(FuncCall);
-					n->funcname = SystemFuncName("current_schema");
 					n->args = NIL;
 					n->agg_order = NIL;
 					n->agg_star = FALSE;
@@ -28844,15 +28925,7 @@ target_el:	a_expr AS ColLabel
 			| a_expr IDENT
 				{
 					$$ = makeNode(ResTarget);
-					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes 
-					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
-					{
-						$$->name = pg_strtolower(pstrdup($2));
-					}
-					else
-					{
-						$$->name = $2;
-					}
+					$$->name = IdentResolveToChar($2, yyscanner);
 					$$->indirection = NIL;
 					$$->val = (Node *)$1;
 					$$->location = @1;
@@ -29293,7 +29366,7 @@ SignedIconst: Iconst								{ $$ = $1; }
 /* Column identifier --- names that can be column, table, etc names.
  */
 ColId:		IDENT
-				{ 
+				{
 					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes)
 					{
 						$$ = pg_strtolower(pstrdup($1));
@@ -29311,15 +29384,7 @@ ColId:		IDENT
  */
 type_function_name:	IDENT
 				{
-					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
-					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
-					{
-						$$ = pg_strtolower(pstrdup($1));
-					}
-					else
-					{
-						$$ = $1;
-					}
+					$$ = IdentResolveToChar($1, yyscanner);
 				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
@@ -29330,15 +29395,7 @@ type_function_name:	IDENT
  */
 ColLabel:	IDENT
 				{
-					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
-					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
-					{
-						$$ = pg_strtolower(pstrdup($1));
-					}
-					else
-					{
-						$$ = $1;
-					}
+					$$ = IdentResolveToChar($1, yyscanner);
 				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
@@ -29725,6 +29782,7 @@ unreserved_keyword:
 			| PER_P
 			| PERCENT
 			| PERM
+			| PIPELINED
 			| PLAN
 			| PLANS
 			| POLICY
@@ -31587,6 +31645,16 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 	/* get the all args informations, only "in" parameters if p_argmodes is null */
 	narg = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
 	bool hasVariadic = HasVariadic(narg, p_argmodes);
+	bool is_null;
+	char prokind = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &is_null);
+	bool is_pipelined = !is_null && PROC_IS_PIPELINED(DatumGetChar(prokind));
+	if (is_pipelined) {
+			const char* message = "call pipelined function is not allowed";
+			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+				ereport(errstate,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				errmsg("call pipelined function \"%s\" is not allowed", name)));
+	}
 
 #ifndef ENABLE_MULTIPLE_NODES
 	if (!hasVariadic && !has_overload_func && !enable_out_param_override())
@@ -32503,6 +32571,34 @@ static Node *checkNullNode(Node *n)
 		return (Node *)r;
 	}
 	return n;
+}
+
+static Node* MakeNoArgFunctionCall(List* funcNames, int location)
+{
+	FuncCall *n = makeNode(FuncCall);
+	n->funcname = funcNames;
+	n->args = NIL;
+	n->agg_order = NIL;
+	n->agg_star = FALSE;
+	n->agg_distinct = FALSE;
+	n->func_variadic = FALSE;
+	n->over = NULL;
+	n->location = location;
+	n->call_func = false;
+	return (Node *)n;
+}
+
+static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner)
+{
+	if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
+	    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+	{
+		return pg_strtolower(pstrdup(ident));
+	}
+	else
+	{
+		return ident;
+	}
 }
 /*
  * Must undefine this stuff before including scan.c, since it has different

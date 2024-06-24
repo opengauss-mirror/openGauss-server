@@ -75,12 +75,13 @@ bool will_shutdown = false;
  *       NEXT   |  92899   |     ?      |     ?     
  *
  ********************************************/
-const uint32 GRAND_VERSION_NUM = 92935;
+const uint32 GRAND_VERSION_NUM = 92936;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 PIPELINED_FUNCTION_VERSION_NUM = 92936;
 const uint32 DISABLE_CONSTRAINT_VERSION_NUM = 92931;
 const uint32 ADD_CLEAN_CASCADE_STANDBY_SLOT_MESSAGE_NUM = 92930;
 const uint32 FLUSH_LSN_VERSION_NUM = 92929;

@@ -685,6 +685,8 @@ static void set_id_stmt(PLpgSQL_stmt* stmt, uint32* unique_id)
         case PLPGSQL_STMT_PERFORM:
             set_id_expr(((PLpgSQL_stmt_perform*)stmt)->expr, unique_id);
             break;
+        case PLPGSQL_STMT_PIPE_ROW:
+            set_id_expr(((PLpgSQL_stmt_pipe_row *)stmt)->expr, unique_id);
         default:
             break;
     }

@@ -444,12 +444,14 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PROKIND_AGGREGATE   'a'
 #define PROKIND_WINDOW      'w'
 #define PROKIND_PROCEDURE   'p'
+#define PROKIND_PIPELIEND   'i'
 #define PROKIND_UNKNOWN     'u'
 
 #define PROC_IS_FUNC(prokind)   ((prokind) == PROKIND_FUNCTION)
 #define PROC_IS_AGG(prokind)    ((prokind) == PROKIND_AGGREGATE)
 #define PROC_IS_WIN(prokind)    ((prokind) == PROKIND_WINDOW)
 #define PROC_IS_PRO(prokind)    ((prokind) == PROKIND_PROCEDURE)
+#define PROC_IS_PIPELINED(prokind)    ((prokind) == PROKIND_PIPELIEND)
 #define PROC_IS_UNKNOWN(prokind)    ((prokind) == PROKIND_UNKNOWN)
 
 /*

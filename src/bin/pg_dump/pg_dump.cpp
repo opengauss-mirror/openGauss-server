@@ -13705,6 +13705,10 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if (proleakproof[0] == 't')
         appendPQExpBuffer(q, " LEAKPROOF");
 
+    
+    if (PROC_IS_PIPELINED(*proKind)) {
+        appendPQExpBuffer(q, " PIPELINED");
+    }
     /*
      * COST and ROWS are emitted only if present and not default, so as not to
      * break backwards-compatibility of the dump without need.	Keep this code

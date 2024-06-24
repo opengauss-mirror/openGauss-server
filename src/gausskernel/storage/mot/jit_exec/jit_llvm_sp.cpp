@@ -88,6 +88,8 @@ static bool ProcessStatementGetDiag(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_
 static bool ProcessStatementOpen(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_stmt_open* stmt);
 static bool ProcessStatementFetch(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_stmt_fetch* stmt);
 static bool ProcessStatementClose(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_stmt_close* stmt);
+static bool ProcessStatementPipeRow(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_stmt_pipe_row* stmt);
+
 
 static llvm::Value* GetLocalOrParamByVarNo(JitLlvmFunctionCodeGenContext* ctx, int varno);
 static llvm::Value* GetIsNullLocalOrParamByVarNo(JitLlvmFunctionCodeGenContext* ctx, int varno);
@@ -1645,6 +1647,8 @@ static bool ProcessStatement(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_stmt* s
             return ProcessStatementClose(ctx, (PLpgSQL_stmt_close*)stmt);
         case PLPGSQL_STMT_PERFORM:
             return ProcessStatementPerform(ctx, (PLpgSQL_stmt_perform*)stmt);
+        case PLPGSQL_STMT_PIPE_ROW:
+            return ProcessStatementPipeRow(ctx,  (PLpgSQL_stmt_pipe_row*)stmt);
         case PLPGSQL_STMT_NULL:
             return true;
 
@@ -4611,6 +4615,13 @@ static bool ProcessStatementReturnNext(JitLlvmFunctionCodeGenContext* ctx, PLpgS
 {
     // Not supported
     MOT_LOG_TRACE("Processing statement: return next");
+    return false;
+}
+
+static bool ProcessStatementPipeRow(JitLlvmFunctionCodeGenContext* ctx, PLpgSQL_stmt_pipe_row* stmt)
+{
+    // Not supported
+    MOT_LOG_TRACE("Processing statement: pipe row");
     return false;
 }
 

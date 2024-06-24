@@ -502,6 +502,8 @@ const char* plpgsql_stmt_typename(PLpgSQL_stmt* stmt)
             return "SIGNAL";
         case PLPGSQL_STMT_RESIGNAL:
             return "RESIGNAL";
+        case PLPGSQL_STMT_PIPE_ROW:
+            return "PIPE ROW";
         default:
             break;
     }
@@ -576,6 +578,7 @@ static void free_rollback(PLpgSQL_stmt_rollback *stmt);
 static void free_savepoint(PLpgSQL_stmt_savepoint *stmt);
 static void free_signal(PLpgSQL_stmt_signal *stmt);
 
+static void free_pipe_row(PLpgSQL_stmt_pipe_row *pipeRowStmt);
 static void free_stmt(PLpgSQL_stmt* stmt)
 {
     switch ((enum PLpgSQL_stmt_types)stmt->cmd_type) {
@@ -667,6 +670,9 @@ static void free_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_RESIGNAL:
             free_signal((PLpgSQL_stmt_signal*)stmt);
             break;
+        case PLPGSQL_STMT_PIPE_ROW:
+            free_pipe_row((PLpgSQL_stmt_pipe_row*)stmt);
+            break;
         default:
             ereport(ERROR,
                 (errmodule(MOD_PLSQL),
@@ -674,6 +680,10 @@ static void free_stmt(PLpgSQL_stmt* stmt)
                     errmsg("unrecognized cmd_type: %d, when free statement", stmt->cmd_type)));
             break;
     }
+}
+static void free_pipe_row(PLpgSQL_stmt_pipe_row *stmt)
+{
+    free_expr(stmt->expr);
 }
 
 static void free_stmts(List* stmts)
@@ -1169,6 +1179,7 @@ static void dump_rollback(PLpgSQL_stmt_rollback *stmt);
 static void dump_null(PLpgSQL_stmt_null* stmt);
 static void dump_expr(PLpgSQL_expr* expr);
 static void dump_savepoint(PLpgSQL_stmt_savepoint *stmt);
+static void dump_pipe_row(PLpgSQL_stmt_pipe_row *stmt);
 
 static void dump_ind(void)
 {
@@ -1267,6 +1278,9 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_SAVEPOINT:
             dump_savepoint((PLpgSQL_stmt_savepoint*)stmt);
             break;
+        case PLPGSQL_STMT_PIPE_ROW:
+            dump_pipe_row((PLpgSQL_stmt_pipe_row*)stmt);
+            break;
         default:
             ereport(ERROR,
                 (errmodule(MOD_PLSQL),
@@ -1274,6 +1288,20 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
                     errmsg("unrecognized cmd_type: %d, when dump PL/PGSQL statement", stmt->cmd_type)));
             break;
     }
+}
+
+static void dump_pipe_row(PLpgSQL_stmt_pipe_row* stmt)
+{
+    dump_ind();
+    printf("PIPE ROW (");
+    if (stmt->retvarno >= 0) {
+        printf("variable %d", stmt->retvarno);
+    } else if (stmt->expr != NULL) {
+        dump_expr(stmt->expr);
+    } else {
+        printf("NULL");
+    }
+    printf(")\n");
 }
 
 static void dump_stmts(List* stmts)
@@ -2024,6 +2052,7 @@ bool traverse_savepoint(PLpgSQL_function* func, PLpgSQL_stmt_savepoint *stmt);
 bool traverse_commit(PLpgSQL_function* func, PLpgSQL_stmt_commit *stmt);
 bool traverse_rollback(PLpgSQL_function* func, PLpgSQL_stmt_rollback *stmt);
 
+bool traverse_pipe_row(PLpgSQL_function *func, PLpgSQL_stmt_pipe_row *stmt);
 /*
  * @Description : traverse statements in trigger body for checking shippable.
  * @in func : the function of trigger body which need be checked.
@@ -2147,11 +2176,28 @@ bool traverse_stmt(PLpgSQL_function* func, PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_ROLLBACK:
             is_shippable = traverse_rollback(func, (PLpgSQL_stmt_rollback*)stmt);
             break;
+        case PLPGSQL_STMT_PIPE_ROW:
+            is_shippable = traverse_pipe_row(func, (PLpgSQL_stmt_pipe_row *)stmt);
+            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unrecognized cmd_type: %d", stmt->cmd_type)));
             break;
     }
     return is_shippable;
+}
+
+/*
+ * @Description : traverse the PIPE ROW struct to check shippable.
+ * @in func : the function of trigger body which need be checked.
+ * @in stmt : the PIPE ROW struct of trigger body.
+ * @return : the PIPE ROW struct can shippable or not.
+ */
+bool traverse_pipe_row(PLpgSQL_function *func, PLpgSQL_stmt_pipe_row *stmt)
+{
+    if (stmt == NULL || stmt->expr == NULL) {
+        return true;
+    }
+    return traverse_expr(func, stmt->expr);
 }
 
 /*

@@ -71,7 +71,7 @@ select add(1,1);
 
 drop schema delete_optimize cascade;
 NOTICE:  drop cascades to 3 other objects
-DETAIL:  drop cascades to type _int4[]
+DETAIL:  drop cascades to type a
 drop cascades to function f1(anyelement)
 drop cascades to function add(integer,integer)
 reset enable_expr_fusion;

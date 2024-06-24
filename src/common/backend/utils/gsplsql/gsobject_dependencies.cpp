@@ -1047,7 +1047,7 @@ static bool gsplsql_update_proc_header(CreateFunctionStmt *stmt, Oid funcid)
         InstanceTypeNameDependExtend(&ret_type_depend_ext);
         /* explicit RETURNS clause */
         compute_return_type(stmt->returnType, language_oid, &prorettype, &returnsSet, fenced, stmt->startLineNumber,
-                            ret_type_depend_ext, true);
+                            ret_type_depend_ext, true, PROC_IS_PIPELINED(get_func_prokind(funcid)));
         if (ret_type_depend_ext->dependUndefined) {
             has_undefined = true;
         }

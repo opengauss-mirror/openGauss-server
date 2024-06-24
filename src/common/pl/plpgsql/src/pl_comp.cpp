@@ -81,7 +81,6 @@ static const ExceptionLabelMap exception_label_map[] = {
  */
 static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup, PLpgSQL_function* func,
     PLpgSQL_func_hashkey* hashkey, bool for_validator);
-extern void plpgsql_compile_error_callback(void* arg);
 static void add_parameter_name(int item_type, int item_no, const char* name);
 static void add_dummy_return(PLpgSQL_function* func);
 static Node* plpgsql_pre_column_ref(ParseState* pstate, ColumnRef* cref);
@@ -94,7 +93,7 @@ static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars);
 static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
     PLpgSQL_func_hashkey* hashkey, bool for_validator);
 static void plpgsql_resolve_polymorphic_argtypes(
-    int numargs, Oid* argtypes, const char* argmodes, Node* call_expr, bool for_validator, const char* proname);
+    int numargs, Oid* arg_types, const char* arg_modes, Node* call_expr, bool for_validator, const char* pro_name);
 static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key);
 static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey* func_key);
 static void plpgsql_append_dlcell(plpgsql_HashEnt* entity);
@@ -104,11 +103,7 @@ static void get_datum_tok_type(PLpgSQL_datum* target, int* tok_flag);
 static PLpgSQL_type* plpgsql_get_cursor_type_relid(const char* cursorname, const char* colname, MemoryContext oldCxt);
 static int find_package_rowfield(PLpgSQL_datum* datum, const char* pkgName, const char* schemaName = NULL);
 
-extern int plpgsql_getCustomErrorCode(void);
 extern bool is_func_need_cache(Oid funcid, const char* func_name);
-
-extern bool plpgsql_check_insert_colocate(
-    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func);
 
 /* ----------
  * plpgsql_compile		Make an execution tree for a PL/pgSQL function.
@@ -371,8 +366,9 @@ PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo)
  */
 static bool whether_add_return(PLpgSQL_function* func, int num_out_args)
 {
+    /* pipelined function allow */
     if (num_out_args == 1 || (num_out_args == 0 && func->fn_rettype == VOIDOID ) || func->fn_retset ||
-        func->fn_rettype == RECORDOID) {
+        func->fn_rettype == RECORDOID || func->is_pipelined) {
         return true;
     } else {
         return false;
@@ -590,6 +586,46 @@ PLpgSQL_resolve_option GetResolveOption()
         PLPGSQL_RESOLVE_COLUMN : PLPGSQL_RESOLVE_ERROR;
 }
 
+static bool CheckPipelinedResIsTuple(Form_pg_type type_struct) {
+    bool retTypeIsValid = true;
+    char typeCategory = type_struct->typcategory;
+    if (type_struct->typtype == TYPTYPE_TABLEOF) {
+        /**
+         * table of index type is not supported as function return type. see
+         * functioncmds.cpp#compute_return_type
+         * the branch is reached when pipelined function is in target list
+         * or nest table in nest table(unsupported feature)
+         */
+        retTypeIsValid = (typeCategory != TYPCATEGORY_TABLEOF_VARCHAR &&
+                          typeCategory != TYPCATEGORY_TABLEOF_INTEGER);
+    } else if (type_struct->typtype == TYPTYPE_BASE) {
+        retTypeIsValid = typeCategory == TYPCATEGORY_ARRAY;
+    } else {
+        retTypeIsValid = false;
+    }
+    if (!retTypeIsValid) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("pipeLined function must have a supported collection return type"),
+                        errcause("Wrong return type"),
+                        erraction("Please check return type of the pipelined function")));
+    }
+    
+    /* check res is tuple */
+    bool pipelinedResIsTuple = false;
+    Oid subType = SearchSubTypeByType(type_struct, NULL);
+    HeapTuple typeElem = SearchSysCache1(TYPEOID, ObjectIdGetDatum(subType));
+    if (!HeapTupleIsValid(typeElem)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for type %u", subType)));
+    }
+    Form_pg_type typeElemStruct = (Form_pg_type)GETSTRUCT(typeElem);
+    if (typeElemStruct->typrelid != InvalidOid || type_struct->typelem == RECORDOID) {
+        pipelinedResIsTuple = true;
+    }
+    ReleaseSysCache(typeElem);
+    return pipelinedResIsTuple;
+}
+
 /*
  * This is the slow part of plpgsql_compile().
  *
@@ -679,6 +715,9 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         /* Null prokind items are created when there is no procedure */
         isFunc = true;
     }
+    bool is_pipelined = !isnull && PROC_IS_PIPELINED(DatumGetChar(prokindDatum));
+    
+    
     Datum pronamespaceDatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_pronamespace, &isnull);
     namespaceOid = DatumGetObjectId(pronamespaceDatum);
     /*
@@ -791,6 +830,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->fn_searchpath->addTemp = true;
     func->ns_top = curr_compile->ns_top;
     func->guc_stat = u_sess->utils_cxt.behavior_compat_flags;
+    func->is_pipelined = is_pipelined;
 
     if (is_dml_trigger)
         func->fn_is_trigger = PLPGSQL_DML_TRIGGER;
@@ -1027,7 +1067,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 }
             }
 
-            if (isTableofType(rettypeid, &base_oid, NULL)) {
+            /* do not rewrite fn_rettype if func is pipelined function */
+            if (!func->is_pipelined && isTableofType(rettypeid, &base_oid, NULL)) {
                 func->fn_rettype = base_oid;
             } else {
                 func->fn_rettype = rettypeid;
@@ -1085,6 +1126,10 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                         "$0", 0, build_datatype(type_tup, -1, func->fn_input_collation), true, true);
                 }
             }
+
+            /* check pipelined result */
+            func->pipelined_resistuple = func->is_pipelined && CheckPipelinedResIsTuple(type_struct);
+
             ReleaseSysCache(type_tup);
             break;
 
@@ -5580,4 +5625,56 @@ void gsplsql_lock_depend_pkg_on_session(PLpgSQL_function* func)
         }
     }
     (void)MemoryContextSwitchTo(oldcxt);
+}
+
+/**
+ * search subType by Form_pg_type
+ * type_struct: type
+ * release type_struct by caller
+ * donot check and ereport
+ */
+Oid SearchSubTypeByType(Form_pg_type type_struct, int32 *typmod)
+{
+    Oid resultType = type_struct->typelem;
+    char type = type_struct->typtype;
+    char typeCatalog = type_struct->typcategory;
+    Assert(type == TYPTYPE_TABLEOF || typeCatalog == TYPCATEGORY_ARRAY);
+
+    if (typmod) {
+        *typmod = type_struct->typtypmod;
+    }
+
+    if (type == TYPTYPE_TABLEOF) {
+        resultType = searchsubtypebytypeId(resultType, typmod);
+    }
+    return resultType;
+}
+
+/**
+ *  search subType by typeOid. same as get_element_type
+ *  typeOid: typeOid
+ *  typmod: ret type mod
+ */
+Oid searchsubtypebytypeId(Oid typeOid, int32 *typmod)
+{
+    Oid resultType = InvalidOid;
+    HeapTuple tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for type %u", typeOid)));
+    }
+    Form_pg_type pFormDataPgType = (Form_pg_type)GETSTRUCT(tp);
+    resultType = pFormDataPgType->typelem;
+    char type = pFormDataPgType->typtype;
+    char typeCatalog = pFormDataPgType->typcategory;
+    if (typmod) {
+        *typmod = pFormDataPgType->typtypmod;
+    }
+    ReleaseSysCache(tp);
+
+    if (type != TYPTYPE_TABLEOF && typeCatalog != TYPCATEGORY_ARRAY) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("unsupported search subtype by type %u", typeOid)));
+    }
+    return type == TYPTYPE_TABLEOF ? searchsubtypebytypeId(resultType, typmod) : resultType;
 }

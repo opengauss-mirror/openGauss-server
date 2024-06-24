@@ -289,6 +289,9 @@ extern char * get_type_name(Oid typid);
 extern int32 get_trigger_type(Oid triggerid);
 extern HeapTuple get_att_stats(Oid relid, AttrNumber attrnum);
 extern bool spq_relation_not_partitioned(Oid relid);
+extern Oid searchsubtypebytypeId(Oid typeOid, int32 *typmod);
+extern Oid SearchSubTypeByType(Form_pg_type type_struct, int32 *typmod);
+
 #endif
 
 #define type_is_array(typid) (get_element_type(typid) != InvalidOid)

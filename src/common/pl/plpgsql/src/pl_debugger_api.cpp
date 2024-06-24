@@ -1534,6 +1534,7 @@ static void collect_breakable_line_walker(const List* stmts, List** lines)
             case PLPGSQL_STMT_COMMIT:
             case PLPGSQL_STMT_ROLLBACK:
             case PLPGSQL_STMT_NULL:
+            case PLPGSQL_STMT_PIPE_ROW:
                 break;
             default:
                 ereport(ERROR,

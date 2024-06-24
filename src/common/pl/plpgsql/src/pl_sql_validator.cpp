@@ -413,6 +413,10 @@ void pl_validate_stmt(PLpgSQL_stmt* stmt, PLpgSQL_function* func, SQLFunctionPar
             pl_validate_expression(((PLpgSQL_stmt_open*)stmt)->dynquery, func, pinfo, plan);
             pl_validate_expression(((PLpgSQL_stmt_open*)stmt)->argquery, func, pinfo, plan);
             break;
+            
+        case PLPGSQL_STMT_PIPE_ROW:
+            pl_validate_expression(((PLpgSQL_stmt_pipe_row*)stmt)->expr, func, pinfo, plan);
+            break;
 
         default:
             break;

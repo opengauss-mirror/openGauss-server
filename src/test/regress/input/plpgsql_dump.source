@@ -1,0 +1,129 @@
+create database plpgsql_dump;
+\c plpgsql_dump
+create schema plpgsql_dump;
+set search_path to plpgsql_dump;
+
+-- pipelined function test
+CREATE TYPE t_tf_row AS (
+    id          NUMBER,
+    description VARCHAR2(50)
+);
+CREATE TYPE t_tf_tab IS TABLE OF t_tf_row;
+
+-- res tuple
+CREATE OR REPLACE FUNCTION get_tab_ptf(p_rows in number) returns t_tf_tab pipelined LANGUAGE plpgsql AS
+$BODY$
+declare result t_tf_row;
+begin
+    for i in 1 .. p_rows loop
+        result.id = i;
+        result.description = 'Descrption for ' || i;
+        pipe row(null);
+        pipe row(result);
+    end loop;
+end;
+$BODY$;
+
+CREATE OR REPLACE PACKAGE plpgsql_dump_pkg AUTHID DEFINER AS TYPE rec as record(r1 int, r2 int);
+TYPE recset_arr IS table OF rec;
+FUNCTION table_of_rec(n INTEGER) RETURN recset_arr PIPELINED;
+END plpgsql_dump_pkg;
+/
+CREATE OR REPLACE PACKAGE BODY plpgsql_dump_pkg AS
+ FUNCTION table_of_rec(n INTEGER) RETURN recset_arr PIPELINED IS
+BEGIN
+declare
+    r rec;
+BEGIN
+FOR i IN 1..n LOOP
+		  r.r1 =i;
+          r.r2=i+1;
+pipe row(r);
+END LOOP;
+END;
+END;
+END plpgsql_dump_pkg;
+/
+
+CREATE OR REPLACE FUNCTION get_tab_ptf_autom(p_rows in number) returns t_tf_tab pipelined LANGUAGE plpgsql AS
+$BODY$
+declare result t_tf_row;
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+    for i in 1 .. p_rows loop
+        result.id = i;
+        result.description = 'Descrption for ' || i;
+        pipe row(null);
+        pipe row(result);
+    end loop;
+end;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION  get_table_of_int_autom(p_rows in number) returns _int4 pipelined  LANGUAGE plpgsql AS
+$BODY$
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+for i in 1 .. p_rows loop
+        pipe row(null);
+        pipe row(i);
+end loop;
+return;
+end;
+$BODY$;
+
+CREATE TABLE stocktable
+(
+    ticker      VARCHAR2(20),
+    trade_date  DATE,
+    open_price  NUMBER,
+    close_price NUMBER
+);
+INSERT INTO stocktable select 'STK' || indx, SYSDATE, indx, indx + 15 from generate_series(1,100) as indx;
+
+-- ROWTYPE(PLPGSQL_DTYPE_CURSORROW)/record(PLPGSQL_DTYPE_REC) test
+CREATE OR REPLACE FUNCTION stockpivot_pl () RETURN _stocktable PIPELINED
+   IS
+    CURSOR c IS SELECT * FROM stocktable;
+    in_rec c%ROWTYPE;
+    in_record record;
+   BEGIN
+    open c;
+LOOP
+FETCH c INTO in_rec;
+FETCH c INTO in_record;
+EXIT WHEN c%NOTFOUND;
+PIPE ROW (in_rec);
+PIPE ROW (in_record);
+END LOOP;
+END;
+/
+
+
+\! @abs_bindir@/gs_dump plpgsql_dump -p @portstring@ -f @abs_bindir@/plpgsql_dump.sql -n plpgsql_dump -w >/dev/null 2>&1; echo $?
+drop schema plpgsql_dump cascade;
+\! @abs_bindir@/gsql -dplpgsql_dump -p @portstring@ -f "@abs_bindir@/plpgsql_dump.sql";
+
+-- pipelined function check
+select * from get_tab_ptf(2);
+select get_tab_ptf(2);
+select * from unnest(get_tab_ptf(2));
+select * from table(get_tab_ptf(2));
+select unnest(get_tab_ptf(2));
+select * from get_tab_ptf_autom(2);
+select get_tab_ptf_autom(2);
+select * from unnest(get_tab_ptf_autom(2));
+select * from table(get_tab_ptf_autom(2));
+select unnest(get_tab_ptf_autom(2));
+SELECT * from plpgsql_dump_pkg.table_of_rec(6);
+select count(*) from stockpivot_pl();
+select * from get_table_of_int_autom(2);
+select get_table_of_int_autom(2);
+select * from unnest(get_table_of_int_autom(2));
+select * from table(get_table_of_int_autom(2));
+select unnest(get_table_of_int_autom(2));
+
+drop schema plpgsql_dump cascade;
+\c postgres
+drop database plpgsql_dump;
+

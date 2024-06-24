@@ -29,9 +29,9 @@ reset search_path;
 drop schema tableof_unsupported cascade;
 NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to type tableof_unsupported.r0
-drop cascades to type _int4[]
+drop cascades to type tableof_unsupported.t0
 drop cascades to type tableof_unsupported.t1
-drop cascades to type tableof_unsupported._r0[]
+drop cascades to type tableof_unsupported.t2
 drop cascades to type tableof_unsupported.test
 drop cascades to type tableof_unsupported.test_arr
 drop cascades to type tableof_unsupported.pljson

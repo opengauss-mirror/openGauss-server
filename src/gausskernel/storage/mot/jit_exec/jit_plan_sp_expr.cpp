@@ -386,7 +386,11 @@ static JitVisitResult VisitStmtListQueries(List* body, JitFunctionQueryVisitor* 
             case PLPGSQL_STMT_ROLLBACK:
                 MOT_LOG_TRACE("Unsupported ROLLBACK statement");
                 return JitVisitResult::JIT_VISIT_ERROR;
-
+                
+            case PLPGSQL_STMT_PIPE_ROW:
+                MOT_LOG_TRACE("Unsupported PIPE ROW statement");
+                return JitVisitResult::JIT_VISIT_ERROR;
+                
             default:
                 MOT_LOG_TRACE("Unsupported unknown statement: %u", stmt->cmd_type);
                 return JitVisitResult::JIT_VISIT_ERROR;

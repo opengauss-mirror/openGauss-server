@@ -196,7 +196,8 @@ enum PLpgSQL_stmt_types {
     PLPGSQL_STMT_NULL,
     PLPGSQL_STMT_SAVEPOINT,
     PLPGSQL_STMT_SIGNAL,
-    PLPGSQL_STMT_RESIGNAL
+    PLPGSQL_STMT_RESIGNAL,
+    PLPGSQL_STMT_PIPE_ROW
 };
 
 /* ----------
@@ -1008,6 +1009,14 @@ typedef struct { /* RETURN QUERY statement */
     char* sqlString;
 } PLpgSQL_stmt_return_query;
 
+typedef struct {
+    int cmd_type;
+    int lineno;
+    PLpgSQL_expr * expr;
+    int retvarno;
+    char* sqlString; 
+} PLpgSQL_stmt_pipe_row;
+
 typedef struct { /* RAISE statement			*/
     int cmd_type;
     int lineno;
@@ -1242,6 +1251,8 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     bool isValid;
     bool is_need_recompile;
     Oid namespaceOid;
+    bool is_pipelined;
+    bool pipelined_resistuple;
 } PLpgSQL_function;
 
 class AutonomousSession;
@@ -1327,6 +1338,11 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
     bool is_exception;
     bool is_declare_handler;    /* the block has declare handler stmt */
     int handler_level;
+    
+    bool is_pipelined;
+    bool pipelined_resistuple;
+
+    MemoryContext proc_ctx;
 } PLpgSQL_execstate;
 
 typedef struct PLpgSQL_pkg_execstate { /* Runtime execution data	*/
@@ -2121,7 +2137,7 @@ extern void examine_parameter_list(List* parameters, Oid languageOid, const char
     List** parameterDefaults, Oid* requiredResultType, List** defargpos, bool fenced, bool* has_undefined = NULL);
 extern void compute_return_type(
     TypeName* returnType, Oid languageOid, Oid* prorettype_p, bool* returnsSet_p, bool fenced, int startLineNumber,
-    TypeDependExtend* type_depend_extend, bool is_refresh_head);
+    TypeDependExtend* type_depend_extend, bool is_refresh_head, bool isPipelined);
 extern CodeLine* debug_show_code_worker(Oid funcid, uint32* num, int* headerlines);
 void plpgsql_free_override_stack(int depth);
 

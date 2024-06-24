@@ -52,7 +52,8 @@ extern ObjectAddress ProcedureCreate(const char *procedureName,
                 bool  isPrivate = false,
                 TypeDependExtend* paramTypDependExt = NULL,
                 TypeDependExtend* retTypDependExt = NULL,
-                CreateFunctionStmt* stmt = NULL
+                CreateFunctionStmt* stmt = NULL,
+                bool isPipelined = false
                 );
 
 extern bool function_parse_error_transpose(const char *prosrc);

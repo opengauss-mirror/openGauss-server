@@ -17,6 +17,7 @@
 #include "utils/plpgsql.h"
 
 #include "access/xact.h"
+#include "access/tupconvert.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_package.h"
 #include "catalog/gs_dependencies_fn.h"
@@ -386,6 +387,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <stmt>	stmt_commit stmt_rollback stmt_savepoint
 %type <stmt>	stmt_case stmt_foreach_a
 %type <stmt>	stmt_signal stmt_resignal
+%type <stmt>	stmt_pipe_row
 
 %type <list>	proc_exceptions declare_stmts
 %type <exception_block> exception_sect declare_sect_b
@@ -559,8 +561,9 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_OPTION
 %token <keyword>	K_OR
 %token <keyword>	K_OUT
-%token <keyword>    K_PACKAGE
+%token <keyword>        K_PACKAGE
 %token <keyword>	K_PERFORM
+%token <keyword>	K_PIPE
 %token <keyword>	K_PG_EXCEPTION_CONTEXT
 %token <keyword>	K_PG_EXCEPTION_DETAIL
 %token <keyword>	K_PG_EXCEPTION_HINT
@@ -581,6 +584,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_RETURNED_SQLSTATE
 %token <keyword>	K_REVERSE
 %token <keyword>	K_ROLLBACK
+%token <keyword>	K_ROW
 %token <keyword>	K_ROWTYPE
 %token <keyword>	K_ROW_COUNT
 %token <keyword>	K_SAVE
@@ -2787,6 +2791,8 @@ label_stmt		: stmt_assign
                         { $$ = $1; }
                 | stmt_null
                         { $$ = $1; }
+                | stmt_pipe_row
+                        { $$ = $1; }
                 ;
 
 stmt_perform	: K_PERFORM {u_sess->parser_cxt.isPerform = true;} expr_until_semi
@@ -4643,7 +4649,77 @@ stmt_return		: K_RETURN
                         }
                     }
                 ;
-
+                
+stmt_pipe_row		: K_PIPE K_ROW '('
+                    {
+			if (!u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_pipelined) {
+				const char* message = "PIPE statement cannot be used in non-pipelined functions";
+				InsertErrorMessage(message, plpgsql_yylloc);
+				ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("%s", message), errdetail("N/A"),
+					errcause("A PIPE statement was used in non-pipelined function"),
+					erraction("Use the PIPE statement only in pipelined functions"),
+					parser_errposition(@1)));
+			}
+                    	PLpgSQL_stmt_pipe_row* newp = (PLpgSQL_stmt_pipe_row *)palloc0(sizeof(PLpgSQL_stmt_pipe_row));
+		        newp->cmd_type = PLPGSQL_STMT_PIPE_ROW;
+                    	newp->lineno = plpgsql_location_to_lineno(@1);
+                    	newp->expr = NULL;
+                    	newp->sqlString = plpgsql_get_curline_query();
+                    	newp->retvarno = -1;
+                    	if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->pipelined_resistuple) {
+				int token = yylex();
+				bool supportedType = true;
+				TupleDesc tupdesc = NULL;
+				if (token == T_DATUM) {
+					newp->retvarno = yylval.wdatum.dno;
+					PLpgSQL_datum *returnVar = yylval.wdatum.datum;
+					auto dtype = returnVar->dtype;
+					supportedType = dtype == PLPGSQL_DTYPE_ROW ||
+						dtype == PLPGSQL_DTYPE_RECORD ||
+						dtype == PLPGSQL_DTYPE_CURSORROW ||
+						dtype == PLPGSQL_DTYPE_REC;
+					switch (dtype) {
+						case PLPGSQL_DTYPE_REC:
+						case PLPGSQL_DTYPE_CURSORROW:
+							tupdesc = ((PLpgSQL_rec *) returnVar)->tupdesc;
+							break;
+						case PLPGSQL_DTYPE_RECORD:
+						case PLPGSQL_DTYPE_ROW:
+							tupdesc = ((PLpgSQL_row *) returnVar)->rowtupdesc;
+							break;
+						default:
+							break;
+					}
+					if (tupdesc != NULL) {
+						Oid retyType = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_rettype;
+						int32 typmod;
+						Oid realRetType = searchsubtypebytypeId(retyType, &typmod);
+						TupleDesc expected = lookup_rowtype_tupdesc_copy(realRetType, typmod);
+						const char* msg = "expression is of wrong type";
+						convert_tuples_by_position(tupdesc, expected, gettext_noop(msg));
+					}
+				} else if (token == K_NULL) {
+					newp->retvarno = -1;
+				} else {
+					supportedType = false;
+				}
+				if (!supportedType) {
+					yyerror("unknown pipe row type");
+				}
+				if (yylex() != ')') {
+					yyerror("syntax error");
+				}
+			 } else {
+				newp->expr = read_sql_expression(')', ")");		
+			}
+			int token = yylex();
+			if (token != ';') {
+				yyerror("syntax error");
+			}
+			$$ = (PLpgSQL_stmt *)newp;
+                    }
+                ;
 stmt_raise		: K_RAISE
                     {
                         PLpgSQL_stmt_raise		*newp;
@@ -5920,6 +5996,8 @@ stmt_commit		: opt_block_label K_COMMIT ';'
                         record_stmt_label($1, (PLpgSQL_stmt *)newp);
                     }
                 ;
+                
+                
 
 savepoint_name : any_identifier
                     {
@@ -6493,6 +6571,7 @@ unreserved_keyword	:
                 | K_PG_EXCEPTION_CONTEXT
                 | K_PG_EXCEPTION_DETAIL
                 | K_PG_EXCEPTION_HINT
+                | K_PIPE
                 | K_PRIOR
                 | K_QUERY
                 | K_RECORD
@@ -6502,6 +6581,7 @@ unreserved_keyword	:
                 | K_RETURNED_SQLSTATE
                 | K_REVERSE
                 | K_ROLLBACK
+                | K_ROW
                 | K_ROW_COUNT
                 | K_ROWTYPE
                 | K_SAVE
@@ -10739,6 +10819,20 @@ make_return_stmt(int location)
                      errhint("Use RETURN NEXT or RETURN QUERY."),
                      parser_errposition(yylloc)));
         }
+    }
+    else if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_pipelined) {
+	if (yylex() != ';') {
+	    const char* message = "pipe error";
+	    InsertErrorMessage(message, plpgsql_yylloc);
+	    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("RETURN statement in a pipelinedd function cannot contains an expression"), errdetail("%s", message),
+                                errcause("A RETURN statement in a pipelined function contains an expression, \
+                                which is not allowed. \
+                                Pipelined functions must return values to the caller by using the PIPE statement."),
+                                erraction("Remove the expression from the RETURN statement \
+                                and use a PIPE statement to return values. \
+                                Alternatively, convert the function into a non-pipelined function")));
+	}
     }
 
     // adapting A db, where return value is independent from OUT parameters 

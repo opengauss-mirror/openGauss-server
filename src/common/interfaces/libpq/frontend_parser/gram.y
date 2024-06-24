@@ -566,6 +566,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
 
 	PACKAGE PACKAGES PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
+	PIPELINED
 /* PGXC_BEGIN */
 	POOL PRECEDING PRECISION
 /* PGXC_END */
@@ -3276,6 +3277,10 @@ createfunc_opt_item:
                     $$ = makeDefElem("window", (Node *)makeInteger(TRUE));
                     $$->location = @1;
                 }
+            | PIPELINED
+		{
+                    $$ = makeDefElem("pipelined", (Node *)makeInteger(TRUE));
+		}
             | common_func_opt_item
                 {
                     $$ = $1;
@@ -3288,6 +3293,11 @@ createproc_opt_item:
 			 common_func_opt_item
 				{
 					$$ = $1;
+				}
+
+			| PIPELINED
+				{
+					$$ = makeDefElem("pipelined", (Node *)makeInteger(TRUE));
 				}
 		;
 

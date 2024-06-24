@@ -14,13 +14,11 @@
  * -------------------------------------------------------------------------
  */
 
-#include "utils/plpgsql_domain.h"
 #include "utils/plpgsql.h"
 #include "utils/pl_package.h"
 
 #include <ctype.h>
 
-#include "access/tuptoaster.h"
 #include "access/transam.h"
 #include "access/tupconvert.h"
 #include "access/xact.h"
@@ -28,52 +26,23 @@
 #include "auditfuncs.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
-#include "catalog/pg_type.h"
-#include "executor/spi.h"
 #include "executor/spi_priv.h"
 #include "funcapi.h"
-#include "gssignal/gs_signal.h"
-#include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
-#include "nodes/pg_list.h"
-#include "nodes/primnodes.h"
-#include "parser/parse_coerce.h"
-#include "parser/parse_expr.h"
 #include "parser/parse_type.h"
-#include "parser/scansup.h"
-#include "pgaudit.h"
 #include "pgstat.h"
 #include "optimizer/clauses.h"
-#include "storage/proc.h"
 #include "tcop/autonomoustransaction.h"
-#include "tcop/tcopprot.h"
-#include "utils/array.h"
 #include "utils/builtins.h"
-#include "utils/datum.h"
 #include "utils/fmgroids.h"
-#include "utils/lsyscache.h"
-#include "utils/memutils.h"
-#include "utils/portal.h"
-#include "utils/rel.h"
-#include "utils/rel_gs.h"
-#include "utils/snapmgr.h"
-#include "utils/syscache.h"
 #include "utils/typcache.h"
-#include "parser/parse_coerce.h"
-#include "pgxc/pgxc.h"
-#include "pgxc/pgxcnode.h"
-#include "pgxc/execRemote.h"
 #include "instruments/instr_unique_sql.h"
 #include "commands/sqladvisor.h"
 #include "access/hash.h"
-#include "distributelayer/streamMain.h"
 #include "instruments/instr_handle_mgr.h"
 #ifdef ENABLE_MOT
-#include "storage/mot/jit_exec.h"
 #include "storage/mot/mot_fdw.h"
 #endif
-#include "commands/event_trigger.h"
-#include "executor/executor.h"
 
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
@@ -161,6 +130,7 @@ static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt_null* stmt);
 static int exec_stmt_exit(PLpgSQL_execstate* estate, PLpgSQL_stmt_exit* stmt);
 static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt);
 static int exec_stmt_return_next(PLpgSQL_execstate* estate, PLpgSQL_stmt_return_next* stmt);
+static int exec_stmt_pipe_row(PLpgSQL_execstate *estate, PLpgSQL_stmt_pipe_row *stmt);
 static int exec_stmt_return_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_return_query* stmt);
 static int exec_stmt_raise(PLpgSQL_execstate* estate, PLpgSQL_stmt_raise* stmt);
 static int exec_stmt_signal(PLpgSQL_execstate* estate, PLpgSQL_stmt_signal* stmt);
@@ -279,7 +249,7 @@ static Datum formDatumFromAttrTarget(PLpgSQL_execstate* estate, const PLpgSQL_te
     Datum value, Oid* valtype, bool* isNull);
 static Datum formDatumFromArrayTarget(PLpgSQL_execstate* estate, const PLpgSQL_temp_assignvar* target,
     int* subscriptvals, int nsubscripts, Datum value, Oid* resultvaltype, bool* isNull);
-static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *target, 
+static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *target,
     HeapTuple var_tup, TupleDesc var_tupdesc);
 
 bool plpgsql_get_current_value_stp_with_exception();
@@ -303,6 +273,8 @@ static bool plsql_convert_value_charset(PLpgSQL_execstate* estate, Datum *val, b
 static bool plsql_convert_expr_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
     PLpgSQL_expr* val_expr, PLpgSQL_datum* target);
 static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyParse);
+void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *pExecstate);
+void PipelinedFuncRewriteResult(PLpgSQL_execstate *estate, ATResult *atResult);
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
  * validating a given linenumber
@@ -581,10 +553,12 @@ void CheckArgTypeMode(HeapTuple procTup, FunctionCallInfo fcinfo)
         prokind = CharGetDatum(prokindDatum);
     }
 
-    if (argTypesIsNull || argModesIsNULL || prokindIsNULL || !InOutParaIsSup(prokind, fcinfo->flinfo->fn_oid)) {
+    bool onlyHasPram =
+        argTypesIsNull || argModesIsNULL || prokindIsNULL || !InOutParaIsSup(prokind, fcinfo->flinfo->fn_oid);
 #else
-    if (argTypesIsNull || argModesIsNULL || prokindIsNULL) {
+    bool onlyHasPram = argTypesIsNull || argModesIsNULL || prokindIsNULL;
 #endif
+    if (onlyHasPram) {
         /* procedure only has in param, check them */
         for (int i = 0; i < fcinfo->nargs; i++) {
             if (fcinfo->argTypes[i] == REFCURSOROID) {
@@ -1119,14 +1093,14 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
     List* parsetreeList = NIL;
     NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     expr->func->pre_parse_trig = true;
-    
+
     PG_TRY();
     {
         parsetreeList = pg_parse_query(expr->query);
         if (parsetreeList == NULL) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unexpected null parsetree list")));
         }
-       
+
         foreach(cell, parsetreeList) {
             Node *parsetree = (Node *)lfirst(cell);
             t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(parsetree);
@@ -1146,7 +1120,7 @@ static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect
                     PG_TRY_RETURN(NULL);
                 }
             }
-            queryList = pg_analyze_and_rewrite_params(parsetree, expr->query, 
+            queryList = pg_analyze_and_rewrite_params(parsetree, expr->query,
                 (ParserSetupHook)plpgsql_parser_setup, (void*)expr);
         }
         if (queryList == NULL) {
@@ -1506,6 +1480,11 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
     }
     list_free_deep(autonmsList);
 #endif
+
+    /* pipelined function support autonomous */
+    PipelinedFuncRewriteResult(&estate, &res);
+
+
     /* Clean up any leftover temporary memory */
     plpgsql_destroy_econtext(&estate);
     exec_eval_cleanup(&estate);
@@ -1516,6 +1495,75 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
      * Return the function's result
      */
     return res.ResTup;
+}
+void PipelinedFuncRewriteResult(PLpgSQL_execstate *estate, ATResult *atResult)
+{
+    /* no pipelined function or pipelined function in target list or empty result */
+    if (!estate->is_pipelined || estate->rsi == NULL || atResult->resisnull) {
+        return;
+    }
+
+    ReturnSetInfo* rsi = estate->rsi;
+    /**
+     * Check caller can handle a set result in the way we want
+     * double check: pipelined function in target list
+     * always success
+     **/
+    if ((rsi == NULL) || !IsA(rsi, ReturnSetInfo) || (rsi->allowedModes & SFRM_Materialize) == 0 ||
+        (rsi->expectedDesc == NULL)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmodule(MOD_PLSQL),
+                 errmsg("pipeliend function called in context that cannot accept a set for "
+                        "PIPE ROW STATEMENT.")));
+    }
+
+
+    rsi->returnMode = SFRM_Materialize;
+    if (estate->tuple_store == NULL) {
+        exec_init_tuple_store(estate);
+    }
+    
+    /* tableof Type also return true */
+    if (type_is_array(estate->fn_rettype)) {
+        Datum res = atResult->ResTup;
+        ArrayType *arr = DatumGetArrayTypeP(res);
+        /* result from select pipelined_function() */
+        Assert(ARR_NDIM(arr) <= 1);
+        ArrayIterator iterator = array_create_iterator(arr, 0);
+        Datum value;
+        bool isNull;
+        while (array_iterate(iterator, &value, &isNull)) {
+            if (estate->pipelined_resistuple) {
+                HeapTupleHeader tupleHeader = DatumGetHeapTupleHeader(value);
+                uint32 len = HeapTupleHeaderGetDatumLength(tupleHeader);
+                HeapTuple tuple = (HeapTuple)palloc0(HEAPTUPLESIZE + len);
+                tuple->t_len = len;
+                tuple->t_data = tupleHeader;
+                tuplestore_puttuple(estate->tuple_store, tuple);
+                heap_freetuple(tuple);
+            } else {
+                tuplestore_putvalues(estate->tuple_store, estate->rettupdesc, &value, &isNull);
+
+            }
+        }
+        array_free_iterator(iterator);
+    } else {
+        ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("pipeLined function must have a supported collection return type"),
+                 errcause("Wrong return type"), erraction("Please check return type of the pipeliend function")));
+    }
+
+    if (estate->tuple_store != NULL) {
+        rsi->setResult = estate->tuple_store;
+        if (estate->rettupdesc) {
+            MemoryContext oldcxt = MemoryContextSwitchTo(estate->tuple_store_cxt);
+            rsi->setDesc = CreateTupleDescCopy(estate->rettupdesc);
+            MemoryContextSwitchTo(oldcxt);
+        }
+    }
+    atResult->ResTup = (Datum)0;
 }
 
 /* ----------
@@ -1606,6 +1654,18 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
                 errmsg("Mismatch between function parameter number [%d:%d].", func->fn_nargs, fcinfo->nargs)));
     }
     bool is_plpgsql_function_with_outparam = func->is_plpgsql_func_with_outparam;
+
+    if (estate.is_pipelined && is_plpgsql_function_with_outparam) {
+        ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Function %s has out arguments", get_func_name(func->fn_oid)),
+                 errcause("A SQL statement references either a packaged, or a stand-alone, "
+                          "PL/SQL function that contains an OUT parameter in its argument list. "
+                          "PL/SQL functions referenced by SQL statements must "
+                          "not contain the OUT parameter."), erraction("Recreate the PL/SQL "
+                           "function without the OUT parameter in the argument list.")));
+    }
+
     if (func->fn_nargs != fcinfo->nargs && is_plpgsql_function_with_outparam) {
         procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->fn_oid));
         proArgModes = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proargmodes, &isNULL);
@@ -1779,6 +1839,8 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
 
     pfree_ext(u_sess->plsql_cxt.pass_func_tupdesc);
 
+    AutonomPipelinedFuncRewriteResult(&estate);
+    
     /*
      * We got a return value - process it
      */
@@ -1787,7 +1849,8 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
 
     fcinfo->isnull = estate.retisnull;
     t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
-    if (estate.retisset) {
+    bool pipelinedRetIsSet = estate.is_pipelined && estate.rsi != NULL;
+    if (estate.retisset || pipelinedRetIsSet) {
         ReturnSetInfo* rsi = estate.rsi;
 
         /* Check caller can handle a set result */
@@ -2011,6 +2074,66 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
      */
     return estate.retval;
 }
+void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *estate)
+{
+    /* do nothing */
+    if (!estate->is_pipelined || estate->rsi != NULL) {
+        return;
+    }
+    if (estate->tuple_store == NULL) {
+        estate->retval = (Datum)0;
+        estate->retisnull = true;
+        estate->rettype = estate->fn_rettype;
+        return;
+    }
+
+    Tuplestorestate *tuple_store = estate->tuple_store;
+    int size = tuplestore_get_memtupcount(tuple_store);
+    Datum *values = (Datum *)palloc(sizeof(Datum) * size);
+    bool *isNulls = (bool *)palloc(sizeof(bool) * size);
+
+    int32 elemTypeMod;
+    Oid elemTypeId  = searchsubtypebytypeId(estate->fn_rettype, &elemTypeMod);
+
+    int16 elemLen = -1;
+    bool elemByVal = false;
+    char elemAlign;
+    get_typlenbyvalalign(elemTypeId, &elemLen, &elemByVal, &elemAlign);
+
+    TupleTableSlot *slot = MakeSingleTupleTableSlot(estate->rettupdesc);
+    int index = 0;
+    while (tuplestore_gettupleslot(tuple_store, true, false, slot)) {
+        if (estate->pipelined_resistuple) {
+            isNulls[index] = false;
+            values[index] = datumCopy(ExecFetchSlotTupleDatum(slot), elemByVal, elemLen);
+        } else {
+            values[index] = heap_slot_getattr(slot, 1, &isNulls[index]);
+        }
+        index++;
+    }
+
+    tuplestore_end(tuple_store);
+
+    /* TableOf also return true */
+    if (type_is_array(estate->fn_rettype)) {
+        int dims[1];
+        int lbs[1];
+
+        dims[0] = size;
+        lbs[0] = 1;
+        estate->retval =
+             PointerGetDatum(construct_md_array(values, isNulls, 1, dims, lbs, elemTypeId, elemLen, elemByVal, elemAlign));
+    } else {
+        ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("pipeLined function must have a supported collection return type"),
+                 errcause("Wrong return type"), erraction("Please check return type of the pipeliend function")));
+    }
+
+    estate->retisnull = false;
+    estate->rettype = estate->fn_rettype;
+    return;
+}
 
 static Datum CopyFcinfoArgValue(Oid typOid, Datum value, bool isNull)
 {
@@ -2045,7 +2168,7 @@ static void RecordSetGeneratedField(PLpgSQL_rec *recNew)
 
     /*
     * Set up values/control arrays for heap_modify_tuple. For all
-    * the attributes except the one we want to replace, use the
+    * the attributes except the one we want to replace, use the'
     * value that's in the old tuple.
     */
     values = (Datum*)palloc(sizeof(Datum) * natts);
@@ -2458,7 +2581,7 @@ static void plpgsql_exec_error_callback(void* arg)
                 sizeof(details) - 1,
                 "Execute PL/pgSQL function(%s). ",
                 estate->func->fn_signature);
-            securec_check_ss(ret, "", "");
+            securec_check_ss(ret, (char*)"", (char*)"");
             audit_report(AUDIT_FUNCTION_EXEC, AUDIT_FAILED, estate->func->fn_signature, details);
         }
     }
@@ -3504,7 +3627,8 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                  * currently only needed for scalar result types --- rowtype
                  * values will always exist in the function's own memory context.
                  */
-                if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
+                bool pipelined = estate->is_pipelined || estate->retisnull;
+                if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL && !pipelined) {
                     int16 resTypLen;
                     bool resTypByVal = false;
 
@@ -4408,7 +4532,10 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
             rc = exec_stmt_return_next(estate, (PLpgSQL_stmt_return_next*)stmt);
             break;
-
+        case PLPGSQL_STMT_PIPE_ROW:
+            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+            rc = exec_stmt_pipe_row(estate, (PLpgSQL_stmt_pipe_row*)stmt);
+            break;
         case PLPGSQL_STMT_RETURN_QUERY: {
             t_thrd.postgres_cxt.cur_command_tag = T_SelectStmt;
             INIT_UNIQUE_SQL_CXT();
@@ -4597,6 +4724,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
 
     return rc;
 }
+
 
 static Oid get_func_oid_from_expr(PLpgSQL_expr *expr)
 {
@@ -6147,7 +6275,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
      * indicates that the function is finished producing tuples.  The rest of
      * the work will be done at the top level.
      */
-    if (estate->retisset) {
+    if (estate->retisset || estate->is_pipelined) {
         return PLPGSQL_RC_RETURN;
     }
 
@@ -6357,6 +6485,144 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
     }
 
     return PLPGSQL_RC_RETURN;
+}
+
+
+static void init_tuple_store_pipelined(PLpgSQL_execstate *estate)
+{
+    if (estate->rsi != NULL) {
+        exec_init_tuple_store(estate);
+    } else {
+        /* init tuple store when pipelined function in targetlist */
+        MemoryContext oldcxt;
+        ResourceOwner oldowner;
+        oldcxt = MemoryContextSwitchTo(estate->proc_ctx);
+        oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+        t_thrd.utils_cxt.CurrentResourceOwner = estate->tuple_store_owner;
+        estate->tuple_store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
+        t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+        MemoryContextSwitchTo(oldcxt);
+    }
+}
+
+static void init_rettupedesc_pipelined(PLpgSQL_execstate *estate)
+{
+    Assert(estate->rettupdesc == NULL);
+    if (!estate->pipelined_resistuple) {
+        char *funcName = get_func_name(estate->func->fn_oid);
+        Oid elemTypeId = searchsubtypebytypeId(estate->fn_rettype, NULL);
+        estate->rettupdesc = TypeGetTupleDesc(elemTypeId, list_make1(makeString(funcName)));
+    } else {
+        int32 elemTypeMod;
+        Oid elemTypeId = searchsubtypebytypeId(estate->fn_rettype, &elemTypeMod);
+        estate->rettupdesc = lookup_rowtype_tupdesc_copy(elemTypeId, elemTypeMod);
+    }
+}
+/* ----------
+ * exec_stmt_return_next		Evaluate an expression and add it to the
+ *								list of tuples returned by the current
+ *								SRF.
+ * ----------
+ */
+static int exec_stmt_pipe_row(PLpgSQL_execstate *estate, PLpgSQL_stmt_pipe_row *stmt)
+{
+
+    /* sanity check */
+    if (!estate->is_pipelined) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("PIPE statement cannot be used in non-pipelined functions"), errdetail("N/A"),
+                        errcause("A PIPE statement was used in non-pipelined function"),
+                        erraction("Use the PIPE statement only in pipelined functions")));
+    }
+
+    if (estate->tuple_store == NULL) {
+        init_tuple_store_pipelined(estate);
+    }
+
+    if (estate->rettupdesc == NULL) {
+        init_rettupedesc_pipelined(estate);
+    }
+
+    if (!estate->pipelined_resistuple) {
+        /* expr or simple select */
+        Assert(stmt->expr != NULL);
+        Assert(stmt->retvarno < 0);
+        Oid rettype;
+        bool isNull = false;
+        Datum retval = exec_eval_expr(estate, stmt->expr, &isNull, &rettype);
+
+        Oid elemTypeId = estate->rettupdesc->attrs[0].atttypid;
+        int32 elemTypeMod = estate->rettupdesc->attrs[0].atttypmod;
+
+        /* coerce type if needed */
+        retval = exec_simple_cast_value(estate, retval, rettype, elemTypeId, elemTypeMod, isNull);
+        tuplestore_putvalues(estate->tuple_store, estate->rettupdesc, &retval, &isNull);
+        return PLPGSQL_RC_OK;
+    }
+
+
+    TupleDesc tupdesc = estate->rettupdesc;
+    bool needFreeTuple = false;
+
+    HeapTuple tuple = NULL;
+    int natts = tupdesc->natts;
+    if (stmt->retvarno < 0) {
+        Datum *dvalues = (Datum*)palloc0(natts * sizeof(Datum));
+        bool *nulls = (bool*)palloc(natts * sizeof(bool));
+        for (int i = 0; i < natts; i++) {
+            nulls[i] = true;
+        }
+        tuple = heap_form_tuple(tupdesc, dvalues, nulls);
+        needFreeTuple = true;
+    } else {
+        PLpgSQL_datum *retvar = estate->datums[stmt->retvarno];
+        switch (retvar->dtype) {
+            case PLPGSQL_DTYPE_REC: 
+            case PLPGSQL_DTYPE_CURSORROW: {
+                PLpgSQL_rec *rec = (PLpgSQL_rec *)retvar;
+                TupleConversionMap *tupmap = NULL;
+
+                if (!HeapTupleIsValid(rec->tup)) {
+                    ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmodule(MOD_PLSQL),
+                                    errmsg("record \"%s\" is not assigned yet", rec->refname),
+                                    errdetail("The tuple structure of a not-yet-assigned record is indeterminate.")));
+                }
+
+                tupmap = convert_tuples_by_position(rec->tupdesc, tupdesc,
+                                                    gettext_noop("wrong record type supplied in PIPE ROW"),
+                                                    estate->func->fn_oid);
+                tuple = rec->tup;
+                /* it might need conversion */
+                if (tupmap != NULL) {
+                    tuple = do_convert_tuple(tuple, tupmap);
+                    needFreeTuple = true;
+                }
+            } break;
+            case PLPGSQL_DTYPE_ROW:
+            case PLPGSQL_DTYPE_RECORD: {
+                PLpgSQL_row *row = (PLpgSQL_row *)retvar;
+                tuple = make_tuple_from_row(estate, row, tupdesc);
+                if (tuple == NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmodule(MOD_PLSQL),
+                                    errmsg("wrong record type supplied in RETURN NEXT statement.")));
+                }
+                needFreeTuple = true;
+            } break;
+            default:
+                ereport(ERROR,
+                        (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR), errmsg("expression is of wrong type"),
+                         errdetail("N/A"), errcause("The expression has a wrong data type"),
+                         erraction("Change the data type of the expression. You may need to use the data type conversion feature")));
+        }
+    }
+    if (HeapTupleIsValid(tuple)) {
+        tuplestore_puttuple(estate->tuple_store, tuple);
+
+        if (needFreeTuple) {
+            heap_freetuple_ext(tuple);
+        }
+    }
+    return PLPGSQL_RC_OK;
 }
 
 /* ----------
@@ -6827,7 +7093,7 @@ static int exec_stmt_raise(PLpgSQL_execstate* estate, PLpgSQL_stmt_raise* stmt)
         int msg_len = SQL_STATE_BUF_LEN + strlen(msg_tail) + 1;
         err_message = (char *)palloc(msg_len);
         errno_t rc = snprintf_s(err_message, msg_len, msg_len - 1, " %d%s", -err_code, msg_tail);
-        securec_check_ss(rc, "\0", "\0");
+        securec_check_ss(rc, (char*)"\0", (char*)"\0");
     }
 
     /*
@@ -7094,6 +7360,9 @@ void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, Ret
     estate->retistuple = func->fn_retistuple;
     estate->retisset = func->fn_retset;
 
+    estate->is_pipelined = func->is_pipelined;
+    estate->pipelined_resistuple = func->pipelined_resistuple;
+    
     estate->readonly_func = func->fn_readonly;
 
     estate->rettupdesc = NULL;
@@ -7181,6 +7450,7 @@ void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, Ret
         //
         CHECK_FOR_INTERRUPTS();
     }
+    estate->proc_ctx = CurrentMemoryContext;
 }
 
 /* ----------
@@ -9152,7 +9422,7 @@ static void exec_move_row_from_fields(PLpgSQL_execstate *estate, PLpgSQL_datum *
     securec_check(rc, "\0", "\0");
 
     newvalues = (Datum *)palloc0(td_natts * sizeof(Datum));
-    
+
     newnulls = (bool *)palloc(td_natts * sizeof(bool));
     rc = memset_s(newnulls, td_natts * sizeof(bool), true, td_natts * sizeof(bool));
     securec_check(rc, "\0", "\0");

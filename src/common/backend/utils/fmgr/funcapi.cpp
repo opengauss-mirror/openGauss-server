@@ -451,7 +451,10 @@ static TypeFuncClass internal_get_result_type(Oid funcid, Node* call_expr, Retur
     /*
      * If scalar polymorphic result, try to resolve it.
      */
-    if (IsPolymorphicType(rettype)) {
+    bool isNull = false;
+    Datum datum = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_prokind, &isNull);
+    bool isPipelinedFunc = isNull ? false : PROC_IS_PIPELINED(CharGetDatum(datum)); 
+    if (IsPolymorphicType(rettype) || isPipelinedFunc) {
         Oid newrettype = exprType(call_expr);
         if (newrettype == InvalidOid) {/* this probably should not happen */
             ereport(ERROR,

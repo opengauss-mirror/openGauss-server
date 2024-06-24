@@ -493,6 +493,7 @@ static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate)
     destEstate->curr_nested_table_type = 0;
     destEstate->is_exception = false;
     destEstate->is_declare_handler = false;
+    destEstate->is_pipelined = srcEstate->is_pipelined;
 
     return destEstate;
 }

@@ -111,11 +111,11 @@ select regexp_replace('', '', '', '') IS NULL;  -- expect t
 
 
 /* enable after regexp_like and regexp_substr checked in */
-create table test_table(name varchar(20));
-insert into test_table values('jack');
-select * from test_table where regexp_like(name,'', 'i');  ---return null
-select * from test_table where regexp_like(name, NULL, 'i'); -- return null
-drop table test_table;
+create table test_table_in_hw_empty_str(name varchar(20));
+insert into test_table_in_hw_empty_str values('jack');
+select * from test_table_in_hw_empty_str where regexp_like(name,'', 'i');  ---return null
+select * from test_table_in_hw_empty_str where regexp_like(name, NULL, 'i'); -- return null
+drop table test_table_in_hw_empty_str;
 
 select nvl(regexp_substr('This is test',''), 'This is NULL'); -- return This is NULL
 select nvl(regexp_substr('This is test',NULL), 'This is NULL'); -- return This is NULL

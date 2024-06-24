@@ -1064,7 +1064,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
     bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate,
-    TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt)
+    TypeDependExtend* paramTypDependExt, TypeDependExtend* retTypDependExt, CreateFunctionStmt* stmt, bool isPipelined)
 {
     Oid retval;
     int parameterCount;
@@ -1432,7 +1432,8 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
     values[Anum_pg_proc_fenced - 1] = BoolGetDatum(fenced);
     values[Anum_pg_proc_shippable - 1] = BoolGetDatum(shippable);
     values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
-    values[Anum_pg_proc_prokind - 1] = CharGetDatum(proIsProcedure ? PROKIND_PROCEDURE : PROKIND_FUNCTION);
+    char functionKind = proIsProcedure ? PROKIND_PROCEDURE : (isPipelined ? PROKIND_PIPELIEND : PROKIND_FUNCTION);
+    values[Anum_pg_proc_prokind - 1] = CharGetDatum(functionKind);
 
     if (proargsrc != NULL) {
         values[Anum_pg_proc_proargsrc - 1] = CStringGetTextDatum(proargsrc);

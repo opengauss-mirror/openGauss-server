@@ -2276,7 +2276,9 @@ Oid getTypeIOParam(HeapTuple typeTuple)
      * Array types get their typelem as parameter; everybody else gets their
      * own type OID as parameter.
      */
-    if (OidIsValid(typeStruct->typelem)) {
+    if (typeStruct->typtype == TYPTYPE_TABLEOF) {
+        return SearchSubTypeByType(typeStruct, NULL);
+    } else if (OidIsValid(typeStruct->typelem)) {
         return typeStruct->typelem;
     } else {
         return HeapTupleGetOid(typeTuple);
@@ -4315,6 +4317,7 @@ Oid get_element_type(Oid typid)
     tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
     if (HeapTupleIsValid(tp)) {
         Form_pg_type typtup = (Form_pg_type)GETSTRUCT(tp);
+        char typtype = typtup->typtype;
         Oid result;
         if (typtup->typlen == -1) {
             result = typtup->typelem;
@@ -4322,7 +4325,7 @@ Oid get_element_type(Oid typid)
             result = InvalidOid;
         }
         ReleaseSysCache(tp);
-        return result;
+        return typtype == TYPTYPE_TABLEOF? get_element_type(result) :result;
     } else {
         return InvalidOid;
     }
