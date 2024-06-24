@@ -10831,7 +10831,7 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
 #endif /* PGXC */
     char* funcname = generate_function_name(aggref->aggfnoid, nargs, NIL, argtypes, aggref->aggvariadic, &use_variadic);
     appendStringInfo(buf, "%s(%s", funcname, (aggref->aggdistinct != NIL) ? "DISTINCT " : "");
-
+    bool isGroupCatAggFunc = aggref->aggfnoid == GROUPCONCATFUNCOID;
     if (AGGKIND_IS_ORDERED_SET(aggref->aggkind)) {
         /*
          * Ordered-set aggregates do not use "*" syntax and we needn't
@@ -10854,7 +10854,7 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
             int narg = 0;
             int start = 0;
             /* the first argument of group_concat() is separator, skip it */
-            if (pg_strcasecmp(funcname, "group_concat") == 0) {
+            if (isGroupCatAggFunc) {
                 init = init->next;
                 narg++;
                 start++;
@@ -10884,7 +10884,7 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
             }
         }
 
-        if (pg_strcasecmp(funcname, "group_concat") == 0) {
+        if (isGroupCatAggFunc) {
             appendStringInfoString(buf, " SEPARATOR ");
             Const* con = (Const*)(((TargetEntry*)lfirst(list_head(aggref->args)))->expr);
             get_rule_separator(con, buf);

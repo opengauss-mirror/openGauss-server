@@ -22,3 +22,4 @@ objfiles.txt
 /ereport.txt
 
 /build/script/version.cfg
+/cmake_build

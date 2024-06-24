@@ -71,3 +71,25 @@ create aggregate aggfns(integer,integer,text) (
    sfunc = aggfns_trans, stype = aggtype[],
    initcond = '{}'
 );
+
+create schema view_test_create_group_concat;
+set current_schema = 'view_test_create_group_concat';
+CREATE TABLE t1(a INT, b INT);
+CREATE FUNCTION _group_concat(text, text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $_$
+SELECT CASE
+  WHEN $2 IS NULL THEN $1
+  WHEN $1 IS NULL THEN $2
+  ELSE $1 || ', ' || $2
+END
+$_$;
+CREATE AGGREGATE group_concat(text) (
+    SFUNC = _group_concat,
+    STYPE = text
+);
+
+CREATE VIEW v4_4_2 AS SELECT group_concat(a::text) a FROM t1;
+select pg_get_viewdef('v4_4_2');
+reset current_schema;
+drop schema view_test_create_group_concat cascade;
