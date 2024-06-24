@@ -571,6 +571,10 @@ bool libpqsw_get_set_command()
 
 /* if skip readonly check in P or Q message */
 bool libpqsw_skip_check_readonly() {
+    if (!g_instance.attr.attr_sql.enableRemoteExcute) {
+        return false;
+    }
+
     return get_redirect_manager()->get_remote_excute();
 }
 
