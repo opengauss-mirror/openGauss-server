@@ -3378,8 +3378,10 @@ void HashMapManagerMain()
         ondemand_htab_ctrl_t *nextHtabCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
         // the tail of redoItem hashmap linked list
         ondemand_htab_ctrl_t *targetHtabCtrl = g_dispatcher->pageLines[g_redoWorker->slotId].managerThd->redoItemHashCtrl;
+        // the processing redoItem hashmap
+        ondemand_htab_ctrl_t *procHtabCtrl = nextHtabCtrl;
         while (nextHtabCtrl != targetHtabCtrl) {
-            ondemand_htab_ctrl_t *procHtabCtrl = nextHtabCtrl;
+            procHtabCtrl = nextHtabCtrl;
             nextHtabCtrl = (ondemand_htab_ctrl_t *)nextHtabCtrl->nextHTabCtrl;
             if (XLByteLT(procHtabCtrl->maxRedoItemPtr, ckptRedoPtr)) {
                 PRTrackAllClear(procHtabCtrl->hTab);
@@ -3394,8 +3396,10 @@ void HashMapManagerMain()
 
         // step3: prune current hashmap
         CountAndGetRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_2], t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_3]);
+        //Retrieves the header of the hashmap linked list
+        procHtabCtrl = g_instance.comm_cxt.predo_cxt.redoItemHashCtrl[g_redoWorker->slotId];
         if (pruneMax) {
-            HashMapManagerProcHashmapPrune(nextHtabCtrl->hTab, ckptRedoPtr, updateStat);
+            HashMapManagerProcHashmapPrune(procHtabCtrl->hTab, ckptRedoPtr, updateStat);
             pg_atomic_write_u64(&g_redoWorker->nextPrunePtr, ckptRedoPtr);
         }
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
