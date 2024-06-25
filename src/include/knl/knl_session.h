@@ -2749,6 +2749,7 @@ typedef struct knl_u_hook_context {
     void *deparseQueryHook;
     void *checkSqlFnRetvalHook;
     void *typeTransfer;
+    void *nullsMinimalPolicyHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

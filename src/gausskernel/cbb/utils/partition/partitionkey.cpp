@@ -318,7 +318,7 @@ int partitonKeyCompare(Const** value1, Const** value2, int len, bool nullEqual)
                     errmsg("null value can not be compared with null value.")));
         }
         if (v1->constisnull || v2->constisnull) {
-            if (DB_IS_CMPT(B_FORMAT)) {
+            if (CheckPluginNullsPolicy()) {
                 compare = (v1->constisnull) ? 1 : -1;
             } else {
                 compare = (v1->constisnull) ? -1 : 1;

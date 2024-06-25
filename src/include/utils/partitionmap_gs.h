@@ -531,4 +531,12 @@ extern void DestroyPartitionMap(PartitionMap* partMap);
 extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
     int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
 
+#ifndef FRONTEND
+typedef bool (*nullsMinimalPolicy)();
+extern inline bool CheckPluginNullsPolicy()
+{
+    return DB_IS_CMPT(B_FORMAT) && (u_sess->hook_cxt.nullsMinimalPolicyHook != NULL ?
+           ((nullsMinimalPolicy)(u_sess->hook_cxt.nullsMinimalPolicyHook))() : false);
+}
+#endif
 #endif /* PARTITIONMAP_GS_H_ */

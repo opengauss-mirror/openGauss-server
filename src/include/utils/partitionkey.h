@@ -100,9 +100,9 @@ extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
                     ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),                                      \
                                     errmsg("null value can not be compared with null value.")));                 \
                 } else if (kv->constisnull) {                                                                    \
-                    compare = DB_IS_CMPT(B_FORMAT) ? -1 : 1;                                                    \
+                    compare = CheckPluginNullsPolicy() ? -1 : 1;                                                 \
                 } else {                                                                                         \
-                    compare = DB_IS_CMPT(B_FORMAT) ? 1 : -1;                                                    \
+                    compare = CheckPluginNullsPolicy() ? 1 : -1;                                                 \
                 }                                                                                                \
                 break;                                                                                           \
             }                                                                                                    \

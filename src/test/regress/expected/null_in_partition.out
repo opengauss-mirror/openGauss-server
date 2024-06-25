@@ -156,13 +156,13 @@ insert into base_partition_tbl values(null, 'test');
 select * from base_partition_tbl partition (num1);
  num | data1 
 -----+-------
-     | test
-(1 row)
+(0 rows)
 
 select * from base_partition_tbl partition (num4);
  num | data1 
 -----+-------
-(0 rows)
+     | test
+(1 row)
 
 create table base_partition_tbl_sub_partition
 (
@@ -193,41 +193,39 @@ insert into base_partition_tbl_sub_partition values(null, 'test');
 select * from base_partition_tbl_sub_partition subpartition (num1_1);
  num | data1 
 -----+-------
-     | test
-(1 row)
+(0 rows)
 
 select * from base_partition_tbl_sub_partition subpartition (num5_2);
  num | data1 
 -----+-------
-(0 rows)
+     | test
+(1 row)
 
 create table t_range (c1 int, c2 int) partition by range(c1) (partition p1 values less than (10), partition p2 values less than(maxvalue));
 insert into t_range values(null),(5),(100);
 create index t_range_c1_idx on t_range (c1 nulls last) local;
-explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Sort
-   Sort Key: c1 NULLS FIRST
-   ->  Partition Iterator
-         Iterations: 2
-         ->  Partitioned Index Scan using t_range_c1_idx on t_range
-               Selected Partitions:  1..2
-(6 rows)
-
-explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO INDEX
+explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
 WARNING:  unused hint: IndexScan(t_range)
                  QUERY PLAN                  
 ---------------------------------------------
  Sort
-   Sort Key: c1
+   Sort Key: c1 NULLS FIRST
    ->  Partition Iterator
          Iterations: 2
          ->  Partitioned Seq Scan on t_range
                Selected Partitions:  1..2
 (6 rows)
 
-select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
+explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- INDEX
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   ->  Partitioned Index Scan using t_range_c1_idx on t_range
+         Selected Partitions:  1..2
+(4 rows)
+
+select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
  c1  | c2 
 -----+----
      |   
@@ -235,7 +233,7 @@ select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
  100 |   
 (3 rows)
 
-select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO INDEX
+select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- INDEX
  c1  | c2 
 -----+----
    5 |   
@@ -245,7 +243,7 @@ select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO IND
 
 drop index t_range_c1_idx;
 create index on t_range (c1  nulls first) local;
-explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
+explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
                              QUERY PLAN                             
 --------------------------------------------------------------------
  Sort
@@ -268,7 +266,7 @@ WARNING:  unused hint: IndexScan(t_range)
                Selected Partitions:  1..2
 (6 rows)
 
-select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
+select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
  c1  | c2 
 -----+----
      |   
