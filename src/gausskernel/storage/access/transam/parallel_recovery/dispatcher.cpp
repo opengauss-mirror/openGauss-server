@@ -2552,6 +2552,11 @@ static void HandleStartupProcInterruptsForParallelRedo(void)
      * Check if we were requested to exit without finishing recovery.
      */
     if (t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status) {
+        if (t_thrd.xlog_cxt.StandbyModeRequested && SS_DISASTER_MAIN_STANDBY_NODE) {
+            ereport(LOG, (errmsg("dorado standby cluster switchover shutdown startup at parallel redo\n")));
+            DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+            DisownLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->dataRecoveryLatch);
+        }
         proc_exit(1);
     }
 
