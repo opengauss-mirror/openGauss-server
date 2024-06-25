@@ -1,50 +1,3 @@
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_NAMESPACE, 4991;
-
-/* Create table gs_model_warehouse */
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 3991, 3994, 3995, 3996;
-
-CREATE TABLE IF NOT EXISTS pg_catalog.gs_model_warehouse
-(
-    modelname name NOCOMPRESS NOT NULL,
-    modelowner Oid NOCOMPRESS NOT NULL,
-    createtime timestamp with time zone NOCOMPRESS NOT NULL,
-    processedtuples int4 NOCOMPRESS NOT NULL,
-    discardedtuples int4 NOCOMPRESS NOT NULL,
-    pre_process_time float4 NOCOMPRESS NOT NULL,
-    exec_time float4 NOCOMPRESS NOT NULL,
-    iterations int4 NOCOMPRESS NOT NULL,
-    outputtype Oid NOCOMPRESS NOT NULL,
-    modeltype text,
-    query text,
-    modeldata bytea,
-    weight float4[1],
-    hyperparametersnames text[1],
-    hyperparametersvalues text[1],
-    hyperparametersoids Oid[1],
-    coefnames text[1],
-    coefvalues text[1],
-    coefoids Oid[1],
-    trainingscoresname text[1],
-    trainingscoresvalue float4[1],
-    modeldescribe text[1]
-)WITH OIDS TABLESPACE pg_default;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 3992;
-CREATE UNIQUE INDEX gs_model_oid_index ON pg_catalog.gs_model_warehouse USING BTREE(oid OID_OPS);
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 3993;
-CREATE UNIQUE INDEX gs_model_name_index ON pg_catalog.gs_model_warehouse USING BTREE(modelname name_ops);
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-GRANT SELECT ON TABLE pg_catalog.gs_model_warehouse TO PUBLIC;
-
- 
-DROP SCHEMA IF EXISTS db4ai cascade;
-CREATE SCHEMA db4ai;
-COMMENT ON schema db4ai IS 'db4ai schema';
-GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
-CREATE TYPE db4ai.snapshot_name AS ("schema" NAME, "name" NAME);
-
 DO $$
 DECLARE
 query_str text;
@@ -73,48 +26,6 @@ BEGIN
     end if;
 END$$;
 
-CREATE TABLE IF NOT EXISTS db4ai.snapshot
-(
-    id BIGINT UNIQUE,                           -- snapshot id (surrogate key)
-    parent_id BIGINT,                           -- parent snapshot id (references snapshot.id)
-    matrix_id BIGINT,                           -- matrix id from CSS snapshots, else NULL
-                                                -- (references snapshot.id)
-    root_id BIGINT,                             -- id of the initial snapshot, constructed via
-                                                -- db4ai.create_snapshot() from operational data
-                                                -- (references snapshot.id)
-    schema NAME NOT NULL,                       -- schema where the snapshot view is exported
-    name NAME NOT NULL,                         -- name of the snapshot, including version postfix
-    owner NAME NOT NULL,                        -- name of the user who created this snapshot
-    commands TEXT[] NOT NULL,                   -- complete list of SQL statements documenting how
-                                                -- to generate this snapshot from its ancestor
-    comment TEXT,                               -- description of the snapshot
-    published BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE, iff the snapshot is currently published
-    archived BOOLEAN NOT NULL DEFAULT FALSE,    -- TRUE, iff the snapshot is currently archived
-    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,-- timestamp of snapshot creation date
-    row_count BIGINT NOT NULL,                  -- number of rows in this snapshot
-    PRIMARY KEY (schema, name)
-) /* DISTRIBUTE BY REPLICATION */;
-COMMENT ON TABLE db4ai.snapshot IS                'system catalog of meta-data on DB4AI snapshots';
- 
-COMMENT ON COLUMN db4ai.snapshot.id IS            'snapshot id (surrogate key)';
-COMMENT ON COLUMN db4ai.snapshot.parent_id IS     'parent snapshot id (references snapshot.id)';
-COMMENT ON COLUMN db4ai.snapshot.matrix_id IS    E'matrix id from CSS snapshots, else NULL\n'
-                                                  '(references snapshot.id)';
-COMMENT ON COLUMN db4ai.snapshot.root_id IS      E'id of the initial snapshot, constructed via\n'
-                                                  'db4ai.create_snapshot() from operational data\n'
-                                                  '(references snapshot.id)';
-COMMENT ON COLUMN db4ai.snapshot.schema IS        'schema where the snapshot view is exported';
-COMMENT ON COLUMN db4ai.snapshot.name IS          'name of the snapshot, including version postfix';
-COMMENT ON COLUMN db4ai.snapshot.owner IS         'name of the user who created this snapshot';
-COMMENT ON COLUMN db4ai.snapshot.commands IS     E'complete list of SQL statements documenting how\n'
-                                                  'to generate this snapshot from its ancestor';
-COMMENT ON COLUMN db4ai.snapshot.comment IS       'description of the snapshot';
-COMMENT ON COLUMN db4ai.snapshot.published IS     'TRUE, iff the snapshot is currently published';
-COMMENT ON COLUMN db4ai.snapshot.archived IS      'TRUE, iff the snapshot is currently archived';
-COMMENT ON COLUMN db4ai.snapshot.created IS       'timestamp of snapshot creation date';
-REVOKE ALL PRIVILEGES ON db4ai.snapshot FROM PUBLIC;
-GRANT SELECT ON db4ai.snapshot TO PUBLIC;
- 
 CREATE OR REPLACE FUNCTION db4ai.create_snapshot_internal(
     IN s_id BIGINT,       -- snapshot id
     IN i_schema NAME,     -- snapshot namespace
@@ -130,16 +41,16 @@ DECLARE
     dist_cmd TEXT;        -- DISTRIBUTE BY translation for backing table
     row_count BIGINT;     -- number of rows in this snapshot
 BEGIN
- 
+
     BEGIN
         RAISE EXCEPTION 'SECURITY_STACK_CHECK';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
- 
+
         IF CURRENT_SCHEMA = 'db4ai' THEN
             e_stack_act := pg_catalog.replace(e_stack_act, 'ion cre', 'ion db4ai.cre');
         END IF;
-        
+
         IF e_stack_act NOT LIKE E'referenced column: create_snapshot_internal\n'
             'SQL statement "SELECT db4ai.create_snapshot_internal(s_id, i_schema, i_name, i_commands, i_comment, CURRENT_USER)"\n'
             'PL/pgSQL function db4ai.create_snapshot(name,name,text[],name,text) line 279 at PERFORM%'
@@ -148,23 +59,23 @@ BEGIN
             USING HINT = 'call public interface db4ai.create_snapshot instead';
         END IF;
     END;
- 
+
     IF pg_catalog.length(i_commands[3]) > 0 THEN
         <<translate_dist_by_hash>>
         DECLARE
             pattern TEXT;             -- current user column name
             mapping NAME[];           -- mapping user column names to internal backing columns
- 
+
             quoted BOOLEAN := FALSE;  -- inside quoted identifier
             cur_ch VARCHAR;           -- current character in tokenizer
             idx INTEGER := 0;         -- loop counter, cannot use FOR .. iterator
             tokens TEXT;              -- user's column name list in DISTRIBUTE BY HASH()
         BEGIN
- 
+
             -- extract mapping from projection list for view definition
             mapping := array(SELECT pg_catalog.unnest(ARRAY[ m[1], coalesce(m[2], replace(m[3],'""','"'))]) FROM pg_catalog.regexp_matches(
                 i_commands[5], 't[0-9]+\.(f[0-9]+) AS (?:([^\s",]+)|"((?:[^"]*"")*[^"]*)")', 'g') m);
- 
+
             -- extract field list from DISTRIBUTE BY clause
             tokens :=(pg_catalog.regexp_matches(i_commands[3], '^\s*DISTRIBUTE\s+BY\s+HASH\s*\((.*)\)\s*$', 'i'))[1];
             IF tokens IS NULL OR tokens SIMILAR TO '\s*' THEN
@@ -178,19 +89,19 @@ BEGIN
                 EXIT translate_dist_by_hash;
             END IF;
             tokens := tokens || ' ';
- 
+
             -- prepare the translated command
             dist_cmd = ' DISTRIBUTE BY HASH(';
- 
+
 -- BEGIN tokenizer code for testing
- 
+
             pattern := '';
- 
+
             LOOP
                 idx := idx + 1;
                 cur_ch := pg_catalog.substr(tokens, idx, 1);
                 EXIT WHEN cur_ch IS NULL OR cur_ch = '';
- 
+
                 CASE cur_ch
                 WHEN '"' THEN
                     IF quoted AND pg_catalog.substr(tokens, idx + 1, 1) = '"' THEN
@@ -222,9 +133,9 @@ BEGIN
                     pattern := pattern || CASE WHEN quoted THEN cur_ch::TEXT ELSE pg_catalog.lower(cur_ch)::TEXT END;
                     CONTINUE;
                 END CASE;
- 
+
 -- END tokenizer code for testing
- 
+
                 -- attempt to map the pattern
                 FOR idx IN 2 .. pg_catalog.array_length(mapping, 1) BY 2 LOOP
                     IF pattern = mapping[idx] THEN
@@ -234,23 +145,23 @@ BEGIN
                         EXIT;
                     END IF;
                 END LOOP;
- 
+
                 -- check if pattern was mapped
                 IF pattern IS NOT NULL THEN
                     RAISE EXCEPTION 'unable to map field "%" to backing table', pattern;
                 END IF;
- 
+
             END LOOP;
- 
+
             IF quoted THEN
                 RAISE EXCEPTION 'unterminated quoted identifier ''%'' at or near: ''%''',
                     pg_catalog.substr(pattern, 1, pg_catalog.char_length(pattern)-1), i_commands[3];
             END IF;
- 
+
             dist_cmd := pg_catalog.rtrim(dist_cmd, ',') || ')';
          END;
     END IF;
- 
+
     dist_cmd := ''; -- we silently drop DISTRIBUTE_BY
     EXECUTE 'CREATE TABLE db4ai.t' || s_id::TEXT || ' WITH (orientation = column, compression = low)' || dist_cmd
         || ' AS SELECT ' || i_commands[4] || ' FROM _db4ai_tmp_x' || s_id::TEXT;
@@ -261,15 +172,15 @@ BEGIN
         || ' backed by db4ai.t' || s_id::TEXT || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
     EXECUTE 'GRANT SELECT ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '" WITH GRANT OPTION';
     EXECUTE 'SELECT COUNT(*) FROM db4ai.v' || s_id::TEXT INTO STRICT row_count;
- 
+
     -- store only original commands supplied by user
     i_commands := ARRAY[i_commands[1], i_commands[2], i_commands[3]];
     INSERT INTO db4ai.snapshot (id, root_id, schema, name, owner, commands, comment, published, row_count)
         VALUES (s_id, s_id, i_schema, i_name, i_owner, i_commands, i_comment, TRUE, row_count);
- 
+
 END;
 $$;
- 
+
 CREATE OR REPLACE FUNCTION db4ai.create_snapshot(
     IN i_schema NAME,               -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_name NAME,                 -- snapshot name
@@ -295,38 +206,38 @@ DECLARE
     dist_cmd TEXT;                  -- DISTRIBUTE BY clause for command (may be NULL)
     res db4ai.snapshot_name;        -- composite result
 BEGIN
- 
+
     -- obtain active message level
     BEGIN
         EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
- 
+
     -- obtain database state of separation of rights
     BEGIN
         separation_of_powers := pg_catalog.upper(pg_catalog.current_setting('enableSeparationOfDuty'));
     EXCEPTION WHEN OTHERS THEN
         separation_of_powers := 'OFF';
     END;
- 
+
     IF separation_of_powers NOT IN ('ON', 'OFF') THEN
         RAISE EXCEPTION 'Uncertain state of separation of rights.';
     ELSIF separation_of_powers = 'ON' THEN
         RAISE EXCEPTION 'Snapshot is not supported in separation of rights';
     END IF;
- 
+
     -- obtain active snapshot mode
     BEGIN
         s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
- 
+
     IF s_mode NOT IN ('CSS', 'MSS') THEN
         RAISE EXCEPTION 'invalid snapshot mode: ''%''', s_mode;
     END IF;
- 
+
     -- obtain relevant configuration parameters
     BEGIN
         s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
@@ -338,38 +249,37 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
- 
+
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
- 
+
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
     ELSIF pg_catalog.strpos(i_name, s_vers_del) > 0 THEN
         RAISE EXCEPTION 'i_name must not contain ''%'' characters', s_vers_del;
     END IF;
- 
+
     current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
         none_represent := NULL;
     END IF;
- 
- 
+
     -- PG BUG: array_ndims('{}') or array_dims(ARRAY[]::INT[]) returns NULL
     IF i_commands IS NULL OR pg_catalog.array_length(i_commands, 1) = none_represent OR pg_catalog.array_length(i_commands, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_commands array malformed'
         USING HINT = 'pass SQL commands as TEXT[] literal, e.g. ''{SELECT *, FROM public.t, DISTRIBUTE BY HASH(id)''';
     END IF;
- 
+
     FOREACH command_str IN ARRAY i_commands LOOP
         IF command_str IS NULL THEN
             RAISE EXCEPTION 'i_commands array contains NULL values';
         END IF;
     END LOOP;
- 
+
     FOREACH command_str IN ARRAY i_commands LOOP
         command_str := pg_catalog.btrim(command_str);
         pattern := pg_catalog.upper(pg_catalog.regexp_replace(pg_catalog.left(command_str, 30), '\s+', ' ', 'g'));
@@ -385,16 +295,16 @@ BEGIN
                     start_pos INTEGER := 1;
                     stmt TEXT := command_str;
                 BEGIN
- 
+
 -- BEGIN splitter code for testing
- 
+
                     pattern := '';
- 
+
                     LOOP
                         idx := idx + 1;
                         cur_ch := pg_catalog.substr(stmt, idx, 1);
                         EXIT WHEN cur_ch IS NULL OR cur_ch = '';
- 
+
                         CASE cur_ch
                         WHEN '"' THEN
                             IF quoted AND pg_catalog.substr(stmt, idx + 1, 1) = '"' THEN
@@ -428,9 +338,9 @@ BEGIN
                             pattern := pattern || pg_catalog.upper(cur_ch);
                             CONTINUE;
                         END CASE;
- 
+
 -- END splitter code for testing
- 
+
                         IF pattern = 'FROM' THEN
                             from_cmd := pg_catalog.substr(stmt, start_pos + 1);
                             proj_cmd := pg_catalog.left(stmt, start_pos - 1);
@@ -472,7 +382,7 @@ BEGIN
             RAISE EXCEPTION 'unrecognized command in i_commands: ''%''', command_str;
         END IF;
     END LOOP;
- 
+
     IF proj_cmd IS NULL THEN
         -- minimum required input
          IF from_cmd IS NULL THEN
@@ -485,11 +395,11 @@ BEGIN
             RAISE EXCEPTION 'FROM clause is missing in i_commands';
         END IF;
     END IF;
- 
+
     IF dist_cmd IS NULL THEN
         dist_cmd := '';
     END IF;
- 
+
     IF i_vers IS NULL OR i_vers = '' THEN
         i_vers := s_vers_del || '1' || s_vers_sep || '0' || s_vers_sep || '0';
     ELSE
@@ -505,24 +415,24 @@ BEGIN
                 || s_vers_del || ']label with optional, leading ''' || s_vers_del || '''';
         END IF;
     END IF;
- 
+
     IF pg_catalog.char_length(i_name || i_vers) > 63 THEN
         RAISE EXCEPTION 'snapshot name too long: ''%''', i_name || i_vers;
     ELSE
         i_name := i_name || i_vers;
     END IF;
- 
+
     -- the final name of the snapshot
     qual_name := pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name);
- 
+
     -- check for duplicate snapshot
     IF 0 < (SELECT COUNT(*) FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name) THEN
         RAISE EXCEPTION 'snapshot % already exists' , qual_name;
     END IF;
- 
+
     --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
     SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
- 
+
     -- execute using current user privileges
     DECLARE
         e_message TEXT;     -- exception message
@@ -531,7 +441,7 @@ BEGIN
             || CASE WHEN from_cmd IS NULL THEN '' ELSE ' ' || from_cmd END;
     EXCEPTION WHEN undefined_table THEN
         GET STACKED DIAGNOSTICS e_message = MESSAGE_TEXT;
- 
+
         -- during function invocation, search path is redirected to {pg_temp, pg_catalog, function_schema} and becomes immutable
         RAISE INFO 'could not resolve relation % using system-defined "search_path" setting during function invocation: ''%''',
             pg_catalog.substr(e_message, 10, 1 + pg_catalog.strpos(pg_catalog.substr(e_message,11), '" does not exist')),
@@ -539,7 +449,7 @@ BEGIN
             USING HINT = 'snapshots require schema-qualified table references, e.g. schema_name.table_name';
         RAISE;
     END;
- 
+
     -- extract normalized projection list
     i_commands := ARRAY[proj_cmd, from_cmd, dist_cmd, '', ''];
     SELECT pg_catalog.string_agg(ident, ', '),
@@ -554,29 +464,28 @@ BEGIN
     IF proj_cmd IS NULL THEN
         RAISE EXCEPTION 'create snapshot internal error1: %', s_id;
     END IF;
- 
+
     -- finalize the snapshot using elevated privileges
     PERFORM db4ai.create_snapshot_internal(s_id, i_schema, i_name, i_commands, i_comment, CURRENT_USER);
- 
+
     -- drop temporary view used for privilege transfer
     EXECUTE 'DROP TABLE _db4ai_tmp_x' || s_id::TEXT;
- 
+
     -- create custom view, owned by current user
     EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || proj_cmd || ' FROM db4ai.v' || s_id::TEXT;
     EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
         || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
     EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER::TEXT || '"';
- 
+
     -- return final snapshot name
     res := ROW(i_schema, i_name);
     -- PG BUG: PG 9.2 cannot return composite type, only a reference to a variable of composite type
     return res;
- 
+
 END;
 $$;
 COMMENT ON FUNCTION db4ai.create_snapshot() IS 'Create a new snapshot';
- 
- 
+
 CREATE OR REPLACE FUNCTION db4ai.prepare_snapshot_internal(
     IN s_id BIGINT,                     -- snapshot id
     IN p_id BIGINT,                     -- parent id
@@ -598,25 +507,25 @@ DECLARE
     e_stack_act TEXT;     -- current stack for validation
     row_count BIGINT;     -- number of rows in this snapshot
 BEGIN
- 
+
     BEGIN
         RAISE EXCEPTION 'SECURITY_STACK_CHECK';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
- 
+
         IF CURRENT_SCHEMA = 'db4ai' THEN
             e_stack_act := pg_catalog.replace(e_stack_act, ' prepare_snapshot(', ' db4ai.prepare_snapshot(');
             e_stack_act := pg_catalog.replace(e_stack_act, ' prepare_snapshot_internal(', ' db4ai.prepare_snapshot_internal(');
             e_stack_act := pg_catalog.replace(e_stack_act, ' sample_snapshot(', ' db4ai.sample_snapshot(');
         END IF;
- 
+
         IF e_stack_act LIKE E'referenced column: i_idx\n'
             'SQL statement "SELECT (db4ai.prepare_snapshot_internal(s_id, p_id, m_id, r_id, i_schema, s_name, i_commands, i_comment,\n'
             '                CURRENT_USER, idx, exec_cmds)).i_idx"\n%'
         THEN
             e_stack_act := pg_catalog.substr(e_stack_act, 200);
         END IF;
- 
+
         IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (184|550|616|723) at assignment%'
           AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 224 at IF%'
         THEN
@@ -625,7 +534,7 @@ BEGIN
             USING HINT = 'call public interface db4ai.prepare_snapshot instead';
         END IF;
     END;
- 
+
     --generate rules from the mapping
     IF i_mapping IS NOT NULL THEN
         DECLARE
@@ -639,7 +548,7 @@ BEGIN
             dist_key NAME[] := pg_catalog.array_agg(coalesce(m[1], pg_catalog.replace(m[2], '""', '"'))) FROM pg_catalog.regexp_matches(
                 pg_catalog.getdistributekey('db4ai.t' || (coalesce(m_id, p_id))::TEXT),'([^\s",]+)|"((?:[^"]*"")*[^"]*)"', 'g') m;
         BEGIN
- 
+
             FOR idx IN 3 .. pg_catalog.array_length(i_mapping, 1) BY 3 LOOP
                 IF idx = 3 THEN
                     ins_grnt := ins_grnt || pg_catalog.quote_ident(i_mapping[idx]);
@@ -651,7 +560,7 @@ BEGIN
                     ins_rule := ins_rule || ', ' || coalesce(i_mapping[idx-2], i_mapping[idx-1]);
                     ins_vals := ins_vals || ', ' || 'new.' || pg_catalog.quote_ident(i_mapping[idx]);
                 END IF;
- 
+
                 IF i_mapping[idx-2] IS NULL THEN -- handle shared columns without private (only CSS)
                     sel_view := sel_view || i_mapping[idx-1];
                 ELSE
@@ -672,7 +581,7 @@ BEGIN
                 END IF;
                 sel_view := sel_view || ' AS ' || pg_catalog.quote_ident(i_mapping[idx]);
             END LOOP;
- 
+
             i_exec_cmds := i_exec_cmds || ARRAY [
                 [ 'O', sel_view || ', xc_node_id, ctid FROM db4ai.t' || coalesce(m_id, s_id)::TEXT
                 || CASE WHEN m_id IS NULL THEN '' ELSE ' WHERE _' || s_id::TEXT END ],
@@ -683,17 +592,17 @@ BEGIN
                 [ 'O', 'CREATE OR REPLACE RULE _DELETE AS ON DELETE TO db4ai.v' || s_id::TEXT || ' DO INSTEAD '
                 || CASE WHEN m_id IS NULL THEN 'DELETE FROM db4ai.t' || s_id::TEXT ELSE 'UPDATE db4ai.t' || m_id::TEXT || ' SET _' || s_id::TEXT || '=FALSE' END
                 || ' WHERE t' || coalesce(m_id, s_id)::TEXT || '.xc_node_id=old.xc_node_id AND t' || coalesce(m_id, s_id)::TEXT || '.ctid=old.ctid' ] ];
- 
+
             IF upd_rule IS NOT NULL THEN
                 i_exec_cmds := i_exec_cmds || ARRAY [
                     [ 'O', upd_grnt || ') ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '"'],
                     [ 'O', upd_rule || ' WHERE t' || coalesce(m_id, s_id)::TEXT || '.xc_node_id=old.xc_node_id AND t' || coalesce(m_id, s_id)::TEXT || '.ctid=old.ctid' ]];
             END IF;
- 
+
             RETURN;
        END;
     END IF;
- 
+
     -- Execute the queries
     LOOP EXIT WHEN i_idx = 1 + pg_catalog.array_length(i_exec_cmds, 1);
         CASE i_exec_cmds[i_idx][1]
@@ -707,7 +616,7 @@ BEGIN
             RAISE EXCEPTION 'prepare snapshot internal error2: % %', idx, i_exec_cmds[idx];
         END CASE;
     END LOOP;
- 
+
     EXECUTE 'DROP RULE IF EXISTS _INSERT ON db4ai.v' || s_id::TEXT;
     EXECUTE 'DROP RULE IF EXISTS _UPDATE ON db4ai.v' || s_id::TEXT;
     EXECUTE 'DROP RULE IF EXISTS _DELETE ON db4ai.v' || s_id::TEXT;
@@ -720,10 +629,10 @@ BEGIN
  
     INSERT INTO db4ai.snapshot (id, parent_id, matrix_id, root_id, schema, name, owner, commands, comment, row_count)
         VALUES (s_id, p_id, m_id, r_id, i_schema, i_name, '"' || i_owner || '"', i_commands, i_comment, row_count);
- 
+
 END;
 $$;
- 
+
 CREATE OR REPLACE FUNCTION db4ai.prepare_snapshot(
     IN i_schema NAME,              -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_parent NAME,              -- parent snapshot name
@@ -774,25 +683,25 @@ DECLARE
     newmap BOOLEAN := FALSE;                                    -- mapping has changed
     res db4ai.snapshot_name;                                    -- composite result
 BEGIN
- 
+
     -- obtain active message level
     BEGIN
         EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
- 
+
     -- obtain active snapshot mode
     BEGIN
         s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
- 
+
     IF s_mode NOT IN ('CSS', 'MSS') THEN
         RAISE EXCEPTION 'invalid snapshot mode: ''%''', s_mode;
     END IF;
- 
+
     -- obtain relevant configuration parameters
     BEGIN
         s_vers_del := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_version_delimiter'));
@@ -804,19 +713,19 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
- 
+
     current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
         none_represent := NULL;
     END IF;
- 
+
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
- 
+
     IF i_parent IS NULL OR i_parent = '' THEN
         RAISE EXCEPTION 'i_parent cannot be NULL or empty';
     ELSE
@@ -828,22 +737,22 @@ BEGIN
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
     END IF;
- 
+
     -- check if parent exists
     BEGIN
         SELECT id, matrix_id, root_id FROM db4ai.snapshot WHERE schema = i_schema AND name = i_parent INTO STRICT p_id, m_id, r_id;
     EXCEPTION WHEN NO_DATA_FOUND THEN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
- 
+
     --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
     SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
- 
+
     -- extract highest used c_id from existing backing table or parent ()
     -- cannot use information_schema here, because the current user has no read permission on the backing table
     SELECT 1 + pg_catalog.max(pg_catalog.ltrim(attname, 'f')::BIGINT) FROM pg_catalog.pg_attribute INTO STRICT c_id
         WHERE attrelid = ('db4ai.t' || coalesce(m_id, p_id)::TEXT)::regclass AND attnum > 0 AND NOT attisdropped AND attname like 'f%';
- 
+
     IF c_id IS NULL THEN
         RAISE EXCEPTION 'prepare snapshot internal error3: %', coalesce(m_id, p_id);
     END IF;
@@ -853,7 +762,7 @@ BEGIN
         USING HINT = 'pass SQL DML and DDL operations as TEXT[] literal, e.g. ''{ALTER, ADD a int, DROP c, DELETE, '
                      'WHERE b=5, INSERT, FROM t, UPDATE, FROM t, SET x=y, SET z=f(z), WHERE t.u=v}''';
     END IF;
- 
+
     -- extract normalized projection list
     p_sv_proj := pg_catalog.substring(pg_catalog.pg_get_viewdef('db4ai.v' || p_id::TEXT), '^SELECT (.*), t[0-9]+\.xc_node_id, t[0-9]+\.ctid FROM.*$');
     mapping := array(SELECT pg_catalog.unnest(ARRAY[ m[1], m[2], coalesce(m[3], pg_catalog.replace(m[4],'""','"'))])
@@ -863,36 +772,36 @@ BEGIN
         -- all MSS columns are private (privte: not null, shared: nullable, user_cname: not null)
         ELSE '(?:COALESCE\()?t[0-9]+\.(f[0-9]+)(?:, t[0-9]+\.(f[0-9]+)\))? AS (?:([^\s",]+)|"((?:[^"]*"")*[^"]*)")'
         END, 'g') m);
- 
+
     -- In principle two MSS naming conventions are possible:
     -- (a) plain column names for MSS, allowing direct operations, but only with CompactSQL, not with TrueSQL. Conversion to CSS
     --     then needs to rename user columns (if they are in f[0-9]+) or simply add columns max fXX + 1
     -- (b) translated columns names for MSS and CSS. Simple MSS->CSS conversion. No direct operations, always using rewrite.
     --     This is the more general approach!
- 
+
     -- The need for rewriting using rules:
     --    UPDATE SET AS T SET T.x=y, "T.x"=y, "_$%_\\'"=NULL, T.z=DEFAULT, (a, b, T.c) = (SELECT 1 a, 2 b, 3 c)
     --    FROM H AS I, J as K
     --    WHERE _x_=5 AND _T.z_=5 AND v='T.z' AND (SELECT x, T.z FROM A as T)
     -- unqualified, ambiguous, quoted, string literals, ... in SET clause maybe still manageable but in WHERE
     -- no guarantee for correctness possible ->  need to use system's SQL parser with rewrite rules! */
- 
+
     -- create / upgrade + prepare target snapshots for SQL DML/DDL operations
     IF s_mode = 'MSS' THEN
         DECLARE
             s_bt_proj TEXT;     -- snapshot backing table projection list
             s_bt_dist TEXT;     -- DISTRIBUTE BY clause for creating backing table
         BEGIN
- 
+
             FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
                 s_bt_proj := s_bt_proj || pg_catalog.quote_ident(mapping[idx]) || ' AS ' || mapping[idx-2] || ',';
             END LOOP;
- 
+
             s_bt_dist := pg_catalog.getdistributekey('db4ai.t' || coalesce(m_id, p_id)::TEXT);
             s_bt_dist := CASE WHEN s_bt_dist IS NULL
                         THEN ' DISTRIBUTE BY REPLICATION'
                         ELSE ' DISTRIBUTE BY HASH(' || s_bt_dist || ')' END; s_bt_dist := ''; -- we silently drop DISTRIBUTE_BY
- 
+
             exec_cmds := ARRAY [
                 [ 'O', 'CREATE TABLE db4ai.t' || s_id::TEXT || ' WITH (orientation = column, compression = low)'
                 -- extract and propagate DISTRIBUTE BY from parent
@@ -913,17 +822,17 @@ BEGIN
             [ 'O', 'ALTER TABLE db4ai.t' || m_id::TEXT || ' ADD _' || s_id::TEXT || ' BOOLEAN NOT NULL DEFAULT FALSE' ],
             [ 'O', 'UPDATE db4ai.t' || m_id::TEXT || ' SET _' || s_id::TEXT || ' = TRUE WHERE _' || p_id::TEXT ]];
     END IF;
- 
+
     -- generate and append grant, create view and rewrite rules for new snapshot
     exec_cmds := (db4ai.prepare_snapshot_internal(s_id, p_id, m_id, r_id, i_schema, s_name, i_commands, i_comment,
         CURRENT_USER, NULL, exec_cmds, mapping)).i_exec_cmds;
- 
+
     FOREACH command_str IN ARRAY i_commands LOOP
         IF command_str IS NULL THEN
             RAISE EXCEPTION 'i_commands array contains NULL values';
         END IF;
     END LOOP;
- 
+
     -- apply SQL DML/DDL according to snapshot mode
     FOREACH command_str IN ARRAY (i_commands || ARRAY[NULL] ) LOOP
         command_str := pg_catalog.btrim(command_str);
@@ -964,16 +873,16 @@ BEGIN
                 start_pos INTEGER := 1;
                 stmt TEXT := next_clauses[SET_CLAUSE];
             BEGIN
- 
+
 -- BEGIN splitter code for testing
- 
+
                 pattern := '';
- 
+
                 LOOP
                     idx := idx + 1;
                     cur_ch := pg_catalog.substr(stmt, idx, 1);
                     EXIT WHEN cur_ch IS NULL OR cur_ch = '';
- 
+
                     CASE cur_ch
                     WHEN '"' THEN
                         IF quoted AND pg_catalog.substr(stmt, idx + 1, 1) = '"' THEN
@@ -1004,9 +913,9 @@ BEGIN
                         pattern := pattern || pg_catalog.upper(cur_ch);
                         CONTINUE;
                     END CASE;
- 
+
 -- END splitter code for testing
- 
+
                     IF pattern IN ('FROM', 'WHERE') THEN
                         next_clauses[FROM_CLAUSE] := pg_catalog.substr(next_clauses[SET_CLAUSE], start_pos + 1);
                         next_clauses[SET_CLAUSE] := pg_catalog.left(next_clauses[SET_CLAUSE], start_pos - 1);
@@ -1110,7 +1019,7 @@ BEGIN
             END IF;
             CONTINUE;
         END IF;
- 
+
         IF current_op IS NOT NULL THEN
             IF current_clauses IS NULL AND current_op NOT IN (DELETE_OP) THEN
                 RAISE EXCEPTION 'missing auxiliary clauses in %',
@@ -1134,16 +1043,16 @@ BEGIN
                     idx    INTEGER := 0;      -- loop counter, cannot use FOR .. iterator
                     tokens TEXT := current_clauses[ALTER_CLAUSE] || ',';
                 BEGIN
- 
+
 -- BEGIN tokenizer code for testing
- 
+
                     pattern := '';
- 
+
                     LOOP
                         idx := idx + 1;
                         cur_ch := pg_catalog.substr(tokens, idx, 1);
                         EXIT WHEN cur_ch IS NULL OR cur_ch = '';
- 
+
                         CASE cur_ch
                         WHEN '"' THEN
                             IF quoted AND pg_catalog.substr(tokens, idx + 1, 1) = '"' THEN
@@ -1175,9 +1084,9 @@ BEGIN
                             pattern := pattern || CASE WHEN quoted THEN cur_ch::TEXT ELSE pg_catalog.lower(cur_ch) END;
                             CONTINUE;
                         END CASE;
- 
+
 -- END tokenizer code for testing
- 
+
                         IF alt_op = 'DROP' AND pg_catalog.upper(dropif) = 'IF' THEN
                             IF pattern = ',' THEN
                                 pattern := dropif;  -- interpret 'if' as column name (not a keyword)
@@ -1187,7 +1096,7 @@ BEGIN
                                                 alt_op, dropif, current_clauses[ALTER_CLAUSE];
                             END IF;
                         END IF;
- 
+
                         IF expect THEN
                             IF pg_catalog.upper(pattern) IN ('ADD', 'DROP') THEN
                                 IF alt_op IS NULL THEN
@@ -1217,7 +1126,7 @@ BEGIN
                         ELSIF alt_op = 'DROP' AND pg_catalog.upper(pattern) = 'EXISTS' AND pg_catalog.upper(dropif) = 'IF' THEN
                             dropif := pattern; -- 'EXISTS' is not a keyword
                         ELSIF alt_op IN ('ADD', 'DROP') THEN
- 
+
                             -- attempt to map the pattern
                             FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
                                 IF pattern = mapping[idx] THEN
@@ -1238,7 +1147,7 @@ BEGIN
                                     END IF;
                                 END IF;
                             END LOOP;
- 
+
                             -- apply the mapping
                             IF alt_op = 'ADD' THEN
                                 -- ADD a private column (MSS and CSS)
@@ -1261,24 +1170,24 @@ BEGIN
                             -- checked before, this should never happen
                             RAISE EXCEPTION 'unexpected ALTER clause: %', alt_op;
                         END IF;
- 
+
                         pattern := '';
                     END LOOP;
- 
+
                     IF quoted THEN
                         RAISE EXCEPTION 'unterminated quoted identifier ''"%'' at or near: ''%''',
                             pg_catalog.substr(pattern, 1, pg_catalog.char_length(pattern)-1), current_clauses[ALTER_CLAUSE];
                     END IF;
- 
+
                     -- CREATE OR REPLACE: cannot drop columns from view - MUST use DROP / CREATE
                     -- clear view dependencies for backing table columns
                     exec_cmds := exec_cmds || ARRAY [ 'O', 'DROP VIEW IF EXISTS db4ai.v' || s_id::TEXT ];
- 
+
                     -- append the DDL statement for the backing table (if any)
                     IF command_str IS NOT NULL THEN
                         exec_cmds := exec_cmds || ARRAY [ 'O', command_str ];
                     END IF;
- 
+
                     IF newmap THEN
                         -- generate and append grant, create view and rewrite rules for new snapshot
                         exec_cmds := (db4ai.prepare_snapshot_internal(s_id, p_id, m_id, r_id, i_schema, s_name, i_commands, i_comment,
@@ -1290,7 +1199,7 @@ BEGIN
                 IF current_clauses[SET_CLAUSE] IS NULL THEN
                     RAISE EXCEPTION 'missing SELECT or VALUES clause in INSERT operation';
                 END IF;
- 
+
                 exec_cmds := exec_cmds || ARRAY [
                     'U', 'INSERT INTO db4ai.v' || s_id::TEXT
                     || ' ' || current_clauses[SET_CLAUSE] -- generic SQL
@@ -1303,11 +1212,11 @@ BEGIN
                     || CASE WHEN current_clauses[WHERE_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[WHERE_CLAUSE] END ];
             ELSIF current_op = UPDATE_OP THEN
                 command_str := NULL; -- stores DDL statement for adding shadow columns
- 
+
                 IF current_clauses[SET_CLAUSE] IS NULL THEN
                     RAISE EXCEPTION 'missing SET clause in UPDATE operation';
                 END IF;
- 
+
                 -- extract updated fields and check their mapping
                 FOR pattern IN
                     SELECT coalesce(m[1], pg_catalog.replace(m[2],'""','"'))
@@ -1332,26 +1241,26 @@ BEGIN
                             EXIT;
                         END IF;
                     END LOOP;
- 
+
                     -- check if pattern was mapped
                     IF pattern IS NOT NULL THEN
                         RAISE EXCEPTION 'unable to map field "%" to backing table in UPDATE operation: %',
                             pattern, current_clauses[SET_CLAUSE];
                     END IF;
                 END LOOP;
- 
+
                 -- append the DDL statement for the backing table for adding shadow columns (if any)
                 IF command_str IS NOT NULL THEN
                     exec_cmds := exec_cmds || ARRAY [ 'O', command_str ];
                 END IF;
- 
+
                 IF newmap THEN
                     -- generate and append grant, create view and rewrite rules for new snapshot
                     exec_cmds := (db4ai.prepare_snapshot_internal(s_id, p_id, m_id, r_id, i_schema, s_name, i_commands, i_comment,
                         CURRENT_USER, NULL, exec_cmds, mapping)).i_exec_cmds;
                     newmap := FALSE;
                 END IF;
- 
+
                 exec_cmds := exec_cmds || ARRAY [
                     'U', 'UPDATE db4ai.v' || s_id::TEXT || ' AS ' || current_clauses[AS_CLAUSE]
                     || ' ' || current_clauses[SET_CLAUSE]
@@ -1359,19 +1268,19 @@ BEGIN
                     || CASE WHEN current_clauses[WHERE_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[WHERE_CLAUSE] END ];
             END IF;
         END IF;
- 
+
         current_op := next_op;
         next_op := NULL;
         -- restore ALTER clause for ADD / DROP without 'ALTER' keyword, else reset to NULL
         current_clauses := next_clauses;
         next_clauses := NULL;
     END LOOP;
- 
+
     -- compute final version string
     IF i_vers IS NULL OR i_vers = '' THEN
         BEGIN
             vers_arr := pg_catalog.regexp_split_to_array(p_name_vers[2], CASE s_vers_sep WHEN '.' THEN '\.' ELSE s_vers_sep END);
- 
+
             IF pg_catalog.array_length(vers_arr, 1) <> 3 OR pg_catalog.array_length(vers_arr, 2) <> none_represent OR
                 vers_arr[1] ~ '[^0-9]' OR vers_arr[2] ~ '[^0-9]' OR vers_arr[3] ~ '[^0-9]' THEN
                 RAISE EXCEPTION 'illegal version format';
@@ -1404,16 +1313,16 @@ ELSE
                 || s_vers_del || ']label with optional, leading ''' || s_vers_del || '''';
         END IF;
     END IF;
- 
+
     IF pg_catalog.char_length(p_name_vers[1] || i_vers) > 63 THEN
         RAISE EXCEPTION 'snapshot name too long: ''%''', p_name_vers[1] || i_vers;
     ELSE
         s_name := p_name_vers[1] || i_vers;
     END IF;
- 
+
     -- the final name of the snapshot
     qual_name := pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(s_name);
- 
+
     -- check for duplicate snapshot
     IF 0 < (SELECT COUNT(0) FROM db4ai.snapshot WHERE schema = i_schema AND name = s_name) THEN
         RAISE EXCEPTION 'snapshot % already exists' , qual_name;
@@ -1423,7 +1332,7 @@ ELSE
         exec_cmds := exec_cmds || ARRAY [
             'O', 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || qual_name || '''' ];
     END IF;
- 
+
     -- Execute the queries
     RAISE NOTICE E'accumulated commands:\n%', pg_catalog.array_to_string(exec_cmds, E'\n');
     DECLARE
@@ -1448,17 +1357,17 @@ ELSE
                     RAISE;
                 END;
             END LOOP;
- 
+
             IF idx < pg_catalog.array_length(exec_cmds, 1) AND (exec_cmds[idx][1] IS NULL OR exec_cmds[idx][1] <> 'O') THEN -- this should never happen
                 RAISE EXCEPTION 'prepare snapshot internal error1: % %', idx, exec_cmds[idx];
             END IF;
- 
+
             -- execute owner statements (if any) and epilogue
             idx := (db4ai.prepare_snapshot_internal(s_id, p_id, m_id, r_id, i_schema, s_name, i_commands, i_comment,
                 CURRENT_USER, idx, exec_cmds)).i_idx;
         END LOOP;
     END;
- 
+
     FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
         s_uv_proj := s_uv_proj || pg_catalog.quote_ident(mapping[idx]) || ',';
     END LOOP;
@@ -1471,12 +1380,11 @@ ELSE
     -- return final snapshot name
     res := ROW(i_schema, s_name);
     return res;
- 
+
 END;
 $$;
 COMMENT ON FUNCTION db4ai.prepare_snapshot() IS 'Prepare snapshot from existing for data curation';
- 
- 
+
 CREATE OR REPLACE FUNCTION db4ai.sample_snapshot(
     IN i_schema NAME,                        -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_parent NAME,                        -- parent snapshot name
@@ -1509,25 +1417,25 @@ DECLARE
     none_represent INT;             -- 0 or NULL
     s_name db4ai.snapshot_name;     -- snapshot sample name
 BEGIN
- 
+
     -- obtain active message level
     BEGIN
         EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
- 
+
     -- obtain active snapshot mode
     BEGIN
         s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
- 
+
     IF s_mode NOT IN ('CSS', 'MSS') THEN
         RAISE EXCEPTION 'invalid snapshot mode: ''%''', s_mode;
     END IF;
- 
+
     -- obtain relevant configuration parameters
     BEGIN
         s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
@@ -1539,19 +1447,19 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
- 
+
     current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
         none_represent := NULL;
     END IF;
- 
+
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
- 
+
     IF i_parent IS NULL OR i_parent = '' THEN
         RAISE EXCEPTION 'i_parent cannot be NULL or empty';
     ELSE
@@ -1563,34 +1471,34 @@ BEGIN
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
     END IF;
- 
+
     -- check if parent exists
     BEGIN
         SELECT id, matrix_id, root_id FROM db4ai.snapshot WHERE schema = i_schema AND name = i_parent INTO STRICT p_id, m_id, r_id;
     EXCEPTION WHEN NO_DATA_FOUND THEN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
- 
+
     IF i_sample_infixes IS NULL OR pg_catalog.array_length(i_sample_infixes, 1) = none_represent OR pg_catalog.array_length(i_sample_infixes, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_infixes array malformed'
         USING HINT = 'pass sample infixes as NAME[] literal, e.g. ''{_train, _test}''';
     END IF;
- 
+
     IF i_sample_ratios IS NULL OR pg_catalog.array_length(i_sample_ratios, 1) = none_represent OR pg_catalog.array_length(i_sample_ratios, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_ratios array malformed'
         USING HINT = 'pass sample percentages as NUMBER[] literal, e.g. ''{.8, .2}''';
     END IF;
- 
+
     IF pg_catalog.array_length(i_sample_infixes, 1) <> pg_catalog.array_length(i_sample_ratios, 1) THEN
         RAISE EXCEPTION 'i_sample_infixes and i_sample_ratios array length mismatch';
     END IF;
- 
+
     IF i_stratify IS NOT NULL THEN
         IF pg_catalog.array_length(i_stratify, 1) = none_represent OR pg_catalog.array_length(i_stratify, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_stratify array malformed'
             USING HINT = 'pass stratification field names as NAME[] literal, e.g. ''{color, size}''';
         END IF;
- 
+
         EXECUTE 'SELECT ARRAY[COUNT(DISTINCT ' || pg_catalog.array_to_string(i_stratify, '), COUNT(DISTINCT ') || ')] FROM db4ai.v' || p_id::TEXT
             INTO STRICT stratify_count;
         IF stratify_count IS NULL THEN
@@ -1602,7 +1510,7 @@ BEGIN
             RAISE EXCEPTION 'sample snapshot internal error3';
         END IF;
     END IF;
- 
+
     IF i_sample_comments IS NOT NULL THEN
         IF pg_catalog.array_length(i_sample_comments, 1) = none_represent OR pg_catalog.array_length(i_sample_comments, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_sample_comments array malformed'
@@ -1611,12 +1519,12 @@ BEGIN
             RAISE EXCEPTION 'i_sample_infixes and i_sample_comments array length mismatch';
         END IF;
     END IF;
- 
+
     -- extract normalized projection list (private: nullable, shared: not null, user_cname: not null)
     p_sv_proj := pg_catalog.substring(pg_catalog.pg_get_viewdef('db4ai.v' || p_id::TEXT), '^SELECT (.*), t[0-9]+\.xc_node_id, t[0-9]+\.ctid FROM.*$');
     mapping := array(SELECT pg_catalog.unnest(ARRAY[ m[1], m[2], coalesce(m[3], pg_catalog.replace(m[4],'""','"'))]) FROM pg_catalog.regexp_matches(p_sv_proj,
         '(?:COALESCE\(t[0-9]+\.(f[0-9]+), )?t[0-9]+\.(f[0-9]+)(?:\))? AS (?:([^\s",]+)|"((?:[^"]*"")*[^"]*)")', 'g') m);
- 
+
     FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
         IF s_mode = 'MSS' THEN
             s_sv_proj := s_sv_proj || coalesce(mapping[idx-2], mapping[idx-1]) || ' AS ' || pg_catalog.quote_ident(mapping[idx]) || ',';
@@ -1630,21 +1538,21 @@ BEGIN
         END IF;
         s_uv_proj := s_uv_proj || pg_catalog.quote_ident(mapping[idx]) || ',';
     END LOOP;
- 
+
     s_bt_dist := pg_catalog.getdistributekey('db4ai.t' || coalesce(m_id, p_id)::TEXT);
     s_bt_dist := CASE WHEN s_bt_dist IS NULL
                 THEN ' DISTRIBUTE BY REPLICATION'
                 ELSE ' DISTRIBUTE BY HASH(' || s_bt_dist || ')' END; s_bt_dist = '';
- 
+
     FOR i IN 1 .. pg_catalog.array_length(i_sample_infixes, 1) LOOP
         IF i_sample_infixes[i] IS NULL THEN
             RAISE EXCEPTION 'i_sample_infixes array contains NULL values';
         END IF;
- 
+
         IF i_sample_ratios[i] IS NULL THEN
             RAISE EXCEPTION 'i_sample_ratios array contains NULL values';
         END IF;
- 
+
         qual_name :=  p_name_vers[1] || i_sample_infixes[i] || s_vers_del || p_name_vers[2];
         IF pg_catalog.char_length(qual_name) > 63 THEN
             RAISE EXCEPTION 'sample snapshot name too long: ''%''', qual_name;
@@ -1652,23 +1560,23 @@ BEGIN
             s_name := (i_schema, qual_name);
             qual_name := pg_catalog.quote_ident(s_name.schema) || '.' || pg_catalog.quote_ident(s_name.name);
         END IF;
- 
+
         IF i_sample_ratios[i] < 0 OR i_sample_ratios[i] > 1 THEN
             RAISE EXCEPTION 'sample ratio must be between 0 and 1';
         END IF;
- 
+
         --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
         SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
- 
+
         -- check for duplicate snapshot
         IF 0 < (SELECT COUNT(*) FROM db4ai.snapshot WHERE schema = s_name.schema AND name = s_name.name) THEN
             RAISE EXCEPTION 'snapshot % already exists' , qual_name;
         END IF;
- 
+
         -- SET seed TO 0.444;
         -- setseed(0.444);
         -- dbms_random.seed(0.888);
- 
+
         -- create / upgrade + prepare target snapshots for SQL DML/DDL operations
         IF s_mode = 'MSS' THEN
             exec_cmds := ARRAY [
@@ -1697,16 +1605,16 @@ BEGIN
                 [ 'O', 'CREATE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ' || s_sv_proj || ' xc_node_id, ctid FROM db4ai.t' || m_id::TEXT
                 || ' WHERE _' || s_id::TEXT ]];
         END IF;
- 
+
         --        || ' AS SELECT ' || proj_list || ' FROM '
         --            || '(SELECT *, count(*) OVER() _cnt, row_number() OVER('
         --                || CASE WHEN i_stratify IS NOT NULL THEN 'ORDER BY ' || array_to_string(i_stratify, ', ') END
         --            || ') _row FROM db4ai.v' || p_id
         --            || ') WHERE round(_row/100 = 0
         --|| ' TABLESAMPLE SYSTEM ( ' || i_sample_ratios[i] || ') REPEATABLE (888)';
- 
+
         --SELECT * FROM (SELECT *, count(*) over()_ cnt, row_number() OVER(ORDER BY COLOR) _row FROM t) WHERE _row % (cnt/ 10) = 0;
- 
+
         -- Execute the queries
         RAISE NOTICE E'accumulated commands:\n%', pg_catalog.array_to_string(exec_cmds, E'\n');
         IF 1 + pg_catalog.array_length(exec_cmds, 1) <> (db4ai.prepare_snapshot_internal(
@@ -1716,23 +1624,22 @@ BEGIN
                 i_sample_comments[i], CURRENT_USER, 1, exec_cmds)).i_idx THEN
             RAISE EXCEPTION 'sample snapshot internal error1';
         END IF;
- 
+
         -- create custom view, owned by current user
         EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || pg_catalog.rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id::TEXT;
         EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
             || CASE WHEN pg_catalog.length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END || '''';
         EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
- 
+
         exec_cmds := NULL;
- 
+
         RETURN NEXT s_name;
     END LOOP;
- 
+
 END;
 $$;
 COMMENT ON FUNCTION db4ai.sample_snapshot() IS 'Create samples from a snapshot';
- 
- 
+
 CREATE OR REPLACE FUNCTION db4ai.manage_snapshot_internal(
     IN i_schema NAME,   -- snapshot namespace
     IN i_name NAME,     -- snapshot name
@@ -1750,42 +1657,42 @@ DECLARE
     none_represent INT;                 -- 0 or NULL
     res db4ai.snapshot_name;            -- composite result
 BEGIN
- 
+
     BEGIN
         RAISE EXCEPTION 'SECURITY_STACK_CHECK';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
- 
+
         IF CURRENT_SCHEMA = 'db4ai' THEN
             e_stack_act := pg_catalog.replace(e_stack_act, ' archive_snapshot(', ' db4ai.archive_snapshot(');
             e_stack_act := pg_catalog.replace(e_stack_act, ' publish_snapshot(', ' db4ai.publish_snapshot(');
         END IF;
- 
+
         IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 11 at assignment%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.manage_snapshot_internal(name,name,boolean) is not allowed'
             USING HINT = 'call public interface db4ai.(publish|archive)_snapshot instead';
         END IF;
     END;
- 
+
     -- obtain active message level
     BEGIN
         EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
- 
+
     -- obtain relevant configuration parameters
     BEGIN
         s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
- 
+
     IF s_mode NOT IN ('CSS', 'MSS') THEN
         RAISE EXCEPTION 'invalid snapshot mode: ''%''', s_mode;
     END IF;
- 
+
     -- obtain relevant configuration parameters
     BEGIN
         s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
@@ -1797,14 +1704,14 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
- 
+
     current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
         none_represent := NULL;
     END IF;
- 
+
     -- check all input parameters
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
@@ -1817,163 +1724,18 @@ BEGIN
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
     END IF;
- 
+
     UPDATE db4ai.snapshot SET published = publish, archived = NOT publish WHERE schema = i_schema AND name = i_name;
     IF SQL%ROWCOUNT = 0 THEN
         RAISE EXCEPTION 'snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
     END IF;
- 
+
     res := ROW(i_schema, i_name);
     return res;
- 
+
 END;
 $$;
- 
-CREATE OR REPLACE FUNCTION db4ai.archive_snapshot(
-    IN i_schema NAME,           -- snapshot namespace, default is CURRENT_USER
-    IN i_name NAME              -- snapshot name
-)
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
-AS $$
-DECLARE
-    res db4ai.snapshot_name;    -- composite result
-BEGIN
- 
-    IF i_schema IS NULL OR i_schema = '' THEN
-        i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
-    END IF;
- 
-    -- return archived snapshot name
-    res := db4ai.manage_snapshot_internal(i_schema, i_name, FALSE);
-    return res;
- 
-END;
-$$;
-COMMENT ON FUNCTION db4ai.archive_snapshot() IS 'Archive snapshot for preventing usage in model training';
- 
-CREATE OR REPLACE FUNCTION db4ai.publish_snapshot(
-    IN i_schema NAME,           -- snapshot namespace, default is CURRENT_USER or PUBLIC
-    IN i_name NAME              -- snapshot name
-)
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
-AS $$
-DECLARE
-    res db4ai.snapshot_name;    -- composite result
-BEGIN
- 
-    IF i_schema IS NULL OR i_schema = '' THEN
-        i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
-    END IF;
- 
-    -- return published snapshot name
-    res := db4ai.manage_snapshot_internal(i_schema, i_name, TRUE);
-    return res;
- 
-END;
-$$;
-COMMENT ON FUNCTION db4ai.publish_snapshot() IS 'Publish snapshot for allowing usage in model training';
- 
- 
-CREATE OR REPLACE FUNCTION db4ai.purge_snapshot_internal(
-    IN i_schema NAME,    -- snapshot namespace
-    IN i_name NAME       -- snapshot name
-)
-RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
-AS $$
-DECLARE
-    s_id BIGINT;         -- snapshot id
-    p_id BIGINT;         -- parent id
-    m_id BIGINT;         -- matrix id
-    o_id BIGINT[];       -- other snapshot ids in same backing table
-    pushed_cmds TEXT[];  -- commands to be pushed to descendants
-    pushed_comment TEXT; -- comments to be pushed to descendants
-    drop_cols NAME[];    -- orphaned columns
-    e_stack_act TEXT;    -- current stack for validation
-    affected BIGINT;     -- number of affected rows;
-BEGIN
- 
-    BEGIN
-        RAISE EXCEPTION 'SECURITY_STACK_CHECK';
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
- 
-        IF CURRENT_SCHEMA = 'db4ai' THEN
-            e_stack_act := pg_catalog.replace(e_stack_act, 'ion pur', 'ion db4ai.pur');
-        END IF;
- 
-        IF e_stack_act NOT LIKE 'referenced column: purge_snapshot_internal
-SQL statement "SELECT db4ai.purge_snapshot_internal(i_schema, i_name)"
-PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
-        THEN
-            RAISE EXCEPTION 'direct call to db4ai.purge_snapshot_internal(name,name) is not allowed'
-            USING HINT = 'call public interface db4ai.purge_snapshot instead';
-        END IF;
-    END;
- 
-    -- check if snapshot exists
-    BEGIN
-        SELECT commands, comment, id, parent_id, matrix_id FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name
-            INTO STRICT pushed_cmds, pushed_comment, s_id, p_id, m_id;
-    EXCEPTION WHEN NO_DATA_FOUND THEN
-        RAISE EXCEPTION 'snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
-    END;
- 
-    -- update descendants, if any
-    UPDATE db4ai.snapshot SET
-        parent_id = p_id,
-        commands = pushed_cmds || commands,
-        comment = CASE WHEN pushed_comment IS NULL THEN comment
-                       WHEN comment IS NULL THEN pushed_comment
-                       ELSE pushed_comment || ' | ' || comment END
-        WHERE parent_id = s_id;
-    IF p_id IS NULL AND SQL%ROWCOUNT > 0 THEN
-        RAISE EXCEPTION 'cannot purge root snapshot ''%.%'' having dependent snapshots', pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name)
-        USING HINT = 'purge all dependent snapshots first';
-    END IF;
- 
-    IF m_id IS NULL THEN
-        EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
-        EXECUTE 'DROP TABLE db4ai.t' || s_id::TEXT;
-        RAISE NOTICE 'PURGE_SNAPSHOT: MSS backing table dropped';
-    ELSE
-        SELECT pg_catalog.array_agg(id) FROM db4ai.snapshot WHERE matrix_id = m_id AND id <> s_id INTO STRICT o_id;
- 
-        IF o_id IS NULL OR pg_catalog.array_length(o_id, 1) = 0 OR pg_catalog.array_length(o_id, 1) IS NULL THEN
-            EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
-            EXECUTE 'DROP TABLE db4ai.t' || m_id::TEXT;
-            RAISE NOTICE 'PURGE_SNAPSHOT: CSS backing table dropped';
-        ELSE
-            EXECUTE 'DELETE FROM db4ai.t' || m_id::TEXT || ' WHERE _' || s_id::TEXT || ' AND NOT (_' || pg_catalog.array_to_string(o_id, ' OR _') || ')';
-            GET DIAGNOSTICS affected = ROW_COUNT;
- 
-            SELECT pg_catalog.array_agg(pg_catalog.quote_ident(column_name))
-            FROM  ( SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'db4ai' AND table_name = ANY ( ('{v' || pg_catalog.array_to_string(s_id || o_id, ',v') || '}')::NAME[] )
-                    GROUP BY column_name
-                    HAVING SUM(CASE table_name WHEN 'v' || s_id::TEXT THEN 0 ELSE 1 END) = 0 )
-            INTO STRICT drop_cols;
- 
-            EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
- 
-            IF TRUE OR drop_cols IS NULL THEN
-                EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT;
-                RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: none', affected;
-            ELSE
-                EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT || ', DROP ' || pg_catalog.array_to_string(drop_cols, ', DROP ');
-                RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: %', affected, drop_cols;
-            END IF;
-        END IF;
-    END IF;
- 
-    DELETE FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name;
-    IF SQL%ROWCOUNT = 0 THEN
-        -- checked before, this should never happen
-        RAISE INFO 'snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
-    END IF;
-END;
-$$;
- 
+
 CREATE OR REPLACE FUNCTION db4ai.purge_snapshot(
     IN i_schema NAME,    -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_name NAME       -- snapshot name
@@ -1989,25 +1751,25 @@ DECLARE
     none_represent INT;             -- 0 or NULL
     res db4ai.snapshot_name;        -- composite result
 BEGIN
- 
+
     -- obtain active message level
     BEGIN
         EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
- 
+
     -- obtain active snapshot mode
     BEGIN
         s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
- 
+
     IF s_mode NOT IN ('CSS', 'MSS') THEN
         RAISE EXCEPTION 'invalid snapshot mode: ''%''', s_mode;
     END IF;
- 
+
     -- obtain relevant configuration parameters
     BEGIN
         s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
@@ -2019,19 +1781,19 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
- 
+
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
- 
+
     current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
         none_represent := NULL;
     END IF;
- 
+
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
     ELSE
@@ -2043,18 +1805,30 @@ BEGIN
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
     END IF;
- 
+
     BEGIN
         EXECUTE 'DROP VIEW ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name);
     EXCEPTION WHEN OTHERS THEN
     END;
- 
+
     PERFORM db4ai.purge_snapshot_internal(i_schema, i_name);
- 
+
     -- return purged snapshot name
     res := ROW(i_schema, i_name);
     return res;
- 
+
 END;
 $$;
 COMMENT ON FUNCTION db4ai.purge_snapshot() IS 'Purge a snapshot and reclaim occupied storage';
+
+DROP FUNCTION IF EXISTS pg_catalog.gs_stat_undo(OUT curr_used_zone_count int4, OUT top_used_zones text, OUT curr_used_undo_size int4,
+OUT undo_threshold int4, OUT oldest_xid_in_undo oid, OUT oldest_xmin oid, OUT total_undo_chain_len oid, OUT max_undo_chain_len oid,
+OUT create_undo_file_count int4, OUT discard_undo_file_count int4) cascade;
+DROP FUNCTION IF EXISTS pg_catalog.gs_stat_undo(OUT curr_used_zone_count int4, OUT top_used_zones text, OUT curr_used_undo_size int4,
+OUT undo_threshold int4, OUT global_recycle_xid xid, OUT oldest_xmin xid, OUT total_undo_chain_len bigint, OUT max_undo_chain_len bigint,
+OUT create_undo_file_count int4, OUT discard_undo_file_count int4) cascade;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4434;
+CREATE OR REPLACE FUNCTION pg_catalog.gs_stat_undo(OUT curr_used_zone_count int4, OUT top_used_zones text, OUT curr_used_undo_size int4,
+OUT undo_threshold int4, OUT global_recycle_xid xid, OUT oldest_xmin xid, OUT total_undo_chain_len bigint, OUT max_undo_chain_len bigint,
+OUT create_undo_file_count int4, OUT discard_undo_file_count int4)
+RETURNS setof record LANGUAGE INTERNAL rows 1 as 'gs_stat_undo';
