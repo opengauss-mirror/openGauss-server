@@ -1,0 +1,1539 @@
+-- FOR PL/pgSQL RAISE_APPLICATION_ERROR scenarios --
+-- check compatibility --
+show sql_compatibility; -- expect ORA --
+ sql_compatibility 
+-------------------
+ A
+(1 row)
+
+-- create new schema --
+drop schema if exists plpgsql_custom_exception;
+NOTICE:  schema "plpgsql_custom_exception" does not exist, skipping
+create schema plpgsql_custom_exception;
+set current_schema = plpgsql_custom_exception;
+-- test within the range --
+CREATE OR REPLACE PROCEDURE account_status (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN                   -- explicitly raise exception
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due.'); -- within the range -20999 ~ -20000
+  END IF;
+END;
+/
+ 
+DECLARE
+  past_due  EXCEPTION;                       -- declare exception
+  PRAGMA EXCEPTION_INIT (past_due, -20000);  -- assign error code to exception
+BEGIN
+  account_status (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));   -- invoke procedure
+
+EXCEPTION
+	WHEN past_due THEN
+		RAISE INFO 'past_due exception: %', SQLERRM;
+END;
+/
+INFO:  past_due exception: Account past due.
+-- test out of range --
+CREATE OR REPLACE PROCEDURE account_status (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN                   -- explicitly raise exception
+    RAISE_APPLICATION_ERROR(-30000, 'Account past due.'); -- out of range -20999 ~ -20000
+  END IF;
+END;
+/
+DECLARE
+  past_due  EXCEPTION;                       -- declare exception
+  PRAGMA EXCEPTION_INIT (past_due, -20000);  -- assign error code to exception
+BEGIN
+  account_status (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));   -- invoke procedure
+
+EXCEPTION
+	WHEN past_due THEN
+		RAISE INFO 'past_due exception: %', SQLERRM;
+	WHEN OTHERS THEN
+		RAISE INFO 'others exception: %', SQLERRM;
+END;
+/
+INFO:  others exception: Parameter 'code' to raise_application_error of -30000 is out of range
+-- test parameter code is null --
+CREATE OR REPLACE PROCEDURE account_status (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN                   -- explicitly raise exception
+    RAISE_APPLICATION_ERROR(NULL, 'Account past due.'); -- out of range -20999 ~ -20000
+  END IF;
+END;
+/
+DECLARE
+  past_due  EXCEPTION;                       -- declare exception
+  PRAGMA EXCEPTION_INIT (past_due, -20000);  -- assign error code to exception
+BEGIN
+  account_status (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));   -- invoke procedure
+
+EXCEPTION
+	WHEN past_due THEN
+		RAISE INFO 'past_due exception: %', SQLERRM;
+	WHEN OTHERS THEN
+		RAISE INFO 'others exception: %', SQLERRM;
+END;
+/
+INFO:  others exception: Parameter 'code' can not be null.
+-- test parameter message is null --
+CREATE OR REPLACE PROCEDURE account_status (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN                   -- explicitly raise exception
+    RAISE_APPLICATION_ERROR(-20000, NULL); -- out of range -20999 ~ -20000
+  END IF;
+END;
+/
+DECLARE
+  past_due  EXCEPTION;                       -- declare exception
+  PRAGMA EXCEPTION_INIT (past_due, -20000);  -- assign error code to exception
+BEGIN
+  account_status (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));   -- invoke procedure
+
+EXCEPTION
+	WHEN past_due THEN
+		RAISE INFO 'past_due exception: %', SQLERRM;
+	WHEN OTHERS THEN
+		RAISE INFO 'others exception: %', SQLERRM;
+END;
+/
+INFO:  others exception: Parameter 'message' can not be null.
+-- test parameter keep_errors is null --
+CREATE OR REPLACE PROCEDURE account_status (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN                   -- explicitly raise exception
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due.', NULL); -- out of range -20999 ~ -20000
+  END IF;
+END;
+/
+DECLARE
+  past_due  EXCEPTION;                       -- declare exception
+  PRAGMA EXCEPTION_INIT (past_due, -20000);  -- assign error code to exception
+BEGIN
+  account_status (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));   -- invoke procedure
+
+EXCEPTION
+	WHEN past_due THEN
+		RAISE INFO 'past_due exception: %', SQLERRM;
+	WHEN OTHERS THEN
+		RAISE INFO 'others exception: %', SQLERRM;
+END;
+/
+INFO:  past_due exception: Account past due.
+----------------------
+-- test keep errors --
+----------------------
+CREATE TABLE t1 (id INT PRIMARY KEY,name text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+INSERT INTO t1 VALUES (1,'ABC');
+-- scenarios 1
+-- account_status1(keep_errors=true)
+-- account_status2(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 2.
+CONTEXT:  ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',TRUE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20000: Account past due 1.
+SQL statement "CALL raise_application_error(-20000,'Account past due 1.',TRUE)"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 3 at PERFORM
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status2 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 2.
+-- scenarios 2
+-- account_status1(keep_errors=false)
+-- account_status2(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 2.
+CONTEXT:  ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',TRUE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20000: Account past due 1.
+SQL statement "CALL raise_application_error(-20000,'Account past due 1.')"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 3 at PERFORM
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status2 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 2.
+-- scenarios 3
+-- account_status1(keep_errors=false)
+-- account_status2(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',FALSE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 2.
+CONTEXT:  ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',FALSE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status2 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 2.
+-- scenarios 4
+-- account_status1(keep_errors=true)
+-- account_status2(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',FALSE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 2.
+CONTEXT:  ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',FALSE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status2 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 2.
+-- scenarios 5
+-- account_status1(keep_errors=true)
+-- account_status2(keep_errors=true)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+ 
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',TRUE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20000: Account past due 1.
+SQL statement "CALL raise_application_error(-20000,'Account past due 1.',TRUE)"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 3 at PERFORM
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 6
+-- account_status1(keep_errors=false)
+-- account_status2(keep_errors=true)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',TRUE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20000: Account past due 1.
+SQL statement "CALL raise_application_error(-20000,'Account past due 1.')"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 3 at PERFORM
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 7
+-- account_status1(keep_errors=false)
+-- account_status2(keep_errors=false)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',FALSE);
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',FALSE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 8
+-- account_status1(keep_errors=false)
+-- account_status2(keep_errors=false)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.'); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',FALSE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',FALSE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 9
+-- account_status1(keep_errors=false)
+-- account_status2(keep_errors=true)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE);
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.'); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.')"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 10
+-- account_status1(keep_errors=true)
+-- account_status2(keep_errors=true)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.'); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.')"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 11
+-- account_status1(keep_errors=true)
+-- account_status2(keep_errors=false)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',FALSE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.'); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.')"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 12
+-- account_status1(keep_errors=true)
+-- account_status2(keep_errors=false)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.'); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.')"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 13
+-- account_status1(insert error)
+-- account_status2(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 2.
+CONTEXT:  ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',TRUE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+GAUSS-23505: duplicate key value violates unique constraint "t1_pkey"
+SQL statement "INSERT INTO t1 VALUES (1,'ABC')"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 2 at SQL statement
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status2 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 2.
+-- scenarios 14
+-- account_status1(insert error)
+-- account_status2(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',FALSE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 2.
+CONTEXT:  ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',FALSE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status2 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 2.
+-- scenarios 15
+-- account_status1(insert error)
+-- account_status2(keep_errors=true)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',TRUE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+GAUSS-23505: duplicate key value violates unique constraint "t1_pkey"
+SQL statement "INSERT INTO t1 VALUES (1,'ABC')"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 2 at SQL statement
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 16
+-- account_status1(insert error)
+-- account_status2(keep_errors=false)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',FALSE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20001: Account past due 2.
+SQL statement "CALL raise_application_error(-20001,'Account past due 2.',FALSE)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 17
+-- account_status1(insert error)
+-- account_status2(keep_errors=false)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.'); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',FALSE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',FALSE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 18
+-- account_status1(insert error)
+-- account_status2(keep_errors=true)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20001, 'Account past due 2.',TRUE); 
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',FALSE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',FALSE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 19
+-- account_status1(keep_errors=true)
+-- account_status2(insert error)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today);
+EXCEPTION
+	WHEN OTHERS THEN
+		INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+GAUSS-23505: duplicate key value violates unique constraint "t1_pkey"
+SQL statement "INSERT INTO t1 VALUES (1,'ABC')"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at SQL statement
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20000: Account past due 1.
+SQL statement "CALL raise_application_error(-20000,'Account past due 1.',TRUE)"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 3 at PERFORM
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 20
+-- account_status1(keep_errors=false)
+-- account_status2(insert error)
+-- account_status3(keep_errors=true)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today);
+EXCEPTION
+	WHEN OTHERS THEN
+		INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.',TRUE); 
+END;
+/
+ 
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.',TRUE)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+GAUSS-23505: duplicate key value violates unique constraint "t1_pkey"
+SQL statement "INSERT INTO t1 VALUES (1,'ABC')"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 5 at SQL statement
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+ORA-20000: Account past due 1.
+SQL statement "CALL raise_application_error(-20000,'Account past due 1.')"
+PL/pgSQL function account_status1(timestamp without time zone,timestamp without time zone) line 3 at PERFORM
+SQL statement "CALL account_status1(due_date,today)"
+PL/pgSQL function account_status2(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status2(due_date,today)"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 2 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 21
+-- account_status1(keep_errors=false)
+-- account_status2(insert error)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.');
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today);
+EXCEPTION
+	WHEN OTHERS THEN
+		INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.'); 
+END;
+/
+ 
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.')"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- scenarios 22
+-- account_status1(keep_errors=true)
+-- account_status2(insert error)
+-- account_status3(keep_errors=false)
+CREATE OR REPLACE PROCEDURE account_status1 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  IF due_date < today THEN
+    RAISE_APPLICATION_ERROR(-20000, 'Account past due 1.', TRUE);
+  END IF;
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status2 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status1 (due_date,today);
+EXCEPTION
+	WHEN OTHERS THEN
+		INSERT INTO t1 VALUES (1,'ABC');
+END;
+/
+CREATE OR REPLACE PROCEDURE account_status3 (
+  due_date DATE,
+  today    DATE
+)
+IS
+BEGIN
+  account_status2 (due_date,today); 
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE_APPLICATION_ERROR(-20002, 'Account past due 3.'); 
+END;
+/
+ 
+DECLARE
+BEGIN
+  account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),
+                  TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+END;
+/
+ERROR:  Account past due 3.
+CONTEXT:  ORA-20002: Account past due 3.
+SQL statement "CALL raise_application_error(-20002,'Account past due 3.')"
+PL/pgSQL function account_status3(timestamp without time zone,timestamp without time zone) line 5 at PERFORM
+SQL statement "CALL account_status3(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+DECLARE
+BEGIN
+  account_status3 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'), 
+				           TO_DATE('09-JUL-2010', 'DD-MON-YYYY'));
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE INFO 'CATCH EXCEPTION: %', SQLERRM;
+END;
+/
+INFO:  CATCH EXCEPTION: Account past due 3.
+-- clean up --
+drop schema if exists plpgsql_custom_exception cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function account_status(timestamp without time zone,timestamp without time zone)
+drop cascades to table t1
+drop cascades to function account_status1(timestamp without time zone,timestamp without time zone)
+drop cascades to function account_status2(timestamp without time zone,timestamp without time zone)
+drop cascades to function account_status3(timestamp without time zone,timestamp without time zone)

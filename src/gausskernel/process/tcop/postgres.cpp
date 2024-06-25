@@ -8641,6 +8641,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         FlushErrorState();
 
+        free_exception_stack();
+        t_thrd.log_cxt.print_exception_stack = false;
+
         /*
          * If we were handling an extended-query-protocol message, initiate
          * skip till next Sync.  This also causes us not to issue

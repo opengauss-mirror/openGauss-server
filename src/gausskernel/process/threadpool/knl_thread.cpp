@@ -151,6 +151,8 @@ static void knl_t_log_init(knl_t_log_context* log_cxt)
 
     log_cxt->error_context_stack = NULL;
     log_cxt->call_stack = NULL;
+    log_cxt->print_exception_stack = false;
+    log_cxt->exception_stack = NULL;
     log_cxt->PG_exception_stack = NULL;
     log_cxt->thd_bt_symbol = NULL;
     log_cxt->flush_message_immediately = false;
