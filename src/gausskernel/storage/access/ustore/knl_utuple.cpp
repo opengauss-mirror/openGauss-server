@@ -1324,6 +1324,8 @@ HeapTuple UHeapCopyHeapTuple(TupleTableSlot *slot)
     if (slot->tts_tuple != NULL) {
         tuple->t_self = ((UHeapTuple)slot->tts_tuple)->ctid;
         tuple->t_tableOid = ((UHeapTuple)slot->tts_tuple)->table_oid;
+        tuple->t_xid_base = ((UHeapTuple)slot->tts_tuple)->t_xid_base;
+        tuple->t_data->t_choice.t_heap.t_xmin = ((UHeapTuple)slot->tts_tuple)->disk_tuple->xid;
     }
 
     return tuple;
