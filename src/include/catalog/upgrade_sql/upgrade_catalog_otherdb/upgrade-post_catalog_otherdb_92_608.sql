@@ -20,28 +20,32 @@ comment on function PG_CATALOG.get_client_info() is 'read current client';
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 -- pg_ls_tmpdir_noargs
 DROP FUNCTION IF EXISTS pg_catalog.pg_ls_tmpdir() CASCADE;
+drop function if exists pg_catalog.pg_ls_tmpdir(out name text, out size bigint, out modification timestamptz) cascade;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 3354;
-CREATE OR REPLACE FUNCTION pg_catalog.pg_ls_tmpdir()
+CREATE OR REPLACE FUNCTION pg_catalog.pg_ls_tmpdir(out name text, out size bigint, out modification timestamptz)
     RETURNS SETOF record
     LANGUAGE internal
     STRICT NOT FENCED NOT SHIPPABLE COST 10 ROWS 20
 AS $function$pg_ls_tmpdir_noargs$function$;
-comment on function PG_CATALOG.pg_ls_tmpdir() is 'list of temporary files in the pg_default tablespace\''s pgsql_tmp directory';
+comment on function PG_CATALOG.pg_ls_tmpdir(out name text, out size bigint, out modification timestamptz) is
+  'list of temporary files in the pg_default tablespace''s pgsql_tmp directory';
 
 -- pg_ls_tmpdir_1arg
-DROP FUNCTION IF EXISTS pg_catalog.pg_ls_tmpdir(oid) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.pg_ls_tmpdir(oid oid) CASCADE;
+drop function if exists pg_catalog.pg_ls_tmpdir(oid oid, out name text, out size bigint, out modification timestamptz) cascade;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 3355;
-CREATE OR REPLACE FUNCTION pg_catalog.pg_ls_tmpdir(oid)
+CREATE OR REPLACE FUNCTION pg_catalog.pg_ls_tmpdir(oid oid, out name text, out size bigint, out modification timestamptz)
     RETURNS SETOF record
     LANGUAGE internal
     STRICT NOT FENCED NOT SHIPPABLE COST 10 ROWS 20
 AS $function$pg_ls_tmpdir_1arg$function$;
-comment on function PG_CATALOG.pg_ls_tmpdir(oid) is 'list of temporary files in the specified tablespace\''s pgsql_tmp directory';
+comment on function PG_CATALOG.pg_ls_tmpdir(oid oid, out name text, out size bigint, out modification timestamptz) is
+  'list of temporary files in the specified tablespace''s pgsql_tmp directory';
 
 -- pg_ls_waldir
 DROP FUNCTION IF EXISTS pg_catalog.pg_ls_waldir() CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 3356;
-CREATE OR REPLACE FUNCTION pg_catalog.pg_ls_waldir()
+CREATE OR REPLACE FUNCTION pg_catalog.pg_ls_waldir(out name text, out size bigint, out modification timestamptz)
     RETURNS SETOF record
     LANGUAGE internal
     STRICT NOT FENCED NOT SHIPPABLE COST 10 ROWS 20
@@ -64,7 +68,7 @@ BEGIN
 	SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5721;
 	CREATE OR REPLACE FUNCTION pg_catalog.get_local_active_session
 		(OUT sampleid bigint, OUT sample_time timestamp with time zone, OUT need_flush_sample boolean, OUT databaseid oid, OUT thread_id bigint, OUT sessionid bigint, OUT start_time timestamp with time zone, OUT event text, OUT lwtid integer, OUT psessionid bigint, OUT tlevel integer, OUT smpid integer, OUT userid oid, OUT application_name text, OUT client_addr inet, OUT client_hostname text, OUT client_port integer, OUT query_id bigint, OUT unique_query_id bigint, OUT user_id oid, OUT cn_id integer, OUT unique_query text, OUT locktag text, OUT lockmode text, OUT block_sessionid bigint, OUT wait_status text, OUT global_sessionid text, OUT xact_start_time timestamp with time zone, OUT query_start_time timestamp with time zone, OUT state text)
-		RETURNS setof record LANGUAGE INTERNAL VOLATILE NOT FENCED as 'get_local_active_session';
+		RETURNS setof record LANGUAGE INTERNAL rows 100 VOLATILE NOT FENCED as 'get_local_active_session';
     CREATE OR REPLACE VIEW DBE_PERF.local_active_session AS
 	  WITH RECURSIVE
 		las(sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
@@ -436,7 +440,10 @@ DROP FUNCTION IF EXISTS pg_catalog.gs_get_parallel_decode_status(OUT slot_name t
 -- CREATE: pg_get_replication_slots
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3784;
 
-CREATE OR REPLACE FUNCTION pg_catalog.pg_get_replication_slots(OUT slot_name text, OUT plugin text, OUT slot_type text, OUT datoid oid, OUT active boolean, OUT xmin xid, OUT catalog_xmin xid, OUT restart_lsn text, OUT dummy_standby boolean, OUT confirmed_flush text) RETURNS setof record LANGUAGE INTERNAL STABLE NOT FENCED as 'pg_get_replication_slots';
+CREATE OR REPLACE FUNCTION pg_catalog.pg_get_replication_slots(OUT slot_name text, OUT plugin text, OUT slot_type text,
+    OUT datoid oid, OUT active boolean, OUT xmin xid, OUT catalog_xmin xid, OUT restart_lsn text, OUT dummy_standby boolean,
+    OUT confirmed_flush text)
+  RETURNS setof record LANGUAGE INTERNAL STABLE NOT FENCED rows 10 as 'pg_get_replication_slots';
 
 COMMENT ON FUNCTION pg_catalog.pg_get_replication_slots() is 'information about replication slots currently in use';
 
@@ -548,6 +555,7 @@ DROP SCHEMA IF EXISTS dbe_sql_util cascade;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_NAMESPACE, 9049;
 CREATE SCHEMA dbe_sql_util;
 GRANT USAGE ON SCHEMA dbe_sql_util TO PUBLIC;
+comment on schema dbe_sql_util is 'sql util schema';
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 9060;
 CREATE OR REPLACE FUNCTION dbe_sql_util.create_hint_sql_patch(name, bigint, text, text DEFAULT NULL::text, boolean DEFAULT true)
@@ -708,12 +716,12 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0,
 DROP FUNCTION IF EXISTS pg_catalog.gs_get_history_memory_detail() cascade;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5257;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_get_history_memory_detail(
-cstring,
+memlog_filename cstring,
 OUT memory_info text) RETURNS SETOF TEXT LANGUAGE INTERNAL as 'gs_get_history_memory_detail';DROP FUNCTION IF EXISTS gs_is_dw_io_blocked() CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4772;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_is_dw_io_blocked(OUT result boolean)
  RETURNS SETOF boolean
- LANGUAGE internal
+ LANGUAGE internal rows 100
  STABLE STRICT NOT FENCED NOT SHIPPABLE
 AS $function$gs_is_dw_io_blocked$function$;
 
@@ -792,7 +800,8 @@ CREATE unlogged table IF NOT EXISTS pg_catalog.statement_history(
     is_slow_sql boolean,
     trace_id text,
     advise text
-);
+)
+WITH (orientation=row, compression=no);
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index pg_catalog.statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
 
@@ -829,7 +838,7 @@ CREATE OR REPLACE FUNCTION pg_catalog.array_count(anyarray, integer)
  LANGUAGE internal
  IMMUTABLE NOT FENCED NOT SHIPPABLE
 AS $function$array_count$function$;
-COMMENT ON FUNCTION pg_catalog.array_count(anyarray, integer) IS 'array elements count';
+COMMENT ON FUNCTION pg_catalog.array_count(anyarray, integer) IS 'array count';
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;DROP FUNCTION IF EXISTS pg_catalog.gs_lwlock_status() CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8888;

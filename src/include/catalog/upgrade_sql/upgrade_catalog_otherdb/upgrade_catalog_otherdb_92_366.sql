@@ -44,6 +44,35 @@ CREATE SCHEMA db4ai;
 COMMENT ON schema db4ai IS 'db4ai schema';
 GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
 CREATE TYPE db4ai.snapshot_name AS ("schema" NAME, "name" NAME);
+
+DO $$
+DECLARE
+query_str text;
+ans bool;
+BEGIN
+    select case when count(*) = 0 then true else false end as ans from (select * FROM pg_namespace where nspname='db4ai') into ans;
+    if ans = true then
+        SET LOCAL inplace_upgrade_next_system_object_oids = IUO_NAMESPACE, 4991;
+        CREATE SCHEMA db4ai;
+        COMMENT ON schema db4ai IS 'db4ai schema';
+        GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
+    end if;
+
+    select case when count(*) = 0 then true else false end as ans from (select * from pg_type where typnamespace=4991 and typname='snapshot_name') into ans;
+    if ans = true then
+        CREATE TYPE db4ai.snapshot_name AS ("schema" NAME, "name" NAME);
+    end if;
+
+    select case when count(*) = 0 then true else false end as ans from (select *from pg_class where relname='snapshot_sequence' and relnamespace = 4991) into ans;
+    if ans = true then
+        query_str := 'CREATE SEQUENCE db4ai.snapshot_sequence;';
+        EXECUTE IMMEDIATE query_str;
+        update pg_class set relacl = null where relname = 'snapshot_sequence' and relnamespace = 4991;
+        query_str := 'GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;';
+        EXECUTE IMMEDIATE query_str;
+    end if;
+END$$;
+
 CREATE TABLE IF NOT EXISTS db4ai.snapshot
 (
     id BIGINT UNIQUE,                           -- snapshot id (surrogate key)
@@ -200,7 +229,7 @@ BEGIN
                 FOR idx IN 2 .. pg_catalog.array_length(mapping, 1) BY 2 LOOP
                     IF pattern = mapping[idx] THEN
                         -- apply the mapping
-                        dist_cmd := dist_cmd || mapping[idx-1] || ',';
+                        dist_cmd := pg_catalog.quote_ident(dist_cmd) || pg_catalog.quote_ident(mapping[idx-1]) || ',';
                         pattern := NULL;
                         EXIT;
                     END IF;

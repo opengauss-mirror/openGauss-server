@@ -136,7 +136,7 @@ BEGIN
                 FOR idx IN 2 .. pg_catalog.array_length(mapping, 1) BY 2 LOOP
                     IF pattern = mapping[idx] THEN
                         -- apply the mapping
-                        dist_cmd := dist_cmd || mapping[idx-1] || ',';
+                        dist_cmd := pg_catalog.quote_ident(dist_cmd) || pg_catalog.quote_ident(mapping[idx-1]) || ',';
                         pattern := NULL;
                         EXIT;
                     END IF;
