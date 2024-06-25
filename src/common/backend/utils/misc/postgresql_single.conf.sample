@@ -870,6 +870,12 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #ss_fi_process_fault_entries = ''
 #ss_fi_custom_fault_entries = ''
 
+
+#------------------------------------------------------------------------------
+# DOLPHIN OPTIONS
+#------------------------------------------------------------------------------
+dolphin.nulls_minimal_policy = on # the inverse of the default configuration value ! do not change !
+
 #------------------------------------------------------------------------------
 # UWAL OPTIONS
 #------------------------------------------------------------------------------

@@ -105,15 +105,15 @@ select * from base_partition_tbl_sub_partition subpartition (num5_2);
 create table t_range (c1 int, c2 int) partition by range(c1) (partition p1 values less than (10), partition p2 values less than(maxvalue));
 insert into t_range values(null),(5),(100);
 create index t_range_c1_idx on t_range (c1 nulls last) local;
-explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
-explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO INDEX
-select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
-select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO INDEX
+explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
+explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- INDEX
+select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
+select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- INDEX
 drop index t_range_c1_idx;
 create index on t_range (c1  nulls first) local;
-explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
+explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
 explain (costs off) select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO INDEX
-select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- INDEX
+select /*+ indexscan(t_range) */* from t_range order by c1 nulls first; -- NO INDEX
 select /*+ indexscan(t_range) */* from t_range order by c1 nulls last; -- NO INDEX
 
 \c regression

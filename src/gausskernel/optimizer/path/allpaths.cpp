@@ -3973,9 +3973,17 @@ static void make_partiterator_pathkey(
                      * we do partitionkey comparison just as ''order by ASC NULL LAST'', and pathkey
                      * must follow the same rules. If sortcluase is ether ''ASC NULL FIRST'' or "DESC
                      * NULL LAST", just abandon pathkeys
+                     * in B database, nulls was the min value
                      */
-                    if (!(pk_strategy == BTLessStrategyNumber && pk_nulls_first == false) &&
-                        !(pk_strategy == BTGreaterStrategyNumber && pk_nulls_first == true)) {
+                    bool invalid_path_key=  false;
+                    if (CheckPluginNullsPolicy()) {
+                        invalid_path_key =  !(pk_strategy == BTLessStrategyNumber && pk_nulls_first == true) &&
+                        !(pk_strategy == BTGreaterStrategyNumber && pk_nulls_first == false);
+                    } else {
+                        invalid_path_key = !(pk_strategy == BTLessStrategyNumber && pk_nulls_first == false) &&
+                        !(pk_strategy == BTGreaterStrategyNumber && pk_nulls_first == true);
+                    }
+                    if (invalid_path_key) {
                         OPT_LOG(DEBUG2,
                             "partiterator fails to inherit pathkeys since sort strategy is"
                             " nether ASC NULL LAST nor DESC DESC NULL FIRST");

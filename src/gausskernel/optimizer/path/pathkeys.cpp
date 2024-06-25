@@ -567,12 +567,12 @@ List* build_index_pathkeys(PlannerInfo* root, IndexOptInfo* index, ScanDirection
         }
         
         /* 
-         * in B format, null value in insert into the minimal partition 
-         * if index is default nulls last, set to nulls first
-         * if index is nulls first, dothing
-         * */
-        if (index->ispartitionedindex && !index->isGlobal && DB_IS_CMPT(B_FORMAT)) {
-            if (!index->nulls_first[i]) {
+         * in B format, null value in insert into the minimal partition
+         * desc default: nulls first -> nulls last
+         * asc  default: nulls last  -> nulls
+         */
+        if (index->ispartitionedindex && !index->isGlobal && CheckPluginNullsPolicy()) {
+            if ((!reverse_sort && !nulls_first) || (reverse_sort && nulls_first)) {
                 nulls_first = !nulls_first;
             }
         }

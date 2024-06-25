@@ -2929,6 +2929,7 @@ typedef struct knl_u_hook_context {
     void *pluginPlannerHook;
     void *groupingplannerHook;
     void *replaceNullOrNotHook;
+    void *nullsMinimalPolicyHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

@@ -1685,16 +1685,14 @@ select * from t_multi_parts_order partition (pd) order by col limit 10;
 
 rollback;
 explain (costs off) delete from t_multi_parts_order partition(pd, p1) order by col limit 10;
-                          QUERY PLAN                           
----------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Delete on t_multi_parts_order
-   ->  Sort
-         Sort Key: col
-         ->  Partition Iterator
-               Iterations: 2
-               ->  Partitioned Seq Scan on t_multi_parts_order
-                     Selected Partitions:  1..2
-(7 rows)
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Index Scan using tbl_idx_t_multi_parts_order on t_multi_parts_order
+               Selected Partitions:  1..2
+(5 rows)
 
 begin;
 delete from t_multi_parts_order partition(p1, pd) order by col desc limit 10;
@@ -1761,16 +1759,14 @@ select * from t_multi_parts_order partition (pd) order by col desc limit 10;
 
 rollback;
 explain (costs off) delete from t_multi_parts_order partition(pd, p1) order by col desc limit 10;
-                          QUERY PLAN                           
----------------------------------------------------------------
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
  Delete on t_multi_parts_order
-   ->  Sort
-         Sort Key: col DESC
-         ->  Partition Iterator
-               Iterations: 2
-               ->  Partitioned Seq Scan on t_multi_parts_order
-                     Selected Partitions:  1..2
-(7 rows)
+   ->  Partition Iterator Scan Backward
+         Iterations: 2
+         ->  Partitioned Index Scan Backward using tbl_idx_t_multi_parts_order on t_multi_parts_order
+               Selected Partitions:  1..2
+(5 rows)
 
 drop table if exists t_multi_parts_order;
 -- range partitions with global index, single column
