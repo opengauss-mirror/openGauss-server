@@ -222,6 +222,18 @@ create or replace view circular_dependency_v as select * from circular_dependenc
 select * from circular_dependency_t; -- failed
 select * from circular_dependency_v; -- failed
 
+create table circular_dependency_t1 (id int, name text);
+create view circular_dependency_v1 as select * from circular_dependency_t1;
+create view circular_dependency_v2 as select * from circular_dependency_v1;
+create or replace view circular_dependency_v2 as select * from circular_dependency_v1 union all select * from circular_dependency_v2;
+alter table circular_dependency_t1 modify id int8;
+select * from circular_dependency_v2; -- failed
+ 
+create table circular_dependency_t2 (id int, name text);
+create view circular_dependency_v3 as select * from circular_dependency_t2;
+create view circular_dependency_v4 as select * from circular_dependency_v3;
+create or replace view circular_dependency_v3 as select * from circular_dependency_t2 union all select * from circular_dependency_v4;
+alter table circular_dependency_t2 modify id int8; -- failed
 
 --- clean
 drop schema dependent_view cascade;

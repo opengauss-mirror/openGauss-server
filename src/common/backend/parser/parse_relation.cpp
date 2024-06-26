@@ -1172,6 +1172,12 @@ static ValidateDependResult ValidateDependView(Oid view_oid, char objType, List*
         } else if (relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) {
             char type = relkind == RELKIND_VIEW ? OBJECT_TYPE_VIEW : OBJECT_TYPE_MATVIEW;
             ValidateDependResult result = ValidateDependView(dep_objid, type, list);
+            if (result == ValidateDependCircularDepend) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                        errmsg(
+                            "infinite recursion detected in rules for relation: \"%s\"", get_rel_name(view_oid)))); 
+            }
             isValid &= (result != ValidateDependInvalid);
             if (isValid) {
                 // here means dep_objid is valid, we should keep the same view_oid.attr with dep_objid.dep_objsubid
@@ -1214,6 +1220,12 @@ bool ValidateDependView(Oid view_oid, char objType) {
     List * list = NIL;
     ValidateDependResult result = ValidateDependView(view_oid, objType, &list);
     list_free_ext(list);
+    if (result == ValidateDependCircularDepend) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg(
+                    "infinite recursion detected in rules for relation: \"%s\"", get_rel_name(view_oid))));
+    }
     return result != ValidateDependInvalid;
 }
 
