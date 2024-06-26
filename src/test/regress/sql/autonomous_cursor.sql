@@ -1600,6 +1600,8 @@ drop table target;
 reset behavior_compat_options;
 
 -- clean
+drop PROCEDURE if exists check4(a int);
+drop table if exists t1_test;
 drop schema pl_auto_ref cascade;
 
 

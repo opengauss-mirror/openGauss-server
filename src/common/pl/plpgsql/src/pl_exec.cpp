@@ -275,6 +275,7 @@ static bool plsql_convert_expr_value_charset(PLpgSQL_execstate* estate, Datum *v
 static TupleDesc get_cursor_tupledesc_exec(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyParse);
 void AutonomPipelinedFuncRewriteResult(PLpgSQL_execstate *pExecstate);
 void PipelinedFuncRewriteResult(PLpgSQL_execstate *estate, ATResult *atResult);
+static bool is_has_update_in_query(PLpgSQL_expr* expr);
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
  * validating a given linenumber
@@ -8874,9 +8875,9 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
 #endif
     curvar->cursor_closed = false;
     /* Execute SQL through move cursor, only in A compatibility mode */
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
-        (void)PortalRunFetch(portal, FETCH_FORWARD, FETCH_ALL, None_Receiver);
-        (void)PortalRunFetch(portal, FETCH_BACKWARD, FETCH_ALL, None_Receiver);
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && is_has_update_in_query(query)) {
+        SPI_cursor_move(portal, true, FETCH_ALL);
+        SPI_cursor_move(portal, false, FETCH_ALL);
     }
     return PLPGSQL_RC_OK;
 }
@@ -16209,6 +16210,36 @@ void plpgsql_free_override_stack(int depth)
             u_sess->catalog_cxt.activeTempCreationPending = u_sess->catalog_cxt.baseTempCreationPending;
         }
     }
+}
+
+static bool is_has_update_in_query(PLpgSQL_expr* expr)
+{
+    List* plansources = NIL;
+    CachedPlanSource* plansource = NULL;
+    Query* query = NULL;
+
+    plansources = SPI_plan_get_plan_sources(expr->plan);
+    if (list_length(plansources) != 1) {
+        return false;
+    }
+    plansource = (CachedPlanSource*)linitial(plansources);
+
+    if (list_length(plansource->query_list) != 1) {
+        return false;
+    }
+    query = (Query*)linitial(plansource->query_list);
+
+    /*
+     * 2. It must be a plain SELECT query without any input tables
+     */
+    if (!IsA(query, Query)) {
+        return false;
+    }
+    if (query->commandType != CMD_SELECT) {
+        return false;
+    }
+
+    return query->hasForUpdate;
 }
 
 #endif

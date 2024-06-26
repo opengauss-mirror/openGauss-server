@@ -1998,7 +1998,6 @@ drop table source;
 drop table target;
 reset behavior_compat_options;
 -- clean
+drop PROCEDURE if exists check4(a int);
+drop table if exists t1_test;
 drop schema pl_auto_ref cascade;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to table t1_test
-drop cascades to function check4(integer)

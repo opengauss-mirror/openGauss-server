@@ -53,22 +53,22 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  company_name : zhangsan  <unnamed portal 8>
+NOTICE:  company_name : zhangsan  <unnamed portal 4>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
 NOTICE:       last_name_name : heliu
-NOTICE:  company_name : lisi  <unnamed portal 9>
+NOTICE:  company_name : lisi  <unnamed portal 5>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
 NOTICE:       last_name_name : heliu
-NOTICE:  company_name : wangwu  <unnamed portal 10>
+NOTICE:  company_name : wangwu  <unnamed portal 6>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
 NOTICE:       last_name_name : heliu
-NOTICE:  company_name : heliu  <unnamed portal 11>
+NOTICE:  company_name : heliu  <unnamed portal 7>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
@@ -110,71 +110,71 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  company_name : zhangsan  <unnamed portal 17>
-NOTICE:       last_name_name : zhangsan  <unnamed portal 18> 
+NOTICE:  company_name : zhangsan  <unnamed portal 9>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 10> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : lisi  <unnamed portal 19> 
+NOTICE:       last_name_name : lisi  <unnamed portal 11> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : wangwu  <unnamed portal 20> 
+NOTICE:       last_name_name : wangwu  <unnamed portal 12> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : heliu  <unnamed portal 21> 
+NOTICE:       last_name_name : heliu  <unnamed portal 13> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:  company_name : lisi  <unnamed portal 22>
-NOTICE:       last_name_name : zhangsan  <unnamed portal 23> 
+NOTICE:  company_name : lisi  <unnamed portal 14>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 15> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : lisi  <unnamed portal 24> 
+NOTICE:       last_name_name : lisi  <unnamed portal 16> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : wangwu  <unnamed portal 25> 
+NOTICE:       last_name_name : wangwu  <unnamed portal 17> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : heliu  <unnamed portal 26> 
+NOTICE:       last_name_name : heliu  <unnamed portal 18> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:  company_name : wangwu  <unnamed portal 27>
-NOTICE:       last_name_name : zhangsan  <unnamed portal 28> 
+NOTICE:  company_name : wangwu  <unnamed portal 19>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 20> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : lisi  <unnamed portal 29> 
+NOTICE:       last_name_name : lisi  <unnamed portal 21> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : wangwu  <unnamed portal 30> 
+NOTICE:       last_name_name : wangwu  <unnamed portal 22> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : heliu  <unnamed portal 31> 
+NOTICE:       last_name_name : heliu  <unnamed portal 23> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:  company_name : heliu  <unnamed portal 32>
-NOTICE:       last_name_name : zhangsan  <unnamed portal 33> 
+NOTICE:  company_name : heliu  <unnamed portal 24>
+NOTICE:       last_name_name : zhangsan  <unnamed portal 25> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : lisi  <unnamed portal 34> 
+NOTICE:       last_name_name : lisi  <unnamed portal 26> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : wangwu  <unnamed portal 35> 
+NOTICE:       last_name_name : wangwu  <unnamed portal 27> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
-NOTICE:       last_name_name : heliu  <unnamed portal 36> 
+NOTICE:       last_name_name : heliu  <unnamed portal 28> 
 NOTICE:            last_name_name2 : h
 NOTICE:            last_name_name2 : a
 NOTICE:            last_name_name2 : t
@@ -206,25 +206,25 @@ BEGIN
   CLOSE c1;
 END;
 /
-NOTICE:  company_name : zhangsan  <unnamed portal 42>
+NOTICE:  company_name : zhangsan  <unnamed portal 30>
 NOTICE:  employee_name : zhangsan
 NOTICE:  employee_name : lisi
 NOTICE:  employee_name : wangwu
 NOTICE:  employee_name : heliu
 NOTICE:  employee_name : heliu
-NOTICE:  company_name : lisi  <unnamed portal 43>
+NOTICE:  company_name : lisi  <unnamed portal 31>
 NOTICE:  employee_name : zhangsan
 NOTICE:  employee_name : lisi
 NOTICE:  employee_name : wangwu
 NOTICE:  employee_name : heliu
 NOTICE:  employee_name : heliu
-NOTICE:  company_name : wangwu  <unnamed portal 44>
+NOTICE:  company_name : wangwu  <unnamed portal 32>
 NOTICE:  employee_name : zhangsan
 NOTICE:  employee_name : lisi
 NOTICE:  employee_name : wangwu
 NOTICE:  employee_name : heliu
 NOTICE:  employee_name : heliu
-NOTICE:  company_name : heliu  <unnamed portal 45>
+NOTICE:  company_name : heliu  <unnamed portal 33>
 NOTICE:  employee_name : zhangsan
 NOTICE:  employee_name : lisi
 NOTICE:  employee_name : wangwu
@@ -265,7 +265,7 @@ NOTICE:  my_cur isopen : t
 NOTICE:  my_cur found : f
 NOTICE:  my_cur not found : f
 NOTICE:  my_cur row count : 0
-NOTICE:  company_name : zhangsan  <unnamed portal 51>
+NOTICE:  company_name : zhangsan  <unnamed portal 35>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
@@ -278,7 +278,7 @@ NOTICE:  my_cur isopen : t
 NOTICE:  my_cur found : f
 NOTICE:  my_cur not found : f
 NOTICE:  my_cur row count : 0
-NOTICE:  company_name : lisi  <unnamed portal 52>
+NOTICE:  company_name : lisi  <unnamed portal 36>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
@@ -291,7 +291,7 @@ NOTICE:  my_cur isopen : t
 NOTICE:  my_cur found : f
 NOTICE:  my_cur not found : f
 NOTICE:  my_cur row count : 0
-NOTICE:  company_name : wangwu  <unnamed portal 53>
+NOTICE:  company_name : wangwu  <unnamed portal 37>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
@@ -304,7 +304,7 @@ NOTICE:  my_cur isopen : t
 NOTICE:  my_cur found : f
 NOTICE:  my_cur not found : f
 NOTICE:  my_cur row count : 0
-NOTICE:  company_name : heliu  <unnamed portal 54>
+NOTICE:  company_name : heliu  <unnamed portal 38>
 NOTICE:       last_name_name : zhangsan
 NOTICE:       last_name_name : lisi
 NOTICE:       last_name_name : wangwu
@@ -401,9 +401,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  department_name : pro  <unnamed portal 63>
-NOTICE:  department_name : rd  <unnamed portal 62>
-NOTICE:  department_name : sale  <unnamed portal 61>
+NOTICE:  department_name : pro  <unnamed portal 47>
+NOTICE:  department_name : rd  <unnamed portal 46>
+NOTICE:  department_name : sale  <unnamed portal 45>
 NOTICE:   department employees info : 1 zhang
 NOTICE:   department employees info : 2 li
  test_cursor_2 
@@ -437,9 +437,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  department_name : pro  <unnamed portal 67>
-NOTICE:  department_name : rd  <unnamed portal 66>
-NOTICE:  department_name : sale  <unnamed portal 65>
+NOTICE:  department_name : pro  <unnamed portal 51>
+NOTICE:  department_name : rd  <unnamed portal 50>
+NOTICE:  department_name : sale  <unnamed portal 49>
 NOTICE:   department employees info : 1 zhang
 NOTICE:   department employees info : 2 li
  test_cursor_2 
@@ -506,9 +506,9 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  department_name : pro  <unnamed portal 71>
-NOTICE:  department_name : rd  <unnamed portal 70>
-NOTICE:  department_name : sale  <unnamed portal 69>
+NOTICE:  department_name : pro  <unnamed portal 55>
+NOTICE:  department_name : rd  <unnamed portal 54>
+NOTICE:  department_name : sale  <unnamed portal 53>
 NOTICE:   department employees info : 1 zhang
 NOTICE:   department employees info : 2 li
  test_cursor_2 
@@ -521,9 +521,9 @@ drop procedure test_cursor_2;
 SELECT department_name, CURSOR(with aa as (select employees_id from employees) select * from aa) FROM departments d;
  department_name |      ?column?       
 -----------------+---------------------
- sale            | <unnamed portal 72>
- rd              | <unnamed portal 73>
- pro             | <unnamed portal 74>
+ sale            | <unnamed portal 56>
+ rd              | <unnamed portal 57>
+ pro             | <unnamed portal 58>
 (3 rows)
 
 -- test conflict with cursor function
@@ -554,7 +554,7 @@ set behavior_compat_options = 'prefer_parse_cursor_parentheses_as_expr';
 SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
  department_name |      ?column?       
 -----------------+---------------------
- sale            | <unnamed portal 75>
+ sale            | <unnamed portal 59>
 (1 row)
 
 -- view contain cursor expr
@@ -562,7 +562,7 @@ create view v1 as SELECT department_name, CURSOR(SELECT e.name FROM employees e)
 select * from v1;
  department_name |      ?column?       
 -----------------+---------------------
- sale            | <unnamed portal 76>
+ sale            | <unnamed portal 60>
 (1 row)
 
 drop view v1;
@@ -570,19 +570,19 @@ drop view v1;
 SELECT department_name, CURSOR((SELECT e.name FROM employees e)) FROM departments d WHERE department_name='sale' ORDER BY department_name;
  department_name |      ?column?       
 -----------------+---------------------
- sale            | <unnamed portal 77>
+ sale            | <unnamed portal 61>
 (1 row)
 
 SELECT department_name, CURSOR(((SELECT e.name FROM employees e))) FROM departments d WHERE department_name='sale' ORDER BY department_name;
  department_name |      ?column?       
 -----------------+---------------------
- sale            | <unnamed portal 78>
+ sale            | <unnamed portal 62>
 (1 row)
 
 SELECT department_name, CURSOR(((/*test*/SELECT e.name FROM employees e))) FROM departments d WHERE department_name='sale' ORDER BY department_name;
  department_name |      ?column?       
 -----------------+---------------------
- sale            | <unnamed portal 79>
+ sale            | <unnamed portal 63>
 (1 row)
 
 -- permission
@@ -625,10 +625,10 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  company_name : zhangsan  <unnamed portal 86>
-NOTICE:  company_name : lisi  <unnamed portal 87>
-NOTICE:  company_name : wangwu  <unnamed portal 88>
-NOTICE:  company_name : heliu  <unnamed portal 89>
+NOTICE:  company_name : zhangsan  <unnamed portal 66>
+NOTICE:  company_name : lisi  <unnamed portal 67>
+NOTICE:  company_name : wangwu  <unnamed portal 68>
+NOTICE:  company_name : heliu  <unnamed portal 69>
  test_cursor_2 
 ---------------
  
@@ -658,22 +658,22 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  company_name : zhangsan  <unnamed portal 95>
+NOTICE:  company_name : zhangsan  <unnamed portal 71>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
 NOTICE:       last_name : heliu
-NOTICE:  company_name : lisi  <unnamed portal 96>
+NOTICE:  company_name : lisi  <unnamed portal 72>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
 NOTICE:       last_name : heliu
-NOTICE:  company_name : wangwu  <unnamed portal 97>
+NOTICE:  company_name : wangwu  <unnamed portal 73>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
 NOTICE:       last_name : heliu
-NOTICE:  company_name : heliu  <unnamed portal 98>
+NOTICE:  company_name : heliu  <unnamed portal 74>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
@@ -698,10 +698,10 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  zhangsan <unnamed portal 100>
-NOTICE:  lisi <unnamed portal 101>
-NOTICE:  wangwu <unnamed portal 102>
-NOTICE:  heliu <unnamed portal 103>
+NOTICE:  zhangsan <unnamed portal 76>
+NOTICE:  lisi <unnamed portal 77>
+NOTICE:  wangwu <unnamed portal 78>
+NOTICE:  heliu <unnamed portal 79>
  test_cursor_2 
 ---------------
  
@@ -722,10 +722,10 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  zhangsan <unnamed portal 105>
-NOTICE:  lisi <unnamed portal 106>
-NOTICE:  wangwu <unnamed portal 107>
-NOTICE:  heliu <unnamed portal 108>
+NOTICE:  zhangsan <unnamed portal 81>
+NOTICE:  lisi <unnamed portal 82>
+NOTICE:  wangwu <unnamed portal 83>
+NOTICE:  heliu <unnamed portal 84>
  test_cursor_2 
 ---------------
  
@@ -748,10 +748,10 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  name : zhangsan  <unnamed portal 114>
-NOTICE:  name : lisi  <unnamed portal 115>
-NOTICE:  name : wangwu  <unnamed portal 116>
-NOTICE:  name : heliu  <unnamed portal 117>
+NOTICE:  name : zhangsan  <unnamed portal 86>
+NOTICE:  name : lisi  <unnamed portal 87>
+NOTICE:  name : wangwu  <unnamed portal 88>
+NOTICE:  name : heliu  <unnamed portal 89>
  test_cursor_2 
 ---------------
  
@@ -778,22 +778,22 @@ begin
 end;
 /
 call test_cursor_2();
-NOTICE:  zhangsan <unnamed portal 119>
+NOTICE:  zhangsan <unnamed portal 91>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
 NOTICE:       last_name : heliu
-NOTICE:  lisi <unnamed portal 120>
+NOTICE:  lisi <unnamed portal 92>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
 NOTICE:       last_name : heliu
-NOTICE:  wangwu <unnamed portal 121>
+NOTICE:  wangwu <unnamed portal 93>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu
 NOTICE:       last_name : heliu
-NOTICE:  heliu <unnamed portal 122>
+NOTICE:  heliu <unnamed portal 94>
 NOTICE:       last_name : zhangsan
 NOTICE:       last_name : lisi
 NOTICE:       last_name : wangwu

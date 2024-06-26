@@ -100,7 +100,55 @@ END;
 ALTER VIEW source_schema.test SET SCHEMA target_schema;  --expected: SET SCHEMA ERROR
 ALTER PROCEDURE source_schema.test() SET SCHEMA target_schema;  --expected: SET SCHEMA ERROR
 
+
+create table SYN_TAB_001
+(
+id int,
+name varchar2(10),
+sal number
+);
+
+insert into SYN_TAB_001 values(1,'aaa',2600);
+insert into SYN_TAB_001 values(1,'bbb',2600);
+insert into SYN_TAB_001 values(2,'ccc',2800);
+insert into SYN_TAB_001 values(3,'ddd',3000);
+insert into SYN_TAB_001 values(3,'fff',3000);
+insert into SYN_TAB_001 values(4,'eee',3200);
+
+create or replace function SYN_FUN_001(a number) return number
+as
+begin
+        return a+1000;
+end;
+/
+
+create or replace  synonym  SYN_FUN_SYN_001 for SYN_FUN_001;
+
+create or replace procedure SYN_PROC_001
+as
+        c_cur sys_refcursor;
+        c_id int;
+  c_name varchar2(10);
+        c_syn number;
+begin
+        open c_cur for select id,name,SYN_FUN_SYN_001(sal) syn from SYN_TAB_001;
+        loop
+                fetch c_cur into c_id,c_name,c_syn;
+                exit when c_cur%notfound;
+            raise info 'c_id:% - c_name:% - c_syn:%',c_id,c_name,c_syn;
+        end loop;
+        close c_cur;
+end;
+/
+
+select SYN_PROC_001();
+
 -- clean up
+drop table if exists SYN_TAB_001 cascade;
+drop function SYN_FUN_001;
+drop procedure SYN_PROC_001;
+drop synonym if exists SYN_FUN_SYN_001;
+
 RESET current_schema;
 DROP SCHEMA synonym_test_schema CASCADE;
 DROP SCHEMA target_schema CASCADE;
