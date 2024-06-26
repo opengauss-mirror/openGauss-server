@@ -1274,6 +1274,7 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
             break;
         case RM_UBTREE2_ID:
             UBTree2RedoDataBlock(blockhead, blockdatarec, bufferinfo);
+            break;
         case RM_HASH_ID:
             HashRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
