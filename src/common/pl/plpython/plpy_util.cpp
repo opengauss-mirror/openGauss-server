@@ -17,43 +17,6 @@
 
 #include "plpy_elog.h"
 
-void* PLy_malloc(size_t bytes)
-{
-    /* We need our allocations to be long-lived, so use t_thrd.top_mem_cxt */
-    return MemoryContextAlloc(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-}
-
-void* PLy_malloc0(size_t bytes)
-{
-    void* ptr = PLy_malloc(bytes);
-
-    if (bytes > 0) {
-        errno_t rc = memset_s(ptr, bytes, 0, bytes);
-        securec_check(rc, "\0", "\0");
-    }
-    return ptr;
-}
-
-char* PLy_strdup(const char* str)
-{
-    char* result = NULL;
-    size_t len;
-    errno_t rc = EOK;
-
-    len = strlen(str) + 1;
-    result = (char*)PLy_malloc(len);
-    rc = memcpy_s(result, len, str, len);
-    securec_check(rc, "\0", "\0");
-
-    return result;
-}
-
-/* define this away */
-void PLy_free(void* ptr)
-{
-    pfree(ptr);
-}
-
 /*
  * Convert a Python unicode object to a Python string/bytes object in
  * openGauss server encoding.	Reference ownership is passed to the

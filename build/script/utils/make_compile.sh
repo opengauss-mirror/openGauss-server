@@ -161,7 +161,7 @@ function install_gaussdb()
     
     shared_opt="--gcc-version=${gcc_version}.${gcc_sub_version} --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} ${with_tassl} --without-zlib"
     if [ "$product_mode"x == "opengauss"x ]; then
-            GAUSSDB_EXTRA_FLAGS=" "
+        GAUSSDB_EXTRA_FLAGS=" "
 
         if [[ "$PLATFORM_ARCH"x == "x86_64"x || "$PLATFORM_ARCH"x == "aarch64"x ]] ; then
             extra_config_opt+=" --enable-mot --enable-bbox --enable-htap"

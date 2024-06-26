@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- * 
+ *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
  * You may obtain a copy of Mulan PSL v2 at:
@@ -26,6 +26,7 @@
 
 #include "access/xact.h"
 #include "executor/spi.h"
+#include "utils/memutils.h"
 
 #include "plpython.h"
 
@@ -135,7 +136,9 @@ static PyObject* PLy_subtransaction_enter(PyObject* self, PyObject* unused)
     subxact->started = true;
     oldcontext = CurrentMemoryContext;
 
-    subxactdata = (PLySubtransactionData*)PLy_malloc(sizeof(*subxactdata));
+    subxactdata = (PLySubtransactionData *) MemoryContextAlloc(
+        u_sess->attr.attr_common.g_PlySessionCtx->session_mctx, sizeof(PLySubtransactionData));
+
     subxactdata->oldcontext = oldcontext;
     subxactdata->oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
 
@@ -146,10 +149,14 @@ static PyObject* PLy_subtransaction_enter(PyObject* self, PyObject* unused)
 #endif
 
     BeginInternalSubTransaction(NULL);
-    /* Do not want to leave the previous memory context */
-    MemoryContextSwitchTo(oldcontext);
+    /* Be sure that cells of explicit_subtransactions list are long-lived */
+    MemoryContextSwitchTo(u_sess->attr.attr_common.g_PlySessionCtx->session_mctx);
 
-    g_plpy_t_context.explicit_subtransactions = lcons(subxactdata, g_plpy_t_context.explicit_subtransactions);
+    u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions = lcons(
+        subxactdata, u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions);
+
+    /* Caller wants to stay in original memory context */
+    MemoryContextSwitchTo(oldcontext);
 
     Py_INCREF(self);
     return self;
@@ -188,7 +195,7 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
         return NULL;
     }
 
-    if (g_plpy_t_context.explicit_subtransactions == NIL) {
+    if (u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions == NIL) {
         PLy_exception_set(PyExc_ValueError, "there is no subtransaction to exit from");
         return NULL;
     }
@@ -217,12 +224,14 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
 #endif
     }
 
-    subxactdata = (PLySubtransactionData*)linitial(g_plpy_t_context.explicit_subtransactions);
-    g_plpy_t_context.explicit_subtransactions = list_delete_first(g_plpy_t_context.explicit_subtransactions);
+    subxactdata = (PLySubtransactionData*)linitial(
+        u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions);
+    u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions = list_delete_first(
+        u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions);
 
     MemoryContextSwitchTo(subxactdata->oldcontext);
     t_thrd.utils_cxt.CurrentResourceOwner = subxactdata->oldowner;
-    PLy_free(subxactdata);
+    pfree(subxactdata);
 
     /*
      * AtEOSubXact_SPI() should not have popped any SPI context, but just in

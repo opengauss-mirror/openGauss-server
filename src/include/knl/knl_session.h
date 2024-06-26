@@ -3223,6 +3223,8 @@ typedef struct knl_session_context {
     knl_u_plancache_context pcache_cxt;
     knl_u_parameterization_context param_cxt;
     knl_u_plpgsql_context plsql_cxt;
+    /* plpython is a plugin, avoid exposing its definition in the kernel, use void* */
+    void* plpython_ctx;
     knl_u_postgres_context postgres_cxt;
     knl_u_proc_context proc_cxt;
     knl_u_ps_context ps_cxt;
@@ -3335,6 +3337,7 @@ extern void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt);
 extern void knl_session_init(knl_session_context* sess_cxt);
 extern void knl_u_executor_init(knl_u_executor_context* exec_cxt);
 extern knl_session_context* create_session_context(MemoryContext parent, uint64 id);
+extern void free_plpython_session_context(knl_session_context* session);
 extern void free_session_context(knl_session_context* session);
 extern void use_fake_session();
 extern bool stp_set_commit_rollback_err_msg(stp_xact_err_type type);

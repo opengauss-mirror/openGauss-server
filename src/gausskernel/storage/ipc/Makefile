@@ -17,6 +17,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = ipc.o ipci.o pmsignal.o procarray.o procsignal.o shmem.o shmqueue.o \
-	sinval.o sinvaladt.o standby.o
+	sinval.o sinvaladt.o standby.o plpython_init.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -144,7 +144,7 @@ static PyObject* PLy_result_colnames(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(g_ply_ctx->PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
@@ -163,7 +163,7 @@ static PyObject* PLy_result_coltypes(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(g_ply_ctx->PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
@@ -182,7 +182,7 @@ static PyObject* PLy_result_coltypmods(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(g_ply_ctx->PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 

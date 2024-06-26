@@ -180,6 +180,7 @@ typedef enum LockTagType {
     LOCKTAG_SUBTRANSACTION, /* subtransaction (for waiting for subxact done) */
     /* ID info for a transaction is its TransactionId + SubTransactionId */
     LOCKTAG_UID,
+    LOCKTAG_PLPY_GIL,
     LOCK_EVENT_NUM
 } LockTagType;
 
@@ -324,6 +325,15 @@ typedef struct LOCKTAG {
         (locktag).locktag_field4 = 0,                          \
         (locktag).locktag_field5 = 0,                          \
         (locktag).locktag_type = LOCKTAG_PARTITION_SEQUENCE,   \
+        (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
+
+#define SET_LOCKTAG_PLPY_GIL(locktag)                \
+        ((locktag).locktag_field1 = 0,               \
+        (locktag).locktag_field2 = 0,                \
+        (locktag).locktag_field3 = 0,                \
+        (locktag).locktag_field4 = 0,                \
+        (locktag).locktag_field5 = 0,                \
+        (locktag).locktag_type = LOCKTAG_PLPY_GIL,   \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
 
 #define SET_LOCKTAG_CSTORE_FREESPACE(locktag, id1, id2)    \

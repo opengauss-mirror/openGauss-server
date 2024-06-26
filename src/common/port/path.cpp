@@ -640,6 +640,21 @@ void get_pkglib_path(const char* my_exec_path, char* ret_path)
     make_relative_path(ret_path, MAXPGPATH, PKGLIBDIR, PGBINDIR, my_exec_path);
 }
 
+void GetPythonhomePath(const char* myExecPath, char* retPath)
+{
+    /*
+     * MakeFile is too hard to modify, here we get PYTHONHOME through relative path simply
+     * PYTHONHOME is installed in the PGHOME/python directory
+     */
+    char pghome[MAXPGPATH];
+    errno_t rc = strncpy_s(pghome, MAXPGPATH, myExecPath, MAXPGPATH);  /* PGHOME/bin/gaussdb */
+    securec_check_c(rc, "\0", "\0");
+    get_parent_directory(pghome);    /* PGHOME/bin/ */
+    get_parent_directory(pghome);    /* PGHOME */
+    (void)snprintf_s(retPath, MAXPGPATH, MAXPGPATH - 1, "%s/python", pghome); /* PGHOME/python */
+}
+
+
 /*
  *	get_locale_path
  */

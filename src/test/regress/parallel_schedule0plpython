@@ -1,0 +1,17 @@
+# plpython tests
+test: plpython3u/plpython_schema
+test: plpython3u/plpython_populate
+test: plpython3u/plpython_test
+test: plpython3u/plpython_do
+test: plpython3u/plpython_global
+test: plpython3u/plpython_global_session
+test: plpython3u/plpython_import
+#test: plpython3u/plpython_spi
+test: plpython3u/plpython_newline plpython3u/plpython_void plpython3u/plpython_params plpython3u/plpython_setof plpython3u/plpython_record
+test: plpython3u/plpython_types
+#test: plpython3u/plpython_error
+test: plpython3u/plpython_unicode plpython3u/plpython_quote
+test: plpython3u/plpython_composite
+#test: plpython3u/plpython_subtransaction
+test: plpython3u/plpython_gms_xslprocessor plpython3u/plpython_gms_xmldom
+test: plpython3u/plpython_drop

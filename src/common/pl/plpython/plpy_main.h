@@ -7,26 +7,6 @@
 
 #include "plpy_procedure.h"
 
-class PyLock {
-public:
-    explicit PyLock(int* lockLevel) : m_lockLevel(lockLevel)
-    {
-        (*m_lockLevel)++;
-    }
-
-    ~PyLock()
-    {
-        (*m_lockLevel)--;
-    }
-    void Reset()
-    {
-        (*m_lockLevel) = 0;
-    }
-
-private:
-    int* m_lockLevel;
-};
-
 /*
  * A stack of PL/Python execution contexts. Each time user-defined Python code
  * is called, an execution context is created and put on the stack. After the
@@ -40,5 +20,8 @@ typedef struct PLyExecutionContext {
 
 /* Get the current execution context */
 extern PLyExecutionContext* PLy_current_execution_context(void);
+
+/* Get the scratch memory context for specified execution context */
+extern MemoryContext PLy_get_scratch_context(PLyExecutionContext *context);
 
 #endif /* PLPY_MAIN_H */

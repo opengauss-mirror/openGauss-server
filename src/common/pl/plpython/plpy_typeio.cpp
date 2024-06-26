@@ -27,8 +27,8 @@
 #include "plpy_main.h"
 
 /* I/O function caching */
-static void PLy_input_datum_func2(PLyDatumToOb* arg, Oid typeOid, HeapTuple typeTup);
-static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup);
+static void PLy_input_datum_func2(PLyDatumToOb* arg, MemoryContext arg_mcxt, Oid typeOid, HeapTuple typeTup);
+static void PLy_output_datum_func2(PLyObToDatum* arg, MemoryContext arg_mcxt, HeapTuple typeTup);
 
 /* conversion from Datums to Python objects */
 static PyObject* PLyBool_FromBool(PLyDatumToOb* arg, Datum d);
@@ -58,10 +58,8 @@ static Datum PLyMapping_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject*
 static Datum PLySequence_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* sequence);
 static Datum PLyGenericObject_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* object);
 
-/* make allocations in the TopMemoryContext */
-static void perm_fmgr_info(Oid functionId, FmgrInfo* finfo);
 
-void PLy_typeinfo_init(PLyTypeInfo* arg)
+void PLy_typeinfo_init(PLyTypeInfo* arg, MemoryContext mcxt)
 {
     arg->is_rowtype = -1;
     arg->in.r.natts = arg->out.r.natts = 0;
@@ -70,30 +68,7 @@ void PLy_typeinfo_init(PLyTypeInfo* arg)
     arg->typ_relid = InvalidOid;
     arg->typrel_xmin = InvalidTransactionId;
     ItemPointerSetInvalid(&arg->typrel_tid);
-}
-
-void PLy_typeinfo_dealloc(PLyTypeInfo* arg)
-{
-    if (arg->is_rowtype == 1) {
-        int i;
-
-        for (i = 0; i < arg->in.r.natts; i++) {
-            if (arg->in.r.atts[i].elm != NULL) {
-                PLy_free(arg->in.r.atts[i].elm);
-            }
-        }
-        if (arg->in.r.atts) {
-            PLy_free(arg->in.r.atts);
-        }
-        for (i = 0; i < arg->out.r.natts; i++) {
-            if (arg->out.r.atts[i].elm != NULL) {
-                PLy_free(arg->out.r.atts[i].elm);
-            }
-        }
-        if (arg->out.r.atts) {
-            PLy_free(arg->out.r.atts);
-        }
-    }
+    arg->mcxt = mcxt;
 }
 
 /*
@@ -106,7 +81,7 @@ void PLy_input_datum_func(PLyTypeInfo* arg, Oid typeOid, HeapTuple typeTup)
         elog(ERROR, "PLyTypeInfo struct is initialized for Tuple");
     }
     arg->is_rowtype = 0;
-    PLy_input_datum_func2(&(arg->in.d), typeOid, typeTup);
+    PLy_input_datum_func2(&(arg->in.d), arg->mcxt, typeOid, typeTup);
 }
 
 void PLy_output_datum_func(PLyTypeInfo* arg, HeapTuple typeTup)
@@ -115,12 +90,13 @@ void PLy_output_datum_func(PLyTypeInfo* arg, HeapTuple typeTup)
         elog(ERROR, "PLyTypeInfo struct is initialized for a Tuple");
     }
     arg->is_rowtype = 0;
-    PLy_output_datum_func2(&(arg->out.d), typeTup);
+    PLy_output_datum_func2(&(arg->out.d), arg->mcxt, typeTup);
 }
 
 void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
 {
     int i;
+    MemoryContext oldcxt = MemoryContextSwitchTo(arg->mcxt);
 
     if (arg->is_rowtype == 0) {
         elog(ERROR, "PLyTypeInfo struct is initialized for a Datum");
@@ -129,10 +105,10 @@ void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
 
     if (arg->in.r.natts != desc->natts) {
         if (arg->in.r.atts) {
-            PLy_free(arg->in.r.atts);
+            pfree(arg->in.r.atts);
         }
         arg->in.r.natts = desc->natts;
-        arg->in.r.atts = (PLyDatumToOb*)PLy_malloc0(desc->natts * sizeof(PLyDatumToOb));
+        arg->in.r.atts = (PLyDatumToOb*)palloc0(desc->natts * sizeof(PLyDatumToOb));
     }
 
     /* Can this be an unnamed tuple? If not, then an Assert would be enough */
@@ -179,15 +155,18 @@ void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
             elog(ERROR, "cache lookup failed for type %u", desc->attrs[i].atttypid);
         }
 
-        PLy_input_datum_func2(&(arg->in.r.atts[i]), desc->attrs[i].atttypid, typeTup);
+        PLy_input_datum_func2(&(arg->in.r.atts[i]), arg->mcxt,
+            TupleDescAttr(desc, i)->atttypid, typeTup);
 
         ReleaseSysCache(typeTup);
     }
+    MemoryContextSwitchTo(oldcxt);
 }
 
 void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
 {
     int i;
+    MemoryContext oldcxt = MemoryContextSwitchTo(arg->mcxt);
 
     if (arg->is_rowtype == 0) {
         elog(ERROR, "PLyTypeInfo struct is initialized for a Datum");
@@ -196,10 +175,10 @@ void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
 
     if (arg->out.r.natts != desc->natts) {
         if (arg->out.r.atts) {
-            PLy_free(arg->out.r.atts);
+            pfree(arg->out.r.atts);
         }
         arg->out.r.natts = desc->natts;
-        arg->out.r.atts = (PLyObToDatum*)PLy_malloc0(desc->natts * sizeof(PLyObToDatum));
+        arg->out.r.atts = (PLyObToDatum*)palloc0(desc->natts * sizeof(PLyObToDatum));
     }
 
     Assert(OidIsValid(desc->tdtypeid));
@@ -241,10 +220,11 @@ void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
             elog(ERROR, "cache lookup failed for type %u", desc->attrs[i].atttypid);
         }
 
-        PLy_output_datum_func2(&(arg->out.r.atts[i]), typeTup);
+        PLy_output_datum_func2(&(arg->out.r.atts[i]), arg->mcxt, typeTup);
 
         ReleaseSysCache(typeTup);
     }
+    MemoryContextSwitchTo(oldcxt);
 }
 
 void PLy_output_record_funcs(PLyTypeInfo* arg, TupleDesc desc)
@@ -274,12 +254,12 @@ void PLy_output_record_funcs(PLyTypeInfo* arg, TupleDesc desc)
 /*
  * Transform a tuple into a Python dict object.
  */
-PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, bool include_generated)
+PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc, bool include_generated)
 {
     PyObject* volatile dict = NULL;
     PLyExecutionContext* exec_ctx = PLy_current_execution_context();
+    MemoryContext scratch_context = PLy_get_scratch_context(exec_ctx);
     MemoryContext oldcontext = CurrentMemoryContext;
-    int i;
 
     if (info->is_rowtype != 1) {
         elog(ERROR, "PLyTypeInfo structure describes a datum");
@@ -292,11 +272,12 @@ PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, 
 
     PG_TRY();
     {
+        int i;
         /*
          * Do the work in the scratch context to avoid leaking memory from the
          * datatype output function calls.
          */
-        MemoryContextSwitchTo(exec_ctx->scratch_ctx);
+        MemoryContextSwitchTo(scratch_context);
         for (i = 0; i < info->in.r.natts; i++) {
             char* key = NULL;
             Datum vattr;
@@ -312,7 +293,6 @@ PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, 
                 if (!include_generated)
                     continue;
             }
-
             key = NameStr(desc->attrs[i].attname);
             vattr = heap_getattr(tuple, (i + 1), desc, &is_null);
 
@@ -325,7 +305,7 @@ PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, 
             }
         }
         MemoryContextSwitchTo(oldcontext);
-        MemoryContextReset(exec_ctx->scratch_ctx);
+        MemoryContextReset(scratch_context);
     }
     PG_CATCH();
     {
@@ -363,12 +343,13 @@ Datum PLyObject_ToCompositeDatum(PLyTypeInfo* info, TupleDesc desc, PyObject* pl
     return datum;
 }
 
-static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup)
+static void PLy_output_datum_func2(PLyObToDatum* arg, MemoryContext arg_mcxt, HeapTuple typeTup)
 {
     Form_pg_type typeStruct = (Form_pg_type)GETSTRUCT(typeTup);
     Oid element_type;
+    MemoryContext oldcxt = MemoryContextSwitchTo(arg_mcxt);
 
-    perm_fmgr_info(typeStruct->typinput, &arg->typfunc);
+    fmgr_info_cxt(typeStruct->typinput, &arg->typfunc, arg_mcxt);
     arg->typoid = HeapTupleGetOid(typeTup);
     arg->typmod = -1;
     arg->typioparam = getTypeIOParam(typeTup);
@@ -402,13 +383,10 @@ static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup)
         Oid funcid;
 
         if (type_is_rowtype(element_type)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("PL/Python functions cannot return type %s", format_type_be(arg->typoid)),
-                    errdetail("PL/Python does not support conversion to arrays of row types.")));
+            arg->func = PLyObject_ToComposite;
         }
 
-        arg->elm = (PLyObToDatum*)PLy_malloc0(sizeof(*arg->elm));
+        arg->elm = (PLyObToDatum*)palloc0(sizeof(*arg->elm));
         arg->elm->func = arg->func;
         arg->func = PLySequence_ToArray;
 
@@ -422,17 +400,19 @@ static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup)
             &dummy_delim,
             &arg->elm->typioparam,
             &funcid);
-        perm_fmgr_info(funcid, &arg->elm->typfunc);
+        fmgr_info_cxt(funcid, &arg->elm->typfunc, arg_mcxt);
     }
+    MemoryContextSwitchTo(oldcxt);
 }
 
-static void PLy_input_datum_func2(PLyDatumToOb* arg, Oid typeOid, HeapTuple typeTup)
+static void PLy_input_datum_func2(PLyDatumToOb* arg, MemoryContext arg_mcxt, Oid typeOid, HeapTuple typeTup)
 {
     Form_pg_type typeStruct = (Form_pg_type)GETSTRUCT(typeTup);
     Oid element_type = get_element_type(typeOid);
+    MemoryContext oldcxt = MemoryContextSwitchTo(arg_mcxt);
 
     /* Get the type's conversion information */
-    perm_fmgr_info(typeStruct->typoutput, &arg->typfunc);
+    fmgr_info_cxt(typeStruct->typoutput, &arg->typfunc, arg_mcxt);
     arg->typoid = HeapTupleGetOid(typeTup);
     arg->typmod = -1;
     arg->typioparam = getTypeIOParam(typeTup);
@@ -478,7 +458,7 @@ static void PLy_input_datum_func2(PLyDatumToOb* arg, Oid typeOid, HeapTuple type
         char dummy_delim;
         Oid funcid;
 
-        arg->elm = (PLyDatumToOb*)PLy_malloc0(sizeof(*arg->elm));
+        arg->elm = (PLyDatumToOb*)palloc0(sizeof(*arg->elm));
         arg->elm->func = arg->func;
         arg->func = PLyList_FromArray;
         arg->elm->typoid = element_type;
@@ -491,8 +471,9 @@ static void PLy_input_datum_func2(PLyDatumToOb* arg, Oid typeOid, HeapTuple type
             &dummy_delim,
             &arg->elm->typioparam,
             &funcid);
-        perm_fmgr_info(funcid, &arg->elm->typfunc);
+        fmgr_info_cxt(funcid, &arg->elm->typfunc, arg_mcxt);
     }
+    MemoryContextSwitchTo(oldcxt);
 }
 
 static PyObject* PLyBool_FromBool(PLyDatumToOb* arg, Datum d)
@@ -759,7 +740,7 @@ static Datum PLyObject_ToComposite(PLyObToDatum* arg, int32 typmod, PyObject* pl
     errno_t rc = memset_s(&info, sizeof(PLyTypeInfo), 0, sizeof(PLyTypeInfo));
     securec_check(rc, "\0", "\0");
 
-    PLy_typeinfo_init(&info);
+    PLy_typeinfo_init(&info, u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
     /* Mark it as needing output routines lookup */
     info.is_rowtype = 2;
 
@@ -773,7 +754,9 @@ static Datum PLyObject_ToComposite(PLyObToDatum* arg, int32 typmod, PyObject* pl
      */
     rv = PLyObject_ToCompositeDatum(&info, desc, plrv);
 
-    PLy_typeinfo_dealloc(&info);
+    ReleaseTupleDesc(desc);
+
+    MemoryContextReset(u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
 
     return rv;
 }
@@ -860,11 +843,6 @@ static Datum PLySequence_ToArray(PLyObToDatum* arg, int32 typmod, PyObject* plrv
             nulls[i] = true;
         } else {
             nulls[i] = false;
-
-            /*
-             * We don't support arrays of row types yet, so the first argument
-             * can be NULL.
-             */
             elems[i] = arg->elm->func(arg->elm, -1, obj);
         }
         Py_XDECREF(obj);
@@ -893,23 +871,32 @@ static Datum PLySequence_ToArray(PLyObToDatum* arg, int32 typmod, PyObject* plrv
 
 static Datum PLyString_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* string)
 {
+    Datum result;
     HeapTuple typeTup;
+    PLyTypeInfo locinfo;
+
+    /* Create a dummy PLyTypeInfo */
+    MemSet(&locinfo, 0, sizeof(PLyTypeInfo));
+    PLy_typeinfo_init(&locinfo, u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
 
     typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->tdtypeid));
-    if (!HeapTupleIsValid(typeTup)) {
+    if (!HeapTupleIsValid(typeTup))
         elog(ERROR, "cache lookup failed for type %u", desc->tdtypeid);
-    }
 
-    PLy_output_datum_func2(&info->out.d, typeTup);
+    PLy_output_datum_func2(&locinfo.out.d, locinfo.mcxt, typeTup);
 
     ReleaseSysCache(typeTup);
-    ReleaseTupleDesc(desc);
 
-    return PLyObject_ToDatum(&info->out.d, info->out.d.typmod, string);
+    result = PLyObject_ToDatum(&locinfo.out.d, desc->tdtypmod, string);
+
+    MemoryContextReset(u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
+
+    return result;
 }
 
 static Datum PLyMapping_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* mapping)
 {
+    Datum result;
     HeapTuple tuple;
     Datum* values = NULL;
     bool* nulls = NULL;
@@ -967,15 +954,18 @@ static Datum PLyMapping_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject*
     }
 
     tuple = heap_form_tuple(desc, values, nulls);
-    ReleaseTupleDesc(desc);
+    result = heap_copy_tuple_as_datum(tuple, desc);
+    heap_freetuple(tuple);
+
     pfree(values);
     pfree(nulls);
 
-    return HeapTupleGetDatum(tuple);
+    return result;
 }
 
 static Datum PLySequence_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* sequence)
 {
+    Datum result;
     HeapTuple tuple;
     Datum* values = NULL;
     bool* nulls = NULL;
@@ -1048,15 +1038,18 @@ static Datum PLySequence_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject
     }
 
     tuple = heap_form_tuple(desc, values, nulls);
-    ReleaseTupleDesc(desc);
+    result = heap_copy_tuple_as_datum(tuple, desc);
+    heap_freetuple(tuple);
+
     pfree(values);
     pfree(nulls);
 
-    return HeapTupleGetDatum(tuple);
+    return result;
 }
 
 static Datum PLyGenericObject_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* object)
 {
+    Datum result;
     HeapTuple tuple;
     Datum* values = NULL;
     bool* nulls = NULL;
@@ -1113,26 +1106,11 @@ static Datum PLyGenericObject_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyO
     }
 
     tuple = heap_form_tuple(desc, values, nulls);
-    ReleaseTupleDesc(desc);
+    result = heap_copy_tuple_as_datum(tuple, desc);
+    heap_freetuple(tuple);
+
     pfree(values);
     pfree(nulls);
 
-    return HeapTupleGetDatum(tuple);
-}
-
-/*
- * This routine is a crock, and so is everyplace that calls it.  The problem
- * is that the cached form of plpython functions/queries is allocated permanently
- * (mostly via malloc()) and never released until backend exit.  Subsidiary
- * data structures such as fmgr info records therefore must live forever
- * as well.  A better implementation would store all this stuff in a per-
- * function memory context that could be reclaimed at need.  In the meantime,
- * fmgr_info_cxt must be called specifying
- * THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB) so that whatever
- * it might allocate, and whatever the eventual function might allocate using
- * fn_mcxt, will live forever too.
- */
-static void perm_fmgr_info(Oid functionId, FmgrInfo* finfo)
-{
-    fmgr_info_cxt(functionId, finfo, THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    return result;
 }
