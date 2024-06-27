@@ -109,6 +109,127 @@ end;
 
 call pro_cursor_no_args_2();
 
+-- test: max len
+drop table if exists t1;
+create table t1(col1 tinyint primary key,col2 varchar(10));
+
+declare
+  cursor case1 is select * from t1;
+  source case1%rowtype:=(200,'abcdeabcedone');
+begin
+  raise notice '% , %',source.col1,source.col2;
+end;
+/
+
+declare
+  cursor case1 is select * from t1;
+  source case1%rowtype;
+begin
+  source:=(200,'abcdeabcedone');
+  raise notice '% , %',source.col1,source.col2;
+end;
+/
+drop table if exists t1;
+-- test:pkg head max len
+create table test12(col1 varchar(10), col2 varchar(10));
+insert into test12 values ('a', 'aa');
+insert into test12 values ('a', 'aa');
+insert into test12 values ('b', 'bb');
+create table test22(col1 varchar2, col2 varchar2);
+insert into test22 values ('dsasdad6sad','d6sasdadsad');
+
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('dsasdad6sad','d6sasdadsad');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdadsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+
+call pck3p.ppp1();
+
+-- test:pkg body max len
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('GJHGH','TYUTD');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test12;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdaGJHGdsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+
+call pck3p.ppp1();
+
+-- test:cursor fetch max len
+create or replace package pck3p is
+cursor cur1 is select col1,col2 from test12;
+var1 cur1%rowtype:=('GJHGH','TYUTD');
+procedure ppp1;
+procedure ppp2(a cur1%rowtype);
+end pck3p;
+/
+
+create or replace package body pck3p is
+procedure ppp1() is
+cursor cur2 is
+select col1,col2 from test22;
+begin
+open cur2;
+fetch cur2 into var1;
+ppp2(var1);
+raise info '%', var1.col1;
+end;
+
+procedure ppp2(a cur1%rowtype) is
+begin
+    a.col1:='dsasdaGJHGdsad';
+    raise info '%', a.col1;
+end;
+end pck3p;
+/
+
+call pck3p.ppp1();
+drop package pck3p;
+drop table test12;
+drop table test22;
+
 create table test12(col1 varchar2,col2 varchar2);
 insert into test12 values ('a', 'aa');
 insert into test12 values ('b', 'bb');
