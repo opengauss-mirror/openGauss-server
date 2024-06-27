@@ -352,12 +352,26 @@ static inline void SSResetDemoteReqType(void)
     SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
 }
 
-static void SSHandleReformFailDuringDemote(DemoteMode demote_mode)
+static void SSHandleReformFailDuringDemote(bool timeout, DemoteMode demote_mode)
 {
     ereport(WARNING,
         (errmodule(MOD_DMS),
             errmsg("[SS reform][SS switchover] Failure in %s primary demote, pmState=%d, need reform rcy.",
                 DemoteModeDesc(demote_mode), pmState)));
+
+    if (timeout) {
+        g_instance.dms_cxt.SSReformInfo.switchover_demote_failure_signal_handled = false;
+        pg_memory_barrier();
+        SendPostmasterSignal(PMSIGNAL_DMS_SWITCHOVER_DEMOTE_FAILURE_CHECK);
+        const int WAIT_SIGNAL_HANDLED = 100; /* only wait 10s*/
+        for (int ntries = 0; ntries < WAIT_SIGNAL_HANDLED; ntries++) {
+            if (g_instance.dms_cxt.SSReformInfo.switchover_demote_failure_signal_handled) {
+                break;
+            }
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(100000L); /* wait 0.1 sec, then retry */
+        }
+    }
 
     /*
      * Shutdown checkpoint would cause concurrency as DMS is starting next round of reform.
@@ -413,10 +427,10 @@ static int CBSwitchoverDemote(void *db_handle)
             return DMS_SUCCESS;
         } else {
             if (ntries >= WAIT_DEMOTE || dms_reform_failed()) {
-                SSHandleReformFailDuringDemote(demote_mode);
+                bool timeout = ntries >= WAIT_DEMOTE ? true : false;
+                SSHandleReformFailDuringDemote(timeout, demote_mode);
                 return DMS_ERROR;
             }
-            ntries = 0;
         }
 
         CHECK_FOR_INTERRUPTS();
