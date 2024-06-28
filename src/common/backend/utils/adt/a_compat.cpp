@@ -932,10 +932,29 @@ Datum chr(PG_FUNCTION_ARGS)
             wch[2] = 0x80 | ((cvalue >> 6) & 0x3F);
             wch[3] = 0x80 | (cvalue & 0x3F);
         }
+    } else if (encoding == PG_GBK && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        unsigned char bytes[2];
+        char* wch = NULL;
+        if (cvalue > 0xfefe)
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmsg("requested character too large for encoding: %u", cvalue)));
 
-    }
+        for (int i = 0; i < 2; i++) {
+            bytes[i] = (cvalue >> ((1 - i) * 8)) & 0xFF;
+        }
 
-    else {
+        if (!pg_gbk_islegal(bytes, 2))
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmsg("invalid character length for encoding: %u", cvalue)));
+
+        result = (text*)palloc(VARHDRSZ + 2);
+        SET_VARSIZE(result, VARHDRSZ + 2);
+        wch = VARDATA(result);
+        wch[0] = (char)bytes[0];
+        wch[1] = (char)bytes[1];
+    } else {
         bool is_mb = false;
 
         /*
