@@ -4846,9 +4846,8 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
     }
 #endif
     (void)MemoryContextSwitchTo(oldcontext);
-    if(u_sess->hook_cxt.forTsdbHook && parse->commandType == CMD_INSERT) {
+    if(u_sess->hook_cxt.forTsdbHook && (parse->commandType == CMD_INSERT || parse->commandType == CMD_MERGE)) {
         
-        for_plugin_rel->reltarget->exprs = tlist;
         List* newList = NIL;
         
         List* returningLists = NIL;
