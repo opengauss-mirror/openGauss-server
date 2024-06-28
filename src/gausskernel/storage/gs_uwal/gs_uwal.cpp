@@ -1105,7 +1105,7 @@ int GsUwalWriteSync(int nBytes, char *buf, UwalNodeInfo *infos, bool specified, 
     params.cb = NULL;
 
     if (!specified) {
-        ock_uwal_append(&params, &offset, infos);
+        return ock_uwal_append(&params, &offset, infos);
     }
     return ock_uwal_append_with_offset(&params, targetOffset, &offset, infos);
 }

@@ -1209,7 +1209,7 @@ static void uwalRcvStateFree()
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->uwalMutex);
     if (walrcv->uwalRcvState != NULL) {
-        pfree(walrcv->uwalRcvState = NULL);
+        pfree(walrcv->uwalRcvState);
         walrcv->uwalRcvState = NULL;
     }
     SpinLockRelease(&walrcv->uwalMutex);
