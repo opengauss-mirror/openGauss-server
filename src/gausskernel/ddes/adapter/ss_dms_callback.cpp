@@ -2170,7 +2170,7 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
 void CBGetBufInfo(char* resid, stat_buf_info_t *buf_info)
 {
     BufferTag tag;
-    errno_t err = memcpy_s(&tag, DMS_RESID_SIZE, resid, DMS_RESID_SIZE);
+    errno_t err = memcpy_s(&tag, sizeof(BufferTag), resid, sizeof(BufferTag));
     securec_check(err, "\0", "\0");
     buftag_get_buf_info(tag, buf_info);
 }
