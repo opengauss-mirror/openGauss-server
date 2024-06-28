@@ -241,6 +241,7 @@ typedef struct knl_session_attr_storage {
     int umax_search_length_for_prune;
     int ustore_verify_level;
     int ustore_verify_module;
+    bool ustore_verify;
     int index_trace_level;
     int archive_interval;
     bool enable_ustore_sync_rollback;

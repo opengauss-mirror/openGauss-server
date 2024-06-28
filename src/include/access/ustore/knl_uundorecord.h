@@ -396,4 +396,6 @@ UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRec
 bool InplaceSatisfyUndoRecord(_in_ UndoRecord *urec, _in_ BlockNumber blkno, _in_ OffsetNumber offset,
     _in_ TransactionId xid);
 
+void UndoRecordVerify(_in_ UndoRecord *urec);
+
 #endif // __KNL_UUNDORECORD_H__

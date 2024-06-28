@@ -3936,15 +3936,13 @@ static void ParseUstoreVerifyLevel(int* mLevel, char* ptoken, const char* pdelim
         if (strcasecmp(ptoken, "NONE") == 0) {
             setVal = (int) USTORE_VERIFY_NONE;
         } else if (strcasecmp(ptoken, "FAST") == 0) {
-            setVal = (int) USTORE_VERIFY_DEFAULT;
-        } else if (strcasecmp(ptoken, "NORMAL") == 0) {
             setVal = (int) USTORE_VERIFY_FAST;
-        } else if (strcasecmp(ptoken, "SLOW") == 0) {
+        } else if (strcasecmp(ptoken, "COMPLETE") == 0) {
             setVal = (int) USTORE_VERIFY_COMPLETE;
         } else {
-            setVal = 0;
+            setVal = USTORE_VERIFY_DEFAULT;
             ereport(LOG, (errmodule(MOD_GUC),
-                errmsg("Invalid parameter settings, only support fast, normal and slow value.")));
+                errmsg("Invalid parameter settings, only support none, fast and complete value.")));
         }
     }
 
@@ -4067,32 +4065,30 @@ static bool IsValidUstoreAttrValues(const char* keyStr, char* value)
         strcasecmp(keyStr, "enable_ustore_sync_rollback") == 0 ||
         strcasecmp(keyStr, "enable_ustore_async_rollback") == 0 ||
         strcasecmp(keyStr, "enable_ustore_page_rollback") == 0) {
-        return (strcasecmp(value, "true") == 0 || strcasecmp(value, "false") == 0) ? true : false;
+        return strcasecmp(value, "true") == 0 || strcasecmp(value, "false") == 0;
     } else if (strcasecmp(keyStr, "ustats_tracker_naptime") == 0) {
         int keyValues = pg_strtoint32(value);
-        return (keyValues >= MIN_USTATS_TRACKER_NAPTIME && keyValues <= MAX_USTATS_TRACKER_NAPTIME) ?
-            true : false;
+        return keyValues >= MIN_USTATS_TRACKER_NAPTIME && keyValues <= MAX_USTATS_TRACKER_NAPTIME;
     } else if (strcasecmp(keyStr, "umax_search_length_for_prune") == 0) {
         int keyValues = pg_strtoint32(value);
-        return (keyValues >= MIN_UMAX_PRUNE_SEARCH_LEN && keyValues <= MAX_UMAX_PRUNE_SEARCH_LEN) ?
-            true : false;
+        return keyValues >= MIN_UMAX_PRUNE_SEARCH_LEN && keyValues <= MAX_UMAX_PRUNE_SEARCH_LEN;
 #ifdef ENABLE_WHITEBOX
     } else if (strcasecmp(keyStr, "ustore_unit_test") == 0) {
-        return (strlen(value) != 0) true : false;
+        return strlen(value) != 0;
 #endif
     } else if (strcasecmp(keyStr, "ustore_verify_level") == 0) {
-        return (strcasecmp(value, "none") == 0 || strcasecmp(value, "fast") == 0 ||
-            strcasecmp(value, "normal") == 0 || strcasecmp(value, "slow") == 0) ? true : false;
+        return strcasecmp(value, "none") == 0 || strcasecmp(value, "fast") == 0 || strcasecmp(value, "complete") == 0 || 
+            strcasecmp(value, "normal") == 0 || strcasecmp(value, "slow") == 0;
     } else if (strcasecmp(keyStr, "ustore_verify_module") == 0) {
         char *psave = NULL;
         const char* pdelimiter = ":";
-        return ValidateVerifyModules(value, pdelimiter, psave) ? true : false;
+        return ValidateVerifyModules(value, pdelimiter, psave);
     } else if (strcasecmp(keyStr, "index_trace_level") == 0) {
-        return (strcasecmp(value, "no") == 0 || strcasecmp(value, "normal") == 0 ||
+        return strcasecmp(value, "no") == 0 || strcasecmp(value, "normal") == 0 ||
             strcasecmp(value, "visibility") == 0 || strcasecmp(value, "showhikey") == 0 ||
-            strcasecmp(value, "all") == 0) ? true : false;
+            strcasecmp(value, "all") == 0;
     } else if (strcasecmp(keyStr, "enable_log_tuple") == 0) {
-        return (strcasecmp(value, "off") == 0) ? true : false;
+        return strcasecmp(value, "off") == 0;
     }
     return false;
 }

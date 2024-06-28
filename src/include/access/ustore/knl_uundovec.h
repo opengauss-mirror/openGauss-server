@@ -149,5 +149,4 @@ void SetUndoPageLSN(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn);
 
 void ReleaseUndoBuffers(void);
 
-void VerifyUndoRecordValid(UndoRecord *urec, bool needCheckXidInvalid = false);
 #endif // __KNL_UUNDOVEC_H__

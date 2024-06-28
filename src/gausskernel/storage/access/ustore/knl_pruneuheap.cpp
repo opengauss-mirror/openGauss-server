@@ -203,7 +203,6 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
     bool executePruning = false;
     errno_t rc;
     bool hasPruned = false;
-    UPageVerifyParams verifyParams;
 
     if (pruned) {
         *pruned = false;
@@ -368,11 +367,7 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
 
     END_CRIT_SECTION();
 
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, relation, page, BufferGetBlockNumber(relbuf->buffer),
-        InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr))) {
-        (void) ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
-    }
+    UpageVerify((UHeapPageHeader)page, InvalidXLogRecPtr, NULL, relation, false, (USTORE_VERIFY_UPAGE_HEADER | USTORE_VERIFY_UPAGE_ROWS));
 
     /*
      * Report the number of tuples reclaimed to pgstats. This is ndeleted

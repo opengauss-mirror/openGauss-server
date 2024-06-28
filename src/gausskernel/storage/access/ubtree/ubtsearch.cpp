@@ -64,7 +64,6 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
 {
     BTStack stack_in = NULL;
     int pageAccess = BT_READ;
-    UBtreePageVerifyParams verifyParams;
 
     /* Get the root page to start with */
     *bufP = UBTreeGetRoot(rel, access);
@@ -143,11 +142,6 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
          */
         if (opaque->btpo.level == 1 && access == BT_WRITE)
             pageAccess = BT_WRITE;
-        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-            (char *) &verifyParams, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
-            NULL, NULL, InvalidXLogRecPtr))) {
-            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
-        }
         /* drop the read lock on the parent page, acquire one on the child */
         *bufP = _bt_relandgetbuf(rel, *bufP, blkno, pageAccess, par_blkno);
 
@@ -1311,7 +1305,6 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
     Oid heapOid = IndexScanGetPartHeapOid(scan);
     TransactionId xidBase;
     bool isnull = false;
-    UBtreePageVerifyParams verifyParams;
 
     tupdesc = RelationGetDescr(scan->indexRelation);
     PartitionOidAttr = IndexRelationGetNumberOfAttributes(scan->indexRelation);
@@ -1418,11 +1411,6 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
         so->currPos.firstItem = itemIndex;
         so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
         so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
-    }
-    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
-        (char *) &verifyParams, scan->indexRelation, page, InvalidBlockNumber, InvalidOffsetNumber,
-        NULL, NULL, InvalidXLogRecPtr))) {
-        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
     }
     return (so->currPos.firstItem <= so->currPos.lastItem);
 }

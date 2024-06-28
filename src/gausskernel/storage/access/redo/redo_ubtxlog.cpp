@@ -1341,14 +1341,14 @@ void UBTree2XlogRecycleQueueInitPageOperatorAdjacentPage(RedoBufferInfo* buffer,
 void UBTree2XlogRecycleQueueEndpointOperatorLeftPage(RedoBufferInfo* buffer, void* recorddata)
 {
     xl_ubtree2_recycle_queue_endpoint *xlrec = (xl_ubtree2_recycle_queue_endpoint *)recorddata;
-    UBTreeRecycleQueuePageChangeEndpointLeftPage(buffer->buf, xlrec->isHead);
+    UBTreeRecycleQueuePageChangeEndpointLeftPage(NULL, buffer->buf, xlrec->isHead);
     PageSetLSN(BufferGetPage(buffer->buf), buffer->lsn);
 }
 
 void UBTree2XlogRecycleQueueEndpointOperatorRightPage(RedoBufferInfo* buffer, void* recorddata)
 {
     xl_ubtree2_recycle_queue_endpoint *xlrec = (xl_ubtree2_recycle_queue_endpoint *)recorddata;
-    UBTreeRecycleQueuePageChangeEndpointRightPage(buffer->buf, xlrec->isHead);
+    UBTreeRecycleQueuePageChangeEndpointRightPage(NULL, buffer->buf, xlrec->isHead);
     PageSetLSN(BufferGetPage(buffer->buf), buffer->lsn);
 }
 

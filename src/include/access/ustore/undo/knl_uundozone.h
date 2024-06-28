@@ -380,8 +380,11 @@ public:
 void AllocateZonesBeforXid();
 void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence);
 void InitUndoSpace(UndoZone *uzone, UndoSpaceType type);
-bool VerifyUndoZone(UndoZone *uzone);
 void exrto_recycle_residual_undo_file(char *FuncName);
+
+void UndoZoneVerifyPtr(UndoZone *uzone);
+
+void UndoZoneVerify(UndoZone *uzone);
 
 } // namespace undo
 #endif // __KNL_UUNDOZONE_H__

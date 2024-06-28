@@ -1679,7 +1679,7 @@ static void RedoUndoInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     if (!skipInsert) {
         InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
     }
-    VerifyUndoRecordValid(undorec);
+    UndoRecordVerify(undorec);
 
     XLogReaderState record;
     XLogRecord decodedRecord;
@@ -1768,7 +1768,7 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
 
     undo::RedoUndoMeta(&record, xlundometa, urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
         t_thrd.ustore_cxt.urecvec->LastRecordSize());
-    VerifyUndoRecordValid(undorec);
+    UndoRecordVerify(undorec);
     UHeapResetPreparedUndo();
 }
 
@@ -1875,10 +1875,10 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     
     URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
     UndoRecord *undorec = (*urecvec)[0];
-    VerifyUndoRecordValid(undorec);
-    if (!inplaceUpdate) {
-        UndoRecord *newundorec = (*urecvec)[1];
-        VerifyUndoRecordValid(newundorec);
+    if (inplaceUpdate) {
+        UndoRecordVerify(undorec);
+    } else {
+        UndoRecordVerify(newundorec);
     }
     UHeapResetPreparedUndo();
 }

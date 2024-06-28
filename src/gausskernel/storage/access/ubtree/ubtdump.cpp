@@ -26,10 +26,15 @@
 #include "access/transam.h"
 #include "access/ubtree.h"
 #include "utils/builtins.h"
-#include "storage/procarray.h"
+#include "storage/procarray.h" 
 
-typedef RpSort ItemIdSort;
-typedef RpSortData ItemIdSortData;
+
+static void UBTreeVerifyTupleKey(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum,
+    OffsetNumber firstPos, OffsetNumber lastPos);
+static void UBTreeVerifyRowptrNonDML(Relation rel, Page page, BlockNumber blkno);
+static void UBTreeVerifyHeader(PageHeaderData* page, Relation rel, BlockNumber blkno, uint16 pageSize, uint16 headerSize);
+static void UBTreeVerifyRowptr(PageHeaderData* header, Page page, BlockNumber blkno, OffsetNumber offset,
+    ItemIdSort indexSortPtr, const char *indexName, Oid relOid);
 
 void UBTreeVerifyIndex(Relation rel, TupleDesc *tupDesc, Tuplestorestate *tupstore, uint32 cols)
 {
@@ -399,300 +404,451 @@ char* UBTGetVerifiedResultStr(uint32 type)
     }
 }
 
-bool VerifyIndexPageHeader(Relation rel, Page page)
+bool UBTreeVerifyTupleTransactionStatus(Relation rel, BlockNumber blkno, TransactionIdStatus xminStatus, TransactionIdStatus xmaxStatus,
+    TransactionId xmin, TransactionId xmax, CommitSeqNo xminCSN, CommitSeqNo xmaxCSN)
 {
-    PageHeader phdr = (PageHeader)page;
-    uint16 pdLower = phdr->pd_lower;
-    uint16 pdUpper = phdr->pd_upper;
-    uint16 pdSpecial = phdr->pd_special;
-    if (PageGetPageSize(phdr) != BLCKSZ || (phdr->pd_flags & ~PD_VALID_FLAG_BITS) != 0 ||
-        pdLower < GetPageHeaderSize(page) || pdLower > pdUpper || pdUpper > pdSpecial || pdSpecial > BLCKSZ) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("UBTREEVERIFY index page header invalid: rel %s, size %lu, flags %u, lower %u, upper %u,"
-                   "special %u", NameStr(rel->rd_rel->relname), PageGetPageSize(phdr), phdr->pd_flags, pdLower,
-                   pdUpper, pdSpecial)));
+    if (u_sess->attr.attr_storage.ustore_verify_level < USTORE_VERIFY_FAST) {
+        return false;
+    }
+
+    bool tranStatusError = false;
+    switch (xminStatus) {
+        case XID_COMMITTED:
+            tranStatusError = (xmaxStatus == XID_COMMITTED && xminCSN > xmaxCSN && xmaxCSN != COMMITSEQNO_FROZEN) ? true : false;
+            break;
+        case XID_INPROGRESS:
+            tranStatusError = (xmaxStatus == XID_COMMITTED && TransactionIdIsValid(xmax)) ? true : false;
+            break;
+        case XID_ABORTED:
+            tranStatusError = (xminStatus == XID_ABORTED && xmaxStatus != XID_ABORTED) ? true : false;
+            break;
+
+        default:
+            break;
+    }
+    if (tranStatusError) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] xmin or xmax status invalid, relName=%s, blkno=%u, xmin=%lu, xmax=%lu, xminStatus=%d, "
+            "xmaxStatus=%d, xminCSN=%lu, xmaxCSN=%lu.", NameStr(rel->rd_rel->relname), blkno, xmin, xmax, xminStatus, 
+             xmaxStatus, xminCSN, xmaxCSN)));
+        return false;
     }
     return true;
 }
-
-bool VerifyIndexTuple(Relation rel, Page page, OffsetNumber offset)
-{
-    ItemId itemId = PageGetItemId(page, offset);
-    IndexTuple ituple = (IndexTuple)PageGetItem(page, itemId);
-    int tupSize = IndexTupleSize(ituple);
-    if (tupSize > (int)ItemIdGetLength(itemId)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("UBTREEVERIFY corrupted tuple: rel %s, tupsize = %d, rpsize = %u.",
-                   NameStr(rel->rd_rel->relname), tupSize, ItemIdGetLength(itemId))));
-    }
-    return true;
-}
-
-bool VerifyIndexOneItemId(Relation rel, Page page, OffsetNumber offset, ItemIdSort itemIdSortPtr)
-{
-    ItemId itemId = PageGetItemId(page, offset);
-    PageHeader phdr = (PageHeader)page;
-    uint16 pdUpper = phdr->pd_upper;
-    uint16 pdSpecial = phdr->pd_special;
-    if (!ItemIdIsUsed(itemId)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("UBTREEVERIFY corrupted unused line pointer: rel %s, offset = %u, rpstart = %u, rplen = %u.",
-                   NameStr(rel->rd_rel->relname), offset, ItemIdGetOffset(itemId), ItemIdGetLength(itemId))));
-    }
-    if (!ItemIdHasStorage(itemId)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("UBTREEVERIFY corrupted no storage line pointer: rel %s, offset = %u, rpstart = %u, rplen = %u.",
-                   NameStr(rel->rd_rel->relname), offset, ItemIdGetOffset(itemId), ItemIdGetLength(itemId))));
-    }
-    itemIdSortPtr->start = ItemIdGetOffset(itemId);
-    itemIdSortPtr->end = itemIdSortPtr->start + SHORTALIGN(ItemIdGetLength(itemId));
-    itemIdSortPtr->offset = offset;
-    if (itemIdSortPtr->start < pdUpper || itemIdSortPtr->end > pdSpecial) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("UBTREEVERIFY corrupted normal line pointer: rel %s, offset = %u, rpstart = %u, rplen = %u.",
-                   NameStr(rel->rd_rel->relname), offset, ItemIdGetOffset(itemId), ItemIdGetLength(itemId))));
-    }
-    VerifyIndexTuple(rel, page, offset);
-    return true;
-}
-
+ 
 static int ItemCompare(const void *item1, const void *item2)
 {
     return ((ItemIdSort)item1)->start - ((ItemIdSort)item2)->start;
 }
-
-bool VerifyIndexPageItemId(Relation rel, Page page, VerifyLevel level)
+ 
+void UBTreeVerifyHikey(Relation rel, Page page, BlockNumber blkno)
 {
-    if (level <= USTORE_VERIFY_FAST) {
-        return true;
-    }
-    TupleDesc tupdes = RelationGetDescr(rel);
-    int keysz = IndexRelationGetNumberOfKeyAttributes(rel);
-    ItemIdSortData itemIdBase[MaxIndexTuplesPerPage];
-    ItemIdSort itemIdSortPtr = itemIdBase;
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    Oid relOid = (rel ? rel->rd_id : InvalidOid);
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-    OffsetNumber firstPos = P_FIRSTDATAKEY(opaque);
-    OffsetNumber lastPos = PageGetMaxOffsetNumber(page);
-    if (firstPos > lastPos) {
-        return true; /* empty page */
-    }
-    
-    /* check key orders */
-    BTScanInsert cmpKeys = UBTreeMakeScanKey(rel, NULL);
-    VerifyIndexOneItemId(rel, page, firstPos, itemIdSortPtr);
-    itemIdSortPtr++;
-    IndexTuple curKey = (IndexTuple)PageGetItem(page, PageGetItemId(page, firstPos));
-    for (OffsetNumber nxtPos = OffsetNumberNext(firstPos); nxtPos <= lastPos; nxtPos = OffsetNumberNext(nxtPos)) {
-        ItemId itemId = PageGetItemId(page, nxtPos);
-        IndexTuple nextKey = (IndexTuple)PageGetItem(page, itemId);
-        if (P_ISLEAF(opaque) || nxtPos > firstPos + 1) {
-            /* current key must <= next key */
-            if (!_bt_index_tuple_compare(tupdes, cmpKeys->scankeys, keysz, curKey, nextKey)) {
-                Datum values[INDEX_MAX_KEYS];
-                bool isnull[INDEX_MAX_KEYS];
-                char *curKeyDesc = NULL;
-                char *nextKeyDesc = NULL;
-                if (P_ISLEAF(opaque)) {
-                    index_deform_tuple(curKey, RelationGetDescr(rel), values, isnull);
-                    curKeyDesc = BuildIndexValueDescription(rel, values, isnull);
-                    index_deform_tuple(nextKey, RelationGetDescr(rel), values, isnull);
-                    nextKeyDesc = BuildIndexValueDescription(rel, values, isnull);
-                }
-                ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("UBTREEVERIFY corrupted key order %s %s, rel %s",
-                        (curKeyDesc ? curKeyDesc : "(UNKNOWN)"),
-                        (nextKeyDesc ? nextKeyDesc : "(UNKNOWN)"),
-                        NameStr(rel->rd_rel->relname))));
-            }
-        }
-        curKey = nextKey;
-        VerifyIndexOneItemId(rel, page, nxtPos, itemIdSortPtr);
-        itemIdSortPtr++;
-    }
 
-    int nstorage = itemIdSortPtr - itemIdBase;
-    if (nstorage <= 1) {
-        pfree(cmpKeys);
-        return true;
-    }
+    if (P_RIGHTMOST(opaque))
+        return;
 
-    qsort((char *)itemIdBase, nstorage, sizeof(ItemIdSortData), ItemCompare);
-
-    for (int i = 0; i < nstorage - 1; i++) {
-        ItemIdSort tempPtr1 = &itemIdBase[i];
-        ItemIdSort tempPtr2 = &itemIdBase[i + 1];
-        if (tempPtr1->end > tempPtr2->start) {
-            ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("UBTREEVERIFY corrupted line pointer: rel %s tempPtr1offset %u, tempPtr1start = %u, "
-                       "tempPtr1end = %u, tempPtr2offset = %u, tempPtr2start = %u, tempPtr2end = %u.",
-                       NameStr(rel->rd_rel->relname),
-                       tempPtr1->offset, tempPtr1->start, tempPtr1->end,
-                       tempPtr2->offset, tempPtr2->start, tempPtr2->end)));
-        }
-    }
-
-    pfree(cmpKeys);
-    return true;
-}
-
-bool VerifyIndexHiKeyAndOpaque(Relation rel, Page page)
-{
-    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     if (P_ISLEAF(opaque) ? (opaque->btpo.level != 0) : (opaque->btpo.level == 0)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("UBTREEVERIFY corrupted rel %s, level %u, flag %u", NameStr(rel->rd_rel->relname),
-                       opaque->btpo.level, opaque->btpo_flags)));
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("UBTREEVERIFY corrupted rel %s, level %u, flag %u, tid[%d:%d]", (rel && rel->rd_rel ? RelationGetRelationName(rel) : "Unknown"),
+            opaque->btpo.level, opaque->btpo_flags, relOid, blkno)));
+        return;
     }
-
-    /* compare last key and HIKEY */
+ 
     OffsetNumber lastPos = PageGetMaxOffsetNumber(page);
-    /* note that the first data key of internal pages has no value */
-    if (!P_RIGHTMOST(opaque) && (P_ISLEAF(opaque) ? (lastPos > P_HIKEY) : (lastPos > P_FIRSTKEY))) {
-        IndexTuple lastTuple = (IndexTuple)PageGetItem(page, PageGetItemId(page, lastPos));
+    if (P_ISLEAF(opaque) ? (lastPos <= P_HIKEY) : (lastPos <= P_FIRSTKEY))
+        return;
 
-        /* we must hold: hikey >= lastKey */
-        BTScanInsert itupKey = UBTreeMakeScanKey(rel, lastTuple);
-        if (UBTreeCompare(rel, itupKey, page, P_HIKEY, InvalidBuffer) > 0) {
-            Datum values[INDEX_MAX_KEYS];
-            bool isnull[INDEX_MAX_KEYS];
-            index_deform_tuple(lastTuple, RelationGetDescr(rel), values, isnull);
-            char *keyDesc = BuildIndexValueDescription(rel, values, isnull);
-            ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("UBTREEVERIFY corrupted key %s with HIKEY compare in rel %s",
-                    (keyDesc ? keyDesc : "(UNKNOWN)"), NameStr(rel->rd_rel->relname))));
-        }
+    IndexTuple lastTuple = (IndexTuple)PageGetItem(page, PageGetItemId(page, lastPos));
+    BTScanInsert itupKey = UBTreeMakeScanKey(rel, lastTuple);
+    if (UBTreeCompare(rel, itupKey, page, P_HIKEY, InvalidBuffer) <= 0) {
         pfree(itupKey);
+        return;
     }
-    return true;
-}
+    pfree(itupKey);
 
-bool UBTreeVerifyITupleTransactionStatus(TransactionIdStatus xminStatus, TransactionIdStatus xmaxStatus,
-    TransactionId xmin, TransactionId xmax, CommitSeqNo xminCSN, CommitSeqNo xmaxCSN)
-{
-    if (xminStatus == XID_INPROGRESS && xmaxStatus == XID_COMMITTED && TransactionIdIsValid(xmax)) {
-        return false;
-    }
-    if (xminStatus == XID_ABORTED && xmaxStatus != XID_ABORTED) {
-        return false;
-    }
-    if (xminStatus == XID_COMMITTED && xmaxStatus == XID_COMMITTED) {
-        if (xminCSN > xmaxCSN && xmaxCSN != COMMITSEQNO_FROZEN) {
-            return false;
-        }
-    }
-    return true;
+    Datum values[INDEX_MAX_KEYS];
+    bool isnull[INDEX_MAX_KEYS];
+    index_deform_tuple(lastTuple, RelationGetDescr(rel), values, isnull);
+    char *keyDesc = BuildIndexValueDescription(rel, values, isnull);
+    ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
+        errmsg("UBTREEVERIFY corrupted key %s with HIKEY compare in rel %s, tid[%d:%d]",
+        (keyDesc ? keyDesc : "(UNKNOWN)"), (rel && rel->rd_rel ? RelationGetRelationName(rel) : "Unknown"), relOid, blkno)));
+    
 }
-
-bool VerifyIndexTransactionInfo(Relation rel, Page page, VerifyLevel level, GPIScanDesc gpiScan)
+ 
+void UBTreeVerifyPageXid(Relation rel, BlockNumber blkno, TransactionId xidBase, TransactionId pruneXid)
 {
-    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-    if (!P_ISLEAF(opaque)) {
-        return true;
-    }
-    TransactionId xid_base = opaque->xid_base;
-    TransactionId pruneXid = ShortTransactionIdToNormal(xid_base, ((PageHeader)page)->pd_prune_xid);
-    if (TransactionIdFollows(xid_base, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("UBTREEVERIFY xid_base invalid: rel %s, xid_base = %lu, nextxid = %lu.",
-                       NameStr(rel->rd_rel->relname), xid_base, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    const char *indexName = (rel && rel->rd_rel ? RelationGetRelationName(rel) : "unknown");
+    Oid relOid = (rel ? rel->rd_id : InvalidOid);
+ 
+    if (TransactionIdFollows(xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid) ||
+        TransactionIdPrecedes(xidBase + MaxShortTransactionId, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] ubtree's page xid_base invalid: indexName=%s, oid=%u, blkno=%u, xid_base=%lu, nextxid=%lu.",
+            indexName, relOid, blkno, xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+        return;
     }
     if (TransactionIdFollows(pruneXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("UBTREEVERIFY prune_xid invalid: rel %s, prune_xid = %lu, nextxid = %lu.",
-                       NameStr(rel->rd_rel->relname), pruneXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] ubtree's page prune_xid invalid: indexName=%s, oid=%u, blkno=%u, xid_base=%lu, nextxid=%lu.",
+            indexName, relOid, blkno, pruneXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+        return;
     }
-    if (level <= USTORE_VERIFY_FAST) {
-        return true;
-    }
+}
 
-    /* stat info for prune_xid and last_delete_xid */
+void UBTreeVerifyTupleTransactionInfo(Relation rel, Page page, OffsetNumber offnum, bool fromInsert, TransactionId xidBase)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+
+    if (offnum == InvalidOffsetNumber)
+        return;
+    
+    IndexTuple tuple = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
+    UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(tuple);
+    TransactionId xid = fromInsert? ShortTransactionIdToNormal(xidBase, uxid->xmin) : ShortTransactionIdToNormal(xidBase, uxid->xmax);
+
+    if (TransactionIdIsNormal(xid) && !TransactionIdIsCurrentTransactionId(xid)) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED), 
+            errmodule(MOD_USTORE), errmsg("[Verify UBTree] tuple xid %s invalid: indexName=%s, oid=%u, xid=%lu.",
+            (fromInsert ? "xmin" : "xmax"), (rel && rel->rd_rel ? RelationGetRelationName(rel) : "Unknown"), 
+            (rel ? rel->rd_id : InvalidOid), xid)));
+    }
+}
+
+void UBTreeVerifyAllTuplesTransactionInfo(Relation rel, Page page, BlockNumber blkno, OffsetNumber startoffset, bool fromInsert,
+    TransactionId xidBase)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
     TransactionId maxXmax = InvalidTransactionId;
     TransactionId minCommittedXmax = MaxTransactionId;
-
+    TransactionId pruneXid = ShortTransactionIdToNormal(xidBase, ((PageHeader)page)->pd_prune_xid);
     OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
-    for (OffsetNumber offnum = P_FIRSTDATAKEY(opaque); offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
-        ItemId iid = PageGetItemId(page, offnum);
-        IndexTuple itup = (IndexTuple)PageGetItem(page, iid);
-        UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    for (OffsetNumber offnum = startoffset; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
+        ItemId itemid = PageGetItemId(page, offnum);
+        IndexTuple tuple = (IndexTuple)PageGetItem(page, itemid);
+        UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(tuple);
+        TransactionId xmin = ShortTransactionIdToNormal(xidBase, uxid->xmin);
+        TransactionId xmax = ShortTransactionIdToNormal(xidBase, uxid->xmax);
 
-        /* fetch trans info */
-        TransactionId xmin = ShortTransactionIdToNormal(xid_base, uxid->xmin);
-        TransactionId xmax = ShortTransactionIdToNormal(xid_base, uxid->xmax);
         if (TransactionIdFollows(Max(xmin, xmax), t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-            ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("UBTREEVERIFY itup xid invalid: rel %s, xmin/xmax %lu/%lu, nextxid %lu, xid-base %lu.",
-                           NameStr(rel->rd_rel->relname), xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextXid,
-                           xid_base)));
+            ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+                "[Verify UBTree] index tuple xid(xmin/xmax) is bigger than nextXid: relName=%s, blkno=%u, xmin=%lu, xmax=%lu, nextxid=%lu, xid_base=%lu.",
+                NameStr(rel->rd_rel->relname), blkno, xmin, xmax, t_thrd.xact_cxt.ShmemVariableCache->nextXid, xidBase)));
+            return;
+        }
+
+        uint32 base = u_sess->attr.attr_storage.ustore_verify ? MaxShortTransactionId : 0;
+        if (TransactionIdIsNormal(xmin) && !IndexItemIdIsFrozen(itemid) &&
+            TransactionIdPrecedes(xmin + base, oldestXmin)) {
+            ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+                "[Verify UBTree] index tuple xmin invalid: relName=%s, blkno=%u, xmin=%lu, oldest_xmin=%lu, xid_base=%lu.",
+                NameStr(rel->rd_rel->relname), blkno, xmin, oldestXmin, xidBase)));
+            return;
+        }
+        if (TransactionIdIsNormal(xmax) && !ItemIdIsDead(itemid) &&
+            TransactionIdPrecedes(xmax + base, oldestXmin)) {
+            ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+                "[Verify UBTree] index tuple xmin invalid: relName=%s, blkno=%u, xmax=%lu, oldest_xmin=%lu, xid_base=%lu.",
+                NameStr(rel->rd_rel->relname), blkno, xmax, oldestXmin, xidBase)));
+            return;
+        }
+        if (!u_sess->attr.attr_storage.ustore_verify) {
+            continue;
         }
         TransactionIdStatus xminStatus = UBTreeCheckXid(xmin);
         CommitSeqNo xminCSN = TransactionIdGetCommitSeqNo(xmin, false, false, false, NULL);
         TransactionIdStatus xmaxStatus = UBTreeCheckXid(xmax);
         CommitSeqNo xmaxCSN = TransactionIdGetCommitSeqNo(xmax, false, false, false, NULL);
-
+ 
         if (xminStatus == XID_INPROGRESS && xmaxStatus != XID_INPROGRESS && TransactionIdIsValid(xmax)) {
             xminStatus = UBTreeCheckXid(xmin);
             xminCSN = TransactionIdGetCommitSeqNo(xmin, false, false, false, NULL);
         }
-
+ 
         if (xmaxStatus == XID_COMMITTED && TransactionIdPrecedes(xmax, minCommittedXmax)) {
             minCommittedXmax = xmax;
         }
         if (TransactionIdFollows(xmax, maxXmax)) {
             maxXmax = xmax;
         }
-        if (!UBTreeVerifyITupleTransactionStatus(xminStatus, xmaxStatus, xmin, xmax, xminCSN, xmaxCSN)) {
-            ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("UBTREEVERIFY xmin xmax status invalid, rel %s, xmin %lu, xmax %lu, xminStatus %d,"
-                           "xmaxStatus %d, xminCSN %lu, xmaxCSN %lu.",
-                           NameStr(rel->rd_rel->relname), xmin, xmax, xminStatus, xmaxStatus, xminCSN, xmaxCSN)));
+        if (!UBTreeVerifyTupleTransactionStatus(rel, blkno, xminStatus, xmaxStatus, xmin, xmax, xminCSN, xmaxCSN)) {
+            return;
         }
     }
-
+ 
+    UBTPageOpaque uopaque = (UBTPageOpaque)PageGetSpecialPointer(page);
+    UBTPageOpaqueInternal ubtOpaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    if (TransactionIdFollows(uopaque->xact, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] xact xid is bigger than nextXid: relName=%s, blkno=%u, xact=%lu, nextxid=%lu.",
+            NameStr(rel->rd_rel->relname), blkno, uopaque->xact, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+        return;
+    }
+    if (!u_sess->attr.attr_storage.ustore_verify) {
+        return;
+    }
     if (minCommittedXmax != MaxTransactionId && TransactionIdIsValid(pruneXid) &&
         TransactionIdFollows(minCommittedXmax, pruneXid)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("UBTREEVERIFY prune_xid invalid, rel = %s, prune_xid on page = %lu, actual value = %lu.",
-                       NameStr(rel->rd_rel->relname), pruneXid, minCommittedXmax)));
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] min_committed_xmax is bigger than prune_xid: relName=%s, blkno=%u, prune_xid=%lu, minCommittedXmax=%lu.",
+            NameStr(rel->rd_rel->relname), blkno, pruneXid, minCommittedXmax)));
+        return;
     }
-
-    if (TransactionIdIsValid(maxXmax) && TransactionIdIsValid(opaque->last_delete_xid) &&
-        TransactionIdFollows(maxXmax, opaque->last_delete_xid)) {
-        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("UBTREEVERIFY last_delete_xid invalid, rel = %s, last_delete_xid on page = %lu, "
-                       "actual value = %lu.",
-                       NameStr(rel->rd_rel->relname), opaque->last_delete_xid, maxXmax)));
+ 
+    if (TransactionIdIsValid(maxXmax) && TransactionIdIsValid(ubtOpaque->last_delete_xid) &&
+        TransactionIdFollows(maxXmax, ubtOpaque->last_delete_xid)) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] max_xmax is bigger than last_delete_xid: relName=%s, blkno=%u, last_delete_xid on page=%lu, actual value=%lu.",
+            NameStr(rel->rd_rel->relname), blkno, ubtOpaque->last_delete_xid, maxXmax)));
     }
-
-    /* skip unique check for non-unique index */
-    if (!rel->rd_index->indisunique && !rel->rd_index->indisprimary) {
-        return true;
-    }
-    /* skip unique check if gpiScan of GPI is not given */
-    if (RelationIsGlobalIndex(rel) && !gpiScan) {
-        return true;
-    }
-    return true;
 }
-
-bool UBTreePageVerify(UBtreePageVerifyParams *verifyParams)
+ 
+void UBTreeVerifyRowptrDML(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum)
 {
-    if (verifyParams == NULL) {
-        return false;
+    if (u_sess->attr.attr_storage.ustore_verify) {
+        return UBTreeVerifyRowptrNonDML(rel, page, blkno);
+    } 
+    if (offnum == InvalidOffsetNumber) {
+        return;
     }
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    const char *indexName = (rel && rel->rd_rel ? RelationGetRelationName(rel) : "unknown");
+    Oid relOid = (rel ? rel->rd_id : InvalidOid);
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    OffsetNumber firstPos = P_FIRSTDATAKEY(opaque);
+    OffsetNumber lastPos = PageGetMaxOffsetNumber(page);
+    if (firstPos > lastPos) {
+        return;
+    }
+    ItemIdSort indexSortPtr = (ItemIdSort)palloc0(sizeof(ItemIdSortData));
+    UBTreeVerifyRowptr((PageHeaderData*)page, page, blkno, offnum, indexSortPtr, indexName, relOid);
+    pfree(indexSortPtr);
+ 
+    UBTreeVerifyTupleKey(rel, page, blkno, offnum, firstPos, lastPos);
+}
+ 
+void UBTreeVerifyItems(Relation rel, BlockNumber blkno, TupleDesc desc, BTScanInsert cmpKeys, int keysz,
+    IndexTuple currKey, IndexTuple nextKey, UBTPageOpaqueInternal opaque)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    if (_bt_index_tuple_compare(desc, cmpKeys->scankeys, keysz, currKey, nextKey))
+        return;
 
-    Relation rel = verifyParams->bvInfo.rel;
-    Page page = verifyParams->page;
-    VerifyLevel level = verifyParams->bvInfo.vLevel;
-    GPIScanDesc gpiScan = verifyParams->gpiScan;
+    char *currkeyDesc = NULL;
+    char *nextkeyDesc = NULL;
+    Datum values[INDEX_MAX_KEYS];
+    bool isnull[INDEX_MAX_KEYS];
+    if (P_ISLEAF(opaque)) {
+        index_deform_tuple(currKey, RelationGetDescr(rel), values, isnull);
+        currkeyDesc = BuildIndexValueDescription(rel, values, isnull);
+        index_deform_tuple(nextKey, RelationGetDescr(rel), values, isnull);
+        nextkeyDesc = BuildIndexValueDescription(rel, values, isnull);
+    }
+    ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+        "[Verify UBTree] nextkey >= currkey, nextkey: %s, currkey : %s, relName=%s, blkno=%u.", (nextkeyDesc ? nextkeyDesc : "(unknown)"),
+        (currkeyDesc ? currkeyDesc : "(unknown)"), NameStr(rel->rd_rel->relname), blkno)));
+}
+ 
+static void UBTreeVerifyTupleKey(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum,
+    OffsetNumber firstPos, OffsetNumber lastPos)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    TupleDesc desc = RelationGetDescr(rel);
+    int keySize = IndexRelationGetNumberOfKeyAttributes(rel);
+    BTScanInsert cmpKeys = UBTreeMakeScanKey(rel, NULL);
+    IndexTuple currKey = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
+    if (offnum > firstPos) {
+        ItemId itemId = PageGetItemId(page, OffsetNumberPrev(offnum));
+        IndexTuple prev_key = (IndexTuple)PageGetItem(page, itemId);
+        UBTreeVerifyItems(rel, blkno, desc, cmpKeys, keySize, prev_key, currKey, opaque);
+    }
+    if (offnum < lastPos) {
+        ItemId itemId = PageGetItemId(page, OffsetNumberNext(offnum));
+        IndexTuple next_key = (IndexTuple)PageGetItem(page, itemId);
+        UBTreeVerifyItems(rel, blkno, desc, cmpKeys, keySize, currKey, next_key, opaque);
+    }
+    pfree(cmpKeys);
+}
+ 
+static void UBTreeVerifyRowptrNonDML(Relation rel, Page page, BlockNumber blkno)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    const char *indexName = (rel && rel->rd_rel ? RelationGetRelationName(rel) : "unknown");
+    Oid relOid = (rel ? rel->rd_id : InvalidOid);
+    TupleDesc desc = RelationGetDescr(rel);
+    int keysz = IndexRelationGetNumberOfKeyAttributes(rel);
+    ItemIdSortData itemidBase[MaxIndexTuplesPerPage]; 
+    ItemIdSort sortPtr = itemidBase;
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    OffsetNumber firstPos = P_FIRSTDATAKEY(opaque);
+    OffsetNumber lastPos = PageGetMaxOffsetNumber(page);
+
+    if (firstPos > lastPos) {
+        return;
+    }
+    
+    BTScanInsert cmpKeys = UBTreeMakeScanKey(rel, NULL);
+    UBTreeVerifyRowptr((PageHeaderData*)page, page, blkno, firstPos, sortPtr, indexName, relOid);
+    IndexTuple currKey = (IndexTuple)PageGetItem(page, PageGetItemId(page, firstPos));
+    OffsetNumber nextPos = OffsetNumberNext(firstPos);
+    sortPtr++;
+    while (nextPos <= lastPos) {
+        ItemId itemid = PageGetItemId(page, nextPos);
+        IndexTuple nextKey = (IndexTuple)PageGetItem(page, itemid);
+        if (P_ISLEAF(opaque) || nextPos > firstPos + 1) {
+            if (!_bt_index_tuple_compare(desc, cmpKeys->scankeys, keysz, currKey, nextKey)) {
+                Datum values[INDEX_MAX_KEYS];
+                bool isnull[INDEX_MAX_KEYS];
+                char *currkeyDesc = NULL;
+                char *nextkeyDesc = NULL;
+                if (P_ISLEAF(opaque)) {
+                    index_deform_tuple(currKey, RelationGetDescr(rel), values, isnull);
+                    currkeyDesc = BuildIndexValueDescription(rel, values, isnull);
+                    index_deform_tuple(nextKey, RelationGetDescr(rel), values, isnull);
+                    nextkeyDesc = BuildIndexValueDescription(rel, values, isnull);
+                }
+                ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+                    "[Verify UBTree] nextkey >= currkey, nextkey: %s, currkey : %s, indexName=%s, oid %u, blkno=%u.", 
+                    (nextkeyDesc ? nextkeyDesc : "(unknown)"), (currkeyDesc ? currkeyDesc : "(unknown)"), indexName, relOid, blkno)));
+                pfree(cmpKeys);
+                return;
+            }
+        }
+        currKey = nextKey;
+        UBTreeVerifyRowptr((PageHeaderData*)page, page, blkno, nextPos, sortPtr,  indexName, relOid);
+        nextPos = OffsetNumberNext(nextPos);
+        sortPtr++;
+    }
+ 
+    int storageNum = sortPtr - itemidBase;
+    if (storageNum <= 1) {
+        pfree(cmpKeys);
+        return;
+    }
+ 
+    qsort((char*)itemidBase, storageNum, sizeof(ItemIdSortData), ItemCompare);
+ 
+    for (int i = 0; i < storageNum - 1; i++) {
+        ItemIdSort tempPtr1 = &itemidBase[i];
+        ItemIdSort tempPtr2 = &itemidBase[i + 1];
+        if (tempPtr1->end > tempPtr2->start) {
+            ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+                "[Verify UBTree] Ubtree ItemIdSort conflict: indexName=%s, oid=%u, blkno=%u, ptr1offset %u, "
+                "ptr1start = %u, ptr1end = %u, ptr2offset = %u, ptr2start = %u, ptr2end = %u.",
+                indexName, relOid, blkno, tempPtr1->offset, tempPtr1->start, tempPtr1->end,
+                tempPtr2->offset, tempPtr2->start, tempPtr2->end)));
+            pfree(cmpKeys);
+            return;
+        }
+    }
+ 
+    pfree(cmpKeys);
+}
+ 
+void UBTreeVerifyPage(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert)
+{
+    BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
+ 
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     if (P_IGNORE(opaque)) {
-        return true;
+        return;
     }
+ 
+    UBTreeVerifyHeader((PageHeaderData*)page, rel, blkno, PageGetPageSize((PageHeader)page), GetPageHeaderSize(page));
+    UBTreeVerifyHikey(rel, page, blkno);
+    UBTreeVerifyRowptrDML(rel, page, blkno, offnum);
+    UBTPageOpaqueInternal ubtOpaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    if (!P_ISLEAF(ubtOpaque)) {
+        return;
+    }
+    TransactionId xidBase = ubtOpaque->xid_base;
+    UBTreeVerifyPageXid(rel, blkno, xidBase, ShortTransactionIdToNormal(xidBase, ((PageHeader)page)->pd_prune_xid));
+    UBTreeVerifyTupleTransactionInfo(rel, page, offnum, fromInsert, xidBase);
+}
+ 
+static void UBTreeVerifyHeader(PageHeaderData* page, Relation rel, BlockNumber blkno, uint16 pageSize, uint16 headerSize)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    if (pageSize != BLCKSZ || (page->pd_flags & ~PD_VALID_FLAG_BITS) != 0 || page->pd_lower < headerSize ||
+        page->pd_lower > page->pd_upper || page->pd_upper > page->pd_special || page->pd_special > BLCKSZ) {
+        const char *indexName = (rel && rel->rd_rel ? RelationGetRelationName(rel) : "unknown");
+        Oid relOid = (rel ? rel->rd_id : InvalidOid);
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] index page header invalid: indexName=%s, oid=%u, blkno=%u, size=%u,"
+            "flags=%u, lower=%u, upper=%u, special=%u.", indexName, relOid, blkno, headerSize,
+            page->pd_flags, page->pd_lower, page->pd_upper, page->pd_special)));
+    }
+}
+ 
+static void UBTreeVerifyRowptr(PageHeaderData* header, Page page, BlockNumber blkno, OffsetNumber offset,
+    ItemIdSort indexSortPtr, const char *indexName, Oid relOid)
+{
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+ 
+    ItemId itemId = PageGetItemId(page, offset);
+    unsigned rpStart = ItemIdGetOffset(itemId);
+    Size rpLen = ItemIdGetLength(itemId);
 
-    VerifyIndexPageHeader(rel, page);
-    VerifyIndexHiKeyAndOpaque(rel, page);
-    VerifyIndexPageItemId(rel, page, level);
-    VerifyIndexTransactionInfo(rel, page, level, gpiScan);
-    return true;
+    if (!ItemIdIsUsed(itemId)) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] row pointer is unused: indexName=%s, oid=%u, blkno=%u, offset=%u, "
+            "rowPtr startOffset=%u, rowPtr len=%lu.", indexName, relOid, blkno, offset, rpStart, rpLen)));
+        return;
+    }
+    if (!ItemIdHasStorage(itemId)) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] row pointer has no storage: indexName=%s, oid=%u, blkno=%u, offset=%u, "
+            "rowPtr startOffset=%u, rowPtr len=%lu.", indexName, relOid, blkno, offset, rpStart, rpLen)));
+        return;
+    }
+    indexSortPtr->start = rpStart;
+    indexSortPtr->end = indexSortPtr->start + SHORTALIGN(ItemIdGetLength(itemId));
+    indexSortPtr->offset = offset;
+    if (indexSortPtr->start < header->pd_upper || indexSortPtr->end > header->pd_special) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] The item corresponding to row pointer exceeds the range of item stored in the page: indexName=%s, oid=%u, "
+            "blkno=%u, offset=%u, rowPtr startOffset=%u, rowPtr len=%lu.", indexName, relOid, blkno, offset, rpStart, rpLen)));
+        return;
+    }
+    int tupleSize = IndexTupleSize((IndexTuple)PageGetItem(page, itemId));
+    if (tupleSize > (int)rpLen) {
+        ereport(ustore_verify_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),errmsg(
+            "[Verify UBTree] tuple size is bigger than item's len: indexName=%s, oid=%u, blkno=%u, offset=%u, "
+            "tuple size=%d, rowPtr len=%lu.", indexName, relOid, blkno, offset, tupleSize, rpLen)));
+        return;
+    }
 }
 
+void UBTreeVerifyAll(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert)
+{
+    BYPASS_VERIFY(USTORE_VERIFY_MOD_UBTREE, rel);
+ 
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+    UBTreeVerifyPage(rel, page, blkno, offnum, fromInsert);
+    BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+    if (P_IGNORE(opaque)) {
+        return;
+    }
+    UBTPageOpaqueInternal ubtOpaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    if (!P_ISLEAF(ubtOpaque)) {
+        return;
+    }
+    TransactionId xidBase = ubtOpaque->xid_base;
+    UBTreeVerifyAllTuplesTransactionInfo(rel, page, blkno, P_FIRSTDATAKEY(ubtOpaque), fromInsert, xidBase);
+}

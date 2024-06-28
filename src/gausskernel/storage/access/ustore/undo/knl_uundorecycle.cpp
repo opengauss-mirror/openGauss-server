@@ -93,6 +93,7 @@ bool AsyncRollback(UndoZone *zone, UndoSlotPtr recycle, TransactionSlot *slot)
         if (!u_sess->attr.attr_storage.enable_ustore_async_rollback) {
             return true;
         }
+        UndoTranslotVerify(slot, recycle);
         UndoRecPtr prev = GetPrevUrp(slot->EndUndoPtr());
         AddRollbackRequest(slot->XactId(), prev, slot->StartUndoPtr(),
             slot->DbId(), recycle);
@@ -941,6 +942,7 @@ void UndoRecycleMain()
                             oldestFrozenXidInUndo, frozenXid)));
                         oldestFrozenXidInUndo = oldestFrozenXidInUndo > frozenXid ? frozenXid : oldestFrozenXidInUndo;
                         UpdateRecyledXid(recycleMaxXIDs, &recycleMaxXIDCount, recycleXid);
+                        UndoZoneVerify(zone);
                     }
                 }
             }

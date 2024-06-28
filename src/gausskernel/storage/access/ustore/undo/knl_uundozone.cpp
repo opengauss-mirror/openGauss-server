@@ -1039,26 +1039,60 @@ reallocate_zone:
     return;
 }
 
-bool VerifyUndoZone(UndoZone *uzone)
+void UndoZoneVerifyPtr(UndoZone *uzone)
 {
-    if (u_sess->attr.attr_storage.ustore_verify_level <= USTORE_VERIFY_DEFAULT) {
-        return true;
-    }
+    UNDO_BYPASS_VERIFY;
 
-    if (uzone->GetAllocateTSlotPtr() < uzone->GetRecycleTSlotPtr() ||
-        uzone->GetInsertURecPtr() < uzone->GetForceDiscardURecPtr() ||
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+    LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
+    if (uzone->GetInsertURecPtr() < uzone->GetForceDiscardURecPtr() ||
         uzone->GetForceDiscardURecPtr() < uzone->GetDiscardURecPtr() ||
-        (TransactionIdIsValid(uzone->GetFrozenXid()) &&
-        (TransactionIdFollows(uzone->GetRecycleXid(), uzone->GetFrozenXid()) ||
-        TransactionIdFollows(g_instance.undo_cxt.globalFrozenXid, uzone->GetFrozenXid()))) ||
-        (TransactionIdIsValid(uzone->GetRecycleXid() &&
-        TransactionIdFollows(g_instance.undo_cxt.globalRecycleXid, uzone->GetRecycleXid())))) {
-            ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
-                "Invalid zone: allocateTSlotPtr %lu, recycleTSlotPtr %lu, frozenxid %lu, recyclexid %lu.",
-                uzone->GetAllocateTSlotPtr(), uzone->GetRecycleTSlotPtr(), uzone->GetFrozenXid(),
-                uzone->GetRecycleXid()));
+        uzone->GetAllocateTSlotPtr() < uzone->GetRecycleTSlotPtr() ||
+        uzone->GetUndoSpace()->Tail() < uzone->GetUndoSpace()->Head() ||
+        uzone->GetSlotSpace()->Tail() < uzone->GetSlotSpace()->Head()) {
+        ereport(WARNING, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("[VERIFY_UNDOZONE]failed. insertPtr %lu, forceDiscardPtr %lu, discardPtr %lu. "
+                "allocateTSlotPtr %lu, recycleTSlotPtr %lu, "
+                "undoInfo: tail %lu, head %lu. slotInfo: tail %lu, head %lu"),
+                uzone->GetInsertURecPtr(), uzone->GetForceDiscardURecPtr(), uzone->GetDiscardURecPtr(),
+                uzone->GetAllocateTSlotPtr(), uzone->GetRecycleTSlotPtr(), uzone->GetUndoSpace()->Tail(),
+                uzone->GetUndoSpace()->Head(),  uzone->GetSlotSpace()->Tail(), uzone->GetSlotSpace()->Head())));
     }
+    LWLockRelease(UndoZoneLock);
+}
 
-    return true;
+void UndoZoneVerify(UndoZone *uzone)
+{
+    UNDO_BYPASS_VERIFY;
+
+    CHECK_VERIFY_LEVEL(USTORE_VERIFY_FAST)
+    UndoZoneVerifyPtr(uzone);
+
+    LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
+    UndoLogOffset insert = UNDO_PTR_GET_OFFSET(uzone->GetInsertURecPtr());
+    UndoLogOffset tail = insert + UNDO_LOG_SEGMENT_SIZE - insert % UNDO_LOG_SEGMENT_SIZE;
+    UndoLogOffset forceDiscard = UNDO_PTR_GET_OFFSET(uzone->GetForceDiscardURecPtr());
+    UndoLogOffset head = (forceDiscard / UNDO_LOG_SEGMENT_SIZE) * UNDO_LOG_SEGMENT_SIZE;
+    if (tail != UNDO_PTR_GET_OFFSET(uzone->GetUndoSpace()->Tail()) ||
+        head != UNDO_PTR_GET_OFFSET(uzone->GetUndoSpace()->Head())) {
+         ereport(WARNING, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("[VERIFY_UNDOZONE]failed. insertPtr %lu, forceDiscardPtr %lu, tail %lu, head %lu. "
+                "zoneInfo: insertPtr %lu, forceDiscardPtr %lu, tail %lu, head %lu"),
+                insert, forceDiscard, tail, head, uzone->GetInsertURecPtr(), uzone->GetForceDiscardURecPtr(),
+                uzone->GetUndoSpace()->Tail(), uzone->GetUndoSpace()->Head())));
+    }
+    UndoSlotPtr allocate = UNDO_PTR_GET_OFFSET(uzone->GetAllocateTSlotPtr());
+    UndoLogOffset slotTail = (UndoLogOffset)(allocate + UNDO_META_SEGMENT_SIZE - allocate % UNDO_META_SEGMENT_SIZE);
+    UndoSlotPtr recycle = UNDO_PTR_GET_OFFSET(uzone->GetRecycleTSlotPtr());
+    UndoLogOffset slotHead = (UndoLogOffset)((recycle / UNDO_META_SEGMENT_SIZE) * UNDO_META_SEGMENT_SIZE);
+    if (slotTail != UNDO_PTR_GET_OFFSET(uzone->GetSlotSpace()->Tail()) ||
+        slotHead != UNDO_PTR_GET_OFFSET(uzone->GetSlotSpace()->Head())) {
+        ereport(WARNING, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("[VERIFY_UNDOZONE]failed. allocatePtr %lu, recyclePtr %lu, tail %lu, head %lu. "
+                "zoneInfo: allocatePtr %lu, recyclePtr %lu, tail %lu, head %lu"),
+                allocate, recycle, slotTail, slotHead, uzone->GetAllocateTSlotPtr(), uzone->GetRecycleTSlotPtr(),
+                uzone->GetSlotSpace()->Tail(), uzone->GetSlotSpace()->Head())));
+    }
+    LWLockRelease(UndoZoneLock);
 }
 } // namespace undo

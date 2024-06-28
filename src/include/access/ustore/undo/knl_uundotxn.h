@@ -171,8 +171,12 @@ private:
 };
 
 UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr);
-bool VerifyTransactionSlotValid(TransactionSlot *slot);
-bool VerifyTransactionSlotBuffer(Page page);
+
+void UndoTranslotVerifyPtr(TransactionSlot *slot, UndoSlotPtr slotPtr);
+
+void UndoTranslotVerifyBuffer(UndoSlotPtr slotPtr);
+
+void UndoTranslotVerify(TransactionSlot *slot, UndoSlotPtr slotPtr);
 
 } // namespace undo
 #endif // __KNL_UUNDOTXN_H__

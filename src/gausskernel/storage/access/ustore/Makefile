@@ -11,6 +11,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = knl_uheap.o knl_upage.o knl_utuple.o knl_uhio.o knl_uscan.o knl_uvisibility.o knl_uvacuumlazy.o knl_uundorecord.o knl_uundovec.o knl_undolauncher.o knl_undoworker.o knl_undorequest.o knl_undoaction.o knl_pruneuheap.o knl_uredo.o knl_uextremeredo.o knl_uam.o knl_utuptoaster.o $(top_builddir)/src/test/whitebox/knl_whitebox_test.o knl_uverify.o
+OBJS = knl_uheap.o knl_upage.o knl_utuple.o knl_uhio.o knl_uscan.o knl_uvisibility.o knl_uvacuumlazy.o knl_uundorecord.o knl_uundovec.o knl_undolauncher.o knl_undoworker.o knl_undorequest.o knl_undoaction.o knl_pruneuheap.o knl_uredo.o knl_uextremeredo.o knl_uam.o knl_utuptoaster.o $(top_builddir)/src/test/whitebox/knl_whitebox_test.o
 SUBDIRS = undo
 include $(top_srcdir)/src/gausskernel/common.mk

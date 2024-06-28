@@ -138,6 +138,7 @@ void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPt
         uzone->MarkDirty();
     }
     uzone->AdvanceInsertURecPtr(UNDO_PTR_GET_OFFSET(lastRecord), lastRecordSize);
+    UndoZoneVerifyPtr(uzone);
     if (uzone->GetForceDiscardURecPtr() > uzone->GetInsertURecPtr()) {
         ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d forceDiscardURecPtr %lu > insertURecPtr %lu."),
             uzone->GetZoneId(), uzone->GetForceDiscardURecPtr(), uzone->GetInsertURecPtr())));
@@ -145,7 +146,8 @@ void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPt
     uzone->GetSlotBuffer().Lock();
     BufferDesc *buf = GetBufferDescriptor(uzone->GetSlotBuffer().Buf() - 1);
     if (!UndoSlotBuffer::IsSlotBufferValid(buf, zid, meta->slotPtr)) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("invalid cached slot buffer %d slot ptr %lu."), 
+        ereport(PANIC, (errmodule(MOD_UNDO), 
+            errmsg(UNDOFORMAT("invalid cached slot buffer %d slot ptr %lu."), 
             uzone->GetSlotBuffer().Buf(), meta->slotPtr)));
     }
     return;
@@ -158,6 +160,7 @@ void FinishUndoMeta(UndoPersistence upersistence)
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("FinishUndoMeta: uzone is NULL")));
     }
+    UndoZoneVerify(uzone);
     uzone->GetSlotBuffer().UnLock();
     uzone->UnlockUndoZone();
     return;
@@ -197,12 +200,6 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
                 zid, meta->slotPtr, slot->XactId(), xid, slot->DbId(), u_sess->proc_cxt.MyDatabaseId)));
     }
 
-    uint32 verifyModule = USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_UNDO_SUB_TRANSLOT;
-    UndoVerifyParams verifyParam;
-    if (ConstructUstoreVerifyParam(verifyModule, USTORE_VERIFY_FAST, (char *) &verifyParam, NULL,
-        NULL, InvalidBlockNumber, InvalidOffsetNumber, NULL, NULL, InvalidXLogRecPtr, NULL, slot, false)) {
-        ExecuteUstoreVerify(verifyModule, (char *) &verifyParam);
-    }
     ereport(DEBUG2, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("update zone %d, slotptr %lu xid %lu dbid %u: old start %lu end %lu, new start %lu end %lu."),
             zid, meta->slotPtr, xid, slot->DbId(), slot->StartUndoPtr(), slot->EndUndoPtr(),
@@ -215,6 +212,7 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
         meta->SetInfo(XLOG_UNDOMETA_INFO_SLOT);
         Assert(meta->dbid != INVALID_DB_OID);
     }
+    UndoTranslotVerifyPtr(slot, INVALID_UNDO_SLOT_PTR);
     return;
 }
 
@@ -269,6 +267,7 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
         }
         UnlockReleaseBuffer(buf.Buf());
     }
+    UndoZoneVerify(zone);
     return;
 }
 
@@ -661,6 +660,7 @@ void RedoRollbackFinish(UndoSlotPtr slotPtr, XLogRecPtr lsn)
             slot->UpdateRollbackProgress();
             PageSetLSN(page, lsn);
             MarkBufferDirty(buf.Buf());
+            UndoTranslotVerify(slot, slotPtr);
         }
         UnlockReleaseBuffer(buf.Buf());
     }
@@ -714,7 +714,7 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
     }
     MarkBufferDirty(buf.Buf());
     END_CRIT_SECTION();
-
+    UndoTranslotVerify(slot, slotPtr);
     UnlockReleaseBuffer(buf.Buf());
     return;
 }

@@ -7083,24 +7083,6 @@ static bool check_ss_work_thread_pool_attr(char** newval, void** extra, GucSourc
     return true;
 }
 
-static bool check_undo_space_limit_size(int *newval, void **extra, GucSource source)
-{
-    if (*newval < u_sess->attr.attr_storage.undo_limit_size_transaction && 
-        u_sess->attr.attr_storage.undo_limit_size_transaction != 0) {
-        return false;
-    }
-    return true;
-}
-
-static bool check_undo_limit_size_per_transaction(int *newval, void **extra, GucSource source)
-{    
-    if (*newval > u_sess->attr.attr_storage.undo_space_limit_size && 
-        u_sess->attr.attr_storage.undo_space_limit_size != 0) {
-        return false;
-    }
-    return true;
-}
-
 #ifdef USE_ASSERT_CHECKING
 static bool parse_ss_fi_entry_list(char *value, uint32 *entry_list, uint32 *count)
 {

@@ -760,10 +760,6 @@ void StartupCLOG(void)
  */
 void TrimCLOG(void)
 {
-    if (u_sess->attr.attr_storage.ustore_verify_level == USTORE_VERIFY_WHITEBOX) {
-        return;
-    }
-
     if (SS_STANDBY_MODE) {
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't trim clog status")));
         return;
