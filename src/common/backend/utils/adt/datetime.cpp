@@ -322,14 +322,25 @@ void j2date(int jd, int* year, int* month, int* day)
  */
 int j2day(int date)
 {
-    unsigned int day;
+    if (!DB_IS_CMPT(PG_FORMAT))
+    {
+        unsigned int day;
 
-    day = date;
+        day = date;
+        day += 1;
+        day %= 7;
+        return (int)day;
+    }
+    else
+    {
+        date += 1;
+        date %= 7;
+        if(date<0)
+            date+=7;
+        return date;
+    }
+    return date;
 
-    day += 1;
-    day %= 7;
-
-    return (int)day;
 } /* j2day() */
 
 /*
