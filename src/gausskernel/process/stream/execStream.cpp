@@ -1069,6 +1069,13 @@ void BuildStreamFlow(PlannedStmt* plan)
         u_sess->stream_cxt.global_obj = New(u_sess->stream_cxt.stream_runtime_mem_cxt) StreamNodeGroup();
         u_sess->stream_cxt.global_obj->m_streamRuntimeContext = u_sess->stream_cxt.stream_runtime_mem_cxt;
 
+#ifndef ENABLE_MULTIPLE_NODES
+        if (StreamTopConsumerAmI() && ActivePortal != NULL) {
+            ActivePortal->streamInfo.RecordSessionInfo();
+            u_sess->stream_cxt.global_obj->m_portal = ActivePortal;
+        }
+#endif
+
         StreamFlowCtl ctl;
         ctl.pstmt = plan;
         ctl.plan = plan->planTree;

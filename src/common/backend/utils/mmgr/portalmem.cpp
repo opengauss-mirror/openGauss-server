@@ -105,7 +105,7 @@ typedef struct portalhashent {
 inline void ReleaseStreamGroup(Portal portal)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && !StreamThreadAmI()) {
+    if (!IS_SPQ_RUNNING && IS_STREAM_PORTAL) {
         portal->streamInfo.AttachToSession();
         StreamNodeGroup::ReleaseStreamGroup(true);
         portal->streamInfo.Reset();
@@ -920,7 +920,7 @@ void AtAbort_Portals(bool STP_rollback)
              * estate is under the queryDesc, and stream threads use it.
              * we should wait all stream threads exit to cleanup queryDesc.
              */
-            if (!StreamThreadAmI()) {
+            if (IS_STREAM_PORTAL) {
                 portal->streamInfo.AttachToSession();
                 StreamNodeGroup::ReleaseStreamGroup(true, STREAM_ERROR);
                 portal->streamInfo.Reset();

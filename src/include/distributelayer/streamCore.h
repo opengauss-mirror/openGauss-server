@@ -58,6 +58,8 @@
 
 #define TupleVectorMaxSize 100
 
+#define IS_STREAM_PORTAL (!StreamThreadAmI() && portal->streamInfo.streamGroup != NULL)
+
 struct StreamState;
 class StreamObj;
 class StreamNodeGroup;

@@ -326,6 +326,7 @@ static void knl_u_stream_init(knl_u_stream_context* stream_cxt)
     stream_cxt->stop_query_id = 0;
     stream_cxt->stream_runtime_mem_cxt = NULL;
     stream_cxt->data_exchange_mem_cxt = NULL;
+    stream_cxt->cursorNodeGroupList = NIL;
 }
 
 static void knl_u_sig_init(knl_u_sig_context* sig_cxt)

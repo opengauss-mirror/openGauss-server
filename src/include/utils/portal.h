@@ -134,6 +134,15 @@ typedef struct PortalStream {
         u_sess->debug_query_id = 0;
     }
 
+    void ResetEnvForCursor()
+    {
+        Assert(u_sess->stream_cxt.global_obj != NULL);
+        (void)MemoryContextSwitchTo(u_sess->top_portal_cxt);
+        u_sess->stream_cxt.cursorNodeGroupList = lappend(u_sess->stream_cxt.cursorNodeGroupList,
+            u_sess->stream_cxt.global_obj);
+        ResetEnv();
+    }
+
     void RecordSessionInfo()
     {
         streamGroup = u_sess->stream_cxt.global_obj;
@@ -230,6 +239,7 @@ typedef struct PortalData {
     bool atEnd;
     bool posOverflow;
     long portalPos;
+    long commitPortalPos;
     bool hasStreamForPlpgsql; /* true if plpgsql's portal has stream may cause hang in for-loop */
 
     /* Presentation data, primarily used by the pg_cursors system view */

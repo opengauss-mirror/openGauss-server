@@ -961,6 +961,8 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 #endif
         u_sess->stream_cxt.global_obj->deInit(status);
         delete u_sess->stream_cxt.global_obj;
+        u_sess->stream_cxt.cursorNodeGroupList = list_delete(u_sess->stream_cxt.cursorNodeGroupList,
+            u_sess->stream_cxt.global_obj);
         u_sess->stream_cxt.global_obj = NULL;
     }
 

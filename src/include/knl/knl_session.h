@@ -112,6 +112,9 @@ typedef struct knl_u_stream_context {
 
     class StreamProducer* producer_obj;
 
+    /* List of StreamNodeGroup belong to current session that are active in the backend */
+    List *cursorNodeGroupList;
+
     MemoryContext stream_runtime_mem_cxt;
 
     /* Shared memory context for in-memory data exchange. */
@@ -3215,6 +3218,11 @@ inline void stp_reset_xact_state_and_err_msg(bool savedisAllowCommitRollback, bo
     if (needResetErrMsg) {
         stp_reset_commit_rolback_err_msg();
     }
+}
+
+inline bool has_backend_cursor_stream()
+{
+    return list_length(u_sess->stream_cxt.cursorNodeGroupList) > 0;
 }
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_H_ */

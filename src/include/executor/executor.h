@@ -262,6 +262,7 @@ extern bool NeedStubExecution(Plan* plan);
 extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos, bool isinherit);
 
 extern long ExecGetPlanMemCost(Plan* node);
+extern bool executorEarlyStop();
 
 /* ----------------------------------------------------------------
  *		ExecProcNode
@@ -276,6 +277,11 @@ static inline TupleTableSlot *ExecProcNode(PlanState *node)
 {
     TupleTableSlot* result;
     Assert(node->ExecProcNode);
+
+    if (unlikely(executorEarlyStop())) {
+        return NULL;
+    }
+
     if (unlikely(node->nodeContext)) {
         MemoryContext old_context = MemoryContextSwitchTo(node->nodeContext); /* Switch to Node Level Memory Context */
         if (node->chgParam != NULL) /* something changed? */
@@ -686,7 +692,6 @@ extern void PthreadRWlockWrlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
 extern void PthreadRWlockUnlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
 extern void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr);
 
-extern bool executorEarlyStop();
 extern void ExecEarlyFree(PlanState* node);
 extern void ExecEarlyFreeBody(PlanState* node);
 extern void ExecReSetRecursivePlanTree(PlanState* node);
