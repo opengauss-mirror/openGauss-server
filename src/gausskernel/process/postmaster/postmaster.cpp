@@ -10695,6 +10695,34 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
     }
 
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_SWITCHOVER_DEMOTE_FAILURE_CHECK)) {
+        if (pmState == PM_WAIT_BACKENDS) {
+            int backend_count = SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+            if (backend_count > 0) {
+                ereport(WARNING, (errmodule(MOD_DMS), 
+                    errmsg("[SS reform][SS switchover] demote fail reason: backends exist, backend_count:%d, "
+                        "pmState:%d",
+                        backend_count, pmState)));
+            }
+
+            const int check_list_num = 4;
+            ThreadId check_list[check_list_num] = {
+                g_instance.pid_cxt.AshPID,
+                g_instance.pid_cxt.TwoPhaseCleanerPID,
+                g_instance.pid_cxt.StatementPID,
+                g_instance.pid_cxt.PercentilePID
+            };
+            for (int i = 0; i < check_list_num; i++) {
+                if (check_list[i] != 0 ) {
+                    ereport(WARNING, (errmodule(MOD_DMS), 
+                        errmsg("[SS reform][SS switchover] demote fail reason: thread name:%s exist, pid:%lu, pmState:%d",
+                            GetProcName(check_list[i]), check_list[i], pmState)));
+                }
+            }
+            g_instance.dms_cxt.SSReformInfo.switchover_demote_failure_signal_handled = true;
+        }
+    }
+
     if (CheckPromoteSignal()) {
         handle_promote_signal();
     }
@@ -15429,7 +15457,7 @@ int SSCountAndPrintChildren(int target)
     
         cnt++;
         ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[SS reform][SS failover] print thread no exiting, thread id:%lu, thread role:%d",
+                errmsg("[SS reform] print thread no exiting, thread id:%lu, thread role:%d",
                 bp->pid, bp->role)));
     }
 

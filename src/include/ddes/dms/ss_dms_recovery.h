@@ -88,6 +88,7 @@ typedef struct st_reform_info {
     bool is_hashmap_constructed;
     TimestampTz reform_ver;
     TimestampTz reform_ver_startup_wait;
+    bool switchover_demote_failure_signal_handled;
 } ss_reform_info_t;
 
 typedef enum st_failover_ckpt_status {
