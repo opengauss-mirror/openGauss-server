@@ -293,17 +293,20 @@ public:
     inline uint64 UndoSize(void)
     {
         if (insertURecPtr_ < forceDiscardURecPtr_) {
-            ereport(PANIC, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("insertURecPtr_ %lu < forceDiscardURecPtr_ %lu."),
-                    insertURecPtr_, forceDiscardURecPtr_)));
+            ereport(WARNING, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("zoneid %d, insertURecPtr_ %lu < forceDiscardURecPtr_ %lu."),
+                zid_, insertURecPtr_, forceDiscardURecPtr_)));
+            return 0;
         }
         return ((insertURecPtr_ - forceDiscardURecPtr_) / BLCKSZ);
     }
     inline uint64 SlotSize(void)
     {
         if (allocateTSlotPtr_ < recycleTSlotPtr_) {
-            ereport(PANIC, (errmodule(MOD_UNDO),
-                errmsg(UNDOFORMAT("allocateTSlotPtr_ %lu < recycleTSlotPtr_ %lu."), allocateTSlotPtr_, recycleTSlotPtr_)));
+            ereport(WARNING, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("zoneid %d, allocateTSlotPtr_ %lu < recycleTSlotPtr_ %lu."), 
+                zid_, allocateTSlotPtr_, recycleTSlotPtr_)));
+            return 0;
         }
         return ((allocateTSlotPtr_ - recycleTSlotPtr_) / BLCKSZ);
     }

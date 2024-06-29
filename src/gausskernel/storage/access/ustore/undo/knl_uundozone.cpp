@@ -232,7 +232,6 @@ TransactionSlot *UndoZone::AllocTransactionSlot(UndoSlotPtr slotPtr, Transaction
     slot->Init(xid, dbid);
     Assert(slot->DbId() == u_sess->proc_cxt.MyDatabaseId && TransactionIdIsValid(slot->XactId()));
     allocateTSlotPtr_ = UNDO_PTR_GET_OFFSET(undo::GetNextSlotPtr(slotPtr));
-    Assert(allocateTSlotPtr_ >= recycleTSlotPtr_);
     return slot;
 }
 
@@ -370,7 +369,6 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
         slotSpace_.LockSpace();
         UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, head);
         slotSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_META_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
-        Assert(slotSpace_.Head() <= allocateTSlotPtr_);
         if (pLevel_ == UNDO_PERMANENT && !(t_thrd.undorecycler_cxt.is_recovery_in_progress)) {
             START_CRIT_SECTION();
             slotSpace_.MarkDirty();
@@ -411,10 +409,10 @@ void UndoZone::PrepareSwitch(void)
 {
     WHITEBOX_TEST_STUB(UNDO_PREPARE_SWITCH_FAILED, WhiteboxDefaultErrorEmit);
 
-    if (undoSpace_.Tail() != UNDO_LOG_MAX_SIZE) {
-        ereport(PANIC, (errmsg(UNDOFORMAT(
-            "Undo space switch fail, expect tail(%lu), real tail(%lu)."),
-            UNDO_LOG_MAX_SIZE, undoSpace_.Tail())));
+    if (undoSpace_.Tail() > UNDO_LOG_MAX_SIZE - UNDO_LOG_SEGMENT_SIZE) {
+        ereport(WARNING, (errmsg(UNDOFORMAT(
+            "Undo space switch fail, zoneid %d, expect tail(%lu), real tail(%lu), real head(%lu)"),
+            zid_, UNDO_LOG_MAX_SIZE - UNDO_LOG_SEGMENT_SIZE, undoSpace_.Tail(), undoSpace_.Head())));
     }
     if (pLevel_ == UNDO_PERMANENT) {
         LockUndoZone();
@@ -800,6 +798,51 @@ static int ReleaseUndoZoneId(int zid, UndoPersistence upersistence)
     return tempZid;
 }
 
+static UndoZone *getUnusedZone(UndoPersistence upersistence, int *retZid, int oldZid)
+{
+    int zid = -1;
+    UndoZone *newUzone = NULL;
+    if (upersistence >= UNDO_PERSISTENT_BUTT || upersistence < UNDO_PERMANENT) {
+        ereport(ERROR, (errmsg("getUnusedZone upersistence out of range [%d]", 
+                upersistence)));
+    }
+    int basecount = (int)upersistence * PERSIST_ZONE_COUNT;
+    for (int i = PERSIST_ZONE_COUNT - 1; i >= 0; i--) {
+        zid = i + basecount;
+        newUzone = UndoZoneGroup::GetUndoZone(zid, true);
+        if (newUzone == NULL) {
+            zid = -1;
+            ereport(WARNING, (errmsg(UNDOFORMAT("can not palloc undo zone memory for zone %d"), zid)));
+            continue;
+        }
+        if (newUzone->Attached() || newUzone->GetPersitentLevel() != upersistence ||
+            newUzone->GetUndoSpace()->Tail() != 0 || newUzone->GetLSN() != 0 ||
+            newUzone->GetFrozenSlotPtr() != INVALID_UNDO_SLOT_PTR ||
+            newUzone->GetRecycleXid() != InvalidTransactionId ||
+            newUzone->GetFrozenXid() != InvalidTransactionId ||
+            newUzone->GetAttachPid() != 0 ||
+            UNDO_PTR_GET_OFFSET(newUzone->GetInsertURecPtr()) != UNDO_LOG_BLOCK_HEADER_SIZE ||
+            UNDO_PTR_GET_OFFSET(newUzone->GetDiscardURecPtr()) != UNDO_LOG_BLOCK_HEADER_SIZE ||
+            UNDO_PTR_GET_OFFSET(newUzone->GetForceDiscardURecPtr()) != UNDO_LOG_BLOCK_HEADER_SIZE ||
+            UNDO_PTR_GET_OFFSET(newUzone->GetAllocateTSlotPtr()) != UNDO_LOG_BLOCK_HEADER_SIZE ||
+            UNDO_PTR_GET_OFFSET(newUzone->GetRecycleTSlotPtr()) != UNDO_LOG_BLOCK_HEADER_SIZE) {
+            zid = -1;
+            continue;
+        }
+        if (zid == oldZid) {
+            continue;
+        }
+        break;
+    }
+    if (!IS_VALID_ZONE_ID(zid)) {
+        ereport(ERROR, (errmsg("SwitchZone: zone id is invalid, there're too many working threads.")));
+    }
+    *retZid = zid;
+    g_instance.undo_cxt.uZoneBitmap[upersistence] = 
+        bms_del_member(g_instance.undo_cxt.uZoneBitmap[upersistence], (zid - basecount));
+    return newUzone;
+}
+
 void UndoZoneGroup::ReleaseZone(int zid, UndoPersistence upersistence)
 {
     Assert(IS_VALID_ZONE_ID(zid));
@@ -842,18 +885,7 @@ UndoZone *UndoZoneGroup::SwitchZone(int zid, UndoPersistence upersistence)
     int retZid = -1;
     uzone->PrepareSwitch();
     LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
-    retZid = AllocateUndoZoneId(upersistence);
-    if (!IS_VALID_ZONE_ID(retZid)) {
-        ereport(ERROR, (errmsg("SwitchZone: zone id is invalid, there're too many working threads.")));
-    }
-
-    UndoZone *newUzone = UndoZoneGroup::GetUndoZone(retZid, true);
-    if (newUzone == NULL || newUzone->GetUndoSpace()->Tail() != 0) {
-        ereport(PANIC,
-            (errmsg(UNDOFORMAT("can not palloc undo zone memory, tail = %lu."),
-            newUzone->GetUndoSpace()->Tail())));
-    }
-
+    UndoZone *newUzone = getUnusedZone(upersistence, &retZid, zid);
     WHITEBOX_TEST_STUB(UNDO_SWITCH_ZONE_FAILED, WhiteboxDefaultErrorEmit);
     newUzone->Attach();
     LWLockRelease(UndoZoneLock);

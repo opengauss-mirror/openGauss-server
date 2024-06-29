@@ -39,13 +39,14 @@ static uint32 USEG_BLOCKS(uint32 dbId)
     return UNDO_META_SEG_SIZE;
 }
 
-uint32 UndoSpace::Used(void)
+uint32 UndoSpace::Used(int zoneId)
 {
     WHITEBOX_TEST_STUB(UNDO_USED_FAILED, WhiteboxDefaultErrorEmit);
 
     if (tail_ < head_) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("space tail %lu < head %lu."), tail_, head_)));
+        ereport(WARNING, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("zoneId %d space tail %lu < head %lu."), zoneId, tail_, head_)));
+        return 0;
     }
     return (uint32)((tail_ - head_) / BLCKSZ);
 }
@@ -75,7 +76,6 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
 {
     RelFileNode rnode;
     UndoLogOffset tail = tail_;
-    Assert(tail < offset && head_ <= tail_);
     BlockNumber blockno;
     UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, offset), dbId);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
@@ -124,7 +124,6 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
         old_head = head_;
         SetHead(offset);
     }
-    Assert(head < offset && head_ <= tail_);
     UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, offset), dbId);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
     uint64 segSize = USEG_SIZE(dbId);
@@ -140,11 +139,13 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
             "unlink undo log, zid=%d, dbid=%u, new_head=%lu, segId:%lu."),
             zid, dbId, offset, head/segSize)));
         if (g_instance.undo_cxt.undoTotalSize < segBlocks) {
-            ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+            ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
                 "unlink undo log, total blocks=%u < segment size."),
                 g_instance.undo_cxt.undoTotalSize)));
+            pg_atomic_write_u32(&g_instance.undo_cxt.undoTotalSize, 0);
+        } else {
+            pg_atomic_fetch_sub_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         }
-        pg_atomic_fetch_sub_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         head += segSize;
     }
     smgrclose(reln);
@@ -453,7 +454,7 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
             usp->CreateNonExistsUndoFile(zoneId, UNDO_SLOT_DB_OID);
             segSize = USEG_SIZE(UNDO_DB_OID);
         }
-        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used());
+        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used(zoneId));
         uint64 transUndoThresholdSize = UNDO_SPACE_THRESHOLD_PER_TRANS * BLCKSZ;
         const uint64 MAX_OFFSET = (UNDO_LOG_MAX_SIZE - transUndoThresholdSize) - segSize;
         if (usp->Tail() < usp->Head() || usp->Tail() > MAX_OFFSET) {

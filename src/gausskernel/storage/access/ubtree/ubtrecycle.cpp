@@ -636,8 +636,10 @@ restart:
         /* by here, buf is write locked */
         Buffer nextBuf = ReadRecycleQueueBuffer(rel, header->nextBlkno);
         LockBuffer(nextBuf, BT_WRITE);
-        /* change endpoint, and insert xlog */
-        RecycleQueueChangeEndpoint(rel, buf, nextBuf, true);
+        if ((header->flags & URQ_HEAD_PAGE) != 0) {
+            /* change endpoint, and insert xlog */
+            RecycleQueueChangeEndpoint(rel, buf, nextBuf, true);
+        }
         /* release current page, and return the next page */
         UnlockReleaseBuffer(buf);
         buf = nextBuf;

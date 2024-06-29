@@ -328,10 +328,10 @@ UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr)
     BlockNumber block = (BlockNumber)(slotOffset / BLCKSZ);
     UndoSlotOffset blkOffset = slotOffset % BLCKSZ;
     UndoSlotOffset offset = blkOffset + MAXALIGN(sizeof(undo::TransactionSlot));
-    if (BLCKSZ - offset < MAXALIGN(sizeof(undo::TransactionSlot))) {
-        offset = (block + 1) * BLCKSZ + UNDO_LOG_BLOCK_HEADER_SIZE;
+    if (BLCKSZ < MAXALIGN(sizeof(undo::TransactionSlot)) + offset) {
+        offset = (UndoSlotOffset)(block + 1) * BLCKSZ + UNDO_LOG_BLOCK_HEADER_SIZE;
     } else {
-        offset += block * BLCKSZ;
+        offset += (UndoSlotOffset)block * BLCKSZ;
     }
     Assert (offset <= UNDO_LOG_MAX_SIZE);
     return MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(slotPtr), offset);

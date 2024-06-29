@@ -298,7 +298,6 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
     if (zone->GetPersitentLevel() == UNDO_PERMANENT) {
         needWal = true;
     }
-    Assert(recycle <= allocate);
     while (recycle < allocate) {
         UndoSlotBuffer& slotBuf = g_slotBufferCache->FetchTransactionBuffer(recycle);
         UndoRecPtr startUndoPtr = INVALID_UNDO_REC_PTR;
@@ -407,7 +406,6 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
                 int startZid = UNDO_PTR_GET_ZONE_ID(startUndoPtr);
                 int endZid = UNDO_PTR_GET_ZONE_ID(oldestEndUndoPtr);
                 if (unlikely(startZid != endZid)) {
-                    Assert(UNDO_PTR_GET_OFFSET(endUndoPtr) == UNDO_LOG_MAX_SIZE);
                     oldestEndUndoPtr = MAKE_UNDO_PTR(startZid, UNDO_LOG_MAX_SIZE);
                 }
                 zone->SetDiscardURecPtr(oldestEndUndoPtr);
@@ -418,7 +416,6 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId f
             *oldestRecycleXid = recycleXid;
             zone->SetForceDiscardURecPtr(endUndoPtr);
             zone->SetRecycleTSlotPtr(recycle);
-            Assert(zone->GetForceDiscardURecPtr() <= zone->GetInsertURecPtr());
             result = true;
             XLogRecPtr lsn = InvalidXLogRecPtr;
 

@@ -305,22 +305,8 @@ loop:
 bool UHeapXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot,
     TransactionIdStatus *hintstatus, Buffer buffer, bool *sync)
 {
-    if (!GTM_LITE_MODE || snapshot->gtm_snapshot_type == GTM_SNAPSHOT_TYPE_LOCAL) {
-        /*
-         * Make a quick range check to eliminate most XIDs without looking at the
-         * CSN log.
-         */
-        if (TransactionIdPrecedes(xid, snapshot->xmin)) {
-            return true;
-        }
-
-        /*
-         * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
-         * that here.
-         */
-        if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
-            return false;
-        }
+    if (TransactionIdOlderThanAllUndo(xid)) {
+        return CommittedXidVisibleInSnapshot(xid, snapshot, buffer);
     }
 
     return XidVisibleInSnapshot(xid, snapshot, hintstatus, buffer, sync);

@@ -2167,10 +2167,9 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
      */
     while (1) {
         TransactionId lastXid = InvalidTransactionId;
-        UndoRecPtr urp = INVALID_UNDO_REC_PTR;
         state = GetTupleFromUndoRecord(urecAdd, prevUndoXid, buffer, offnum, &hdr, visibleTuple,
             &freeTuple, &uinfo, ctid, &lastXid, NULL);
-        int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urp);
+        int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urecAdd);
         undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
         if (state == UNDO_TRAVERSAL_ABORT) {
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(
@@ -2189,7 +2188,7 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
                 GetTopTransactionIdIfAny(), PtrGetVal(*visibleTuple, table_oid), blkno, offnum, lastXid,
                 pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
                 pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
-                urp, zoneId, PtrGetVal(uzone, GetInsertURecPtr()), PtrGetVal(uzone, GetForceDiscardURecPtr()),
+                urecAdd, zoneId, PtrGetVal(uzone, GetInsertURecPtr()), PtrGetVal(uzone, GetForceDiscardURecPtr()),
                 PtrGetVal(uzone, GetDiscardURecPtr()), PtrGetVal(uzone, GetRecycleXid()),
                 PtrGetVal(snapshot, satisfies), PtrGetVal(snapshot, xmin))));
         } else if (state == UNDO_TRAVERSAL_END || state == UNDO_TRAVERSAL_ENDCHAIN) {
@@ -2204,19 +2203,19 @@ static bool GetTupleFromUndo(UndoRecPtr urecAdd, UHeapTuple currentTuple, UHeapT
             ereport(ERROR, (errmodule(MOD_USTORE), errmsg(
                 "snapshot too old! "
                 "Reason: Need fetch undo record. "
-                "LogInfo: urp %lu, undo state %d, tuple flag %u, tupTd %d, tupXid %lu. "
+                "LogInfo: undo state %d, tuple flag %u, tupTd %d, tupXid %lu. "
                 "Td: tdxid %lu, tdid %d, undoptr %lu. "
                 "TransInfo: xid %lu, oid %u, tid(%u, %u), "
                 "globalRecycleXid %lu, globalFrozenXid %lu. "
                 "ZoneInfo: urp: %lu, zid %d, insertURecPtr %lu, forceDiscardURecPtr %lu, "
                 "discardURecPtr %lu, recycleXid %lu. "
                 "Snapshot: type %d, xmin %lu.",
-                urecAdd, state, hdr.flag, tupTdid, tupXid,
+                state, hdr.flag, tupTdid, tupXid,
                 uinfo.xid, uinfo.td_slot, uinfo.urec_add,
                 GetTopTransactionIdIfAny(), tableOid, blkno, offnum,
                 pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
                 pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
-                urp, zoneId, PtrGetVal(uzone, GetInsertURecPtr()), PtrGetVal(uzone, GetForceDiscardURecPtr()),
+                urecAdd, zoneId, PtrGetVal(uzone, GetInsertURecPtr()), PtrGetVal(uzone, GetForceDiscardURecPtr()),
                 PtrGetVal(uzone, GetDiscardURecPtr()), PtrGetVal(uzone, GetRecycleXid()),
                 snapshot->satisfies, snapshot->xmin)));
         } else if (state != UNDO_TRAVERSAL_COMPLETE || uinfo.td_slot == UHEAPTUP_SLOT_FROZEN ||

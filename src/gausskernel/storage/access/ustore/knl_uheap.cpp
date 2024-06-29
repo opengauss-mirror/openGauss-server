@@ -2003,7 +2003,7 @@ TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapsho
 {
     UHeapTupleData utuple;
     Buffer buffer;
-    UndoRecPtr prevUrecptr;
+    UndoRecPtr prevUrecptr = INVALID_UNDO_REC_PTR;
     int transSlotId;
     bool lockReacquired;
     TransactionId fxid = GetTopTransactionId();
@@ -2418,7 +2418,7 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
     UndoRecPtr urecptr;
     UndoRecPtr newUrecptr;
     UndoRecPtr prevUrecptr = INVALID_UNDO_REC_PTR;
-    UndoRecPtr newPrevUrecptr;
+    UndoRecPtr newPrevUrecptr = INVALID_UNDO_REC_PTR;
     Page page;
     BlockNumber block;
     ItemPointerData ctid;
@@ -2776,8 +2776,11 @@ check_tup_satisfies_update:
         useInplaceUpdate = false;
         useLinkUpdate = false;
     } else if (!useInplaceUpdate) {
-        useInplaceUpdate = UHeapPagePruneOpt(relation, buffer, oldOffnum,
-            newtupsize - oldtupsize);
+        bool pruned = UHeapPagePruneOpt(relation, buffer, oldOffnum, newtupsize - oldtupsize);
+        lp = UPageGetRowPtr(page, oldOffnum);
+        if (pruned && (RowPtrGetOffset(lp) + newtupsize <= BLCKSZ)) {
+            useInplaceUpdate = true;
+        }
         /* The page might have been modified, so refresh disk_tuple */
         oldtup.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, lp);
     }
@@ -3894,6 +3897,10 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
      * Unable to find an unused TD slot or reuse one.
      * Try to extend the ITL array now.
      */
+    if (urecPtr != NULL) {
+        urecPtr = INVALID_UNDO_REC_PTR;
+    }
+
     nExtended = UPageExtendTDSlots(relation, buf);
     if (nExtended > 0) {
         /*
@@ -5638,6 +5645,10 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     START_CRIT_SECTION();
 
     /* Apply undo action for an INSERT */
+    if (urec->Blkno() != blkno) {
+        ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("Blkno %u of undorecord is different from buffer %u.", urec->Blkno(), blkno)));
+    }
     ExecuteUndoForInsert(relation, buffer, urec->Offset(), urec->Xid());
 
     int nline = UHeapPageGetMaxOffsetNumber(page);

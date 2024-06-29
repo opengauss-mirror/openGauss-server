@@ -1368,7 +1368,7 @@ bool UHeapIndexBuildNextPage(UHeapScanDesc scan)
     int nAborted = 0;
     for (int slotNo = 0; slotNo < numSlots; slotNo++) {
         TransactionId xid = tdSlots[slotNo].xactid;
-        if (!TransactionIdIsValid(xid) || TransactionIdIsCurrentTransactionId(xid) || TransactionIdDidCommit(xid)) {
+        if (!TransactionIdIsValid(xid) || TransactionIdIsCurrentTransactionId(xid) || UHeapTransactionIdDidCommit(xid)) {
             continue; /* xid visible in SnapshotNow */
         }
 

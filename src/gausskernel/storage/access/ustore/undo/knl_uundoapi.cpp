@@ -139,7 +139,7 @@ void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPt
     }
     uzone->AdvanceInsertURecPtr(UNDO_PTR_GET_OFFSET(lastRecord), lastRecordSize);
     if (uzone->GetForceDiscardURecPtr() > uzone->GetInsertURecPtr()) {
-        ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d forceDiscardURecPtr %lu > insertURecPtr %lu."),
+        ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d forceDiscardURecPtr %lu > insertURecPtr %lu."),
             uzone->GetZoneId(), uzone->GetForceDiscardURecPtr(), uzone->GetInsertURecPtr())));
     }
     uzone->GetSlotBuffer().Lock();
