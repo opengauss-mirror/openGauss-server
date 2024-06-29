@@ -2052,6 +2052,8 @@ int SyncMdFile(const FileTag *ftag, char *path)
     if (compressNode) {
         CopyCompressedPath(dst, path);
         openFilePath = dst;
+        errno_t rc = strcpy_s(path, MAXPGPATH, dst);
+        securec_check_c(rc, "\0", "\0");
     }
     BlockNumber relSegSize = compressNode ? CFS_LOGIC_BLOCKS_PER_FILE : RELSEG_SIZE;
     /* Try to open the requested segment. */
