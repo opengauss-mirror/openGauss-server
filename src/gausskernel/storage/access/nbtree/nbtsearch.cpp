@@ -442,7 +442,6 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
      * Check tuple has correct number of attributes.
      */
     _bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
-
     /*
      * Force result ">" if target item is first data item on an internal page
      * --- see NOTE above.
@@ -475,30 +474,51 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
         datum = index_getattr(itup, scankey->sk_attno, itupdesc, &isNull);
 
         if (likely((!(scankey->sk_flags & SK_ISNULL)) && !isNull)) {
-            /* btint4cmp */
-            if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
-                result = (int32)datum == (int32)scankey->sk_argument
-                             ? 0
-                             : ((int32)datum > (int32)scankey->sk_argument ? 1 : -1);
-            } else if (scankey->sk_func.fn_oid == F_BTINT8CMP) {
-                result = (int64)datum == (int64)scankey->sk_argument
-                             ? 0
-                             : ((int64)datum > (int64)scankey->sk_argument ? 1 : -1);
-            } else if (scankey->sk_func.fn_oid == F_BTINT84CMP) {
-                result = (int64)datum == (int64)(int32)scankey->sk_argument
-                             ? 0
-                             : ((int64)datum > (int64)(int32)scankey->sk_argument ? 1 : -1);
-            } else if (scankey->sk_func.fn_oid == F_BTINT48CMP) {
-                result = (int64)(int32)datum == (int64)scankey->sk_argument
-                             ? 0
-                             : ((int64)(int32)datum > (int64)scankey->sk_argument ? 1 : -1);
+            if (scankey->sk_flags & SK_BT_DESC) {
+                /* btint4cmp */
+                if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
+                    result = (int32)datum == (int32)scankey->sk_argument
+                                 ? 0
+                                 : ((int32)datum > (int32)scankey->sk_argument ? 1 : -1);
+                } else if (scankey->sk_func.fn_oid == F_BTINT8CMP) {
+                    result = (int64)datum == (int64)scankey->sk_argument
+                                 ? 0
+                                 : ((int64)datum > (int64)scankey->sk_argument ? 1 : -1);
+                } else if (scankey->sk_func.fn_oid == F_BTINT84CMP) {
+                    result = (int64)datum == (int64)(int32)scankey->sk_argument
+                                 ? 0
+                                 : ((int64)datum > (int64)(int32)scankey->sk_argument ? 1 : -1);
+                } else if (scankey->sk_func.fn_oid == F_BTINT48CMP) {
+                    result = (int64)(int32)datum == (int64)scankey->sk_argument
+                                 ? 0
+                                 : ((int64)(int32)datum > (int64)scankey->sk_argument ? 1 : -1);
+                } else {
+                    result = DatumGetInt32(
+                        FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum, scankey->sk_argument));
+                }
             } else {
-                result = DatumGetInt32(
-                    FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum, scankey->sk_argument));
+                /* btint4cmp */
+                if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
+                    result = (int32)datum == (int32)scankey->sk_argument
+                                 ? 0
+                                 : ((int32)datum > (int32)scankey->sk_argument ? -1 : 1);
+                } else if (scankey->sk_func.fn_oid == F_BTINT8CMP) {
+                    result = (int64)datum == (int64)scankey->sk_argument
+                                 ? 0
+                                 : ((int64)datum > (int64)scankey->sk_argument ? -1 : 1);
+                } else if (scankey->sk_func.fn_oid == F_BTINT84CMP) {
+                    result = (int64)datum == (int64)(int32)scankey->sk_argument
+                                 ? 0
+                                 : ((int64)datum > (int64)(int32)scankey->sk_argument ? -1 : 1);
+                } else if (scankey->sk_func.fn_oid == F_BTINT48CMP) {
+                    result = (int64)(int32)datum == (int64)scankey->sk_argument
+                                 ? 0
+                                 : ((int64)(int32)datum > (int64)scankey->sk_argument ? -1 : 1);
+                } else {
+                    result = -(DatumGetInt32(
+                        FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum, scankey->sk_argument)));
+                }
             }
-
-            if (!(scankey->sk_flags & SK_BT_DESC))
-                result = -result;
         } else {
             if (scankey->sk_flags & SK_ISNULL) { /* key is NULL */
                 if (isNull)

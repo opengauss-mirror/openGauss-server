@@ -2481,17 +2481,18 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          * because the SSI checks and the *Satisfies routine for historical
          * MVCC snapshots need the correct tid to decide about the visibility.
          */
-        heap_tuple->t_data = (HeapTupleHeader)PageGetItem(dp, lp);
         heap_tuple->t_len = ItemIdGetLength(lp);
-        heap_tuple->t_tableOid = RelationGetRelid(relation);
         heap_tuple->t_bucketId = RelationGetBktid(relation);
+        ItemPointerSet(&heap_tuple->t_self, blkno, offnum);
+        heap_tuple->t_tableOid = RelationGetRelid(relation);
         HeapTupleCopyBaseFromPage(heap_tuple, dp);
 #ifdef PGXC
         heap_tuple->t_xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
 #endif
-        ItemPointerSet(&heap_tuple->t_self, blkno, offnum);
 
+        heap_tuple->t_data = (HeapTupleHeader)PageGetItem(dp, lp);
         /*
+
          * Shouldn't see a HEAP_ONLY tuple at chain start.
          */
         if (at_chain_start && HeapTupleIsHeapOnly(heap_tuple)) {
