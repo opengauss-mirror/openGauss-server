@@ -2813,8 +2813,7 @@ static void ProcessTargetRtoRpoChanged()
 
         if (g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto !=
             u_sess->attr.attr_storage.hadr_recovery_time_target) {
-            ereport(LOG, (errmodule(MOD_RTO_RPO),
-                          errmsg("hadr_target_rto changes to %d, previous target_rto is %d, "
+            ereport(LOG, (errmsg("hadr_target_rto changes to %d, previous target_rto is %d, "
                                  "current the sleep time is %ld",
                                  u_sess->attr.attr_storage.hadr_recovery_time_target,
                                  g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto,
@@ -2832,8 +2831,7 @@ static void ProcessTargetRtoRpoChanged()
         }
 
         if (g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto != u_sess->attr.attr_storage.target_rto) {
-            ereport(LOG, (errmodule(MOD_RTO_RPO),
-                          errmsg("target_rto changes to %d, previous target_rto is %d, current the sleep time is %ld",
+            ereport(LOG, (errmsg("target_rto changes to %d, previous target_rto is %d, current the sleep time is %ld",
                                  u_sess->attr.attr_storage.target_rto,
                                  g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto,
                                  g_instance.rto_cxt.rto_standby_data[walsnd->index].current_sleep_time)));
@@ -3567,15 +3565,13 @@ static void LogCtrlCalculateSleepTime(int64 logCtrlSleepTime, int64 balanceSleep
     if (pre_time == 0 && logCtrlSleepTime != 0) {
         if (isHadrRPO) {
             ereport(LOG,
-                (errmodule(MOD_RTO_RPO),
-                errmsg("Log control take effect due to RPO, target_rpo is %d, current_rpo is %ld, "
+                (errmsg("Log control take effect due to RPO, target_rpo is %d, current_rpo is %ld, "
                        "current the sleep time is %ld microseconds",
                        u_sess->attr.attr_storage.hadr_recovery_point_target,
                        walsnd->log_ctrl.current_RPO, logCtrlSleepTime)));
         } else {
             ereport(LOG,
-                (errmodule(MOD_RTO_RPO),
-                errmsg("Log control take effect due to RTO, target_rto is %d, current_rto is %ld, "
+                (errmsg("Log control take effect due to RTO, target_rto is %d, current_rto is %ld, "
                        "current the sleep time is %ld microseconds",
                        targetRTO, walsnd->log_ctrl.current_RTO, logCtrlSleepTime)));
         }
@@ -3584,15 +3580,13 @@ static void LogCtrlCalculateSleepTime(int64 logCtrlSleepTime, int64 balanceSleep
     if (pre_time != 0 && logCtrlSleepTime == 0) {
         if (isHadrRPO) {
             ereport(LOG,
-                (errmodule(MOD_RTO_RPO),
-                errmsg("Log control does not take effect due to RPO, target_rpo is %d, current_rpo is %ld, "
+                (errmsg("Log control does not take effect due to RPO, target_rpo is %d, current_rpo is %ld, "
                        "current the sleep time is %ld microseconds",
                        u_sess->attr.attr_storage.hadr_recovery_point_target,
                        walsnd->log_ctrl.current_RPO, logCtrlSleepTime)));
         } else {
             ereport(LOG,
-                (errmodule(MOD_RTO_RPO),
-                errmsg("Log control does not take effect because of RTO, target_rto is %d, current_rto is %ld, "
+                (errmsg("Log control does not take effect because of RTO, target_rto is %d, current_rto is %ld, "
                        "current the sleep time is %ld microseconds",
                        targetRTO, walsnd->log_ctrl.current_RTO, logCtrlSleepTime)));
         }
