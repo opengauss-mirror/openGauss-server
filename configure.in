@@ -479,6 +479,11 @@ PGAC_ARG_BOOL(enable, depend, no, [turn on automatic dependency tracking],
               [autodepend=yes])
 AC_SUBST(autodepend)
 
+# set CXXFLAGS_VECTOR from the environment, if available
+if test "$ac_env_CXXFLAGS_VECTOR_set" = set; then
+  CXXFLAGS_VECTOR=$ac_env_CXXFLAGS_VECTOR_value
+fi
+
 # As the original PostgreSQL using C compiler, so we still use CFLAGS
 # to pass in compiler options but change it to CXXFLAGS at the end of
 # the configuration.
@@ -506,6 +511,9 @@ if test "$GCC" = yes -a "$ICC" = no; then
   PGAC_PROG_CC_CFLAGS_OPT([-fwrapv])
   # Disable FP optimizations that cause various errors on gcc 4.5+ or maybe 4.6+
   PGAC_PROG_CC_CFLAGS_OPT([-fexcess-precision=standard])
+  # Optimization flags for specific files that benefit from vectorization
+  PGAC_PROG_CC_VAR_OPT(CXXFLAGS_VECTOR, [-funroll-loops])
+  PGAC_PROG_CC_VAR_OPT(CXXFLAGS_VECTOR, [-ftree-vectorize])
 elif test "$ICC" = yes; then
   # Intel's compiler has a bug/misoptimization in checking for
   # division by NAN (NaN == 0), -mp1 fixes it, so add it to the CFLAGS.
@@ -520,6 +528,8 @@ elif test "$PORTNAME" = "hpux"; then
   # Fix that by using +Olibmerrno if the compiler recognizes it.
   PGAC_PROG_CC_CFLAGS_OPT([+Olibmerrno])
 fi
+
+AC_SUBST(CXXFLAGS_VECTOR, $CXXFLAGS_VECTOR)
 
 # supply -g if --enable-debug
 if test "$enable_debug" = yes && test "$ac_cv_prog_cc_g" = yes; then

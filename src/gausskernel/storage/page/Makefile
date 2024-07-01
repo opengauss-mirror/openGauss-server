@@ -12,3 +12,6 @@ endif
 OBJS =  bufpage.o checksum.o itemptr.o pagecompress.o checksum_impl.o pageparse.o gs_xlogdump.o 
 
 include $(top_srcdir)/src/gausskernel/common.mk
+
+# important optimizations flags for checksum_impl.cpp
+checksum_impl.o: CXXFLAGS += -O2 ${CXXFLAGS_VECTOR}

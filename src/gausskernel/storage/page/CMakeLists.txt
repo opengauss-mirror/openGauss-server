@@ -18,4 +18,4 @@ set(page_DEF_OPTIONS ${MACRO_OPTIONS})
 set(page_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(page_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 add_static_objtarget(gausskernel_storage_page TGT_page_SRC TGT_page_INC "${page_DEF_OPTIONS}" "${page_COMPILE_OPTIONS}" "${page_LINK_OPTIONS}")
-
+set_property(SOURCE "checksum_impl.cpp" PROPERTY COMPILE_OPTIONS "-O2" "-funroll-loops" "-ftree-vectorize")
