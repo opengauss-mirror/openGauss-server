@@ -2786,7 +2786,8 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                             }
                         }
                         if (!exist) {
-                            break;
+                            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
+                                            errmsg("record \"%s\" has no field \"%s\"", rec->refname, word2)));
                         }
                     }
                 }
@@ -3872,6 +3873,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
         }
         case PLPGSQL_TTYPE_CURSORROW: {
             PLpgSQL_rec* rec = (PLpgSQL_rec*)palloc0(sizeof(PLpgSQL_rec));
+            rec->field_need_check = NIL;
             rec->dtype = PLPGSQL_DTYPE_CURSORROW;
             rec->refname = pstrdup(refname);
             rec->lineno = lineno;
