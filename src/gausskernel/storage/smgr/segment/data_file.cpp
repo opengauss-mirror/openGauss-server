@@ -31,13 +31,14 @@
 #include "storage/smgr/fd.h"
 #include "storage/smgr/knl_usync.h"
 #include "storage/smgr/segment.h"
+#include "storage/dss/dss_adaptor.h"
 #include "storage/file/fio_device.h"
 #include "postmaster/pagerepair.h"
 #include "ddes/dms/ss_common_attr.h"
 
 static const mode_t SEGMENT_FILE_MODE = S_IWUSR | S_IRUSR;
 
-static int dv_open_file(char *filename, uint32 flags, int mode);
+static int dv_open_file(char *filename, int flags, int mode);
 static void dv_close_file(int fd);
 static void df_open_target_files(SegLogicFile *sf, int targetno);
 
@@ -49,12 +50,12 @@ void df_extend_file_vector(SegLogicFile *sf);
  * We can not use virtual fd because space data files are accessed by multi-thread.
  * Callers must handle fd < 0
  */
-static int dv_open_file(char *filename, uint32 flags, int mode)
+static int dv_open_file(char *filename, int flags, int mode)
 {
     int fd = -1;
     fd = BasicOpenFile(filename, flags, mode);
     int err = errno;
-    ereport(LOG, (errmsg("dv_open_file filename: %s, flags is %d, mode is %lu, fd is %d", filename, flags, mode, fd)));
+    ereport(LOG, (errmsg("dv_open_file filename: %s, flags is %d, mode is %d, fd is %d", filename, flags, mode, fd)));
     errno = err;
     return fd;
 }
@@ -106,7 +107,7 @@ void df_create_file(SegLogicFile *sf, bool redo)
         }
     } else {
         // File not exists
-        uint32 flags = O_RDWR | O_CREAT | O_EXCL | PG_BINARY;
+        int flags = O_RDWR | O_CREAT | O_EXCL | PG_BINARY;
         if (sf->segfiles != NULL) {
             ereport(LOG,
                 (errmodule(MOD_SEGMENT_PAGE),
@@ -154,7 +155,7 @@ bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block)
         return false;
     }
 
-    uint32 flags = O_RDWR | PG_BINARY;
+    int flags = O_RDWR | PG_BINARY;
     /* need palloc segfiles if file_num is 0 */
     if (sf->vector_capacity == 0) {
         df_extend_file_vector(sf);
@@ -388,7 +389,7 @@ void df_open_all_file(RepairFileKey key, int32 max_sliceno)
 {
     int fd = -1;
     char *filename = NULL;
-    uint32 flags = O_RDWR | PG_BINARY;
+    int flags = O_RDWR | PG_BINARY;
     Oid relNode = key.relfilenode.relNode;
     ForkNumber forknum = key.forknum;
     SegSpace *spc = spc_init_space_node(key.relfilenode.spcNode, key.relfilenode.dbNode);
@@ -436,7 +437,7 @@ void df_open_all_file(RepairFileKey key, int32 max_sliceno)
 static void df_open_target_files(SegLogicFile *sf, int targetno)
 {
     int sliceno = sf->file_num;
-    uint32 flags = O_RDWR | PG_BINARY;
+    int flags = O_RDWR | PG_BINARY;
 
     for (;;) {
         if (targetno != 0 && targetno < sliceno) {
@@ -501,7 +502,12 @@ void df_extend_internal(SegLogicFile *sf)
         if (new_sliceno >= sf->vector_capacity) {
             df_extend_file_vector(sf);
         }
-        int new_fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+        int new_fd; 
+        if (ENABLE_DSS) {
+            new_fd = dv_open_file(filename, O_RDWR | O_CREAT | DSS_FT_NODE_FLAG_INNER_INITED, SEGMENT_FILE_MODE);
+        } else {
+            new_fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+        }
         if (new_fd < 0) {
             ereport(ERROR, (errcode_for_file_access(), errmsg("[segpage] could not create file \"%s\": %m", filename)));
         }
@@ -612,7 +618,7 @@ void df_shrink(SegLogicFile *sf, BlockNumber target)
 
             if (unlink(filename) != 0) {
                 /* The fd is closed, if we can not open it, next access to this file will panic */
-                uint32 flags = O_RDWR | O_EXCL | PG_BINARY;
+                int flags = O_RDWR | O_EXCL | PG_BINARY;
                 sf->segfiles[i].fd = dv_open_file(filename, flags, SEGMENT_FILE_MODE);
                 if (sf->segfiles[i].fd < 0) {
                     ereport(PANIC, (errmsg("Unlink file %s failed and unable to read it again.", filename)));
