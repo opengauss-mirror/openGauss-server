@@ -328,6 +328,13 @@ update bypass_pt_update set a = 9 where a = 2;
 select * from bypass_pt_update order by a;
 
 drop table bypass_pt_update;
+
+create table bypass_pt_update (a int primary key, c text, d timestamp(0) with time zone default current_timestamp(0) on update current_timestamp(0));
+insert into bypass_pt_update select 1, 'sdawa';
+explain (costs off) update bypass_pt_update set c = 'sdawa' where a = 1;
+update bypass_pt_update set c = 'sdawa' where a = 1;
+drop table bypass_pt_update;
+
 set sql_beta_feature='a_style_coerce';
 set enable_partition_opfusion = off;
 set enable_opfusion = off;
